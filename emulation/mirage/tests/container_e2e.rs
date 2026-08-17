@@ -28,6 +28,12 @@
 //! blocks until its parent dies, then removes its own record), because a
 //! mock that returned immediately would let a regression back to `-d`
 //! pass every test in this file.
+//!
+//! The mock enforces `--rm` on itself, though, which is the one thing it
+//! cannot be trusted about: it is playing both sides of the contract. So
+//! one test here drives the machine's real podman or docker end to end —
+//! `a_real_engine_creates_and_removes_the_container_with_the_run` — and
+//! skips when neither is installed with the image it needs.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -173,7 +179,14 @@ record_runtime() {
 }
 
 case "$1" in
-  pull) exit 0 ;;
+  pull)
+    # A real pull is chatty on both streams: layer progress on stderr,
+    # and the digest of what was pulled on stdout. Mirage shows a user
+    # both — and must put neither on *its* stdout, which belongs to the
+    # workload. See `provider_chatter_stays_off_a_redirected_stdout`.
+    echo 'Trying to pull img:latest...' >&2
+    echo 'sha256:1111feed2222beef-pulled-digest'
+    exit 0 ;;
   image)
     case "$2" in
       inspect) exit 1 ;;
@@ -250,6 +263,18 @@ case "$1" in
     # engine's foreground client exits when the container stops and stops
     # the container when it is killed; here the container lasts exactly
     # as long as the mirage that asked for it.
+    #
+    # What this proves, and what it does not. It proves mirage asked for
+    # `--rm` and no `-d`, that it holds the client for the session's
+    # whole life, and that nothing in mirage's own teardown depends on
+    # the client having been asked politely. It does *not* prove the
+    # engine keeps its half of that bargain, because the two lines below
+    # are the mock keeping it for itself: a real client is reparented to
+    # init when mirage is SIGKILLed and goes on holding its container
+    # (which is the leak `mirage cleanup` exists to reclaim, and why the
+    # reclaim test below stands its orphan up by hand rather than by
+    # killing a run). For the engine's half, see
+    # `a_real_engine_creates_and_removes_the_container_with_the_run`.
     owner=$PPID
     while kill -0 "$owner" 2>/dev/null; do sleep 0.2; done
     # The client is gone. `--rm` is what removes the container now — and
@@ -1039,6 +1064,252 @@ fn cleanup_spares_the_containers_of_a_live_run() {
 
     run.signal(Signal::SIGINT);
     run.wait(READY);
+    assert_no_leaks(&tag);
+}
+
+#[test]
+fn provider_chatter_stays_off_a_redirected_stdout() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_containerized_profile("cp");
+
+    // `mirage run --profile cp -- ./app > out.txt`, typed at a prompt:
+    // stdout is a file, stderr is still the terminal. Both halves matter.
+    // Without a terminal on stderr mirage captures the provider instead
+    // of showing it, which is the branch every other test in this file
+    // exercises and the one that was never broken.
+    let pty = nix::pty::openpty(None, None).unwrap();
+    let out_path = env.base.root().join("redirected.out");
+    let out = std::fs::File::create(&out_path).unwrap();
+
+    let mut child = env
+        .base
+        .mirage()
+        .args([
+            "run",
+            "--profile",
+            "cp",
+            "--",
+            "/bin/echo",
+            "hello-from-container",
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::from(out))
+        // Moved in, so the parent's copy of the slave is closed once the
+        // child has it and the master below sees an end of file when the
+        // run exits.
+        .stderr(std::process::Stdio::from(pty.slave))
+        .spawn()
+        .unwrap();
+
+    // Drained on a thread: a pty has a small buffer, and a pull that
+    // filled it while nobody was reading would block the run rather than
+    // fail the test.
+    let terminal = std::thread::spawn(move || {
+        use std::io::Read as _;
+        let mut master = std::fs::File::from(pty.master);
+        let mut seen = Vec::new();
+        // The read ends in `EIO` on Linux once the last slave is closed,
+        // which is this loop's end of file rather than a failure.
+        let _ = master.read_to_end(&mut seen);
+        String::from_utf8_lossy(&seen).into_owned()
+    });
+
+    // Bounded, and killed rather than left behind if the bound is hit:
+    // this run is not owned by the harness's `Run`, so nothing else
+    // would stop it.
+    let deadline = std::time::Instant::now() + READY;
+    let status = loop {
+        match child.try_wait().unwrap() {
+            Some(status) => break status,
+            None if std::time::Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("the run did not finish within {READY:?}");
+            }
+            None => std::thread::sleep(Duration::from_millis(20)),
+        }
+    };
+    let terminal = terminal.join().unwrap();
+    assert!(status.success(), "the run failed:\n{terminal}");
+
+    // The whole promise, in one assertion: what the workload wrote, and
+    // nothing else. The provider's pull writes a digest to *its* stdout,
+    // and mirage inherited that descriptor — so a redirected run's file
+    // held `sha256:…` above the workload's own output.
+    let redirected = std::fs::read_to_string(&out_path).unwrap();
+    assert_eq!(
+        redirected, "hello-from-container\n",
+        "something other than the workload wrote to the run's stdout \
+         (the terminal saw:\n{terminal})"
+    );
+    // And it is not simply gone: a user watching the pull still sees it,
+    // on the stream mirage talks about itself on.
+    assert!(
+        terminal.contains("pulled-digest"),
+        "the provider's output was discarded rather than sent to stderr:\n{terminal}"
+    );
+}
+
+#[test]
+fn a_mount_whose_host_path_is_missing_is_refused_before_anything_is_created() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_containerized_profile("cp");
+
+    // The engines disagree about this: docker creates the path as a
+    // root-owned directory on the host and starts the container, podman
+    // refuses with `statfs …: no such file or directory`. One `--mount`
+    // must not mean two things, so mirage decides it before either is
+    // asked.
+    let missing = env.base.root().join("not-here");
+    let err = env.base.fails(&[
+        "run",
+        "--profile",
+        "cp",
+        "--mount",
+        &format!("{}:/data", missing.display()),
+        "--",
+        "/bin/true",
+    ]);
+    assert!(
+        err.contains(&missing.display().to_string()) && err.contains("does not exist"),
+        "the error must name the host path that is missing: {err}"
+    );
+    assert!(
+        !missing.exists(),
+        "mirage created the host path it refused to mount"
+    );
+    let log = env.provider_log();
+    assert!(
+        !log.contains("run --rm"),
+        "a container was created for a mount that could never work:\n{log}"
+    );
+    assert!(
+        env.live_containers().is_empty(),
+        "containers outlived a failed bring-up: {:?}",
+        env.live_containers()
+    );
+}
+
+/// A real container engine on this machine that already has the image
+/// these tests need, preferring podman exactly as mirage does.
+///
+/// Both halves are required. An engine without the image would make the
+/// test pull one over the network, which is neither this test's subject
+/// nor a thing a test suite should do to a machine.
+fn real_engine_with_image() -> Option<&'static str> {
+    ["podman", "docker"].into_iter().find(|engine| {
+        std::process::Command::new(engine)
+            .args(["image", "inspect", REAL_IMAGE])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    })
+}
+
+/// The image the real-engine test runs its node in.
+///
+/// Anything with a shell and a glibc: the emulator's `LD_PRELOAD` is
+/// applied to the container's own entrypoint, and a musl image (alpine,
+/// busybox) cannot load it — which is a real failure mode, but not this
+/// test's.
+const REAL_IMAGE: &str = "ubuntu:24.04";
+
+/// A real container, force-removed when this value is dropped.
+///
+/// A test that fails between creating one and asserting it is gone must
+/// not leave it on the machine — and unlike the mock's, a real client is
+/// reparented when the test kills its `mirage run` and goes on holding
+/// the container.
+struct RealContainer {
+    engine: &'static str,
+    name: String,
+}
+
+impl RealContainer {
+    fn exists(&self) -> bool {
+        std::process::Command::new(self.engine)
+            .args(["container", "inspect", &self.name])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    }
+}
+
+impl Drop for RealContainer {
+    fn drop(&mut self) {
+        let _ = std::process::Command::new(self.engine)
+            .args(["rm", "-f", &self.name])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+}
+
+#[test]
+fn a_real_engine_creates_and_removes_the_container_with_the_run() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    let Some(engine) = real_engine_with_image() else {
+        eprintln!(
+            "SKIP: neither podman nor docker has {REAL_IMAGE} locally, so the real-engine \
+             container lifecycle cannot be exercised here."
+        );
+        return;
+    };
+
+    // The mock elsewhere in this file honours `--rm` by removing its own
+    // record, which means the crate's headline claim — a container never
+    // outlives the run that made it — is asserted against a script
+    // playing both sides. This is the same claim against a real engine:
+    // mirage asks for the container, a real `podman`/`docker` creates it,
+    // and a Ctrl-C in the run's terminal has to be enough to remove it.
+    env.base.ok(&[
+        "profile",
+        "create",
+        "real",
+        "--emulator",
+        TEST_EMULATOR,
+        "--no-input",
+        "--image",
+        REAL_IMAGE,
+        "--container-provider",
+        engine,
+    ]);
+    let tag = marker("real-container");
+
+    let mut run = env.base.spawn_run(
+        &["--profile", "real"],
+        &["/bin/sh", "-c", &tagged_sleep(&tag)],
+    );
+    let id = run.await_ready(READY);
+    let container = RealContainer {
+        engine,
+        name: format!("mirage-{id}-node-0"),
+    };
+    assert!(
+        container.exists(),
+        "the session reported ready without a container: {}",
+        container.name
+    );
+
+    run.signal(Signal::SIGINT);
+    run.wait(READY);
+
+    wait_for(
+        "the real container to be removed with its run",
+        Duration::from_secs(60),
+        || !container.exists(),
+    );
     assert_no_leaks(&tag);
 }
 

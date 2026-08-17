@@ -41,6 +41,46 @@ pub const CONTAINER_IDLE_COMMAND: &[&str] = &["sleep", "infinity"];
 /// namespaces, mounts and the network.
 pub const NODE_START_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
+/// How long a node container has to keep running, after it has reported
+/// itself up, before bring-up believes it.
+///
+/// A container that stops inside this window never really started, and
+/// without the wait mirage reports that in the worst possible way. The
+/// provider answers `Running: true` while the image's entrypoint is
+/// still dying — a `sleep` the image's shell cannot spell, a musl image
+/// handed a glibc `LD_PRELOAD` it cannot relocate — so bring-up
+/// succeeds, the session goes ready, and the *first exec* fails with the
+/// engine's own words about a container id the user has never seen.
+///
+/// Half a second because that is the measured gap: podman reported
+/// `Running: true` some 380ms before its client exited for an alpine
+/// image whose entrypoint could not load its preloaded library. It is
+/// paid once per bring-up, not once per node, against a phase that
+/// already takes seconds.
+pub const NODE_SETTLE: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// How often a cancellable wait looks at its [`Cancel`] switch.
+///
+/// Short enough that Ctrl-C during an image pull feels immediate, long
+/// enough that a poll costs nothing next to the provider it is watching.
+const CANCEL_POLL: std::time::Duration = std::time::Duration::from_millis(25);
+
+/// How long to let a dead client's last words catch up with it.
+///
+/// A process's exit is observable before what it wrote is: `try_wait`
+/// reaps the client while the thread reading its pipe still has bytes to
+/// deliver, so an error built the instant the exit is noticed can quote
+/// nothing at all. Bounded, and small, because a pipe can also be held
+/// open by something the provider left behind — a diagnostic is worth a
+/// moment's wait and not a hang.
+const OUTPUT_FLUSH: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// A bounded ring of the last lines a child process wrote.
+type LineRing = std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<String>>>;
+
+/// How many drain threads are still delivering into a [`LineRing`].
+type Draining = std::sync::Arc<std::sync::atomic::AtomicUsize>;
+
 /// A provider client owning one node container.
 ///
 /// The container runs for exactly as long as this value is alive. That is
@@ -56,54 +96,137 @@ pub struct NodeClient {
     pub name: String,
     /// The provider client process. `None` once it has been killed.
     child: Option<std::process::Child>,
-    /// The last few lines the client wrote to stderr.
+    /// How the client ended, once it has. `None` while it is running.
+    ///
+    /// Recorded rather than recomputed because it can only be collected
+    /// once: `try_wait` reaps the client, and every later caller — the
+    /// error that has to say *why* a container is gone, most of all —
+    /// would find nothing to ask.
+    exit: Option<std::process::ExitStatus>,
+    /// The last few lines the client wrote, on either stream.
+    ///
+    /// Both streams, because the two things that speak through them are
+    /// different: the provider writes its own refusals to stderr, while
+    /// the container's process writes wherever it likes, and the reason a
+    /// node died is whichever of them got there first.
     ///
     /// Drained on a thread rather than left in the pipe, because the
     /// client outlives the container and a pipe nobody reads eventually
     /// blocks the writer. Bounded for the same reason a log is: a client
     /// that chatters for hours must not grow this without limit.
-    stderr: std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<String>>>,
+    output: LineRing,
+    /// How many of those drains are still running. Zero means everything
+    /// the client ever wrote is in `output`.
+    draining: Draining,
 }
 
-/// How many lines of a provider client's stderr to keep.
+/// How many lines of a provider client's output to keep.
 ///
 /// Enough for a refusal with a little context around it; the interesting
 /// part of `podman run` failing is always its last words.
-const CLIENT_STDERR_LINES: usize = 20;
+const CLIENT_OUTPUT_LINES: usize = 20;
+
+/// A new, empty ring for [`drain_lines`] to fill.
+fn line_ring() -> LineRing {
+    std::sync::Arc::new(std::sync::Mutex::new(
+        std::collections::VecDeque::with_capacity(CLIENT_OUTPUT_LINES),
+    ))
+}
+
+/// Drain `reader` on a thread, keeping its last [`CLIENT_OUTPUT_LINES`]
+/// lines in `sink`.
+///
+/// `draining` counts the threads still doing this, so a reader of the
+/// ring can tell "it said nothing" from "it has not all arrived yet".
+fn drain_lines(reader: impl std::io::Read + Send + 'static, sink: LineRing, draining: &Draining) {
+    use std::io::{BufRead as _, BufReader};
+    use std::sync::atomic::Ordering;
+    draining.fetch_add(1, Ordering::SeqCst);
+    let draining = draining.clone();
+    std::thread::spawn(move || {
+        for line in BufReader::new(reader)
+            .lines()
+            .map_while(std::result::Result::ok)
+        {
+            // Recovered from rather than panicked on: this is a ring of
+            // plain strings with no invariant a panic could have broken,
+            // and losing the diagnostics this thread exists to collect is
+            // the worse outcome.
+            let mut sink = sink.lock().unwrap_or_else(|e| e.into_inner());
+            if sink.len() == CLIENT_OUTPUT_LINES {
+                sink.pop_front();
+            }
+            sink.push_back(line);
+        }
+        draining.fetch_sub(1, Ordering::SeqCst);
+    });
+}
+
+/// Wait, briefly, for the threads counted by `draining` to finish.
+///
+/// Worth doing once the process they are reading from has exited, which
+/// is the moment its pipes reach an end of file and its last partial
+/// line becomes a line. See [`OUTPUT_FLUSH`].
+fn wait_for_drains(draining: &Draining) {
+    use std::sync::atomic::Ordering;
+    let deadline = std::time::Instant::now() + OUTPUT_FLUSH;
+    while draining.load(Ordering::SeqCst) > 0 && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
+/// What a drained stream has said so far, most recent lines last.
+fn tail_of(ring: &LineRing) -> String {
+    ring.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("; ")
+        .trim()
+        .to_string()
+}
+
+/// How a process ended, in words: shared by everything that has to
+/// report a dead provider client, so the two never drift.
+///
+/// The number is not decoration. A client that exits 125 is the provider
+/// itself refusing; 127 is the image's own entrypoint failing to start;
+/// a signal is something outside the session killing it — three
+/// different fixes behind what mirage used to report identically as
+/// "stopped immediately".
+fn exit_phrase(code: &Option<i32>, signal: &Option<i32>) -> String {
+    match (code, signal) {
+        (Some(code), _) => format!("exit status {code}"),
+        (None, Some(signal)) => format!("killed by signal {signal}"),
+        (None, None) => "no exit status".to_string(),
+    }
+}
 
 impl NodeClient {
-    /// Adopt a freshly-spawned provider client, draining its stderr.
+    /// Adopt a freshly-spawned provider client, draining what it writes.
     fn adopt(rank: u32, name: String, mut child: std::process::Child) -> Self {
-        use std::io::{BufRead as _, BufReader};
-
-        let stderr = std::sync::Arc::new(std::sync::Mutex::new(
-            std::collections::VecDeque::with_capacity(CLIENT_STDERR_LINES),
-        ));
+        let output = line_ring();
+        let draining = Draining::default();
+        if let Some(pipe) = child.stdout.take() {
+            drain_lines(pipe, output.clone(), &draining);
+        }
         if let Some(pipe) = child.stderr.take() {
-            let sink = stderr.clone();
-            std::thread::spawn(move || {
-                for line in BufReader::new(pipe)
-                    .lines()
-                    .map_while(std::result::Result::ok)
-                {
-                    // Recovered from rather than panicked on: this is a
-                    // ring of plain strings with no invariant a panic
-                    // could have broken, and losing the diagnostics this
-                    // thread exists to collect is the worse outcome.
-                    let mut sink = sink.lock().unwrap_or_else(|e| e.into_inner());
-                    if sink.len() == CLIENT_STDERR_LINES {
-                        sink.pop_front();
-                    }
-                    sink.push_back(line);
-                }
-            });
+            drain_lines(pipe, output.clone(), &draining);
         }
         Self {
             rank,
             name,
             child: Some(child),
-            stderr,
+            exit: None,
+            output,
+            draining,
         }
+    }
+
+    /// Wait, briefly, for everything the client wrote to arrive.
+    fn settle_output(&self) {
+        wait_for_drains(&self.draining);
     }
 
     /// What the provider client has said, most recent lines last.
@@ -111,16 +234,8 @@ impl NodeClient {
     /// Empty when it said nothing, which is the normal case: a healthy
     /// `podman run` of an idling container is silent for its whole life.
     #[must_use]
-    pub fn stderr_tail(&self) -> String {
-        self.stderr
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>()
-            .join("; ")
-            .trim()
-            .to_string()
+    pub fn output_tail(&self) -> String {
+        tail_of(&self.output)
     }
 
     /// Stop the container by killing its provider client, and reap the
@@ -134,7 +249,9 @@ impl NodeClient {
             return;
         };
         let _ = child.kill();
-        let _ = child.wait();
+        if let Ok(status) = child.wait() {
+            self.exit.get_or_insert(status);
+        }
     }
 
     /// Whether the provider client is still running.
@@ -145,8 +262,61 @@ impl NodeClient {
     /// than discovering later through a failing exec.
     pub fn alive(&mut self) -> bool {
         match self.child.as_mut() {
-            Some(child) => matches!(child.try_wait(), Ok(None)),
+            Some(child) => match child.try_wait() {
+                Ok(None) => true,
+                Ok(Some(status)) => {
+                    self.exit.get_or_insert(status);
+                    false
+                }
+                Err(_) => false,
+            },
             None => false,
+        }
+    }
+
+    /// Why this container is gone, for a caller that has just found it
+    /// is: its own exit status and its last words.
+    ///
+    /// `None` while the client is still running. The container's own
+    /// reason is the whole value of this: "a node container has exited"
+    /// describes an event the caller had already noticed, whereas
+    /// "exit status 127: Error relocating …: symbol not found" names the
+    /// image that cannot host a node and why.
+    pub fn death_report(&mut self) -> Option<String> {
+        if self.alive() {
+            return None;
+        }
+        self.settle_output();
+        let (code, signal) = self.exit_codes();
+        let phrase = exit_phrase(&code, &signal);
+        let said = self.output_tail();
+        Some(if said.is_empty() {
+            format!("container `{}` stopped ({phrase})", self.name)
+        } else {
+            format!("container `{}` stopped ({phrase}): {said}", self.name)
+        })
+    }
+
+    /// The exit code and terminating signal of a client that has ended.
+    fn exit_codes(&self) -> (Option<i32>, Option<i32>) {
+        use std::os::unix::process::ExitStatusExt as _;
+        match self.exit {
+            Some(status) => (status.code(), status.signal()),
+            None => (None, None),
+        }
+    }
+
+    /// The error describing a client that ended before its container
+    /// could be used, having lasted `waited`.
+    fn exited(&self, waited: std::time::Duration) -> ContainerError {
+        self.settle_output();
+        let (code, signal) = self.exit_codes();
+        ContainerError::ClientExited {
+            name: self.name.clone(),
+            waited,
+            code,
+            signal,
+            output: self.output_tail(),
         }
     }
 }
@@ -199,7 +369,7 @@ pub enum ContainerError {
         waited: std::time::Duration,
     },
 
-    /// The provider client exited before its container came up.
+    /// The provider client exited before its container could be used.
     ///
     /// Distinct from [`ContainerError::NotRunning`] because it is a
     /// different event with a different fix. A timeout means the engine
@@ -208,17 +378,105 @@ pub enum ContainerError {
     /// image cannot run. That reason is the whole value of the variant:
     /// reporting "did not start within 543ms" against a sixty-second
     /// budget describes neither what happened nor what to do about it.
-    #[error("container `{name}` stopped immediately (after {waited:?}){}",
-        if .stderr.is_empty() { String::new() } else { format!(": {}", .stderr) })]
+    ///
+    /// The exit status is carried alongside the words because the two
+    /// answer different questions. A client that refused says so on
+    /// stderr and exits 125; a client whose *container* died says
+    /// whatever the container said and exits with the container's own
+    /// status. When it said nothing at all the status is all there is,
+    /// and 127 from an image mirage only ever asked to run
+    /// [`CONTAINER_IDLE_COMMAND`] is already the diagnosis.
+    #[error("container `{name}` stopped immediately (after {waited:?}, {}){}",
+        exit_phrase(.code, .signal),
+        if .output.is_empty() {
+            format!(
+                "; it said nothing, and the only thing mirage asked it to run was `{}`, \
+                 which this image may be unable to",
+                CONTAINER_IDLE_COMMAND.join(" ")
+            )
+        } else {
+            format!(": {}", .output)
+        })]
     ClientExited {
         /// Name of the container that failed to come up.
         name: String,
         /// How long the provider client lasted.
         waited: std::time::Duration,
-        /// What the client wrote to stderr, trimmed. Empty when it said
-        /// nothing.
-        stderr: String,
+        /// The client's exit code, or `None` when a signal ended it.
+        code: Option<i32>,
+        /// The signal that ended the client, when one did.
+        signal: Option<i32>,
+        /// What the client wrote, on either stream, trimmed. Empty when
+        /// it said nothing.
+        output: String,
     },
+
+    /// A bind mount names a host path no container can be given.
+    ///
+    /// Checked by mirage rather than left to the provider, because the
+    /// providers disagree about what a missing host path means: docker
+    /// creates it as a root-owned directory on the host and carries on,
+    /// podman refuses the container. One `--mount` must not mean two
+    /// things, and neither of those two is what the user asked for.
+    #[error("--mount {spec}: the host path `{path}` {problem}")]
+    Mount {
+        /// The mount as the provider would have been given it
+        /// (`HOST:CONTAINER[:ro]`).
+        spec: String,
+        /// The host path mirage resolved it to.
+        path: String,
+        /// What is wrong with that path, and what to do about it.
+        problem: String,
+    },
+
+    /// The caller asked for the operation to stop before it finished.
+    ///
+    /// Bring-up is a chain of blocking provider invocations, and an image
+    /// pull is minutes of it. A user who changes their mind in the middle
+    /// wants their prompt back, which means the provider running right
+    /// now has to be ended rather than waited for — see [`Cancel`].
+    #[error("interrupted while {what}")]
+    Cancelled {
+        /// What was in flight, phrased to follow "interrupted while".
+        what: String,
+    },
+}
+
+/// A shared "stop what you are doing" switch for a bring-up in flight.
+///
+/// The container engine is a chain of blocking child processes, so
+/// nothing outside it can hurry it along: `podman pull` is not a future
+/// that can be dropped, it is a process that has to be killed. A
+/// [`Cancel`] is how the owner of a bring-up — the `mirage run` whose
+/// user just pressed Ctrl-C — says so. Every long step polls it, kills
+/// whatever provider it is waiting on, and returns
+/// [`ContainerError::Cancelled`], so an interrupt during a ten-minute
+/// pull costs the caller a poll interval rather than the rest of the
+/// pull.
+///
+/// Cloning shares the switch; flipping it is one-way, because there is no
+/// version of "actually, carry on" that a half-torn-down session could
+/// honour.
+#[derive(Debug, Clone, Default)]
+pub struct Cancel(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl Cancel {
+    /// A switch nobody has flipped yet.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Ask whatever is using this switch to stop.
+    pub fn cancel(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Whether the switch has been flipped.
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
 }
 
 /// Result alias for container operations.
@@ -246,6 +504,85 @@ fn host_gpu_devices() -> Vec<String> {
         .filter(|p| std::path::Path::new(p).exists())
         .map(|p| (*p).to_string())
         .collect()
+}
+
+/// A `Stdio` that writes to mirage's own stderr.
+///
+/// Used where a child's *stdout* has to be shown to the user. Inheriting
+/// would be the obvious thing and is the wrong one: it hands the child
+/// mirage's stdout, which belongs to the workload alone — the promise
+/// that `mirage run … > out.txt` is byte-exact is only worth as much as
+/// the number of things allowed to write to that file. Falls back to
+/// discarding the stream if the descriptor cannot be duplicated, which
+/// loses provider chatter rather than misdirecting it.
+fn mirage_stderr() -> Stdio {
+    use std::os::fd::AsFd as _;
+    std::io::stderr()
+        .as_fd()
+        .try_clone_to_owned()
+        .map_or_else(|_| Stdio::null(), Stdio::from)
+}
+
+/// Resolve the host side of every bind mount, refusing the ones no
+/// container should be given.
+///
+/// Two shapes of host path are trouble, and each is trouble differently
+/// on the two engines mirage drives:
+///
+/// * **Relative** (`--mount data:/data`). Neither engine reads that as a
+///   path. A `-v` source with no leading separator is a *named volume*,
+///   so both quietly create a persistent volume called `data` and mount
+///   it empty: the directory the user meant is not in the container, and
+///   the volume outlives the session, the run, and `mirage cleanup`,
+///   which reclaims containers and networks and has never heard of it.
+///   Resolved against the working directory instead, which is what the
+///   spec plainly means.
+/// * **Nonexistent**. docker creates it on the host as a root-owned
+///   directory and starts the container; podman refuses with
+///   `statfs …: no such file or directory`. Mirage rejects it on both,
+///   before anything is created, naming the path — see
+///   [`ContainerError::Mount`].
+fn resolve_mounts(mounts: &[FileMount]) -> Result<Vec<FileMount>> {
+    mounts.iter().map(resolve_mount).collect()
+}
+
+/// Resolve and check one bind mount's host path.
+fn resolve_mount(mount: &FileMount) -> Result<FileMount> {
+    let refuse = |path: &std::path::Path, problem: String| ContainerError::Mount {
+        spec: mount.to_volume_arg(),
+        path: path.display().to_string(),
+        problem,
+    };
+
+    let host = std::path::Path::new(&mount.host_path);
+    let host = if host.is_absolute() {
+        host.to_path_buf()
+    } else {
+        // Lexical, not canonical: this answers "which path did the user
+        // mean", and resolving symlinks as well would hand the provider
+        // a path the user never wrote and cannot recognise in an error.
+        std::path::absolute(host).map_err(|e| {
+            refuse(
+                host,
+                format!("could not be resolved against the working directory: {e}"),
+            )
+        })?
+    };
+
+    match host.try_exists() {
+        Ok(true) => Ok(FileMount {
+            host_path: host.display().to_string(),
+            ..mount.clone()
+        }),
+        Ok(false) => Err(refuse(
+            &host,
+            "does not exist. Create it before the run, or correct the path — mirage will \
+             not create it for you, because docker would make it a root-owned directory on \
+             the host while podman would refuse to start the container"
+                .to_string(),
+        )),
+        Err(e) => Err(refuse(&host, format!("could not be read: {e}"))),
+    }
 }
 
 /// Supplementary groups that own the host GPU device nodes
@@ -360,6 +697,13 @@ impl BringUpPhase {
 /// container the provider refuses to start. As named fields they cannot.
 #[derive(Debug)]
 pub struct NodeSpec<'a> {
+    /// The session these containers belong to.
+    ///
+    /// Not part of the container's shape — nothing in `run_argv` reads
+    /// it — but part of its *provenance*: the provider client mirage
+    /// spawns is marked with it, so a client stranded by a `SIGKILL`ed
+    /// run can be found and reaped by [`mirage_core::reclaim`] later.
+    pub session: &'a mirage_core::session::SessionId,
     /// Image to run.
     pub image: &'a str,
     /// Network to attach to, or `None` to leave the provider's default.
@@ -385,6 +729,10 @@ pub struct NodeSpec<'a> {
 #[derive(Debug, Clone)]
 pub struct Engine {
     provider: String,
+    /// The switch that ends whatever this engine is waiting on, when the
+    /// caller has installed one. `None` means "there is nobody to
+    /// interrupt this", which is every call outside a session bring-up.
+    cancel: Option<Cancel>,
 }
 
 impl Engine {
@@ -395,7 +743,10 @@ impl Engine {
     pub fn resolve(def: &ContainerizedDef) -> Result<Self> {
         let provider = mirage_core::container::resolve_provider(def.provider.as_deref())
             .ok_or(ContainerError::NoProvider)?;
-        Ok(Self { provider })
+        Ok(Self {
+            provider,
+            cancel: None,
+        })
     }
 
     /// Build an engine around an explicit provider binary (name or
@@ -404,12 +755,37 @@ impl Engine {
     pub fn with_provider(provider: impl Into<String>) -> Self {
         Self {
             provider: provider.into(),
+            cancel: None,
         }
+    }
+
+    /// Give this engine a switch its caller can flip to end whatever it
+    /// is waiting on. See [`Cancel`].
+    #[must_use]
+    pub fn with_cancel(mut self, cancel: Cancel) -> Self {
+        self.cancel = Some(cancel);
+        self
     }
 
     /// The resolved provider binary (`"podman"`, `"docker"`, or a path).
     pub fn provider(&self) -> &str {
         &self.provider
+    }
+
+    /// Whether the caller has asked this engine to stop.
+    fn cancelled(&self) -> bool {
+        self.cancel.as_ref().is_some_and(Cancel::is_cancelled)
+    }
+
+    /// `Err(Cancelled)` if the caller has asked this engine to stop,
+    /// phrased to follow "interrupted while".
+    fn check_cancelled(&self, what: &str) -> Result<()> {
+        if self.cancelled() {
+            return Err(ContainerError::Cancelled {
+                what: what.to_string(),
+            });
+        }
+        Ok(())
     }
 
     // ---- argv builders (pure) -------------------------------------
@@ -450,6 +826,12 @@ impl Engine {
         command: &[String],
     ) -> Vec<String> {
         let &NodeSpec {
+            // The session marks the *client process* mirage spawns, not
+            // the container it asks for; see [`Self::launch_node`]. It is
+            // named here rather than elided with `..` so that a field
+            // added to the spec later cannot be silently ignored by the
+            // argv this whole crate exists to build.
+            session: _,
             image,
             network,
             host_gpus,
@@ -622,42 +1004,68 @@ impl Engine {
     /// most needs to see. What they see depends on where mirage's stderr
     /// goes:
     ///
-    /// * **A terminal** — the provider's own streams are inherited, so
-    ///   `podman pull`'s layer-by-layer progress renders exactly as it
-    ///   does when run by hand. That cannot be reproduced by capturing:
-    ///   a progress bar is `\r`-driven, and a line reader holds every
-    ///   update until a newline that never comes.
-    /// * **Anything else** (a CI log, `2>file`) — captured, as before, so
-    ///   a failure's stderr is carried in the error rather than scattered
+    /// * **A terminal** — the provider's output is passed straight
+    ///   through, so `podman pull`'s layer-by-layer progress renders
+    ///   exactly as it does when run by hand. That cannot be reproduced
+    ///   by capturing: a progress bar is `\r`-driven, and a line reader
+    ///   holds every update until a newline that never comes.
+    /// * **Anything else** (a CI log, `2>file`) — captured, so a
+    ///   failure's stderr is carried in the error rather than scattered
     ///   into whatever the caller redirected to.
     ///
     /// The trade on the first branch is deliberate: a failed pull's
     /// output is not repeated in [`ContainerError::Command`], because the
     /// user just watched it go past.
+    ///
+    /// # Provider chatter never lands on mirage's stdout
+    ///
+    /// Not even the provider's *own* stdout, which is why the pass-
+    /// through branch duplicates mirage's stderr onto the child's stdout
+    /// rather than inheriting. mirage's stdout belongs to the workload
+    /// and to nothing else: `mirage run … > out.txt` from a terminal has
+    /// to produce a byte-exact `out.txt`, and inheriting put the pull's
+    /// progress and the pulled image's digest in it. Sent to stderr, the
+    /// digest is still on screen for a user watching the pull, and still
+    /// out of the way of a user redirecting the run.
     pub fn pull(&self, image: &str) -> Result<()> {
         use std::io::IsTerminal as _;
 
         let args = vec!["pull".to_string(), image.to_string()];
-        if !std::io::stderr().is_terminal() {
-            return self.checked(&args);
-        }
-
-        let status = spawn_retrying_etxtbsy(|| {
+        let passthrough = std::io::stderr().is_terminal();
+        let mut child = spawn_retrying_etxtbsy(|| {
             Command::new(&self.provider)
                 .args(&args)
-                // stdout as well as stderr: podman writes the pulled
-                // image's digest to stdout, and swallowing it while
-                // showing the progress that led to it would be odd.
                 .stdin(Stdio::null())
-                .stdout(Stdio::inherit())
-                .stderr(Stdio::inherit())
-                .status()
+                .stdout(if passthrough {
+                    mirage_stderr()
+                } else {
+                    Stdio::null()
+                })
+                .stderr(if passthrough {
+                    Stdio::inherit()
+                } else {
+                    Stdio::piped()
+                })
+                .spawn()
         })
         .map_err(|source| ContainerError::Spawn {
             provider: self.provider.clone(),
             args: args.clone(),
             source,
         })?;
+
+        let said = line_ring();
+        let draining = Draining::default();
+        if let Some(pipe) = child.stderr.take() {
+            drain_lines(pipe, said.clone(), &draining);
+        }
+        // Waited on a poll rather than with `output()`, so that a Ctrl-C
+        // ten seconds into a ten-minute pull ends the pull instead of
+        // being noticed after it. Keeping only the tail of a captured
+        // stderr is part of the same trade: a failing pull's last words
+        // are the ones worth carrying in an error, and a full transcript
+        // would have to be buffered whole.
+        let status = self.wait_cancellable(&mut child, &args, &format!("pulling image {image}"))?;
         if status.success() {
             Ok(())
         } else {
@@ -665,8 +1073,53 @@ impl Engine {
                 provider: self.provider.clone(),
                 args,
                 code: status.code().unwrap_or(-1),
-                stderr: "see the provider's output above".to_string(),
+                stderr: if passthrough {
+                    "see the provider's output above".to_string()
+                } else {
+                    // The pull has exited; its last words may still be in
+                    // flight. See [`OUTPUT_FLUSH`].
+                    wait_for_drains(&draining);
+                    tail_of(&said)
+                },
             })
+        }
+    }
+
+    /// Wait for a provider child, ending it if the caller cancels.
+    ///
+    /// The child must not have any pipe left for this thread to drain:
+    /// waiting is a poll here, so nothing is reading, and a provider that
+    /// filled such a pipe would block forever against a loop that only
+    /// ever asks whether it has exited.
+    fn wait_cancellable(
+        &self,
+        child: &mut std::process::Child,
+        args: &[String],
+        what: &str,
+    ) -> Result<std::process::ExitStatus> {
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => return Ok(status),
+                Ok(None) => {}
+                Err(source) => {
+                    return Err(ContainerError::Spawn {
+                        provider: self.provider.clone(),
+                        args: args.to_vec(),
+                        source,
+                    });
+                }
+            }
+            if self.cancelled() {
+                // Killed and reaped here rather than left to the caller:
+                // this is the one path that abandons a running provider,
+                // and `std::process::Child` has no `Drop` to catch it.
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(ContainerError::Cancelled {
+                    what: what.to_string(),
+                });
+            }
+            std::thread::sleep(CANCEL_POLL);
         }
     }
 
@@ -854,20 +1307,29 @@ impl Engine {
     /// Dropping or killing it stops the container, and `--rm` then
     /// removes it.
     ///
-    /// Its stdin and stdout go to `/dev/null`. The container's foreground
-    /// process is an idle placeholder — workloads arrive later via
-    /// `provider exec` — so it has nothing to say, and letting it write
-    /// to mirage's terminal would interleave provider chatter with the
-    /// workload output the user actually asked for.
+    /// Its stdin goes to `/dev/null`: the container's foreground process
+    /// is an idle placeholder — workloads arrive later via
+    /// `provider exec` — so nothing in there reads.
     ///
-    /// stderr is *captured* rather than discarded, and drained into the
-    /// returned [`NodeClient`]. It too used to go to `/dev/null`, which
-    /// meant a `podman run` that refused instantly — a bound port, a
-    /// device that does not exist, an entrypoint the image cannot run —
-    /// said so into nothing, and mirage reported only that the container
-    /// "did not start". The reason is the single most useful thing about
-    /// a failed bring-up and it was being thrown away a few microseconds
-    /// before it was needed.
+    /// Both output streams are *captured* rather than inherited or
+    /// discarded, and drained into the returned [`NodeClient`].
+    /// Inheriting would interleave provider chatter with the workload
+    /// output the user asked for; discarding is what mirage used to do,
+    /// and it meant a `podman run` that refused instantly — a bound
+    /// port, a device that does not exist, an entrypoint the image
+    /// cannot run — said so into nothing, and mirage reported only that
+    /// the container "did not start". stdout is kept for the same reason
+    /// stderr is: the words that explain a node's death are the
+    /// *container's*, and a container writes them to whichever stream it
+    /// likes.
+    ///
+    /// The client is also marked with the session and runtime directory
+    /// it belongs to, which is a promise
+    /// [`mirage_core::container::ENV_SESSION`] makes on its behalf.
+    /// Marking matters exactly when nothing else survives: a `SIGKILL`ed
+    /// run leaves this process reparented to init, still holding a
+    /// container, and its environment is then the only evidence of whose
+    /// it was — which is what `mirage cleanup` reads.
     ///
     /// Returns as soon as the client has been spawned. The container is
     /// not necessarily running yet; use [`Self::await_running`] for that.
@@ -890,8 +1352,13 @@ impl Engine {
         let child = spawn_retrying_etxtbsy(|| {
             Command::new(&self.provider)
                 .args(&argv)
+                .env(mirage_core::container::ENV_SESSION, spec.session.as_str())
+                .env(
+                    mirage_core::container::ENV_RUNTIME,
+                    mirage_core::container::owning_runtime(),
+                )
                 .stdin(Stdio::null())
-                .stdout(Stdio::null())
+                .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
         })
@@ -927,7 +1394,9 @@ impl Engine {
     /// # Errors
     ///
     /// Returns [`ContainerError::NotRunning`] if the container has not
-    /// come up within `timeout`.
+    /// come up within `timeout`, [`ContainerError::ClientExited`] if its
+    /// client gave up first, or [`ContainerError::Cancelled`] if the
+    /// caller stopped waiting (see [`Cancel`]).
     pub fn await_running(
         &self,
         client: &mut NodeClient,
@@ -954,12 +1423,11 @@ impl Engine {
             // container of the same name from being adopted as though
             // this run had created it.
             if !client.alive() {
-                return Err(ContainerError::ClientExited {
-                    name,
-                    waited: std::time::Instant::now().saturating_duration_since(deadline - timeout),
-                    stderr: client.stderr_tail(),
-                });
+                return Err(client.exited(
+                    std::time::Instant::now().saturating_duration_since(deadline - timeout),
+                ));
             }
+            self.check_cancelled(&format!("starting container `{name}`"))?;
             if std::time::Instant::now() >= deadline {
                 return Err(ContainerError::NotRunning {
                     name,
@@ -999,7 +1467,9 @@ impl Engine {
     /// ([`BringUpPhase`]) so callers can surface detailed live status.
     /// On any failure the partially-created containers and network are
     /// torn down before returning the error, so a failed bring-up never
-    /// leaks resources.
+    /// leaks resources — including the failure that is a caller flipping
+    /// this engine's [`Cancel`], which is the same rollback rather than a
+    /// second path that would have to be kept honest separately.
     #[allow(clippy::too_many_arguments)]
     pub fn bring_up<F, P>(
         &self,
@@ -1021,6 +1491,17 @@ impl Engine {
         // resource is ours before removing it and `reclaim_orphans` can
         // find what a crashed supervisor left behind.
         let labels = mirage_core::container::owner_labels(session);
+
+        // Before anything is created, and before the pull above all: a
+        // mistyped `--mount` is the cheapest failure in bring-up to
+        // diagnose and the most expensive to wait for, and finding it
+        // after ten minutes of pulling an image would be nobody's idea
+        // of a good error.
+        let mounts = resolve_mounts(&def.mounts)?;
+
+        // Nothing has been created yet, so an interrupt that arrived
+        // before this point costs the caller nothing to honour.
+        self.check_cancelled("bringing up the session's containers")?;
 
         // Pull the image unless it is already present locally; pulling a
         // large image is the slowest, most visible step, so report it.
@@ -1107,10 +1588,11 @@ impl Engine {
         // built once and borrowed by each launch below; only the name,
         // the rank and the environment differ per rank.
         let spec = NodeSpec {
+            session,
             image: &def.image,
             network: Some(&network),
             host_gpus,
-            mounts: &def.mounts,
+            mounts: &mounts,
             ports: &def.ports,
             devices: &devices,
             groups: &groups,
@@ -1126,7 +1608,8 @@ impl Engine {
             });
             let env = node_env(rank);
             let launched = self
-                .launch_node(&name, &spec, &env, rank)
+                .check_cancelled(&format!("starting node {} of {node_count}", rank + 1))
+                .and_then(|()| self.launch_node(&name, &spec, &env, rank))
                 .and_then(|mut client| {
                     // The client is spawned; the container is not up yet.
                     // Wait for it here rather than letting the first exec
@@ -1165,6 +1648,28 @@ impl Engine {
                     rollback(self, &state.nodes, &mut clients);
                     return Err(e);
                 }
+            }
+        }
+
+        // Every node says it is up. Wait a moment and ask again, because
+        // the provider answers "running" about a container whose process
+        // is still deciding whether it can run at all; see
+        // [`NODE_SETTLE`]. A node that dies in this window is reported
+        // here, with its own exit status and last words, instead of
+        // reaching the caller as a healthy session whose first exec
+        // fails with the engine's words about a missing container.
+        if !clients.is_empty() {
+            std::thread::sleep(NODE_SETTLE);
+            let mut died = None;
+            for client in &mut clients {
+                if !client.alive() {
+                    died = Some(client.exited(NODE_SETTLE));
+                    break;
+                }
+            }
+            if let Some(e) = died {
+                rollback(self, &state.nodes, &mut clients);
+                return Err(e);
             }
         }
 
@@ -1263,9 +1768,16 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
 
+    /// The session every test in here brings up.
+    fn session() -> &'static mirage_core::session::SessionId {
+        static SESSION: std::sync::OnceLock<mirage_core::session::SessionId> =
+            std::sync::OnceLock::new();
+        SESSION.get_or_init(|| mirage_core::session::SessionId::new("s").unwrap())
+    }
+
     /// The ownership labels bring-up stamps on every resource.
     fn labels() -> Vec<(String, String)> {
-        mirage_core::container::owner_labels(&mirage_core::session::SessionId::new("s").unwrap())
+        mirage_core::container::owner_labels(session())
     }
 
     fn mount(spec: &str) -> FileMount {
@@ -1281,6 +1793,7 @@ mod tests {
     /// so what a case is actually about is the only thing written down.
     fn bare_spec() -> NodeSpec<'static> {
         NodeSpec {
+            session: session(),
             image: "img",
             network: None,
             host_gpus: false,
@@ -1296,10 +1809,22 @@ mod tests {
     /// `network inspect` (so `ensure_network` takes the create path) and
     /// `image inspect` (so callers think the image is absent), and prints
     /// a fake id on stdout for everything else.
+    ///
+    /// A `run` also logs the ownership marks it was *given* — the
+    /// environment of the client process, which no argv records and which
+    /// is the only thing a reclaim can read off a stranded client — and
+    /// then *stays in the foreground*, as a real client does. A `run`
+    /// that returned immediately would be a container that stopped the
+    /// instant it started, which is a thing bring-up now (rightly)
+    /// refuses to call a healthy session.
     fn mock_provider(dir: &Path, log: &Path) -> std::path::PathBuf {
         let provider = dir.join("mock-provider.sh");
         let script = format!(
             "#!/bin/sh\necho \"$@\" >> {log}\n\
+             if [ \"$1\" = run ]; then \
+             echo \"client-env MIRAGE_SESSION=${{MIRAGE_SESSION-unset}} \
+             MIRAGE_RUNTIME=${{MIRAGE_RUNTIME-unset}}\" >> {log}; \
+             echo fake-cid-123; exec sleep 30; fi\n\
              if [ \"$1\" = network ] && [ \"$2\" = inspect ]; then exit 1; fi\n\
              if [ \"$1\" = image ] && [ \"$2\" = inspect ]; then exit 1; fi\n\
              if [ \"$1\" = inspect ]; then echo true; exit 0; fi\n\
@@ -1309,6 +1834,55 @@ mod tests {
         std::fs::write(&provider, script).unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
         provider
+    }
+
+    /// Wait for the provider log to contain `needle`, and return it.
+    ///
+    /// The client writes its line and then blocks for the rest of its
+    /// life, so a test that reads the log the moment `launch_node`
+    /// returns races the `echo` rather than the container.
+    fn log_containing(log: &Path, needle: &str) -> String {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let recorded = std::fs::read_to_string(log).unwrap_or_default();
+            if recorded.contains(needle) {
+                return recorded;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the provider never recorded {needle:?}:\n{recorded}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
+    /// A provider script that is whatever the test needs it to be.
+    fn scripted_provider(dir: &Path, name: &str, body: &str) -> std::path::PathBuf {
+        let provider = dir.join(name);
+        std::fs::write(&provider, format!("#!/bin/sh\n{body}")).unwrap();
+        std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+        provider
+    }
+
+    /// A containerised profile pointing at `provider`, with `mounts`.
+    fn def_with(provider: &Path, mounts: Vec<FileMount>) -> ContainerizedDef {
+        ContainerizedDef {
+            provider: Some(provider.to_string_lossy().to_string()),
+            image: "img:latest".to_string(),
+            mounts,
+            ports: vec![],
+            devices: vec![],
+            groups: vec![],
+            hacks: vec![],
+        }
+    }
+
+    /// Bring up a one-node session on `engine` with `def`, discarding the
+    /// progress reports.
+    fn bring_up_one(engine: &Engine, def: &ContainerizedDef) -> Result<()> {
+        engine
+            .bring_up(session(), def, false, 1, 6000, |_| vec![], |_| {})
+            .map(|_| ())
     }
 
     #[test]
@@ -1333,6 +1907,7 @@ mod tests {
             "podman",
             "mirage-s-node-0",
             &NodeSpec {
+                session: session(),
                 image: "img:latest",
                 network: Some("mirage-s"),
                 host_gpus: true,
@@ -1396,6 +1971,7 @@ mod tests {
             "docker",
             "mirage-s-node-0",
             &NodeSpec {
+                session: session(),
                 image: "img:latest",
                 network: Some("mirage-s"),
                 host_gpus: true,
@@ -1634,19 +2210,10 @@ mod tests {
             .unwrap();
         assert_eq!(client.rank, 0);
         assert_eq!(client.name, "mirage-s-node-0");
-        // The mock exits on its own. Wait for it — `alive` is a `try_wait`
-        // and so reaps it — rather than killing it, so the argv it
-        // recorded is on disk before we read it.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while client.alive() {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "the mock never exited"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-
-        let recorded = std::fs::read_to_string(&log).unwrap();
+        // The client is still there, holding its container, until
+        // somebody stops it — which is the whole ownership model.
+        let recorded = log_containing(&log, "run --rm");
+        assert!(client.alive(), "the client must own the container's life");
         assert!(
             recorded.contains("run --rm --name mirage-s-node-0"),
             "the container must be launched attached and self-removing: {recorded:?}"
@@ -1680,6 +2247,35 @@ mod tests {
         client.kill();
         assert!(!client.alive());
         client.kill();
+    }
+
+    #[test]
+    fn the_provider_client_carries_the_session_that_owns_it() {
+        // The client is the one process that survives a `SIGKILL`ed run
+        // still holding a container, and nothing on disk records that it
+        // exists. Its environment is the only evidence of whose it was,
+        // which is exactly what `mirage cleanup` reads — and the marker
+        // is documented as being set on "every container provider client
+        // mirage spawns", so an unmarked client makes that a lie and the
+        // stranded container unattributable.
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("log");
+        let provider = mock_provider(dir.path(), &log);
+        let engine = Engine::with_provider(provider.to_string_lossy().to_string());
+
+        let _client = engine
+            .launch_node("mirage-s-node-0", &bare_spec(), &[], 0)
+            .unwrap();
+
+        let recorded = log_containing(&log, "client-env");
+        assert!(
+            recorded.contains(&format!(
+                "client-env MIRAGE_SESSION={} MIRAGE_RUNTIME={}",
+                session().as_str(),
+                mirage_core::container::owning_runtime()
+            )),
+            "the provider client was spawned unmarked:\n{recorded}"
+        );
     }
 
     #[test]
@@ -1724,6 +2320,244 @@ mod tests {
         assert!(
             err.to_string().contains("no such device /dev/kfd"),
             "the provider's reason was lost: {err}"
+        );
+        // And its exit status, which is the half that distinguishes a
+        // provider refusing (125) from a container that ran and died.
+        assert!(
+            err.to_string().contains("exit status 125"),
+            "the client's exit status was lost: {err}"
+        );
+    }
+
+    #[test]
+    fn a_node_that_dies_just_after_reporting_up_fails_the_bring_up() {
+        // The provider answers "running" about a container whose process
+        // is still deciding whether it can run: an alpine image handed a
+        // glibc `LD_PRELOAD` reports itself up some 380ms before its
+        // entrypoint gives up. Bring-up used to believe the first
+        // answer, so the session went ready and the *first exec* failed
+        // with the engine's words about a container id nobody had seen —
+        // exit 255, no mention of the image, the mount or the preload.
+        //
+        // The container's last words here go to stdout, which mirage
+        // discarded until it was pointed out that a dying process writes
+        // wherever it likes.
+        let dir = tempfile::tempdir().unwrap();
+        let provider = scripted_provider(
+            dir.path(),
+            "dying-provider.sh",
+            "case \"$1\" in\n\
+             run) sleep 0.1; echo 'Error relocating /mnt/mirage/lib/librocjitsu.so: \
+             symbol not found'; exit 127 ;;\n\
+             inspect) echo true; exit 0 ;;\n\
+             *) exit 0 ;;\n\
+             esac\n",
+        );
+        let engine = Engine::with_provider(provider.to_string_lossy().to_string());
+
+        let err = bring_up_one(&engine, &def_with(&provider, vec![])).unwrap_err();
+        let message = err.to_string();
+        assert!(
+            matches!(err, ContainerError::ClientExited { .. }),
+            "a node that died must fail bring-up rather than reach the first exec: {message}"
+        );
+        assert!(
+            message.contains("mirage-s-node-0")
+                && message.contains("exit status 127")
+                && message.contains("Error relocating"),
+            "the error must name the container, how it ended and what it said: {message}"
+        );
+    }
+
+    #[test]
+    fn a_container_that_dies_mid_session_can_say_why() {
+        // Nothing re-publishes a session's health once it is ready, so
+        // the death of a node container is discovered by whoever next
+        // asks — and all that caller has to go on is this. "A node
+        // container has exited" is a restatement of the question; the
+        // engine's status and the container's last words are the answer.
+        let dir = tempfile::tempdir().unwrap();
+        let provider = scripted_provider(
+            dir.path(),
+            "oom-provider.sh",
+            "case \"$1\" in\n\
+             run) echo 'container mirage-s-node-0 was killed by the OOM killer' >&2; \
+             exit 137 ;;\n\
+             *) exit 0 ;;\n\
+             esac\n",
+        );
+        let engine = Engine::with_provider(provider.to_string_lossy().to_string());
+
+        let mut client = engine
+            .launch_node("mirage-s-node-0", &bare_spec(), &[], 0)
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let report = loop {
+            if let Some(report) = client.death_report() {
+                break report;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the client never exited"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        assert!(
+            report.contains("mirage-s-node-0")
+                && report.contains("exit status 137")
+                && report.contains("OOM killer"),
+            "the report must name the container, how it ended and what it said: {report}"
+        );
+        // And a client that is still there has nothing to report, which
+        // is what makes this safe to ask on the healthy path.
+        let log = dir.path().join("log");
+        let healthy = Engine::with_provider(
+            mock_provider(dir.path(), &log)
+                .to_string_lossy()
+                .to_string(),
+        );
+        let mut client = healthy
+            .launch_node("mirage-s-node-1", &bare_spec(), &[], 1)
+            .unwrap();
+        assert_eq!(client.death_report(), None);
+    }
+
+    #[test]
+    fn bring_up_refuses_a_mount_whose_host_path_does_not_exist() {
+        // docker creates the missing path as a root-owned directory on
+        // the host and starts the container; podman refuses. Mirage
+        // decides, before either of them is asked, and says which path
+        // it means.
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("log");
+        let provider = mock_provider(dir.path(), &log);
+        let engine = Engine::with_provider(provider.to_string_lossy().to_string());
+        let missing = dir.path().join("not-here");
+
+        let err = bring_up_one(
+            &engine,
+            &def_with(
+                &provider,
+                vec![mount(&format!("{}:/data", missing.display()))],
+            ),
+        )
+        .unwrap_err();
+
+        let message = err.to_string();
+        assert!(
+            matches!(err, ContainerError::Mount { .. }),
+            "a missing host path must be mirage's refusal, not the provider's: {message}"
+        );
+        assert!(
+            message.contains(&missing.display().to_string()) && message.contains("does not exist"),
+            "the error must name the path that is missing: {message}"
+        );
+        // And nothing was created on the way to finding out — not even
+        // the pull, which is minutes the user would have waited before
+        // being told about a typo.
+        let recorded = std::fs::read_to_string(&log).unwrap_or_default();
+        assert!(
+            recorded.is_empty(),
+            "the provider was asked to do something before the mount was checked:\n{recorded}"
+        );
+        assert!(
+            !missing.exists(),
+            "mirage created the host path it refused to mount"
+        );
+    }
+
+    #[test]
+    fn bring_up_makes_a_relative_mount_absolute() {
+        // A `-v` source with no leading separator is a *named volume* to
+        // both engines, so `--mount data:/data` used to mount an empty
+        // volume called `data` instead of the directory the user meant —
+        // and leave it behind afterwards, where `mirage cleanup` (which
+        // knows about containers and networks) never looks.
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("log");
+        let provider = mock_provider(dir.path(), &log);
+        let engine = Engine::with_provider(provider.to_string_lossy().to_string());
+
+        // A relative path that exists: this crate's own manifest, next to
+        // the working directory `cargo test` runs a unit test in.
+        bring_up_one(
+            &engine,
+            &def_with(&provider, vec![mount("Cargo.toml:/m:ro")]),
+        )
+        .unwrap();
+
+        let expected = std::env::current_dir().unwrap().join("Cargo.toml");
+        let recorded = std::fs::read_to_string(&log).unwrap();
+        assert!(
+            recorded.contains(&format!("-v {}:/m:ro", expected.display())),
+            "the host path reached the provider unresolved:\n{recorded}"
+        );
+        assert!(
+            !recorded.contains("-v Cargo.toml:"),
+            "a relative host path became a named volume:\n{recorded}"
+        );
+    }
+
+    #[test]
+    fn a_pull_stops_when_the_caller_cancels() {
+        // Pulling an image is minutes of a blocking child process, and a
+        // user who changes their mind wants the prompt back now. Nothing
+        // outside the engine can hurry it: `podman pull` is not a future
+        // that can be dropped, it is a process that has to be killed.
+        let dir = tempfile::tempdir().unwrap();
+        let provider = scripted_provider(
+            dir.path(),
+            "slow-provider.sh",
+            "case \"$1\" in\n\
+             pull) sleep 30; exit 0 ;;\n\
+             *) exit 0 ;;\n\
+             esac\n",
+        );
+        let cancel = Cancel::new();
+        let engine = Engine::with_provider(provider.to_string_lossy().to_string())
+            .with_cancel(cancel.clone());
+
+        let started = std::time::Instant::now();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            cancel.cancel();
+        });
+        let err = engine.pull("img:latest").unwrap_err();
+        let waited = started.elapsed();
+
+        assert!(
+            matches!(err, ContainerError::Cancelled { .. }),
+            "a cancelled pull must say so: {err}"
+        );
+        assert!(
+            err.to_string().contains("pulling image img:latest"),
+            "the error must name what was interrupted: {err}"
+        );
+        assert!(
+            waited < std::time::Duration::from_secs(5),
+            "the pull was waited out rather than ended: {waited:?}"
+        );
+    }
+
+    #[test]
+    fn a_cancelled_bring_up_creates_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("log");
+        let provider = mock_provider(dir.path(), &log);
+        let cancel = Cancel::new();
+        cancel.cancel();
+        let engine =
+            Engine::with_provider(provider.to_string_lossy().to_string()).with_cancel(cancel);
+
+        let err = bring_up_one(&engine, &def_with(&provider, vec![])).unwrap_err();
+        assert!(
+            matches!(err, ContainerError::Cancelled { .. }),
+            "a cancelled bring-up must say so: {err}"
+        );
+        let recorded = std::fs::read_to_string(&log).unwrap_or_default();
+        assert!(
+            !recorded.contains("run --rm"),
+            "a cancelled bring-up started a container anyway:\n{recorded}"
         );
     }
 
