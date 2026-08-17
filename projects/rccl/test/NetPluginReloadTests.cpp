@@ -4,16 +4,17 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Regression test for AICOMRCCL-1534 (NCCL GitHub issue #1978): a non-default
-// NCCL_NET_PLUGIN must remain reloadable after the communicator that first used
-// it is destroyed. Before the fix, ncclNetPluginUnload memset() the plugin
-// struct and wiped the plugin name parsed once from NCCL_NET_PLUGIN, so the
-// second communicator silently fell back to the default net plugin.
+// Whitebox tests for in-process net plugin loading (NCCL_NET_PLUGIN=STATIC_PLUGIN)
+// using plugin/net_reload_plugin.cpp.
 //
-// The test uses a tiny net plugin (plugin/net_reload_plugin.cpp) compiled into
-// this test binary that records every real init() call, then creates and
-// destroys a communicator twice in one process. The plugin must be initialised
-// twice (once per comm).
+// NetPluginReload — AICOMRCCL-1534 (NCCL GitHub issue #1978): a non-default
+// NCCL_NET_PLUGIN must remain reloadable after the communicator that first used
+// it is destroyed.
+//
+// NetPluginAssignFail — NCCL 2.28.7 assignment-failure cleanup (src/plugin/net.cc):
+// when a plugin inits but fails assignment (e.g. incompatible UNPACK version),
+// ncclNetPluginFinalize() must run before probing the next plugin; netName mismatch
+// must skip init entirely.
 
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
@@ -30,12 +31,8 @@
 namespace RcclUnitTesting {
 namespace {
 
-// One create/destroy cycle per iteration; the plugin must be (re)initialised
-// once per cycle, so the expected init count equals this.
 constexpr int kNumCommCycles = 2;
 
-// Creates a unique file from an mkstemp template and unlinks it on scope exit,
-// so an early-returning ASSERT_ cannot leak it into /tmp
 class ScopedTempFile {
  public:
   explicit ScopedTempFile(const char* pathTemplate) : path_(pathTemplate) {
@@ -54,7 +51,6 @@ class ScopedTempFile {
   ScopedTempFile& operator=(const ScopedTempFile&) = delete;
 
   bool valid() const { return valid_; }
-
   const std::string& path() const { return path_; }
 
  private:
@@ -71,25 +67,38 @@ int countLines(const std::string& path) {
   return count;
 }
 
+// Returns the reason this host cannot run the test, or "" when it can.
+// GTEST_SKIP() must be issued by the caller: it expands to a bare return and
+// would otherwise only leave this helper, letting the test body run on.
+std::string gpuSkipReason() {
+  int deviceCount = 0;
+  if (hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount < 1)
+    return "requires at least one GPU";
+  return "";
+}
+
+void initAndDestroyComm() {
+  ncclUniqueId id;
+  ASSERT_EQ(ncclGetUniqueId(&id), ncclSuccess);
+
+  ncclComm_t comm = nullptr;
+  ASSERT_EQ(ncclCommInitRank(&comm, 1, id, 0), ncclSuccess);
+  ASSERT_EQ(ncclCommDestroy(comm), ncclSuccess);
+}
+
 } // namespace
 
 TEST(NetPluginReload, CustomPluginReloadsAfterCommDestroy) {
   RUN_ISOLATED_TEST("NetPluginReload.CustomPluginReloadsAfterCommDestroy", []() {
-    int deviceCount = 0;
-    if (hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount < 1)
-      GTEST_SKIP() << "requires at least one GPU";
+    if (auto reason = gpuSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
+    ASSERT_EQ(hipSetDevice(0), hipSuccess);
 
     ScopedTempFile counterFile("/tmp/rccl_net_reload_XXXXXX");
     ASSERT_TRUE(counterFile.valid()) << "failed to create counter file";
 
     ASSERT_EQ(setenv("RCCL_NET_RELOAD_COUNTER_FILE", counterFile.path().c_str(), 1), 0);
-
-    // The test plugin is compiled into this binary and its ncclNetPlugin_v10
-    // symbol is exported (see test/CMakeLists.txt). NCCL_NET_PLUGIN=STATIC_PLUGIN
-    // makes the loader dlopen(NULL) and resolve that in-process symbol
+    // ncclNetPlugin_v12 is exported from this binary (see test/CMakeLists.txt).
     ASSERT_EQ(setenv("NCCL_NET_PLUGIN", "STATIC_PLUGIN", 1), 0);
-
-    ASSERT_EQ(hipSetDevice(0), hipSuccess);
 
     for (int cycle = 0; cycle < kNumCommCycles; ++cycle) {
       ncclUniqueId id;
@@ -97,18 +106,96 @@ TEST(NetPluginReload, CustomPluginReloadsAfterCommDestroy) {
 
       ncclComm_t comm = nullptr;
       ASSERT_EQ(ncclCommInitRank(&comm, 1, id, 0), ncclSuccess)
-        << "comm init cycle " << cycle << " failed";
+          << "comm init cycle " << cycle << " failed";
 
       ASSERT_EQ(ncclCommDestroy(comm), ncclSuccess);
     }
 
-    int loads = countLines(counterFile.path());
-
-    // Fixed: plugin reloaded for every cycle -> kNumCommCycles init calls.
-    // Pre-fix: name wiped on unload, later cycles use the default plugin -> 1.
+    const int loads = countLines(counterFile.path());
     EXPECT_EQ(loads, kNumCommCycles)
         << "custom net plugin init count = " << loads << " (expected "
         << kNumCommCycles << "; fewer means the plugin was not reloaded after destroy)";
+  });
+}
+
+TEST(NetPluginAssignFail, FinalizesOnFailedAssignment) {
+  RUN_ISOLATED_TEST("NetPluginAssignFail.FinalizesOnFailedAssignment", []() {
+    if (auto reason = gpuSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
+    ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+    ScopedTempFile initFile("/tmp/rccl_net_assign_init_XXXXXX");
+    ScopedTempFile finalizeFile("/tmp/rccl_net_assign_fin_XXXXXX");
+    ASSERT_TRUE(initFile.valid()) << "failed to create init counter file";
+    ASSERT_TRUE(finalizeFile.valid()) << "failed to create finalize counter file";
+
+    ASSERT_EQ(setenv("RCCL_NET_TEST_PLUGIN_MODE", "assign_fail", 1), 0);
+    ASSERT_EQ(setenv("RCCL_NET_ASSIGN_FAIL_INIT_FILE", initFile.path().c_str(), 1), 0);
+    ASSERT_EQ(setenv("RCCL_NET_ASSIGN_FAIL_FINALIZE_FILE", finalizeFile.path().c_str(), 1), 0);
+    ASSERT_EQ(setenv("NCCL_NET_PLUGIN", "STATIC_PLUGIN", 1), 0);
+
+    initAndDestroyComm();
+
+    EXPECT_EQ(countLines(initFile.path()), 1)
+        << "external plugin init must run once before assignment failure";
+    EXPECT_EQ(countLines(finalizeFile.path()), 1)
+        << "ncclNetPluginFinalize() must run when assignment fails";
+  });
+}
+
+TEST(NetPluginAssignFail, NetNameMismatchSkipsInit) {
+  RUN_ISOLATED_TEST("NetPluginAssignFail.NetNameMismatchSkipsInit", []() {
+    if (auto reason = gpuSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
+    ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+    ScopedTempFile initFile("/tmp/rccl_net_assign_init_XXXXXX");
+    ScopedTempFile finalizeFile("/tmp/rccl_net_assign_fin_XXXXXX");
+    ASSERT_TRUE(initFile.valid()) << "failed to create init counter file";
+    ASSERT_TRUE(finalizeFile.valid()) << "failed to create finalize counter file";
+
+    ASSERT_EQ(setenv("RCCL_NET_TEST_PLUGIN_MODE", "assign_fail", 1), 0);
+    ASSERT_EQ(setenv("RCCL_NET_ASSIGN_FAIL_INIT_FILE", initFile.path().c_str(), 1), 0);
+    ASSERT_EQ(setenv("RCCL_NET_ASSIGN_FAIL_FINALIZE_FILE", finalizeFile.path().c_str(), 1), 0);
+    ASSERT_EQ(setenv("NCCL_NET_PLUGIN", "STATIC_PLUGIN", 1), 0);
+    ASSERT_EQ(setenv("NCCL_IB_DISABLE", "1", 1), 0);
+
+    ncclUniqueId id;
+    ASSERT_EQ(ncclGetUniqueId(&id), ncclSuccess);
+
+    ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+    config.netName = const_cast<char*>("Socket");
+
+    ncclComm_t comm = nullptr;
+    ASSERT_EQ(ncclCommInitRankConfig(&comm, 1, id, 0, &config), ncclSuccess);
+    ASSERT_EQ(ncclCommDestroy(comm), ncclSuccess);
+
+    EXPECT_EQ(countLines(initFile.path()), 0)
+        << "ReloadTest must not be inited when netName requests Socket";
+    EXPECT_EQ(countLines(finalizeFile.path()), 0)
+        << "ReloadTest must not be finalized when it was never inited";
+  });
+}
+
+TEST(NetPluginAssignFail, SurvivesMultipleCommCycles) {
+  RUN_ISOLATED_TEST("NetPluginAssignFail.SurvivesMultipleCommCycles", []() {
+    if (auto reason = gpuSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
+    ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+    ScopedTempFile initFile("/tmp/rccl_net_assign_init_XXXXXX");
+    ScopedTempFile finalizeFile("/tmp/rccl_net_assign_fin_XXXXXX");
+    ASSERT_TRUE(initFile.valid());
+    ASSERT_TRUE(finalizeFile.valid());
+
+    ASSERT_EQ(setenv("RCCL_NET_TEST_PLUGIN_MODE", "assign_fail", 1), 0);
+    ASSERT_EQ(setenv("RCCL_NET_ASSIGN_FAIL_INIT_FILE", initFile.path().c_str(), 1), 0);
+    ASSERT_EQ(setenv("RCCL_NET_ASSIGN_FAIL_FINALIZE_FILE", finalizeFile.path().c_str(), 1), 0);
+    ASSERT_EQ(setenv("NCCL_NET_PLUGIN", "STATIC_PLUGIN", 1), 0);
+
+    for (int cycle = 0; cycle < kNumCommCycles; ++cycle) initAndDestroyComm();
+
+    EXPECT_EQ(countLines(initFile.path()), kNumCommCycles)
+        << "each comm cycle must init the external plugin once";
+    EXPECT_EQ(countLines(finalizeFile.path()), kNumCommCycles)
+        << "each failed assignment must finalize the external plugin once";
   });
 }
 
