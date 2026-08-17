@@ -380,8 +380,7 @@ compute_queue_t::update_waves ()
       group_leader = nullptr;
 
     wave->set_mark (wave_mark);
-    if (is_first_wave)
-      wave->workgroup ().set_mark (wave_mark);
+    wave->workgroup ().set_mark (wave_mark);
   };
 
   process_t &process = this->process ();
