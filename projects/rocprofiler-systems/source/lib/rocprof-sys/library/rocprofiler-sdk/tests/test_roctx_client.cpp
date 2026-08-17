@@ -109,7 +109,7 @@ TEST_F(roctx_client_test, constructor_creates_controller)
                                       .perfetto_annotations   = false,
                                       .selected_trace_regions = "TestRegion" };
     auto                      session = std::make_shared<rocprofsys::control::session>();
-    roctx_client<mock_marker_policy> client(session, config);
+    const roctx_client<mock_marker_policy> client(session, config);
 }
 
 TEST_F(roctx_client_test, constructor_without_region_filter)
@@ -122,7 +122,7 @@ TEST_F(roctx_client_test, constructor_without_region_filter)
                                       .perfetto_annotations   = false,
                                       .selected_trace_regions = "" };
     auto                      session = std::make_shared<rocprofsys::control::session>();
-    roctx_client<mock_marker_policy> client(session, config);
+    const roctx_client<mock_marker_policy> client(session, config);
     EXPECT_FALSE(client.get_trigger().filter_active());
 }
 
@@ -136,7 +136,7 @@ TEST_F(roctx_client_test, constructor_with_region_filter)
                                       .perfetto_annotations   = false,
                                       .selected_trace_regions = "Region 1" };
     auto                      session = std::make_shared<rocprofsys::control::session>();
-    roctx_client<mock_marker_policy> client(session, config);
+    const roctx_client<mock_marker_policy> client(session, config);
     EXPECT_TRUE(client.get_trigger().filter_active());
 }
 
@@ -150,7 +150,7 @@ TEST_F(roctx_client_test, should_write_no_filter)
                                       .perfetto_annotations   = false,
                                       .selected_trace_regions = "" };
     auto                      session = std::make_shared<rocprofsys::control::session>();
-    roctx_client<mock_marker_policy> client(session, config);
+    const roctx_client<mock_marker_policy> client(session, config);
     EXPECT_TRUE(client.get_trigger().should_write_markers());
 }
 
@@ -164,7 +164,7 @@ TEST_F(roctx_client_test, should_write_with_filter_not_in_region)
                                       .perfetto_annotations   = false,
                                       .selected_trace_regions = "Region 1" };
     auto                      session = std::make_shared<rocprofsys::control::session>();
-    roctx_client<mock_marker_policy> client(session, config);
+    const roctx_client<mock_marker_policy> client(session, config);
     EXPECT_FALSE(client.get_trigger().should_write_markers());
 }
 
