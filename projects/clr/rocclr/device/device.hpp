@@ -1720,8 +1720,10 @@ class Device : public RuntimeObject {
     uint32_t num_grids;
     uint64_t prev_sum;
     uint64_t all_sum;
-    struct MGSyncData* sgs;
-    uint num_wg;
+    uint32_t num_wg;
+    uint32_t pad0[23];        // pad so sgs starts on a new 128B cache line
+    struct MGSyncData sgs;    // offset 128, alone on its line
+    uint32_t pad1[30];        // keep the rest of the line to itself
   };
 
   // Attributes that could be retrived from hsa_amd_memory_pool_link_info_t.
@@ -1771,9 +1773,9 @@ class Device : public RuntimeObject {
   // atomic traffic does not evict the read-only fields sharing MGSyncInfo.
   static constexpr size_t kSGSyncLineSize = 128;
 
-  static_assert(offsetof(MGSyncInfo, sgs) == 32,
+  static_assert(offsetof(MGSyncInfo, sgs) == 128,
                 "MGSyncInfo layout must match struct mg_info in device-libs cg.cl");
-  static_assert(sizeof(MGSyncInfo) == 48,
+  static_assert(sizeof(MGSyncInfo) == 256,
                 "MGSyncInfo layout must match struct mg_info in device-libs cg.cl");
 
   // Max Scratch size is based on ISA and thus per device.
