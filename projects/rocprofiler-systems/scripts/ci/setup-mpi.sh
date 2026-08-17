@@ -32,27 +32,26 @@ MPICH_ROOT="${MPI_ROOT:-/opt/mpich}"
 # Number of jobs to use for building.
 NJOBS="${NJOBS:-$(nproc)}"
 
-# Detect the MPI vendor from the mpicc command.
+# Detect the MPI vendor of the active mpicc by checking for a vendor-unique
+# binary (ompi_info / mpichversion) next to it. This CI image ships a system
+# OpenMPI RPM on PATH, so a plain `command -v ompi_info` would always match
+# regardless of which implementation was actually built; scoping the check to
+# mpicc's own directory ties detection to the mpicc actually in use.
+# Compiler-flag output (mpicc --showme:compile / -show) is not a reliable
+# alternative either, since it only reflects the install prefix (e.g.
+# "-I/opt/ompi/include"), which does not necessarily contain the vendor name.
 detect_mpi_vendor() {
-    local mpicc
+    local mpicc mpi_bindir
     mpicc="$(command -v mpicc || true)"
     if [[ -z "${mpicc}" ]]; then
         echo "unknown"
         return
     fi
 
-    local include_paths=""
-    if "${mpicc}" --showme:compile &>/dev/null; then
-        include_paths="$("${mpicc}" --showme:compile 2>/dev/null || true)"
-    elif "${mpicc}" -show &>/dev/null; then
-        include_paths="$("${mpicc}" -show 2>/dev/null || true)"
-    fi
-
-    local lower_paths
-    lower_paths="$(echo "${include_paths}" | tr '[:upper:]' '[:lower:]')"
-    if [[ "${lower_paths}" == *openmpi* ]]; then
+    mpi_bindir="$(dirname "${mpicc}")"
+    if [[ -x "${mpi_bindir}/ompi_info" ]]; then
         echo "openmpi"
-    elif [[ "${lower_paths}" == *mpich* ]]; then
+    elif [[ -x "${mpi_bindir}/mpichversion" ]]; then
         echo "mpich"
     else
         echo "unknown"
