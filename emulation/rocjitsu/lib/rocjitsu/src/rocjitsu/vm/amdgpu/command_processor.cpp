@@ -278,6 +278,10 @@ CommandProcessor::CommandProcessor(std::string name, simdojo::ExecMode exec_mode
   // event must already have a handler when the queue becomes visible.
   doorbell_event_.set_handler(
       [this](simdojo::Tick ts, simdojo::Message *) { handle_doorbell(ts); });
+  dispatch_continuation_event_.set_handler([this](simdojo::Tick ts, simdojo::Message *) {
+    dispatch_continuation_pending_ = false;
+    handle_doorbell_sync(ts);
+  });
 }
 
 CommandProcessor::~CommandProcessor() { stop_doorbell_monitor(); }
@@ -292,10 +296,16 @@ void CommandProcessor::set_dispatch_threads(uint32_t threads) {
   threads = std::max(threads, 1u);
   if (exec_mode_ != simdojo::ExecMode::FUNCTIONAL || plugin_group_->requires_serial_hot_hooks())
     threads = 1;
+  const bool pool_driven = threads > 1;
+  for (auto *cu : cus_)
+    cu->set_pool_driven(pool_driven);
   if (dispatch_threads_ == threads)
     return;
   dispatch_threads_ = threads;
   local_dispatch_pool_.reset();
+  if (!pool_driven)
+    for (auto *cu : cus_)
+      cu->schedule_work();
 }
 
 void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
@@ -869,12 +879,25 @@ bool CommandProcessor::barrier_satisfied(const HwQueueState &qs, size_t idx) con
   if (idx == 0 && !qs.implicit_barrier_next)
     return true;
 
-  // Barrier bit: all prior entries must be fully completed.
+  // Header barrier bit: all prior entries must be fully completed.
   for (size_t i = 0; i < idx; ++i) {
     if (!qs.entries[i].fully_completed())
       return false;
   }
   return true;
+}
+
+void CommandProcessor::drain_pending_wg_completions() {
+  for (const auto completion : pending_wg_completions_) {
+    plugin_group_->onAmdgpuWorkgroupCompleted(completion.dispatch_id, completion.wg_id);
+    for (auto *spi : spis_)
+      if (spi->release_wgp_workgroup(completion.dispatch_id, completion.wg_id))
+        break;
+    mark_cluster_workgroup_complete(completion.dispatch_id, completion.wg_id);
+    if (completion_)
+      completion_->notify_wg_complete(completion.dispatch_id, completion.wg_id, new_queue_states_);
+  }
+  pending_wg_completions_.clear();
 }
 
 void CommandProcessor::register_cluster_workgroup(const DispatchEntry &entry, uint32_t local_wg_id,
@@ -1201,17 +1224,15 @@ void CommandProcessor::notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id) 
   util::Logger::cp(
       [&](auto &os) { os << std::format("WG_COMPLETE d={} wg={}", dispatch_id, wg_id); });
   std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-  for (auto *spi : spis_)
-    if (spi->release_wgp_workgroup(dispatch_id, wg_id))
-      break;
-  mark_cluster_workgroup_complete(dispatch_id, wg_id);
-  if (completion_) {
-    completion_->notify_wg_complete(dispatch_id, wg_id, new_queue_states_);
-    // Without worker fan-out, completion arrives on the CP's engine thread, so
-    // retire promptly while another resident dispatch may wait on this signal.
-    // Parallel workers must defer draining until their fan-out rejoins the CP.
-    if (dispatch_threads_ <= 1)
+  pending_wg_completions_.push_back({dispatch_id, wg_id});
+  if (dispatch_threads_ <= 1) {
+    drain_pending_wg_completions();
+    if (completion_) {
+      // Without worker fan-out, completion arrives on the CP's engine thread, so
+      // retire promptly while another resident dispatch may wait on this signal.
+      // Parallel workers must defer draining until their fan-out rejoins the CP.
       completion_->drain_completions(new_queue_states_);
+    }
   }
 }
 
@@ -1226,6 +1247,7 @@ void CommandProcessor::on_cu_idle() {
 
   std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
 
+  drain_pending_wg_completions();
   if (completion_)
     completion_->drain_completions(new_queue_states_);
 
@@ -1234,11 +1256,13 @@ void CommandProcessor::on_cu_idle() {
   for (auto &qs : new_queue_states_) {
     while (qs.next_dispatch_idx < qs.entries.size()) {
       auto &e = qs.entries[qs.next_dispatch_idx];
-      if (e.barrier_bit && !barrier_satisfied(qs, qs.next_dispatch_idx))
+      if (e.wait_for_predecessors && !barrier_satisfied(qs, qs.next_dispatch_idx))
         break;
       if (!e.is_non_kernel())
         break;
       e.completed_wgs = e.total_wgs;
+      if (completion_)
+        completion_->complete_non_kernel(e);
       ++qs.next_dispatch_idx;
     }
   }
@@ -1254,7 +1278,7 @@ void CommandProcessor::on_cu_idle() {
   for (auto &qs : new_queue_states_) {
     if (qs.next_dispatch_idx < qs.entries.size()) {
       auto &entry = qs.entries[qs.next_dispatch_idx];
-      if (entry.barrier_bit && !barrier_satisfied(qs, qs.next_dispatch_idx))
+      if (entry.wait_for_predecessors && !barrier_satisfied(qs, qs.next_dispatch_idx))
         continue;
       if (!entry.is_non_kernel() && !entry.fully_dispatched()) {
         uint32_t sent = dispatch_workgroups(entry);
@@ -1279,11 +1303,13 @@ void CommandProcessor::process_queues() {
     while (qs.next_dispatch_idx < qs.entries.size()) {
       auto &entry = qs.entries[qs.next_dispatch_idx];
 
-      if (entry.barrier_bit && !barrier_satisfied(qs, qs.next_dispatch_idx))
+      if (entry.wait_for_predecessors && !barrier_satisfied(qs, qs.next_dispatch_idx))
         break; // Stalled on barrier bit.
 
       if (entry.is_non_kernel()) {
         entry.completed_wgs = entry.total_wgs; // 0 == 0, immediately complete.
+        if (completion_)
+          completion_->complete_non_kernel(entry);
         ++qs.next_dispatch_idx;
         continue;
       }
@@ -1484,7 +1510,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dp.workgroup_size_z = pkt.workgroup_size_z;
   dp.completion_signal = pkt.completion_signal.handle;
   dp.host_signal = false;
-  dp.barrier_bit = (pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1;
+  dp.wait_for_predecessors = (pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1;
 
   // Process AQL acquire fence: invalidate caches so the kernel sees the
   // latest host/agent writes (kernarg data, input buffers, etc.).
@@ -1737,13 +1763,18 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
           .queue_id = queue.queue_id,
           .process_id = queue.process_id,
           .completion_signal = sig,
-          .barrier_bit = true,
+          .wait_for_predecessors = ((pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
+          .blocks_following = true,
       };
 
+      const bool blocks_following = dp.blocks_following;
       qs.entries.push_back(std::move(dp));
       ++read_idx;
-      process_limit = read_idx;
-      break;
+      if (blocks_following) {
+        process_limit = read_idx;
+        break;
+      }
+      continue;
     } else if (pkt_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC) {
       AmdExtKernelDispatchPacket ext{};
       std::memcpy(&ext, &pkt, sizeof(ext));
@@ -1795,7 +1826,8 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
             .queue_id = queue.queue_id,
             .process_id = queue.process_id,
             .completion_signal = barrier.completion_signal.handle,
-            .barrier_bit = ((barrier.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
+            .wait_for_predecessors = ((barrier.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
+            .blocks_following = true,
         };
 
         qs.entries.push_back(std::move(dp));
@@ -1855,7 +1887,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
             .queue_id = queue.queue_id,
             .process_id = queue.process_id,
             .completion_signal = sig,
-            .barrier_bit = ((pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
+            .wait_for_predecessors = ((pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
         };
 
         qs.entries.push_back(std::move(dp));
@@ -1909,11 +1941,9 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
                       entries_after - entries_before, entries_after);
   });
 
-  // While the queue mutex is dropped, CU workers may append completions to
-  // new_queue_states_. The shared structure lock remains held, so concurrent
-  // registration/removal cannot invalidate the dispatch loop's vector
-  // references; worker completion callbacks continue to use only the queue
-  // mutex.
+  // While the queue mutex is dropped, CU workers append compact completion
+  // records only. The shared structure lock keeps queue/CU storage stable; once
+  // the batch rejoins, the CP thread applies every stateful retirement action.
   auto run_dispatch_workers = [&]() {
     if (exec_mode_ != simdojo::ExecMode::FUNCTIONAL || dispatch_threads_ <= 1 || !has_active_cus())
       return FunctionalQuantumResult{};
@@ -1922,12 +1952,16 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
     // batch instead of retaining a separate pool for every SPI.
     FunctionalQuantumResult result = run_active_cus_once();
     lock.lock();
+    drain_pending_wg_completions();
     if (completion_)
       completion_->drain_completions(new_queue_states_);
     return result;
   };
 
-  // Phase 1: Dispatch-Execute-Complete loop (functional mode).
+  // Phase 1: Dispatch-Execute-Complete loop (functional mode). Dispatch all
+  // queues that currently have capacity, then execute at most one active-CU
+  // batch. Returning after that batch lets peer components publish state before
+  // a polling wave is resumed by the CP continuation event.
   //
   // Wrapped in a rescan loop. A dependent kernel the host submits *while this
   // handler is executing* is picked up only by the post-loop re-fetch below;
@@ -1956,11 +1990,13 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
         while (qs.next_dispatch_idx < qs.entries.size()) {
           auto &entry = qs.entries[qs.next_dispatch_idx];
 
-          if (entry.barrier_bit && !barrier_satisfied(qs, qs.next_dispatch_idx))
+          if (entry.wait_for_predecessors && !barrier_satisfied(qs, qs.next_dispatch_idx))
             break;
 
           if (entry.is_non_kernel()) {
             entry.completed_wgs = entry.total_wgs;
+            if (completion_)
+              completion_->complete_non_kernel(entry);
             ++qs.next_dispatch_idx;
             if (completion_)
               completion_->drain_completions(new_queue_states_);
@@ -1968,11 +2004,9 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
             continue;
           }
 
-          // Dispatch-execute-retire loop: keep dispatching WGs, activating CUs,
-          // and retiring WFs until the entry is fully dispatched and completed,
-          // or we hit genuine backpressure (no CU can accept any WG).
-          // NOTE: drain_completions may pop entries, so we must re-check indices
-          // after each drain and not hold stale references.
+          // Dispatch WGs until the entry is fully dispatched or all CUs apply
+          // backpressure. Execution is deferred until every queue gets this
+          // dispatch pass, preventing a polling queue from starving its peers.
           uint32_t dispatch_id = entry.dispatch_id;
           bool backpressure = false;
           for (;;) {
@@ -1986,17 +2020,6 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
             if (sent > 0)
               progress = true;
 
-            auto worker_result = run_dispatch_workers();
-            if (worker_result.ran)
-              progress = true;
-            if (worker_result.yielded) {
-              yield_to_event_loop = true;
-              break;
-            }
-
-            if (completion_)
-              completion_->drain_completions(new_queue_states_);
-
             if (qs.next_dispatch_idx >= qs.entries.size())
               break;
             auto &post = qs.entries[qs.next_dispatch_idx];
@@ -2007,13 +2030,11 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
               ++qs.next_dispatch_idx;
               break;
             }
-            if (sent == 0 && !worker_result.ran) {
+            if (sent == 0) {
               backpressure = true;
               break;
             }
           }
-          if (yield_to_event_loop)
-            break;
           if (backpressure)
             break;
         }
@@ -2023,15 +2044,16 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
 
       if (!yield_to_event_loop) {
         auto worker_result = run_dispatch_workers();
-        if (worker_result.ran)
+        if (worker_result.ran) {
           progress = true;
-        if (worker_result.yielded)
           yield_to_event_loop = true;
+        }
       }
     }
 
     // Final drain: catch any entries that became fully_completed during the
-    // last iteration but weren't drained by the re-entrant path.
+    // last worker batch.
+    drain_pending_wg_completions();
     if (completion_)
       completion_->drain_completions(new_queue_states_);
 
@@ -2073,11 +2095,13 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
       auto &qs = new_queue_states_[qi];
       while (qs.next_dispatch_idx < qs.entries.size()) {
         auto &entry = qs.entries[qs.next_dispatch_idx];
-        if (entry.barrier_bit && !barrier_satisfied(qs, qs.next_dispatch_idx))
+        if (entry.wait_for_predecessors && !barrier_satisfied(qs, qs.next_dispatch_idx))
           break;
         if (!entry.is_non_kernel())
           break;
         entry.completed_wgs = entry.total_wgs;
+        if (completion_)
+          completion_->complete_non_kernel(entry);
         ++qs.next_dispatch_idx;
       }
     }
@@ -2102,12 +2126,20 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
     is_primary_ = true;
   }
 
-  for (size_t i = 0; i < cus_.size(); ++i) {
-    if (cus_[i]->has_active_wfs()) {
-      if (dispatch_ports_[i]->link())
-        dispatch_ports_[i]->send(std::make_unique<simdojo::Message>(simdojo::MessageHeader{}));
-      else
-        cus_[i]->schedule_work();
+  if (dispatch_threads_ > 1) {
+    if (yield_to_event_loop && (has_active_cus() || pending_entries() > 0) &&
+        !dispatch_continuation_pending_) {
+      dispatch_continuation_pending_ = true;
+      schedule_event(&dispatch_continuation_event_, now + 1);
+    }
+  } else {
+    for (size_t i = 0; i < cus_.size(); ++i) {
+      if (cus_[i]->has_active_wfs()) {
+        if (dispatch_ports_[i]->link())
+          dispatch_ports_[i]->send(std::make_unique<simdojo::Message>(simdojo::MessageHeader{}));
+        else
+          cus_[i]->schedule_work();
+      }
     }
   }
 

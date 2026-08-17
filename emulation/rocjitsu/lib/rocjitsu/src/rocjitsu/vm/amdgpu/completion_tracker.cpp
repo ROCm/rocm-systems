@@ -55,11 +55,7 @@ void CompletionTracker::drain_completions(std::vector<HwQueueState> &queues) {
                           entry.completed_wgs, entry.total_wgs, entry.completion_signal);
       });
 
-      flush_caches(entry.process_id);
-      plugin_group_->onAmdgpuDispatchExecutionEnd(entry.dispatch_id);
-      if (entry.completion_signal != 0) {
-        fire_signal(entry);
-      }
+      deliver_completion(entry);
       if (dispatch_retired_cb_)
         dispatch_retired_cb_(entry);
 
@@ -78,6 +74,21 @@ void CompletionTracker::drain_completions(std::vector<HwQueueState> &queues) {
         interrupt_cb_(last_process_id, 0);
     }
   }
+}
+
+void CompletionTracker::complete_non_kernel(DispatchEntry &entry) {
+  if (entry.is_non_kernel())
+    deliver_completion(entry);
+}
+
+void CompletionTracker::deliver_completion(DispatchEntry &entry) {
+  if (entry.completion_notified)
+    return;
+  flush_caches(entry.process_id);
+  plugin_group_->onAmdgpuDispatchExecutionEnd(entry.dispatch_id);
+  if (entry.completion_signal != 0)
+    fire_signal(entry);
+  entry.completion_notified = true;
 }
 
 void CompletionTracker::fire_queue_idle_signal(uint64_t queue_desc_va, uint32_t process_id) {

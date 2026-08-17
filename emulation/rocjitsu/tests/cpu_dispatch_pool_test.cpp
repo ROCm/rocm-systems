@@ -35,14 +35,14 @@ constexpr uint32_t kSSetvskip = 0xBF100000u;
 constexpr uint64_t kProgramBase = 0x100000;
 
 struct DispatchPoolFixture {
-  explicit DispatchPoolFixture(uint32_t cu_count) : l2("pool_l2") {
+  explicit DispatchPoolFixture(uint32_t cu_count, uint32_t functional_quantum = 1) : l2("pool_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
     cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = 104;
     cfg.vgprs_per_wf = 256;
     cfg.lds_size_kb = 64;
-    cfg.functional_quantum = 1;
+    cfg.functional_quantum = functional_quantum;
 
     for (uint32_t i = 0; i < 256; ++i)
       memory.write32(kProgramBase + i * sizeof(uint32_t), kSNop);
@@ -93,6 +93,17 @@ TEST(CpuDispatchPoolTest, ZeroThreadsFallsBackToCallingThread) {
   EXPECT_EQ(pool.thread_count(), 1u);
   pool.run(std::span<amdgpu::ComputeUnitCore *>(fixture.tasks), /*threads=*/0);
   EXPECT_EQ(fixture.wfs.front()->trace_inst_count_, 1u);
+}
+
+TEST(CpuDispatchPoolTest, ZeroFunctionalQuantumRunsUntilWavefrontHalts) {
+  constexpr uint32_t kSEndpgm = 0xBF810000u;
+  DispatchPoolFixture fixture(/*cu_count=*/1, /*functional_quantum=*/0);
+  fixture.memory.write32(kProgramBase + 2 * sizeof(uint32_t), kSEndpgm);
+
+  auto result = fixture.cus.front()->run_quantum();
+
+  EXPECT_TRUE(result.ran);
+  EXPECT_TRUE(fixture.cus.front()->is_idle());
 }
 
 TEST(CpuDispatchPoolTest, WorkerExceptionsRethrowAndPoolRemainsReusable) {

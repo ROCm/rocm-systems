@@ -100,7 +100,12 @@ struct DispatchEntry {
   /// fields, and this keeps HIP/MIOpen event timing consistent for guest queues.
   uint64_t profiling_start_timestamp = 0;
   bool host_signal = false;
-  bool barrier_bit = false;
+  /// Header barrier bit: this packet waits for all earlier packets in its queue.
+  bool wait_for_predecessors = false;
+  /// Packet-type ordering: following packets cannot pass this packet.
+  bool blocks_following = false;
+  /// Completion hooks and signal have already been delivered.
+  bool completion_notified = false;
   bool execution_begun = false;
 
   bool fully_dispatched() const { return dispatched_wgs >= total_wgs; }
