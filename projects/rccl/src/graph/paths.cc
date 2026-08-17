@@ -1228,7 +1228,8 @@ NCCL_PARAM(P2pCuReduceScaleEnable, "P2P_CU_REDUCE_SCALE_ENABLE", 0);
 // in the pool: ppp = pow2Down(p2pnChannels / nRanks). The pow2 step matters --
 // ncclP2pChannelForPart mods channel ids by the pool, so ppp*nRanks > pool
 // causes round bases to wrap and channels to collide.
-RCCL_PARAM(SaturateP2pNChannels, "SATURATE_P2P_NCHANNELS", 0);
+// Unset defaults to on for gfx1250, off elsewhere.
+RCCL_PARAM(SaturateP2pNChannels, "SATURATE_P2P_NCHANNELS", RCCL_VALUE_UNSET);
 extern int64_t ncclParamWorkArgsBytes();
 
 ncclResult_t ncclTopoComputeP2pChannelsPerPeer(struct ncclComm* comm) {
@@ -1260,6 +1261,7 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
 
   // comm->p2pnChannelsPerPeer was set by ncclTopoComputeP2pChannelsPerPeer().
   int minChannels = comm->p2pnChannelsPerPeer;
+  const bool isGfx1250 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
 
   int arch, vendor, model;
   NCCLCHECK(ncclTopoCpuType(comm->topo, &arch, &vendor, &model));
@@ -1295,7 +1297,6 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     // Otherwise keep the historical 64 cap and per-arch multi-node caps below.
     {
       int userMaxP2p = (int)ncclParamMaxP2pNChannels();
-      bool isGfx1250 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
       int defaultMax = isGfx1250 ? (int)MAXCHANNELS : 4 * CHANNEL_LIMIT;
       int upper = (userMaxP2p > defaultMax) ? std::min(userMaxP2p, (int)MAXCHANNELS) : defaultMax;
       comm->p2pnChannels = std::min(std::max(pow2Up(comm->p2pnChannels), pow2Up(comm->p2pnChannelsPerPeer)), upper);
@@ -1318,9 +1319,12 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, MAXCHANNELS);
   }
 
-  // Opt-in: pick p2pnChannelsPerPeer so a P2P plan tiles the channel pool
-  // without wrapping. Saturates gridDim.x for alltoall-style workloads.
-  if (rcclParamSaturateP2pNChannels() && comm->nRanks > 0) {
+  // Pick p2pnChannelsPerPeer so a P2P plan tiles the channel pool without wrapping.
+  // Saturates gridDim.x for alltoall-style workloads. On by default for gfx1250,
+  // which needs the larger per-peer count to use its full pool; opt-in elsewhere.
+  int saturateP2p = (int)rcclParamSaturateP2pNChannels();
+  if (saturateP2p == RCCL_VALUE_UNSET) saturateP2p = isGfx1250 ? 1 : 0;
+  if (saturateP2p && comm->nRanks > 0) {
     int target = std::max(1, comm->p2pnChannels / comm->nRanks);
     int newPpp = std::min(pow2Down(target), (int)MAXCHANNELS);
     INFO(NCCL_INIT | NCCL_TUNING,
