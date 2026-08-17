@@ -7,34 +7,30 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 ### Added
 
 **API:**
+  - Advanced Thread Trace (ATT) support in the live attach workflow:
+    - On attach, the SDK registers for code-object iteration and creation callbacks so thread trace operates correctly on code objects that were loaded before the attach occurred.
+    - Makes ATT usable on already-running production workloads without an application restart.
+  - Experimental SQTT quick scan mode for thread trace, enabled through a new CMake flag:
+    - Collects thread trace data without packet insertion or HSA signal manipulation, removing the queue interception overhead required by the standard ATT path.
+    - Individual kernels can be traced without serialization, and the path is independent of the ROCm runtime version.
+    - Experimental: intended to validate the new collection path and to enable out-of-process thread trace and long-kernel tracing in future releases.
 
-  - Streaming Performance Monitor (SPM) counter collection support (beta):
-    - New experimental API in `rocprofiler-sdk/experimental/spm.h`:
-    - GPU-timestamped counter values alongside kernel dispatch information.
-  - Added `spm_support` along with reserved padding to `rocprofiler_counter_info_v1_t`
+**rocprof-trace-decoder:**
 
-**rocprofv3 (CLI):**
-
-  - SPM counter collection support in `rocprofv3` (beta):
-    - `--spm <counter>` flag to specify counters for SPM collection.
-    - `--spm-sample-interval` and `--spm-sample-interval-unit` parameters to configure sampling rate.
-    - `--spm-beta-enabled` flag to opt in to the beta SPM feature.
-    - `--spm-config` option in `rocprofv3-avail` to list available SPM configurations.
-  - JSON and rocpd output format support for SPM.
-
-**Documentation:**
-
-  - SPM API reference guide (`api-reference/spm.rst`).
-  - SPM usage guide for `rocprofv3` (`how-to/using-spm.rst`).
-  - `--spm-config` documentation to `rocprofv3-avail` usage guide.
+  - Python API for decoding Advanced Thread Trace (ATT) / SQTT data directly from Python, without writing a C++ consumer:
+    - Wraps the decoder library and exposes thread trace decoding as a first-class Python interface, with samples demonstrating common workflows.
+    - Useful for analysis scripts, Jupyter notebooks, and custom profiling tools that process ATT output programmatically.
+    - Decoder integration tests have been migrated to Python, simplifying test authoring and making it easier for downstream tools to validate their trace-decoding pipelines.
 
 ### Changed
 - Bump rocpd schema to version 3.0.1 which supports NIC agent types.
 - Bump rocpd schema to version 3.0.2 for HIP graph per-node attribution (`graph_exec_id`/`graph_node_id` columns on `rocpd_kernel_dispatch`/`rocpd_memory_copy` and the new `rocpd_graph_launch` table). The pre-graph-attribution 3.0.1 schema is now frozen under `versions/3.0.1/` per the rocpd schema versioning scheme.
 - Bump rocpd schema to version 3.0.3 for SPM support. The pre-spm-support 3.0.2 schema is now frozen under `versions/3.0.2/` per the rocpd schema versioning scheme.
 
-### Removed
+### Resolved issues
 
+
+### Removed
 
 ## ROCprofiler-SDK 1.3.5 for ROCm release 10.0.0
 
@@ -51,14 +47,11 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - Streaming Performance Monitor (SPM) counter data in the rocpd output format:
     - SPM records are stored as `rocpd_track` rows labelled `SPM`, with counter values grouped by timestamp into `rocpd_sample` rows and per-dimension data in `rocpd_pmc_event` rows.
     - The rocpd schema gains the `sample_id`, `xcc`, `shader_engine`, and `instance` columns.
-    - SPM data is consumable by any tool that reads the rocpd database and convertible to the other output formats, such as Perfetto.
-  - Advanced Thread Trace (ATT) support in the live attach workflow:
-    - On attach, the SDK registers for code-object iteration and creation callbacks so thread trace operates correctly on code objects that were loaded before the attach occurred.
-    - Makes ATT usable on already-running production workloads without an application restart.
-  - Experimental SQTT quick scan mode for thread trace, enabled through a new CMake flag:
-    - Collects thread trace data without packet insertion or HSA signal manipulation, removing the queue interception overhead required by the standard ATT path.
-    - Individual kernels can be traced without serialization, and the path is independent of the ROCm runtime version.
-    - Experimental: intended to validate the new collection path and to enable out-of-process thread trace and long-kernel tracing in future releases.
+    - SPM data is consumable by any tool that reads the rocpd database and convertible to the other output formats, such as Perfetto.    
+  - Streaming Performance Monitor (SPM) counter collection support (beta):
+    - New experimental API in `rocprofiler-sdk/experimental/spm.h`:
+    - GPU-timestamped counter values alongside kernel dispatch information.
+  - Added `spm_support` along with reserved padding to `rocprofiler_counter_info_v1_t`
 
 **rocprofv3 (CLI):**
 
@@ -70,13 +63,6 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
     - Automatically included in `--runtime-trace` and `--sys-trace`.
     - Records are emitted across all supported output backends: CSV, JSON, Perfetto, OTF2, and rocpd.
   - Container-aware `rocattach` symbol resolution: attach entry points are resolved directly from the target process mapped ELF, and tool paths are validated from the target's perspective before injection. This allows attaching from a host to a containerized process without manually copying `.so` files.
-
-**rocprof-trace-decoder:**
-
-  - Python API for decoding Advanced Thread Trace (ATT) / SQTT data directly from Python, without writing a C++ consumer:
-    - Wraps the decoder library and exposes thread trace decoding as a first-class Python interface, with samples demonstrating common workflows.
-    - Useful for analysis scripts, Jupyter notebooks, and custom profiling tools that process ATT output programmatically.
-    - Decoder integration tests have been migrated to Python, simplifying test authoring and making it easier for downstream tools to validate their trace-decoding pipelines.
 
 ### Changed
 
@@ -105,12 +91,29 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Dependency on `libatomic`. The library was previously linked unconditionally through the `rocprofiler-sdk-atomic` interface target, which caused link failures on toolchains and container images where `libatomic1` is not installed. The single `std::atomic` use that required it has been replaced with explicit memory-ordering synchronization; behavior is unchanged.
 
 
+## ROCprofiler-SDK 1.3.2 for ROCm release 7.14
+
+### Added
+
+**API:**
+  - SPM counter collection support in `rocprofv3` (beta):
+    - `--spm <counter>` flag to specify counters for SPM collection.
+    - `--spm-sample-interval` and `--spm-sample-interval-unit` parameters to configure sampling rate.
+    - `--spm-beta-enabled` flag to opt in to the beta SPM feature.
+    - `--spm-config` option in `rocprofv3-avail` to list available SPM configurations.
+  - JSON and rocpd output format support for SPM.
+
+**Documentation:**
+
+  - SPM API reference guide (`api-reference/spm.rst`).
+  - SPM usage guide for `rocprofv3` (`how-to/using-spm.rst`).
+  - `--spm-config` documentation to `rocprofv3-avail` usage guide.
+
 ## ROCprofiler-SDK 1.3.0 for ROCm release 7.2.4
 
 ### Optimized
 
 - Reduced ROCprofiler-sdk profiling overhead: Improved profiling stability for vLLM workloads traced with PyTorch torch.profiler using the rocprofiler-sdk backend.
-
 
 ## ROCprofiler-SDK 1.3.0 for ROCm release 7.13
 
@@ -206,163 +209,39 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 **Note:** Public API (`rocprofiler_force_configure()`) remains unchanged - no breaking changes for users
 
-## ROCprofiler-SDK for AFAR I
+## ROCprofiler-SDK 1.1.0 for ROCm release 7.2
 
 ### Added
+- Counter collection support for `gfx1150` and `gfx1151`.
+- HSA Extension API v8 support.
+- `hipStreamCopyAttributes` API implementation.
+- `--profile-mpi-ranks` option in `rocprofv3` to selectively profile specific MPI ranks. Supports comma-separated ranges and individual ranks (e.g., `--profile-mpi-ranks 0-3,8,10-15`).
 
-- HSA API tracing
-- Kernel dispatch tracing
-- Kernel dispatch counter collection
-  - Instances reported as single dimension
-  - No serialization
+### Optimized
 
-## ROCprofiler-SDK for AFAR II
-
-### Added
-
-- HIP API tracing
-- ROCTx tracing
-- Tracing ROCProf Tool V3
-- Documentation packaging
-- ROCTx control (start and stop)
-- Memory copy tracing
-
-## ROCprofiler-SDK for AFAR III
-
-### Added
-
-- Kernel dispatch counter collection. This includes serialization and multidimensional instances.
-- Kernel serialization.
-- Serialization control (on and off).
-- ROCprof tool plugin interface V3 for counters and dimensions.
-- Support to list metrics.
-- Correlation-Id retirement
-- HIP and HSA trace distinction:
-  - --hip-runtime-trace          For collecting HIP Runtime API traces
-  - --hip-compiler-trace         For collecting HIP compiler-generated code traces
-  - --hsa-core-trace             For collecting HSA API traces (core API)
-  - --hsa-amd-trace              For collecting HSA API traces (AMD-extension API)
-  - --hsa-image-trace            For collecting HSA API traces (image-extension API)
-  - --hsa-finalizer-trace        For collecting HSA API traces (finalizer-extension API)
-
-## ROCprofiler-SDK for AFAR IV
-
-### Added
-
-**API:**
-
-- Page migration reporting
-- Scratch memory reporting
-- Kernel dispatch callback tracing
-- External correlation Id request service
-- Buffered counter collection record headers
-- Option to remove HSA dependency from counter collection
-
-**Tool:**
-
-- `rocprofv3` multi-GPU support in a single-process
-
-## ROCprofiler-SDK for AFAR V
-
-### Added
-
-**API:**
-
-- Agent or device counter collection
-- PC sampling (beta)
-
-**Tool:**
-
-- Single JSON output format support
-- Perfetto output format support (.pftrace)
-- Input YAML support for counter collection
-- Input JSON support for counter collection
-- Application replay in counter collection
-- `rocprofv3` multi-GPU support:
-  - Multiprocess (multiple files)
-
-### Changed
-
-- `rocprofv3` tool now requires mentioning `--` before the application. For detailed use, see [Using rocprofv3](source/docs/how-to/using-rocprofv3.rst)
+- Improved process attachment and updated the corresponding [documentation](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3-process-attachment.html).
+- Improved [Quick reference guide for rocprofv3] (https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/quick_guide.html).
+- Updated installation documentation with links to the latest repository (https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/install/installation.html).
 
 ### Resolved issues
+- Fixed multi-GPU dimension mismatch.
+- Fixed device lock issue for dispatch counters.
+- Addressed OpenMP Tools task scheduling null pointer exception.
+- Fixed stream ID errors arising during process attachment.
+- Fixed issues arising during dynamic code object loading.
 
-- Fixed `SQ_ACCUM_PREV` and `SQ_ACCUM_PREV_HIRE` overwriting issue
-
-## ROCprofiler-SDK 0.4.0 for ROCm release 6.2 (AFAR VI)
-
-### Added
-
-- OTF2 tool support
-- Kernel and range filtering
-- Counter collection definitions in YAML
-- Documentation updates (SQ block, counter collection, tracing, tool usage)
-- `rocprofv3` option `--kernel-rename`
-- `rocprofv3` options for Perfetto settings (buffer size and so on)
-- CSV columns for kernel trace
-  - `Thread_Id`
-  - `Dispatch_Id`
-- CSV column for counter collection
-
-## ROCprofiler-SDK 0.5.0 for ROCm release 6.3 (AFAR VII)
+## ROCprofiler-SDK 1.1.0 for ROCm release 7.1
 
 ### Added
+- Dynamic process attachment- ROCprofiler-sdk and `rocprofv3` now facilitate dynamic profiling of a running GPU applications by attaching to its process ID (PID), rather than launching the application through the profiler itself.
+- Scratch-memory trace information to the Perfetto output in `rocprofv3`.
+- New capabilities to the thread trace support in `rocprofv3`, including real-time clock support for thread trace alignment on gfx9 architecture. This enables high-resolution clock computation and better synchronization across shader engines. Additionally, `MultiKernelDispatch` thread trace support is now available across all ASICs.
+- Documentation for dynamic process attachment.
+- Documentation for `rocpd` summaries.
 
-- Start and end timestamp columns to the counter collection csv output
-- Check to force tools to initialize context id with zero
-- Support to specify hardware counters for collection using rocprofv3 as `rocprofv3 --pmc [COUNTER [COUNTER ...]]`
-- Memory Allocation Tracing
-- PC sampling tool support with CSV and JSON output formats
-- List supported PC Sampling Configurations
 
-### Changed
-
-- `--marker-trace` option for `rocprofv3` now supports the legacy ROCTx library `libroctx64.so` when the application is linked against the new library `librocprofiler-sdk-roctx.so`.
-- Replaced deprecated `hipHostMalloc` and `hipHostFree` functions with `hipExtHostAlloc` and `hipFreeHost` for ROCm versions starting 6.3.
-- Updated `rocprofv3` `--help` options.
-- Changed naming of "agent profiling" to a more descriptive "device counting service". To convert existing tool or user code to the new name, use the following sed:
-`find . -type f -exec sed -i 's/rocprofiler_agent_profile_callback_t/rocprofiler_device_counting_service_callback_t/g; s/rocprofiler_configure_agent_profile_counting_service/rocprofiler_configure_device_counting_service/g; s/agent_profile.h/device_counting_service.h/g; s/rocprofiler_sample_agent_profile_counting_service/rocprofiler_sample_device_counting_service/g' {} +`
-- Changed naming of "dispatch profiling service" to a more descriptive "dispatch counting service". To convert existing tool or user code to the new names, the following sed can be used: `-type f -exec sed -i -e 's/dispatch_profile_counting_service/dispatch_counting_service/g' -e 's/dispatch_profile.h/dispatch_counting_service.h/g' -e 's/rocprofiler_profile_counting_dispatch_callback_t/rocprofiler_dispatch_counting_service_callback_t/g' -e 's/rocprofiler_profile_counting_dispatch_data_t/rocprofiler_dispatch_counting_service_data_t/g'  -e 's/rocprofiler_profile_counting_dispatch_record_t/rocprofiler_dispatch_counting_service_record_t/g' {} +`
-- `FETCH_SIZE` metric on gfx94x now uses `TCC_BUBBLE` for 128B reads.
-- PMC dispatch-based counter collection serialization is now per-device instead of being global across all devices.
-- Added output return functionality to rocprofiler_sample_device_counting_service
-- Added rocprofiler_load_counter_definition.
-
-### Resolved issues
-
-- Create subdirectory when `rocprofv3 --output-file` includes a folder path
-- Fixed misaligned stores (undefined behavior) for buffer records
-- Fixed crash when only scratch reporting is enabled
-- Fixed `MeanOccupancy` metrics
-- Fixed aborted-application validation test to properly check for `hipExtHostAlloc` command
-- Fixed implicit reduction of SQ and GRBM metrics
-- Fixed support for derived counters in reduce operation
-- Bug fixed in max-in-reduce operation
-- Introduced fix to handle a range of values for `select()` dimension in expressions parser
-- Conditional `aql::set_profiler_active_on_queue` only when counter collection is registered (resolves Navi3 kernel tracing issues)
-
-### Removed
-
-- Removed gfx8 metric definitions
-- Removed `rocprofv3` installation to sbin directory
-
-## ROCprofiler-SDK 0.6.0 for ROCm release 6.4
-
-### Added
-
-- Support for `select()` operation in counter expression.
-- `reduce()` operation for counter expression with respect to dimension.
-- `--collection-period` feature in `rocprofv3` to enable filtering using time.
-- `--collection-period-unit` feature in `rocprofv3` to control time units used in collection period option.
-- Deprecation notice for ROCProfiler and ROCProfilerV2.
-- Support for rocDecode API Tracing
-- Usage documentation for ROCTx
-- Usage documentation for MPI applications
-- SDK: `rocprofiler_agent_v0_t` support for agent UUIDs
-- SDK: `rocprofiler_agent_v0_t` support for agent visibility based on gpu isolation environment variables such as `ROCR_VISIBLE_DEVICES` and so on.
-- Accumulation VGPR support for `rocprofv3`.
-- Host-trap based PC sampling support for rocprofv3.
-- Support for OpenMP tool.
+### Optimized
+- Improved the stability and robustness of the `rocpd` output.
 
 ## ROCprofiler-SDK 1.0.0 for ROCm release 7.0
 
@@ -429,37 +308,160 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 - Support for compilation of gfx940 and gfx941 targets.
 
-
-## ROCprofiler-SDK 1.1.0 for ROCm release 7.1
-
-### Added
-- Dynamic process attachment- ROCprofiler-sdk and `rocprofv3` now facilitate dynamic profiling of a running GPU applications by attaching to its process ID (PID), rather than launching the application through the profiler itself.
-- Scratch-memory trace information to the Perfetto output in `rocprofv3`.
-- New capabilities to the thread trace support in `rocprofv3`, including real-time clock support for thread trace alignment on gfx9 architecture. This enables high-resolution clock computation and better synchronization across shader engines. Additionally, `MultiKernelDispatch` thread trace support is now available across all ASICs.
-- Documentation for dynamic process attachment.
-- Documentation for `rocpd` summaries.
-
-
-### Optimized
-- Improved the stability and robustness of the `rocpd` output.
-
-## ROCprofiler-SDK 1.1.0 for ROCm release 7.2
+## ROCprofiler-SDK 0.6.0 for ROCm release 6.4
 
 ### Added
-- Counter collection support for `gfx1150` and `gfx1151`.
-- HSA Extension API v8 support.
-- `hipStreamCopyAttributes` API implementation.
-- `--profile-mpi-ranks` option in `rocprofv3` to selectively profile specific MPI ranks. Supports comma-separated ranges and individual ranks (e.g., `--profile-mpi-ranks 0-3,8,10-15`).
 
-### Optimized
+- Support for `select()` operation in counter expression.
+- `reduce()` operation for counter expression with respect to dimension.
+- `--collection-period` feature in `rocprofv3` to enable filtering using time.
+- `--collection-period-unit` feature in `rocprofv3` to control time units used in collection period option.
+- Deprecation notice for ROCProfiler and ROCProfilerV2.
+- Support for rocDecode API Tracing
+- Usage documentation for ROCTx
+- Usage documentation for MPI applications
+- SDK: `rocprofiler_agent_v0_t` support for agent UUIDs
+- SDK: `rocprofiler_agent_v0_t` support for agent visibility based on gpu isolation environment variables such as `ROCR_VISIBLE_DEVICES` and so on.
+- Accumulation VGPR support for `rocprofv3`.
+- Host-trap based PC sampling support for rocprofv3.
+- Support for OpenMP tool.
 
-- Improved process attachment and updated the corresponding [documentation](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3-process-attachment.html).
-- Improved [Quick reference guide for rocprofv3] (https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/quick_guide.html).
-- Updated installation documentation with links to the latest repository (https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/install/installation.html).
+## ROCprofiler-SDK 0.5.0 for ROCm release 6.3 (AFAR VII)
+
+### Added
+
+- Start and end timestamp columns to the counter collection csv output
+- Check to force tools to initialize context id with zero
+- Support to specify hardware counters for collection using rocprofv3 as `rocprofv3 --pmc [COUNTER [COUNTER ...]]`
+- Memory Allocation Tracing
+- PC sampling tool support with CSV and JSON output formats
+- List supported PC Sampling Configurations
+
+### Changed
+
+- `--marker-trace` option for `rocprofv3` now supports the legacy ROCTx library `libroctx64.so` when the application is linked against the new library `librocprofiler-sdk-roctx.so`.
+- Replaced deprecated `hipHostMalloc` and `hipHostFree` functions with `hipExtHostAlloc` and `hipFreeHost` for ROCm versions starting 6.3.
+- Updated `rocprofv3` `--help` options.
+- Changed naming of "agent profiling" to a more descriptive "device counting service". To convert existing tool or user code to the new name, use the following sed:
+`find . -type f -exec sed -i 's/rocprofiler_agent_profile_callback_t/rocprofiler_device_counting_service_callback_t/g; s/rocprofiler_configure_agent_profile_counting_service/rocprofiler_configure_device_counting_service/g; s/agent_profile.h/device_counting_service.h/g; s/rocprofiler_sample_agent_profile_counting_service/rocprofiler_sample_device_counting_service/g' {} +`
+- Changed naming of "dispatch profiling service" to a more descriptive "dispatch counting service". To convert existing tool or user code to the new names, the following sed can be used: `-type f -exec sed -i -e 's/dispatch_profile_counting_service/dispatch_counting_service/g' -e 's/dispatch_profile.h/dispatch_counting_service.h/g' -e 's/rocprofiler_profile_counting_dispatch_callback_t/rocprofiler_dispatch_counting_service_callback_t/g' -e 's/rocprofiler_profile_counting_dispatch_data_t/rocprofiler_dispatch_counting_service_data_t/g'  -e 's/rocprofiler_profile_counting_dispatch_record_t/rocprofiler_dispatch_counting_service_record_t/g' {} +`
+- `FETCH_SIZE` metric on gfx94x now uses `TCC_BUBBLE` for 128B reads.
+- PMC dispatch-based counter collection serialization is now per-device instead of being global across all devices.
+- Added output return functionality to rocprofiler_sample_device_counting_service
+- Added rocprofiler_load_counter_definition.
 
 ### Resolved issues
-- Fixed multi-GPU dimension mismatch.
-- Fixed device lock issue for dispatch counters.
-- Addressed OpenMP Tools task scheduling null pointer exception.
-- Fixed stream ID errors arising during process attachment.
-- Fixed issues arising during dynamic code object loading.
+
+- Create subdirectory when `rocprofv3 --output-file` includes a folder path
+- Fixed misaligned stores (undefined behavior) for buffer records
+- Fixed crash when only scratch reporting is enabled
+- Fixed `MeanOccupancy` metrics
+- Fixed aborted-application validation test to properly check for `hipExtHostAlloc` command
+- Fixed implicit reduction of SQ and GRBM metrics
+- Fixed support for derived counters in reduce operation
+- Bug fixed in max-in-reduce operation
+- Introduced fix to handle a range of values for `select()` dimension in expressions parser
+- Conditional `aql::set_profiler_active_on_queue` only when counter collection is registered (resolves Navi3 kernel tracing issues)
+
+### Removed
+
+- Removed gfx8 metric definitions
+- Removed `rocprofv3` installation to sbin directory
+
+## ROCprofiler-SDK 0.4.0 for ROCm release 6.2 (AFAR VI)
+
+### Added
+
+- OTF2 tool support
+- Kernel and range filtering
+- Counter collection definitions in YAML
+- Documentation updates (SQ block, counter collection, tracing, tool usage)
+- `rocprofv3` option `--kernel-rename`
+- `rocprofv3` options for Perfetto settings (buffer size and so on)
+- CSV columns for kernel trace
+  - `Thread_Id`
+  - `Dispatch_Id`
+- CSV column for counter collection
+
+## ROCprofiler-SDK for AFAR V
+
+### Added
+
+**API:**
+
+- Agent or device counter collection
+- PC sampling (beta)
+
+**Tool:**
+
+- Single JSON output format support
+- Perfetto output format support (.pftrace)
+- Input YAML support for counter collection
+- Input JSON support for counter collection
+- Application replay in counter collection
+- `rocprofv3` multi-GPU support:
+  - Multiprocess (multiple files)
+
+### Changed
+
+- `rocprofv3` tool now requires mentioning `--` before the application. For detailed use, see [Using rocprofv3](source/docs/how-to/using-rocprofv3.rst)
+
+### Resolved issues
+
+- Fixed `SQ_ACCUM_PREV` and `SQ_ACCUM_PREV_HIRE` overwriting issue
+
+## ROCprofiler-SDK for AFAR IV
+
+### Added
+
+**API:**
+
+- Page migration reporting
+- Scratch memory reporting
+- Kernel dispatch callback tracing
+- External correlation Id request service
+- Buffered counter collection record headers
+- Option to remove HSA dependency from counter collection
+
+**Tool:**
+
+- `rocprofv3` multi-GPU support in a single-process
+
+## ROCprofiler-SDK for AFAR III
+
+### Added
+
+- Kernel dispatch counter collection. This includes serialization and multidimensional instances.
+- Kernel serialization.
+- Serialization control (on and off).
+- ROCprof tool plugin interface V3 for counters and dimensions.
+- Support to list metrics.
+- Correlation-Id retirement
+- HIP and HSA trace distinction:
+  - --hip-runtime-trace          For collecting HIP Runtime API traces
+  - --hip-compiler-trace         For collecting HIP compiler-generated code traces
+  - --hsa-core-trace             For collecting HSA API traces (core API)
+  - --hsa-amd-trace              For collecting HSA API traces (AMD-extension API)
+  - --hsa-image-trace            For collecting HSA API traces (image-extension API)
+  - --hsa-finalizer-trace        For collecting HSA API traces (finalizer-extension API)
+
+## ROCprofiler-SDK for AFAR II
+
+### Added
+
+- HIP API tracing
+- ROCTx tracing
+- Tracing ROCProf Tool V3
+- Documentation packaging
+- ROCTx control (start and stop)
+- Memory copy tracing
+
+## ROCprofiler-SDK for AFAR I
+
+### Added
+
+- HSA API tracing
+- Kernel dispatch tracing
+- Kernel dispatch counter collection
+  - Instances reported as single dimension
+  - No serialization
