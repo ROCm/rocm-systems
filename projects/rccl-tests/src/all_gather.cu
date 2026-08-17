@@ -77,9 +77,16 @@ testResult_t AllGatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirem
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInternalError;
       }
-      reqs->barrierCount = deviceCtaCount;
-      reqs->lsaBarrierCount = deviceCtaCount;
-      reqs->ginSignalCount = deviceCtaCount;
+      // Cover both the -V/deviceCtaCount launch and the size-adaptive CTA count the
+      // kernel self-selects (allGatherCtas, up to allGatherMaxCtas()), decoupled
+      // from -V -- the kernel indexes barrier/lsaBarrier/signal by blockIdx.x.
+      {
+        const int agBarCtas = (deviceCtaCount > gin_sdma_allgather::allGatherMaxCtas())
+                                ? deviceCtaCount : gin_sdma_allgather::allGatherMaxCtas();
+        reqs->barrierCount = agBarCtas;
+        reqs->lsaBarrierCount = agBarCtas;
+        reqs->ginSignalCount = agBarCtas;
+      }
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,7)
       reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
 #else
@@ -98,11 +105,15 @@ bool AllGatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* re
 
   switch(deviceImpl) {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
-    case 3: // GinHybridAllGatherKernel: LSA direct (small) + direct GIN puts (large)
-      reqs->barrierCount = deviceCtaCount;
-      reqs->lsaBarrierCount = deviceCtaCount;
-      reqs->ginSignalCount = deviceCtaCount;
+    case 3: { // GinHybridAllGatherKernel: LSA direct (small) + direct GIN puts (large)
+      // Size to cover the size-adaptive CTA count (allGatherCtas) as well as -V.
+      const int agBarCtas = (deviceCtaCount > gin_sdma_allgather::allGatherMaxCtas())
+                              ? deviceCtaCount : gin_sdma_allgather::allGatherMaxCtas();
+      reqs->barrierCount = agBarCtas;
+      reqs->lsaBarrierCount = agBarCtas;
+      reqs->ginSignalCount = agBarCtas;
       return true;
+    }
 #endif
     default:
       return false;
@@ -119,6 +130,18 @@ bool AllGatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* re
 // values do not wrap, unlike the backend's int-typed inline-put threshold). The
 // resolved value is passed to the kernel, so the AllGather tier is decoupled from
 // the backend gin.put inline-vs-copy-engine threshold (ctx->sdmaThreshold).
+// Parse a decimal CTA-count env var (NCCL_GIN_ANVIL_AG_CTAS) into a size_t,
+// returning the "unset" sentinel when absent/empty/unparseable so allGatherCtas()
+// falls back to its size-adaptive ladder. Mirrors ReduceScatterParseCtasEnv.
+static inline size_t AllGatherParseCtasEnv() {
+  const char* e = getenv("NCCL_GIN_ANVIL_AG_CTAS");
+  if (e == nullptr || e[0] == '\0') return gin_sdma_allgather::kAllGatherCtasUnset;
+  char* end = nullptr;
+  unsigned long long v = strtoull(e, &end, 10);
+  if (end == e) return gin_sdma_allgather::kAllGatherCtasUnset;
+  return (size_t)v;
+}
+
 static size_t AllGatherResolveSdmaThreshold() {
   auto parseEnv = [](const char* name, bool* isSet, unsigned long long* val) {
     const char* e = getenv(name);
@@ -199,12 +222,13 @@ template <typename F>
 static testResult_t AllGatherLaunchDeviceKernel(F kernel, void* sendbuff, size_t sendoffset,
                                                 void* recvbuff, size_t recvoffset, size_t count,
                                                 int root, ncclComm_t comm, cudaStream_t stream,
-                                                size_t sdmaThreshold) {
+                                                size_t sdmaThreshold, int gridCtas) {
   if (kernel == nullptr) return testNotImplemented;
   ncclDevComm* devComm = (ncclDevComm*)comm;
   ncclWindow_t sendwin = (ncclWindow_t)sendbuff;
   ncclWindow_t recvwin = (ncclWindow_t)recvbuff;
-  kernel<<<deviceCtaCount, 512, 0, stream>>>(sendwin, sendoffset, recvwin, recvoffset, count, root, sdmaThreshold, *devComm);
+  if (gridCtas < 1) gridCtas = 1;
+  kernel<<<gridCtas, 512, 0, stream>>>(sendwin, sendoffset, recvwin, recvoffset, count, root, sdmaThreshold, *devComm);
   return testSuccess;
 }
 #endif
@@ -218,9 +242,19 @@ testResult_t AllGatherRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
   } else {
     switch(deviceImpl) {
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
-      case 3:
-        TESTCHECK(AllGatherLaunchDeviceKernel(SPECIALIZE_KERNEL(GinHybridAllGatherKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, root, comm, stream, AllGatherResolveSdmaThreshold()));
+      case 3: {
+        // Size-adaptive CTA count (decoupled from -V), keyed off the same LSA<->SDMA
+        // tier predicate the kernel evaluates: ~16 CTAs for the direct-store LSA
+        // tier, few (4) for the GIN-put/SDMA tier where only nRanks threads issue
+        // the puts and extra CTAs are pure barrier overhead. NCCL_GIN_ANVIL_AG_CTAS
+        // pins a fixed count (diagnostic).
+        const size_t agSdmaThreshold = AllGatherResolveSdmaThreshold();
+        const size_t agChunkBytes = count * (size_t)wordSize(type);
+        static const size_t agCtasEnv = AllGatherParseCtasEnv();
+        const int agGridCtas = gin_sdma_allgather::allGatherCtas(agChunkBytes, agSdmaThreshold, agCtasEnv);
+        TESTCHECK(AllGatherLaunchDeviceKernel(SPECIALIZE_KERNEL(GinHybridAllGatherKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, root, comm, stream, agSdmaThreshold, agGridCtas));
         return testSuccess;
+      }
 #endif
       default:
         return testNotImplemented;
