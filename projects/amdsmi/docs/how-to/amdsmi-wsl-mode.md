@@ -72,10 +72,22 @@ cmake --build build --target amd_smi -j"$(nproc)"
 A build without `-DENABLE_WSL_BACKEND=ON` produces the standard native library;
 the WSL source is not compiled and the intercept hooks expand to nothing.
 
-Building with the flag on also requires `hsakmt/rocdxg_smi.h` at compile time,
-from a `rocr-runtime/libhsakmt` tree built with its `WIN_SDK`/dxg path —
-distinct from the runtime `librocdxg.so.1` dependency above. CMake fails with
-a `FATAL_ERROR` if that header is not found alongside the checkout.
+Building with the flag on needs nothing beyond this repository. amd-smi keeps
+its own copy of the librocdxg ABI in
+`include/amd_smi/impl/wsl/rocdxg_abi.h`, so no `rocr-runtime/libhsakmt`
+checkout is required and the library is never linked, only `dlopen`ed.
+
+To confirm that vendored copy still matches upstream, build the opt-in check
+against a real `libhsakmt` include tree:
+
+```bash
+cmake -S . -B build -DENABLE_WSL_BACKEND=ON -DBUILD_TESTS=ON \
+      -DVERIFY_ROCDXG_ABI=ON \
+      -DROCDXG_UPSTREAM_INCLUDE_DIR=<path>/libhsakmt/include
+cmake --build build --target rocdxg_abi_check
+```
+
+Every check is a `static_assert`, so compiling the target is the test.
 
 ## Impact on existing scripts
 
