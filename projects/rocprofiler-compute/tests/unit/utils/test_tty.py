@@ -13,10 +13,10 @@ import pytest
 from utils.tty import (
     build_continuation_indent,
     convert_time_columns,
-    format_duration,
-    format_node_stats,
     format_args_variant_lines,
+    format_duration,
     format_node_args,
+    format_node_stats,
     format_table_output,
     has_time_data,
     print_operator_node,
