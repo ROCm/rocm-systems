@@ -63,6 +63,7 @@ if(rocshmem_FOUND AND rocshmem_VERSION VERSION_GREATER_EQUAL 3.3.0)
     # not break.
     add_subdirectory(rocshmem)
 endif()
+add_subdirectory(hipfile)
 add_subdirectory(hsa-code-object)
 add_subdirectory(hip-streams)
 add_subdirectory(hip-stream-reuse)

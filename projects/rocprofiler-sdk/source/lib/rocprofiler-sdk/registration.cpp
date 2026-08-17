@@ -38,6 +38,7 @@
 #include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hip/stream.hpp"
+#include "lib/rocprofiler-sdk/hipfile/hipfile.hpp"
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/memory_allocation.hpp"
@@ -1551,6 +1552,27 @@ rocprofiler_set_api_table(const char* name,
         // allow tools to install API wrappers
         rocprofiler::intercept_table::notify_intercept_table_registration(
             ROCPROFILER_ROCSHMEM_TABLE, lib_version, lib_instance, std::make_tuple(rocshmem_api));
+    }
+    else if(std::string_view{name} == "hipFile")
+    {
+        ROCP_ERROR_IF(num_tables > 1)
+            << "rocprofiler expected hipFILE library to pass 1 API table, not " << num_tables;
+
+        auto* hipfile_api = static_cast<hipFileDispatchTable*>(tables[0]);
+
+        // Save the original table before installing wrappers; wrappers call through the copy.
+        rocprofiler::hipfile::copy_table(hipfile_api, lib_instance);
+
+        // install rocprofiler API wrappers
+        rocprofiler::hipfile::update_table(hipfile_api);
+
+        // Tracing notifications the runtime has initialized
+        rocprofiler::runtime_init::initialize(
+            ROCPROFILER_RUNTIME_INITIALIZATION_HIPFILE, lib_version, lib_instance);
+
+        // allow tools to install API wrappers
+        rocprofiler::intercept_table::notify_intercept_table_registration(
+            ROCPROFILER_HIPFILE_TABLE, lib_version, lib_instance, std::make_tuple(hipfile_api));
     }
     else if(std::string_view{name} == "rocattach")
     {

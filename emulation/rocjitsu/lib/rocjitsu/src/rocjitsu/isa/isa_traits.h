@@ -41,6 +41,7 @@ template <rj_code_arch_t Arch> struct IsaTrait;
 ///   - `MAX_ACC_VGPRS_PER_WF`  — maximum accumulator VGPRs (0 if absent).
 ///   - `WAITCNT_LGKMCNT_MASK`  — lgkmcnt field mask in S_WAITCNT (0 if no
 ///                               monolithic S_WAITCNT — RDNA4 only).
+///   - `MODE_HAS_GPR_IDX_EN`   — true when MODE bit 27 controls VGPR indexing.
 ///   - `Context`               — wavefront execution context type.
 ///   - `OperandType`           — per-ISA operand classification enum.
 ///   - `StatusReg`             — STATUS register bitfield type.
@@ -52,6 +53,7 @@ concept GpuIsa = requires {
   { Isa::MAX_VGPRS_PER_WF } -> std::convertible_to<uint32_t>;
   { Isa::MAX_ACC_VGPRS_PER_WF } -> std::convertible_to<uint32_t>;
   { Isa::WAITCNT_LGKMCNT_MASK } -> std::convertible_to<uint32_t>;
+  { Isa::MODE_HAS_GPR_IDX_EN } -> std::convertible_to<bool>;
   typename Isa::Context;
   typename Isa::OperandType;
   typename Isa::StatusReg;
@@ -99,7 +101,9 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
 /// VCC in the encoded wavefront allocation. That descriptor limit is larger
 /// than the ordinary scratch SGPR range exposed through CdnaIsaBase, so DBT
 /// must query the descriptor limit separately from semantic scratch limits.
-/// RDNA descriptors use the ordinary ISA SGPR maximum.
+/// RDNA and gfx1250 descriptors use the ordinary ISA SGPR maximum. gfx1250 is
+/// kept out of arch_is_rdna() because several of its descriptor and register
+/// allocation rules differ from generic RDNA despite sharing the GFX10+ ABI.
 [[nodiscard]] inline constexpr uint32_t arch_descriptor_sgpr_allocation_limit(rj_code_arch_t arch) {
   // Architectural descriptor SGPR-allocation ceilings. CDNA descriptors may name
   // up to 112 SGPRs; RDNA up to 106. These are fixed ISA facts (not the smaller
@@ -108,7 +112,7 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
   constexpr uint32_t kRdnaDescriptorSgprLimit = 106;
   if (arch_is_cdna(arch))
     return kCdnaDescriptorSgprLimit;
-  if (arch_is_rdna(arch))
+  if (arch_is_rdna(arch) || arch == ROCJITSU_CODE_ARCH_GFX1250)
     return kRdnaDescriptorSgprLimit;
   return 0;
 }
@@ -133,7 +137,10 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
   case ROCJITSU_CODE_ARCH_RDNA4:
     return 64u * 1024u;
   case ROCJITSU_CODE_ARCH_GFX1250:
-    return 160u * 1024u;
+    // gfx1250 can allocate up to 320 KiB to one workgroup. This is distinct
+    // from the configurable LDS/vector-cache partition sizes reported for a
+    // TCP, which must not be used as the descriptor allocation ceiling.
+    return 320u * 1024u;
   default:
     return 0;
   }
