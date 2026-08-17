@@ -124,6 +124,7 @@ rj_status_t rj_code_inst_list_create(rj_code_object_t *obj, rj_code_target_id_t 
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
   try {
+    Instruction::ScopedHeapAllocation heap_allocation;
     auto owned = std::make_unique<rj_code_inst_list_t>();
 
     // DBT local caves are emitted into .text, so instruction-list callers only
@@ -158,15 +159,19 @@ void rj_code_inst_list_retain(rj_code_inst_list_t *inst_list) {
 void rj_code_inst_list_release(rj_code_inst_list_t *inst_list) {
   if (!inst_list)
     return;
-  if (inst_list->release())
+  if (inst_list->release()) {
+    Instruction::ScopedHeapAllocation heap_allocation;
     delete inst_list;
+  }
 }
 
 void rj_code_inst_list_destroy(rj_code_inst_list_t *inst_list) {
   if (!inst_list)
     return;
-  if (inst_list->destroy())
+  if (inst_list->destroy()) {
+    Instruction::ScopedHeapAllocation heap_allocation;
     delete inst_list;
+  }
 }
 
 rj_status_t rj_code_basic_block_list_create(rj_code_object_t *obj, rj_code_target_id_t target_id,
@@ -184,6 +189,7 @@ rj_status_t rj_code_basic_block_list_create(rj_code_object_t *obj, rj_code_targe
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
   try {
+    Instruction::ScopedHeapAllocation heap_allocation;
     auto owned = std::make_unique<rj_code_basic_block_list_t>();
     owned->blocks = BasicBlock::build(*obj->co, *decoder, arch);
     *list = owned.release();
@@ -201,15 +207,19 @@ void rj_code_basic_block_list_retain(rj_code_basic_block_list_t *list) {
 void rj_code_basic_block_list_release(rj_code_basic_block_list_t *list) {
   if (!list)
     return;
-  if (list->release())
+  if (list->release()) {
+    Instruction::ScopedHeapAllocation heap_allocation;
     delete list;
+  }
 }
 
 void rj_code_basic_block_list_destroy(rj_code_basic_block_list_t *list) {
   if (!list)
     return;
-  if (list->destroy())
+  if (list->destroy()) {
+    Instruction::ScopedHeapAllocation heap_allocation;
     delete list;
+  }
 }
 
 uint32_t rj_code_basic_block_list_size(const rj_code_basic_block_list_t *list) {
@@ -239,15 +249,19 @@ void rj_code_basic_block_retain(rj_code_basic_block_t *block) {
 void rj_code_basic_block_release(rj_code_basic_block_t *block) {
   if (!block)
     return;
-  if (block->release())
+  if (block->release()) {
+    Instruction::ScopedHeapAllocation heap_allocation;
     delete block;
+  }
 }
 
 void rj_code_basic_block_destroy(rj_code_basic_block_t *block) {
   if (!block)
     return;
-  if (block->destroy())
+  if (block->destroy()) {
+    Instruction::ScopedHeapAllocation heap_allocation;
     delete block;
+  }
 }
 
 uint64_t rj_code_basic_block_start_offset(const rj_code_basic_block_t *block) {

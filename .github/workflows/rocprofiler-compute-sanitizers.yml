@@ -176,7 +176,6 @@ jobs:
 
           export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/llvm/bin:${PATH}"
           export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:${ROCM_PATH}/lib/rocm_sysdeps/lib:${{ steps.sanitizer_runtime.outputs.sanitizer_lib_dir }}:${LD_LIBRARY_PATH:-}"
-          export PKG_CONFIG_PATH="${ROCM_PATH}/lib/rocm_sysdeps/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 
           c_compiler="$(command -v amdclang)"
           cxx_compiler="$(command -v amdclang++)"
@@ -195,7 +194,6 @@ jobs:
             "-DCMAKE_HIP_COMPILER=${cxx_compiler}" \
             -DCMAKE_BUILD_TYPE=Debug \
             "-DCMAKE_PREFIX_PATH=${ROCM_PATH}" \
-            "-DCMAKE_LIBRARY_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib" \
             -DENABLE_TESTS=ON \
             -DINSTALL_TESTS=ON \
             "-DENABLE_SANITIZER=${{ matrix.sanitizer.enable_sanitizer }}" \
