@@ -54,9 +54,10 @@ TEST_F(session_scope_test, subscriber_not_resumed_while_a_listened_scope_is_stil
     // Reproduces the scenario a scoped subscriber (e.g. "sampling", which
     // listens to both global and sampling) must not be resumed just
     // because ONE of its scopes cleared - it must wait for ALL of them.
-    mock_trigger global_trigger{ s, "global_trigger", scope::global, action::pause };
-    mock_trigger sampling_trigger{ s, "sampling_trigger", scope::sampling,
-                                   action::pause };
+    const mock_trigger global_trigger{ s, "global_trigger", scope::global,
+                                       action::pause };
+    const mock_trigger sampling_trigger{ s, "sampling_trigger", scope::sampling,
+                                         action::pause };
 
     int resume_count = 0;
     int pause_count  = 0;
@@ -78,9 +79,10 @@ TEST_F(session_scope_test, subscriber_not_resumed_while_a_listened_scope_is_stil
 
 TEST_F(session_scope_test, subscriber_paused_immediately_when_any_listened_scope_pauses)
 {
-    mock_trigger global_trigger{ s, "global_trigger", scope::global, action::trace };
-    mock_trigger sampling_trigger{ s, "sampling_trigger", scope::sampling,
-                                   action::trace };
+    const mock_trigger global_trigger{ s, "global_trigger", scope::global,
+                                       action::trace };
+    const mock_trigger sampling_trigger{ s, "sampling_trigger", scope::sampling,
+                                         action::trace };
 
     int pause_count = 0;
     s.subscribe({ [&pause_count]() { ++pause_count; },
@@ -96,8 +98,8 @@ TEST_F(session_scope_test, single_scope_subscriber_unaffected_by_other_scope)
 {
     // A subscriber listening only to scope::global (the default) must be
     // unaffected by a scope::sampling trigger's transitions.
-    mock_trigger sampling_trigger{ s, "sampling_trigger", scope::sampling,
-                                   action::trace };
+    const mock_trigger sampling_trigger{ s, "sampling_trigger", scope::sampling,
+                                         action::trace };
 
     int pause_count  = 0;
     int resume_count = 0;
@@ -113,9 +115,10 @@ TEST_F(session_scope_test, single_scope_subscriber_unaffected_by_other_scope)
 
 TEST_F(session_scope_test, is_active_is_tracked_independently_per_scope)
 {
-    mock_trigger global_trigger{ s, "global_trigger", scope::global, action::trace };
-    mock_trigger sampling_trigger{ s, "sampling_trigger", scope::sampling,
-                                   action::trace };
+    const mock_trigger global_trigger{ s, "global_trigger", scope::global,
+                                       action::trace };
+    const mock_trigger sampling_trigger{ s, "sampling_trigger", scope::sampling,
+                                         action::trace };
 
     sampling_trigger.set_action(action::pause);
 
@@ -130,8 +133,9 @@ TEST_F(session_scope_test,
     // window are both time_window instances, so both report the same trigger
     // name. Storing them under that name alone lets the second registration
     // overwrite the first.
-    mock_trigger global_window{ s, "time_window", scope::global, action::pause };
-    mock_trigger sampling_window{ s, "time_window", scope::sampling, action::pause };
+    const mock_trigger global_window{ s, "time_window", scope::global, action::pause };
+    const mock_trigger sampling_window{ s, "time_window", scope::sampling,
+                                        action::pause };
 
     EXPECT_FALSE(s.is_active(scope::global));
     EXPECT_FALSE(s.is_active(scope::sampling));
@@ -143,7 +147,7 @@ TEST_F(session_scope_test,
     // global_window's own setter: if its entry had been overwritten, the
     // global scope would now wrongly resolve active.
     {
-        mock_trigger probe{ s, "probe", scope::global, action::trace };
+        const mock_trigger probe{ s, "probe", scope::global, action::trace };
     }
     EXPECT_FALSE(s.is_active(scope::global))
         << "global_window's pause must survive the sampling window's registration";
@@ -151,9 +155,11 @@ TEST_F(session_scope_test,
 
 TEST_F(session_scope_test, unregister_removes_only_the_matching_scope)
 {
-    mock_trigger sampling_window{ s, "time_window", scope::sampling, action::pause };
+    const mock_trigger sampling_window{ s, "time_window", scope::sampling,
+                                        action::pause };
     {
-        mock_trigger global_window{ s, "time_window", scope::global, action::pause };
+        const mock_trigger global_window{ s, "time_window", scope::global,
+                                          action::pause };
         EXPECT_FALSE(s.is_active(scope::global));
     }
 
@@ -163,7 +169,7 @@ TEST_F(session_scope_test, unregister_removes_only_the_matching_scope)
     // Force a fresh resolve of sampling: a shared entry erased by the
     // global window's destructor would leave nothing to keep this scope paused.
     {
-        mock_trigger probe{ s, "probe", scope::sampling, action::trace };
+        const mock_trigger probe{ s, "probe", scope::sampling, action::trace };
     }
     EXPECT_FALSE(s.is_active(scope::sampling))
         << "unregistering the global window must not remove the same-named sampling one";
