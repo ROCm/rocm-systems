@@ -386,10 +386,15 @@ void print_diagnostic(std::ostream &os, const TranslationDiagnostic &diagnostic,
 [[nodiscard]] std::string translation_action_text(const InstructionTranslationReport &translation) {
   if (translation.copied_original)
     return "copy_original";
-  if (!translation.has_legalization)
+
+  // An unclassified semantic lowering deliberately reads the same as a
+  // classified expansion: whether a legalization entry also named the opcode is
+  // internal to the profile, and the action the reader sees is the same one.
+  const auto action = translation.effective_action();
+  if (!action)
     return "encode";
 
-  std::string text = legalization_action_name(translation.action);
+  std::string text = legalization_action_name(*action);
   if (translation.semantic_lowering)
     text += " semantic";
   return text;
@@ -404,23 +409,19 @@ void print_diagnostic(std::ostream &os, const TranslationDiagnostic &diagnostic,
 
 [[nodiscard]] size_t count_action(const std::vector<InstructionTranslationReport> &translations,
                                   Action action) {
-  size_t count = 0;
-  for (const auto &translation : translations) {
-    if (!translation.copied_original && translation.has_legalization &&
-        translation.action == action)
-      ++count;
-  }
-  return count;
+  return static_cast<size_t>(std::ranges::count_if(
+      translations, [action](const InstructionTranslationReport &translation) {
+        return translation.effective_action() == action;
+      }));
 }
 
+/// @brief Instructions re-encoded with no rule: not copied, and no action.
 [[nodiscard]] size_t
 count_runtime_encode(const std::vector<InstructionTranslationReport> &translations) {
-  size_t count = 0;
-  for (const auto &translation : translations) {
-    if (!translation.copied_original && !translation.has_legalization)
-      ++count;
-  }
-  return count;
+  return static_cast<size_t>(
+      std::ranges::count_if(translations, [](const InstructionTranslationReport &translation) {
+        return !translation.copied_original && !translation.effective_action();
+      }));
 }
 
 [[nodiscard]] size_t

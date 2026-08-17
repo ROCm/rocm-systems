@@ -1533,7 +1533,16 @@ hipError_t playback_hipHostGetDevicePointer(PlaybackContext& ctx, const uint8_t*
     void* dev_ptr = nullptr;
     hipError_t r = hipHostGetDevicePointer(&dev_ptr, live_host, a->flags);
     if (r == hipSuccess) {
-        ctx.record_alloc(a->devPtr, dev_ptr, 0, AllocKind::DevicePtrAlias);
+        // For zero-copy host allocations the device pointer equals the host
+        // pointer, so a->devPtr collides with the recorded address of the
+        // owning hipHostMalloc/hipMalloc entry. Recording an alias here would
+        // overwrite that entry and downgrade its AllocKind to DevicePtrAlias,
+        // losing the info teardown needs to hipHostFree the pinned buffer —
+        // leaking it on any path that frees via alloc_map (e.g. the
+        // divergence-abort teardown, which runs before the replayed hipHostFree
+        // event). Only record a genuinely distinct alias.
+        if (!ctx.has_alloc(a->devPtr))
+            ctx.record_alloc(a->devPtr, dev_ptr, 0, AllocKind::DevicePtrAlias);
     }
     return r;
 }
@@ -2323,22 +2332,31 @@ hipError_t playback_hipStreamQuery_spt(PlaybackContext& ctx, const uint8_t* pl) 
 // Shared D2H validation logic for all 3D memcpy variants.
 // Copies byte_count bytes from src_live (device) into a host buffer, then
 // validates against the expected blob stored at d2h_hash_lo/hi.
+// `tag` names the calling API in the diagnostics. It has no default: several
+// APIs share this body, and the messages here are the only thing that tells
+// them apart in a replay log.
 static hipError_t replay_memcpy3d_d2h(PlaybackContext& ctx,
                                        void* src_live, size_t byte_count,
                                        uint64_t d2h_hash_lo, uint64_t d2h_hash_hi,
-                                       hipStream_t stream, bool is_async) {
+                                       hipStream_t stream, bool is_async,
+                                       const char* tag) {
     std::vector<uint8_t> actual(byte_count ? byte_count : 1);
     hipError_t r;
     if (is_async) {
         r = hipMemcpyAsync(actual.data(), src_live, byte_count,
                            hipMemcpyDeviceToHost, stream);
-        if (stream) (void)hipStreamSynchronize(stream);
+        // A recorded default stream translates to nullptr, and that is still the
+        // stream this readback was issued on, so sync unconditionally or the
+        // comparison below races the copy. Propagating the sync failure keeps a
+        // dead device from being reported as a data mismatch. Both match the
+        // sibling 2D path in replay_memcpy2d().
+        if (r == hipSuccess) r = hipStreamSynchronize(stream);
     } else {
         r = hipMemcpy(actual.data(), src_live, byte_count, hipMemcpyDeviceToHost);
     }
     if (r != hipSuccess) {
-        fprintf(stderr, "[HRR] hipMemcpy3D D2H: device readback failed: %d (%s)\n",
-                r, hipGetErrorString(r));
+        fprintf(stderr, "[HRR] %s D2H: device readback failed: %d (%s)\n",
+                tag, r, hipGetErrorString(r));
         ctx.note_d2h_fail(hrr_dispatch_seq);
         return r;
     }
@@ -2349,12 +2367,12 @@ static hipError_t replay_memcpy3d_d2h(PlaybackContext& ctx,
     size_t blob_sz = 0;
     const void* expected = ctx.load_blob(d2h_hash_lo, d2h_hash_hi, &blob_sz);
     if (!expected) {
-        fprintf(stderr, "[HRR] hipMemcpy3D D2H validate FAIL: expected blob not found in archive\n");
+        fprintf(stderr, "[HRR] %s D2H validate FAIL: expected blob not found in archive\n", tag);
         ctx.note_d2h_fail(hrr_dispatch_seq);
         return hipSuccess;
     }
     size_t cmp_sz = std::min(byte_count, blob_sz);
-    hrr_d2h_validate(ctx, "3D", hrr_dispatch_seq, actual.data(),
+    hrr_d2h_validate(ctx, tag, hrr_dispatch_seq, actual.data(),
                      static_cast<const uint8_t*>(expected), cmp_sz);
     return hipSuccess;
 }
@@ -2387,7 +2405,7 @@ hipError_t playback_hipMemcpy3D(PlaybackContext& ctx, const uint8_t* pl) {
         size_t byte_count = parms.extent.width * parms.extent.height * parms.extent.depth;
         return replay_memcpy3d_d2h(ctx, src_live, byte_count,
                                    a->d2h_hash_lo, a->d2h_hash_hi,
-                                   nullptr, false);
+                                   nullptr, false, "hipMemcpy3D");
     }
     // D2D: translate both pointers
     parms.srcPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.srcPtr.ptr));
@@ -2424,12 +2442,220 @@ hipError_t playback_hipMemcpy3DAsync(PlaybackContext& ctx, const uint8_t* pl) {
         size_t byte_count = parms.extent.width * parms.extent.height * parms.extent.depth;
         return replay_memcpy3d_d2h(ctx, src_live, byte_count,
                                    a->d2h_hash_lo, a->d2h_hash_hi,
-                                   stream, true);
+                                   stream, true, "hipMemcpy3DAsync");
     }
     // D2D: translate both pointers
     parms.srcPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.srcPtr.ptr));
     parms.dstPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstPtr.ptr));
     return hipMemcpy3DAsync(&parms, stream);
+}
+
+// ---------------------------------------------------------------------------
+// Manual playback: hipDrvMemcpy3D / hipDrvMemcpy3DAsync / hipDrvMemcpy2DUnaligned
+// Driver-style struct copies. Mirror hipMemcpy3D: reconstruct the struct from
+// the inline bytes, translate the embedded device pointers (srcDevice/dstDevice)
+// via the alloc map, load the H2D blob into srcHost, or validate D2H against the
+// expected blob. Keyed off srcMemoryType/dstMemoryType. Host and device memory
+// types are in scope; array-typed rects are declined (see below).
+// ---------------------------------------------------------------------------
+
+// Host-side byte footprint of a driver-copy rect, measured from the host base
+// pointer. Mirrors capture's drvmemcpy_host_byte_count() and, underneath it,
+// amd::BufferRect::create(): the rect spans
+//   z*slice + y*row + x  ..  + (depth-1)*slice + (height-1)*row + width
+// Replay substitutes the captured blob for srcHost while keeping the recorded
+// pitches and offsets, so the blob must be at least this large or the runtime
+// strides past its end.
+static size_t drvmemcpy_host_bytes(size_t pitch, size_t pitch_height,
+                                   size_t x, size_t y, size_t z,
+                                   size_t width, size_t height, size_t depth) {
+    if (width == 0 || height == 0 || depth == 0) return 0;
+    size_t row = (pitch != 0) ? pitch : width;
+    if (row < width) row = width;
+    size_t slice = pitch * pitch_height;
+    if (slice < row * height) slice = row * height;  // 0 => runtime default
+    return z * slice + y * row + x + (depth - 1) * slice + row * (height - 1) + width;
+}
+
+// Resolve the H2D source blob for a driver copy. Returns nullptr when there is
+// nothing faithful to substitute: no blob recorded, or a blob smaller than the
+// recorded source rect (an archive captured before the blob-footprint fix).
+// Skipping matches replay_memcpy2d's H2D policy: never fall back to the stale
+// capture-time host VA, and never hand the runtime a short buffer to stride off.
+static const void* drvmemcpy_h2d_src_blob(PlaybackContext& ctx, const char* api,
+                                          uint64_t hash_lo, uint64_t hash_hi,
+                                          size_t need) {
+    size_t blob_sz = 0;
+    const void* blob = (hash_lo || hash_hi)
+                           ? ctx.load_blob(hash_lo, hash_hi, &blob_sz)
+                           : nullptr;
+    if (!blob) {
+        fprintf(stderr, "[HRR] %s H2D: no blob to substitute, skipped\n", api);
+        return nullptr;
+    }
+    if (blob_sz < need) {
+        fprintf(stderr,
+                "[HRR] %s H2D: blob covers %zu of the %zu bytes the recorded rect "
+                "spans, skipped\n", api, blob_sz, need);
+        return nullptr;
+    }
+    return blob;
+}
+
+// Array-typed rects are out of scope for these APIs, so decline them up front
+// rather than let them reach a branch that cannot describe them. An array is
+// addressed through srcArray / dstArray, and the matching srcDevice / dstDevice
+// is unset: the device-to-host branch below would translate that unset pointer
+// and report the resulting null as a translation bug, and the device-to-device
+// branch would translate two unset pointers. hipMemoryType has no separate
+// texture enumerator (a texture is read through the array it is bound to), so
+// this covers the texture case too. Warned once per API, like the no-op
+// handlers, so a replay with many such copies does not spam stderr.
+static bool drvmemcpy_declines_array_rect(const char* api, bool& warned,
+                                          hipMemoryType src_type, hipMemoryType dst_type) {
+    if (src_type != hipMemoryTypeArray && dst_type != hipMemoryTypeArray) return false;
+    if (!warned) {
+        warned = true;
+        fprintf(stderr, "[HRR] %s: array memory type is not replayed by HRR; the copy is "
+                        "skipped and results may differ from capture.\n", api);
+    }
+    return true;
+}
+
+// Shared body for hipDrvMemcpy3D / hipDrvMemcpy3DAsync.
+static hipError_t replay_drvmemcpy3d(PlaybackContext& ctx, HIP_MEMCPY3D& parms,
+                                     const char* api, uint64_t blob_hash_lo,
+                                     uint64_t blob_hash_hi, uint64_t d2h_hash_lo,
+                                     uint64_t d2h_hash_hi, hipStream_t stream,
+                                     bool is_async) {
+    if (parms.srcMemoryType == hipMemoryTypeHost) {
+        if (parms.dstMemoryType == hipMemoryTypeHost) {
+            // Host-to-host touches no device state, and the recorded dstHost VA
+            // is meaningless at replay (writing through it would be a wild
+            // store). Nothing to reproduce.
+            fprintf(stderr, "[HRR] %s: host-to-host copy, skipped\n", api);
+            return hipSuccess;
+        }
+        size_t need = drvmemcpy_host_bytes(parms.srcPitch, parms.srcHeight,
+                                           parms.srcXInBytes, parms.srcY, parms.srcZ,
+                                           parms.WidthInBytes, parms.Height, parms.Depth);
+        const void* blob = drvmemcpy_h2d_src_blob(ctx, api, blob_hash_lo, blob_hash_hi, need);
+        if (!blob) return hipSuccess;
+        parms.srcHost = blob;
+        parms.dstDevice = reinterpret_cast<hipDeviceptr_t>(
+            ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstDevice)));
+        hipError_t r = is_async ? hipDrvMemcpy3DAsync(&parms, stream)
+                                : hipDrvMemcpy3D(&parms);
+        if (r == hipSuccess)
+            r = hrr_sync_after_replayed_h2d(ctx, is_async ? "replayed driver 3D async H2D memcpy"
+                                                          : "replayed driver 3D H2D memcpy");
+        return r;
+    }
+    if (parms.dstMemoryType == hipMemoryTypeHost) {
+        uint64_t src_rec = reinterpret_cast<uint64_t>(parms.srcDevice);
+        void* src_live = ctx.translate_ptr(src_rec);
+        if (!src_live) {
+            fprintf(stderr, "[HRR] %s D2H validate FAIL: src 0x%llx not mapped - "
+                            "pointer translation bug\n",
+                    api, (unsigned long long)src_rec);
+            ctx.d2h_attempted++;
+            ctx.note_d2h_fail(hrr_dispatch_seq);
+            return hipSuccess;
+        }
+        size_t byte_count = parms.WidthInBytes * parms.Height * parms.Depth;
+        return replay_memcpy3d_d2h(ctx, src_live, byte_count, d2h_hash_lo, d2h_hash_hi,
+                                   stream, is_async, api);
+    }
+    parms.srcDevice = reinterpret_cast<hipDeviceptr_t>(
+        ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.srcDevice)));
+    parms.dstDevice = reinterpret_cast<hipDeviceptr_t>(
+        ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstDevice)));
+    return is_async ? hipDrvMemcpy3DAsync(&parms, stream) : hipDrvMemcpy3D(&parms);
+}
+
+hipError_t playback_hipDrvMemcpy3D(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipDrvMemcpy3D*>(pl);
+    HIP_MEMCPY3D parms{};
+    std::memcpy(&parms, a->drv3d_bytes, sizeof(parms));
+    static bool array_warned = false;
+    if (drvmemcpy_declines_array_rect("hipDrvMemcpy3D", array_warned,
+                                      parms.srcMemoryType, parms.dstMemoryType))
+        return hipSuccess;
+    return replay_drvmemcpy3d(ctx, parms, "hipDrvMemcpy3D",
+                              a->blob_hash_lo, a->blob_hash_hi,
+                              a->d2h_hash_lo, a->d2h_hash_hi,
+                              nullptr, /*is_async=*/false);
+}
+
+hipError_t playback_hipDrvMemcpy3DAsync(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipDrvMemcpy3DAsync*>(pl);
+    HIP_MEMCPY3D parms{};
+    std::memcpy(&parms, a->drv3d_bytes, sizeof(parms));
+    static bool array_warned = false;
+    if (drvmemcpy_declines_array_rect("hipDrvMemcpy3DAsync", array_warned,
+                                      parms.srcMemoryType, parms.dstMemoryType))
+        return hipSuccess;
+    return replay_drvmemcpy3d(ctx, parms, "hipDrvMemcpy3DAsync",
+                              a->blob_hash_lo, a->blob_hash_hi,
+                              a->d2h_hash_lo, a->d2h_hash_hi,
+                              ctx.translate_stream(a->stream), /*is_async=*/true);
+}
+
+hipError_t playback_hipDrvMemcpy2DUnaligned(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipDrvMemcpy2DUnaligned*>(pl);
+    static constexpr char kApi[] = "hipDrvMemcpy2DUnaligned";
+    hip_Memcpy2D parms{};
+    std::memcpy(&parms, a->drv2d_bytes, sizeof(parms));
+
+    static bool array_warned = false;
+    if (drvmemcpy_declines_array_rect(kApi, array_warned,
+                                      parms.srcMemoryType, parms.dstMemoryType))
+        return hipSuccess;
+
+    if (parms.srcMemoryType == hipMemoryTypeHost) {
+        if (parms.dstMemoryType == hipMemoryTypeHost) {
+            fprintf(stderr, "[HRR] %s: host-to-host copy, skipped\n", kApi);
+            return hipSuccess;
+        }
+        // The runtime widens hip_Memcpy2D to a HIP_MEMCPY3D with Depth == 1 and
+        // srcHeight == 0, defaulting the pitch to x + WidthInBytes. See
+        // hip::getDrvMemcpy3DDesc().
+        size_t pitch = parms.srcPitch ? parms.srcPitch
+                                      : parms.srcXInBytes + parms.WidthInBytes;
+        size_t need = drvmemcpy_host_bytes(pitch, /*pitch_height=*/0, parms.srcXInBytes,
+                                           parms.srcY, /*z=*/0, parms.WidthInBytes,
+                                           parms.Height, /*depth=*/1);
+        const void* blob = drvmemcpy_h2d_src_blob(ctx, kApi, a->blob_hash_lo,
+                                                  a->blob_hash_hi, need);
+        if (!blob) return hipSuccess;
+        parms.srcHost = blob;
+        parms.dstDevice = reinterpret_cast<hipDeviceptr_t>(
+            ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstDevice)));
+        hipError_t r = hipDrvMemcpy2DUnaligned(&parms);
+        if (r == hipSuccess)
+            r = hrr_sync_after_replayed_h2d(ctx, "replayed driver 2D H2D memcpy");
+        return r;
+    }
+    if (parms.dstMemoryType == hipMemoryTypeHost) {
+        uint64_t src_rec = reinterpret_cast<uint64_t>(parms.srcDevice);
+        void* src_live = ctx.translate_ptr(src_rec);
+        if (!src_live) {
+            fprintf(stderr, "[HRR] %s D2H validate FAIL: src 0x%llx not mapped - "
+                            "pointer translation bug\n",
+                    kApi, (unsigned long long)src_rec);
+            ctx.d2h_attempted++;
+            ctx.note_d2h_fail(hrr_dispatch_seq);
+            return hipSuccess;
+        }
+        size_t byte_count = parms.WidthInBytes * parms.Height;
+        return replay_memcpy3d_d2h(ctx, src_live, byte_count,
+                                   a->d2h_hash_lo, a->d2h_hash_hi, nullptr, false, kApi);
+    }
+    parms.srcDevice = reinterpret_cast<hipDeviceptr_t>(
+        ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.srcDevice)));
+    parms.dstDevice = reinterpret_cast<hipDeviceptr_t>(
+        ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstDevice)));
+    return hipDrvMemcpy2DUnaligned(&parms);
 }
 
 // ---------------------------------------------------------------------------
