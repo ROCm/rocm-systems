@@ -308,8 +308,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
       }
     }
 #endif
-    // The post timestamp exists only to feed telemetry latencies, and reads the
-    // clock only for the WQEs 1-in-N sampling selects.
+    // Post timestamp feeds latency; clock read only for sampled WQEs.
     if (rcclTelemetryOn() && i == 0) {
       int64_t _tel_ns = rcclTelemetryPostTs(qp->telQpStats);
       for (int r=0; r<nreqs; r++) reqs[r]->tel_post_ts = _tel_ns;
@@ -656,8 +655,7 @@ ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
       if (comm->prepostReceiveWorkRequests) {
         continue;
       }
-      // The post timestamp exists only to feed telemetry latencies, and reads
-      // the clock only for the WQEs 1-in-N sampling selects.
+      // Post timestamp feeds latency; clock read only for sampled WQEs.
       if (rcclTelemetryOn() && i == 0) req->tel_post_ts = rcclTelemetryPostTs(qp->telQpStats);
       // Post receive work request on the QP
       if (comm->base.recvMatchingScheme != BY_ORDER) {
@@ -849,9 +847,8 @@ static inline ncclResult_t IbCastRequestComplete(struct ncclIbRequest* r, int* d
   TRACE(NCCL_NET, "NET/IB: %s: %s request completed (req=%p, comm=%p, id=%ld, type=%s)", __func__,
         r->base->isSend ? "Send" : "Recv", r, r->base, r->id, IbCastReqTypeStr[r->type]);
   *done = 1;
-  // devBases[0] is this comm's first device, which is the one telChStats was
-  // resolved on; keep the test so a request that never reached a device is
-  // charged to nothing, exactly as before.
+  // devBases[0] is the comm's first device, where telChStats was resolved; the
+  // test leaves a request that never reached a device charged to nothing.
   if (r->devBases[0]) {
     rcclTelemetryChRequestCompleted(r->base->isSend ? ((struct ncclIbSendComm*)(r->base))->telChStats :
                                                       ((struct ncclIbRecvComm*)(r->base))->telChStats);
@@ -919,8 +916,8 @@ static ncclResult_t IbCastLogCompletionWithError(struct ncclIbNetCommBase* commB
   return ncclSuccess;
 }
 
-// Record one drained CQE against its QP, once per CQE not per sub-request.
-// The qp_num lookup exists only to feed telemetry, hence the flag test here.
+// Record one drained CQE against its QP, once per CQE; qp_num lookup is
+// telemetry-only, hence the flag test here.
 static inline void IbCastTelemetryWqeComplete(struct ncclIbNetCommBase* commBase, struct ibv_wc* wc, int devIndex,
                                               int64_t postTs) {
   if (!rcclTelemetryOn()) return;
@@ -1096,7 +1093,7 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
                                        NULL));
 #endif
     }
-    // One CQE == one WQE completion on one QP; record once (not per sub-request).
+    // One CQE == one WQE completion; record once, not per sub-request.
     IbCastTelemetryWqeComplete(commBase, wc, devIndex, req->tel_post_ts);
   } else {
     if (wc->opcode == IBV_WC_RECV_RDMA_WITH_IMM) {

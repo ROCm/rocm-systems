@@ -340,9 +340,7 @@ static ncclResult_t ncclNetPluginFinalize(struct ncclComm* comm, int pluginIndex
 }
 
 ncclResult_t ncclNetInit(struct ncclComm* comm) {
-  // Deliberately not NCCLCHECKed: telemetry is diagnostic, so it reports its
-  // own failures and never turns one into a failed init. See the error model
-  // in net_telemetry.h.
+  // Not NCCLCHECKed: telemetry reports its own failures. See net_telemetry.h.
   if (rcclTelemetryInit() != 0) {
     INFO(NCCL_NET, "Telemetry was requested but could not start; continuing without it");
   }

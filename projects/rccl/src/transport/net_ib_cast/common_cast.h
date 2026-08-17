@@ -140,9 +140,8 @@ struct alignas(64) ncclIbDev {
 
 #define MAX_IB_DEVS 32
 #define MAX_IB_VDEVS MAX_IB_DEVS * 8
-// Telemetry indexes its per-device slots with this transport's device index, so
-// a shortfall there would silently drop every counter of the devices past the
-// end. Keeping the two in step is cheaper than detecting that at runtime.
+// Telemetry indexes device slots by this transport's device index, so a
+// shortfall would silently drop every counter past the end.
 static_assert(MAX_IB_DEVS <= RCCL_TELEMETRY_MAX_DEVS,
               "telemetry has fewer device slots than the transport can enumerate");
 extern struct ncclIbMergedDev IbCastMergedDevs[MAX_IB_VDEVS];
@@ -436,12 +435,8 @@ struct ncclIbQp {
   int channelId;
   bool isDataQp;
 
-  // Telemetry slot of this QP, resolved once during connection setup and NULL
-  // for an untracked QP. Holding the pointer rather than a slot index is what
-  // keeps a posted WQE down to one slot resolution; see the "resolved slot
-  // handles" section in net_telemetry.h. It occupies what was otherwise
-  // trailing padding, so ncclIbQp (and with it ncclIbNetCommBase, which the
-  // static_asserts below constrain) does not change size.
+  // Resolved telemetry slot (NULL if untracked); the pointer keeps a posted WQE
+  // to one slot resolution. Reuses padding, so ncclIbQp keeps its size.
   RcclQpStats* telQpStats;
 };
 
@@ -624,10 +619,8 @@ struct ncclIbSendComm {
   uint64_t putSignalScratchpad;
   bool useCtsOffload;
   int telChId; // Telemetry: NCCL channel ID for this communicator
-  // Telemetry slot of telChId on this comm's first device, resolved once during
-  // connection setup and NULL when untracked. Same reasoning as
-  // ncclIbQp::telQpStats: request completions are as frequent as WQE
-  // completions, so they must not re-resolve the channel every time.
+  // Resolved slot for telChId on this comm's first device (NULL if untracked).
+  // Same reasoning as ncclIbQp::telQpStats: avoid re-resolving per completion.
   RcclChannelStats* telChStats;
 };
 // The SendFifo needs to be 32-byte aligned and each element needs

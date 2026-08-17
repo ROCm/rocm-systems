@@ -1082,10 +1082,8 @@ ib_recv_dev_list:
   comm->telChId = channelId;
   comm->telChStats = NULL;
 
-  // Counting QPs per device, handing out slots and resolving the slot handles
-  // only feeds telemetry, so skip it outright when telemetry is off.
-  // IbCastQpCreate() already left every telQpStats at NULL, which is the
-  // untracked value the hooks expect.
+  // Telemetry-only: skip when off. IbCastQpCreate() left every telQpStats NULL,
+  // the untracked value the hooks expect.
   if (rcclTelemetryOn()) {
     for (int i = 0; i < comm->base.vProps.ndevs; i++) {
       int ibDevN = comm->base.vProps.devs[i];
@@ -1097,14 +1095,13 @@ ib_recv_dev_list:
       int slotOffset = 0;
       for (int q = 0; q < comm->base.nqps && slotOffset < numSlots; q++) {
         if (comm->base.qps[q].devIndex != i) continue;
-        // QPs past the granted slots keep telQpStats == NULL and stay untracked.
+        // QPs past the granted slots keep telQpStats == NULL (untracked).
         int telSlot = startSlot + slotOffset++;
         rcclTelemetrySetQpRole(ibDevN, channelId, telSlot, comm->base.qps[q].isDataQp);
         comm->base.qps[q].telQpStats = rcclTelemetryResolveQp(ibDevN, channelId, telSlot);
       }
     }
-    // Request completions are charged to this channel on the comm's first
-    // device, which the loop above has just registered.
+    // Request completions are charged to the comm's first device.
     comm->telChStats = rcclTelemetryResolveChannel(comm->base.vProps.devs[0], channelId);
   }
 
@@ -1800,10 +1797,9 @@ ib_recv:
       int slotOffset = 0;
       for (int q = 0; q < rComm->base.nqps && slotOffset < numSlots; q++) {
         if (rComm->base.qps[q].devIndex != i) continue;
-        // QPs past the granted slots keep telQpStats == NULL and stay untracked.
+        // QPs past the granted slots keep telQpStats == NULL (untracked).
         int telSlot = startSlot + slotOffset++;
-        // ncclIbQp::isDataQp is false for every receiver QP because it only
-        // drives AINIC QP creation. Classify by who actually posts CTS.
+        // isDataQp is always false on receiver QPs; classify by CTS role.
         rcclTelemetrySetQpRole(telIbDevN, channelId, telSlot, !IbCastRecvCommIsCtsQp(rComm, q));
         rComm->base.qps[q].telQpStats = rcclTelemetryResolveQp(telIbDevN, channelId, telSlot);
       }

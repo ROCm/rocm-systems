@@ -34,17 +34,10 @@ static inline ncclResult_t IbCastRecvCommGetQpForCts(struct ncclIbRecvComm* recv
   return ncclSuccess;
 }
 
-// Query whether a receiver QP is one of the CTS-posting QPs. Receiver QPs are
-// dual-role: every one of them takes data receives, and a subset also posts
-// CTS. Ask the selector which QPs those are rather than restating its rule
-// here, so a caller's classification cannot drift from the real CTS
-// assignment. Request ids cycle with a period of at most nqps.
-//
-// If the selector fails, answer false. Every receiver QP does take data
-// receives, so "not a CTS QP" is the truthful fallback, whereas answering true
-// would label an arbitrary QP as CTS and corrupt the role counts. The selector
-// has no failure path today; this only keeps that assumption from turning into
-// a misclassification if one is ever added.
+// Query whether a receiver QP is CTS-posting. Receiver QPs are dual-role: all
+// take data receives and a subset posts CTS, so ask the selector rather than
+// restate its rule. On selector failure answer false, since every QP takes
+// data, so "not CTS" is the truthful fallback and true would corrupt roles.
 static inline bool IbCastRecvCommIsCtsQp(struct ncclIbRecvComm* recvComm, int qpIndex) {
   for (uint32_t id = 0; id < (uint32_t)recvComm->base.nqps; id++) {
     ncclIbQp* ctsQp = NULL;
