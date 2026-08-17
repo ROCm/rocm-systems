@@ -1687,11 +1687,11 @@ TEST(NetBootstrapInterfaceTest, VirbrConsideredLast) {
       << "ncclFindInterfaces auto-selected libvirt bridge '" << pick
       << "'; virbr* must be the last-resort interface";
 
-  // When a virbr* bridge is actually present on this host, (1) + (3) together
-  // prove it was deprioritized below every other interface (including lo).
-  if (nVirbr > 0)
-    TEST_INFO("virbr present (%d bridge iface(s)) but auto-pick chose '%s'",
-              nVirbr, pick);
+  if (nVirbr == 0)
+    GTEST_SKIP() << "no virbr* interface present; the libvirt bridge fallback "
+                    "ordering was not exercised on this host";
+  TEST_INFO("virbr present (%d bridge iface(s)) but auto-pick chose '%s'",
+            nVirbr, pick);
 }
 
 } // namespace RcclUnitTesting
