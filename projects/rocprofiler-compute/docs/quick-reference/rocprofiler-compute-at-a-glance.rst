@@ -89,7 +89,7 @@ ROCm Compute Profiler's analysis report is organized into the following views:
      - See also
    * - System Speed-of-Light
      - What percentage of the GPU's theoretical peak performance the kernel achieves, across compute and memory subsystems.
-     - :ref:`sys-sol`, :ref:`sys-sol-rdna`
+     - :ref:`CDNA Speed-of-Light <sys-sol>`, :ref:`RDNA Speed-of-Light <sys-sol-rdna>`
    * - Hardware block Speed-of-Light
      - Which specific hardware block — the compute unit, a cache level, the command processor, or the workgroup manager — is the bottleneck for a kernel, based on utilization and stall metrics for that block.
      - :ref:`profiling-hw-component-filtering`, :doc:`../conceptual/performance-model`
