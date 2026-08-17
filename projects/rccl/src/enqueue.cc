@@ -3667,16 +3667,21 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         NCCLCHECK(ncclCudaGetCapturingGraph(&graph, info->stream, comm->config.graphUsageMode));
         captured = ncclCudaGraphValid(graph);
         if (info->coll == ncclFuncAlltoAll) { 
+          bool sendLocalValid = false;
+          bool recvLocalValid = false;
           NCCLCHECK(ncclRegFind(comm, info->sendbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype),
                                 &sendReg));
           NCCLCHECK(ncclRegFind(comm, info->recvbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype),
                                 &recvReg));
+          if (sendReg) NCCLCHECK(ncclRegLocalIsValid(sendReg, &sendLocalValid));
+          if (recvReg) NCCLCHECK(ncclRegLocalIsValid(recvReg, &recvLocalValid));   
+
           /**
-           * To do : using allowUB = (captured || (sendReg != NULL && recvReg != NULL)); for alltoall, 
+           * To do : using allowUB = (captured || (sendLocalValid && recvLocalValid)); for alltoall, 
            * with symmetric memory, in Graphmode, with sequence of buffer sizes where max is not aligned 
            * to 128 bytes, results in data validation errors. setting this to false, until it is resolved.
            */
-          allowUB = false; // (captured || (sendReg != NULL && recvReg != NULL))
+          allowUB = false;
           for (int r = 0; r < comm->nRanks; r++) {
             NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI,
                                     (void*)((char*)info->sendbuff + r * info->count * ncclTypeSize(info->datatype)),

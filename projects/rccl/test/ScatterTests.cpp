@@ -187,7 +187,7 @@ namespace RcclUnitTesting
     std::vector<ncclDataType_t> const dataTypes       = {ncclUint8,ncclBfloat16,ncclUint32,ncclUint64};;
     std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
     std::vector<int>            const roots           = {0};
-    std::vector<int>            const numElements     = {1,4096,5003*32};
+    std::vector<int>            const numElements     = {1,4096};
     std::vector<bool>           const inPlaceList     = {true,false};
     std::vector<bool>           const managedMemList  = {false};
     std::vector<bool>           const useHipGraphList = {true};

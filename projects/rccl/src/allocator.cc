@@ -42,15 +42,16 @@ ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
 
   if (ncclCuMemEnable()) {
     size_t handleSize = size;
-    int requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
-#if CUDART_VERSION >= 12030
-    // Query device to see if FABRIC handle support is available
-    flag = 0;
-    // Lock VMM calls to prevent ROCclr host race conditions
-    std::lock_guard<std::mutex> lock(getVmmMutex());
-    (void)CUPFN(cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED, currentDev));
-    if (flag) requestedHandleTypes |= CU_MEM_HANDLE_TYPE_FABRIC;
-#endif
+    int requestedHandleTypes = ncclCuMemHandleType;
+    if (requestedHandleTypes == CU_MEM_HANDLE_TYPE_FABRIC) {
+      flag = 0;
+      // Check if the device supports FABRIC handles
+      CUresult err = CUPFN(cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED, currentDev));
+      if (err != CUDA_SUCCESS || !flag) {
+        WARN("ncclMemAlloc: device %d has no FABRIC handles support, falling back to POSIX", cudaDev);
+        requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+      }
+    }
 #if defined(HIP_VMM_UNCACHED_MEMORY)
     memprop.type = hipMemAllocationTypeUncached;
 #else
@@ -101,7 +102,7 @@ ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
     for (int i = 0; i < dcnt; ++i) {
       int p2p = 0;
       if (i == cudaDev || (CUDASUCCESS(cudaDeviceCanAccessPeer(&p2p, i, cudaDev)) && p2p)) {
-        // 1. Initialize & increment refcount for GPU i
+        // Initialize & increment refcount for GPU i
         hipCtx_t ctx;
         hipError_t err = hipDevicePrimaryCtxRetain(&ctx, i); 
         if (err == hipSuccess) {
@@ -154,9 +155,8 @@ ncclResult_t ncclMemFree_impl(void* ptr) {
   CUCHECKGOTO(cuPointerGetAttribute((void*)&ptrDev, CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL, (CUdeviceptr)ptr), ret, fail);
   CUDACHECKGOTO(cudaSetDevice((int)ptrDev), ret, fail);
   if (ncclCuMemEnable()) {
-    std::lock_guard<std::mutex> lock(getVmmMutex());
-    NCCLCHECKGOTO(ncclCuMemFree(ptr, nullptr), ret,
-                  fail); // User facing API, memManager does not need to track user memory. Same as ncclMemAlloc
+    // User facing API, memManager does not need to track user memory. Same as ncclMemAlloc
+    NCCLCHECKGOTO(ncclCuMemFree(ptr, nullptr), ret, fail); 
     goto exit;
   }
 

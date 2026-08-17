@@ -171,8 +171,7 @@ namespace RcclUnitTesting
       if (pid == 0)
       {
         // Child process enters execution loop
-
-        // 1. Close parent-side handles in child process
+        // Close parent-side handles in child process
         close(childList[childId]->parentWriteFd);
         close(childList[childId]->parentReadFd);
 
