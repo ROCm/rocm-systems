@@ -2489,7 +2489,7 @@ main(int argc, char** argv)
     int code = -1;
     if(binary_rewrite)
     {
-        auto outdir = path::parent_path(outfile);
+        const auto outdir = path::parent_path(outfile);
         if(!outdir.empty())
         {
             try
