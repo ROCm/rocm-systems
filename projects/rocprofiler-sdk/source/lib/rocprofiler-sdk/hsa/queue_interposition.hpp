@@ -318,7 +318,7 @@ void
 interposition_sync();
 
 /**
- * @brief Stop and join the completion-monitor thread, sweeping any stragglers
+ * @brief Stop and join the completion-monitor thread, retiring any stragglers
  *
  * Closes the producer admission gate, wakes the monitor, joins it, then waits (bounded)
  * for any producer still in the doorbell path to leave it and retires whatever they left
@@ -333,11 +333,12 @@ stop_completion_monitor();
 /**
  * @brief Signal that global finalization has begun
  *
- * Moves the monitor to a draining state, distinct from the transient per-client finalizer
- * state. The monitor keeps running and keeps retiring completions; only the grace period
- * a drain is willing to wait shortens, because at global shutdown an in-flight dependency
- * may never resolve and stop_completion_monitor's sweep is the authoritative flush. Must
- * be called before the finalize-path drain, and only on the true global-teardown path.
+ * Moves the monitor to a finalizing state, distinct from the transient per-client
+ * finalizer state. The monitor keeps running and keeps retiring completions; only the
+ * grace period a drain is willing to wait shortens, because at global shutdown an
+ * in-flight dependency may never resolve and stop_completion_monitor's forced retirement
+ * is the authoritative flush. Must be called before the finalize-path drain, and only on
+ * the true global-teardown path.
  */
 void
 request_completion_monitor_shutdown();
