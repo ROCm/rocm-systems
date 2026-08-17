@@ -48,7 +48,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - Streaming Performance Monitor (SPM) counter data in the rocpd output format:
     - SPM records are stored as `rocpd_track` rows labelled `SPM`, with counter values grouped by timestamp into `rocpd_sample` rows and per-dimension data in `rocpd_pmc_event` rows.
     - The rocpd schema gains the `sample_id`, `xcc`, `shader_engine`, and `instance` columns.
-    - SPM data is consumable by any tool that reads the rocpd database and convertible to the other output formats, such as Perfetto.
+    - SPM data is consumable by any tool that reads the rocpd database and is convertible to CSV via `rocpd convert`. Conversion to the other output formats, such as Perfetto and OTF2, is not yet supported.
   - Streaming Performance Monitor (SPM) counter collection support (beta):
     - New experimental API in `rocprofiler-sdk/experimental/spm.h`:
     - GPU-timestamped counter values alongside kernel dispatch information.
@@ -57,9 +57,9 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 **rocprofv3 (CLI):**
 
   - OpenMP (OMPT) tracing via the new `--ompt-trace` flag:
-    - Accepts a bare boolean or a space-separated category list (`all, thread, parallel, task, sync, mutex, target, device, error`), following the same style as `--pmc` and `--output-format`; for example, `--ompt-trace parallel task target sync`. Also folded into `--sys-trace`/`--runtime-trace`.
-    - rocpd-only trace: records go to the rocpd database (the default output format) and export via `rocpd convert`.
-    - The OMPT callback layer has been supported by ROCprofiler-SDK since an earlier release; this flag makes it accessible without writing a custom tool.
+    - Accepts a bare boolean or a space-separated category list (`all` `thread` `parallel` `task` `sync` `mutex` `target` `device` `error`), following the same style as `--pmc` and `--output-format`; for example, `--ompt-trace parallel task target sync`. Categories must be space-separated; comma-separated tokens are rejected. Also folded into `--sys-trace`/`--runtime-trace`.
+    - rocpd-only trace: records go to the rocpd database (the default output format) and are exported via `rocpd convert`.
+    - The OMPT callback layer is already supported by ROCprofiler-SDK; this flag makes it accessible without writing a custom tool.
   - hipFile API tracing via the new `--hipfile-trace` flag (or the `ROCPROF_HIPFILE_API_TRACE` environment variable):
     - Automatically included in `--runtime-trace` and `--sys-trace`.
     - Records are emitted across all supported output backends: CSV, JSON, Perfetto, OTF2, and rocpd.
