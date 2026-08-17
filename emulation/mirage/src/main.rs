@@ -51,6 +51,12 @@ struct Cli {
 }
 
 #[derive(Subcommand, Debug)]
+// 344 bytes, effectively all of it in `Ctl(CtlCmd)`. Boxing to even the
+// variants out would be a pessimisation, not a saving: exactly one of
+// these is ever built — by `Cli::parse_from` in `main` — and it is moved
+// once into `dispatch` and dropped. That would trade a stack move for a
+// heap allocation and a pointer chase, to shrink a value with a single
+// instance and no container.
 #[allow(clippy::large_enum_variant)]
 enum TopCmd {
     /// Show version, copyright, and the third-party crates mirage is
@@ -108,6 +114,33 @@ fn print_about() {
     print!("{THIRD_PARTY}");
 }
 
+/// Whether `arg` is one of [`Cli`]'s global flags, which may appear
+/// before the subcommand and so must be stepped over when looking for it.
+///
+/// `-v` is an [`ArgAction::Count`][clap::ArgAction::Count], so clap
+/// accepts it bundled to any depth — `-v`, `-vv`, `-vvv`, … This function
+/// therefore matches the *shape* rather than a list of spellings. It used
+/// to be a list, and the list stopped at `-vv`: `mirage -vvv -- ./app`
+/// mistook `-vvv` for the subcommand, spliced `run` in front of it, and
+/// left the real `run` to be executed as the workload — so the user got
+/// `command not found: run` from a flag that only differed by one `v`.
+///
+/// A global flag added to [`Cli`] must be added here too, which is the
+/// kind of coupling that rots quietly. `tests::every_global_flag_is_known`
+/// asks clap for the actual list and fails if this function does not
+/// recognise one of them.
+fn is_global_flag(arg: &str) -> bool {
+    match arg {
+        "--json" | "--verbose" => true,
+        _ => {
+            arg.len() >= 2
+                && arg.starts_with('-')
+                && !arg.starts_with("--")
+                && arg[1..].chars().all(|c| c == 'v')
+        }
+    }
+}
+
 /// Make `mirage` a drop-in replacement for the `rocjitsu` CLI by routing
 /// bare `mirage [opts] -- <app> [args…]` invocations to `mirage run`.
 ///
@@ -122,7 +155,7 @@ fn print_about() {
 /// `--env`, …) then flows straight through.
 ///
 /// Invocations that name a subcommand (`mirage run …`, `mirage profile
-/// …`, `mirage exec start … -- cmd`) and those with no `--` separator
+/// …`, `mirage exec --session s -- cmd`) and those with no `--` separator
 /// (so `--help`/`--version` keep working) are left untouched.
 fn dropin_argv(args: Vec<String>) -> Vec<String> {
     // Only rocjitsu-style invocations carry a `--` app separator.
@@ -134,7 +167,7 @@ fn dropin_argv(args: Vec<String>) -> Vec<String> {
     let mut head: Option<&str> = None;
     let mut head_idx = sep;
     for (i, a) in args.iter().enumerate().take(sep).skip(1) {
-        if a == "--json" || a == "-v" || a == "--verbose" || a == "-vv" {
+        if is_global_flag(a) {
             continue;
         }
         head = Some(a.as_str());
@@ -185,29 +218,29 @@ fn dispatch(cli: Cli) -> anyhow::Result<ExitCode> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-    use super::dropin_argv;
+    use super::{Cli, dropin_argv, is_global_flag};
 
-    fn v(args: &[&str]) -> Vec<String> {
+    fn v_args(args: &[&str]) -> Vec<String> {
         args.iter().map(|s| s.to_string()).collect()
     }
 
     #[test]
     fn bare_dropin_routes_to_run() {
         assert_eq!(
-            dropin_argv(v(&["mirage", "--", "./app", "arg"])),
-            v(&["mirage", "run", "--", "./app", "arg"])
+            dropin_argv(v_args(&["mirage", "--", "./app", "arg"])),
+            v_args(&["mirage", "run", "--", "./app", "arg"])
         );
     }
 
     #[test]
     fn rocjitsu_config_and_daemon_route_to_run() {
         assert_eq!(
-            dropin_argv(v(&[
+            dropin_argv(v_args(&[
                 "mirage", "--config", "c.json", "--daemon", "--", "./app"
             ])),
-            v(&[
+            v_args(&[
                 "mirage", "run", "--config", "c.json", "--daemon", "--", "./app"
             ])
         );
@@ -216,10 +249,10 @@ mod tests {
     #[test]
     fn attach_maps_to_daemon() {
         assert_eq!(
-            dropin_argv(v(&[
+            dropin_argv(v_args(&[
                 "mirage", "--attach", "--config", "c.json", "--", "./app"
             ])),
-            v(&[
+            v_args(&[
                 "mirage", "run", "--daemon", "--config", "c.json", "--", "./app"
             ])
         );
@@ -228,7 +261,7 @@ mod tests {
     #[test]
     fn global_flags_before_dropin_are_preserved() {
         assert_eq!(
-            dropin_argv(v(&[
+            dropin_argv(v_args(&[
                 "mirage",
                 "--json",
                 "--profile",
@@ -236,7 +269,7 @@ mod tests {
                 "--",
                 "./app"
             ])),
-            v(&[
+            v_args(&[
                 "mirage",
                 "--json",
                 "run",
@@ -248,23 +281,76 @@ mod tests {
         );
     }
 
+    /// `-vvv` used to be mistaken for the subcommand, which spliced `run`
+    /// in front of it and turned the real `run` into the workload —
+    /// `mirage -vvv -- ./app` died with `command not found: run` while
+    /// `-vv` worked. Counted flags have no upper bound, so neither does
+    /// this.
+    #[test]
+    fn bundled_verbosity_of_any_depth_finds_the_subcommand() {
+        for v in ["-v", "-vv", "-vvv", "-vvvv", "-vvvvvvvvvv"] {
+            let args = v_args(&["mirage", v, "run", "--", "./app"]);
+            assert_eq!(
+                dropin_argv(args.clone()),
+                args,
+                "{v} should leave an explicit `run` alone"
+            );
+            assert_eq!(
+                dropin_argv(v_args(&["mirage", v, "--", "./app"])),
+                v_args(&["mirage", v, "run", "--", "./app"]),
+                "{v} should be stepped over when splicing `run`"
+            );
+        }
+    }
+
+    /// `is_global_flag` duplicates knowledge that lives in `Cli`'s derive.
+    /// Ask clap what the global flags actually are, so adding one and
+    /// forgetting this function is a test failure rather than a bug
+    /// report about a flag that eats the subcommand.
+    #[test]
+    fn every_global_flag_is_known() {
+        use clap::CommandFactory as _;
+        for arg in Cli::command().get_arguments() {
+            if !arg.is_global_set() {
+                continue;
+            }
+            if let Some(long) = arg.get_long() {
+                let spelling = format!("--{long}");
+                assert!(
+                    is_global_flag(&spelling),
+                    "`{spelling}` is global on `Cli` but `is_global_flag` \
+                     does not recognise it, so it would be mistaken for a \
+                     subcommand in a drop-in invocation"
+                );
+            }
+            if let Some(short) = arg.get_short() {
+                let spelling = format!("-{short}");
+                assert!(
+                    is_global_flag(&spelling),
+                    "`{spelling}` is global on `Cli` but `is_global_flag` \
+                     does not recognise it"
+                );
+            }
+        }
+    }
+
     #[test]
     fn explicit_run_subcommand_is_untouched() {
-        let args = v(&["mirage", "run", "--profile", "mi350x", "--", "./app"]);
+        let args = v_args(&["mirage", "run", "--profile", "mi350x", "--", "./app"]);
         assert_eq!(dropin_argv(args.clone()), args);
     }
 
     #[test]
     fn other_subcommands_are_untouched() {
-        let args = v(&["mirage", "exec", "start", "s", "--", "cmd"]);
+        let args = v_args(&["mirage", "exec", "--session", "s", "--", "cmd"]);
         assert_eq!(dropin_argv(args.clone()), args);
     }
 
     #[test]
     fn no_separator_is_untouched() {
-        let args = v(&["mirage", "profile", "list"]);
+        let args = v_args(&["mirage", "profile", "list"]);
         assert_eq!(dropin_argv(args.clone()), args);
-        let help = v(&["mirage", "--help"]);
+        let help = v_args(&["mirage", "--help"]);
         assert_eq!(dropin_argv(help.clone()), help);
     }
 }
