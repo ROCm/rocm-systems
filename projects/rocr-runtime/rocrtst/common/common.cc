@@ -47,6 +47,8 @@
 /// Implementation of utility functions used by RocR applications
 #include "common/common.h"
 #include "common/env_config.h"
+#include "common/platform_filter.h"
+#include "gtest/gtest.h"
 #include <assert.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -124,7 +126,19 @@ bool isWslEnvironment() {
 
 bool SkipOnWsl(const char* reason) {
   if (!isWslEnvironment()) return false;
-  std::cout << "[ SKIPPED ] " << reason << std::endl;
+
+  // This gtest predates GTEST_SKIP(), so register the skip with the rocrtst
+  // SkippedTestTracker (shown in the end-of-run summary) rather than silently
+  // returning green.
+  std::string test_name = "unknown";
+  const ::testing::TestInfo* info =
+      ::testing::UnitTest::GetInstance()->current_test_info();
+  if (info != nullptr) {
+    test_name = std::string(info->test_case_name()) + "." + info->name();
+  }
+
+  SkippedTestTracker::getInstance().recordSkip(test_name, reason);
+  std::cout << "[ SKIPPED ] " << test_name << " : " << reason << std::endl;
   return true;
 }
 
