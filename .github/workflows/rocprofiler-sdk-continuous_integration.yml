@@ -288,7 +288,7 @@ jobs:
 
       - name: Test Install Build
         if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
-        timeout-minutes: 20
+        timeout-minutes: 30
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
@@ -319,7 +319,7 @@ jobs:
 
       - name: Test Installed Packages
         if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
-        timeout-minutes: 20
+        timeout-minutes: 30
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |

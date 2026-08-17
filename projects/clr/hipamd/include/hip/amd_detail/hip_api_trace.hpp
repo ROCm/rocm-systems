@@ -48,7 +48,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 31
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 32
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -141,6 +141,8 @@ typedef hipError_t (*t_hipDeviceGetDefaultMemPool)(hipMemPool_t* mem_pool, int d
 typedef hipError_t (*t_hipDeviceGetGraphMemAttribute)(int device, hipGraphMemAttributeType attr,
                                                       void* value);
 typedef hipError_t (*t_hipDeviceGetLimit)(size_t* pValue, enum hipLimit_t limit);
+typedef hipError_t (*t_hipDeviceGetLuid)(char* luid, unsigned int* deviceNodeMask,
+                                         hipDevice_t device);
 typedef hipError_t (*t_hipDeviceGetMemPool)(hipMemPool_t* mem_pool, int device);
 typedef hipError_t (*t_hipDeviceGetName)(char* name, int len, hipDevice_t device);
 typedef hipError_t (*t_hipDeviceGetP2PAttribute)(int* value, hipDeviceP2PAttr attr, int srcDevice,
@@ -1827,8 +1829,11 @@ struct HipDispatchTable {
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 31
   t_hipMemGetDefaultMemPool hipMemGetDefaultMemPool_fn;
 
-  // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 32
+  t_hipDeviceGetLuid hipDeviceGetLuid_fn;
+
+  // DO NOT EDIT ABOVE!
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 33
 
   // ******************************************************************************************* //
   //
