@@ -1077,6 +1077,28 @@ bool Device::populateOCLDeviceConstants() {
                           &localUID)) {
     info_.luidLowPart_ = localUID.low;
     info_.luidHighPart_ = localUID.high;
+    // Node mask = this agent's index within its adapter (LUID). Agents sharing a
+    // LUID form a linked adapter; a standalone adapter reports 0x1. The LUID is
+    // zero on platforms without a WDDM adapter, where the node mask stays 0.
+    if ((localUID.low != 0) || (localUID.high != 0)) {
+      uint32_t luidNodeIndex = 0;
+      for (const auto& siblingAgent : gpu_agents_) {
+        if (siblingAgent.handle == bkendDevice_.handle) {
+          break;
+        }
+        hsa_luid_t siblingUID = {0};
+        if ((HSA_STATUS_SUCCESS ==
+             Hsa::agent_get_info(siblingAgent,
+                                 static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_LUID),
+                                 &siblingUID)) &&
+            (siblingUID.low == localUID.low) && (siblingUID.high == localUID.high)) {
+          ++luidNodeIndex;
+        }
+      }
+      if (luidNodeIndex < 32) {
+        info_.luidDeviceNodeMask_ = 1u << luidNodeIndex;
+      }
+    }
   }
 
   if (HSA_STATUS_SUCCESS !=
@@ -1786,6 +1808,10 @@ bool Device::populateOCLDeviceConstants() {
   std::ignore = Hsa::system_get_info(
                     static_cast<hsa_system_info_t>(HSA_AMD_SYSTEM_INFO_DMABUF_SUPPORTED),
                     &info_.dmabufSupported_);
+
+  // Support for host-allocated dma_buf buffer sharing (system-wide capability).
+  info_.hostAllocDmabufSupported_ = hostVmemSupported_;
+
   // devices with no cluster support; max size is 0
   info_.clusterMaxSize_ = 0;
 

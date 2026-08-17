@@ -68,7 +68,14 @@ function_return_blocks(BasicBlock &callee, uint16_t return_sreg, std::span<const
       continue;
 
     const Instruction *term = block->terminator();
+    // BasicBlock::build() never emits an empty block, so this is an invariant rather than an
+    // expected input -- but the assert compiles out, and a null here would be dereferenced while
+    // loading a code object. Skipping costs a return-edge classification; crashing costs the host
+    // process. A block with no instructions also has no terminator to classify, so there is
+    // nothing this walk could have concluded from it anyway.
     assert(term != nullptr && "decoded BasicBlock should contain at least one instruction");
+    if (term == nullptr)
+      continue;
     if (point.terminal_return_sreg && s_setpc_from_sreg(*term, text_word_at(text, term->src_loc()),
                                                         *point.terminal_return_sreg)) {
       continue;
@@ -151,6 +158,8 @@ std::unordered_set<uint64_t> scoped_call_return_offsets(std::span<BasicBlock *co
            function_return_blocks(*call.callee, call.return_sreg, text, allowed_blocks)) {
         const Instruction *term = return_block->terminator();
         assert(term != nullptr && "function_return_blocks returns non-empty decoded blocks");
+        if (term == nullptr)
+          continue;
         returns.insert(term->src_loc());
       }
     }

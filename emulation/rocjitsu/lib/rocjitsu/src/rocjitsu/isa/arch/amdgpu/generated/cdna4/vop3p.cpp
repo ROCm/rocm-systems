@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace cdna4 {
@@ -57,6 +58,12 @@ VPkMadI16Vop3p::VPkMadI16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkMadI16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkMadI16Vop3p>(opcode);
+}
+} // namespace detail
+
 VPkMulLoU16Vop3p::VPkMulLoU16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_mul_lo_u16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkMulLoU16Vop3p)),
@@ -69,6 +76,12 @@ VPkMulLoU16Vop3p::VPkMulLoU16Vop3p(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkMulLoU16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkMulLoU16Vop3p>(opcode);
+}
+} // namespace detail
 
 VPkAddI16Vop3p::VPkAddI16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_add_i16", reinterpret_cast<const OpEncoding *>(inst),
@@ -83,6 +96,12 @@ VPkAddI16Vop3p::VPkAddI16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkAddI16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkAddI16Vop3p>(opcode);
+}
+} // namespace detail
+
 VPkSubI16Vop3p::VPkSubI16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_sub_i16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkSubI16Vop3p)),
@@ -95,6 +114,12 @@ VPkSubI16Vop3p::VPkSubI16Vop3p(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkSubI16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkSubI16Vop3p>(opcode);
+}
+} // namespace detail
 
 VPkLshlrevB16Vop3p::VPkLshlrevB16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_lshlrev_b16", reinterpret_cast<const OpEncoding *>(inst),
@@ -109,6 +134,12 @@ VPkLshlrevB16Vop3p::VPkLshlrevB16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkLshlrevB16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkLshlrevB16Vop3p>(opcode);
+}
+} // namespace detail
+
 VPkLshrrevB16Vop3p::VPkLshrrevB16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_lshrrev_b16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkLshrrevB16Vop3p)),
@@ -121,6 +152,12 @@ VPkLshrrevB16Vop3p::VPkLshrrevB16Vop3p(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkLshrrevB16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkLshrrevB16Vop3p>(opcode);
+}
+} // namespace detail
 
 VPkAshrrevI16Vop3p::VPkAshrrevI16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_ashrrev_i16", reinterpret_cast<const OpEncoding *>(inst),
@@ -135,6 +172,12 @@ VPkAshrrevI16Vop3p::VPkAshrrevI16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkAshrrevI16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkAshrrevI16Vop3p>(opcode);
+}
+} // namespace detail
+
 VPkMaxI16Vop3p::VPkMaxI16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_max_i16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkMaxI16Vop3p)),
@@ -148,6 +191,12 @@ VPkMaxI16Vop3p::VPkMaxI16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkMaxI16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkMaxI16Vop3p>(opcode);
+}
+} // namespace detail
+
 VPkMinI16Vop3p::VPkMinI16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_min_i16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkMinI16Vop3p)),
@@ -160,6 +209,12 @@ VPkMinI16Vop3p::VPkMinI16Vop3p(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkMinI16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkMinI16Vop3p>(opcode);
+}
+} // namespace detail
 
 VPkMadU16Vop3p::VPkMadU16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_mad_u16", reinterpret_cast<const OpEncoding *>(inst),
@@ -176,6 +231,12 @@ VPkMadU16Vop3p::VPkMadU16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkMadU16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkMadU16Vop3p>(opcode);
+}
+} // namespace detail
+
 VPkAddU16Vop3p::VPkAddU16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_add_u16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkAddU16Vop3p)),
@@ -188,6 +249,12 @@ VPkAddU16Vop3p::VPkAddU16Vop3p(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkAddU16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkAddU16Vop3p>(opcode);
+}
+} // namespace detail
 
 VPkSubU16Vop3p::VPkSubU16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_sub_u16", reinterpret_cast<const OpEncoding *>(inst),
@@ -202,6 +269,12 @@ VPkSubU16Vop3p::VPkSubU16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkSubU16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkSubU16Vop3p>(opcode);
+}
+} // namespace detail
+
 VPkMaxU16Vop3p::VPkMaxU16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_max_u16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkMaxU16Vop3p)),
@@ -215,6 +288,12 @@ VPkMaxU16Vop3p::VPkMaxU16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkMaxU16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkMaxU16Vop3p>(opcode);
+}
+} // namespace detail
+
 VPkMinU16Vop3p::VPkMinU16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_min_u16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkMinU16Vop3p)),
@@ -227,6 +306,12 @@ VPkMinU16Vop3p::VPkMinU16Vop3p(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkMinU16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkMinU16Vop3p>(opcode);
+}
+} // namespace detail
 
 VPkFmaF16Vop3p::VPkFmaF16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_fma_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -243,6 +328,12 @@ VPkFmaF16Vop3p::VPkFmaF16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkFmaF16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkFmaF16Vop3p>(opcode);
+}
+} // namespace detail
+
 VPkAddF16Vop3p::VPkAddF16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkAddF16Vop3p)),
@@ -255,6 +346,12 @@ VPkAddF16Vop3p::VPkAddF16Vop3p(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkAddF16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkAddF16Vop3p>(opcode);
+}
+} // namespace detail
 
 VPkMulF16Vop3p::VPkMulF16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_mul_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -269,6 +366,12 @@ VPkMulF16Vop3p::VPkMulF16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkMulF16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkMulF16Vop3p>(opcode);
+}
+} // namespace detail
+
 VPkMinF16Vop3p::VPkMinF16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_min_f16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkMinF16Vop3p)),
@@ -282,6 +385,12 @@ VPkMinF16Vop3p::VPkMinF16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkMinF16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkMinF16Vop3p>(opcode);
+}
+} // namespace detail
+
 VPkMaxF16Vop3p::VPkMaxF16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_max_f16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkMaxF16Vop3p)),
@@ -294,6 +403,12 @@ VPkMaxF16Vop3p::VPkMaxF16Vop3p(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkMaxF16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkMaxF16Vop3p>(opcode);
+}
+} // namespace detail
 
 VDot2F32Bf16Vop3p::VDot2F32Bf16Vop3p(const MachineInst *inst)
     : Vop3p("v_dot2_f32_bf16", reinterpret_cast<const OpEncoding *>(inst),
@@ -310,6 +425,12 @@ VDot2F32Bf16Vop3p::VDot2F32Bf16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVDot2F32Bf16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VDot2F32Bf16Vop3p>(opcode);
+}
+} // namespace detail
+
 VPkMinimum3F16Vop3p::VPkMinimum3F16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_minimum3_f16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkMinimum3F16Vop3p)),
@@ -324,6 +445,12 @@ VPkMinimum3F16Vop3p::VPkMinimum3F16Vop3p(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkMinimum3F16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkMinimum3F16Vop3p>(opcode);
+}
+} // namespace detail
 
 VPkMaximum3F16Vop3p::VPkMaximum3F16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_maximum3_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -340,6 +467,12 @@ VPkMaximum3F16Vop3p::VPkMaximum3F16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkMaximum3F16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkMaximum3F16Vop3p>(opcode);
+}
+} // namespace detail
+
 VMadMixF32Vop3p::VMadMixF32Vop3p(const MachineInst *inst)
     : Vop3p("v_mad_mix_f32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VMadMixF32Vop3p)),
@@ -354,6 +487,12 @@ VMadMixF32Vop3p::VMadMixF32Vop3p(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMadMixF32Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VMadMixF32Vop3p>(opcode);
+}
+} // namespace detail
 
 VMadMixloF16Vop3p::VMadMixloF16Vop3p(const MachineInst *inst)
     : Vop3p("v_mad_mixlo_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -370,6 +509,12 @@ VMadMixloF16Vop3p::VMadMixloF16Vop3p(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMadMixloF16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VMadMixloF16Vop3p>(opcode);
+}
+} // namespace detail
 
 void VMadMixloF16Vop3p::implicit_uses(RegisterSet &uses) const {
   Vop3p::implicit_uses(uses);
@@ -393,6 +538,12 @@ VMadMixhiF16Vop3p::VMadMixhiF16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMadMixhiF16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VMadMixhiF16Vop3p>(opcode);
+}
+} // namespace detail
+
 void VMadMixhiF16Vop3p::implicit_uses(RegisterSet &uses) const {
   Vop3p::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -414,6 +565,12 @@ VDot2F32F16Vop3p::VDot2F32F16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVDot2F32F16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VDot2F32F16Vop3p>(opcode);
+}
+} // namespace detail
+
 VDot2I32I16Vop3p::VDot2I32I16Vop3p(const MachineInst *inst)
     : Vop3p("v_dot2_i32_i16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VDot2I32I16Vop3p)),
@@ -428,6 +585,12 @@ VDot2I32I16Vop3p::VDot2I32I16Vop3p(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVDot2I32I16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VDot2I32I16Vop3p>(opcode);
+}
+} // namespace detail
 
 VDot2U32U16Vop3p::VDot2U32U16Vop3p(const MachineInst *inst)
     : Vop3p("v_dot2_u32_u16", reinterpret_cast<const OpEncoding *>(inst),
@@ -444,6 +607,12 @@ VDot2U32U16Vop3p::VDot2U32U16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVDot2U32U16Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VDot2U32U16Vop3p>(opcode);
+}
+} // namespace detail
+
 VDot4I32I8Vop3p::VDot4I32I8Vop3p(const MachineInst *inst)
     : Vop3p("v_dot4_i32_i8", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VDot4I32I8Vop3p)),
@@ -458,6 +627,12 @@ VDot4I32I8Vop3p::VDot4I32I8Vop3p(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVDot4I32I8Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VDot4I32I8Vop3p>(opcode);
+}
+} // namespace detail
 
 VDot4U32U8Vop3p::VDot4U32U8Vop3p(const MachineInst *inst)
     : Vop3p("v_dot4_u32_u8", reinterpret_cast<const OpEncoding *>(inst),
@@ -474,6 +649,12 @@ VDot4U32U8Vop3p::VDot4U32U8Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVDot4U32U8Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VDot4U32U8Vop3p>(opcode);
+}
+} // namespace detail
+
 VDot8I32I4Vop3p::VDot8I32I4Vop3p(const MachineInst *inst)
     : Vop3p("v_dot8_i32_i4", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VDot8I32I4Vop3p)),
@@ -488,6 +669,12 @@ VDot8I32I4Vop3p::VDot8I32I4Vop3p(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVDot8I32I4Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VDot8I32I4Vop3p>(opcode);
+}
+} // namespace detail
 
 VDot8U32U4Vop3p::VDot8U32U4Vop3p(const MachineInst *inst)
     : Vop3p("v_dot8_u32_u4", reinterpret_cast<const OpEncoding *>(inst),
@@ -504,6 +691,12 @@ VDot8U32U4Vop3p::VDot8U32U4Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVDot8U32U4Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VDot8U32U4Vop3p>(opcode);
+}
+} // namespace detail
+
 VPkFmaF32Vop3p::VPkFmaF32Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_fma_f32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkFmaF32Vop3p)),
@@ -519,6 +712,12 @@ VPkFmaF32Vop3p::VPkFmaF32Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkFmaF32Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkFmaF32Vop3p>(opcode);
+}
+} // namespace detail
+
 VPkMulF32Vop3p::VPkMulF32Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_mul_f32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkMulF32Vop3p)),
@@ -531,6 +730,12 @@ VPkMulF32Vop3p::VPkMulF32Vop3p(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkMulF32Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkMulF32Vop3p>(opcode);
+}
+} // namespace detail
 
 VPkAddF32Vop3p::VPkAddF32Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_add_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -545,6 +750,12 @@ VPkAddF32Vop3p::VPkAddF32Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkAddF32Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkAddF32Vop3p>(opcode);
+}
+} // namespace detail
+
 VPkMovB32Vop3p::VPkMovB32Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_mov_b32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VPkMovB32Vop3p)),
@@ -557,6 +768,12 @@ VPkMovB32Vop3p::VPkMovB32Vop3p(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVPkMovB32Vop3p(const MachineInst *opcode) {
+  return std::make_unique<VPkMovB32Vop3p>(opcode);
+}
+} // namespace detail
 
 VAccvgprReadVop3p::VAccvgprReadVop3p(const MachineInst *inst)
     : Vop3p("v_accvgpr_read", reinterpret_cast<const OpEncoding *>(inst),
@@ -573,6 +790,12 @@ VAccvgprReadVop3p::VAccvgprReadVop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVAccvgprReadVop3p(const MachineInst *opcode) {
+  return std::make_unique<VAccvgprReadVop3p>(opcode);
+}
+} // namespace detail
+
 VAccvgprWriteVop3p::VAccvgprWriteVop3p(const MachineInst *inst)
     : Vop3p("v_accvgpr_write", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VAccvgprWriteVop3p)),
@@ -584,6 +807,12 @@ VAccvgprWriteVop3p::VAccvgprWriteVop3p(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVAccvgprWriteVop3p(const MachineInst *opcode) {
+  return std::make_unique<VAccvgprWriteVop3p>(opcode);
+}
+} // namespace detail
 
 VMfmaF3216x16x128F8f6f4Vop3pMfma::VMfmaF3216x16x128F8f6f4Vop3pMfma(const MachineInst *inst,
                                                                    bool has_vop3px2_prefix)
@@ -627,6 +856,12 @@ VMfmaF3216x16x128F8f6f4Vop3pMfma::VMfmaF3216x16x128F8f6f4Vop3pMfma(const Machine
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF3216x16x128F8f6f4Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF3216x16x128F8f6f4Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VMfmaF3232x32x64F8f6f4Vop3pMfma::VMfmaF3232x32x64F8f6f4Vop3pMfma(const MachineInst *inst,
                                                                  bool has_vop3px2_prefix)
     : Vop3pMfma("v_mfma_f32_32x32x64_f8f6f4", reinterpret_cast<const OpEncoding *>(inst),
@@ -669,6 +904,12 @@ VMfmaF3232x32x64F8f6f4Vop3pMfma::VMfmaF3232x32x64F8f6f4Vop3pMfma(const MachineIn
   }
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF3232x32x64F8f6f4Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF3232x32x64F8f6f4Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VMfmaF3216x16x32Bf16Vop3pMfma::VMfmaF3216x16x32Bf16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_16x16x32_bf16", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VMfmaF3216x16x32Bf16Vop3pMfma)),
@@ -700,6 +941,12 @@ VMfmaF3216x16x32Bf16Vop3pMfma::VMfmaF3216x16x32Bf16Vop3pMfma(const MachineInst *
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF3216x16x32Bf16Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF3216x16x32Bf16Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 VMfmaI3216x16x64I8Vop3pMfma::VMfmaI3216x16x64I8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_i32_16x16x64_i8", reinterpret_cast<const OpEncoding *>(inst),
@@ -733,6 +980,12 @@ VMfmaI3216x16x64I8Vop3pMfma::VMfmaI3216x16x64I8Vop3pMfma(const MachineInst *inst
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaI3216x16x64I8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaI3216x16x64I8Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VMfmaF3232x32x16Bf16Vop3pMfma::VMfmaF3232x32x16Bf16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_32x32x16_bf16", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VMfmaF3232x32x16Bf16Vop3pMfma)),
@@ -764,6 +1017,12 @@ VMfmaF3232x32x16Bf16Vop3pMfma::VMfmaF3232x32x16Bf16Vop3pMfma(const MachineInst *
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF3232x32x16Bf16Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF3232x32x16Bf16Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 VMfmaI3232x32x32I8Vop3pMfma::VMfmaI3232x32x32I8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_i32_32x32x32_i8", reinterpret_cast<const OpEncoding *>(inst),
@@ -797,6 +1056,12 @@ VMfmaI3232x32x32I8Vop3pMfma::VMfmaI3232x32x32I8Vop3pMfma(const MachineInst *inst
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaI3232x32x32I8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaI3232x32x32I8Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VSmfmacF3216x16x64Bf16Vop3pMfma::VSmfmacF3216x16x64Bf16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_16x16x64_bf16", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VSmfmacF3216x16x64Bf16Vop3pMfma)),
@@ -827,6 +1092,12 @@ VSmfmacF3216x16x64Bf16Vop3pMfma::VSmfmacF3216x16x64Bf16Vop3pMfma(const MachineIn
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacF3216x16x64Bf16Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacF3216x16x64Bf16Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 VSmfmacI3216x16x128I8Vop3pMfma::VSmfmacI3216x16x128I8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_i32_16x16x128_i8", reinterpret_cast<const OpEncoding *>(inst),
@@ -859,6 +1130,12 @@ VSmfmacI3216x16x128I8Vop3pMfma::VSmfmacI3216x16x128I8Vop3pMfma(const MachineInst
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacI3216x16x128I8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacI3216x16x128I8Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VSmfmacF3216x16x128Bf8Bf8Vop3pMfma::VSmfmacF3216x16x128Bf8Bf8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_16x16x128_bf8_bf8", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VSmfmacF3216x16x128Bf8Bf8Vop3pMfma)),
@@ -889,6 +1166,12 @@ VSmfmacF3216x16x128Bf8Bf8Vop3pMfma::VSmfmacF3216x16x128Bf8Bf8Vop3pMfma(const Mac
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacF3216x16x128Bf8Bf8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacF3216x16x128Bf8Bf8Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 VSmfmacF3216x16x128Bf8Fp8Vop3pMfma::VSmfmacF3216x16x128Bf8Fp8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_16x16x128_bf8_fp8", reinterpret_cast<const OpEncoding *>(inst),
@@ -921,6 +1204,12 @@ VSmfmacF3216x16x128Bf8Fp8Vop3pMfma::VSmfmacF3216x16x128Bf8Fp8Vop3pMfma(const Mac
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacF3216x16x128Bf8Fp8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacF3216x16x128Bf8Fp8Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VSmfmacF3216x16x128Fp8Bf8Vop3pMfma::VSmfmacF3216x16x128Fp8Bf8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_16x16x128_fp8_bf8", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VSmfmacF3216x16x128Fp8Bf8Vop3pMfma)),
@@ -951,6 +1240,12 @@ VSmfmacF3216x16x128Fp8Bf8Vop3pMfma::VSmfmacF3216x16x128Fp8Bf8Vop3pMfma(const Mac
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacF3216x16x128Fp8Bf8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacF3216x16x128Fp8Bf8Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 VMfmaF3232x32x12bF32Vop3pMfma::VMfmaF3232x32x12bF32Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_32x32x1_2b_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -984,6 +1279,12 @@ VMfmaF3232x32x12bF32Vop3pMfma::VMfmaF3232x32x12bF32Vop3pMfma(const MachineInst *
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF3232x32x12bF32Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF3232x32x12bF32Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VMfmaF3216x16x14bF32Vop3pMfma::VMfmaF3216x16x14bF32Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_16x16x1_4b_f32", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VMfmaF3216x16x14bF32Vop3pMfma)),
@@ -1015,6 +1316,12 @@ VMfmaF3216x16x14bF32Vop3pMfma::VMfmaF3216x16x14bF32Vop3pMfma(const MachineInst *
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF3216x16x14bF32Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF3216x16x14bF32Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 VMfmaF324x4x116bF32Vop3pMfma::VMfmaF324x4x116bF32Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_4x4x1_16b_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1048,6 +1355,12 @@ VMfmaF324x4x116bF32Vop3pMfma::VMfmaF324x4x116bF32Vop3pMfma(const MachineInst *in
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF324x4x116bF32Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF324x4x116bF32Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VSmfmacF3216x16x128Fp8Fp8Vop3pMfma::VSmfmacF3216x16x128Fp8Fp8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_16x16x128_fp8_fp8", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VSmfmacF3216x16x128Fp8Fp8Vop3pMfma)),
@@ -1078,6 +1391,12 @@ VSmfmacF3216x16x128Fp8Fp8Vop3pMfma::VSmfmacF3216x16x128Fp8Fp8Vop3pMfma(const Mac
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacF3216x16x128Fp8Fp8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacF3216x16x128Fp8Fp8Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 VMfmaF3232x32x2F32Vop3pMfma::VMfmaF3232x32x2F32Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_32x32x2_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1111,6 +1430,12 @@ VMfmaF3232x32x2F32Vop3pMfma::VMfmaF3232x32x2F32Vop3pMfma(const MachineInst *inst
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF3232x32x2F32Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF3232x32x2F32Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VMfmaF3216x16x4F32Vop3pMfma::VMfmaF3216x16x4F32Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_16x16x4_f32", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VMfmaF3216x16x4F32Vop3pMfma)),
@@ -1143,6 +1468,12 @@ VMfmaF3216x16x4F32Vop3pMfma::VMfmaF3216x16x4F32Vop3pMfma(const MachineInst *inst
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF3216x16x4F32Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF3216x16x4F32Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VSmfmacF3232x32x32Bf16Vop3pMfma::VSmfmacF3232x32x32Bf16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_32x32x32_bf16", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VSmfmacF3232x32x32Bf16Vop3pMfma)),
@@ -1174,6 +1505,12 @@ VSmfmacF3232x32x32Bf16Vop3pMfma::VSmfmacF3232x32x32Bf16Vop3pMfma(const MachineIn
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacF3232x32x32Bf16Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacF3232x32x32Bf16Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VSmfmacI3232x32x64I8Vop3pMfma::VSmfmacI3232x32x64I8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_i32_32x32x64_i8", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VSmfmacI3232x32x64I8Vop3pMfma)),
@@ -1204,6 +1541,12 @@ VSmfmacI3232x32x64I8Vop3pMfma::VSmfmacI3232x32x64I8Vop3pMfma(const MachineInst *
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacI3232x32x64I8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacI3232x32x64I8Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 VMfmaF3232x32x42bF16Vop3pMfma::VMfmaF3232x32x42bF16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_32x32x4_2b_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1237,6 +1580,12 @@ VMfmaF3232x32x42bF16Vop3pMfma::VMfmaF3232x32x42bF16Vop3pMfma(const MachineInst *
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF3232x32x42bF16Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF3232x32x42bF16Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VMfmaF3216x16x44bF16Vop3pMfma::VMfmaF3216x16x44bF16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_16x16x4_4b_f16", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VMfmaF3216x16x44bF16Vop3pMfma)),
@@ -1268,6 +1617,12 @@ VMfmaF3216x16x44bF16Vop3pMfma::VMfmaF3216x16x44bF16Vop3pMfma(const MachineInst *
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF3216x16x44bF16Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF3216x16x44bF16Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 VMfmaF324x4x416bF16Vop3pMfma::VMfmaF324x4x416bF16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_4x4x4_16b_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1301,6 +1656,12 @@ VMfmaF324x4x416bF16Vop3pMfma::VMfmaF324x4x416bF16Vop3pMfma(const MachineInst *in
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF324x4x416bF16Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF324x4x416bF16Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VSmfmacF3232x32x64Bf8Bf8Vop3pMfma::VSmfmacF3232x32x64Bf8Bf8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_32x32x64_bf8_bf8", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VSmfmacF3232x32x64Bf8Bf8Vop3pMfma)),
@@ -1331,6 +1692,12 @@ VSmfmacF3232x32x64Bf8Bf8Vop3pMfma::VSmfmacF3232x32x64Bf8Bf8Vop3pMfma(const Machi
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacF3232x32x64Bf8Bf8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacF3232x32x64Bf8Bf8Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 VMfmaF3232x32x8F16Vop3pMfma::VMfmaF3232x32x8F16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_32x32x8_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1364,6 +1731,12 @@ VMfmaF3232x32x8F16Vop3pMfma::VMfmaF3232x32x8F16Vop3pMfma(const MachineInst *inst
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF3232x32x8F16Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF3232x32x8F16Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VMfmaF3216x16x16F16Vop3pMfma::VMfmaF3216x16x16F16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_16x16x16_f16", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VMfmaF3216x16x16F16Vop3pMfma)),
@@ -1396,6 +1769,12 @@ VMfmaF3216x16x16F16Vop3pMfma::VMfmaF3216x16x16F16Vop3pMfma(const MachineInst *in
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF3216x16x16F16Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF3216x16x16F16Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VSmfmacF3232x32x64Bf8Fp8Vop3pMfma::VSmfmacF3232x32x64Bf8Fp8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_32x32x64_bf8_fp8", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VSmfmacF3232x32x64Bf8Fp8Vop3pMfma)),
@@ -1427,6 +1806,12 @@ VSmfmacF3232x32x64Bf8Fp8Vop3pMfma::VSmfmacF3232x32x64Bf8Fp8Vop3pMfma(const Machi
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacF3232x32x64Bf8Fp8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacF3232x32x64Bf8Fp8Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VSmfmacF3232x32x64Fp8Bf8Vop3pMfma::VSmfmacF3232x32x64Fp8Bf8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_32x32x64_fp8_bf8", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VSmfmacF3232x32x64Fp8Bf8Vop3pMfma)),
@@ -1457,6 +1842,12 @@ VSmfmacF3232x32x64Fp8Bf8Vop3pMfma::VSmfmacF3232x32x64Fp8Bf8Vop3pMfma(const Machi
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacF3232x32x64Fp8Bf8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacF3232x32x64Fp8Bf8Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 VMfmaI3232x32x42bI8Vop3pMfma::VMfmaI3232x32x42bI8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_i32_32x32x4_2b_i8", reinterpret_cast<const OpEncoding *>(inst),
@@ -1490,6 +1881,12 @@ VMfmaI3232x32x42bI8Vop3pMfma::VMfmaI3232x32x42bI8Vop3pMfma(const MachineInst *in
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaI3232x32x42bI8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaI3232x32x42bI8Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VMfmaI3216x16x44bI8Vop3pMfma::VMfmaI3216x16x44bI8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_i32_16x16x4_4b_i8", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VMfmaI3216x16x44bI8Vop3pMfma)),
@@ -1521,6 +1918,12 @@ VMfmaI3216x16x44bI8Vop3pMfma::VMfmaI3216x16x44bI8Vop3pMfma(const MachineInst *in
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaI3216x16x44bI8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaI3216x16x44bI8Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 VMfmaI324x4x416bI8Vop3pMfma::VMfmaI324x4x416bI8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_i32_4x4x4_16b_i8", reinterpret_cast<const OpEncoding *>(inst),
@@ -1554,6 +1957,12 @@ VMfmaI324x4x416bI8Vop3pMfma::VMfmaI324x4x416bI8Vop3pMfma(const MachineInst *inst
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaI324x4x416bI8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaI324x4x416bI8Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VSmfmacF3232x32x64Fp8Fp8Vop3pMfma::VSmfmacF3232x32x64Fp8Fp8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_32x32x64_fp8_fp8", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VSmfmacF3232x32x64Fp8Fp8Vop3pMfma)),
@@ -1584,6 +1993,12 @@ VSmfmacF3232x32x64Fp8Fp8Vop3pMfma::VSmfmacF3232x32x64Fp8Fp8Vop3pMfma(const Machi
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacF3232x32x64Fp8Fp8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacF3232x32x64Fp8Fp8Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 VMfmaF3216x16x32F16Vop3pMfma::VMfmaF3216x16x32F16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_16x16x32_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1617,6 +2032,12 @@ VMfmaF3216x16x32F16Vop3pMfma::VMfmaF3216x16x32F16Vop3pMfma(const MachineInst *in
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF3216x16x32F16Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF3216x16x32F16Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VMfmaF3232x32x16F16Vop3pMfma::VMfmaF3232x32x16F16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_32x32x16_f16", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VMfmaF3232x32x16F16Vop3pMfma)),
@@ -1648,6 +2069,12 @@ VMfmaF3232x32x16F16Vop3pMfma::VMfmaF3232x32x16F16Vop3pMfma(const MachineInst *in
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF3232x32x16F16Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF3232x32x16F16Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 VMfmaI3232x32x16I8Vop3pMfma::VMfmaI3232x32x16I8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_i32_32x32x16_i8", reinterpret_cast<const OpEncoding *>(inst),
@@ -1681,6 +2108,12 @@ VMfmaI3232x32x16I8Vop3pMfma::VMfmaI3232x32x16I8Vop3pMfma(const MachineInst *inst
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaI3232x32x16I8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaI3232x32x16I8Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VMfmaI3216x16x32I8Vop3pMfma::VMfmaI3216x16x32I8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_i32_16x16x32_i8", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VMfmaI3216x16x32I8Vop3pMfma)),
@@ -1713,6 +2146,12 @@ VMfmaI3216x16x32I8Vop3pMfma::VMfmaI3216x16x32I8Vop3pMfma(const MachineInst *inst
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaI3216x16x32I8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaI3216x16x32I8Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VSmfmacF3216x16x64F16Vop3pMfma::VSmfmacF3216x16x64F16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_16x16x64_f16", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VSmfmacF3216x16x64F16Vop3pMfma)),
@@ -1744,6 +2183,12 @@ VSmfmacF3216x16x64F16Vop3pMfma::VSmfmacF3216x16x64F16Vop3pMfma(const MachineInst
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacF3216x16x64F16Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacF3216x16x64F16Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VSmfmacF3232x32x32F16Vop3pMfma::VSmfmacF3232x32x32F16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_32x32x32_f16", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VSmfmacF3232x32x32F16Vop3pMfma)),
@@ -1774,6 +2219,12 @@ VSmfmacF3232x32x32F16Vop3pMfma::VSmfmacF3232x32x32F16Vop3pMfma(const MachineInst
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacF3232x32x32F16Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacF3232x32x32F16Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 VMfmaF3232x32x42bBf16Vop3pMfma::VMfmaF3232x32x42bBf16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_32x32x4_2b_bf16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1807,6 +2258,12 @@ VMfmaF3232x32x42bBf16Vop3pMfma::VMfmaF3232x32x42bBf16Vop3pMfma(const MachineInst
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF3232x32x42bBf16Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF3232x32x42bBf16Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VMfmaF3216x16x44bBf16Vop3pMfma::VMfmaF3216x16x44bBf16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_16x16x4_4b_bf16", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VMfmaF3216x16x44bBf16Vop3pMfma)),
@@ -1838,6 +2295,12 @@ VMfmaF3216x16x44bBf16Vop3pMfma::VMfmaF3216x16x44bBf16Vop3pMfma(const MachineInst
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF3216x16x44bBf16Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF3216x16x44bBf16Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 VMfmaF324x4x416bBf16Vop3pMfma::VMfmaF324x4x416bBf16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_4x4x4_16b_bf16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1871,6 +2334,12 @@ VMfmaF324x4x416bBf16Vop3pMfma::VMfmaF324x4x416bBf16Vop3pMfma(const MachineInst *
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF324x4x416bBf16Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF324x4x416bBf16Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VMfmaF3232x32x8Bf16Vop3pMfma::VMfmaF3232x32x8Bf16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_32x32x8_bf16", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VMfmaF3232x32x8Bf16Vop3pMfma)),
@@ -1902,6 +2371,12 @@ VMfmaF3232x32x8Bf16Vop3pMfma::VMfmaF3232x32x8Bf16Vop3pMfma(const MachineInst *in
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF3232x32x8Bf16Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF3232x32x8Bf16Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 VMfmaF3216x16x16Bf16Vop3pMfma::VMfmaF3216x16x16Bf16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_16x16x16_bf16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1935,6 +2410,12 @@ VMfmaF3216x16x16Bf16Vop3pMfma::VMfmaF3216x16x16Bf16Vop3pMfma(const MachineInst *
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF3216x16x16Bf16Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF3216x16x16Bf16Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VSmfmacF3216x16x32F16Vop3pMfma::VSmfmacF3216x16x32F16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_16x16x32_f16", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VSmfmacF3216x16x32F16Vop3pMfma)),
@@ -1965,6 +2446,12 @@ VSmfmacF3216x16x32F16Vop3pMfma::VSmfmacF3216x16x32F16Vop3pMfma(const MachineInst
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacF3216x16x32F16Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacF3216x16x32F16Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 VSmfmacF3232x32x16F16Vop3pMfma::VSmfmacF3232x32x16F16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_32x32x16_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1997,6 +2484,12 @@ VSmfmacF3232x32x16F16Vop3pMfma::VSmfmacF3232x32x16F16Vop3pMfma(const MachineInst
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacF3232x32x16F16Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacF3232x32x16F16Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VSmfmacF3216x16x32Bf16Vop3pMfma::VSmfmacF3216x16x32Bf16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_16x16x32_bf16", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VSmfmacF3216x16x32Bf16Vop3pMfma)),
@@ -2027,6 +2520,12 @@ VSmfmacF3216x16x32Bf16Vop3pMfma::VSmfmacF3216x16x32Bf16Vop3pMfma(const MachineIn
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacF3216x16x32Bf16Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacF3216x16x32Bf16Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 VSmfmacF3232x32x16Bf16Vop3pMfma::VSmfmacF3232x32x16Bf16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_32x32x16_bf16", reinterpret_cast<const OpEncoding *>(inst),
@@ -2059,6 +2558,12 @@ VSmfmacF3232x32x16Bf16Vop3pMfma::VSmfmacF3232x32x16Bf16Vop3pMfma(const MachineIn
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacF3232x32x16Bf16Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacF3232x32x16Bf16Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VSmfmacI3216x16x64I8Vop3pMfma::VSmfmacI3216x16x64I8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_i32_16x16x64_i8", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VSmfmacI3216x16x64I8Vop3pMfma)),
@@ -2090,6 +2595,12 @@ VSmfmacI3216x16x64I8Vop3pMfma::VSmfmacI3216x16x64I8Vop3pMfma(const MachineInst *
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacI3216x16x64I8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacI3216x16x64I8Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VSmfmacI3232x32x32I8Vop3pMfma::VSmfmacI3232x32x32I8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_i32_32x32x32_i8", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VSmfmacI3232x32x32I8Vop3pMfma)),
@@ -2120,6 +2631,12 @@ VSmfmacI3232x32x32I8Vop3pMfma::VSmfmacI3232x32x32I8Vop3pMfma(const MachineInst *
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacI3232x32x32I8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacI3232x32x32I8Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 VMfmaF6416x16x4F64Vop3pMfma::VMfmaF6416x16x4F64Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f64_16x16x4_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -2153,6 +2670,12 @@ VMfmaF6416x16x4F64Vop3pMfma::VMfmaF6416x16x4F64Vop3pMfma(const MachineInst *inst
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF6416x16x4F64Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF6416x16x4F64Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VMfmaF644x4x44bF64Vop3pMfma::VMfmaF644x4x44bF64Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f64_4x4x4_4b_f64", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VMfmaF644x4x44bF64Vop3pMfma)),
@@ -2184,6 +2707,12 @@ VMfmaF644x4x44bF64Vop3pMfma::VMfmaF644x4x44bF64Vop3pMfma(const MachineInst *inst
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF644x4x44bF64Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF644x4x44bF64Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 VMfmaF3216x16x32Bf8Bf8Vop3pMfma::VMfmaF3216x16x32Bf8Bf8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_16x16x32_bf8_bf8", reinterpret_cast<const OpEncoding *>(inst),
@@ -2217,6 +2746,12 @@ VMfmaF3216x16x32Bf8Bf8Vop3pMfma::VMfmaF3216x16x32Bf8Bf8Vop3pMfma(const MachineIn
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF3216x16x32Bf8Bf8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF3216x16x32Bf8Bf8Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VMfmaF3216x16x32Bf8Fp8Vop3pMfma::VMfmaF3216x16x32Bf8Fp8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_16x16x32_bf8_fp8", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VMfmaF3216x16x32Bf8Fp8Vop3pMfma)),
@@ -2248,6 +2783,12 @@ VMfmaF3216x16x32Bf8Fp8Vop3pMfma::VMfmaF3216x16x32Bf8Fp8Vop3pMfma(const MachineIn
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF3216x16x32Bf8Fp8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF3216x16x32Bf8Fp8Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 VMfmaF3216x16x32Fp8Bf8Vop3pMfma::VMfmaF3216x16x32Fp8Bf8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_16x16x32_fp8_bf8", reinterpret_cast<const OpEncoding *>(inst),
@@ -2281,6 +2822,12 @@ VMfmaF3216x16x32Fp8Bf8Vop3pMfma::VMfmaF3216x16x32Fp8Bf8Vop3pMfma(const MachineIn
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF3216x16x32Fp8Bf8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF3216x16x32Fp8Bf8Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VMfmaF3216x16x32Fp8Fp8Vop3pMfma::VMfmaF3216x16x32Fp8Fp8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_16x16x32_fp8_fp8", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VMfmaF3216x16x32Fp8Fp8Vop3pMfma)),
@@ -2312,6 +2859,12 @@ VMfmaF3216x16x32Fp8Fp8Vop3pMfma::VMfmaF3216x16x32Fp8Fp8Vop3pMfma(const MachineIn
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF3216x16x32Fp8Fp8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF3216x16x32Fp8Fp8Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 VMfmaF3232x32x16Bf8Bf8Vop3pMfma::VMfmaF3232x32x16Bf8Bf8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_32x32x16_bf8_bf8", reinterpret_cast<const OpEncoding *>(inst),
@@ -2345,6 +2898,12 @@ VMfmaF3232x32x16Bf8Bf8Vop3pMfma::VMfmaF3232x32x16Bf8Bf8Vop3pMfma(const MachineIn
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF3232x32x16Bf8Bf8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF3232x32x16Bf8Bf8Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VMfmaF3232x32x16Bf8Fp8Vop3pMfma::VMfmaF3232x32x16Bf8Fp8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_32x32x16_bf8_fp8", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VMfmaF3232x32x16Bf8Fp8Vop3pMfma)),
@@ -2376,6 +2935,12 @@ VMfmaF3232x32x16Bf8Fp8Vop3pMfma::VMfmaF3232x32x16Bf8Fp8Vop3pMfma(const MachineIn
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF3232x32x16Bf8Fp8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF3232x32x16Bf8Fp8Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 VMfmaF3232x32x16Fp8Bf8Vop3pMfma::VMfmaF3232x32x16Fp8Bf8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_32x32x16_fp8_bf8", reinterpret_cast<const OpEncoding *>(inst),
@@ -2409,6 +2974,12 @@ VMfmaF3232x32x16Fp8Bf8Vop3pMfma::VMfmaF3232x32x16Fp8Bf8Vop3pMfma(const MachineIn
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF3232x32x16Fp8Bf8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF3232x32x16Fp8Bf8Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VMfmaF3232x32x16Fp8Fp8Vop3pMfma::VMfmaF3232x32x16Fp8Fp8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_32x32x16_fp8_fp8", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VMfmaF3232x32x16Fp8Fp8Vop3pMfma)),
@@ -2441,6 +3012,12 @@ VMfmaF3232x32x16Fp8Fp8Vop3pMfma::VMfmaF3232x32x16Fp8Fp8Vop3pMfma(const MachineIn
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVMfmaF3232x32x16Fp8Fp8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VMfmaF3232x32x16Fp8Fp8Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VSmfmacF3216x16x64Bf8Bf8Vop3pMfma::VSmfmacF3216x16x64Bf8Bf8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_16x16x64_bf8_bf8", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VSmfmacF3216x16x64Bf8Bf8Vop3pMfma)),
@@ -2471,6 +3048,12 @@ VSmfmacF3216x16x64Bf8Bf8Vop3pMfma::VSmfmacF3216x16x64Bf8Bf8Vop3pMfma(const Machi
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacF3216x16x64Bf8Bf8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacF3216x16x64Bf8Bf8Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 VSmfmacF3216x16x64Bf8Fp8Vop3pMfma::VSmfmacF3216x16x64Bf8Fp8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_16x16x64_bf8_fp8", reinterpret_cast<const OpEncoding *>(inst),
@@ -2503,6 +3086,12 @@ VSmfmacF3216x16x64Bf8Fp8Vop3pMfma::VSmfmacF3216x16x64Bf8Fp8Vop3pMfma(const Machi
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacF3216x16x64Bf8Fp8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacF3216x16x64Bf8Fp8Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VSmfmacF3216x16x64Fp8Bf8Vop3pMfma::VSmfmacF3216x16x64Fp8Bf8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_16x16x64_fp8_bf8", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VSmfmacF3216x16x64Fp8Bf8Vop3pMfma)),
@@ -2533,6 +3122,12 @@ VSmfmacF3216x16x64Fp8Bf8Vop3pMfma::VSmfmacF3216x16x64Fp8Bf8Vop3pMfma(const Machi
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacF3216x16x64Fp8Bf8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacF3216x16x64Fp8Bf8Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 VSmfmacF3216x16x64Fp8Fp8Vop3pMfma::VSmfmacF3216x16x64Fp8Fp8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_16x16x64_fp8_fp8", reinterpret_cast<const OpEncoding *>(inst),
@@ -2565,6 +3160,12 @@ VSmfmacF3216x16x64Fp8Fp8Vop3pMfma::VSmfmacF3216x16x64Fp8Fp8Vop3pMfma(const Machi
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacF3216x16x64Fp8Fp8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacF3216x16x64Fp8Fp8Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VSmfmacF3232x32x32Bf8Bf8Vop3pMfma::VSmfmacF3232x32x32Bf8Bf8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_32x32x32_bf8_bf8", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VSmfmacF3232x32x32Bf8Bf8Vop3pMfma)),
@@ -2595,6 +3196,12 @@ VSmfmacF3232x32x32Bf8Bf8Vop3pMfma::VSmfmacF3232x32x32Bf8Bf8Vop3pMfma(const Machi
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacF3232x32x32Bf8Bf8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacF3232x32x32Bf8Bf8Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 VSmfmacF3232x32x32Bf8Fp8Vop3pMfma::VSmfmacF3232x32x32Bf8Fp8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_32x32x32_bf8_fp8", reinterpret_cast<const OpEncoding *>(inst),
@@ -2627,6 +3234,12 @@ VSmfmacF3232x32x32Bf8Fp8Vop3pMfma::VSmfmacF3232x32x32Bf8Fp8Vop3pMfma(const Machi
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacF3232x32x32Bf8Fp8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacF3232x32x32Bf8Fp8Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VSmfmacF3232x32x32Fp8Bf8Vop3pMfma::VSmfmacF3232x32x32Fp8Bf8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_32x32x32_fp8_bf8", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VSmfmacF3232x32x32Fp8Bf8Vop3pMfma)),
@@ -2658,6 +3271,12 @@ VSmfmacF3232x32x32Fp8Bf8Vop3pMfma::VSmfmacF3232x32x32Fp8Bf8Vop3pMfma(const Machi
   flags_ |= MFMA;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacF3232x32x32Fp8Bf8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacF3232x32x32Fp8Bf8Vop3pMfma>(opcode);
+}
+} // namespace detail
+
 VSmfmacF3232x32x32Fp8Fp8Vop3pMfma::VSmfmacF3232x32x32Fp8Fp8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_32x32x32_fp8_fp8", reinterpret_cast<const OpEncoding *>(inst),
                 selected_exec_fn(InstructionExecutionId::VSmfmacF3232x32x32Fp8Fp8Vop3pMfma)),
@@ -2688,6 +3307,12 @@ VSmfmacF3232x32x32Fp8Fp8Vop3pMfma::VSmfmacF3232x32x32Fp8Fp8Vop3pMfma(const Machi
   num_dst_ = 1;
   flags_ |= MFMA;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeVSmfmacF3232x32x32Fp8Fp8Vop3pMfma(const MachineInst *opcode) {
+  return std::make_unique<VSmfmacF3232x32x32Fp8Fp8Vop3pMfma>(opcode);
+}
+} // namespace detail
 
 } // namespace cdna4
 } // namespace rocjitsu

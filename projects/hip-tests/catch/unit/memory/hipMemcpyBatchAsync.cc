@@ -565,8 +565,8 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2H_Functional) {
 /**
  * Test Description
  * ------------------------
- * - Verifies H2H batch copies across generated host allocation types, copy
- * counts, and copy sizes.
+ * - Verifies H2H batch copies across independently generated source and
+ * destination host allocation types and copy counts.
  * Test source
  * ------------------------
  * - catch/unit/memory/hipMemcpyBatchAsync.cc
@@ -575,14 +575,15 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2H_Functional) {
  *  - HIP_VERSION >= 7.1
  */
 HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_H2H_Functional) {
-  const LinearAllocs host_alloc_type = GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc);
+  const LinearAllocs src_alloc_type = GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc);
+  const LinearAllocs dst_alloc_type = GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc);
   const size_t copy_count = GENERATE(1, 8);
   const size_t copy_size = kSmallCopySize;
 
   BatchConfig config{copy_count, copy_size};
   StreamGuard stream_guard(Streams::created);
-  std::vector<LinearAllocGuard<int>> src = AllocateBatchBuffers(host_alloc_type, config);
-  std::vector<LinearAllocGuard<int>> dst = AllocateBatchBuffers(host_alloc_type, config);
+  std::vector<LinearAllocGuard<int>> src = AllocateBatchBuffers(src_alloc_type, config);
+  std::vector<LinearAllocGuard<int>> dst = AllocateBatchBuffers(dst_alloc_type, config);
   std::vector<void*> src_ptrs = MakeBatchPtrs(src);
   std::vector<void*> dst_ptrs = MakeBatchPtrs(dst);
   std::vector<size_t> sizes(config.copy_count, config.copy_size);

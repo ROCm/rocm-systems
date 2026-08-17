@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna4 {
@@ -35,6 +36,12 @@ FlatLoadU8Vflat::FlatLoadU8Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatLoadU8Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatLoadU8Vflat>(opcode);
+}
+} // namespace detail
+
 FlatLoadI8Vflat::FlatLoadI8Vflat(const MachineInst *inst)
     : Vflat("flat_load_i8", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatLoadI8Vflat)),
@@ -50,6 +57,12 @@ FlatLoadI8Vflat::FlatLoadI8Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatLoadI8Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatLoadI8Vflat>(opcode);
+}
+} // namespace detail
 
 FlatLoadU16Vflat::FlatLoadU16Vflat(const MachineInst *inst)
     : Vflat("flat_load_u16", reinterpret_cast<const OpEncoding *>(inst),
@@ -67,6 +80,12 @@ FlatLoadU16Vflat::FlatLoadU16Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatLoadU16Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatLoadU16Vflat>(opcode);
+}
+} // namespace detail
+
 FlatLoadI16Vflat::FlatLoadI16Vflat(const MachineInst *inst)
     : Vflat("flat_load_i16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatLoadI16Vflat)),
@@ -82,6 +101,12 @@ FlatLoadI16Vflat::FlatLoadI16Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatLoadI16Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatLoadI16Vflat>(opcode);
+}
+} // namespace detail
 
 FlatLoadB32Vflat::FlatLoadB32Vflat(const MachineInst *inst)
     : Vflat("flat_load_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -99,6 +124,12 @@ FlatLoadB32Vflat::FlatLoadB32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatLoadB32Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatLoadB32Vflat>(opcode);
+}
+} // namespace detail
+
 FlatLoadB64Vflat::FlatLoadB64Vflat(const MachineInst *inst)
     : Vflat("flat_load_b64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatLoadB64Vflat)),
@@ -114,6 +145,12 @@ FlatLoadB64Vflat::FlatLoadB64Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatLoadB64Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatLoadB64Vflat>(opcode);
+}
+} // namespace detail
 
 FlatLoadB96Vflat::FlatLoadB96Vflat(const MachineInst *inst)
     : Vflat("flat_load_b96", reinterpret_cast<const OpEncoding *>(inst),
@@ -131,6 +168,12 @@ FlatLoadB96Vflat::FlatLoadB96Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatLoadB96Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatLoadB96Vflat>(opcode);
+}
+} // namespace detail
+
 FlatLoadB128Vflat::FlatLoadB128Vflat(const MachineInst *inst)
     : Vflat("flat_load_b128", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatLoadB128Vflat)),
@@ -146,6 +189,12 @@ FlatLoadB128Vflat::FlatLoadB128Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatLoadB128Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatLoadB128Vflat>(opcode);
+}
+} // namespace detail
 
 FlatStoreB8Vflat::FlatStoreB8Vflat(const MachineInst *inst)
     : Vflat("flat_store_b8", reinterpret_cast<const OpEncoding *>(inst),
@@ -163,6 +212,12 @@ FlatStoreB8Vflat::FlatStoreB8Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatStoreB8Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatStoreB8Vflat>(opcode);
+}
+} // namespace detail
+
 FlatStoreB16Vflat::FlatStoreB16Vflat(const MachineInst *inst)
     : Vflat("flat_store_b16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatStoreB16Vflat)),
@@ -178,6 +233,12 @@ FlatStoreB16Vflat::FlatStoreB16Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatStoreB16Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatStoreB16Vflat>(opcode);
+}
+} // namespace detail
 
 FlatStoreB32Vflat::FlatStoreB32Vflat(const MachineInst *inst)
     : Vflat("flat_store_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -195,6 +256,12 @@ FlatStoreB32Vflat::FlatStoreB32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatStoreB32Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatStoreB32Vflat>(opcode);
+}
+} // namespace detail
+
 FlatStoreB64Vflat::FlatStoreB64Vflat(const MachineInst *inst)
     : Vflat("flat_store_b64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatStoreB64Vflat)),
@@ -210,6 +277,12 @@ FlatStoreB64Vflat::FlatStoreB64Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatStoreB64Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatStoreB64Vflat>(opcode);
+}
+} // namespace detail
 
 FlatStoreB96Vflat::FlatStoreB96Vflat(const MachineInst *inst)
     : Vflat("flat_store_b96", reinterpret_cast<const OpEncoding *>(inst),
@@ -227,6 +300,12 @@ FlatStoreB96Vflat::FlatStoreB96Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatStoreB96Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatStoreB96Vflat>(opcode);
+}
+} // namespace detail
+
 FlatStoreB128Vflat::FlatStoreB128Vflat(const MachineInst *inst)
     : Vflat("flat_store_b128", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatStoreB128Vflat)),
@@ -243,6 +322,12 @@ FlatStoreB128Vflat::FlatStoreB128Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatStoreB128Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatStoreB128Vflat>(opcode);
+}
+} // namespace detail
+
 FlatLoadD16U8Vflat::FlatLoadD16U8Vflat(const MachineInst *inst)
     : Vflat("flat_load_d16_u8", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatLoadD16U8Vflat)),
@@ -258,6 +343,12 @@ FlatLoadD16U8Vflat::FlatLoadD16U8Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatLoadD16U8Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatLoadD16U8Vflat>(opcode);
+}
+} // namespace detail
 
 void FlatLoadD16U8Vflat::implicit_uses(RegisterSet &uses) const {
   Vflat::implicit_uses(uses);
@@ -281,6 +372,12 @@ FlatLoadD16I8Vflat::FlatLoadD16I8Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatLoadD16I8Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatLoadD16I8Vflat>(opcode);
+}
+} // namespace detail
+
 void FlatLoadD16I8Vflat::implicit_uses(RegisterSet &uses) const {
   Vflat::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -302,6 +399,12 @@ FlatLoadD16B16Vflat::FlatLoadD16B16Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatLoadD16B16Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatLoadD16B16Vflat>(opcode);
+}
+} // namespace detail
 
 void FlatLoadD16B16Vflat::implicit_uses(RegisterSet &uses) const {
   Vflat::implicit_uses(uses);
@@ -325,6 +428,12 @@ FlatLoadD16HiU8Vflat::FlatLoadD16HiU8Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatLoadD16HiU8Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatLoadD16HiU8Vflat>(opcode);
+}
+} // namespace detail
+
 void FlatLoadD16HiU8Vflat::implicit_uses(RegisterSet &uses) const {
   Vflat::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -346,6 +455,12 @@ FlatLoadD16HiI8Vflat::FlatLoadD16HiI8Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatLoadD16HiI8Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatLoadD16HiI8Vflat>(opcode);
+}
+} // namespace detail
 
 void FlatLoadD16HiI8Vflat::implicit_uses(RegisterSet &uses) const {
   Vflat::implicit_uses(uses);
@@ -369,6 +484,12 @@ FlatLoadD16HiB16Vflat::FlatLoadD16HiB16Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatLoadD16HiB16Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatLoadD16HiB16Vflat>(opcode);
+}
+} // namespace detail
+
 void FlatLoadD16HiB16Vflat::implicit_uses(RegisterSet &uses) const {
   Vflat::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -391,6 +512,12 @@ FlatStoreD16HiB8Vflat::FlatStoreD16HiB8Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatStoreD16HiB8Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatStoreD16HiB8Vflat>(opcode);
+}
+} // namespace detail
+
 FlatStoreD16HiB16Vflat::FlatStoreD16HiB16Vflat(const MachineInst *inst)
     : Vflat("flat_store_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatStoreD16HiB16Vflat)),
@@ -406,6 +533,12 @@ FlatStoreD16HiB16Vflat::FlatStoreD16HiB16Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatStoreD16HiB16Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatStoreD16HiB16Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicSwapB32Vflat::FlatAtomicSwapB32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_swap_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -428,6 +561,12 @@ FlatAtomicSwapB32Vflat::FlatAtomicSwapB32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicSwapB32Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicSwapB32Vflat>(opcode);
+}
+} // namespace detail
+
 FlatAtomicCmpswapB32Vflat::FlatAtomicCmpswapB32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_cmpswap_b32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicCmpswapB32Vflat)),
@@ -448,6 +587,12 @@ FlatAtomicCmpswapB32Vflat::FlatAtomicCmpswapB32Vflat(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicCmpswapB32Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicCmpswapB32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicAddU32Vflat::FlatAtomicAddU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_add_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -470,6 +615,12 @@ FlatAtomicAddU32Vflat::FlatAtomicAddU32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicAddU32Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicAddU32Vflat>(opcode);
+}
+} // namespace detail
+
 FlatAtomicSubU32Vflat::FlatAtomicSubU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicSubU32Vflat)),
@@ -490,6 +641,12 @@ FlatAtomicSubU32Vflat::FlatAtomicSubU32Vflat(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicSubU32Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicSubU32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicSubClampU32Vflat::FlatAtomicSubClampU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_sub_clamp_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -512,6 +669,12 @@ FlatAtomicSubClampU32Vflat::FlatAtomicSubClampU32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicSubClampU32Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicSubClampU32Vflat>(opcode);
+}
+} // namespace detail
+
 FlatAtomicMinI32Vflat::FlatAtomicMinI32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_min_i32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicMinI32Vflat)),
@@ -532,6 +695,12 @@ FlatAtomicMinI32Vflat::FlatAtomicMinI32Vflat(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicMinI32Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicMinI32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicMinU32Vflat::FlatAtomicMinU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_min_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -554,6 +723,12 @@ FlatAtomicMinU32Vflat::FlatAtomicMinU32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicMinU32Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicMinU32Vflat>(opcode);
+}
+} // namespace detail
+
 FlatAtomicMaxI32Vflat::FlatAtomicMaxI32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_max_i32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicMaxI32Vflat)),
@@ -574,6 +749,12 @@ FlatAtomicMaxI32Vflat::FlatAtomicMaxI32Vflat(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicMaxI32Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicMaxI32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicMaxU32Vflat::FlatAtomicMaxU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_max_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -596,6 +777,12 @@ FlatAtomicMaxU32Vflat::FlatAtomicMaxU32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicMaxU32Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicMaxU32Vflat>(opcode);
+}
+} // namespace detail
+
 FlatAtomicAndB32Vflat::FlatAtomicAndB32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_and_b32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicAndB32Vflat)),
@@ -616,6 +803,12 @@ FlatAtomicAndB32Vflat::FlatAtomicAndB32Vflat(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicAndB32Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicAndB32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicOrB32Vflat::FlatAtomicOrB32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_or_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -638,6 +831,12 @@ FlatAtomicOrB32Vflat::FlatAtomicOrB32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicOrB32Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicOrB32Vflat>(opcode);
+}
+} // namespace detail
+
 FlatAtomicXorB32Vflat::FlatAtomicXorB32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicXorB32Vflat)),
@@ -658,6 +857,12 @@ FlatAtomicXorB32Vflat::FlatAtomicXorB32Vflat(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicXorB32Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicXorB32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicIncU32Vflat::FlatAtomicIncU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_inc_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -680,6 +885,12 @@ FlatAtomicIncU32Vflat::FlatAtomicIncU32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicIncU32Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicIncU32Vflat>(opcode);
+}
+} // namespace detail
+
 FlatAtomicDecU32Vflat::FlatAtomicDecU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_dec_u32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicDecU32Vflat)),
@@ -700,6 +911,12 @@ FlatAtomicDecU32Vflat::FlatAtomicDecU32Vflat(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicDecU32Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicDecU32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicSwapB64Vflat::FlatAtomicSwapB64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_swap_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -722,6 +939,12 @@ FlatAtomicSwapB64Vflat::FlatAtomicSwapB64Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicSwapB64Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicSwapB64Vflat>(opcode);
+}
+} // namespace detail
+
 FlatAtomicCmpswapB64Vflat::FlatAtomicCmpswapB64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_cmpswap_b64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicCmpswapB64Vflat)),
@@ -742,6 +965,12 @@ FlatAtomicCmpswapB64Vflat::FlatAtomicCmpswapB64Vflat(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicCmpswapB64Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicCmpswapB64Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicAddU64Vflat::FlatAtomicAddU64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_add_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -764,6 +993,12 @@ FlatAtomicAddU64Vflat::FlatAtomicAddU64Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicAddU64Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicAddU64Vflat>(opcode);
+}
+} // namespace detail
+
 FlatAtomicSubU64Vflat::FlatAtomicSubU64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_sub_u64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicSubU64Vflat)),
@@ -784,6 +1019,12 @@ FlatAtomicSubU64Vflat::FlatAtomicSubU64Vflat(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicSubU64Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicSubU64Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicMinI64Vflat::FlatAtomicMinI64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_min_i64", reinterpret_cast<const OpEncoding *>(inst),
@@ -806,6 +1047,12 @@ FlatAtomicMinI64Vflat::FlatAtomicMinI64Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicMinI64Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicMinI64Vflat>(opcode);
+}
+} // namespace detail
+
 FlatAtomicMinU64Vflat::FlatAtomicMinU64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_min_u64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicMinU64Vflat)),
@@ -826,6 +1073,12 @@ FlatAtomicMinU64Vflat::FlatAtomicMinU64Vflat(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicMinU64Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicMinU64Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicMaxI64Vflat::FlatAtomicMaxI64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_max_i64", reinterpret_cast<const OpEncoding *>(inst),
@@ -848,6 +1101,12 @@ FlatAtomicMaxI64Vflat::FlatAtomicMaxI64Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicMaxI64Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicMaxI64Vflat>(opcode);
+}
+} // namespace detail
+
 FlatAtomicMaxU64Vflat::FlatAtomicMaxU64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_max_u64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicMaxU64Vflat)),
@@ -868,6 +1127,12 @@ FlatAtomicMaxU64Vflat::FlatAtomicMaxU64Vflat(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicMaxU64Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicMaxU64Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicAndB64Vflat::FlatAtomicAndB64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_and_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -890,6 +1155,12 @@ FlatAtomicAndB64Vflat::FlatAtomicAndB64Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicAndB64Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicAndB64Vflat>(opcode);
+}
+} // namespace detail
+
 FlatAtomicOrB64Vflat::FlatAtomicOrB64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_or_b64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicOrB64Vflat)),
@@ -910,6 +1181,12 @@ FlatAtomicOrB64Vflat::FlatAtomicOrB64Vflat(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicOrB64Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicOrB64Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicXorB64Vflat::FlatAtomicXorB64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_xor_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -932,6 +1209,12 @@ FlatAtomicXorB64Vflat::FlatAtomicXorB64Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicXorB64Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicXorB64Vflat>(opcode);
+}
+} // namespace detail
+
 FlatAtomicIncU64Vflat::FlatAtomicIncU64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_inc_u64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicIncU64Vflat)),
@@ -952,6 +1235,12 @@ FlatAtomicIncU64Vflat::FlatAtomicIncU64Vflat(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicIncU64Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicIncU64Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicDecU64Vflat::FlatAtomicDecU64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_dec_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -974,6 +1263,12 @@ FlatAtomicDecU64Vflat::FlatAtomicDecU64Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicDecU64Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicDecU64Vflat>(opcode);
+}
+} // namespace detail
+
 FlatAtomicCondSubU32Vflat::FlatAtomicCondSubU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_cond_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicCondSubU32Vflat)),
@@ -994,6 +1289,12 @@ FlatAtomicCondSubU32Vflat::FlatAtomicCondSubU32Vflat(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicCondSubU32Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicCondSubU32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicMinNumF32Vflat::FlatAtomicMinNumF32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_min_num_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1016,6 +1317,12 @@ FlatAtomicMinNumF32Vflat::FlatAtomicMinNumF32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicMinNumF32Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicMinNumF32Vflat>(opcode);
+}
+} // namespace detail
+
 FlatAtomicMaxNumF32Vflat::FlatAtomicMaxNumF32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_max_num_f32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicMaxNumF32Vflat)),
@@ -1036,6 +1343,12 @@ FlatAtomicMaxNumF32Vflat::FlatAtomicMaxNumF32Vflat(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicMaxNumF32Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicMaxNumF32Vflat>(opcode);
+}
+} // namespace detail
 
 FlatAtomicAddF32Vflat::FlatAtomicAddF32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_add_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1058,6 +1371,12 @@ FlatAtomicAddF32Vflat::FlatAtomicAddF32Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicAddF32Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicAddF32Vflat>(opcode);
+}
+} // namespace detail
+
 FlatAtomicPkAddF16Vflat::FlatAtomicPkAddF16Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicPkAddF16Vflat)),
@@ -1079,6 +1398,12 @@ FlatAtomicPkAddF16Vflat::FlatAtomicPkAddF16Vflat(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicPkAddF16Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicPkAddF16Vflat>(opcode);
+}
+} // namespace detail
+
 FlatAtomicPkAddBf16Vflat::FlatAtomicPkAddBf16Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicPkAddBf16Vflat)),
@@ -1099,6 +1424,12 @@ FlatAtomicPkAddBf16Vflat::FlatAtomicPkAddBf16Vflat(const MachineInst *inst)
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+std::unique_ptr<Instruction> decodeFlatAtomicPkAddBf16Vflat(const MachineInst *opcode) {
+  return std::make_unique<FlatAtomicPkAddBf16Vflat>(opcode);
+}
+} // namespace detail
 
 } // namespace rdna4
 } // namespace rocjitsu
