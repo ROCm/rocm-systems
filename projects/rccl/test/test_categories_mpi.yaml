@@ -161,6 +161,78 @@ test_categories:
       - "NCCL_LAUNCH_MODE=GROUP"
       - "NCCL_DMABUF_ENABLE=1"
       - "RCCL_MPI_LOG_ALL_RANKS=1"
+  # The QP-sharing functional gate. The same five tests run at three values of
+  # RCCL_IB_COMM_NGROUPS: expectations are derived from ngroups by the reference
+  # model (test/transport/NetIbMPI/QpShareRefModel.hpp), so no test is pinned to
+  # a value and none skips outside one. RCCL_PARAM caches both tunables per
+  # process, which is why ngroups varies across categories rather than within a
+  # test. See test/transport/NetIbMPI/QpSharingTestGuide.md.
+  quick_env_qpshare_ngroups1:
+    description: "QP sharing gate, maximum concentration: NGROUPS=1 puts every connection in group 0, so the whole functional set runs on one shared QP. DEPTH_MULTIPLIER=8 is pinned rather than left at the default so the preset does not sit near the saturation ceiling; measured on AINIC that ceiling is between 112 and 128 comms per group even at depth 1, far above anything these tests reach, so 8 is headroom and not a requirement (the under-provisioned point is gated separately by quick_env_qpshare_undersized_depth)."
+    test_patterns: &qpshare_functional_tests
+      - "NetIbMPITest.QpShareAlgoLayoutSweep:NetIbMPITest.QpShareAlgoChurnLayout:NetIbMPITest.QpShareDataAllConnsTransfer:NetIbMPITest.QpShareDataUnsharedGroups:NetIbMPITest.QpShareDataFlushRouting"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_IB_MERGE_NICS=0"
+      - "NCCL_NET_FORCE_MERGE="
+      - "RCCL_IB_COMM_NGROUPS=1"
+      - "RCCL_IB_QP_DEPTH_MULTIPLIER=8"
+      - "NCCL_GDR_FLUSH_DISABLE=0"
+  quick_env_qpshare_ngroups2:
+    description: "QP sharing gate, smallest mixed configuration: NGROUPS=2 places a PRIMARY-only group beside a PRIMARY+SECONDARY group — the first point at which group-index arithmetic can be wrong without being invisible. Same five functional tests."
+    test_patterns: *qpshare_functional_tests
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_IB_MERGE_NICS=0"
+      - "NCCL_NET_FORCE_MERGE="
+      - "RCCL_IB_COMM_NGROUPS=2"
+      - "RCCL_IB_QP_DEPTH_MULTIPLIER=8"
+      - "NCCL_GDR_FLUSH_DISABLE=0"
+  quick_env_qpshare_ngroups16:
+    description: "QP sharing gate, wide configuration: at NGROUPS=16 the connection counts straddle the shared and unshared regimes within one run, and the layout sweep reaches 33 connections across 16 groups. Same five functional tests. Expected green, but INTERMITTENTLY CRASHES — measured 2 runs in 18 on AINIC (2026-08-17) — on a use-after-free in the group teardown path, so a signal-kill here is that known defect rather than a new regression. The qpshare_uaf_teardown category below reproduces the same bug deterministically and is the acceptance criterion for it; do not add a retry here to make this category look stable."
+    test_patterns: *qpshare_functional_tests
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_IB_MERGE_NICS=0"
+      - "NCCL_NET_FORCE_MERGE="
+      - "RCCL_IB_COMM_NGROUPS=16"
+      - "RCCL_IB_QP_DEPTH_MULTIPLIER=8"
+      - "NCCL_GDR_FLUSH_DISABLE=0"
+  quick_env_qpshare_undersized_depth:
+    description: "QP sharing under-provisioned point: NGROUPS=1 at the default depth multiplier (1), so 128 comms share a QP whose queues were sized for one. The invariant is unchanged — no (ngroups, depth, nconns) combination may fail to connect or corrupt a transfer; the transport is expected to size for the group or degrade to an unshared QP via the existing qp_sharing_skip_sender path in connect.cc. It does not do that today, so this category is EXPECTED RED: it is the acceptance criterion for the saturation-fallback fix, deliberately gating rather than disabled. Measured 2026-08-17 on AINIC: 112 comms/group at depth 1 is fine and 128 is not, hence the pinned count — the default counts elsewhere in the suite do not reach the ceiling. The break lands in the data phase (ibv_post_send ENOMEM) after every connection has established, so it is silent until traffic flows."
+    test_patterns:
+      - "NetIbMPITest.QpShareDataAllConnsTransfer"
+    exclude_windows: *mpi_exclude_windows
+    # Deliberately NOT *mpi_quick_labels: this category is expected red, and a
+    # permanently-red entry in the smoke/precheck gate gets muted, which is how
+    # an acceptance criterion quietly stops being one. Selectable and
+    # excludable via the qpshare_known_red label instead.
+    labels: &qpshare_known_red_labels
+      - "rccl"
+      - "mpi"
+      - "qpshare"
+      - "qpshare_known_red"
+    env_variables:
+      - "NCCL_IB_MERGE_NICS=0"
+      - "NCCL_NET_FORCE_MERGE="
+      - "RCCL_IB_COMM_NGROUPS=1"
+      - "QPSHARE_TEST_NCONNS=128"
+  quick_env_qpshare_depth_ceiling:
+    description: "QP sharing depth-multiplier ceiling — the same missing capacity check from the opposite side. The multiplier is applied to the QP work-queue sizing as given, so a value the device cannot allocate kills the FIRST connection instead of being clamped to the device limit; nothing is shared yet at that point, so a saturation fallback would not help either. EXPECTED RED, acceptance criterion for clamping the multiplier. Root cause measured 2026-08-17 on AINIC: the shared CQ is sized 768 × NCCL_IB_QPS_PER_CONNECTION × RCCL_IB_QP_DEPTH_MULTIPLIER entries (connect.cc:949, :1730) and passed to ibv_create_cq unchecked against device_attr.max_cqe. Bisected against that device's max_cqe of 65435: qps × depth = 85 passes, 86 fails, on both the qps=1 and qps=2 paths, so the usable depth is floor(max_cqe / (768 × qps)) — 85 at QPS=1, 42 at the default QPS of 2. Both knobs are pinned here because they multiply into the same limit. The ceiling is hardware-dependent — on a NIC with a larger max_cqe this category passes until the multiplier is raised past floor(max_cqe / 768)."
+    test_patterns:
+      - "NetIbMPITest.QpShareDataAllConnsTransfer"
+    exclude_windows: *mpi_exclude_windows
+    labels: *qpshare_known_red_labels
+    env_variables:
+      - "NCCL_IB_MERGE_NICS=0"
+      - "NCCL_NET_FORCE_MERGE="
+      - "RCCL_IB_COMM_NGROUPS=1"
+      - "RCCL_IB_QP_DEPTH_MULTIPLIER=96"
+      - "NCCL_IB_QPS_PER_CONNECTION=1"
+      - "QPSHARE_TEST_NCONNS=2"
   standard:
     description: "MPI regression — all transport / IB / implicit-launch / UBR / graph-capture suites (same patterns as comprehensive; lighter env)."
     test_patterns: &mpi_all_patterns
@@ -347,6 +419,63 @@ test_categories:
       - "RCCL_LL128_FORCE_ENABLE=1"
       - "NCCL_PROTO=LL128"
       - "NCCL_ALGO=Tree"
+  # The stress tests are split across two categories on purpose. The ctest
+  # generator joins a category's test_patterns with ':' into ONE --gtest_filter,
+  # i.e. one process (shared/ctest/parse_test_categories.py, positive_string),
+  # and gtest runs registration order, not filter order. QpShareStressConnectionChurn
+  # leaves the process unusable, so any test registered after it in the same
+  # process never reports. Keeping churn in its own category is what makes the
+  # batch result observable at all -- do not merge these back together.
+  qpshare_stress:
+    description: "QP sharing stress, everything except connection churn: many-connection load, shared-RQ saturation, and batch create/destroy under sharing. Scale with QPSHARE_TEST_NCONNS and QPSHARE_TEST_ITERS; the defaults are what this category gates on. One EXPECTED RED. StressBatchCreateDestroy: one PD leaked in total (rank 0, before=1 after=2) at the default batch of 10. The leak rate is a function of live comms per group at teardown, not of RCCL_IB_COMM_NGROUPS directly: a protection-domain reference is taken per comm but released once per group, so the release only reaches zero -- and only then attempts the ibv_dealloc_pd that fails -- when a group held exactly one comm. QPSHARE_TEST_NCONNS=1 or 2 therefore leaks one PD per batch rather than one in total. Same underlying bug as qpshare_stress_churn, at its mildest rate."
+    test_patterns:
+      - "NetIbMPITest.QpShareStressManyConns:NetIbMPITest.QpShareStressSharedRqSaturation:NetIbMPITest.QpShareStressBatchCreateDestroy"
+    exclude_windows: *mpi_exclude_windows
+    labels:
+      - "rccl"
+      - "mpi"
+      - "qpshare"
+      - "qpshare_known_red"
+    env_variables:
+      - "NCCL_IB_MERGE_NICS=0"
+      - "NCCL_NET_FORCE_MERGE="
+      - "RCCL_IB_COMM_NGROUPS=2"
+      - "RCCL_IB_QP_DEPTH_MULTIPLIER=64"
+      - "NCCL_IB_QPS_PER_CONNECTION=1"
+  qpshare_stress_churn:
+    description: "QP sharing connection churn, isolated in its own category because it crashes the process. EXPECTED RED, kept as the acceptance criterion for the sharing-specific protection-domain leak. One comm is live at a time, so every earlier cycle was fully closed, yet one PD is leaked per cycle with a matching ibv_dealloc_pd() failure. On this device (max_pd=1024) connect then fails at iteration 1022 of 2048 with no diagnostic from the transport, and the following connect segfaults rather than failing cleanly. The iteration number is device-specific: it is max_pd, not a fixed constant. Not shared-QP pool exhaustion despite IBCAST_MAX_SHARED_QPS also being 1024 -- no 'pool full' WARN is ever emitted, and a full pool cannot fail a connect in the first place, since the NULL return from IbCastRegisterSharedQp is ignored at connect.cc:1109."
+    test_patterns:
+      - "NetIbMPITest.QpShareStressConnectionChurn"
+    exclude_windows: *mpi_exclude_windows
+    labels:
+      - "rccl"
+      - "mpi"
+      - "qpshare"
+      - "qpshare_known_red"
+    env_variables:
+      - "NCCL_IB_MERGE_NICS=0"
+      - "NCCL_NET_FORCE_MERGE="
+      - "RCCL_IB_COMM_NGROUPS=2"
+      - "RCCL_IB_QP_DEPTH_MULTIPLIER=64"
+      - "NCCL_IB_QPS_PER_CONNECTION=1"
+  # Deterministic form of the crash that hits quick_env_qpshare_ngroups16 about
+  # once in nine runs. Same test, same tunables; the only difference is
+  # MALLOC_PERTURB_=165, which tells glibc to overwrite freed heap with 0xa5 so
+  # the stale read faults instead of usually finding intact memory. Measured
+  # 2026-08-17 on AINIC: 6/6 crashes with the poison, 0/6 without it.
+  qpshare_uaf_teardown:
+    description: "QP sharing use-after-free in group teardown. EXPECTED RED, and it dies by signal rather than by a failed assertion — the process is gone before gtest can report. IbCastRegisterSharedQp stores &comm->devs[devIdx].base in the shared-QP pool slot (connect.cc:1105); IbCastCloseSend/IbCastCloseRecv free(comm) (connect.cc:2140/:2235); IbCastCleanupGroupCqs then reads primaryDevBase->ibDevN through that freed pointer (qp_sharing.cc:193) and locks IbCastDevs[ibDevN].mutex with the resulting index (:194). Backtrace: pthread_mutex_lock ← IbCastCleanupGroupCqs+0x248 ← IbCastCloseRecv+0x373. Acceptance criterion for storing ibDevN by value in the pool slot. When testing a fix, re-run two controls beside it: the same filter without MALLOC_PERTURB_ (must still pass) and non-sharing NetIb tests with the poison on (must be unaffected — they are today). MALLOC_PERTURB_ is a glibc feature and is inert elsewhere, so on a non-glibc platform this category degrades into a duplicate of quick_env_qpshare_ngroups16 and stops being a reliable gate."
+    test_patterns:
+      - "NetIbMPITest.QpShareAlgoChurnLayout"
+    exclude_windows: *mpi_exclude_windows
+    labels: *qpshare_known_red_labels
+    env_variables:
+      - "NCCL_IB_MERGE_NICS=0"
+      - "NCCL_NET_FORCE_MERGE="
+      - "RCCL_IB_COMM_NGROUPS=16"
+      - "RCCL_IB_QP_DEPTH_MULTIPLIER=8"
+      - "NCCL_GDR_FLUSH_DISABLE=0"
+      - "MALLOC_PERTURB_=165"
 
 execution_settings:
   mpi_launch:
@@ -363,6 +492,11 @@ execution_settings:
     quick_env_net_graph_register: 1200
     quick_env_netib_xfer_trace: 1200
     quick_env_netib_xfer_log_ranks: 1200
+    quick_env_qpshare_ngroups1: 1200
+    quick_env_qpshare_ngroups2: 1200
+    quick_env_qpshare_ngroups16: 1200
+    quick_env_qpshare_undersized_depth: 1200
+    quick_env_qpshare_depth_ceiling: 1200
     standard: 1200
     comprehensive: 1200
     comprehensive_disable_env: 1200
@@ -374,3 +508,6 @@ execution_settings:
     full_pow2_tree_ll: 1200
     full_pow2_ring_ll128: 1200
     full_pow2_tree_ll128: 1200
+    qpshare_stress: 3600
+    qpshare_stress_churn: 3600
+    qpshare_uaf_teardown: 1200

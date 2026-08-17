@@ -498,6 +498,228 @@
       ]
     },
 
+    "qpshare_ngroups1": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_MERGE_NICS": "0",
+        "NCCL_NET_FORCE_MERGE": "",
+        "RCCL_IB_COMM_NGROUPS": "1",
+        "RCCL_IB_QP_DEPTH_MULTIPLIER": "8",
+        "NCCL_GDR_FLUSH_DISABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "QpShare_AlgoLayoutSweep",
+          "description": "Group-assignment layout, state only, no data phase. Creates connections one at a time up to min(2*NGROUPS+1, 64) and checks every live comm against the reference model (test/transport/NetIbMPI/QpShareRefModel.hpp) after each create -- sharedGroupIdx, isSharedQpPrimary, refcount, commId and cross-comm QP identity -- then tears down from the front, re-checking after each destroy. Expectations are derived from RCCL_IB_COMM_NGROUPS, so the test runs and asserts at every value instead of skipping outside a pinned one. At NGROUPS=1 every connection lands in group 0, so this is the maximum-concentration point -- the whole functional set runs on a single shared QP. DEPTH_MULTIPLIER=8 is pinned rather than left at the default so the preset does not sit near the saturation ceiling. Measured on AINIC that ceiling is between 112 and 128 comms per group even at depth 1, far above anything these tests reach, so 8 is headroom and not a requirement -- the under-provisioned point is gated separately by qpshare_undersized_depth.",
+          "test_filter": "NetIbMPITest.QpShareAlgoLayoutSweep"
+        },
+        {
+          "name": "QpShare_AlgoChurnLayout",
+          "description": "Interleaved create/destroy with rotating non-tail victims, layout re-validated against the reference model after every operation. This is the pool-bookkeeping check: a refcount that survives teardown, or a freed pool slot still counted, makes model and implementation disagree. Reports observed group spread; balance is measured, never asserted. At NGROUPS=1 every connection lands in group 0, so this is the maximum-concentration point -- the whole functional set runs on a single shared QP. DEPTH_MULTIPLIER=8 is pinned rather than left at the default so the preset does not sit near the saturation ceiling. Measured on AINIC that ceiling is between 112 and 128 comms per group even at depth 1, far above anything these tests reach, so 8 is headroom and not a requirement -- the under-provisioned point is gated separately by qpshare_undersized_depth.",
+          "test_filter": "NetIbMPITest.QpShareAlgoChurnLayout"
+        },
+        {
+          "name": "QpShare_DataAllConnsTransfer",
+          "description": "Universal invariant at this (NGROUPS, DEPTH_MULTIPLIER) point: every connection must be established and must transfer correctly. Sweeps payload sizes from 0 to 1 MiB across the protocol boundaries on every comm, pattern-verified. Connection count from QPSHARE_TEST_NCONNS, defaulting to a value that forces sharing at the configured NGROUPS. At NGROUPS=1 every connection lands in group 0, so this is the maximum-concentration point -- the whole functional set runs on a single shared QP. DEPTH_MULTIPLIER=8 is pinned rather than left at the default so the preset does not sit near the saturation ceiling. Measured on AINIC that ceiling is between 112 and 128 comms per group even at depth 1, far above anything these tests reach, so 8 is headroom and not a requirement -- the under-provisioned point is gated separately by qpshare_undersized_depth.",
+          "test_filter": "NetIbMPITest.QpShareDataAllConnsTransfer"
+        },
+        {
+          "name": "QpShare_DataUnsharedGroups",
+          "description": "The unshared regime as a first-class case rather than a skip: connection count is derived as min(NGROUPS, 8) so every comm is a solo PRIMARY on its own physical QP. Asserts the distinct-QP layout and a correct data path on each. At NGROUPS=1 every connection lands in group 0, so this is the maximum-concentration point -- the whole functional set runs on a single shared QP. DEPTH_MULTIPLIER=8 is pinned rather than left at the default so the preset does not sit near the saturation ceiling. Measured on AINIC that ceiling is between 112 and 128 comms per group even at depth 1, far above anything these tests reach, so 8 is headroom and not a requirement -- the under-provisioned point is gated separately by qpshare_undersized_depth.",
+          "test_filter": "NetIbMPITest.QpShareDataUnsharedGroups"
+        },
+        {
+          "name": "QpShare_DataFlushRouting",
+          "description": "GDR flush completion routing on a shared CQ: a PRIMARY/SECONDARY pair (located from the reference model, not from hardcoded indices) posts iflush() concurrently, verifying each completion routes back to the correct comm by commId rather than being cross-attributed. An unshared comm provides the baseline. Requires GDR-capable hardware and skips otherwise -- a hardware capability, not a tunable. At NGROUPS=1 every connection lands in group 0, so this is the maximum-concentration point -- the whole functional set runs on a single shared QP. DEPTH_MULTIPLIER=8 is pinned rather than left at the default so the preset does not sit near the saturation ceiling. Measured on AINIC that ceiling is between 112 and 128 comms per group even at depth 1, far above anything these tests reach, so 8 is headroom and not a requirement -- the under-provisioned point is gated separately by qpshare_undersized_depth.",
+          "test_filter": "NetIbMPITest.QpShareDataFlushRouting"
+        }
+      ]
+    },
+
+    "qpshare_ngroups2": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_MERGE_NICS": "0",
+        "NCCL_NET_FORCE_MERGE": "",
+        "RCCL_IB_COMM_NGROUPS": "2",
+        "RCCL_IB_QP_DEPTH_MULTIPLIER": "8",
+        "NCCL_GDR_FLUSH_DISABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "QpShare_AlgoLayoutSweep",
+          "description": "Group-assignment layout, state only, no data phase. Creates connections one at a time up to min(2*NGROUPS+1, 64) and checks every live comm against the reference model (test/transport/NetIbMPI/QpShareRefModel.hpp) after each create -- sharedGroupIdx, isSharedQpPrimary, refcount, commId and cross-comm QP identity -- then tears down from the front, re-checking after each destroy. Expectations are derived from RCCL_IB_COMM_NGROUPS, so the test runs and asserts at every value instead of skipping outside a pinned one. NGROUPS=2 is the smallest value that mixes a PRIMARY-only group with a PRIMARY+SECONDARY group, and the first point at which group-index arithmetic can be wrong without being invisible. DEPTH_MULTIPLIER=8 is pinned rather than left at the default so the preset does not sit near the saturation ceiling. Measured on AINIC that ceiling is between 112 and 128 comms per group even at depth 1, far above anything these tests reach, so 8 is headroom and not a requirement -- the under-provisioned point is gated separately by qpshare_undersized_depth.",
+          "test_filter": "NetIbMPITest.QpShareAlgoLayoutSweep"
+        },
+        {
+          "name": "QpShare_AlgoChurnLayout",
+          "description": "Interleaved create/destroy with rotating non-tail victims, layout re-validated against the reference model after every operation. This is the pool-bookkeeping check: a refcount that survives teardown, or a freed pool slot still counted, makes model and implementation disagree. Reports observed group spread; balance is measured, never asserted. NGROUPS=2 is the smallest value that mixes a PRIMARY-only group with a PRIMARY+SECONDARY group, and the first point at which group-index arithmetic can be wrong without being invisible. DEPTH_MULTIPLIER=8 is pinned rather than left at the default so the preset does not sit near the saturation ceiling. Measured on AINIC that ceiling is between 112 and 128 comms per group even at depth 1, far above anything these tests reach, so 8 is headroom and not a requirement -- the under-provisioned point is gated separately by qpshare_undersized_depth.",
+          "test_filter": "NetIbMPITest.QpShareAlgoChurnLayout"
+        },
+        {
+          "name": "QpShare_DataAllConnsTransfer",
+          "description": "Universal invariant at this (NGROUPS, DEPTH_MULTIPLIER) point: every connection must be established and must transfer correctly. Sweeps payload sizes from 0 to 1 MiB across the protocol boundaries on every comm, pattern-verified. Connection count from QPSHARE_TEST_NCONNS, defaulting to a value that forces sharing at the configured NGROUPS. NGROUPS=2 is the smallest value that mixes a PRIMARY-only group with a PRIMARY+SECONDARY group, and the first point at which group-index arithmetic can be wrong without being invisible. DEPTH_MULTIPLIER=8 is pinned rather than left at the default so the preset does not sit near the saturation ceiling. Measured on AINIC that ceiling is between 112 and 128 comms per group even at depth 1, far above anything these tests reach, so 8 is headroom and not a requirement -- the under-provisioned point is gated separately by qpshare_undersized_depth.",
+          "test_filter": "NetIbMPITest.QpShareDataAllConnsTransfer"
+        },
+        {
+          "name": "QpShare_DataUnsharedGroups",
+          "description": "The unshared regime as a first-class case rather than a skip: connection count is derived as min(NGROUPS, 8) so every comm is a solo PRIMARY on its own physical QP. Asserts the distinct-QP layout and a correct data path on each. NGROUPS=2 is the smallest value that mixes a PRIMARY-only group with a PRIMARY+SECONDARY group, and the first point at which group-index arithmetic can be wrong without being invisible. DEPTH_MULTIPLIER=8 is pinned rather than left at the default so the preset does not sit near the saturation ceiling. Measured on AINIC that ceiling is between 112 and 128 comms per group even at depth 1, far above anything these tests reach, so 8 is headroom and not a requirement -- the under-provisioned point is gated separately by qpshare_undersized_depth.",
+          "test_filter": "NetIbMPITest.QpShareDataUnsharedGroups"
+        },
+        {
+          "name": "QpShare_DataFlushRouting",
+          "description": "GDR flush completion routing on a shared CQ: a PRIMARY/SECONDARY pair (located from the reference model, not from hardcoded indices) posts iflush() concurrently, verifying each completion routes back to the correct comm by commId rather than being cross-attributed. An unshared comm provides the baseline. Requires GDR-capable hardware and skips otherwise -- a hardware capability, not a tunable. NGROUPS=2 is the smallest value that mixes a PRIMARY-only group with a PRIMARY+SECONDARY group, and the first point at which group-index arithmetic can be wrong without being invisible. DEPTH_MULTIPLIER=8 is pinned rather than left at the default so the preset does not sit near the saturation ceiling. Measured on AINIC that ceiling is between 112 and 128 comms per group even at depth 1, far above anything these tests reach, so 8 is headroom and not a requirement -- the under-provisioned point is gated separately by qpshare_undersized_depth.",
+          "test_filter": "NetIbMPITest.QpShareDataFlushRouting"
+        }
+      ]
+    },
+
+    "qpshare_ngroups16": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_MERGE_NICS": "0",
+        "NCCL_NET_FORCE_MERGE": "",
+        "RCCL_IB_COMM_NGROUPS": "16",
+        "RCCL_IB_QP_DEPTH_MULTIPLIER": "8",
+        "NCCL_GDR_FLUSH_DISABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "QpShare_AlgoLayoutSweep",
+          "description": "Group-assignment layout, state only, no data phase. Creates connections one at a time up to min(2*NGROUPS+1, 64) and checks every live comm against the reference model (test/transport/NetIbMPI/QpShareRefModel.hpp) after each create -- sharedGroupIdx, isSharedQpPrimary, refcount, commId and cross-comm QP identity -- then tears down from the front, re-checking after each destroy. Expectations are derived from RCCL_IB_COMM_NGROUPS, so the test runs and asserts at every value instead of skipping outside a pinned one. NGROUPS=16 is the wide point: connection counts here straddle the shared and unshared regimes within one run, and the layout sweep reaches 33 connections across 16 groups. DEPTH_MULTIPLIER=8 is pinned rather than left at the default so the preset does not sit near the saturation ceiling. Measured on AINIC that ceiling is between 112 and 128 comms per group even at depth 1, far above anything these tests reach, so 8 is headroom and not a requirement -- the under-provisioned point is gated separately by qpshare_undersized_depth.",
+          "test_filter": "NetIbMPITest.QpShareAlgoLayoutSweep"
+        },
+        {
+          "name": "QpShare_AlgoChurnLayout",
+          "description": "Interleaved create/destroy with rotating non-tail victims, layout re-validated against the reference model after every operation. This is the pool-bookkeeping check: a refcount that survives teardown, or a freed pool slot still counted, makes model and implementation disagree. Reports observed group spread; balance is measured, never asserted. NGROUPS=16 is the wide point: connection counts here straddle the shared and unshared regimes within one run, and the layout sweep reaches 33 connections across 16 groups. DEPTH_MULTIPLIER=8 is pinned rather than left at the default so the preset does not sit near the saturation ceiling. Measured on AINIC that ceiling is between 112 and 128 comms per group even at depth 1, far above anything these tests reach, so 8 is headroom and not a requirement -- the under-provisioned point is gated separately by qpshare_undersized_depth.",
+          "test_filter": "NetIbMPITest.QpShareAlgoChurnLayout"
+        },
+        {
+          "name": "QpShare_DataAllConnsTransfer",
+          "description": "Universal invariant at this (NGROUPS, DEPTH_MULTIPLIER) point: every connection must be established and must transfer correctly. Sweeps payload sizes from 0 to 1 MiB across the protocol boundaries on every comm, pattern-verified. Connection count from QPSHARE_TEST_NCONNS, defaulting to a value that forces sharing at the configured NGROUPS. NGROUPS=16 is the wide point: connection counts here straddle the shared and unshared regimes within one run, and the layout sweep reaches 33 connections across 16 groups. DEPTH_MULTIPLIER=8 is pinned rather than left at the default so the preset does not sit near the saturation ceiling. Measured on AINIC that ceiling is between 112 and 128 comms per group even at depth 1, far above anything these tests reach, so 8 is headroom and not a requirement -- the under-provisioned point is gated separately by qpshare_undersized_depth.",
+          "test_filter": "NetIbMPITest.QpShareDataAllConnsTransfer"
+        },
+        {
+          "name": "QpShare_DataUnsharedGroups",
+          "description": "The unshared regime as a first-class case rather than a skip: connection count is derived as min(NGROUPS, 8) so every comm is a solo PRIMARY on its own physical QP. Asserts the distinct-QP layout and a correct data path on each. NGROUPS=16 is the wide point: connection counts here straddle the shared and unshared regimes within one run, and the layout sweep reaches 33 connections across 16 groups. DEPTH_MULTIPLIER=8 is pinned rather than left at the default so the preset does not sit near the saturation ceiling. Measured on AINIC that ceiling is between 112 and 128 comms per group even at depth 1, far above anything these tests reach, so 8 is headroom and not a requirement -- the under-provisioned point is gated separately by qpshare_undersized_depth.",
+          "test_filter": "NetIbMPITest.QpShareDataUnsharedGroups"
+        },
+        {
+          "name": "QpShare_DataFlushRouting",
+          "description": "GDR flush completion routing on a shared CQ: a PRIMARY/SECONDARY pair (located from the reference model, not from hardcoded indices) posts iflush() concurrently, verifying each completion routes back to the correct comm by commId rather than being cross-attributed. An unshared comm provides the baseline. Requires GDR-capable hardware and skips otherwise -- a hardware capability, not a tunable. NGROUPS=16 is the wide point: connection counts here straddle the shared and unshared regimes within one run, and the layout sweep reaches 33 connections across 16 groups. DEPTH_MULTIPLIER=8 is pinned rather than left at the default so the preset does not sit near the saturation ceiling. Measured on AINIC that ceiling is between 112 and 128 comms per group even at depth 1, far above anything these tests reach, so 8 is headroom and not a requirement -- the under-provisioned point is gated separately by qpshare_undersized_depth.",
+          "test_filter": "NetIbMPITest.QpShareDataFlushRouting"
+        }
+      ]
+    },
+
+    "qpshare_undersized_depth": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_MERGE_NICS": "0",
+        "NCCL_NET_FORCE_MERGE": "",
+        "RCCL_IB_COMM_NGROUPS": "1",
+        "QPSHARE_TEST_NCONNS": "128"
+      },
+      "tests": [
+        {
+          "name": "QpShare_DataAllConnsTransfer_Depth1",
+          "description": "The under-provisioned point: NGROUPS=1 at the default RCCL_IB_QP_DEPTH_MULTIPLIER of 1, so 128 comms share a QP whose queues were sized for one. The invariant does not change -- no (NGROUPS, depth, nconns) combination may fail to connect or corrupt a transfer; the transport is expected to size for the group or degrade to an unshared QP through the existing qp_sharing_skip_sender path (connect.cc) rather than run the device out of work-queue room. It does not do that today, so this preset is EXPECTED RED. Measured 2026-08-17 on AINIC: 112 comms in one group at depth 1 is fine and 128 is not, which is why the count is pinned here -- the small counts the rest of the suite uses do not reach the ceiling. The break lands in the DATA phase as ibv_post_send ENOMEM, after every connection has established, so it is a silent-until-traffic failure rather than a refused connect. Raising the multiplier to 2 makes the same 128 comms pass, so the tunable works; what is missing is a capacity check when it has not been raised. Acceptance criterion for the saturation-fallback fix, deliberately gating rather than disabled or documented away as a limitation.",
+          "test_filter": "NetIbMPITest.QpShareDataAllConnsTransfer"
+        }
+      ]
+    },
+
+    "qpshare_depth_ceiling": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_MERGE_NICS": "0",
+        "NCCL_NET_FORCE_MERGE": "",
+        "RCCL_IB_COMM_NGROUPS": "1",
+        "RCCL_IB_QP_DEPTH_MULTIPLIER": "96",
+        "NCCL_IB_QPS_PER_CONNECTION": "1",
+        "QPSHARE_TEST_NCONNS": "2"
+      },
+      "tests": [
+        {
+          "name": "QpShare_DataAllConnsTransfer_DepthCeiling",
+          "description": "The same missing capacity check seen from the opposite side: a depth multiplier larger than the device can allocate. The multiplier is applied to the QP's work-queue sizing as given, so an unhonourable value kills the FIRST connection outright instead of clamping to the device limit or falling back to an unshared QP -- and it fails before anything is shared, so no saturation fallback would help. Root cause measured 2026-08-17 on AINIC: the shared CQ is sized 3 x NET_IB_MAX_REQUESTS(256) x NCCL_IB_QPS_PER_CONNECTION x RCCL_IB_QP_DEPTH_MULTIPLIER = 768 x qps x depth entries (connect.cc:949 sender, :1730 receiver) and passed to ibv_create_cq with no comparison against device_attr.max_cqe. Bisected against that device's max_cqe of 65435: qps x depth = 85 passes at 65280 entries and 86 fails at 66048, identically on the qps=1 and qps=2 paths, so the usable depth is floor(max_cqe / (768 x qps)) -- 85 at QPS=1 and only 42 at the default QPS of 2. Both knobs are pinned in this preset because they multiply into the same limit. EXPECTED RED; acceptance criterion for clamping the multiplier to the queried device limit. The ceiling is device-specific: on a NIC with a larger max_cqe this preset passes, so raise the multiplier past floor(max_cqe / 768) rather than assuming 96 is universally over the line.",
+          "test_filter": "NetIbMPITest.QpShareDataAllConnsTransfer"
+        }
+      ]
+    },
+
+    "qpshare_stress": {
+      "extends": "net_ib_base",
+      "timeout": 600,
+      "env_variables": {
+        "NCCL_IB_MERGE_NICS": "0",
+        "NCCL_NET_FORCE_MERGE": "",
+        "RCCL_IB_COMM_NGROUPS": "2",
+        "RCCL_IB_QP_DEPTH_MULTIPLIER": "64",
+        "NCCL_IB_QPS_PER_CONNECTION": "1"
+      },
+      "tests": [
+        {
+          "name": "QpShare_StressManyConns",
+          "description": "Sustained batched traffic over QPSHARE_TEST_NCONNS connections (default 100, so ~50 comms per group at NGROUPS=2). DEPTH_MULTIPLIER=64 carries headroom above the 50 required.",
+          "test_filter": "NetIbMPITest.QpShareStressManyConns"
+        },
+        {
+          "name": "QpShare_StressSharedRqSaturation",
+          "description": "Post-all-then-wait-all across every connection in a shared group, QPSHARE_TEST_ITERS rounds (default 10) over QPSHARE_TEST_NCONNS connections (default 50) -- deliberately tries to starve the shared RQ.",
+          "test_filter": "NetIbMPITest.QpShareStressSharedRqSaturation"
+        },
+        {
+          "name": "QpShare_StressBatchCreateDestroy",
+          "description": "QPSHARE_TEST_ITERS batches (default 110) of QPSHARE_TEST_NCONNS connections (default 10), with the layout revalidated against a fresh reference model at batch checkpoints -- every batch starts from an empty live set, so drift means teardown left refcounts behind -- and RDMA object counts compared against a pre-batch baseline. What it reports is a protection-domain leak. This is the same PD-lifetime bug as QpShare_StressConnectionChurn, at a rate set by group OCCUPANCY (comms per group), i.e. by batch size AND NGROUPS together -- not by either alone. A PD reference is taken once per comm (connect.cc:99) but released once per GROUP (qp_sharing.cc:198), so a group holding k comms returns k-1 fewer references than it took and only a group that held exactly one comm reaches the dealloc at all. Measured 2026-08-17 on AINIC, same 10 connections x 20 batches: NGROUPS=10 (1 comm/group) gives before=1 after=21 with 21 dealloc WARNs per rank, while NGROUPS=2 (5 comms/group) gives before=1 after=2 with 1 WARN. Leaking less at low NGROUPS is the release path being reached less often, not health. When the dealloc IS reached it fails EBUSY, because IbCastCleanupGroupCqs runs at connect.cc:2094/:2176 before the per-comm MR deregistration loop at :2104/:2182, and the failure is only WARNed -- IbCastCleanupGroupCqs itself returns void (qp_sharing.h:101) and the wrap_ibv_dealloc_pd result at qp_sharing.cc:199 is dropped outright, so pdRefs is left at 0 with a stale non-NULL IbCastDevs[].pd. Attribution does not depend on this suite: the sharing-unaware NetIbMPITest.ConnectionBatchCreateDestroy is clean on generic IB and on IB-CAST with sharing off, and shows the same leak with sharing on. EXPECTED RED; acceptance criterion for the PD-lifetime fix. Runs in its own mpirun, separate from QpShare_StressConnectionChurn, so the churn crash cannot mask it.",
+          "test_filter": "NetIbMPITest.QpShareStressBatchCreateDestroy"
+        }
+      ]
+    },
+    "qpshare_stress_churn": {
+      "extends": "net_ib_base",
+      "timeout": 1800,
+      "env_variables": {
+        "NCCL_IB_MERGE_NICS": "0",
+        "NCCL_NET_FORCE_MERGE": "",
+        "RCCL_IB_COMM_NGROUPS": "2",
+        "RCCL_IB_QP_DEPTH_MULTIPLIER": "64",
+        "NCCL_IB_QPS_PER_CONNECTION": "1"
+      },
+      "tests": [
+        {
+          "name": "QpShare_StressConnectionChurn",
+          "description": "QPSHARE_TEST_ITERS connect/transfer/close cycles (default 2048). Only one connection is live at a time, so every cycle is fully torn down before the next begins and nothing is entitled to accumulate. Measured 2026-08-17 on AINIC: each cycle leaks exactly one protection domain (one comm per group, so the group teardown reaches the dealloc every time), each announced by 'ibv_dealloc_pd failed with error Device or resource busy errno 16' -- 1023 of them per rank -- and connect stops working at iteration 1022 of 2048, this device reporting max_pd=1024. This is the same PD-lifetime bug as QpShare_StressBatchCreateDestroy, at the occupancy that hits it hardest. It is NOT shared-QP pool exhaustion even though IBCAST_MAX_SHARED_QPS is also 1024: per-rank logs of that run contain zero 'pool full' WARNs, and a full pool could not fail a connect anyway since IbCastRegisterSharedQp's NULL return is ignored at connect.cc:1109. The failing connect DOES report itself, once, on the connect-side rank: 'Call to ibv_alloc_pd failed with error No space left on device'. It is invisible in a merged mpirun log, which carries rank 0 only -- pass -x NCCL_DEBUG_FILE=<dir>/nccl_%h_%p.log to see it. The process is not usable afterwards: the next connect attempt segfaults rather than failing cleanly, which is why this test has its own configuration and its own mpirun instead of sharing one with qpshare_stress. EXPECTED RED against that pre-existing transport bug, kept gating as its acceptance criterion. Set QPSHARE_TEST_ITERS well below 1024 to exercise the pre-exhaustion path; the leak is already visible in the checkpoints there.",
+          "test_filter": "NetIbMPITest.QpShareStressConnectionChurn"
+        }
+      ]
+    },
+
+    "qpshare_uaf_teardown": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_MERGE_NICS": "0",
+        "NCCL_NET_FORCE_MERGE": "",
+        "RCCL_IB_COMM_NGROUPS": "16",
+        "RCCL_IB_QP_DEPTH_MULTIPLIER": "8",
+        "NCCL_GDR_FLUSH_DISABLE": "0",
+        "MALLOC_PERTURB_": "165"
+      },
+      "tests": [
+        {
+          "name": "QpShare_AlgoChurnLayout_UafTeardown",
+          "description": "The deterministic form of a use-after-free that otherwise crashes qpshare_ngroups16 intermittently (measured 2 runs in 18 on AINIC, 2026-08-17). Same test and same tunables as that configuration; the only addition is MALLOC_PERTURB_=165, which makes glibc overwrite freed heap with 0xa5 so the stale read faults instead of usually reading intact memory. With it the crash is 6/6; without it 0/6 in the same session. Cause: IbCastRegisterSharedQp stores a pointer to the per-comm device block, &comm->devs[devIdx].base, in the shared-QP pool slot as primaryDevBase (connect.cc:1105). IbCastCloseSend/IbCastCloseRecv free(comm) at connect.cc:2140/:2235, and IbCastCleanupGroupCqs then dereferences that freed pointer to read primaryDevBase->ibDevN (qp_sharing.cc:193) and locks IbCastDevs[ibDevN].mutex (:194) with whatever garbage index came back. Backtrace lands in pthread_mutex_lock via IbCastCleanupGroupCqs+0x248 from IbCastCloseRecv+0x373. EXPECTED RED, and it does not fail an assertion -- the process dies, so the configuration reports a signal rather than a test failure. Acceptance criterion for storing ibDevN by value in the pool slot instead of a pointer into the comm. Controls to re-run alongside any fix attempt: the same filter without MALLOC_PERTURB_ (passes), and non-sharing NetIb tests with the poison on (unaffected). MALLOC_PERTURB_ is glibc-only and is inert on other allocators, so on a non-glibc platform this configuration silently degrades to being the same as qpshare_ngroups16.",
+          "test_filter": "NetIbMPITest.QpShareAlgoChurnLayout"
+        }
+      ]
+    },
+
     "cast_single_qp": {
       "extends": "cast_base",
       "timeout": 60,
@@ -1022,6 +1244,54 @@
       "name": "NET IB - CAST WRR only (QPS=2, splitData=0)",
       "description": "White-box WRR scheduler tests without split-data: weights distribution, doWrr toggle, splitData toggle, sched parms reflection",
       "config": "cast_wrr_no_split",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - QP Sharing (NGROUPS=1)",
+      "description": "QP-sharing gate at maximum concentration -- every connection on one shared QP. Layout sweep, churn layout, all-connection data path, unshared-regime data path and GDR flush routing, all with expectations derived from NGROUPS rather than pinned to it.",
+      "config": "qpshare_ngroups1",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - QP Sharing (NGROUPS=2)",
+      "description": "QP-sharing gate at the smallest mixed configuration: PRIMARY-only and PRIMARY+SECONDARY groups side by side. Same five functional tests.",
+      "config": "qpshare_ngroups2",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - QP Sharing (NGROUPS=16)",
+      "description": "QP-sharing gate at the wide configuration, straddling the shared and unshared regimes within one run. Same five functional tests. Expected green, but INTERMITTENTLY CRASHES -- measured 2 runs in 18 on AINIC (2026-08-17) -- on a use-after-free in the group teardown path. A signal-kill here is that known defect, not a new regression; the qpshare_uaf_teardown configuration reproduces it deterministically. Do not paper over it with a retry.",
+      "config": "qpshare_ngroups16",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - QP Sharing (under-provisioned depth)",
+      "description": "128 comms in one group at the default depth multiplier. EXPECTED RED: the transport has no saturation fallback, so the connections establish and the data phase then fails with ENOMEM instead of the queue being sized for the group or the comm degrading to an unshared QP. Acceptance criterion for that fix, not a documented limitation.",
+      "config": "qpshare_undersized_depth",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - QP Sharing (depth multiplier ceiling)",
+      "description": "The same missing capacity check from the other side: a depth multiplier the device cannot allocate. EXPECTED RED -- the first connection fails outright instead of the multiplier being clamped to the device limit. Ceiling is on depth x NCCL_IB_QPS_PER_CONNECTION and is hardware-dependent, so on a NIC with more work-queue room this preset passes until the multiplier is raised further.",
+      "config": "qpshare_depth_ceiling",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - QP Sharing Stress",
+      "description": "Many-connection load, shared-RQ saturation and batch create/destroy under sharing. One EXPECTED RED: StressBatchCreateDestroy, against a sharing-specific protection-domain leak whose rate is set by group occupancy (comms per group). Kept gating as an acceptance criterion for the PD-lifetime fix, not disabled. Connection churn is deliberately NOT in this configuration -- see the separate qpshare_stress_churn entry below.",
+      "config": "qpshare_stress",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - QP Sharing Stress (connection churn)",
+      "description": "Connection churn under sharing, in its own configuration and therefore its own process. EXPECTED RED against the same PD-lifetime bug as qpshare_stress, at the occupancy that hits it hardest: one comm per group, so every cycle reaches the group teardown and leaks one PD, exhausting the device max_pd (1024) at iteration 1022. Separated from qpshare_stress because churn leaves the process unable to connect and the next attempt segfaults -- anything sharing a process with it would never report. Longer timeout (1800s) than the rest: 2048 connect/transfer/close cycles is minutes of wall time, not seconds.",
+      "config": "qpshare_stress_churn",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - QP Sharing (use-after-free teardown)",
+      "description": "The deterministic form of the intermittent ngroups=16 crash: same test and tunables, plus MALLOC_PERTURB_=165 so the stale read into a freed comm faults every time (6/6 with the poison, 0/6 without). EXPECTED RED, reported as a signal rather than a test failure because the process dies. Acceptance criterion for storing ibDevN by value in the shared-QP pool slot instead of a pointer into the comm. glibc-only: on another allocator this degrades to a duplicate of qpshare_ngroups16.",
+      "config": "qpshare_uaf_teardown",
       "enabled": true
     },
     {
