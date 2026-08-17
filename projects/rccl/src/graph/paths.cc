@@ -1289,12 +1289,14 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     // (seen on MI455 2x1p1g alltoall when topology fallback yields 2 channels
     // but the gfx1250 single-node doubling above asks for 4 parts per peer).
     //
+    // gfx1250 defaults to the full pool so P2P follows the collective channel count.
     // When the user explicitly raises NCCL_MAX_P2P_NCHANNELS past 4*CHANNEL_LIMIT
     // (=64), treat it as an opt-in to the extended upper bound (up to MAXCHANNELS).
     // Otherwise keep the historical 64 cap and per-arch multi-node caps below.
     {
       int userMaxP2p = (int)ncclParamMaxP2pNChannels();
-      int defaultMax = 4 * CHANNEL_LIMIT;
+      bool isGfx1250 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
+      int defaultMax = isGfx1250 ? (int)MAXCHANNELS : 4 * CHANNEL_LIMIT;
       int upper = (userMaxP2p > defaultMax) ? std::min(userMaxP2p, (int)MAXCHANNELS) : defaultMax;
       comm->p2pnChannels = std::min(std::max(pow2Up(comm->p2pnChannels), pow2Up(comm->p2pnChannelsPerPeer)), upper);
       if (upper == defaultMax) {

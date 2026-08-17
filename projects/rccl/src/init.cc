@@ -1840,9 +1840,9 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
   }
 
-  // TODO: Set gfx1250 nc defaults after dedicated tuning data is available.
+  // gfx1250 defaults to the full pool; ncclTopoPostset caps nc by CU count and NCCL_MAX_NCHANNELS.
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250")) {
-    allGather3Data[rank].nc = 2;
+    allGather3Data[rank].nc = MAXCHANNELS;
   }
 
   allGather3Data[rank].pivotA2AEnabled = comm->topo->pivotA2AEnabled && rcclParamPivotAlltoallEnable();
