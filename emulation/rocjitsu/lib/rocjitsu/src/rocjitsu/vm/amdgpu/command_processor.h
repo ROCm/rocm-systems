@@ -174,6 +174,19 @@ public:
 
   size_t dispatched_count() const { return total_dispatched_; }
 
+  /// @brief Total workgroups this CP has placed on its own XCD's compute units.
+  /// @details Distinct from dispatched_count(), which counts AQL packets. This is
+  /// a lifetime running total, not a per-dispatch figure: to see how one grid was
+  /// spread, snapshot every XCD's counter before the dispatch and diff afterwards.
+  ///
+  /// Atomic because the increment happens on the dispatch path under
+  /// hw_queue_mutex_ while SoC::dispatched_workgroups_per_xcd() reads every XCD's
+  /// counter without that lock. Relaxed ordering is enough: this is a cumulative
+  /// statistic, not a synchronization point.
+  [[nodiscard]] uint64_t dispatched_workgroups() const {
+    return dispatched_workgroups_.load(std::memory_order_relaxed);
+  }
+
   size_t next_cu_index() const { return next_cu_; }
 
   const std::vector<simdojo::Port *> &dispatch_ports() const { return dispatch_ports_; }
@@ -322,6 +335,7 @@ private:
   SdmaPacketDialect sdma_packet_dialect_ = SdmaPacketDialect::Legacy;
   uint32_t next_dispatch_id_ = 1;
   size_t total_dispatched_ = 0;
+  std::atomic<uint64_t> dispatched_workgroups_{0};
 
   struct ClusterWorkgroupPlacement {
     ComputeUnitCore *cu = nullptr;

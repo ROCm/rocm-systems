@@ -402,6 +402,7 @@ add_executable(
     daemon_api_test.cpp
     matmul_test.cpp
     vector_add_test.cpp
+    xcd_distribution_test.cpp
     cdna5_architecture_test.cpp
     cdna5_cluster_test.cpp
     cdna5_dispatch_memory_test.cpp
