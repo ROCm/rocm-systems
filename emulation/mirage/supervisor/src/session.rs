@@ -69,6 +69,17 @@ pub struct Session {
     pub def: SessionDef,
     /// Resolved profile, emulator context and scratch directory.
     pub ctx: SessionContext,
+    /// How many nodes this session runs on, resolved once here.
+    ///
+    /// A session's shape is fixed when it is created, and this field is
+    /// what fixes it. It used to be re-read from disk on every
+    /// [`Session::describe`] — once per exec and once per `Describe` or
+    /// `Attach` — so editing a by-name topology while a run was live
+    /// reshaped that live session underneath it: a one-node run started
+    /// fanning out to three ranks, with three different `WORLD_SIZE`s in
+    /// play, and containers for two of the nodes that were never brought
+    /// up.
+    node_count: u32,
     /// Health, published so waiters can react without polling.
     health: watch::Sender<SessionHealth>,
     /// Runtime state, guarded together because teardown must observe a
@@ -103,6 +114,18 @@ pub struct Session {
     /// party that needs it is a per-connection task on the control
     /// socket, which has no other reason to look at `inner` at all.
     closing: watch::Sender<bool>,
+    /// `true` while a bring-up may still be creating things this session
+    /// does not know about.
+    ///
+    /// Bring-up runs in a task nobody holds a handle to, and most of its
+    /// work happens inside blocking calls that cannot be cancelled — a
+    /// `podman run` creating containers and a network. Teardown therefore
+    /// waits for it (see [`Session::await_bring_up`]) rather than racing
+    /// it: the alternative, and what used to happen, is a Ctrl-C during
+    /// bring-up returning promptly and the runtime shutting down on top
+    /// of a half-built session, cancelling the very rollback that would
+    /// have removed it.
+    bringing_up: watch::Sender<bool>,
 }
 
 /// A `mirage exec` client's claim on a session.
@@ -165,13 +188,18 @@ impl Session {
     ///
     /// `runtime_dir` is created here so a backend can rely on it existing.
     ///
+    /// The session's node count is resolved here too, once and for all:
+    /// see [`Session::node_count`].
+    ///
     /// # Errors
     ///
-    /// Returns an error if the scratch directory cannot be created.
+    /// Returns an error if the scratch directory cannot be created, or if
+    /// the profile names a topology that does not exist.
     pub fn new(def: SessionDef, profile: ProfileDef) -> Result<Arc<Self>> {
         let runtime_dir = mirage_core::paths::session_runtime_dir(&def.id);
         std::fs::create_dir_all(&runtime_dir)
             .map_err(|e| MirageError::io(runtime_dir.clone(), e))?;
+        let node_count = resolve_node_count(&profile)?;
         let ctx = SessionContext {
             id: def.id.clone(),
             profile,
@@ -182,13 +210,25 @@ impl Session {
         Ok(Arc::new(Self {
             def,
             ctx,
+            node_count,
             health,
             inner: Mutex::new(Inner::default()),
             quiescent: watch::channel(true).0,
             torn_down: watch::channel(false).0,
             leases: watch::channel(0).0,
             closing: watch::channel(false).0,
+            bringing_up: watch::channel(false).0,
         }))
+    }
+
+    /// How many nodes this session runs on.
+    ///
+    /// Answered from the count resolved at creation, never from the
+    /// topology store: a live session's shape must not change because
+    /// somebody edited the topology it was created from.
+    #[must_use]
+    pub fn node_count(&self) -> u32 {
+        self.node_count
     }
 
     /// The session's id.
@@ -225,7 +265,7 @@ impl Session {
         let _previous = self.health.send_replace(health);
     }
 
-    /// Publish a lifecycle phase.
+    /// Publish a lifecycle phase, unless it would overwrite an answer.
     ///
     /// `stopped` is marked terminal, because it is: a torn-down session
     /// will never become healthy, and anyone waiting on it has their
@@ -234,10 +274,43 @@ impl Session {
     /// finished, so a concurrent `mirage session wait` blocks for its
     /// entire timeout and then reports a timeout for a session that was
     /// stopped seconds earlier.
+    ///
+    /// Two publications are refused here rather than at the call sites,
+    /// because a `watch` channel is last-value-wins and both would
+    /// silently replace something a waiter is owed.
+    ///
+    /// A **terminal failure** is the reason bring-up gave, and bring-up
+    /// tears the session down itself to roll back what it created — so
+    /// `failed` is immediately followed by `stopping` and then `stopped`,
+    /// with nothing in between for a waiter to wake on. Whoever lost that
+    /// race read `stopped`, waited out the teardown, and reported
+    /// `session failed to start (stopped)` with the reason gone; with a
+    /// slow containerised teardown it reported a timeout instead.
+    ///
+    /// A **healthy** phase published after teardown has begun is the
+    /// mirror image: it would tell a `mirage exec` in another terminal
+    /// that a session whose containers are being removed is open for
+    /// business. Bring-up finishing just after a Ctrl-C is exactly that
+    /// case, and it is why the check is made under the lock that
+    /// `tearing_down` is set under.
     pub fn set_phase(&self, healthy: bool, phase: &str, message: Option<String>) {
+        // The lock is held across the publish, not merely across the
+        // check: released in between, a `ready` cleared by teardown
+        // starting a microsecond later would still reach the channel.
+        let inner = self.lock();
+        if self.has_failed() || (healthy && inner.tearing_down) {
+            return;
+        }
         let mut health = SessionHealth::phase(healthy, phase, message);
         health.terminal = phase == state::STOPPED;
         self.set_health(health);
+        drop(inner);
+    }
+
+    /// Whether bring-up has recorded a terminal failure.
+    fn has_failed(&self) -> bool {
+        let health = self.health.borrow();
+        health.terminal && health.state.as_deref() == Some(state::FAILED)
     }
 
     /// The container record, once bring-up has produced one.
@@ -339,6 +412,59 @@ impl Session {
         self.lock().tearing_down
     }
 
+    /// Declare that a bring-up is about to start, so [`Session::teardown`]
+    /// waits for it.
+    ///
+    /// Called by the owner *before* the bring-up task is spawned: a flag
+    /// the task sets for itself would leave a window in which teardown
+    /// sees no bring-up and a bring-up is nonetheless about to create
+    /// containers.
+    pub fn begin_bring_up(&self) {
+        self.bringing_up.send_replace(true);
+    }
+
+    /// Declare the in-flight bring-up finished.
+    ///
+    /// "Finished" means it will create nothing further and has cleaned up
+    /// anything the session refused to take (see
+    /// [`Session::set_containers`]) — not that it succeeded. A bring-up
+    /// that fails calls [`Session::teardown`] itself to roll back, so it
+    /// must call this *first*: teardown waits here, and a task waiting on
+    /// its own completion would wait forever.
+    pub fn finish_bring_up(&self) {
+        self.bringing_up.send_replace(false);
+    }
+
+    /// Resolve once no bring-up is in flight.
+    ///
+    /// Deliberately unbounded. What is being waited for is a `podman
+    /// pull` or a `podman run` on a blocking thread, which cannot be
+    /// cancelled and takes as long as a registry and a network take, and
+    /// every deadline short enough to be worth having is one that expires
+    /// mid-pull — at which point the run exits, the runtime drops the
+    /// bring-up task, and the containers and the per-session network it
+    /// had created are left behind. Networks are not `--rm`; nothing
+    /// removes them but mirage. A Ctrl-C that takes a moment to come back
+    /// is the price of "nothing is left behind" being true.
+    ///
+    /// A second interrupt does not shorten it, and deliberately so: the
+    /// only way to cut this short is to kill the run outright, which is
+    /// the case `mirage cleanup` exists for.
+    async fn await_bring_up(&self) {
+        let mut rx = self.bringing_up.subscribe();
+        // `wait_for` inspects the current value before suspending, so the
+        // common case — teardown of a session that came up long ago —
+        // returns without yielding.
+        let in_flight = *rx.borrow();
+        if in_flight {
+            tracing::info!(
+                session = %self.def.id,
+                "waiting for bring-up to finish before tearing the session down"
+            );
+        }
+        let _ = rx.wait_for(|in_flight| !*in_flight).await;
+    }
+
     /// Take a borrower's lease on this session.
     ///
     /// Returns `None` once teardown has begun — the same answer, and for
@@ -430,8 +556,7 @@ impl Session {
     /// # Errors
     ///
     /// Returns an error if the session is not ready, if it is being torn
-    /// down, or if the process grid cannot be described (an unresolvable
-    /// topology).
+    /// down, or if the process grid cannot be built.
     pub async fn start_exec(
         &self,
         def: &ExecDef,
@@ -559,10 +684,14 @@ impl Session {
     /// remapped onto the in-container mounts here, once, rather than at
     /// every call site.
     ///
+    /// Every call describes the same session: the shape is the one fixed
+    /// at creation, and the rendezvous port is picked once and kept, so a
+    /// `mirage exec` in another terminal joins the job rather than
+    /// starting a differently-shaped one beside it.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the session is not ready, or if the topology
-    /// cannot be resolved.
+    /// Returns an error if the session is not ready.
     pub fn describe(&self) -> Result<SessionDescription> {
         // Refuse until bring-up has finished, for the reason spelled out
         // on [`Session::start_exec`]: the injection and the container
@@ -590,7 +719,8 @@ impl Session {
             let head_port = *inner.head_port.get_or_insert_with(pick_head_port);
             (inner.injection.clone(), inner.containers.clone(), head_port)
         };
-        let node_count = resolve_node_count(&self.ctx.profile)?;
+        // Fixed at creation, not re-read here: see [`Session::node_count`].
+        let node_count = self.node_count;
 
         let (head_addr, head_port) = match &containers {
             Some(state) => (container_name(&self.def.id, 0), state.head_port),
@@ -693,13 +823,16 @@ impl Session {
     /// 1. mark the session as tearing down, so no new exec can start and
     ///    no new borrower can attach, and tell any borrower still holding
     ///    a lease that the session is going away;
-    /// 2. terminate and reap every workload process;
-    /// 3. only then stop the emulator daemon — the simulated device has
+    /// 2. wait for any bring-up still in flight, so that what is torn
+    ///    down is everything the session has, rather than everything it
+    ///    had when the user pressed Ctrl-C;
+    /// 3. terminate and reap every workload process;
+    /// 4. only then stop the emulator daemon — the simulated device has
     ///    to outlive every process that might still be talking to it, or
     ///    a workload gets an I/O error on the way out instead of a clean
     ///    exit;
-    /// 4. remove the containers and network;
-    /// 5. delete the scratch directory.
+    /// 5. remove the containers and network;
+    /// 6. delete the scratch directory.
     ///
     /// Every step is best-effort past the first: a failure in one must not
     /// strand the ones after it, because those are what release the
@@ -743,6 +876,19 @@ impl Session {
         // [`Session::wait_closing`].
         self.closing.send_replace(true);
 
+        // Wait for a bring-up that is still running.
+        //
+        // Everything it creates from here on is refused by the session —
+        // `tearing_down` is set above — and handed straight back to it to
+        // remove, which it does before returning. Waiting is what makes
+        // that rollback actually happen: without it `mirage run` returns,
+        // `main` returns, the tokio runtime drops, and the task is
+        // cancelled at its next await with a network and a container per
+        // node already created. That is the leak a Ctrl-C during bring-up
+        // used to produce, and `--rm` does not cover it: a container is
+        // removed when it stops, a network is removed by nobody.
+        self.await_bring_up().await;
+
         // Let any `start_exec` that is mid-spawn finish registering.
         //
         // The flag above stops new ones, but a call that had already
@@ -763,7 +909,7 @@ impl Session {
             )
         };
 
-        // 2. Every exec, concurrently: with many execs, terminating them
+        // 3. Every exec, concurrently: with many execs, terminating them
         // in sequence would multiply the SIGTERM grace period by their
         // count and make teardown take minutes.
         let terminations = execs.iter().map(|e| e.terminate());
@@ -773,7 +919,7 @@ impl Session {
             inner.execs.clear();
         }
 
-        // 3. The emulator daemon, now that nothing is talking to it.
+        // 4. The emulator daemon, now that nothing is talking to it.
         // `stop` is blocking (it joins the emulator's own threads), so it
         // runs on a blocking thread rather than stalling the runtime.
         if let Some(daemon) = emulator_daemon
@@ -790,7 +936,7 @@ impl Session {
             }
         }
 
-        // 4. Containers and the per-session network.
+        // 5. Containers and the per-session network.
         //
         // Killing the provider clients is what actually stops the
         // containers, and `--rm` then removes them. The explicit teardown
@@ -816,7 +962,7 @@ impl Session {
             tracing::warn!(session = %self.def.id, "container teardown failed: {e}");
         }
 
-        // 5. Scratch. Anything the emulator wrote here is dead with the
+        // 6. Scratch. Anything the emulator wrote here is dead with the
         // session; leaving it would accumulate a directory per session.
         let runtime_dir = self.ctx.runtime_dir.clone();
         if runtime_dir.exists()
@@ -1158,6 +1304,28 @@ mod tests {
         }
     }
 
+    /// A session with a scratch directory under `dir` and nothing
+    /// bringing it up, so a test can drive its lifecycle by hand.
+    ///
+    /// The path override is installed and removed inside this function,
+    /// under the shared lock: `TEST_ROOT` is process-wide, and a test
+    /// that held it across its `await`s would redirect every other test
+    /// in this binary for as long as it ran. Nothing after construction
+    /// consults it — the session captured its scratch directory.
+    fn a_session(dir: &std::path::Path, profile: ProfileDef) -> Arc<Session> {
+        let _guard = mirage_core::paths::test_env_lock();
+        mirage_core::paths::set_test_root(dir);
+        let def = make_def(
+            SessionId::new("lifecycle").unwrap(),
+            MaybeRef::Owned(profile.clone()),
+            "/".to_string(),
+            false,
+        );
+        let session = Session::new(def, profile).unwrap();
+        mirage_core::paths::clear_test_root();
+        session
+    }
+
     fn profile(num_nodes: u32, gpus_per_node: u32) -> ProfileDef {
         ProfileDef {
             name: "p".to_string(),
@@ -1246,6 +1414,140 @@ mod tests {
         assert_eq!(
             container_library_path(&env, runtime),
             format!("{CONTAINER_LIB_DIR}:{CONTAINER_RUNTIME_DIR}/lib")
+        );
+    }
+
+    #[test]
+    fn a_live_sessions_shape_is_the_one_it_was_created_with() {
+        // A by-name topology is a file the user can edit, and they do —
+        // while a run is up, to set up the next one. `describe` used to
+        // re-read it on every call, once per exec and once per
+        // `Describe`, so a one-node session started handing out
+        // `WORLD_SIZE=3` and fanning execs out to two nodes it had never
+        // brought containers up for.
+        let dir = tempfile::tempdir().unwrap();
+        let _guard = mirage_core::paths::test_env_lock();
+        mirage_core::paths::set_test_root(dir.path());
+
+        let mut topology = TopologyDef {
+            num_nodes: 1,
+            gpus_per_node: 1,
+            agent: MaybeRef::Ref("MI350X".to_string()),
+        };
+        mirage_core::topology::store::put("shared", &topology).unwrap();
+
+        let mut p = profile(1, 1);
+        p.emulator.topology = MaybeRef::Ref("shared".to_string());
+        let def = make_def(
+            SessionId::new("shape").unwrap(),
+            MaybeRef::Owned(p.clone()),
+            "/".to_string(),
+            false,
+        );
+        let session = Session::new(def, p).unwrap();
+        session.set_phase(true, state::READY, None);
+        let before = session.describe().unwrap().node_count;
+
+        // The user grows the topology for their next run.
+        topology.num_nodes = 3;
+        mirage_core::topology::store::put("shared", &topology).unwrap();
+        let after = session.describe().unwrap().node_count;
+
+        mirage_core::paths::clear_test_root();
+
+        assert_eq!(before, 1);
+        assert_eq!(
+            after, 1,
+            "editing a topology reshaped a session that was already running"
+        );
+    }
+
+    #[tokio::test]
+    async fn teardown_waits_for_a_bring_up_that_is_still_creating_things() {
+        // Ctrl-C during bring-up. The bring-up task is not one anybody
+        // holds a handle to, and the work inside it is a blocking
+        // `podman run` that no cancellation reaches — so a teardown that
+        // returned early let `mirage run` exit, the runtime drop the
+        // task, and the containers and per-session network it had just
+        // created stay behind. `--rm` does not cover that: a network is
+        // removed by nobody.
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let dir = tempfile::tempdir().unwrap();
+        let session = a_session(dir.path(), profile(1, 1));
+        session.begin_bring_up();
+
+        let rolled_back = Arc::new(AtomicBool::new(false));
+        tokio::spawn({
+            let session = session.clone();
+            let rolled_back = Arc::clone(&rolled_back);
+            async move {
+                // What an interrupted bring-up does: it finishes creating
+                // what it was creating, is handed it straight back by a
+                // session that is tearing down, and removes it itself.
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                let refused = session.set_containers(ContainerState::default(), Vec::new());
+                assert!(
+                    refused.is_some(),
+                    "a session that is tearing down must hand its containers back"
+                );
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                rolled_back.store(true, Ordering::SeqCst);
+                session.finish_bring_up();
+            }
+        });
+
+        session.teardown().await;
+        assert!(
+            rolled_back.load(Ordering::SeqCst),
+            "teardown returned while bring-up was still rolling back; \
+             the runtime shutting down next would have cancelled it"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_terminal_failure_survives_the_teardown_it_triggers() {
+        // Bring-up tears the session down itself to roll back what it
+        // created, so `failed` is followed at once by `stopping` and
+        // `stopped`. A `watch` is last-value-wins, and the reason is the
+        // only thing the user can act on.
+        let dir = tempfile::tempdir().unwrap();
+        let session = a_session(dir.path(), profile(1, 1));
+
+        session.set_health(SessionHealth::failed(
+            "pulling image quay.io/nope:1 failed: not found",
+        ));
+        session.teardown().await;
+
+        let health = session.health();
+        assert_eq!(health.state.as_deref(), Some(state::FAILED), "{health:?}");
+        assert!(
+            health
+                .message
+                .as_deref()
+                .unwrap_or_default()
+                .contains("quay.io/nope:1"),
+            "the reason bring-up gave was lost: {health:?}"
+        );
+        assert!(health.is_settled(), "{health:?}");
+    }
+
+    #[tokio::test]
+    async fn a_session_that_is_tearing_down_never_reports_itself_ready() {
+        // The other end of the same race: bring-up finishing an instant
+        // after a Ctrl-C. `ready` published then would tell a
+        // `mirage exec` in another terminal that a session whose
+        // containers are being removed is open for business.
+        let dir = tempfile::tempdir().unwrap();
+        let session = a_session(dir.path(), profile(1, 1));
+
+        session.teardown().await;
+        session.set_phase(true, state::READY, None);
+
+        assert!(!session.health().healthy, "{:?}", session.health());
+        assert!(
+            session.describe().is_err(),
+            "a torn-down session described itself to a borrower"
         );
     }
 

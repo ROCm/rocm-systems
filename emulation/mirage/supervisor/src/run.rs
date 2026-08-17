@@ -55,10 +55,10 @@ impl Run {
     ///
     /// # Errors
     ///
-    /// Returns an error if the profile cannot be resolved, which is
-    /// deliberately checked here rather than during bring-up: a session
-    /// naming a profile that does not exist should fail at creation, not
-    /// come up and fail every exec.
+    /// Returns an error if the profile or its topology cannot be
+    /// resolved, which is deliberately checked here rather than during
+    /// bring-up: a session naming a profile that does not exist should
+    /// fail at creation, not come up and fail every exec.
     pub fn start(req: CreateSessionRequest) -> Result<Self> {
         let profile = resolve_profile(&req.profile)?;
         let id = req.id.unwrap_or_else(SessionId::generate);
@@ -66,6 +66,13 @@ impl Run {
         let session = Session::new(def, profile)?;
 
         tracing::info!(session = %id, "session created");
+        // Declared before the task exists, so there is no instant in
+        // which teardown could look and see no bring-up in flight. The
+        // `JoinHandle` is dropped on purpose: aborting this task would
+        // not stop the blocking `podman` call inside it, so what teardown
+        // waits on is the session's own signal rather than the handle —
+        // see [`Session::await_bring_up`].
+        session.begin_bring_up();
         tokio::spawn(Self::bring_up(session.clone()));
         Ok(Self { session })
     }
@@ -285,22 +292,39 @@ impl Run {
     /// Failure is recorded as terminal health rather than thrown away:
     /// the session stays alive so the caller can read *why* it failed and
     /// [`Run::wait_ready`] resolves instead of timing out.
+    ///
+    /// Both arms end the bring-up before doing anything that waits, and
+    /// they end it *after* publishing, so that a teardown blocked on this
+    /// bring-up (a Ctrl-C during an image pull) is released only once the
+    /// session's health is the truth and everything created is either the
+    /// session's or already removed.
     async fn bring_up(session: Arc<Session>) {
         match Self::bring_up_inner(&session).await {
             Ok(()) => {
+                // Refused if teardown got here first, which it can: this
+                // is the instant after a Ctrl-C during a slow pull.
                 session.set_phase(true, state::READY, None);
+                session.finish_bring_up();
                 tracing::info!(session = %session.id(), "session ready");
             }
             Err(e) => {
                 tracing::warn!(session = %session.id(), "session bring-up failed: {e}");
+                // Published before the teardown below rather than after
+                // it, and it stays published: `set_phase` will not let
+                // `stopping` overwrite a terminal failure. Republishing
+                // afterwards instead left whoever was waiting to read the
+                // last value in between, which is `stopped` — a session
+                // that "failed to start (stopped)", with the reason lost.
                 session.set_health(SessionHealth::failed(e.to_string()));
+                // Nothing further will be created, so a teardown waiting
+                // on this bring-up may go ahead — including the one
+                // below, which is this failure's own rollback and would
+                // otherwise be waiting for itself.
+                session.finish_bring_up();
                 // Release whatever the failed bring-up did manage to
                 // create. Without this a session that failed halfway
                 // leaves containers and a network behind.
                 session.teardown().await;
-                // Teardown ends in `stopped`; restore the terminal failure
-                // so the reason survives for the caller to read.
-                session.set_health(SessionHealth::failed(e.to_string()));
             }
         }
     }
@@ -388,7 +412,10 @@ impl Run {
         let plan = crate::session::plan_container(&session.ctx, injection);
         def.mounts.extend(plan.mounts);
 
-        let node_count = crate::session::resolve_node_count(&session.ctx.profile)?;
+        // The shape the session was created with, not a fresh read of the
+        // topology: bring-up must start containers for exactly the nodes
+        // every later `describe` will name.
+        let node_count = session.node_count();
         let host_gpus = injection.host_gpus;
         let id = session.id().clone();
         let watcher = session.clone();
@@ -532,7 +559,22 @@ mod tests {
         let _guard = mirage_core::paths::test_env_lock();
         mirage_core::paths::set_test_root(dir);
         let id = SessionId::new("waitready").unwrap();
-        let profile = ProfileDef {
+        let profile = stub_profile();
+        let def = make_def(id, MaybeRef::Owned(profile.clone()), "/".to_string(), false);
+        let run = Arc::new(Run {
+            session: Session::new(def, profile).unwrap(),
+        });
+        mirage_core::paths::clear_test_root();
+        run
+    }
+
+    /// A one-node profile naming an emulator no build registers.
+    ///
+    /// Nothing brings a session on it up by accident, which is what
+    /// [`stalled_run`] needs — and when one *is* brought up, bring-up
+    /// fails at its first step with a message worth asserting on.
+    fn stub_profile() -> ProfileDef {
+        ProfileDef {
             name: "p".to_string(),
             description: None,
             emulator: EmulatorDef {
@@ -547,13 +589,88 @@ mod tests {
                 }),
             },
             containerize: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_waiter_that_arrives_late_still_learns_why_bring_up_failed() {
+        // `wait_ready` reads a `watch`, and a `watch` keeps only the last
+        // value published. Bring-up records its failure and then tears
+        // the session down to roll back what it created, so `stopping`
+        // and `stopped` land immediately behind the reason — and whoever
+        // was not already awake for the failure read `stopped` instead.
+        // `mirage run` then said "session failed to start (stopped)",
+        // which names nothing the user can fix.
+        //
+        // Deterministic where the race is not: this waiter arrives after
+        // the whole sequence, which is the case a watch channel cannot
+        // replay.
+        let dir = tempfile::tempdir().unwrap();
+        let run = stalled_run(dir.path());
+
+        run.session.set_health(SessionHealth::failed(
+            "pulling image quay.io/nope:1 failed: not found",
+        ));
+        run.session.teardown().await;
+
+        let health = run
+            .wait_ready(TIMEOUT)
+            .await
+            .expect("a settled session must not be timed out");
+        assert!(!health.healthy, "{health:?}");
+        assert_eq!(health.state.as_deref(), Some(state::FAILED), "{health:?}");
+        assert!(
+            health
+                .message
+                .as_deref()
+                .unwrap_or_default()
+                .contains("quay.io/nope:1"),
+            "the reason is what the user acts on: {health:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_bring_up_that_cannot_start_reports_its_reason_and_tears_itself_down() {
+        // The real path, end to end: `Run::start` spawns bring-up,
+        // bring-up fails at its first step, and it calls `teardown`
+        // itself to roll back. That teardown waits for the bring-up that
+        // is in flight — which is this very task — so an ordering mistake
+        // there is not a leak but a hang, and this is the test that would
+        // catch it.
+        let dir = tempfile::tempdir().unwrap();
+        let run = {
+            let _guard = mirage_core::paths::test_env_lock();
+            mirage_core::paths::set_test_root(dir.path());
+            let run = Run::start(CreateSessionRequest {
+                id: Some(SessionId::new("no-backend").unwrap()),
+                profile: MaybeRef::Owned(stub_profile()),
+                workdir: "/".to_string(),
+                daemon: false,
+            })
+            .expect("a session with a resolvable profile is created");
+            mirage_core::paths::clear_test_root();
+            run
         };
-        let def = make_def(id, MaybeRef::Owned(profile.clone()), "/".to_string(), false);
-        let run = Arc::new(Run {
-            session: Session::new(def, profile).unwrap(),
-        });
-        mirage_core::paths::clear_test_root();
-        run
+
+        let health = tokio::time::timeout(TIMEOUT, run.wait_ready(TIMEOUT))
+            .await
+            .expect("bring-up and its rollback must not deadlock")
+            .expect("a session that failed to start is settled, not timed out");
+        assert!(!health.healthy, "{health:?}");
+        assert!(
+            health
+                .message
+                .as_deref()
+                .unwrap_or_default()
+                .contains("unknown emulator `stub`"),
+            "the caller must be told what is wrong with the profile: {health:?}"
+        );
+
+        // And the run can still be destroyed, without waiting for a
+        // bring-up that has already finished.
+        tokio::time::timeout(TIMEOUT, run.destroy())
+            .await
+            .expect("teardown of a failed session must not hang");
     }
 
     #[tokio::test(start_paused = true)]
