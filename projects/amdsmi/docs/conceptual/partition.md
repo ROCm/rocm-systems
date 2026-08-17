@@ -137,14 +137,12 @@ their own resources.
 
 ```{note}
 The **accelerator partition profile** and **memory partition mode** are properties of the
-whole physical GPU, and their backing sysfs nodes only respond on the primary partition
-(`partition_id == 0`). AMD SMI therefore transparently resolves the owning physical device
-for secondary partitions, so `amdsmi_get_gpu_accelerator_partition_profile()`,
-`amdsmi_get_gpu_memory_partition()`, `amdsmi_get_gpu_memory_partition_config()`, and
-`amd-smi partition` report the same partition type on every logical partition of a physical
-GPU. Each partition still reports its own `partition_id`. Prior releases returned `N/A` for
-the secondary (sub-partition) nodes because the query was issued directly against a node that
-does not expose the whole-GPU partition interface.
+whole physical GPU, and their sysfs nodes only respond on the primary partition
+(`partition_id == 0`). AMD SMI resolves the owning device for secondary partitions, so
+`amdsmi_get_gpu_accelerator_partition_profile()`, `amdsmi_get_gpu_memory_partition()`,
+`amdsmi_get_gpu_memory_partition_config()`, and `amd-smi partition` report the same
+partition type on every logical partition of a physical GPU, while each partition still
+reports its own `partition_id`. Earlier releases reported `N/A` on the secondary nodes.
 ```
 
 ### Default configuration

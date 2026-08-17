@@ -4,6 +4,14 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ***All information listed below is for reference and subject to change.***
 
+## amd_smi_lib for ROCm 10.1
+
+### Resolved Issues
+
+- **Fixed partition information reporting `N/A` for sub-partitions in CPX/NPS4 mode** ([issue #100](https://github.com/ROCm/amdsmi/issues/100)).  
+  - `amdsmi_get_gpu_compute_partition()`, `amdsmi_get_gpu_compute_partition_mem_alloc_mode()`, `amdsmi_get_gpu_memory_partition()`, `amdsmi_get_gpu_memory_partition_config()`, and `amdsmi_get_gpu_accelerator_partition_profile()` now query the owning device's primary partition (`partition_id == 0`), which is the only node that exposes the whole-GPU partition interface.
+  - On an MI300X in CPX/NPS4 mode, `amd-smi partition` now reports the compute/accelerator profile and memory partition type on all 64 logical GPUs instead of only the 8 primary partitions. Each partition still reports its own `partition_id`.
+
 ## amd_smi_lib for ROCm 7.15.0
 
 ### Added
@@ -209,11 +217,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Removed the unused `amdsmi_nic_link_type_t` enum from the public header**. No API or struct referenced it; NIC link types are reported through `amdsmi_link_type_t`, which gains `AMDSMI_LINK_TYPE_NUMA` and `AMDSMI_LINK_TYPE_XNUMA` in this release.
 
 ### Resolved Issues
-
-- **Fixed partition information reporting `N/A` for sub-partitions in CPX/NPS4 mode** ([issue #100](https://github.com/ROCm/amdsmi/issues/100)).  
-  - `amdsmi_get_gpu_compute_partition()`, `amdsmi_get_gpu_compute_partition_mem_alloc_mode()`, `amdsmi_get_gpu_memory_partition()`, `amdsmi_get_gpu_memory_partition_config()`, and `amdsmi_get_gpu_accelerator_partition_profile()` now resolve the owning physical device and query its primary partition (`partition_id == 0`) for a secondary (sub-partition) node that does not expose the whole-GPU partition interface.
-  - On an MI300X in CPX/NPS4 mode this makes `amd-smi partition` report the compute/accelerator profile and memory partition type on all 64 logical GPUs instead of only the 8 primary partitions.
-  - Each partition continues to report its own `partition_id`.
 
 - **Fixed `amd-smi set --power-cap` rejecting the minimum allowed value**.  
   - The lower bound is now inclusive, so setting the power cap to the exact minimum of the reported range (e.g. `210` when the range is 210-300W) succeeds instead of failing validation, matching the inclusive range shown in the error message.
