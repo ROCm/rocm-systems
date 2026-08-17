@@ -956,7 +956,11 @@ ncclResult_t IbCastConnectImpl(void* ctx, int dev, void* opaqueHandle, void** se
   // For single-subnet or IB deployments, all GIDs are zero → dev stays unchanged.
   if (ncclParamIbCastSubnetAwareRouting()) NCCLCHECK(IbCastFindDevBySubnet(handle->listenGids, 2, dev, &dev));
 
-  if (IbCastAinicRoce && sendDevComm) {
+  // The channel id only reaches the transport on the AINIC path; elsewhere the
+  // fifth connect() arg carries the device handle, not the context, so all
+  // channels share bucket 0 and telemetry reports num_channels as unknown.
+  bool telChannelIdKnown = (IbCastAinicRoce && sendDevComm);
+  if (telChannelIdKnown) {
     channelId = ((ncclNet_ctxt_t*)sendDevComm)->chId;
   }
 
@@ -1092,6 +1096,7 @@ ib_recv_dev_list:
         if (comm->base.qps[q].devIndex == i) numQpsForDev++;
       int numSlots = 0;
       int startSlot = rcclTelemetrySetupChannel(ibDevN, channelId, numQpsForDev, &numSlots);
+      if (!telChannelIdKnown) rcclTelemetryMarkChannelsUnknown(ibDevN);
       int slotOffset = 0;
       for (int q = 0; q < comm->base.nqps && slotOffset < numSlots; q++) {
         if (comm->base.qps[q].devIndex != i) continue;
@@ -1575,7 +1580,9 @@ ncclResult_t IbCastAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle
   bool useDmaBuf = false;
   *recvComm = NULL;
 
-  if (IbCastAinicRoce && recvDevComm) {
+  // See IbCastConnect(): the channel id only reaches the transport on AINIC.
+  bool telChannelIdKnown = (IbCastAinicRoce && recvDevComm);
+  if (telChannelIdKnown) {
     channelId = ((ncclNet_ctxt_t*)recvDevComm)->chId;
   }
 
@@ -1794,6 +1801,7 @@ ib_recv:
         if (rComm->base.qps[q].devIndex == i) numQpsForDev++;
       int numSlots = 0;
       int startSlot = rcclTelemetrySetupChannel(telIbDevN, channelId, numQpsForDev, &numSlots);
+      if (!telChannelIdKnown) rcclTelemetryMarkChannelsUnknown(telIbDevN);
       int slotOffset = 0;
       for (int q = 0; q < rComm->base.nqps && slotOffset < numSlots; q++) {
         if (rComm->base.qps[q].devIndex != i) continue;
@@ -1943,6 +1951,8 @@ fail:
 ncclResult_t IbCastCloseSend(void* sendComm) {
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
   if (comm) {
+    if (comm->base.vProps.ndevs > 0)
+      rcclTelemetryAddCqPolls(comm->base.vProps.devs[0], comm->base.telCqPollCount);
     NCCLCHECK(ncclSocketClose(&comm->base.sock));
 
     for (int q = 0; q < comm->base.nqps; q++)
@@ -1974,6 +1984,8 @@ ncclResult_t IbCastCloseSend(void* sendComm) {
 ncclResult_t IbCastCloseRecv(void* recvComm) {
   struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
   if (comm) {
+    if (comm->base.vProps.ndevs > 0)
+      rcclTelemetryAddCqPolls(comm->base.vProps.devs[0], comm->base.telCqPollCount);
     NCCLCHECK(ncclSocketClose(&comm->base.sock));
 
     for (int q = 0; q < comm->base.nqps; q++)

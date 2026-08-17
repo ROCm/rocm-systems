@@ -1225,7 +1225,8 @@ ncclResult_t IbCastTest(void* request, int* done, int* sizes) {
       }
       TIME_START(3);
       NCCLCHECK(wrap_ibv_poll_cq(r->devBases[i]->cq, cqMaxPollEvent, wcs, &wrDone));
-      rcclTelemetryCqPoll(r->devBases[i]->ibDevN);
+      // Per-comm poll count; folded into the device at close (see CloseSend).
+      if (rcclTelemetryOn()) r->base->telCqPollCount++;
       if (wrDone == 0) {
         TIME_CANCEL(3);
       } else {
@@ -1236,11 +1237,13 @@ ncclResult_t IbCastTest(void* request, int* done, int* sizes) {
       for (int w = 0; w < wrDone; w++) {
         struct ibv_wc* wc = wcs + w;
         if (wc->status != IBV_WC_SUCCESS) {
+          // Count the error on both paths; resiliency runs are exactly where CQ
+          // errors happen, so gating this on !resiliency left the counter at 0.
+          rcclTelemetryCqError(r->devBases[i]->ibDevN);
           if (r->base->resiliency == NULL) {
             WARN("NET/IB: %s: Got CQE with error (devIndex=%d, req=%p, comm=%p (%s), wr_id=%lu, qp_num=%d)", __func__,
                  i, r, r->base, r->base->isSend ? "send" : "recv", wc->wr_id, wc->qp_num);
             IbCastLogCompletionWithError(r->base, wc, i);
-            rcclTelemetryCqError(r->devBases[i]->ibDevN);
             // If resiliency is not enabled, we cannot recover from any error.
             return ncclRemoteError;
           }

@@ -517,6 +517,9 @@ struct alignas(32) ncclIbNetCommBase {
   struct ncclIbDevInfo remDevs[NCCL_IB_MAX_DEVS_PER_NIC];
   // statistics about the comm
   struct ncclIbStats stats;
+  // Telemetry: ibv_poll_cq calls by this comm, folded into the device at close.
+  // Kept per-comm so the hot poll path never touches the shared device line.
+  uint64_t telCqPollCount;
 #ifdef ENABLE_FAULT_INJECTION
   uint32_t faultQpDelayUs[NCCL_IB_MAX_QPS];
   bool faultQpError[NCCL_IB_MAX_QPS];

@@ -30,6 +30,22 @@ RCCL_TEL_STATIC_ASSERT(sizeof(((RcclTelemetryConfig*)0)->output_dir) + RCCL_TEL_
                            <= RCCL_TEL_PATH_MAX,
                        "output_dir plus the JSON file name does not fit RCCL_TEL_PATH_MAX");
 
+/* The device record is cache-line aligned and its hot data-path counters each
+ * start on their own line, so neighbouring records and the read-mostly metadata
+ * never share a line with a per-WQE or per-request write. */
+RCCL_TEL_STATIC_ASSERT(alignof(RcclDeviceStats) == RCCL_TELEMETRY_CACHELINE,
+                       "RcclDeviceStats must be cache-line aligned");
+RCCL_TEL_STATIC_ASSERT(sizeof(RcclDeviceStats) % RCCL_TELEMETRY_CACHELINE == 0,
+                       "RcclDeviceStats size must be a whole number of cache lines");
+RCCL_TEL_STATIC_ASSERT(offsetof(RcclDeviceStats, wqe_size_histogram) % RCCL_TELEMETRY_CACHELINE == 0,
+                       "wqe_size_histogram must start on a cache line");
+RCCL_TEL_STATIC_ASSERT(offsetof(RcclDeviceStats, tx_bytes) % RCCL_TELEMETRY_CACHELINE == 0,
+                       "tx_bytes must start on a cache line");
+RCCL_TEL_STATIC_ASSERT(offsetof(RcclDeviceStats, rx_bytes) % RCCL_TELEMETRY_CACHELINE == 0,
+                       "rx_bytes must start on a cache line");
+RCCL_TEL_STATIC_ASSERT(offsetof(RcclDeviceStats, tx_bytes) != offsetof(RcclDeviceStats, rx_bytes),
+                       "tx_bytes and rx_bytes must not share a cache line");
+
 /* Upper bound on RCCL_TELEMETRY_LATENCY_SAMPLE. Well past the point where the
  * latency work has stopped costing anything; it exists so that the round-up to
  * a power of two cannot be handed an absurd value. */
@@ -48,7 +64,6 @@ uint64_t rcclTelemetryLatencySampleMask = 0;
 int rcclTelemetryLatencySampleN = 1;
 
 /* Internal state */
-static int rcclTelemetryInitialized = 0;
 static char rcclTelemetryStartTime[64];
 static char rcclTelemetryProcessName[256];
 
@@ -696,15 +711,20 @@ static void rcclTelemetryFlushAtExit(void) {
   (void)rcclTelemetryFlush();
 }
 
-int rcclTelemetryInit(void) {
-  if (__atomic_exchange_n(&rcclTelemetryInitialized, 1, __ATOMIC_SEQ_CST)) {
-    return 0;
-  }
+/* The body runs exactly once. A second caller racing in blocks in pthread_once
+ * until the winner returns, so it never observes rcclTelemetryEnabled still 0
+ * after a successful init. An entry latch did not give that: the loser returned
+ * before the flag was published, then went on to win netRefCount++ == 0 and skip
+ * the one-time device registration, leaving the run paying for every hook while
+ * writing "devices": []. */
+static pthread_once_t rcclTelemetryInitOnceControl = PTHREAD_ONCE_INIT;
+static int rcclTelemetryInitStatus = 0;
 
+static void rcclTelemetryInitBody(void) {
   const char* enable_env = getenv("RCCL_TELEMETRY_ENABLE");
   if (enable_env == NULL || strcmp(enable_env, "1") != 0) {
     rcclTelemetryEnabled = 0;
-    return 0;
+    return;
   }
 
   strncpy(rcclTelemetryCfg.output_dir, "/tmp", sizeof(rcclTelemetryCfg.output_dir) - 1);
@@ -724,7 +744,8 @@ int rcclTelemetryInit(void) {
               "RCCL NET_TELEMETRY: RCCL_TELEMETRY_OUTPUT_DIR is longer than %zu bytes; "
               "telemetry stays disabled\n",
               sizeof(rcclTelemetryCfg.output_dir) - 1);
-      return -1;
+      rcclTelemetryInitStatus = -1;
+      return;
     }
     strncpy(rcclTelemetryCfg.output_dir, env_val, sizeof(rcclTelemetryCfg.output_dir) - 1);
     rcclTelemetryCfg.output_dir[sizeof(rcclTelemetryCfg.output_dir) - 1] = '\0';
@@ -845,7 +866,8 @@ int rcclTelemetryInit(void) {
     fprintf(stderr,
             "RCCL NET_TELEMETRY: could not register the exit handler that writes the JSON; "
             "telemetry stays disabled\n");
-    return -1;
+    rcclTelemetryInitStatus = -1;
+    return;
   }
 
   /* The sampler only needs rcclTelemetryNumDevs, which stays 0 until a device
@@ -855,7 +877,12 @@ int rcclTelemetryInit(void) {
   /* Publish last: every hot-path hook keys off this flag, so it must not be
    * observable as 1 before the table above is seeded. */
   __atomic_store_n(&rcclTelemetryEnabled, 1, __ATOMIC_RELEASE);
-  return 0;
+  rcclTelemetryInitStatus = 0;
+}
+
+int rcclTelemetryInit(void) {
+  pthread_once(&rcclTelemetryInitOnceControl, rcclTelemetryInitBody);
+  return rcclTelemetryInitStatus;
 }
 
 int rcclTelemetryFlush(void) {
@@ -1588,7 +1615,10 @@ static void rcclTelemetryWriteJson(FILE* fp) {
     fprintf(fp, "      \"rx_bytes\": %lu,\n", (unsigned long)dev->rx_bytes);
     fprintf(fp, "      \"num_cq_errors\": %lu,\n", (unsigned long)dev->num_cq_errors);
     fprintf(fp, "      \"cq_poll_count\": %lu,\n", (unsigned long)dev->cq_poll_count);
-    fprintf(fp, "      \"num_channels\": %d,\n", dev->num_channels);
+    if (dev->channels_unknown)
+      fprintf(fp, "      \"num_channels\": null,\n");
+    else
+      fprintf(fp, "      \"num_channels\": %d,\n", dev->num_channels);
     fprintf(fp, "      \"active_channels\": %d,\n", activeChannels);
     fprintf(fp, "      \"num_qp_untracked\": %d,\n", dev->num_qp_untracked);
 
@@ -1620,7 +1650,10 @@ static void rcclTelemetryWriteJson(FILE* fp) {
 
       if (chPrinted > 0) fprintf(fp, ",\n");
       fprintf(fp, "        {\n");
-      fprintf(fp, "          \"id\": %d,\n", ch->id);
+      if (dev->channels_unknown)
+        fprintf(fp, "          \"id\": null,\n");
+      else
+        fprintf(fp, "          \"id\": %d,\n", ch->id);
       fprintf(fp, "          \"num_wqe_sent\": %lu,\n", (unsigned long)agg.num_wqe_sent);
       fprintf(fp, "          \"num_recv_wqe\": %lu,\n", (unsigned long)agg.num_recv_wqe);
       fprintf(fp, "          \"num_wqe_rcvd\": %lu,\n", (unsigned long)agg.num_wqe_rcvd);

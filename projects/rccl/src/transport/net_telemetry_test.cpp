@@ -798,7 +798,10 @@ static void testSamplingDefaultIsIdentity(void) {
 
   const int POSTS = 2000;
   for (int i = 0; i < POSTS; i++) {
-    int64_t backdate = 1000 + (i % 7) * 25000;
+    /* Bucket centres (interval 30000): a few us of clock jitter between the two
+     * paths cannot push a completion across a bucket edge, so the histograms
+     * stay bit-identical run to run. */
+    int64_t backdate = 15000 + (i % 7) * 30000;
 
     int64_t sampledTs = rcclTelemetryPostTs(viaSampling);
     CHECK(sampledTs > RCCL_TELEMETRY_TS_UNSAMPLED);

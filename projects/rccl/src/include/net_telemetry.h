@@ -354,7 +354,9 @@ typedef struct __attribute__((aligned(RCCL_TELEMETRY_CACHELINE))) {
  * descriptor table (see net_telemetry.cc). `hw_config` is an opaque pointer to
  * that table; consumers outside of net_telemetry.cc should not dereference it.
  */
-typedef struct {
+typedef struct __attribute__((aligned(RCCL_TELEMETRY_CACHELINE))) {
+  /* --- Read-mostly / cold metadata. Written only at registration, first use or
+   * flush, never by a per-WQE or per-request hook, so it may share a line. --- */
   int    device_id;
   char   roce_device[RCCL_TELEMETRY_DEV_NAME_MAX];
   char   eth_device[RCCL_TELEMETRY_DEV_NAME_MAX];
@@ -362,22 +364,35 @@ typedef struct {
 
   const void* hw_config;      /* opaque: points to active per-HW RcclHwConfig */
 
-  uint64_t tx_bytes;
-  uint64_t rx_bytes;
-  uint64_t num_cq_errors;
-  uint64_t cq_poll_count;
-  uint64_t wqe_size_histogram[RCCL_TELEMETRY_WQE_SIZE_BUCKETS];
   int      num_channels;
+  /* Set when the transport has no real NCCL channel id (non-AINIC): every QP
+   * then lands in one device-wide bucket, so num_channels is reported unknown
+   * rather than a misleading 1. */
+  int      channels_unknown;
   /* Per-channel shortfalls plus channels that could not be tracked. */
   int num_qp_untracked;
   /* Blocks of RcclChannelStats; stored before channel_capacity is raised. */
   void** channel_blocks;
   int channel_capacity;
   int channel_block0_log2;
+  uint64_t num_cq_errors;
+  /* Folded in at teardown from the per-comm counters, never on the data path,
+   * so it stays with the cold fields above. */
+  uint64_t cq_poll_count;
+
+  /* --- Hot: bumped on every posted WQE. Own line(s) so it never shares with
+   * the byte counters below or the metadata above. --- */
+  uint64_t wqe_size_histogram[RCCL_TELEMETRY_WQE_SIZE_BUCKETS]
+      __attribute__((aligned(RCCL_TELEMETRY_CACHELINE)));
+
+  /* --- Hot: per-request byte counters. tx and rx take separate lines so a rank
+   * driving both directions on one device does not ping-pong a shared line. --- */
+  uint64_t tx_bytes __attribute__((aligned(RCCL_TELEMETRY_CACHELINE)));
+  uint64_t rx_bytes __attribute__((aligned(RCCL_TELEMETRY_CACHELINE)));
 
   /* Scalar hardware counters — filled at flush time, -1 means N/A.
    * Indexed by position in the active per-HW counter table. */
-  int64_t hw_counters[RCCL_TELEMETRY_MAX_HWC];
+  int64_t hw_counters[RCCL_TELEMETRY_MAX_HWC] __attribute__((aligned(RCCL_TELEMETRY_CACHELINE)));
 
   /* Per-priority PFC counters, -1 if not supported */
   int64_t pfc_rx_frames[RCCL_TELEMETRY_NUM_PFC_PRIO];
@@ -969,11 +984,16 @@ static inline void rcclTelemetryWriteWqe(int devIdx, int chIdx, int qpIdx, int w
 }
 
 /**
- * Record one ibv_poll_cq invocation on a device's completion queue.
+ * Fold a comm's accumulated ibv_poll_cq count into its device at teardown.
+ *
+ * cq_poll_count is bumped on every poll, including the empty ones, and has no
+ * per-device meaning on the data path, so the hot path keeps a plain per-comm
+ * counter (ncclIbNetCommBase::telCqPollCount) and only this rare teardown call
+ * touches the shared device line.
  */
-static inline void rcclTelemetryCqPoll(int devIdx) {
-  if (!rcclTelemetryOn() || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS) return;
-  __atomic_fetch_add(&rcclTelemetryDevs[devIdx].cq_poll_count, 1, __ATOMIC_RELAXED);
+static inline void rcclTelemetryAddCqPolls(int devIdx, uint64_t polls) {
+  if (!rcclTelemetryOn() || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS || polls == 0) return;
+  __atomic_fetch_add(&rcclTelemetryDevs[devIdx].cq_poll_count, polls, __ATOMIC_RELAXED);
 }
 
 /**
@@ -1019,6 +1039,19 @@ static inline void rcclTelemetryWqeSize(int devIdx, uint64_t bytes) {
  *   }
  */
 int rcclTelemetrySetupChannel(int devIdx, int chIdx, int numQps, int* numSlots);
+
+/**
+ * Mark a device's channel ids as not real NCCL channel ids.
+ *
+ * Call from a transport that cannot supply a channel id (e.g. mlx5/thor2, where
+ * the id only reaches the AINIC path): every QP then shares one device-wide
+ * bucket, and flush reports num_channels as null so the single bucket is not
+ * mistaken for a real per-channel breakdown.
+ */
+static inline void rcclTelemetryMarkChannelsUnknown(int devIdx) {
+  if (!rcclTelemetryOn() || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS) return;
+  __atomic_store_n(&rcclTelemetryDevs[devIdx].channels_unknown, 1, __ATOMIC_RELAXED);
+}
 
 /**
  * Assign the data/CTS role of a single telemetry QP slot reserved by
