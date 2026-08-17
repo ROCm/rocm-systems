@@ -634,7 +634,7 @@ Purpose: One GPU PC (program counter) sample (schema 3.0.4+). Stores the sampled
 | event_id | References rocpd_event.id; its parent_id links to the dispatch event. |
 | dispatch_id | Dispatch id of the sampled kernel (unique within a recording/guid). |
 | correlation_id | Internal correlation id of the PC-sample record. |
-| exec_mask | Active SIMD lanes at sample time (TEXT, preserves the full 64-bit mask). |
+| exec_mask | Active SIMD lanes at sample time. TEXT holding a `0x`-prefixed, 16-digit zero-padded hex mask (for example `0x00000000ffffffff`); parse with `int(value, 16)`. |
 | code_object_id | Code object containing the sampled instruction. |
 | code_object_offset | Byte offset within the code object (the PC value). |
 | wave_issued | Whether the wave issued an instruction (stochastic only; null for host-trap). |

@@ -1860,8 +1860,9 @@ One row per collected PC sample. Key columns:
       (``rocpd_event.correlation_id``).
   * - ``exec_mask``
     - TEXT
-    - Bitmask of active SIMD lanes at sample time. Stored as a decimal string so
-      the full 64-bit mask is preserved without integer overflow.
+    - Bitmask of active SIMD lanes at sample time, as a ``0x``-prefixed hex string
+      zero-padded to 16 digits. Fixed width makes lexicographic ordering match
+      numeric ordering.
   * - ``code_object_id``
     - INTEGER
     - Identifies the loaded code object containing the sampled instruction.
