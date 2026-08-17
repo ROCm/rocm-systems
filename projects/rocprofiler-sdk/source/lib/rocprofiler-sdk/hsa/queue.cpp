@@ -1018,8 +1018,12 @@ WriteInterceptor(const void* packets,
             // routing that connects the tool's PASS toggle callbacks (writers, via
             // replay_local_start/stop_context) to the services that read it at dispatch (via
             // kernel_replay::local_context_override). It lives for the whole loop and is torn down
-            // when the guard exits; global context state is never touched.
-            auto local_ctx_tls_guard = kernel_replay::scoped_local_context_control{};
+            // when the guard exits; global context state is never touched. It captures the contexts
+            // active now (loop start) as the toggle mask, so a tool may only enable/disable one of
+            // those and a local start cannot promote a globally-stopped context
+            // (local_context.hpp).
+            auto local_ctx_tls_guard =
+                kernel_replay::scoped_local_context_control{context::get_active_contexts()};
 
             // Per-pass loop: PASS enter -> submit -> drain the async handler -> PASS exit -> ask
             // the tool whether to continue -> restore device memory before the next pass.
