@@ -73,6 +73,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ci-env:
+    name: Load CI Environment
+    runs-on: ubuntu-24.04
+    outputs:
+      baseline-run-id: ${{ steps.ci-env.outputs.baseline-run-id }}
+    steps:
+      - name: Checkout ci-env action
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/ci-env
+          sparse-checkout-cone-mode: true
+
+      - name: Load CI environment
+        id: ci-env
+        uses: ./.github/actions/ci-env
+
   configure:
     name: Configure Changed Projects
     runs-on: ubuntu-24.04
@@ -109,7 +125,7 @@ jobs:
             --config-path ".github/repos-config.json"
 
   setup:
-    needs: configure
+    needs: [ci-env, configure]
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
     with:
       build_variant: "release"
@@ -120,10 +136,10 @@ jobs:
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
       # rocm-systems affects compiler-runtime (HIP, CLR, runtime, profiler-core)
-      # which cascades to ALL downstream stages. No stages can be reused.
-      # Hard-coding to empty for now.
+      # Keep prebuilt_stages empty - rely on automatic stage reuse
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
-      baseline_run_id: ${{ inputs.baseline_run_id || '' }}
+      # Pull baseline run ID from ci-env (updated by assistant-librarian[bot] on submodule bumps)
+      baseline_run_id: ${{ inputs.baseline_run_id || needs.ci-env.outputs.baseline-run-id }}
       # Enable automatic stage reuse - TheRock finds commit-compatible baselines
       # and determines which stages to rebuild based on changed files
       stage_reuse_mode: reuse-stage
