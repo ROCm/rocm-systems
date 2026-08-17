@@ -128,6 +128,18 @@
       "tests": [
         {"name": "GdrPeerMem", "description": "net_ib peer-memory client sysfs detection (mock memory_peers tree)", "test_filter": "GdrPeerMem.*"}
       ]
+    },
+    "build_time": {
+      "is_gtest": false,
+      "binary": "${WORKDIR:-$PWD}/test/test_build_time.py",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 2400,
+      "command_args": "--local-gpu --compare-base --max-regression-pct 10 --repeat 2 --jobs 64",
+      "tests": [
+        {"name": "BuildTime.LocalGpuArch", "description": "Clean build of the runner's GPU arch is no more than 10% slower than the PR's base commit"}
+      ]
     }
   },
   "test_suites": [
@@ -147,6 +159,12 @@
       "name": "RCCL Unit Tests - GDR Peer-Memory Detection",
       "description": "rccl-UnitTestsGdr (net_ib memory_peers sysfs scan, CPU-only)",
       "config": "unit_tests_gdr",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Build Time",
+      "description": "Times the PR's base commit and its head on this runner and gates on the relative change. Drives its own cmake build, separate from the install.sh build the other suites use.",
+      "config": "build_time",
       "enabled": true
     }
   ]
