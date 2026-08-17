@@ -2884,6 +2884,9 @@ def amdsmi_get_gpu_asic_info(processor_handle: processor_handle_t) -> Dict[str, 
         "rev_id": _pad_hex_value(hex(asic_info_struct.rev_id), 2),
         "asic_serial": asic_info_struct.asic_serial.decode("utf-8"),
         "oam_id": _validate_if_max_uint(asic_info_struct.oam_id, MaxUIntegerTypes.UINT32_T),
+        "physical_acc_id": _validate_if_max_uint(
+            asic_info_struct.physical_acc_id, MaxUIntegerTypes.UINT32_T
+        ),
         "num_compute_units": _validate_if_max_uint(
             asic_info_struct.num_of_compute_units, MaxUIntegerTypes.UINT32_T
         ),
@@ -5357,6 +5360,30 @@ def amdsmi_get_npm_info(node_handle: processor_handle_t) -> Dict[str, Any]:
     }
 
     return dict_ret
+
+
+def amdsmi_get_tray_info(node_handle: processor_handle_t) -> Dict[str, Any]:
+    """
+    Return tray-wide compute-tray type and accelerator count from UALoE.
+
+    node_handle is reserved for future use and MUST be NULL.
+
+    max_acc_per_tray is "N/A" when no UALoE session is active.
+    """
+    if not isinstance(node_handle, amdsmi_wrapper.amdsmi_node_handle):
+        raise AmdSmiParameterException(node_handle, amdsmi_wrapper.amdsmi_node_handle)
+
+    tray_info = amdsmi_wrapper.amdsmi_tray_info_t()
+    _check_res(amdsmi_wrapper.amdsmi_get_tray_info(node_handle, ctypes.byref(tray_info)))
+
+    return {
+        "max_acc_per_tray": _validate_if_max_uint(
+            tray_info.max_acc_per_tray, MaxUIntegerTypes.UINT32_T
+        ),
+        "tray_type": amdsmi_wrapper.amdsmi_compute_tray_type_t__enumvalues.get(
+            tray_info.tray_type, "AMDSMI_COMPUTE_TRAY_TYPE_UNKNOWN"
+        ).replace("AMDSMI_COMPUTE_TRAY_TYPE_", ""),
+    }
 
 
 def amdsmi_get_temp_metric(

@@ -313,6 +313,7 @@ class StaticCommands:
                 "rev_id": "N/A",
                 "asic_serial": "N/A",
                 "oam_id": "N/A",
+                "physical_acc_id": "N/A",
                 "num_compute_units": "N/A",
                 "target_graphics_version": "N/A",
             }

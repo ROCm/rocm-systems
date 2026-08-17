@@ -1,9 +1,9 @@
 LIB_NAME = ualoecfg
 LIB_TARGET = lib$(LIB_NAME).a
 
-SRCS = ualoe_lib.c ualoe_cdev.c ualoe_cb.c ualoe_nl.c
+SRCS = ualoe_lib.c ualoe_cdev.c ualoe_cb.c ualoe_nl.c ualoe_telem.c
 
-INCS = -I../include
+INCS = -I../../include/ualoe_lib -I../../include
 
 OBJS = $(patsubst %.c, %.o, $(SRCS))
 
@@ -26,7 +26,11 @@ endif
 
 all: $(LIB_TARGET)
 
-$(LIB_TARGET): $(OBJS)
+.check-sync: ../../include/ualoe_lib/ifoe_telemetry_hostapp.h ../../include/ualoe_lib/ualoe_lib.h check_telemetry_category.sh
+	@bash check_telemetry_category.sh
+	@touch $@
+
+$(LIB_TARGET): .check-sync $(OBJS)
 	ar rcs $@ $(OBJS)
 
 %.o: %.c

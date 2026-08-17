@@ -20,13 +20,21 @@
  * THE SOFTWARE.
  */
 
-#ifndef UALOE_CB_H
-#define UALOE_CB_H
+#pragma once
 
-#include "ualoe_lib.h"
+#include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_gpu_device.h"
 
-void ualoe_cb_fini(ualoe_handle_t handle);
-int ualoe_cb_init(ualoe_handle_t handle, int dev_id, ualoe_handle_t cdev_fd,
-                  ualoe_event_callback_t cb, void* user_ctx);
-
-#endif /* UALOE_CB_H */
+/**
+ *  @brief Populate physical_acc_id for a single GPU via UALoE. Implemented in
+ *  amd_smi_ualoe.cc; keeps ualoe_lib types out of amd_smi.cc.
+ *
+ *  @param[in]  device GPU device to query.
+ *  @param[out] phys_id Physical accelerator ID; sentinel-filled on any
+ *  NOT_SUPPORTED/error path.
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS on success, ::AMDSMI_STATUS_NOT_SUPPORTED if the
+ *  device has no active UALoE session.
+ */
+amdsmi_status_t get_physical_acc_id_from_ualoe(amd::smi::AMDSmiGPUDevice* device,
+                                               uint32_t* phys_id);

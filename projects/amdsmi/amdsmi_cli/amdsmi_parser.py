@@ -3258,6 +3258,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         power_management_help = "Displays power management information"
         base_board_temps_help = "Displays baseboard temperatures"
         gtt_help = "Displays GTT (shared GPU memory) size"
+        tray_help = "Displays compute tray type and accelerator count"
 
         node_parser = subparsers.add_parser(
             "node", help=node_help, description=node_subcommand_help
@@ -3282,6 +3283,9 @@ class AMDSMIParser(argparse.ArgumentParser):
             help=base_board_temps_help,
         )
         node_parser.add_argument("-G", "--gtt", action="store_true", required=False, help=gtt_help)
+        node_parser.add_argument(
+            "-T", "--tray", action="store_true", required=False, help=tray_help
+        )
 
         # Add Universal Arguments
         self._add_command_modifiers(node_parser)

@@ -13,6 +13,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - New enum: `amdsmi_accelerator_partition_mem_alloc_mode_t` (`AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_CAPPING`, `AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_ALL`).
   - Supersedes the equivalent `compute_partition` memory allocation mode APIs, which are now deprecated.
 
+- **Added physical accelerator ID and tray info via UALoE**.
+  - `amdsmi_asic_info_t` gained a `physical_acc_id` field, populated by `amdsmi_get_gpu_asic_info()`.
+  - New node-scoped API `amdsmi_get_tray_info()` reports compute tray type and accelerator count via the new `amdsmi_tray_info_t` struct and `amdsmi_compute_tray_type_t` enum.
+  - Both are UALoE-backed and report `AMDSMI_STATUS_NOT_SUPPORTED` (or the `UINT32_MAX` sentinel for `physical_acc_id`) on systems without an active UALoE session.
+  - CLI: `amd-smi static --asic` now includes `PHYSICAL_ACC_ID`; new `amd-smi node --tray`/`-T` flag prints tray type and accelerator count.
+
 ### Changed
 
 - **Bumped the library major version to 27.0.0** (breaking).  

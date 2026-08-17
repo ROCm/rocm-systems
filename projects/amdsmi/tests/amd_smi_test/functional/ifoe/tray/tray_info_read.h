@@ -20,13 +20,32 @@
  * THE SOFTWARE.
  */
 
-#ifndef UALOE_CB_H
-#define UALOE_CB_H
+#ifndef TESTS_AMD_SMI_TEST_FUNCTIONAL_TRAY_INFO_READ_H_
+#define TESTS_AMD_SMI_TEST_FUNCTIONAL_TRAY_INFO_READ_H_
 
-#include "ualoe_lib.h"
+#include "test_base.h"
 
-void ualoe_cb_fini(ualoe_handle_t handle);
-int ualoe_cb_init(ualoe_handle_t handle, int dev_id, ualoe_handle_t cdev_fd,
-                  ualoe_event_callback_t cb, void* user_ctx);
+class TestTrayInfoRead : public TestBase {
+ public:
+  TestTrayInfoRead();
 
-#endif /* UALOE_CB_H */
+  // @Brief: Destructor for test case of TestTrayInfoRead
+  virtual ~TestTrayInfoRead();
+
+  // @Brief: Setup the environment for measurement
+  virtual void SetUp();
+
+  // @Brief: Core measurement execution
+  virtual void Run();
+
+  // @Brief: Clean up and retrieve the resource
+  virtual void Close();
+
+  // @Brief: Display results
+  virtual void DisplayResults() const;
+
+  // @Brief: Display information about what this test does
+  virtual void DisplayTestInfo(void);
+};
+
+#endif  // TESTS_AMD_SMI_TEST_FUNCTIONAL_TRAY_INFO_READ_H_

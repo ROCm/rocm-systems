@@ -27,6 +27,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <string>
 
@@ -119,6 +120,17 @@ void TestIfoeInfoRead::Run(void) {
     err = amdsmi_get_gpu_asic_info(processor_handles_[0], &asic_info);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(err)
+
+    // physical_acc_id is UALoE-backed; without an active session it stays at
+    // the UINT32_MAX sentinel rather than failing amdsmi_get_gpu_asic_info().
+    IF_VERB(STANDARD) {
+      std::cout << "\t**Physical Accelerator ID: ";
+      if (asic_info.physical_acc_id == std::numeric_limits<uint32_t>::max()) {
+        std::cout << "N/A (not supported on this system)" << std::endl;
+      } else {
+        std::cout << asic_info.physical_acc_id << std::endl;
+      }
+    }
 
     // device name, brand, serial_number
     amdsmi_board_info_t board_info;

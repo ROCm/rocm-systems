@@ -1149,7 +1149,8 @@ typedef struct {
   uint64_t target_graphics_version;  //!< 0xFFFFFFFFFFFFFFFF if not supported
   uint32_t subsystem_id;             //!> The subsystem ID
   uint64_t flags;                    //!< Chip flags
-  uint32_t reserved[18];
+  uint32_t physical_acc_id;          //!< Physical accelerator ID, 0xFFFFFFFF if not supported
+  uint32_t reserved[17];
 } amdsmi_asic_info_t;
 
 /**
@@ -2697,6 +2698,29 @@ typedef struct {
   uint32_t ubb_power_threshold;  //!< The UBB node power threshold in Watts.
   uint64_t reserved[5];
 } amdsmi_npm_info_t;
+
+/**
+ * @brief Compute tray type
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+  AMDSMI_COMPUTE_TRAY_TYPE_UNKNOWN = 0,   //!< Unknown or unsupported compute tray type
+  AMDSMI_COMPUTE_TRAY_TYPE_HELIOS_P = 1,  //!< Helios-P compute tray
+  AMDSMI_COMPUTE_TRAY_TYPE_HELIOS_R = 2,  //!< Helios-R compute tray
+  AMDSMI_COMPUTE_TRAY_TYPE_TITAN = 3      //!< Titan compute tray
+} amdsmi_compute_tray_type_t;
+
+/**
+ * @brief Compute tray info
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+  uint32_t max_acc_per_tray;             //!< Max accelerators per tray, 0xFFFFFFFF if not supported
+  amdsmi_compute_tray_type_t tray_type;  //!< Compute tray type
+  uint32_t reserved[14];
+} amdsmi_tray_info_t;
 
 /**
  * @brief PTL (Peak Tops Limiter) data format types
@@ -7646,6 +7670,24 @@ amdsmi_status_t amdsmi_get_gpu_xcd_counter(amdsmi_processor_handle processor_han
  * @return ::AMDSMI_STATUS_SUCCESS on success, non-zero on failure.
  */
 amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle, amdsmi_npm_info_t* info);
+
+/**
+ * @brief Retrieves compute-tray type and accelerator count for the specified node.
+ *
+ * @ingroup tagNodeInfo
+ *
+ * @platform{gpu_bm_linux} @platform{host}
+ *
+ * @note node_handle is reserved for future use and MUST be NULL.
+ *
+ * @param[in]  node_handle Reserved for future use; must be NULL.
+ * @param[out] info Pointer to amdsmi_tray_info_t structure to receive tray info.
+ *             Must be allocated by the user.
+ *
+ * @return ::AMDSMI_STATUS_SUCCESS on success, ::AMDSMI_STATUS_NOT_SUPPORTED if no active UALoE
+ *         session is available, non-zero on other failures.
+ */
+amdsmi_status_t amdsmi_get_tray_info(amdsmi_node_handle node_handle, amdsmi_tray_info_t* info);
 
 /** @} End tagNodeInfo */
 

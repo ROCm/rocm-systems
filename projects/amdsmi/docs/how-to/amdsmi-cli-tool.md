@@ -1168,6 +1168,7 @@ GPU: 0
         OAM_ID: 0
         NUM_COMPUTE_UNITS: 228
         TARGET_GRAPHICS_VERSION: gfx942
+        PHYSICAL_ACC_ID: N/A
         FLAGS: 17
     BUS:
         BDF: 0000:01:00.0
