@@ -5362,7 +5362,7 @@ def amdsmi_get_npm_info(node_handle: processor_handle_t) -> Dict[str, Any]:
     return dict_ret
 
 
-def amdsmi_get_tray_info(node_handle: processor_handle_t) -> Dict[str, Any]:
+def amdsmi_get_tray_info(node_handle: processor_handle_t = None) -> Dict[str, Any]:
     """
     Return tray-wide compute-tray type and accelerator count from UALoE.
 
@@ -5370,7 +5370,7 @@ def amdsmi_get_tray_info(node_handle: processor_handle_t) -> Dict[str, Any]:
 
     max_acc_per_tray is "N/A" when no UALoE session is active.
     """
-    if not isinstance(node_handle, amdsmi_wrapper.amdsmi_node_handle):
+    if node_handle is not None and not isinstance(node_handle, amdsmi_wrapper.amdsmi_node_handle):
         raise AmdSmiParameterException(node_handle, amdsmi_wrapper.amdsmi_node_handle)
 
     tray_info = amdsmi_wrapper.amdsmi_tray_info_t()

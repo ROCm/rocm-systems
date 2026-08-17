@@ -29,6 +29,9 @@
  *  @brief Populate physical_acc_id for a single GPU via UALoE. Implemented in
  *  amd_smi_ualoe.cc; keeps ualoe_lib types out of amd_smi.cc.
  *
+ *  @note Unlike sibling UALoE functions, this does not acquire the device's
+ *  SMIGPUDEVICE_MUTEX internally; the caller must already hold it.
+ *
  *  @param[in]  device GPU device to query.
  *  @param[out] phys_id Physical accelerator ID; sentinel-filled on any
  *  NOT_SUPPORTED/error path.

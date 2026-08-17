@@ -763,6 +763,10 @@ static amdsmi_compute_tray_type_t map_ualoe_tray_type(uint32_t raw_tray_type) {
 static amdsmi_status_t get_gpu_identity_via_ualoe(amd::smi::AMDSmiGPUDevice* device,
                                                   uint32_t& phys_id,
                                                   amdsmi_tray_info_t& tray_info) {
+  if (device == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
   phys_id = std::numeric_limits<uint32_t>::max();
   tray_info.max_acc_per_tray = std::numeric_limits<uint32_t>::max();
   tray_info.tray_type = AMDSMI_COMPUTE_TRAY_TYPE_UNKNOWN;
@@ -779,7 +783,7 @@ static amdsmi_status_t get_gpu_identity_via_ualoe(amd::smi::AMDSmiGPUDevice* dev
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
   if (ret != 0) {
-    return AMDSMI_STATUS_UNKNOWN_ERROR;
+    return convert_errno_to_amdsmi_status(ret);
   }
 
   phys_id = identity.phys_id;
@@ -791,6 +795,9 @@ static amdsmi_status_t get_gpu_identity_via_ualoe(amd::smi::AMDSmiGPUDevice* dev
 
 amdsmi_status_t get_physical_acc_id_from_ualoe(amd::smi::AMDSmiGPUDevice* device,
                                                uint32_t* phys_id) {
+  if (device == nullptr || phys_id == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
   amdsmi_tray_info_t unused_tray_info{};
   return get_gpu_identity_via_ualoe(device, *phys_id, unused_tray_info);
 }

@@ -158,14 +158,11 @@ class NodeCommands:
 
         # Get compute tray type and accelerator count
         if args.tray:
-            if args.nodes is not None:
-                try:
-                    tray_dict = amdsmi_interface.amdsmi_get_tray_info(args.nodes)
-                except amdsmi_exception.AmdSmiLibraryException as e:
-                    logging.debug("Failed to get tray info | %s", e.get_error_info())
-                    tray_dict = {}
-            else:
-                logging.debug("No node handle available to query tray info")
+            try:
+                tray_dict = amdsmi_interface.amdsmi_get_tray_info()
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                logging.debug("Failed to get tray info | %s", e.get_error_info())
+                tray_dict = {}
 
         # Print output
         if self.logger.is_human_readable_format() and self.logger.destination == "stdout":
