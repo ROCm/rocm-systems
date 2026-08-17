@@ -71,6 +71,9 @@ public:
   epoch_t mark () const { return m_mark; }
   void set_mark (epoch_t mark) { m_mark = mark; }
 
+  void get_info (amd_dbgapi_cluster_info_t query, size_t value_size,
+                 void *value) const;
+
   const dispatch_t &dispatch () const { return m_dispatch; }
   queue_t &queue () const;
   const agent_t &agent () const;

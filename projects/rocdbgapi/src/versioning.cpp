@@ -228,6 +228,9 @@ amd_dbgapi_get_status_string (amd_dbgapi_status_t status,
         string
           = "The memory at the specified address is currently unavailable";
         break;
+      case AMD_DBGAPI_STATUS_ERROR_INVALID_CLUSTER_ID:
+        string = "The cluster handle is invalid";
+        break;
         /* Don't add a default here, so that we can catch at compile time when
            an enum value is missing.  */
       }

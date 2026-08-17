@@ -51,4 +51,78 @@ cluster_t::architecture () const
   return queue ().architecture ();
 }
 
+void
+cluster_t::get_info (amd_dbgapi_cluster_info_t query, size_t value_size,
+                     void *value) const
+{
+  switch (query)
+    {
+    case AMD_DBGAPI_CLUSTER_INFO_DISPATCH:
+      utils::get_info (value_size, value, dispatch ().id ());
+      return;
+
+    case AMD_DBGAPI_CLUSTER_INFO_QUEUE:
+      utils::get_info (value_size, value, queue ().id ());
+      return;
+
+    case AMD_DBGAPI_CLUSTER_INFO_AGENT:
+      utils::get_info (value_size, value, agent ().id ());
+      return;
+
+    case AMD_DBGAPI_CLUSTER_INFO_PROCESS:
+      utils::get_info (value_size, value, process ().id ());
+      return;
+
+    case AMD_DBGAPI_CLUSTER_INFO_ARCHITECTURE:
+      utils::get_info (value_size, value, architecture ().id ());
+      return;
+
+    case AMD_DBGAPI_CLUSTER_INFO_CLUSTER_COORD:
+      {
+        auto ids = cluster_ids ();
+        dbgapi_assert (ids.has_value ());
+        utils::get_info (value_size, value, *ids);
+        return;
+      }
+    }
+
+  throw api_error_t (AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT);
+}
+
 } /* namespace amd::dbgapi */
+
+using namespace amd::dbgapi;
+
+amd_dbgapi_status_t AMD_DBGAPI
+amd_dbgapi_cluster_get_info (amd_dbgapi_cluster_id_t cluster_id,
+                             amd_dbgapi_cluster_info_t query,
+                             size_t value_size, void *value)
+{
+  TRACE_BEGIN (param_in (cluster_id), param_in (query),
+               param_in (value_size), param_in (value));
+  TRY
+  {
+    if (!detail::is_initialized)
+      THROW (AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED);
+
+    cluster_t *cluster = find (cluster_id);
+
+    if (cluster == nullptr
+        || !cluster->cluster_ids ().has_value ())
+      {
+        /* Normally, if the cluster is found, its coordinates must be
+           non-nullopt, because we do not expose ids of clusters to
+           the client if the cluster has nullopt coordinates.  But if
+           the client manually-crafted a client id that somehow hit a
+           dummy cluster, behave as if no such cluster_t exists.  */
+        THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_CLUSTER_ID);
+      }
+
+    cluster->get_info (query, value_size, value);
+  }
+  CATCH (AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED,
+         AMD_DBGAPI_STATUS_ERROR_INVALID_CLUSTER_ID,
+         AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT,
+         AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT_COMPATIBILITY);
+  TRACE_END (make_query_ref (query, param_out (value)));
+}
