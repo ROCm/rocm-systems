@@ -3630,6 +3630,16 @@ typedef enum
    * ::AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE.
    */
   AMD_DBGAPI_WORKGROUP_INFO_CLUSTER = 7,
+  /**
+   * The workgroup coordinate within the cluster of the workgroup.  The
+   * type of this attribute is \p uint32_t[3] with elements 1, 2, and 3
+   * corresponding to the X, Y, and Z coordinates respectively.
+   *
+   * If the architecture does not support clusters or if the workgroup
+   * is not in cluster mode, ::amd_dbgapi_workgroup_get_info returns
+   * ::AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE.
+   */
+  AMD_DBGAPI_WORKGROUP_INFO_WORKGROUP_COORD_IN_CLUSTER = 8,
 } amd_dbgapi_workgroup_info_t;
 
 /**
@@ -3894,6 +3904,17 @@ typedef enum
    * ::AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE.
    */
   AMD_DBGAPI_WAVE_INFO_CLUSTER_COORD = 16,
+  /**
+   * The wave's workgroup's coordinate within the cluster of the
+   * workgroup.  The type of this attribute is \p uint32_t[3] with
+   * elements 1, 2, and 3 corresponding to the X, Y, and Z coordinates
+   * respectively.
+   *
+   * If the architecture does not support clusters or if the wave is
+   * not in cluster mode, ::amd_dbgapi_wave_get_info returns
+   * ::AMD_DBGAPI_STATUS_ERROR_NOT_AVAILABLE.
+   */
+  AMD_DBGAPI_WAVE_INFO_WORKGROUP_COORD_IN_CLUSTER = 17,
 } amd_dbgapi_wave_info_t;
 
 /**

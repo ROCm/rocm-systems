@@ -12,12 +12,16 @@ Full documentation for AMD Debugger API is available at
   that is returned when the cluster id passed to an API function is invalid.
 
 - `amd_dbgapi_workgroup_get_info` adds a new query named
-  `AMD_DBGAPI_WORKGROUP_INFO_CLUSTER` to get the cluster a workgroup belongs to.
+  `AMD_DBGAPI_WORKGROUP_INFO_CLUSTER` to get the cluster a workgroup belongs
+  to and a query named `AMD_DBGAPI_WORKGROUP_INFO_WORKGROUP_COORD_IN_CLUSTER`
+  to get the workgroup's coordinates within its cluster.
 
 - `amd_dbgapi_wave_get_info` adds a query named
   `AMD_DBGAPI_WAVE_INFO_CLUSTER_COORD` to get the cluster coordinates
-  of a wave, and a query named `AMD_DBGAPI_WAVE_INFO_CLUSTER` to get the
-  cluster a wave's workgroup belongs to.
+  of a wave, `AMD_DBGAPI_WAVE_INFO_WORKGROUP_COORD_IN_CLUSTER` to get the
+  wave's workgroup's coordinates within its cluster, and a query named
+  `AMD_DBGAPI_WAVE_INFO_CLUSTER` to get the cluster a wave's workgroup belongs
+  to.
 
 - `amd_dbgapi_dispatch_get_info` add a query named
   `AMD_DBGAPI_DISPATCH_INFO_CLUSTER_SIZES` to get the cluster sizes in
