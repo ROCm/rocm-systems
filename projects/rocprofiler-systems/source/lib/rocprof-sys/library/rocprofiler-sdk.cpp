@@ -708,7 +708,7 @@ tool_tracing_callback_stop(
 {
     auto _name = tool_data->callback_tracing_info.at(record.kind, record.operation);
 
-    std::uint64_t begin_ts = user_data->value;
+    const std::uint64_t begin_ts = user_data->value;
 
     if(get_use_timemory())
     {
@@ -793,14 +793,14 @@ tool_tracing_callback_stop(
     rocprofiler_iterate_callback_tracing_kind_operation_args(
         record, iterate_args_callback, 2, &args);
 
-    auto          call_stack = get_backtrace(_bt_data);
-    std::uint64_t _beg_ts    = begin_ts;
-    std::uint64_t _end_ts    = ts;
+    auto                call_stack = get_backtrace(_bt_data);
+    const std::uint64_t _beg_ts    = begin_ts;
+    const std::uint64_t _end_ts    = ts;
 
     {
         cache_category<CategoryT>();
         cache_add_thread_info(record.thread_id);
-        std::string args_str = get_args_string(args);
+        const std::string args_str = get_args_string(args);
         cache_region(&record, _beg_ts, _end_ts, call_stack.dump(), args_str,
                      trait::name<CategoryT>::value, _name);
     }
@@ -1181,7 +1181,7 @@ ompt_tracing_callback_start(rocprofiler_callback_tracing_record_t record,
                             rocprofiler_user_data_t* /*user_data*/,
                             rocprofiler_timestamp_t ts)
 {
-    std::string_view _name = ompt_get_unified_name(record);
+    const std::string_view _name = ompt_get_unified_name(record);
 
     if(get_use_timemory())
     {
@@ -1226,7 +1226,7 @@ ompt_tracing_callback_stop(
     rocprofiler_timestamp_t               ts,
     std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data)
 {
-    std::string_view _name = ompt_get_unified_name(record);
+    const std::string_view _name = ompt_get_unified_name(record);
 
     if(get_use_timemory())
     {
@@ -1339,13 +1339,14 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         {
             case ROCPROFILER_OMPT_ID_implicit_task:
             {
-                int flag = payload_data->args.implicit_task.flags;
+                const int flag = payload_data->args.implicit_task.flags;
                 if(flag & ompt_task_initial) return;  // Skips both the start and end
                 break;
             }
             case ROCPROFILER_OMPT_ID_thread_begin:
             {
-                ompt_thread_t thread_type = payload_data->args.thread_begin.thread_type;
+                const ompt_thread_t thread_type =
+                    payload_data->args.thread_begin.thread_type;
                 if(thread_type == ompt_thread_initial) return;
                 break;
             }
@@ -2079,7 +2080,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     static_cast<rocprofiler_buffer_tracing_memory_allocation_record_t*>(
                         header->payload);
 
-                std::uint64_t _stream_id = get_stream_id(record).handle;
+                const std::uint64_t _stream_id = get_stream_id(record).handle;
                 {
                     cache_category<category::rocm_memory_allocate>();
                     cache_add_thread_info(record->thread_id);

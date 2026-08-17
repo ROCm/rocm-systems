@@ -179,7 +179,7 @@ basic_cached_perfetto_engine<Backend>::preregister_pids(
 
     {
         std::lock_guard<std::mutex> lk{ m_collector_mutex };
-        for(int pid : source_pids)
+        for(const int pid : source_pids)
         {
             auto& bytes = m_collected_bytes[pid];
             bytes.reserve(COLLECTED_BYTES_INITIAL_CAPACITY);
