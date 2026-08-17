@@ -40,6 +40,7 @@
 #include <vector>
 #include <algorithm>
 #include <mutex>
+#include <set>
 #ifdef _WIN32
 #include <process.h>  // _exit
 #else
@@ -651,10 +652,30 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
             // proves no captured allocation covers the address.
             if (!live && rec_ptr != 0 && ctx.regions_enabled)
                 live = ctx.regions.materialize_for(ctx, rec_ptr);
-            // Region check: an intra-segment OOB/stale pointer, or a block to be
-            // relocated behind a guard page. No-op when no sidecar was loaded.
-            if (live)
+
+            if (!live && rec_ptr != 0) {
+                live = reinterpret_cast<void*>(rec_ptr);
+                // The measurement behind --warn-untranslated-args: this pointer
+                // reaches the GPU as an address belonging to another process,
+                // which is what a missing region annotation looks like.
+                ctx.untranslated_ptr_args.fetch_add(1, std::memory_order_relaxed);
+                static std::mutex mu;
+                static std::set<std::string> warned;
+                char key[160];
+                snprintf(key, sizeof(key), "%s#%u", kernel_name.c_str(), i);
+                bool first;
+                { std::lock_guard<std::mutex> lk(mu); first = warned.insert(key).second; }
+                if (first)
+                    fprintf(stderr,
+                            "[HRR] '%s' arg[%u]: recorded 0x%llx is in no known "
+                            "allocation — passing it through unchanged\n",
+                            compact_kernel_name(kernel_name).c_str(), i,
+                            (unsigned long long)rec_ptr);
+            } else {
+                // Region check: an intra-segment OOB/stale pointer, or a block to be
+                // relocated behind a guard page. No-op when no sidecar was loaded.
                 live = hrr_region_check_ptr(ctx, &rls, kernel_name, i, rec_ptr, live);
+            }
             if (dbg_dump_ptrs) dbg_ptrs.emplace_back(i, rec_ptr, live);
             storage.resize(sizeof(void*));
             memcpy(storage.data(), &live, sizeof(void*));
