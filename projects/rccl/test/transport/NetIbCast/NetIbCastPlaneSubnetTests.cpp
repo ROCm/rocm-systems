@@ -4,30 +4,20 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only regression tests for the net_ib_cast features backported from
-// NCCL v2.30.7 (ROCm/rocm-systems#8514):
-//   - plane/rail detection : IbCastGetPlaneIndex
-//   - subnet detection     : gidSameSubnet / subnetMatchesAny
-//
-// These exercise the *real* internal helpers through the test-only wrappers in
-// net_ib_cast_inspect.h (no RDMA HW / MPI / GPU required). The GIN_IB_TC traffic
-// class and the GRH addressing + device-override paths are exercised end-to-end
-// by the MPI suite (transport/NetIbMPI/*), since they require live QPs.
+// Host-only unit tests for net_ib_cast internals via the wrappers in
+// net_ib_cast_inspect.h (no RDMA/MPI/GPU): plane/rail dedup, subnet detection
+// and merged rail/plane aggregation.
 
 #include <cstdint>
 #include <cstring>
 #include <arpa/inet.h>
 #include <gtest/gtest.h>
 
-// net_ib_cast_inspect.h already wraps its declarations in extern "C" and pulls
-// in nccl.h (with its HIP/C++ templates) *outside* that guard, so it must be
-// included directly — wrapping it in an extra extern "C" forces the HIP
-// templates into C linkage and breaks the build.
-#include "net_ib_cast_inspect.h"
+#include "net_ib_cast_inspect.h"  // extern "C" wrappers; include directly (pulls in nccl.h)
 
 namespace {
 
-// Build an IPv4-mapped RoCE GID (::ffff:a.b.c.d).
+// IPv4-mapped RoCE GID (::ffff:a.b.c.d).
 void MakeGidV4(uint8_t g[16], uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
   memset(g, 0, 16);
   g[10] = 0xff;
@@ -35,17 +25,15 @@ void MakeGidV4(uint8_t g[16], uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
   g[12] = a; g[13] = b; g[14] = c; g[15] = d;
 }
 
-// Build a native (non IPv4-mapped) IPv6 GID with a chosen 64-bit subnet prefix.
+// Native IPv6 GID with a chosen 64-bit subnet prefix (g[15] = interface id).
 void MakeGidV6(uint8_t g[16], uint8_t prefix0, uint8_t iface) {
   memset(g, 0, 16);
   g[0] = prefix0;
-  g[1] = 0x01;   // ensure it is not an all-zero / IPv4-mapped pattern
-  g[15] = iface; // interface id (not part of the subnet prefix)
+  g[1] = 0x01;
+  g[15] = iface;
 }
 
-// ---------------------------------------------------------------------------
 // plane/rail: IbCastGetPlaneIndex dedups plane IDs into a compact index space.
-// ---------------------------------------------------------------------------
 TEST(NetIbCastPlaneRail, GetPlaneIndexDedup) {
   int16_t count = 1;
   int16_t planes[14] = {-1};  // slot 0 seeded with NCCL_NET_ID_UNDEF
@@ -62,8 +50,7 @@ TEST(NetIbCastPlaneRail, GetPlaneIndexDedup) {
 
 TEST(NetIbCastPlaneRail, GetPlaneIndexRejectsVirtBit) {
   int16_t count = 1, planes[14] = {-1}, idx = 0;
-  // 0x4000 == NCCL_IB_PLANE_VIRT_BIT: reserved, must be rejected.
-  EXPECT_NE(ncclIbCastTestGetPlaneIndex(0x4000, &count, planes, &idx), ncclSuccess);
+  EXPECT_NE(ncclIbCastTestGetPlaneIndex(0x4000, &count, planes, &idx), ncclSuccess);  // 0x4000 = VIRT_BIT
 }
 
 TEST(NetIbCastPlaneRail, GetPlaneIndexNullArgs) {
@@ -73,9 +60,7 @@ TEST(NetIbCastPlaneRail, GetPlaneIndexNullArgs) {
   EXPECT_NE(ncclIbCastTestGetPlaneIndex(0, &count, planes, nullptr), ncclSuccess);
 }
 
-// ---------------------------------------------------------------------------
-// subnet detection: gidSameSubnet
-// ---------------------------------------------------------------------------
+// subnet: gidSameSubnet.
 TEST(NetIbCastSubnet, GidSameSubnetIPv4) {
   uint8_t a[16], b[16];
   MakeGidV4(a, 192, 168, 1, 10);
@@ -104,16 +89,14 @@ TEST(NetIbCastSubnet, GidSameSubnetFamilyMismatch) {
   EXPECT_EQ(ncclIbCastTestGidSameSubnet(v4, v6, 24), 0);  // AF_INET vs AF_INET6
 }
 
-// ---------------------------------------------------------------------------
-// subnet detection: subnetMatchesAny (skips invalid/zero GIDs)
-// ---------------------------------------------------------------------------
+// subnet: subnetMatchesAny skips invalid/zero GIDs.
 TEST(NetIbCastSubnet, SubnetMatchesAny) {
   uint8_t local[16];
   MakeGidV4(local, 10, 0, 5, 1);
 
-  uint8_t zero[16];   memset(zero, 0, 16);        // invalid GID -> skipped
-  uint8_t other[16];  MakeGidV4(other, 10, 0, 9, 9);  // different /24
-  uint8_t match[16];  MakeGidV4(match, 10, 0, 5, 200); // same /24
+  uint8_t zero[16];   memset(zero, 0, 16);            // invalid -> skipped
+  uint8_t other[16];  MakeGidV4(other, 10, 0, 9, 9);
+  uint8_t match[16];  MakeGidV4(match, 10, 0, 5, 200);
 
   uint8_t rem[3 * 16];
   memcpy(rem + 0,  zero,  16);
@@ -121,8 +104,50 @@ TEST(NetIbCastSubnet, SubnetMatchesAny) {
   memcpy(rem + 32, match, 16);
   EXPECT_EQ(ncclIbCastTestSubnetMatchesAny(local, rem, 3, 24), 1);
 
-  memcpy(rem + 32, other, 16);  // now no remote shares the subnet
+  memcpy(rem + 32, other, 16);  // no remote shares the subnet now
   EXPECT_EQ(ncclIbCastTestSubnetMatchesAny(local, rem, 3, 24), 0);
+}
+
+// plane/rail: merged rail/plane aggregation for fused vNICs (IbCastMergedRailPlane).
+constexpr int16_t kPlaneVirtBit = static_cast<int16_t>(0x1 << 14);  // NCCL_IB_PLANE_VIRT_BIT
+constexpr int16_t kIdUndef = -1;                                    // NCCL_NET_ID_UNDEF
+
+TEST(NetIbCastMergedRailPlane, SingleDevKeepsPhysical) {
+  int16_t rail[] = {3}, plane[] = {5}, pidx[] = {2};
+  int16_t outRail = 0, outPlane = 0;
+  ASSERT_EQ(ncclIbCastTestMergedRailPlane(rail, plane, pidx, 1, &outRail, &outPlane), ncclSuccess);
+  EXPECT_EQ(outRail, 3);
+  EXPECT_EQ(outPlane, 5);  // single dev -> physical plane, no virtual bit
+}
+
+TEST(NetIbCastMergedRailPlane, MultiSameRailOrsPlaneBits) {
+  int16_t rail[] = {7, 7}, plane[] = {5, 9}, pidx[] = {0, 3};
+  int16_t outRail = 0, outPlane = 0;
+  ASSERT_EQ(ncclIbCastTestMergedRailPlane(rail, plane, pidx, 2, &outRail, &outPlane), ncclSuccess);
+  EXPECT_EQ(outRail, 7);  // same rail preserved
+  EXPECT_EQ(outPlane, static_cast<int16_t>(kPlaneVirtBit | (0x1 << 0) | (0x1 << 3)));
+}
+
+TEST(NetIbCastMergedRailPlane, MultiDifferentRailUndef) {
+  int16_t rail[] = {7, 9}, plane[] = {0, 0}, pidx[] = {1, 2};
+  int16_t outRail = 0, outPlane = 0;
+  ASSERT_EQ(ncclIbCastTestMergedRailPlane(rail, plane, pidx, 2, &outRail, &outPlane), ncclSuccess);
+  EXPECT_EQ(outRail, kIdUndef);  // mismatched rails -> undefined
+  EXPECT_EQ(outPlane, static_cast<int16_t>(kPlaneVirtBit | (0x1 << 1) | (0x1 << 2)));
+}
+
+TEST(NetIbCastMergedRailPlane, UndefRailPropagates) {
+  int16_t rail[] = {kIdUndef, 7}, plane[] = {0, 0}, pidx[] = {0, 1};
+  int16_t outRail = 0, outPlane = 0;
+  ASSERT_EQ(ncclIbCastTestMergedRailPlane(rail, plane, pidx, 2, &outRail, &outPlane), ncclSuccess);
+  EXPECT_EQ(outRail, kIdUndef);
+}
+
+TEST(NetIbCastMergedRailPlane, RejectsBadArgs) {
+  int16_t rail[] = {1}, plane[] = {1}, pidx[] = {0}, o1 = 0, o2 = 0;
+  EXPECT_EQ(ncclIbCastTestMergedRailPlane(rail, plane, pidx, 0, &o1, &o2), ncclInvalidArgument);       // ndevs = 0
+  EXPECT_EQ(ncclIbCastTestMergedRailPlane(rail, plane, pidx, 999, &o1, &o2), ncclInvalidArgument);     // ndevs > max
+  EXPECT_EQ(ncclIbCastTestMergedRailPlane(nullptr, plane, pidx, 1, &o1, &o2), ncclInvalidArgument);    // null input
 }
 
 }  // namespace

@@ -59,6 +59,13 @@ ncclResult_t ncclIbCastSetSchedParms(void* sendComm, bool schedEnable, bool doWr
  * call IbCastGetPlaneIndex(). Returns ncclInvalidUsage on overflow / bad ID. */
 ncclResult_t ncclIbCastTestGetPlaneIndex(int devPlane, int16_t* count, int16_t* planes, int16_t* idx);
 
+/* plane/rail: derive the merged railId/planeId of a fused vNIC from its physical
+ * devices' (railId, planeId, planeIdx) triples. Forwards to the real
+ * IbCastMergedRailPlane() used by IbCastMakeVDeviceInternal. Returns
+ * ncclInvalidArgument on null args or ndevs outside [1, NCCL_NET_MAX_DEVS_PER_NIC]. */
+ncclResult_t ncclIbCastTestMergedRailPlane(const int16_t* railIds, const int16_t* planeIds, const int16_t* planeIdxs,
+                                           int ndevs, int16_t* outRailId, int16_t* outPlaneId);
+
 /* subnet detection: 1 if two RoCE GIDs share a subnet, else 0. prefixLen in
  * [1,32] applies to IPv4-mapped GIDs; native IPv6 compares the 64-bit prefix. */
 int ncclIbCastTestGidSameSubnet(const uint8_t localGid[16], const uint8_t remoteGid[16], int prefixLen);
