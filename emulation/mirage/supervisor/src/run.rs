@@ -89,6 +89,16 @@ impl Run {
         &self.session.def
     }
 
+    /// Declare how many processes per node this run's job has.
+    ///
+    /// See [`Session::set_job_shape`](crate::session::Session::set_job_shape):
+    /// call it before serving the control socket, so that a `mirage exec`
+    /// is never handed a description of a differently-shaped job than the
+    /// one this run's own ranks are in.
+    pub fn set_job_shape(&self, nproc_per_node: u32) {
+        self.session.set_job_shape(nproc_per_node);
+    }
+
     /// The session's current health.
     #[must_use]
     pub fn health(&self) -> SessionHealth {
@@ -308,7 +318,15 @@ impl Run {
                 tracing::info!(session = %session.id(), "session ready");
             }
             Err(e) => {
-                tracing::warn!(session = %session.id(), "session bring-up failed: {e}");
+                // `debug`, not `warn`. The reason is published as the
+                // session's health a line below, which is where every
+                // caller reads it from and how `mirage run` renders the
+                // fatal error — so logging it at a level that is on by
+                // default printed the same paragraph twice, and for a
+                // `--hack` build failure that paragraph is hundreds of
+                // lines of provider output. One path reports an error;
+                // this one only says when it happened.
+                tracing::debug!(session = %session.id(), "session bring-up failed: {e}");
                 // Published before the teardown below rather than after
                 // it, and it stays published: `set_phase` will not let
                 // `stopping` overwrite a terminal failure. Republishing
@@ -436,6 +454,11 @@ impl Run {
         let host_gpus = injection.host_gpus;
         let id = session.id().clone();
         let watcher = session.clone();
+        // The switch teardown flips to end this bring-up rather than wait
+        // it out. Taken here, where the engine is built, because that is
+        // the only place an engine and the session that owns it are both
+        // in scope.
+        let cancel = session.cancel_switch();
 
         // The container engine is entirely blocking (it shells out to
         // podman/docker and waits), so all of it runs on a blocking
@@ -443,7 +466,8 @@ impl Run {
         // is a watch channel and safe to publish to from anywhere.
         let result = tokio::task::spawn_blocking(move || -> Result<_> {
             let engine = mirage_container::Engine::resolve(&def)
-                .map_err(|e| MirageError::other(e.to_string()))?;
+                .map_err(|e| MirageError::other(e.to_string()))?
+                .with_cancel(cancel);
 
             // Profile hacks build a derived image once, keyed by the base
             // image plus the hack set, and run that instead.

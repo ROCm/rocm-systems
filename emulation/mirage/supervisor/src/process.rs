@@ -780,10 +780,19 @@ async fn pump<R>(
                 // Announce the chunk *before* offering it, and only clear
                 // the flag once the channel has taken it: the whole point
                 // is to be visible while this `await` is what is blocking.
+                //
+                // The counter is bumped before the flag is cleared, and
+                // the order is the whole guarantee. Cleared first, there
+                // is an instant in which the pump is neither holding
+                // anything nor has advanced its count — and a
+                // `drain_pumps` that sampled exactly there read a pump
+                // that had just delivered as one blocked on a pipe
+                // nobody will close, and aborted it. This way every
+                // sample sees one or the other.
                 progress.holding.store(true, Ordering::Relaxed);
                 let sent = tx.send(chunk).await;
-                progress.holding.store(false, Ordering::Relaxed);
                 progress.delivered.fetch_add(1, Ordering::Relaxed);
+                progress.holding.store(false, Ordering::Relaxed);
                 // A closed receiver means the exec is being torn down and
                 // nobody is listening any more. Stop reading rather than
                 // spinning on a dead channel.

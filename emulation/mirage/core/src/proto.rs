@@ -126,6 +126,17 @@ pub struct SessionDescription {
     pub session: SessionId,
     /// Number of nodes in the session's topology.
     pub node_count: u32,
+    /// Processes per node in the job this session was created to run,
+    /// as the owning `mirage run` was asked for with `--nproc-per-node`.
+    ///
+    /// Part of the description because it is part of the session's
+    /// *shape*, not of one command: `RANK`, `LOCAL_RANK` and
+    /// `WORLD_SIZE` are numbered in this grid, and a `mirage exec` that
+    /// computed them from its own process count instead handed its
+    /// workload a different world from the one the run's ranks are in —
+    /// while pointing it at the run's rendezvous, which is how a
+    /// collective mis-forms rather than fails.
+    pub nproc_per_node: u32,
     /// Default working directory for processes on the host. Meaningless
     /// inside a container, where nothing mounts it.
     pub workdir: String,

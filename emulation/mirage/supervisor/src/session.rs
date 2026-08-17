@@ -126,6 +126,18 @@ pub struct Session {
     /// of a half-built session, cancelling the very rollback that would
     /// have removed it.
     bringing_up: watch::Sender<bool>,
+    /// The switch that ends whatever provider the bring-up is waiting on.
+    ///
+    /// The companion to `bringing_up`, and the reason waiting on it is
+    /// affordable. The wait has to be unbounded — see
+    /// [`Session::await_bring_up`] — but "unbounded" only has to mean
+    /// "as long as the rollback needs", not "as long as a registry
+    /// takes". Teardown flips this immediately before it waits, so the
+    /// `podman pull` in flight is killed, bring-up fails at its next
+    /// step, and the wait ends in a poll interval rather than in
+    /// minutes. Handed to the engine where the engine is built, in
+    /// [`Run::bring_up_containers`](crate::Run).
+    cancel: mirage_container::Cancel,
 }
 
 /// A `mirage exec` client's claim on a session.
@@ -170,6 +182,20 @@ struct Inner {
     /// How many `start_exec` calls have reserved an id and not yet
     /// registered their exec. See [`Session::quiescent`].
     starting: usize,
+    /// Processes per node in the job this session was created to run.
+    ///
+    /// Declared by the owning run before it serves its socket (see
+    /// [`Session::set_job_shape`]) and reported in every
+    /// [`Session::describe`], because it is part of the session's shape
+    /// rather than of one command: every rank variable is numbered in
+    /// this grid, and a `mirage exec` that had to guess it handed its
+    /// workload a different `WORLD_SIZE` from the one the run's own
+    /// ranks have.
+    ///
+    /// Zero until the run says otherwise, and read as one: a session
+    /// nobody declared a shape for runs one process per node, which is
+    /// what `mirage run` without `--nproc-per-node` asks for.
+    job_nproc: u32,
     /// Rendezvous port for a non-containerised session, chosen on the
     /// first [`Session::describe`] and then fixed.
     ///
@@ -218,7 +244,30 @@ impl Session {
             leases: watch::channel(0).0,
             closing: watch::channel(false).0,
             bringing_up: watch::channel(false).0,
+            cancel: mirage_container::Cancel::new(),
         }))
+    }
+
+    /// The switch teardown uses to end a bring-up that is in flight.
+    ///
+    /// Handed to the container engine so that a `podman pull` or a
+    /// `podman run` is a thing that can be *stopped* rather than only
+    /// waited out. See the `cancel` field.
+    #[must_use]
+    pub fn cancel_switch(&self) -> mirage_container::Cancel {
+        self.cancel.clone()
+    }
+
+    /// Declare how many processes per node the job in this session runs.
+    ///
+    /// Called by the owning run before it serves its control socket, so
+    /// that no borrower can ever be handed a description of a
+    /// differently-shaped job than the one the run's own ranks are in.
+    /// Doing it at creation would be better still, and is not possible:
+    /// the count is a property of the command `mirage run` was given,
+    /// which is not known to [`Session::new`].
+    pub fn set_job_shape(&self, nproc_per_node: u32) {
+        self.lock().job_nproc = nproc_per_node.max(1);
     }
 
     /// How many nodes this session runs on.
@@ -437,19 +486,27 @@ impl Session {
 
     /// Resolve once no bring-up is in flight.
     ///
-    /// Deliberately unbounded. What is being waited for is a `podman
-    /// pull` or a `podman run` on a blocking thread, which cannot be
-    /// cancelled and takes as long as a registry and a network take, and
+    /// Deliberately unbounded, and cheap anyway. What is being waited for
+    /// is a `podman pull` or a `podman run` on a blocking thread, and
     /// every deadline short enough to be worth having is one that expires
     /// mid-pull — at which point the run exits, the runtime drops the
     /// bring-up task, and the containers and the per-session network it
     /// had created are left behind. Networks are not `--rm`; nothing
-    /// removes them but mirage. A Ctrl-C that takes a moment to come back
-    /// is the price of "nothing is left behind" being true.
+    /// removes them but mirage.
     ///
-    /// A second interrupt does not shorten it, and deliberately so: the
-    /// only way to cut this short is to kill the run outright, which is
-    /// the case `mirage cleanup` exists for.
+    /// What makes the unbounded wait affordable is that the caller ends
+    /// the bring-up rather than merely outlasting it: [`Session::teardown`]
+    /// flips the session's [`Cancel`](mirage_container::Cancel)
+    /// immediately before waiting here, which kills the provider in
+    /// flight, so bring-up fails at its next step and rolls back. The
+    /// wait is therefore as long as the rollback needs and no longer —
+    /// a Ctrl-C during a ten-minute pull comes back in a poll interval,
+    /// with nothing left behind.
+    ///
+    /// A second interrupt still does not shorten it, and deliberately so:
+    /// the rollback is what "nothing is left behind" is made of, and the
+    /// only way past it is to kill the run outright, which is the case
+    /// `mirage cleanup` exists for.
     async fn await_bring_up(&self) {
         let mut rx = self.bringing_up.subscribe();
         // `wait_for` inspects the current value before suspending, so the
@@ -472,12 +529,21 @@ impl Session {
     /// admitted now would build its process grid from a description of
     /// containers that are being removed.
     ///
-    /// While any lease is held, [`Session::teardown`] will not begin. That
-    /// is the point: a `mirage exec` starts its processes in *its own*
-    /// terminal, in its own process, so the session has no other way to
-    /// know they exist — and tearing down under them stops the emulator
-    /// daemon, runs the backend's shutdown hook and deletes the scratch
-    /// directory those processes are actively using.
+    /// Holding a lease is what a borrower has instead of being visible: a
+    /// `mirage exec` starts its processes in *its own* terminal, in its
+    /// own process, so the session has no other way to know they exist —
+    /// and tearing down under them stops the emulator daemon, runs the
+    /// backend's shutdown hook and deletes the scratch directory those
+    /// processes are actively using.
+    ///
+    /// The lease does not itself hold teardown off, and reading it that
+    /// way is how the property gets attributed to the wrong layer.
+    /// [`Session::teardown`] never looks at the count; what waits is
+    /// `mirage run`, which calls [`Session::wait_for_borrowers`] before
+    /// it destroys the run — and which deliberately stops waiting when
+    /// the user interrupts it. Teardown's own duty to a borrower is to
+    /// *tell* it: it publishes `closing`, which drops the connection the
+    /// lease is made of.
     #[must_use]
     pub fn attach(&self) -> Option<SessionLease> {
         let inner = self.lock();
@@ -711,13 +777,18 @@ impl Session {
                 health.state.as_deref().unwrap_or("unknown"),
             )));
         }
-        let (injection, containers, head_port) = {
+        let (injection, containers, head_port, job_nproc) = {
             let mut inner = self.lock();
             // Chosen once and remembered, so every caller — this run's own
             // exec and any `mirage exec` in another terminal — rendezvous
             // on the same port.
             let head_port = *inner.head_port.get_or_insert_with(pick_head_port);
-            (inner.injection.clone(), inner.containers.clone(), head_port)
+            (
+                inner.injection.clone(),
+                inner.containers.clone(),
+                head_port,
+                inner.job_nproc.max(1),
+            )
         };
         // Fixed at creation, not re-read here: see [`Session::node_count`].
         let node_count = self.node_count;
@@ -756,6 +827,7 @@ impl Session {
         Ok(SessionDescription {
             session: self.def.id.clone(),
             node_count,
+            nproc_per_node: job_nproc,
             workdir: self.def.workdir.clone(),
             containers: containers.map(|state| ContainerTargets {
                 provider: state.provider.clone(),
@@ -887,6 +959,14 @@ impl Session {
         // node already created. That is the leak a Ctrl-C during bring-up
         // used to produce, and `--rm` does not cover it: a container is
         // removed when it stops, a network is removed by nobody.
+        //
+        // Ended, not merely waited out. The provider running right now is
+        // a blocking child process, so the only way to hurry it is to
+        // kill it, and this is the switch that does — see
+        // [`Session::await_bring_up`]. Flipped *before* the wait rather
+        // than after it, which is the whole point: after it there is
+        // nothing left to cancel.
+        self.cancel.cancel();
         self.await_bring_up().await;
 
         // Let any `start_exec` that is mid-spawn finish registering.
@@ -918,6 +998,12 @@ impl Session {
             let mut inner = self.lock();
             inner.execs.clear();
         }
+
+        // And whatever a borrower left in the session, which the step
+        // above cannot reach: a `mirage exec` starts its processes in its
+        // own process, as its own children, so they are not in any exec
+        // of ours to terminate.
+        self.reap_leftovers().await;
 
         // 4. The emulator daemon, now that nothing is talking to it.
         // `stop` is blocking (it joins the emulator's own threads), so it
@@ -984,9 +1070,93 @@ impl Session {
         tracing::info!(session = %self.def.id, "session destroyed");
     }
 
+    /// Stop anything still running in this session that no exec owns.
+    ///
+    /// Normally there is nothing: every process the run started is in an
+    /// exec, and every process a borrower started is reaped by the
+    /// borrower. The case this exists for is the borrower that cannot do
+    /// that — a `mirage exec` that was `SIGKILL`ed. Its workload is
+    /// reparented to init, still tagged with this session, still holding
+    /// the emulated device; `mirage cleanup` will not touch it, correctly,
+    /// because the session is *live*, and that is exactly why the run has
+    /// to be the one to reap it. The run owns the session, so nothing may
+    /// be left in it when the session goes.
+    ///
+    /// Found by the tag rather than by bookkeeping, for the reason
+    /// [`mirage_core::reclaim`] gives at length: the borrower's own record
+    /// of its processes died with the borrower, and the tag did not. The
+    /// scan is filtered to *this* session — every other session under
+    /// this runtime directory is somebody's live job, and a run tearing
+    /// itself down has no business reclaiming those.
+    ///
+    /// `SIGTERM` first and `SIGKILL` after the same grace period a
+    /// workload of our own gets: a borrower that is still alive and
+    /// winding down (teardown with a lease still held — the Ctrl-C path)
+    /// deserves the chance to exit on its own terms, and a stranded one
+    /// has nobody left to care either way.
+    ///
+    /// The pid alone is signalled, not `kill(-pid)`, for the reason
+    /// [`mirage_core::reclaim::reap`] gives: the scan already returns
+    /// every descendant that kept the tag, and the group form would
+    /// additionally reach processes that had *dropped* it by joining a
+    /// mirage-led group — a wider claim than the tag supports.
+    async fn reap_leftovers(&self) {
+        let id = self.def.id.clone();
+        let leftovers: Vec<u32> = tokio::task::spawn_blocking(move || {
+            // Nothing is "live" for this purpose: the question is not
+            // which sessions still have an owner but which processes are
+            // in *this* session, which is about to have none.
+            mirage_core::reclaim::stranded_workloads(&[])
+                .into_iter()
+                .filter(|s| s.session == id)
+                .map(|s| s.pid)
+                .collect()
+        })
+        .await
+        .unwrap_or_default();
+        if leftovers.is_empty() {
+            return;
+        }
+
+        tracing::info!(
+            session = %self.def.id,
+            "reaping {} process(es) left in the session by a borrower that did not",
+            leftovers.len()
+        );
+        for pid in &leftovers {
+            signal_pid(*pid, nix::sys::signal::Signal::SIGTERM);
+        }
+        let deadline = tokio::time::Instant::now() + crate::process::TERM_GRACE;
+        for pid in &leftovers {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if crate::process::wait_gone(*pid, remaining).await {
+                continue;
+            }
+            signal_pid(*pid, nix::sys::signal::Signal::SIGKILL);
+        }
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
+}
+
+/// Send `sig` to one process and to nothing else.
+///
+/// Non-positive pids are rejected here as they are in
+/// [`crate::process::signal_group`], and for the same reason: `kill(0,
+/// sig)` addresses the caller's own process group and `kill(-1, sig)`
+/// every process the caller may signal, so a stray zero would turn a
+/// cleanup into ending the user's session. `read_dir` on `/proc` cannot
+/// produce one, which is what makes the guard free.
+fn signal_pid(pid: u32, sig: nix::sys::signal::Signal) {
+    let Ok(raw) = i32::try_from(pid) else {
+        return;
+    };
+    if raw <= 0 {
+        return;
+    }
+    let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(raw), sig);
 }
 
 /// Resolve how many nodes a profile's topology describes.
@@ -1478,31 +1648,83 @@ mod tests {
         session.begin_bring_up();
 
         let rolled_back = Arc::new(AtomicBool::new(false));
-        tokio::spawn({
+        // The stand-in bring-up asserts nothing and answers instead.
+        // An assertion inside a spawned task is swallowed — a panic there
+        // fails no test — and, worse, it skips the `finish_bring_up()`
+        // below it, so the deliberately unbounded `await_bring_up()` in
+        // teardown waits forever. A wrong answer has to come back as a
+        // hung test rather than as a failing one exactly once before that
+        // is worth writing down.
+        let refused = Arc::new(AtomicBool::new(false));
+        let bringing_up = tokio::spawn({
             let session = session.clone();
             let rolled_back = Arc::clone(&rolled_back);
+            let refused = Arc::clone(&refused);
             async move {
                 // What an interrupted bring-up does: it finishes creating
                 // what it was creating, is handed it straight back by a
                 // session that is tearing down, and removes it itself.
                 tokio::time::sleep(Duration::from_millis(50)).await;
-                let refused = session.set_containers(ContainerState::default(), Vec::new());
-                assert!(
-                    refused.is_some(),
-                    "a session that is tearing down must hand its containers back"
-                );
+                let handed_back = session.set_containers(ContainerState::default(), Vec::new());
+                refused.store(handed_back.is_some(), Ordering::SeqCst);
                 tokio::time::sleep(Duration::from_millis(50)).await;
                 rolled_back.store(true, Ordering::SeqCst);
                 session.finish_bring_up();
             }
         });
 
-        session.teardown().await;
+        // Bounded, so a teardown that does not come back is a failure and
+        // not a suite that never finishes. Generously bounded: what is
+        // under test is "did it wait at all", which the two sleeps above
+        // decide, not how fast it is.
+        tokio::time::timeout(Duration::from_secs(30), session.teardown())
+            .await
+            .expect("teardown must not wait on a bring-up that has finished");
+        bringing_up.await.expect("the stand-in bring-up finishes");
+
+        assert!(
+            refused.load(Ordering::SeqCst),
+            "a session that is tearing down must hand its containers back"
+        );
         assert!(
             rolled_back.load(Ordering::SeqCst),
             "teardown returned while bring-up was still rolling back; \
              the runtime shutting down next would have cancelled it"
         );
+    }
+
+    #[tokio::test]
+    async fn teardown_cancels_the_bring_up_it_is_about_to_wait_for() {
+        // The wait is unbounded on purpose, and that is only affordable
+        // because teardown ends the bring-up rather than outlasting it.
+        // With the switch unwired — which it was, a complete
+        // cancellation mechanism in `mirage_container` that no production
+        // caller ever constructed — a Ctrl-C during a ten-minute image
+        // pull sat in `await_bring_up` for the rest of that pull, and
+        // `mirage run` looked like it had ignored the signal.
+        let dir = tempfile::tempdir().unwrap();
+        let session = a_session(dir.path(), profile(1, 1));
+        let cancel = session.cancel_switch();
+        assert!(!cancel.is_cancelled(), "nothing has asked it to stop yet");
+        session.begin_bring_up();
+
+        // A bring-up that only ends when it is told to, which is what a
+        // provider under a `Cancel` does.
+        tokio::spawn({
+            let session = session.clone();
+            let cancel = cancel.clone();
+            async move {
+                while !cancel.is_cancelled() {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                session.finish_bring_up();
+            }
+        });
+
+        tokio::time::timeout(Duration::from_secs(30), session.teardown())
+            .await
+            .expect("teardown must end the bring-up it waits for, not wait it out");
+        assert!(cancel.is_cancelled());
     }
 
     #[tokio::test]

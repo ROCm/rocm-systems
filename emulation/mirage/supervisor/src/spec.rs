@@ -55,31 +55,76 @@ pub(crate) const CONTAINER_RUNTIME_DIR: &str = "/mnt/mirage/runtime";
 /// container, and this function creates the per-exec subdirectory under
 /// it.
 ///
+/// # Identity: the session's grid, not this exec's
+///
+/// Two counts meet here and they are not the same number.
+///
+/// [`SessionDescription::nproc_per_node`] is the **job's** shape — what
+/// the owning `mirage run` was started with — and it is what every rank
+/// variable is computed against: `WORLD_SIZE` is `node_count *
+/// nproc_per_node`, and a process is rank `node * nproc_per_node + local`
+/// of it. [`ExecDef::nproc_per_node`] is how many of a node's slots
+/// *this* invocation fills, which is a question about how many processes
+/// to start and about nothing else.
+///
+/// For `mirage run` the two are equal, which is why conflating them went
+/// unnoticed: the run's own exec is the job. For `mirage exec` they are
+/// not. Computing the world from the exec's count told a
+/// `mirage exec` into a `--nproc-per-node 3` job that the world had two
+/// processes in it rather than six, and numbered its ranks accordingly —
+/// while still pointing them at the run's rendezvous port, so a
+/// collective built on those numbers mis-forms instead of failing.
+///
+/// The rule that falls out, and the one the CLI documents:
+///
+/// * `mirage exec -- cmd` starts one process per node, each of them its
+///   node's local rank 0 — ranks `0`, `P`, `2P`, … of a `WORLD_SIZE` of
+///   `N * P`.
+/// * `mirage exec --node n -- cmd` starts exactly that node's local rank
+///   0, which is what keeps it a single-process exec and therefore an
+///   interactive one.
+/// * `--nproc-per-node k` fills the first `k` slots of each node it runs
+///   on, and `k` may not exceed the job's own `P`: rank `node * P + P` is
+///   the next node's rank 0, and two live processes claiming one rank in
+///   one rendezvous is the failure this whole section exists to prevent.
+///
 /// # Errors
 ///
-/// Returns an error if the world size exceeds [`MAX_WORLD_SIZE`], or if
-/// the pid-file directory cannot be created.
+/// Returns an error if the world size exceeds [`MAX_WORLD_SIZE`], if the
+/// exec asks for more processes per node than the job has slots for, or
+/// if the pid-file directory cannot be created.
 pub fn build_specs(
     desc: &SessionDescription,
     def: &ExecDef,
     exec_id: &ExecId,
 ) -> Result<Vec<SpawnSpec>> {
     let node_count = desc.node_count.max(1);
+    // The job's shape and this exec's, kept apart deliberately; see the
+    // "Identity" section above for what conflating them cost.
+    let job_nproc = desc.nproc_per_node.max(1);
     let nproc = def.nproc_per_node.max(1);
 
     // The grid size is user-supplied, so the product has to be checked
     // rather than assumed: unchecked it panics in a debug build and wraps
     // in a release one, and either way the loop below starts forking.
     let world_size = node_count
-        .checked_mul(nproc)
+        .checked_mul(job_nproc)
         .filter(|n| *n <= MAX_WORLD_SIZE)
         .ok_or_else(|| {
             MirageError::other(format!(
-                "{node_count} nodes x {nproc} processes per node is {} processes, \
+                "{node_count} nodes x {job_nproc} processes per node is {} processes, \
                  more than the {MAX_WORLD_SIZE} mirage will start for one exec",
-                u64::from(node_count) * u64::from(nproc)
+                u64::from(node_count) * u64::from(job_nproc)
             ))
         })?;
+
+    if nproc > job_nproc {
+        return Err(MirageError::other(format!(
+            "this session runs {job_nproc} process(es) per node, so it has no \
+             {nproc}th slot on a node to start one in. Start the run with \
+             `--nproc-per-node {nproc}` if that is the shape the job should have."
+        )));
+    }
 
     // Which nodes this exec actually starts processes on. `--node N`
     // narrows it to one; the rank variables below are still computed
@@ -141,7 +186,9 @@ pub fn build_specs(
     let mut specs = Vec::with_capacity(nodes.len() * nproc as usize);
     for node in nodes {
         for local in 0..nproc {
-            let global = node * nproc + local;
+            // The job's stride, not this exec's: rank `n` of the session
+            // is at `n * job_nproc`, whoever started it.
+            let global = node * job_nproc + local;
             let args = if node == 0 {
                 &def.exec
             } else {
@@ -162,6 +209,13 @@ pub fn build_specs(
                             MirageError::other(format!("session has no container for node {node}"))
                         })?
                         .to_string();
+                    // No [`Cancel`](mirage_container::Cancel) on this
+                    // one, and it is the one engine that needs none: it
+                    // is used purely to build an argv, which starts no
+                    // child and waits on nothing. The engine that does
+                    // run providers — the session's bring-up — is given
+                    // the session's switch where it is built, in
+                    // [`Run::bring_up_containers`](crate::Run).
                     let engine = mirage_container::Engine::with_provider(&targets.provider);
                     let mut env = env;
                     // Inside the container the host's runtime directory is
@@ -426,10 +480,17 @@ mod tests {
     use mirage_core::proto::ContainerTargets;
     use mirage_core::session::SessionId;
 
+    /// A one-process-per-node session, the shape almost every test wants.
     fn desc(node_count: u32) -> SessionDescription {
+        job(node_count, 1)
+    }
+
+    /// A session running `nproc` processes on each of `node_count` nodes.
+    fn job(node_count: u32, nproc: u32) -> SessionDescription {
         SessionDescription {
             session: SessionId::new("s").unwrap(),
             node_count,
+            nproc_per_node: nproc,
             workdir: "/work".to_string(),
             containers: None,
             env: BTreeMap::from([("EMU".to_string(), "1".to_string())]),
@@ -485,7 +546,7 @@ mod tests {
     fn several_processes_on_one_node_are_still_multi_process() {
         // The rule is about how many processes share the terminal, not
         // how many nodes there are.
-        let specs = build_specs(&desc(1), &exec_def(4, None), &id()).unwrap();
+        let specs = build_specs(&job(1, 4), &exec_def(4, None), &id()).unwrap();
         assert_eq!(specs.len(), 4);
         assert!(specs.iter().all(|s| s.stdio == StdioMode::Capture));
     }
@@ -544,13 +605,83 @@ mod tests {
 
     #[test]
     fn local_and_global_ranks_are_distinct_with_several_procs_per_node() {
-        let specs = build_specs(&desc(2), &exec_def(2, None), &id()).unwrap();
+        let specs = build_specs(&job(2, 2), &exec_def(2, None), &id()).unwrap();
         assert_eq!(specs.len(), 4);
         let at = |i: usize, k: &str| specs[i].env.get(k).cloned().unwrap_or_default();
         assert_eq!(at(3, "RANK"), "3");
         assert_eq!(at(3, "LOCAL_RANK"), "1");
         assert_eq!(at(3, "MIRAGE_RANK"), "1");
         assert_eq!(at(3, "WORLD_SIZE"), "4");
+    }
+
+    #[test]
+    fn an_exec_is_numbered_in_the_jobs_grid_and_not_in_its_own() {
+        // MRG3-001. `mirage exec -- cmd` into a `--num-nodes 2
+        // --nproc-per-node 3` job starts one process per node — but each
+        // one is a rank *of that job*, not of a two-process job of its
+        // own. Numbering them 0..1 out of a world of 2 while handing them
+        // the run's own `MASTER_PORT` is what makes a collective
+        // mis-form rather than fail: the six ranks the run started and
+        // the two the exec started rendezvous on the same port with
+        // irreconcilable ideas of how many of them there are.
+        let specs = build_specs(&job(2, 3), &exec_def(1, None), &id()).unwrap();
+        assert_eq!(specs.len(), 2, "one process per node, as before");
+        let at = |i: usize, k: &str| specs[i].env.get(k).cloned().unwrap_or_default();
+
+        assert_eq!(at(0, "RANK"), "0");
+        assert_eq!(at(0, "LOCAL_RANK"), "0");
+        assert_eq!(at(0, "MIRAGE_RANK"), "0");
+        // Node 1's local rank 0 is the job's rank 3, not its rank 1.
+        assert_eq!(at(1, "RANK"), "3");
+        assert_eq!(at(1, "LOCAL_RANK"), "0");
+        assert_eq!(at(1, "MIRAGE_RANK"), "1");
+        for i in 0..2 {
+            assert_eq!(at(i, "WORLD_SIZE"), "6", "the job's world, not the exec's");
+        }
+    }
+
+    #[test]
+    fn naming_a_node_of_a_multi_process_job_gets_that_nodes_first_rank() {
+        // `mirage exec --node 1 -- bash` on a three-process-per-node job.
+        // One process, so it keeps the terminal — and it is rank 3, the
+        // identity node 1's own first rank has.
+        let specs = build_specs(&job(2, 3), &exec_def(1, Some(1)), &id()).unwrap();
+        assert_eq!(specs.len(), 1);
+        assert_eq!(specs[0].stdio, StdioMode::Inherit { stdin: true });
+        let at = |k: &str| specs[0].env.get(k).cloned().unwrap_or_default();
+        assert_eq!(at("RANK"), "3");
+        assert_eq!(at("LOCAL_RANK"), "0");
+        assert_eq!(at("MIRAGE_RANK"), "1");
+        assert_eq!(at("WORLD_SIZE"), "6");
+    }
+
+    #[test]
+    fn an_exec_may_fill_as_many_of_a_nodes_slots_as_the_job_has() {
+        // Asking for the job's own shape reproduces the run's grid
+        // exactly, which is the equivalence `mirage exec` rests on.
+        let specs = build_specs(&job(2, 3), &exec_def(3, Some(1)), &id()).unwrap();
+        let ranks: Vec<String> = specs
+            .iter()
+            .map(|s| s.env.get("RANK").cloned().unwrap_or_default())
+            .collect();
+        assert_eq!(ranks, ["3", "4", "5"]);
+        let locals: Vec<String> = specs
+            .iter()
+            .map(|s| s.env.get("LOCAL_RANK").cloned().unwrap_or_default())
+            .collect();
+        assert_eq!(locals, ["0", "1", "2"]);
+    }
+
+    #[test]
+    fn an_exec_cannot_ask_for_more_slots_than_a_node_has() {
+        // Rank `node * P + P` is the *next* node's rank 0, so allowing
+        // this would put two live processes on one rank of one
+        // rendezvous — the same silent mis-forming, arrived at from the
+        // other direction.
+        let err = build_specs(&job(2, 2), &exec_def(3, None), &id()).unwrap_err();
+        let text = err.to_string();
+        assert!(text.contains("2 process(es) per node"), "{text}");
+        assert!(text.contains("--nproc-per-node 3"), "{text}");
     }
 
     #[test]
@@ -568,7 +699,7 @@ mod tests {
 
     #[test]
     fn an_impossible_world_size_is_refused_rather_than_forked() {
-        let err = build_specs(&desc(2), &exec_def(u32::MAX, None), &id()).unwrap_err();
+        let err = build_specs(&job(2, u32::MAX), &exec_def(1, None), &id()).unwrap_err();
         assert!(err.to_string().contains("more than the"), "{err}");
     }
 
@@ -603,7 +734,7 @@ mod tests {
         // The tag is the only record of the association that survives the
         // owning run being `SIGKILL`ed, so `mirage cleanup` can find what
         // was stranded. See [`mirage_core::reclaim`].
-        let specs = build_specs(&desc(2), &exec_def(2, None), &id()).unwrap();
+        let specs = build_specs(&job(2, 2), &exec_def(2, None), &id()).unwrap();
         assert_eq!(specs.len(), 4);
         for spec in &specs {
             assert_eq!(
@@ -627,7 +758,7 @@ mod tests {
         // cleanup` running under a different `MIRAGE_RUNTIME` sees a
         // healthy workload as a crashed run's leftovers.
         let runtime = mirage_core::container::owning_runtime();
-        let specs = build_specs(&desc(2), &exec_def(2, None), &id()).unwrap();
+        let specs = build_specs(&job(2, 2), &exec_def(2, None), &id()).unwrap();
         for spec in &specs {
             assert_eq!(
                 spec.env.get("MIRAGE_RUNTIME").map(String::as_str),

@@ -539,6 +539,37 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn a_directory_that_was_already_there_is_narrowed_before_it_is_used() {
+        // The other half, and the half the bug was actually about. Every
+        // level mirage *creates* is private by construction —
+        // `mkdir(2)` takes the mode — so a test that only exercises
+        // those proves nothing about the forty lines that narrow a
+        // directory somebody else made. Replace them with `return
+        // Ok(())` and the test above still passes.
+        //
+        // This is the real shape: `$XDG_RUNTIME_DIR` unset, so the
+        // runtime root falls back under a shared `$TMPDIR`, and the
+        // directory mirage is about to serve its socket out of already
+        // exists and is reachable by everyone on the machine.
+        let dir = tempfile::tempdir().unwrap();
+        let existing = dir.path().join("run");
+        std::fs::create_dir(&existing).unwrap();
+        std::fs::set_permissions(&existing, std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert_eq!(mode_of(&existing) & 0o077, 0o077, "the setup must be open");
+
+        let path = socket_path(&existing, "preexisting");
+        let _socket = ControlSocket::bind(&path).await.unwrap();
+
+        let mode = mode_of(&existing);
+        assert_eq!(
+            mode & 0o077,
+            0,
+            "a directory that already existed was served out of at mode {mode:04o}; \
+             anyone who can reach it can `mirage exec` into this session"
+        );
+    }
+
     /// The permission bits of `path`.
     fn mode_of(path: &Path) -> u32 {
         std::fs::metadata(path).unwrap().permissions().mode() & 0o777

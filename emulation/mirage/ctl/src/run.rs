@@ -88,6 +88,16 @@ pub async fn run_cmd(a: RunArgs) -> anyhow::Result<ExitCode> {
         workdir: workdir.clone(),
         daemon: !a.in_process,
     })?);
+    // Declare the job's shape before anything can ask about the session.
+    //
+    // `--nproc-per-node` is a property of the job this run *is*, not of
+    // the one command below, and every rank variable is numbered in that
+    // grid — so a `mirage exec` from another terminal has to be told it
+    // or it invents a different world and joins this one's rendezvous
+    // with it. Said here, before `run_owned` serves the socket, so there
+    // is no instant in which a borrower could be answered with the
+    // default.
+    run.set_job_shape(a.nproc_per_node.unwrap_or(1));
     eprintln!("mirage: session {session}");
 
     // From here on every exit path must go through teardown, including
@@ -227,12 +237,24 @@ async fn run_owned(
 /// "node 2/4…"), so echoing every notification would repeat lines that
 /// say nothing new.
 ///
+/// A **terminal failure** is not printed here at all, and that omission
+/// is the point. The reason bring-up gives is published as health *and*
+/// returned to [`run_owned`], which turns it into the fatal error `main`
+/// prints — so echoing it here printed the same text twice, or three
+/// times with the log line the supervisor used to emit beside it, and
+/// nondeterministically, because whether this loop woke before teardown
+/// replaced the value was a race. For a `--hack` build failure, whose
+/// message carries the provider's own output, that was hundreds of
+/// duplicated lines. Progress is this function's job; the answer is the
+/// caller's.
+///
 /// stderr, not stdout: this is mirage talking about itself, and it must
 /// not land in the middle of a workload's piped output.
 async fn report_progress(
     mut health: tokio::sync::watch::Receiver<mirage_core::session::SessionHealth>,
 ) {
     let mut last: Option<String> = None;
+    let mut entered = tokio::time::Instant::now();
     loop {
         {
             // Scoped so the watch guard is released before the await
@@ -240,21 +262,102 @@ async fn report_progress(
             // workspace lints, and for good reason — it would block every
             // publisher, which here is bring-up itself.
             let current = health.borrow_and_update();
-            if let Some(message) = &current.message
-                && last.as_ref() != Some(message)
-            {
-                eprintln!("mirage: {message}");
-                last = Some(message.clone());
+            if let Some(line) = progress_line(&current, last.as_deref()) {
+                eprintln!("mirage: {line}");
+                last = Some(line);
+                entered = tokio::time::Instant::now();
             }
         }
-        if health.changed().await.is_err() {
-            // The session is gone; there is nothing further to report and
-            // the caller is about to finish anyway. Park rather than
-            // return, so this stays the "never resolves" arm of a
-            // `select!` and cannot be mistaken for readiness.
-            std::future::pending::<()>().await;
+        match tokio::time::timeout(STALL_NOTICE, health.changed()).await {
+            // Health changed; loop and report whatever is new.
+            Ok(Ok(())) => {}
+            Ok(Err(_)) => {
+                // The session is gone; there is nothing further to report
+                // and the caller is about to finish anyway. Park rather
+                // than return, so this stays the "never resolves" arm of
+                // a `select!` and cannot be mistaken for readiness.
+                std::future::pending::<()>().await;
+            }
+            Err(_elapsed) => {
+                let stalled = {
+                    let current = health.borrow();
+                    stall_notice(&current, entered.elapsed())
+                };
+                if let Some(notice) = stalled {
+                    eprintln!("mirage: {notice}");
+                }
+            }
         }
     }
+}
+
+/// How long a phase may go without saying anything before mirage does.
+const STALL_NOTICE: Duration = Duration::from_secs(30);
+
+/// What to say about a phase that has gone quiet, if anything.
+///
+/// Only the *externally bounded* phases — pulling an image, building a
+/// derived one — because they are the ones that can legitimately go quiet
+/// for a long time and are therefore the ones whose readiness clock
+/// [`Run::wait_ready`](mirage_supervisor::Run::wait_ready) deliberately
+/// suspends. Every other phase is already covered: if it stops moving,
+/// the deadline expires and the run fails with a message that says so.
+///
+/// Which left exactly one hole, and it was the whole of what a stalled
+/// bring-up looked like from outside: `podman pull` reports itself once
+/// and then goes silent, so a registry that never answers and a
+/// three-gigabyte image that is downloading fine produce the same
+/// output — one line, and then nothing, for as long as it takes. Saying
+/// how long it has been going is what tells the two apart, and naming
+/// the way out is what stops a user who has decided it is stuck from
+/// having to guess whether mirage will notice a Ctrl-C.
+fn stall_notice(health: &mirage_core::session::SessionHealth, elapsed: Duration) -> Option<String> {
+    use mirage_core::session::state;
+    let phase = health.state.as_deref()?;
+    if !state::is_externally_bounded(Some(phase)) {
+        return None;
+    }
+    Some(format!(
+        "still {phase} after {}; Ctrl-C to stop waiting for it",
+        humanised(elapsed)
+    ))
+}
+
+/// A duration as a person would say it: `45s`, `2m 30s`.
+fn humanised(elapsed: Duration) -> String {
+    let seconds = elapsed.as_secs();
+    match (seconds / 60, seconds % 60) {
+        (0, s) => format!("{s}s"),
+        (m, s) => format!("{m}m {s}s"),
+    }
+}
+
+/// What [`report_progress`] should print for a health snapshot, given
+/// the last line it printed.
+///
+/// Split out from the loop so the rule can be stated and tested rather
+/// than inferred from a nest of conditions. Two things are refused:
+///
+/// * a message identical to the last one, because health is republished
+///   on every phase and several phases share a message shape; and
+/// * a **terminal failure**, which is the reason bring-up gave and which
+///   [`run_owned`] returns as the process's fatal error. Printing it here
+///   too is how the same paragraph came to be shown twice — three times
+///   with the supervisor's log line beside it — and nondeterministically,
+///   since whether this loop woke before teardown replaced the value was
+///   a race.
+fn progress_line(
+    health: &mirage_core::session::SessionHealth,
+    last: Option<&str>,
+) -> Option<String> {
+    let terminal_failure =
+        health.terminal && health.state.as_deref() == Some(mirage_core::session::state::FAILED);
+    health
+        .message
+        .as_deref()
+        .filter(|_| !terminal_failure)
+        .filter(|message| last != Some(message))
+        .map(str::to_string)
 }
 
 /// Hold the session open while other terminals are still using it.
@@ -426,47 +529,58 @@ async fn supervise_locally(
     // and finishes at once, because nothing was piped.
     let printer = tokio::spawn(mirage_supervisor::output::print_labelled(output));
 
-    // Hand the terminal to a single-process exec, so an interactive
-    // program can read it at all. Dropped — and so given back — on every
-    // exit path below, including the interrupted one.
-    //
-    // Single-process only, and that is not a nicety. Handing the terminal
-    // over makes the workload's process group the terminal's *foreground*
-    // group, and the tty driver then delivers Ctrl-C to that group alone:
-    // not to mirage, and not to any other rank. On a grid that would mean
-    // Ctrl-C killing one rank, leaving the rest running, and never waking
-    // the interrupt handling below — so `wait_finished` never resolves
-    // and a second Ctrl-C goes to a group that no longer exists.
-    //
-    // It costs a grid nothing, because a grid is not an interactive
-    // program: it has no stdin either way. `mirage exec --node N` is how
-    // you get a terminal on one node of one.
-    //
-    // [`Exec::terminal_pid`] answers from the exec's *shape* rather than
-    // from how many processes are alive right now. Counting live pids
-    // read a partly-failed grid — one rank of four whose command was not
-    // found, or three ranks that exited first — as the interactive case,
-    // and handed the terminal to a rank built with `/dev/null` on stdin.
-    let _terminal = exec.terminal_pid().and_then(TerminalHandoff::give_to);
+    warn_if_stdin_is_dropped(&exec);
 
-    // Ctrl-C reaches us, not the workload: children lead their own
-    // process groups, so the terminal's foreground group is this process
-    // alone. Forwarding it deliberately — and then falling through to the
+    // Lend the terminal to a single-process exec, at the moment it asks
+    // for it. Given back when this future is dropped, which is every
+    // exit path below including the interrupted one.
+    let lending = lend_terminal(exec.terminal_pid());
+    tokio::pin!(lending);
+
+    // Ctrl-C reaches us for as long as we still hold the terminal, and
+    // reaches the workload directly once we have lent it out. Forwarding
+    // it deliberately in the first case — and then falling through to the
     // normal wait — is what makes a workload get a chance to clean up,
     // and what makes the caller's teardown run rather than being skipped
     // by an abrupt exit.
+    //
+    // Narrated, because an interrupt that visibly does nothing is
+    // indistinguishable from an interrupt that was not delivered. A
+    // workload that ignores `SIGINT` is not rare — a training loop
+    // catching it to checkpoint, a shell with `trap ''` — and mirage
+    // sitting silently through two of them, waiting on something it never
+    // named, is the whole of what a user sees go wrong.
     let interrupted = async {
         let sig = interrupts.next().await;
+        eprintln!(
+            "mirage: {}: asked the workload to stop; \
+             interrupt again to stop waiting for it",
+            signal_name(sig)
+        );
         exec.signal(sig).await.ok();
         // A second interrupt means the user is not waiting any longer.
         interrupts.next().await;
+        eprintln!("mirage: not waiting any longer; stopping the workload");
     };
 
     tokio::select! {
         () = exec.wait_finished() => {}
         () = interrupted => {
-            exec.terminate().await;
+            // `terminate` escalates SIGTERM to SIGKILL on its own, so it
+            // ends — but for a containerised grid it is a provider round
+            // trip per rank and can take a while, and a user who has
+            // already said twice that they are done waiting must not have
+            // to guess whether the third interrupt did anything either.
+            tokio::select! {
+                () = exec.terminate() => {}
+                _ = interrupts.next() => {
+                    eprintln!("mirage: killing the workload outright");
+                    exec.kill_now();
+                    exec.wait_finished().await;
+                }
+            }
         }
+        () = &mut lending => unreachable!("the terminal is lent until the exec is over"),
     }
 
     // Wait for the printer so the last lines are on screen before we
@@ -479,11 +593,202 @@ async fn supervise_locally(
     Ok(ExitCode::from((code & 0xff) as u8))
 }
 
+/// The name a user would recognise for `sig`.
+fn signal_name(sig: i32) -> &'static str {
+    match sig {
+        libc::SIGINT => "interrupted",
+        libc::SIGHUP => "hangup",
+        libc::SIGTERM => "terminated",
+        _ => "signalled",
+    }
+}
+
+/// Say, once, that nothing is going to read the input being piped in.
+///
+/// A job of several processes connects nobody's stdin, and the README
+/// explains why: one terminal cannot be shared between readers, and
+/// handing it to rank 0 would mean keystrokes going somewhere the user
+/// cannot see. Documented is not the same as visible, though —
+/// `mirage run --nproc-per-node 2 -- ./job < input` reads an immediate
+/// EOF in every rank, which from the outside is indistinguishable from a
+/// broken pipe, a bad path, or mirage dropping the data.
+///
+/// Only when stdin is *not* a terminal, because that is the only case in
+/// which the user supplied any: an interactive caller has not piped
+/// anything in and does not need telling that nothing is reading it.
+fn warn_if_stdin_is_dropped(exec: &Arc<Exec>) {
+    use std::io::IsTerminal as _;
+    if !stdin_is_being_discarded(exec.owns_terminal(), std::io::stdin().is_terminal()) {
+        return;
+    }
+    eprintln!(
+        "mirage: this job runs several processes, so none of them is given stdin — \
+         one terminal cannot be shared between readers. What you piped in is being \
+         discarded; pass it as a file the workload opens, or run one process \
+         (`mirage exec --node N`) if it has to be read."
+    );
+}
+
+/// Whether the caller piped something in that no rank will ever read.
+///
+/// The two conditions are independent and both load-bearing: a
+/// single-process exec is handed the caller's stdin whatever it is, and
+/// an interactive caller has piped nothing in — so only a multi-process
+/// job started with a redirected stdin loses anything.
+fn stdin_is_being_discarded(owns_terminal: bool, stdin_is_terminal: bool) -> bool {
+    !owns_terminal && !stdin_is_terminal
+}
+
+/// How often a lent terminal's borrower is checked for having asked.
+///
+/// Fast at first and slow afterwards, because the distribution is not
+/// uniform: a program that wants the terminal wants it at once — an
+/// interactive `bash` stops itself before it prints a prompt — while a
+/// program that asks for it an hour in is asking for a password or a
+/// confirmation, where half a second is nothing. The slow rate is what
+/// keeps a day-long non-interactive run from polling `/proc` fifty times
+/// a second for no reason.
+const TERMINAL_POLL_EAGER: Duration = Duration::from_millis(20);
+const TERMINAL_POLL_SETTLED: Duration = Duration::from_millis(500);
+
+/// How long the eager rate lasts.
+const TERMINAL_EAGER_FOR: Duration = Duration::from_secs(3);
+
+/// Hold the terminal for the workload and hand it over when it asks.
+///
+/// Never resolves: the caller races it against the workload finishing,
+/// and dropping it takes the terminal back.
+///
+/// # Why this is not done up front
+///
+/// Handing the terminal over is what makes an interactive workload
+/// possible at all — see [`TerminalHandoff`] — and it is also what makes
+/// mirage unreachable, because the tty delivers `SIGINT` to the
+/// foreground process group and to nothing else. Doing it at spawn time
+/// therefore gave the terminal away to every single-process workload,
+/// interactive or not, and a `mirage run -- ./job` whose job ignores
+/// `SIGINT` became a run that could not be interrupted from its own
+/// terminal: Ctrl-C went to the job, the job ignored it, mirage never
+/// woke, and nothing was printed. The second interrupt the help promises
+/// "stops waiting for it" never arrived, because mirage was not listening
+/// to that terminal any more.
+///
+/// Lending it on demand splits the two cases the way they actually
+/// differ. A workload that never reads the terminal never takes it, so
+/// mirage stays the foreground group and the documented two-interrupt
+/// behaviour holds. A workload that does read it is stopped by the kernel
+/// with `SIGTTIN` the first time it tries — that is precisely what a
+/// background process group reading its controlling terminal earns — and
+/// being stopped is the ask. Mirage hands the terminal over, continues
+/// it, and from then on Ctrl-C belongs to the workload, which for an
+/// interactive program is exactly right and is what `mirage run -- bash`
+/// needs.
+async fn lend_terminal(pid: Option<u32>) {
+    let _handoff = match pid {
+        Some(pid) => hand_over_when_asked(pid).await,
+        None => None,
+    };
+    // Held, not returned, so the terminal goes back when the caller drops
+    // this future rather than at some point it has to remember.
+    std::future::pending::<()>().await;
+}
+
+/// Wait for `pid` to be stopped for want of the terminal, then give it.
+async fn hand_over_when_asked(pid: u32) -> Option<TerminalHandoff> {
+    if !TerminalHandoff::ours_to_lend() {
+        // Not a terminal, or not ours: there is nothing to lend and
+        // nothing to watch for.
+        return None;
+    }
+    let eager_until = tokio::time::Instant::now() + TERMINAL_EAGER_FOR;
+    loop {
+        match process_state(pid) {
+            // Stopped. For a process in a background process group with
+            // a controlling terminal that means `SIGTTIN` or `SIGTTOU`,
+            // i.e. it tried to use the terminal — and if it stopped for
+            // some other reason, handing it the terminal it is about to
+            // be resumed onto costs nothing.
+            Some(b'T' | b't') => {
+                // A handoff that does not take is retried rather than
+                // given up on. Giving up would leave a workload stopped
+                // for want of a terminal that nothing will ever hand it,
+                // which is a hang with no way out; mirage may have lost
+                // the foreground group only momentarily, and the poll
+                // below costs nothing while it has.
+                if let Some(handoff) = TerminalHandoff::give_to(pid) {
+                    // Only now: continued before the handoff, it would
+                    // stop again on its very next read.
+                    resume(pid);
+                    return Some(handoff);
+                }
+            }
+            Some(_) => {}
+            // Gone, or never readable. Either way nobody is going to ask.
+            None => return None,
+        }
+        let interval = if tokio::time::Instant::now() < eager_until {
+            TERMINAL_POLL_EAGER
+        } else {
+            TERMINAL_POLL_SETTLED
+        };
+        tokio::time::sleep(interval).await;
+    }
+}
+
+/// The single-letter state the kernel reports for `pid`, if it is alive.
+///
+/// Read from `/proc` rather than waited for: the workload's `Child` is
+/// owned by the supervisor task that will reap it, and a second waiter
+/// racing it for the same status is how a wait becomes a lost exit code.
+/// `waitid(WNOWAIT)` would not reap, but it would still be a second party
+/// to the child, whereas reading its state is an observation and nothing
+/// more.
+///
+/// The comm field is parenthesised and may itself contain spaces and
+/// brackets, so the state is taken from after the *last* `)`, which is
+/// the parse `proc(5)` documents.
+fn process_state(pid: u32) -> Option<u8> {
+    let stat = std::fs::read(format!("/proc/{pid}/stat")).ok()?;
+    let close = stat.iter().rposition(|b| *b == b')')?;
+    stat.get(close + 1..)?
+        .iter()
+        .copied()
+        .find(|b| !b.is_ascii_whitespace())
+}
+
+/// Let a stopped workload carry on, now that it has the terminal.
+///
+/// The group, because that is what the kernel stopped: `SIGTTIN` is
+/// delivered to the whole foreground-denied process group, so a workload
+/// that had already forked has children stopped alongside it.
+fn resume(pid: u32) {
+    let Ok(raw) = i32::try_from(pid) else {
+        return;
+    };
+    if raw <= 0 {
+        return;
+    }
+    let _ = nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(-raw),
+        nix::sys::signal::Signal::SIGCONT,
+    );
+}
+
 /// The signals that must never kill mirage outright, armed once.
 ///
 /// `SIGTERM` as well as `SIGINT`: a CI runner cancelling a job, or a
 /// shell script's `kill`, sends the former, and both have to reach the
 /// cleanup path.
+///
+/// And `SIGHUP`, which is the one a user is most likely to send without
+/// meaning to send anything: it is what closing a terminal window does,
+/// and closing the window is how people end a run they have lost
+/// interest in. Its default disposition is "terminate immediately", so
+/// mirage exited 129 having run no teardown at all — the workload
+/// survived, the socket stayed in `run/` claiming a session that no
+/// longer existed, and the scratch directory stayed on disk. Handled
+/// exactly like `SIGTERM`, because a hangup means the same thing:
+/// nobody is watching this any more, take it down.
 ///
 /// # Why this is installed before anything else happens
 ///
@@ -502,6 +807,7 @@ async fn supervise_locally(
 struct Interrupts {
     sigint: tokio::signal::unix::Signal,
     sigterm: tokio::signal::unix::Signal,
+    sighup: tokio::signal::unix::Signal,
 }
 
 impl Interrupts {
@@ -516,6 +822,7 @@ impl Interrupts {
         Ok(Self {
             sigint: signal(SignalKind::interrupt())?,
             sigterm: signal(SignalKind::terminate())?,
+            sighup: signal(SignalKind::hangup())?,
         })
     }
 
@@ -524,10 +831,16 @@ impl Interrupts {
     /// A signal that arrived earlier is not lost: tokio buffers one per
     /// kind, so an interrupt during bring-up is delivered the moment
     /// anything waits for it.
+    ///
+    /// The number is the one that actually arrived, so the exit status
+    /// mirage reports and the signal it forwards to the workload are
+    /// both the truth — a hangup is forwarded as a hangup, which is what
+    /// a workload that cares about the difference is entitled to.
     async fn next(&mut self) -> i32 {
         tokio::select! {
             _ = self.sigint.recv() => libc::SIGINT,
             _ = self.sigterm.recv() => libc::SIGTERM,
+            _ = self.sighup.recv() => libc::SIGHUP,
         }
     }
 }
@@ -750,6 +1063,14 @@ fn live_runs() -> Vec<SessionId> {
 /// work, `Ctrl-C` and `Ctrl-Z` are delivered to the workload rather than
 /// to mirage, and a shell's own job control works inside it.
 ///
+/// # Why it is lent rather than given
+///
+/// "Delivered to the workload rather than to mirage" is the cost as well
+/// as the point, so the handoff is made when the workload asks for the
+/// terminal and not before — see [`lend_terminal`], which is the only
+/// caller. A workload that never reads the terminal never takes it, and
+/// mirage stays interruptible from the window it was started in.
+///
 /// # SIGTTOU
 ///
 /// Giving the terminal *back* is itself a background write to it, which
@@ -795,6 +1116,22 @@ fn with_sigttou_blocked<T>(f: impl FnOnce() -> T) -> T {
 }
 
 impl TerminalHandoff {
+    /// Whether mirage has a terminal that is its to lend.
+    ///
+    /// The same two conditions [`TerminalHandoff::give_to`] checks, asked
+    /// before anything is watched rather than after: with no terminal —
+    /// a pipe, a CI runner, `< /dev/null` — or with mirage already in the
+    /// background, there is nothing to hand over and no reason to poll
+    /// for somebody asking.
+    fn ours_to_lend() -> bool {
+        use std::io::IsTerminal as _;
+        use std::os::fd::AsFd as _;
+
+        let stdin = std::io::stdin();
+        stdin.is_terminal()
+            && nix::unistd::tcgetpgrp(stdin.as_fd()).ok() == Some(nix::unistd::getpgrp())
+    }
+
     /// Give the terminal to the process group led by `pid`.
     ///
     /// Returns `None` when there is nothing to do: stdin is not a
@@ -919,6 +1256,162 @@ mod tests {
             .enable_all()
             .build()
             .unwrap()
+    }
+
+    /// A health snapshot in a named phase, with a message.
+    fn phase(state: &str, message: &str) -> mirage_core::session::SessionHealth {
+        mirage_core::session::SessionHealth::phase(false, state, Some(message.to_string()))
+    }
+
+    #[test]
+    fn a_fatal_reason_is_reported_once_and_by_the_error_path() {
+        // The same paragraph used to be printed two or three times, from
+        // identical input, because bring-up's failure is *both*
+        // published as health and returned to the caller — and progress
+        // reporting echoed the health while `main` printed the error. For
+        // a `--hack` build failure, whose message carries the provider's
+        // whole build log, that was hundreds of duplicated lines.
+        let reason = "pulling image quay.io/nope:1 failed: unauthorized";
+        let failed = mirage_core::session::SessionHealth::failed(reason);
+        assert!(
+            failed.terminal && failed.state.as_deref() == Some(mirage_core::session::state::FAILED),
+            "the fixture must be the shape bring-up publishes: {failed:?}"
+        );
+        assert_eq!(
+            progress_line(&failed, None),
+            None,
+            "the fatal reason is the caller's to report, and it does"
+        );
+
+        // Progress itself is untouched: this is a filter on one kind of
+        // message, not a mute.
+        assert_eq!(
+            progress_line(&phase("pulling", "pulling image big:latest"), None).as_deref(),
+            Some("pulling image big:latest")
+        );
+        // And an unchanged message is still only said once, which is the
+        // rule that was already there.
+        assert_eq!(
+            progress_line(&phase("starting", "node 1/4"), Some("node 1/4")),
+            None
+        );
+    }
+
+    #[test]
+    fn a_pull_that_has_gone_quiet_says_how_long_it_has_been_quiet_for() {
+        // A stalled bring-up used to look exactly like a healthy slow
+        // one: `podman pull` reports itself once and then says nothing,
+        // and mirage suspends the readiness clock for it on purpose — so
+        // a registry that never answers produced one line of output and
+        // then silence, indefinitely, with no hint that a Ctrl-C would
+        // even be noticed.
+        let pulling = phase("pulling", "pulling image big:latest");
+        let notice = stall_notice(&pulling, Duration::from_secs(150))
+            .expect("a suspended phase that has gone quiet must say so");
+        assert!(notice.contains("still pulling"), "{notice}");
+        assert!(notice.contains("2m 30s"), "{notice}");
+        assert!(
+            notice.contains("Ctrl-C"),
+            "the way out must be named: {notice}"
+        );
+
+        // Not for the phases whose clock is running: those already fail
+        // with "made no progress", and a second voice saying the same
+        // thing first would be noise.
+        assert_eq!(
+            stall_notice(&phase("starting", "node 1/4"), STALL_NOTICE),
+            None
+        );
+        assert_eq!(
+            stall_notice(
+                &mirage_core::session::SessionHealth::phase(true, "ready", None),
+                STALL_NOTICE
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn a_piped_stdin_that_no_rank_will_read_is_reported() {
+        // Documented behaviour that is indistinguishable from a broken
+        // pipe: `mirage run --nproc-per-node 2 -- ./job < input` gives
+        // every rank an immediate EOF, silently.
+        assert!(
+            stdin_is_being_discarded(false, false),
+            "a grid started with a redirected stdin loses what was piped in"
+        );
+        // Not a warning anyone else needs. One process is handed the
+        // caller's stdin whatever it is...
+        assert!(!stdin_is_being_discarded(true, false));
+        assert!(!stdin_is_being_discarded(true, true));
+        // ...and an interactive caller piped nothing in to lose.
+        assert!(!stdin_is_being_discarded(false, true));
+    }
+
+    #[tokio::test]
+    async fn closing_the_terminal_is_an_interrupt_and_not_a_death() {
+        // `SIGHUP` is what closing a terminal window sends, and closing
+        // the window is how people end a run they have lost interest in.
+        // Unhandled, its default disposition ends mirage outright: exit
+        // 129, no teardown, the workload still running, the socket still
+        // in `run/` claiming a live session and the scratch directory
+        // still on disk.
+        //
+        // This test would not merely fail before the fix — it would take
+        // the test binary down with it, which is the same thing happening
+        // for the same reason.
+        let mut interrupts = Interrupts::install().unwrap();
+        nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(std::process::id() as i32),
+            nix::sys::signal::Signal::SIGHUP,
+        )
+        .unwrap();
+
+        let sig = tokio::time::timeout(Duration::from_secs(10), interrupts.next())
+            .await
+            .expect("a hangup must reach the interrupt handling, not the default action");
+        assert_eq!(sig, libc::SIGHUP);
+    }
+
+    #[test]
+    fn a_stopped_workload_is_recognised_as_asking_for_the_terminal() {
+        // How the terminal is lent on demand: a process in a background
+        // process group that reads its controlling terminal is stopped by
+        // `SIGTTIN`, and being stopped is the ask. Reading the state is
+        // what makes that observable without becoming a second party to
+        // somebody else's child.
+        let mut child = std::process::Command::new("/bin/sh")
+            .args(["-c", "while true; do sleep 1; done"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+
+        assert!(
+            matches!(process_state(pid), Some(b'S' | b'R' | b'D')),
+            "a running process must not read as stopped: {:?}",
+            process_state(pid).map(char::from)
+        );
+
+        nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(pid as i32),
+            nix::sys::signal::Signal::SIGSTOP,
+        )
+        .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !matches!(process_state(pid), Some(b'T' | b't')) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "a stopped process was never seen as stopped: {:?}",
+                process_state(pid).map(char::from)
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        let _ = child.kill();
+        let _ = child.wait();
     }
 
     #[test]

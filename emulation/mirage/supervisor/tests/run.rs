@@ -20,8 +20,10 @@ use std::time::Duration;
 
 use mirage_core::common::MaybeRef;
 use mirage_core::config::OptionDef;
+use mirage_core::discovery::RuntimeLocation;
 use mirage_core::emulator::{
-    EmulatorBackend, EmulatorBackendDef, EmulatorDef, EmulatorDescription, SupportStatus,
+    EmulatorBackend, EmulatorBackendDef, EmulatorDef, EmulatorDescription, RuntimeStatus,
+    SupportStatus,
 };
 use mirage_core::exec::{ExecArgs, ExecDef, ExecId, InjectionDef};
 use mirage_core::plugin::PluginsDef;
@@ -68,8 +70,10 @@ impl EmulatorBackend for Stub {
         Ok(())
     }
 
-    fn installed(&self) -> bool {
-        true
+    fn runtime(&self) -> RuntimeStatus {
+        // Installed by virtue of being compiled in: there is no library
+        // to locate, so there is no location to report.
+        RuntimeStatus::new(true, RuntimeLocation::Unknown)
     }
 
     fn supported(&self) -> SupportStatus {
@@ -131,8 +135,10 @@ impl EmulatorBackend for NoDaemonStub {
         Ok(())
     }
 
-    fn installed(&self) -> bool {
-        true
+    fn runtime(&self) -> RuntimeStatus {
+        // Installed by virtue of being compiled in: there is no library
+        // to locate, so there is no location to report.
+        RuntimeStatus::new(true, RuntimeLocation::Unknown)
     }
 
     fn supported(&self) -> SupportStatus {
@@ -430,29 +436,22 @@ async fn a_workload_that_forks_has_its_whole_tree_reaped() {
         marker = forked.marker().display()
     );
     let (exec, _output) = run.exec(&def(&run, &script, None)).await.expect("starts");
-    forked.started().await;
+    let pid = forked.started().await;
 
     tokio::time::timeout(Duration::from_secs(30), run.destroy())
         .await
         .expect("teardown must not hang");
     let _ = exec;
 
-    // `expect`, not `unwrap_or(0)`. Defaulting both samples to 0 made the
-    // assertion `0 == 0` — satisfied whenever the marker could not be
-    // read at all, which no longer distinguishes "the grandchild was
-    // reaped" from "the file went away". The file provably existed a few
-    // lines above, so a read failure here is a broken test, not a pass.
-    let size = |what: &str| {
-        std::fs::metadata(forked.marker())
-            .unwrap_or_else(|e| panic!("the marker must still be readable {what}: {e}"))
-            .len()
-    };
-    let size_after_teardown = size("right after teardown");
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    let size_later = size("half a second later");
-    assert_eq!(
-        size_after_teardown, size_later,
-        "a grandchild was still writing after its run was destroyed"
+    // Asked of the process table, not inferred from a file it stopped
+    // growing. Sampling the marker's length twice across a fixed sleep
+    // measures the same property the sibling test three lines below
+    // asserts directly with `wait_gone` — but slower, and with a
+    // half-second sleep in the middle deciding how much of a still-alive
+    // grandchild's writing counts as "stopped".
+    assert!(
+        mirage_supervisor::process::wait_gone(pid, Duration::from_secs(10)).await,
+        "pid {pid} was forked by a workload and survived the run that owned it"
     );
 }
 
@@ -564,11 +563,23 @@ async fn a_concurrent_destroy_waits_for_the_one_already_running() {
     //
     // The workload ignores SIGTERM, so the first teardown is still inside
     // its grace period when the second one starts.
+    //
+    // The trap has to be *installed* before the first teardown starts, or
+    // SIGTERM kills the shell outright, that teardown finishes instantly,
+    // and the second one has nothing to wait for — the test then passes
+    // whatever `teardown` does. A sleep is not enough to say that
+    // happened, and the sibling in `process.rs` already shows the answer:
+    // the shell announces itself and the test waits for the marker.
     let run = start(1).await;
+    let scratch = tempfile::tempdir().expect("scratch dir");
+    let trapped = scratch.path().join("trap-installed");
     let (_exec, output) = run
         .exec(&def(
             &run,
-            "trap '' TERM; while true; do sleep 1; done",
+            &format!(
+                "trap '' TERM; : > {trapped}; while true; do sleep 1; done",
+                trapped = trapped.display()
+            ),
             None,
         ))
         .await
@@ -578,10 +589,15 @@ async fn a_concurrent_destroy_waits_for_the_one_already_running() {
         while output.recv().await.is_some() {}
     });
 
-    // Give the shell time to install its trap. Until it has, SIGTERM
-    // kills it outright and the first teardown finishes instantly — which
-    // would make this test pass whatever `teardown` does.
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    while !trapped.exists() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the workload never installed its SIGTERM trap, so this test \
+             would have proved nothing about a concurrent teardown"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 
     let first = tokio::spawn({
         let run = Arc::clone(&run);
@@ -722,6 +738,122 @@ async fn teardown_tells_the_borrowers_it_is_not_waiting() {
         .await
         .expect("teardown must not wait for a lease it has already disowned")
         .unwrap();
+}
+
+/// A process standing in for one a `mirage exec` started and then failed
+/// to reap, killed when the test ends however it ends.
+///
+/// Tagged exactly as a real one is — [`ENV_SESSION`] and [`ENV_RUNTIME`],
+/// which is the whole marker — because that tag is the only thing that
+/// survives the borrower dying, and finding it is what the code under
+/// test does. Spawned directly rather than through an `Exec`, since the
+/// point is that it belongs to no exec of the run's.
+struct Borrowed(std::process::Child);
+
+impl Borrowed {
+    fn spawn(session: &mirage_core::session::SessionId) -> Self {
+        use mirage_core::container::{ENV_RUNTIME, ENV_SESSION, owning_runtime};
+        Self(
+            std::process::Command::new("/bin/sh")
+                // `exec`, so there is exactly one tagged process and the
+                // test is not racing a shell's own child.
+                .args(["-c", "exec sleep 600"])
+                .env(ENV_SESSION, session.as_str())
+                .env(ENV_RUNTIME, owning_runtime())
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .expect("a stand-in borrower's workload starts"),
+        )
+    }
+
+    fn pid(&self) -> u32 {
+        self.0.id()
+    }
+
+    /// Whether the process has ended, waiting up to `timeout` for it.
+    ///
+    /// `try_wait`, not [`mirage_supervisor::process::wait_gone`]. In the
+    /// real leak the stranded workload is reparented to init, which reaps
+    /// it, so the pid genuinely leaves the table. Here the test process
+    /// is its parent and reaps nothing until the guard below drops, so a
+    /// killed stand-in is a *zombie* — and `kill(pid, 0)` succeeds on a
+    /// zombie, which is a test that fails for a process that is provably
+    /// dead.
+    fn ended_within(&mut self, timeout: Duration) -> bool {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if matches!(self.0.try_wait(), Ok(Some(_))) {
+                return true;
+            }
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+}
+
+impl Drop for Borrowed {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+#[tokio::test]
+async fn a_borrower_that_died_does_not_leave_its_workload_in_the_session() {
+    // `kill -9` on a `mirage exec`. Its workload is its own child, in its
+    // own process, so nothing of the run's is waiting on it — and
+    // `kill -9` runs no code of the borrower's either, so nobody reaps
+    // it. It is then reparented to init, still tagged with this session,
+    // still holding the emulated device.
+    //
+    // `mirage cleanup` will not touch it, and is right not to: the
+    // session is live, and reclaiming a live session's processes is
+    // exactly what it must never do. Which is why this has to be the
+    // run's job. The run owns the session; nothing may be left in it when
+    // the session goes.
+    let run = start(1).await;
+    let mut stranded = Borrowed::spawn(run.id());
+    let pid = stranded.pid();
+    assert!(process_alive(pid), "the setup must leave a live process");
+
+    tokio::time::timeout(Duration::from_secs(30), run.destroy())
+        .await
+        .expect("teardown must not hang");
+
+    assert!(
+        stranded.ended_within(Duration::from_secs(10)),
+        "pid {pid} was started in this session by a borrower that died, and \
+         outlived the run that owned the session"
+    );
+}
+
+#[tokio::test]
+async fn tearing_one_session_down_leaves_another_sessions_processes_alone() {
+    // The other half, and the reason the sweep is filtered to one
+    // session rather than reusing `mirage cleanup`'s "everything under
+    // this runtime directory" scan. Two runs under one `MIRAGE_RUNTIME`
+    // is the ordinary case — a second terminal — and a run tearing itself
+    // down that reclaimed the other's workloads would be killing a
+    // healthy job.
+    let mine = start(1).await;
+    let theirs = start(1).await;
+    let mut stranded = Borrowed::spawn(theirs.id());
+
+    tokio::time::timeout(Duration::from_secs(30), mine.destroy())
+        .await
+        .expect("teardown must not hang");
+
+    assert!(
+        !stranded.ended_within(Duration::from_millis(200)),
+        "tearing down session {} killed a process belonging to session {}",
+        mine.id(),
+        theirs.id()
+    );
+    theirs.destroy().await;
 }
 
 #[tokio::test]

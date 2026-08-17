@@ -209,6 +209,19 @@ impl Exec {
         }
     }
 
+    /// Whether this exec is the single-process kind that takes the
+    /// caller's terminal whole.
+    ///
+    /// Answered from the exec's *shape*, so it is stable for the exec's
+    /// whole life — unlike [`Exec::terminal_pid`], which is also `None`
+    /// once the process has been reaped. A caller that needs to say
+    /// something about the shape ("nothing is reading your stdin") wants
+    /// this one.
+    #[must_use]
+    pub fn owns_terminal(&self) -> bool {
+        self.owns_terminal
+    }
+
     /// Pids of the processes still running in this exec.
     #[must_use]
     pub fn live_pids(&self) -> Vec<u32> {
