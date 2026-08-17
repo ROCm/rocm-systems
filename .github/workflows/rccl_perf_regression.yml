@@ -31,18 +31,11 @@ name: RCCL Perf Regression Gate
 
 on:
   pull_request:
-    # TEMPORARY -- DO NOT MERGE AS IS.
-    #
-    # Production value is `[main, develop]`. It is pointed at this PR's own
-    # branch so the pipeline can be exercised end to end from CI before it is
-    # let anywhere near real PRs: open a throwaway PR that touches
-    # projects/rccl/** with THIS branch as its base, and the gate runs against
-    # it using the workflow file from this PR (pull_request events resolve the
-    # workflow from the merge commit, so the version under review is the
-    # version that executes).
-    #
-    # Restoring `[main, develop]` is the last commit before this leaves draft.
-    branches: [aimvt-196-rccl-regression-robustness]
+    # This matches the PR's BASE branch, not its head -- the gate runs on
+    # anything merging INTO main or develop, whatever the topic branch is
+    # called. Widening this list is not free: each entry multiplies the PRs
+    # eligible for a ~25min slot on a 4-node reservation the whole team shares.
+    branches: [main, develop]
     paths:
       - 'projects/rccl/**'
       # Docs-only and test-only churn cannot move a collective's bandwidth, and
