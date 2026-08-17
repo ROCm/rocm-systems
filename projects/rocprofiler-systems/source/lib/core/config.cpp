@@ -842,6 +842,16 @@ configure_settings(bool _init)
 #endif
 
     ROCPROFSYS_CONFIG_SETTING(
+        std::string, env_vars::SAMPLING_NICS,
+        "NICs to profile. Comma-separated list of network interface names, 'all' to "
+        "profile all available interfaces, or 'none' to disable. Conventional NICs are "
+        "profiled via the PAPI net component (reads /proc/net/dev); AI NICs (RDMA-capable "
+        "interfaces detected via AMD SMI) are profiled via AMD SMI. When set, "
+        "ROCPROFSYS_PAPI_EVENTS is used as-is if it already contains net::: events; "
+        "otherwise rx/tx byte and rx/tx packet event strings are constructed automatically.",
+        std::string{ "none" }, "sampling", "process_sampling");
+
+    ROCPROFSYS_CONFIG_SETTING(
         std::string, env_vars::SAMPLING_GPUS,
         "Devices to query when ROCPROFSYS_USE_AMD_SMI=ON. Values should be separated by "
         "commas and can be explicit or ranges, e.g. 0,1,5-8. An empty value implies "

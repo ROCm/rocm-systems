@@ -74,6 +74,7 @@ inline constexpr const char* SAMPLING_DURATION   = "ROCPROFSYS_SAMPLING_DURATION
 inline constexpr const char* SAMPLING_CPUS       = "ROCPROFSYS_SAMPLING_CPUS";
 inline constexpr const char* SAMPLING_GPUS       = "ROCPROFSYS_SAMPLING_GPUS";
 inline constexpr const char* SAMPLING_AINICS     = "ROCPROFSYS_SAMPLING_AINICS";
+inline constexpr const char* SAMPLING_NICS       = "ROCPROFSYS_SAMPLING_NICS";
 inline constexpr const char* SAMPLING_TIDS       = "ROCPROFSYS_SAMPLING_TIDS";
 inline constexpr const char* SAMPLING_INCLUDE_INLINES =
     "ROCPROFSYS_SAMPLING_INCLUDE_INLINES";
