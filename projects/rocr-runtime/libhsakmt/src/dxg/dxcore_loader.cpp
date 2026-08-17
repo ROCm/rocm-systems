@@ -51,6 +51,8 @@ DxcoreLoader::DxcoreLoader()
     , pfn_D3DKMTEnumAdapters3(nullptr)
     , pfn_D3DKMTQueryResourceInfo(nullptr)
     , pfn_D3DKMTOpenResource(nullptr)
+    , pfn_D3DKMTEnumProcesses(nullptr)
+    , pfn_D3DKMTQueryVideoMemoryInfo(nullptr)
     , dxcore_handle_(nullptr)
     , init_flag_() {
 }
@@ -150,6 +152,15 @@ bool DxcoreLoader::LoadDxcoreApis() {
     LOAD_DXCORE_API(D3DKMTSubmitCommandToHwQueue);
 
     #undef LOAD_DXCORE_API
+
+    // Optional WSL2 dxgkrnl exports. Older libdxcore builds may not expose
+    // these, so callers must probe the function pointer before use.
+    DXCORE_PFN(D3DKMTEnumProcesses) =
+        (DXCORE_DEF(D3DKMTEnumProcesses)*)rocr::os::GetExportAddress(
+            dxcore_handle_, "D3DKMTEnumProcesses");
+    DXCORE_PFN(D3DKMTQueryVideoMemoryInfo) =
+        (DXCORE_DEF(D3DKMTQueryVideoMemoryInfo)*)rocr::os::GetExportAddress(
+            dxcore_handle_, "D3DKMTQueryVideoMemoryInfo");
 
     pr_info("[DxcoreLoader] All DXCore APIs loaded successfully\n");
     return true;
