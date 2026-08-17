@@ -144,7 +144,7 @@ get_manager()
 AgentTraceResources::AgentTraceResources(const hsa::AgentCache&        agent,
                                          trace_resource_requirements_t requirements)
 : m_agent_id(CHECK_NOTNULL(agent.get_rocp_agent())->id)
-, m_requirements(std::move(requirements))
+, m_requirements(requirements)
 , m_queue(att_queue_create(agent,
                            m_requirements.staging_buffer_size,
                            m_requirements.staging_buffer_count))

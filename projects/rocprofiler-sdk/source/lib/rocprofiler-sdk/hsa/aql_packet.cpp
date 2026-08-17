@@ -192,7 +192,7 @@ TraceMemoryPool::Free(void* ptr, void* data)
 void*
 TraceMemoryPool::allocate_output(size_t requested_size)
 {
-    auto resources_ptr = CHECK_NOTNULL(resources.get());
+    auto* resources_ptr = CHECK_NOTNULL(resources.get());
     return resources_ptr->acquire_output_buffer(*this, output_buffer_index++, requested_size);
 }
 
