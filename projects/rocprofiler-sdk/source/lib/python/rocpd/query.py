@@ -396,10 +396,11 @@ def export_sqlite_query(
         if export_format == "csv":
             import csv
 
-            # Preserve integer-looking Exec_Mask values as numeric so
-            # QUOTE_NONNUMERIC does not wrap them in quotes. Keep non-numeric
-            # values unchanged for pandas versions that no longer support
-            # errors="ignore" in to_numeric.
+            # rocpd_gpu_pc_sample.exec_mask is stored as "0x"-prefixed hex text, but
+            # the CSV export keeps the decimal integer form, both because existing
+            # consumers read it that way and because QUOTE_NONNUMERIC would otherwise
+            # wrap the value in quotes. Values that are already decimal are parsed by
+            # the base-10 attempt first, so no representation becomes ambiguous.
             if "Exec_Mask" in df.columns:
 
                 def _to_int_if_numeric(value):
@@ -407,6 +408,10 @@ def export_sqlite_query(
                         return value
                     try:
                         return int(value)
+                    except (TypeError, ValueError, OverflowError):
+                        pass
+                    try:
+                        return int(str(value), 16)
                     except (TypeError, ValueError, OverflowError):
                         return value
 

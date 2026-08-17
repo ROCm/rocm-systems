@@ -41,6 +41,14 @@ def _json_records(json_data, key):
     return list(records) if records else []
 
 
+# exec_mask is stored as "0x"-prefixed hex text, zero-padded to the full 64-bit width.
+_HEX_MASK_PATTERN = re.compile(r"^0x[0-9a-f]{16}$")
+
+
+def _assert_hex_mask(value, context):
+    assert _HEX_MASK_PATTERN.match(str(value)), f"{context}: {value!r} is not 64-bit hex"
+
+
 # ---------------------------------------------------------------------------
 # JSON <-> decoded-view field mapping.
 #
@@ -62,13 +70,6 @@ _HW_ID_FIELDS = [
     "queue_id",
     "microengine_id",
 ]
-
-# Columns the database stores as "0x"-prefixed hex text rather than a number, so the
-# JSON oracle's integer value must be compared against a base-16 parse.
-_HEX_COLUMNS = {"exec_mask"}
-
-# exec_mask is written zero-padded to the full 64-bit width.
-_HEX_MASK_PATTERN = re.compile(r"^0x[0-9a-f]{16}$")
 
 # Arbiter pipes tracked by the gfx9 stochastic snapshot.
 _ARB_PIPES = [
@@ -168,23 +169,12 @@ def test_rocpd_tables_populated(rocpd_connection):
 
 
 def test_rocpd_exec_mask_is_hex_text(rocpd_connection):
-    # exec_mask is stored as "0x"-prefixed hex text zero-padded to 16 digits. Assert
-    # both the SQLite storage class (a numeric value would come back as int/float and
-    # would mean the writer stopped formatting it) and the exact textual form.
     rows = rocpd_connection.execute(
-        "SELECT typeof(exec_mask), exec_mask FROM rocpd_gpu_pc_sample"
+        "SELECT exec_mask FROM rocpd_gpu_pc_sample"
     ).fetchall()
     assert len(rows) > 0
-    for storage_class, value in rows:
-        assert storage_class == "text", f"exec_mask stored as {storage_class}: {value!r}"
-        assert _HEX_MASK_PATTERN.match(
-            value
-        ), f"exec_mask {value!r} is not 0x-prefixed 64-bit hex"
-    # The fixed width must preserve ordering: the lexicographic min/max have to be the
-    # numeric min/max too, which is the property the zero-padding exists for.
-    masks = [value for _, value in rows]
-    assert min(masks) == min(masks, key=lambda mask: int(mask, 16))
-    assert max(masks) == max(masks, key=lambda mask: int(mask, 16))
+    for (value,) in rows:
+        _assert_hex_mask(value, "exec_mask")
 
 
 def test_rocpd_sample_count_matches_json(rocpd_connection, json_data):
@@ -272,10 +262,10 @@ def test_rocpd_vs_json_all_fields(rocpd_connection, json_data):
                     assert str(actual) == str(
                         expected
                     ), f"{method_key}[{index}].{column}: DB={actual!r} JSON={expected!r}"
-                elif column in _HEX_COLUMNS:
-                    assert _HEX_MASK_PATTERN.match(
-                        str(actual)
-                    ), f"{method_key}[{index}].{column}: DB={actual!r} is not 64-bit hex"
+                elif column == "exec_mask":
+                    # Stored as hex text; the JSON oracle reports the same mask as an
+                    # integer, so compare against a base-16 parse.
+                    _assert_hex_mask(actual, f"{method_key}[{index}].{column}")
                     assert int(str(actual), 16) == int(
                         expected
                     ), f"{method_key}[{index}].{column}: DB={actual} JSON={expected}"
