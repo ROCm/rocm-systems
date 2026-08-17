@@ -34,10 +34,10 @@ run of 8 ranks each therefore produces 16 files.
 
 ## When telemetry itself fails
 
-Telemetry is diagnostic, so nothing inside it can fail the collective that
-carries it: a run produces the same result whether telemetry succeeded,
-degraded or never started. Failures are reported rather than propagated, so
-they are visible without being fatal.
+Telemetry is diagnostic: nothing inside it can fail the collective that carries
+it, and a run produces the same result whether telemetry succeeded, degraded or
+never started. Failures are reported, not propagated — visible without being
+fatal.
 
 * If telemetry cannot start, initialization says so on stderr, RCCL logs one
   `INFO` line, and the run continues with telemetry off.
@@ -88,41 +88,35 @@ After the run, inspect any `rccl_telemetry_*.json` in the output directory.
 }
 ```
 
-The channel WQE/CTS counters are the sum of the counters of the QPs in that
-channel, by construction: they are not stored, they are computed from the QP
-slots when the JSON is written. Keeping them as a second counter on the data path
-made every QP on a channel contend for one cache line, which cost up to 11% on
-mid-size collectives. `num_req_completed` is the exception — it counts requests,
-not WQEs, so no QP sum produces it and it is still a stored counter.
+The channel WQE/CTS counters are not stored; they are summed from the channel's
+QP slots when the JSON is written. Storing them instead made every QP on a
+channel contend for one cache line, costing up to 11% on mid-size collectives.
+`num_req_completed` is the exception: it counts requests, not WQEs, so no QP sum
+produces it and it stays a stored counter.
 
-A QP whose slot could not be allocated is not counted anywhere; its count is
-reported in `num_qp_untracked` instead of being dropped silently.
+A QP whose slot could not be allocated is reported in `num_qp_untracked` rather
+than dropped silently.
 
 ## Data-path cost
 
-Nothing on the data path looks a slot up. Each QP's statistics slot is resolved
-once, when the connection is set up, and the resulting pointer is stored on the
-QP; the per-WQE hooks take that pointer and do nothing but their counter
-updates. Slot addresses are stable for the life of the process — blocks are
-appended, never freed or moved — which is what makes this safe. A QP that has no
-slot holds a null pointer, and every hook is then a no-op on it, so call sites
-still never test anything before calling. Posting one send WQE is a single hook
-call that updates both counters it owns. The completion hook reaches its
-histogram bucket by a multiply rather than a 64-bit division; the bucket index is
-identical to the division's for every input.
+Nothing on the data path looks a slot up. Each QP's slot is resolved once at
+connection setup and the pointer is stored on the QP; the per-WQE hooks just
+update counters through it. Slot addresses are stable for the process lifetime
+(blocks are appended, never freed or moved), which makes this safe. A QP with no
+slot holds a null pointer and every hook is a no-op, so call sites never test
+before calling. Posting one send WQE is a single hook that updates both its
+counters. The completion hook finds its histogram bucket by a multiply, not a
+64-bit division, giving the same index for every input.
 
 ## Latency sampling
 
-Every counter above is an increment. The completion **latency** is not: it costs
-two `clock_gettime` calls per WQE — one when the WQE is posted, one when its
-completion is drained — plus a bucket computation and two compare-and-swap loops
-for `min`/`max`. That family is the bulk of the per-WQE cost, and
-`RCCL_TELEMETRY_LATENCY_SAMPLE=N` measures only one posted WQE in `N` instead of
-all of them.
+Every counter above is an increment. The completion **latency** is not: two
+`clock_gettime` calls per WQE (at post and at completion), a bucket computation
+and two CAS loops for `min`/`max`. That family is the bulk of the per-WQE cost,
+so `RCCL_TELEMETRY_LATENCY_SAMPLE=N` measures only one posted WQE in `N`.
 
-The decision is taken on the post path, because that is where the first
-timestamp would be read, and it is carried to the completion path in the post
-timestamp itself, using a sentinel:
+The choice is made on the post path (where the first timestamp would be read)
+and carried to the completion path in the post timestamp itself, via a sentinel:
 
 | post timestamp | meaning |
 |---|---|
@@ -135,19 +129,18 @@ sides, and still lands in `num_wqe_completed`.
 
 ### What sampling does and does not change
 
-Sampling writes to nothing except the three latency fields, so no other counter
-can move with `N`. On the 2-node alltoall regression, three runs at `N = 1` and
-three at `N = 16` agree bit for bit on `num_wqe_sent`, `num_recv_wqe`,
-`num_wqe_rcvd`, `num_wqe_completed`, `num_cts_sent` and its
+Sampling writes only the three latency fields, so no other counter moves with
+`N`. On the 2-node alltoall regression, three runs at `N = 1` and three at
+`N = 16` agree bit for bit on every other counter (`num_wqe_sent`,
+`num_recv_wqe`, `num_wqe_rcvd`, `num_wqe_completed`, `num_cts_sent` and its
 signalled/unsignalled split, `num_write_wqe`, `num_write_imm_wqe`,
-`num_req_completed`, `tx_bytes`, `rx_bytes`, `num_data_qp`, `num_cts_qp` and
-`num_qp_untracked`.
+`num_req_completed`, `tx_bytes`, `rx_bytes`, `num_data_qp`, `num_cts_qp`,
+`num_qp_untracked`).
 
-`num_slot_miss` is the one counter that is not reproducible, and it is not
-reproducible at a *fixed* `N` either: it counts how often a sender found the
-CTS FIFO slot not yet published, which is a polling race, and it varied by 33%
-across three runs at `N = 1` alone. Do not read a change in it as an effect of
-sampling.
+`num_slot_miss` is the exception, and not reproducible at a *fixed* `N` either:
+it counts a sender finding the CTS FIFO slot not yet published — a polling race —
+and varied 33% across three `N = 1` runs. Do not read a change in it as a
+sampling effect.
 
 Affected by `N`: `wqe_completion_histogram`, `wqe_completion_ns_min` and
 `wqe_completion_ns_max`, plus the two new `num_wqe_sampled` /
@@ -155,50 +148,48 @@ Affected by `N`: `wqe_completion_histogram`, `wqe_completion_ns_min` and
 
 ### Reading a sampled histogram
 
-The counts are **not** scaled by `N` to fake un-sampled totals. What you get is
-the truth about a sample, plus enough information to know how large that sample
-was:
+Counts are **not** scaled by `N`. You get the truth about a sample, plus its
+size:
 
-- `latency_sample_interval` at the top level of the file is the `N` actually in
-  effect after the power-of-two round-up, not the value you asked for.
-- `num_wqe_sampled`, per QP and per channel, is how many completions the
-  histogram is built from. It is exactly the sum of that QP's histogram buckets.
+- `latency_sample_interval` (top level) is the `N` actually in effect after the
+  power-of-two round-up, not the value asked for.
+- `num_wqe_sampled` (per QP and per channel) is how many completions the
+  histogram is built from, exactly the sum of that QP's histogram buckets.
 
 Both keys appear **only when `N > 1`**. At the default the histogram already
 covers every matched completion, `num_wqe_sampled` would just repeat
-`num_wqe_completed`, and the file is byte-for-byte what it was before sampling
-existed.
+`num_wqe_completed`, and the file is byte-for-byte what it was before sampling.
 
 `min`/`max` become the extremes **of the sample**, so at `N > 1` they understate
-the true range — and they understate it asymmetrically, since the rare
-long-tail completion is exactly the one most likely to be skipped. A 2-node
-alltoall that reported a 78.2 ms maximum with every WQE measured reported
-43.5 ms at `N = 16` off the same traffic. Use them as a sampled range, and read
-the tail from the top histogram bucket rather than from `max`. The histogram
-shape itself is unbiased: selection is by posting position, not by latency.
+the true range, and asymmetrically: the rare long-tail completion is the one most
+likely skipped. A 2-node alltoall reporting 78.2 ms max at `N = 1` reported
+43.5 ms at `N = 16` off the same traffic. Read the tail from the top histogram
+bucket, not `max`. The histogram shape is unbiased — selection is by posting
+position, not latency.
 
 ## Performance
 
-Telemetry is inactive unless `RCCL_TELEMETRY_ENABLE=1`. With it disabled, the cost is within
-run-to-run noise of a build that has no telemetry code at all.
+Disabled (`RCCL_TELEMETRY_ENABLE` unset), the cost is within run-to-run noise of
+a build with no telemetry code.
 
-With telemetry enabled the cost is about 59 ns per posted WQE. Measured on 2 nodes x 8 ranks
-(MI300X, mlx5, IB-CAST), it peaks at roughly +6-8% in the 192K-256K range and falls monotonically
-to zero by 1M, with no measurable cost at small (8K-128K) or large (4M-2G) message sizes.
+Enabled, the cost is about 59 ns per posted WQE. On 2 nodes x 8 ranks (MI300X,
+mlx5, IB-CAST) it peaks at +6-8% in the 192K-256K range and falls monotonically
+to zero by 1M, with no measurable cost at small (8K-128K) or large (4M-2G) sizes.
 
-The shape of that curve comes from RCCL's channel-count rule, not from telemetry. With
-`nc = clamp(nBytes/65536, 1, 4)` and `30 * nc` WQEs posted per operation, the WQE count per
-operation reaches its maximum of 120 exactly at 256K, at the shortest operation time for that
-count, so the per-WQE cost is at its most visible there. Each size that first reaches a new
-channel count shows the same step, which is why 192K behaves like 256K. Algorithm, protocol and
+That curve comes from RCCL's channel-count rule, not telemetry. With
+`nc = clamp(nBytes/65536, 1, 4)` and `30 * nc` WQEs per operation, WQEs/op peak
+at 120 exactly at 256K, at the shortest operation time for that count, so the
+per-WQE cost is most visible there. Each size that first reaches a new channel
+count shows the same step (hence 192K behaves like 256K). Algorithm, protocol and
 channel count are identical with and without telemetry.
 
 ### What latency sampling buys
 
-Sampling is the one knob that changes this cost, and the honest way to measure it is within one
-binary, varying only `RCCL_TELEMETRY_LATENCY_SAMPLE`: two builds that differ only in code layout
-measure up to 4% apart at these sizes, which is more than the effect. Medians of 14 reps,
-`all_gather` and `reduce_scatter`, 2 nodes x 8 ranks, as a percentage of the `N = 1` run time:
+Sampling is the only knob that changes this cost. The honest measure is
+within one binary, varying only `RCCL_TELEMETRY_LATENCY_SAMPLE`, since two builds
+differing only in code layout measure up to 4% apart here — more than the effect.
+Medians of 14 reps, `all_gather` and `reduce_scatter`, 2 nodes x 8 ranks, as a
+percentage of the `N = 1` run time:
 
 | N | 192K-256K | median over 192K-1M | share of the whole latency family |
 |---|---|---|---|
@@ -206,30 +197,28 @@ measure up to 4% apart at these sizes, which is more than the effect. Medians of
 | 16 | -1.4% | -1.2% | ~86% |
 | 64 | -1.6% | -1.4% | ~98% |
 
-In overhead-against-a-no-telemetry-build terms, the peak at 256K goes from about +8.0% at `N = 1`
-to about +6.4% at `N = 16`.
+Against a no-telemetry build, the 256K peak drops from ~+8.0% at `N = 1` to
+~+6.4% at `N = 16`. So the whole family (two `clock_gettime` per WQE, the bucket
+computation, both min/max CAS loops) is worth ~1.6% at the peak, and `N = 16`
+recovers essentially all of it. `N = 64` is within 0.2 points of `N = 16` but
+measures only 1.6% of WQEs, giving up histogram resolution for no gain; `N = 16`
+is where the curve flattens.
 
-So the whole family — two `clock_gettime` per WQE, the bucket computation and both min/max CAS
-loops — is worth about 1.6% of run time at the peak, and `N = 16` recovers essentially all of it.
-`N = 64` is within 0.2 points of `N = 16` and measures only 1.6% of WQEs, so it gives up a great
-deal of histogram resolution for no further gain. `N = 16` is the point where the curve flattens.
+The default `N = 1` costs nothing: a load of a never-written global plus a
+perfectly-predicted branch in front of a clock read that used to be
+unconditional. `N = 1` and the pre-sampling tip peak within 0.3 points once each
+build's layout term is removed.
 
-The default `N = 1` costs nothing: it is a load of a never-written global and a
-perfectly-predicted branch in front of a clock read that used to be unconditional. Measured
-against the same pre-sampling code on two different node pairs, `N = 1` and the pre-sampling tip
-peak within 0.3 points of each other once each build's own layout term is removed, which is well
-inside the layout sensitivity described below.
+Sampling does not make an instrumented build indistinguishable from an
+uninstrumented one: the per-WQE counter work remains, plus the build's layout
+term. A reference build with latency instrumentation deleted measures 1.3%
+*faster* than a no-telemetry build at 928K-1M, where no telemetry cost can exist
+— that is the scale of the layout term, and why the table above is within-binary.
 
-What sampling does not do is make an instrumented build indistinguishable from an uninstrumented one.
-What remains after sampling is the per-WQE counter work, which sampling does not touch and is not
-meant to, plus whatever the code layout of the particular build is worth. A reference build with
-the latency instrumentation deleted outright measures 1.3% *faster* than a build with no telemetry
-code at all at 928K-1M, where no telemetry cost can exist; that is the scale of the layout term,
-and it is why the table above is a within-binary comparison.
-
-Hardware counters are read twice per process, at first use of a device and at exit, and only for
-the devices a rank actually uses. Periodic sampling is off unless `RCCL_TELEMETRY_SAMPLE_MS` is
-set, and when enabled it runs on a background thread, never on the data path.
+Hardware counters are read twice per process (first device use, and exit), only
+for devices a rank uses. Periodic sampling is off unless
+`RCCL_TELEMETRY_SAMPLE_MS` is set, and then runs on a background thread, never on
+the data path.
 
 ## Application-level counters
 
@@ -259,7 +248,7 @@ Device-level counters:
 | `tx_bytes` / `rx_bytes` | Software byte totals sent / received on the device. |
 | `num_cq_errors` | Completions drained with an error status. |
 | `cq_poll_count` | Number of `ibv_poll_cq` calls. |
-| `num_channels` / `active_channels` | Channels seen / channels that carried traffic. |
+| `num_channels` / `active_channels` | Channels seen / channels that carried traffic. `num_channels` is `null` when the transport supplies no channel id (mlx5/thor2); every QP then shares one device-wide bucket with a `null` id. |
 | `num_qp_untracked` | QPs on this device that could not be given a stats slot; their traffic is absent from every counter above. |
 | `wqe_size_stats` | Distribution of send WQE payload sizes; only non-empty buckets are emitted. |
 
