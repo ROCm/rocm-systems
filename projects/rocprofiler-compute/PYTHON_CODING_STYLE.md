@@ -149,7 +149,7 @@ def find_csvs(directory: Path, pattern: str) -> List[Path]:
     ...
 
 
-def resolve_csv(path: Optional[Path]) -> Path:
+def compressed_name(path: Optional[Path]) -> Path:
     ...
 ```
 
@@ -165,7 +165,7 @@ def find_csvs(directory: Path, pattern: str) -> list[Path]:
     ...
 
 
-def resolve_csv(path: Path | None) -> Path:
+def compressed_name(path: Path | None) -> Path:
     ...
 ```
 

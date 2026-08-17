@@ -69,7 +69,7 @@ def test_torch_trace_profile(
     marker_api_trace_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv"))
     assert marker_api_trace_files, "No marker_api_trace.csv produced"
     for marker_file in marker_api_trace_files:
-        corresponding_counter_file = csv_compression.resolve_csv(
+        corresponding_counter_file = csv_compression.compressed_name(
             marker_file.parent
             / marker_file.name.replace("marker_api_trace", "counter_collection")
         )

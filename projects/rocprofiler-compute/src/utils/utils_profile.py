@@ -283,7 +283,7 @@ def run_prof(
     ):
         for db_name in db_paths:
             pid = db_name.stem.split("_")[0]
-            native_counter_csv = csv_compression.resolve_csv(
+            native_counter_csv = csv_compression.compressed_name(
                 out_pmc_1 / f"{pid}_native_counter_collection.csv"
             )
             if not native_counter_csv.is_file():

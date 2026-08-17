@@ -54,7 +54,7 @@ def test_triton_trace_profile(
     marker_api_trace_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv"))
     assert marker_api_trace_files, "No marker_api_trace.csv produced"
     assert all(
-        csv_compression.resolve_csv(
+        csv_compression.compressed_name(
             f.parent / f.name.replace("marker_api_trace", "counter_collection")
         ).is_file()
         for f in marker_api_trace_files
@@ -175,7 +175,7 @@ def test_ml_api_trace_torch_compile_triton(
     marker_api_trace_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv"))
     assert marker_api_trace_files, "No marker_api_trace.csv produced"
     assert all(
-        csv_compression.resolve_csv(
+        csv_compression.compressed_name(
             f.parent / f.name.replace("marker_api_trace", "counter_collection")
         ).is_file()
         for f in marker_api_trace_files

@@ -458,7 +458,7 @@ def process_ml_api_trace_output(
         Path(workload_dir).glob("**/ml_api_trace*_marker_api_trace.csv")
     )
     counter_collection_csvs = [
-        csv_compression.resolve_csv(
+        csv_compression.compressed_name(
             markers_file.parent
             / markers_file.name.replace("_marker_api_trace.", "_counter_collection.")
         )

@@ -232,8 +232,7 @@ def test_group_id_assigner_reuses_ids_for_repeated_keys():
 # =============================================================================
 # Compression
 #
-# The helpers open through csv_compression, so a .gz name compresses on write
-# and either form reads back the same rows.
+# Counter artifacts compress on write when the destination name ends in .gz.
 # =============================================================================
 
 

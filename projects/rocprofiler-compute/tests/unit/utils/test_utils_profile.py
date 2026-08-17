@@ -242,7 +242,7 @@ def test_run_prof_relabels_dispatch_and_kernel_ids(tmp_path, monkeypatch):
     )
 
     results_csv = workload_dir / "results_pmc_perf_test.csv.gz"
-    assert csv_compression._is_compressed(results_csv)
+    assert results_csv.name.endswith(".csv.gz")
 
     results = pd.read_csv(results_csv)
     assert "PID" not in results.columns

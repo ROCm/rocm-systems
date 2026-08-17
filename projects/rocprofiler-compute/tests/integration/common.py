@@ -207,19 +207,20 @@ def check_csv_files(output_dir, num_devices, num_kernels):
     """
     files_in_workload = os.listdir(output_dir)
 
-    # results_*.csv is written compressed, so accept either form. read_csv
-    # infers gzip from the .gz suffix.
+    # results_*.csv.gz is the only counter artifact form we keep in workloads.
     def is_csv(name):
-        return name.endswith(".csv") or name.endswith(".csv.gz")
+        if name.startswith("results_"):
+            return name.endswith(".csv.gz")
+        return name.endswith(".csv")
 
-    # Validate PMC data exists (profile creates pmc_perf_*.csv or results_*.csv)
+    # Validate PMC data exists (profile creates pmc_perf_*.csv or results_*.csv.gz)
     has_separate = any(
         f.startswith("pmc_perf_") and is_csv(f) for f in files_in_workload
     )
     has_results = any(f.startswith("results_") and is_csv(f) for f in files_in_workload)
 
     assert has_separate or has_results, (
-        "Expected pmc_perf_*.csv or results_*.csv from profile mode"
+        "Expected pmc_perf_*.csv or results_*.csv.gz from profile mode"
     )
 
     # Validate row counts for PMC files (but don't add to return dict)

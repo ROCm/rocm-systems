@@ -15,13 +15,6 @@ CONTENT = "a,b\n1,2\n"
 
 
 @pytest.fixture
-def plain_csv(tmp_path):
-    path = tmp_path / "data.csv"
-    path.write_text(CONTENT, encoding="utf-8")
-    return path
-
-
-@pytest.fixture
 def gzip_csv(tmp_path):
     path = tmp_path / "data.csv.gz"
     with gzip.open(path, "wt", encoding="utf-8") as f:
@@ -54,25 +47,23 @@ def test_compressed_name_accepts_path(tmp_path):
 # =============================================================================
 
 
-def test_write_compresses_when_name_says_to(tmp_path):
+def test_write_compresses_gz_name(tmp_path):
     path = tmp_path / "out.csv.gz"
 
     with csv_compression.open_csv_write(path) as f:
         f.write(CONTENT)
 
-    assert csv_compression._is_compressed(path)
     with gzip.open(path, "rt", encoding="utf-8") as f:
         assert f.read() == CONTENT
 
 
 def test_write_leaves_plain_name_uncompressed(tmp_path):
-    """pmc_perf.csv and sysinfo.csv stay plain, and pandas still reads them."""
+    """pmc_perf.csv and sysinfo.csv stay plain."""
     path = tmp_path / "out.csv"
 
     with csv_compression.open_csv_write(path) as f:
         f.write(CONTENT)
 
-    assert not csv_compression._is_compressed(path)
     assert path.read_text(encoding="utf-8") == CONTENT
 
 
@@ -99,25 +90,17 @@ def test_read_gzip(gzip_csv):
         assert f.read() == CONTENT
 
 
-def test_read_plain(plain_csv):
-    with csv_compression.open_csv_read(plain_csv) as f:
+def test_read_plain(tmp_path):
+    path = tmp_path / "data.csv"
+    path.write_text(CONTENT, encoding="utf-8")
+
+    with csv_compression.open_csv_read(path) as f:
         assert f.read() == CONTENT
 
 
 def test_read_missing_file_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
-        csv_compression.open_csv_read(tmp_path / "absent.csv")
-
-
-def test_read_dispatches_on_content_not_name(tmp_path):
-    named_gz_but_plain = tmp_path / "a.csv.gz"
-    named_gz_but_plain.write_text(CONTENT, encoding="utf-8")
-    named_plain_but_gz = tmp_path / "b.csv"
-    named_plain_but_gz.write_bytes(gzip.compress(CONTENT.encode("utf-8")))
-
-    for path in (named_gz_but_plain, named_plain_but_gz):
-        with csv_compression.open_csv_read(path) as f:
-            assert f.read() == CONTENT
+        csv_compression.open_csv_read(tmp_path / "absent.csv.gz")
 
 
 def test_truncated_gzip_raises_a_corrupt_csv_error(tmp_path):
@@ -143,60 +126,30 @@ def test_corrupt_gzip_raises_a_corrupt_csv_error(tmp_path):
 
 
 # =============================================================================
-# is_compressed
-# =============================================================================
-
-
-def test_is_compressed_reports_false_for_plain(plain_csv):
-    assert not csv_compression._is_compressed(plain_csv)
-
-
-def test_is_compressed_reports_false_for_missing_file(tmp_path):
-    assert not csv_compression._is_compressed(tmp_path / "absent.csv")
-
-
-def test_is_compressed_reports_false_for_empty_file(tmp_path):
-    """A run killed before the first flush leaves a zero-byte file."""
-    empty = tmp_path / "empty.csv"
-    empty.touch()
-    assert not csv_compression._is_compressed(empty)
-
-
-# =============================================================================
 # Discovery
 # =============================================================================
 
 
-def test_find_csvs_matches_both_forms(tmp_path):
-    (tmp_path / "results_a.csv").write_text(CONTENT, encoding="utf-8")
+def test_find_csvs_matches_compressed_artifacts(tmp_path):
+    (tmp_path / "results_a.csv.gz").write_bytes(gzip.compress(CONTENT.encode()))
     (tmp_path / "results_b.csv.gz").write_bytes(gzip.compress(CONTENT.encode()))
     (tmp_path / "sysinfo.csv").write_text(CONTENT, encoding="utf-8")
 
     found = csv_compression.find_csvs(tmp_path, "results_*.csv")
 
-    assert [p.name for p in found] == ["results_a.csv", "results_b.csv.gz"]
-
-
-def test_find_csvs_returns_one_path_per_artifact(tmp_path):
-    """Both forms of one pass must not concatenate as if they were two passes."""
-    (tmp_path / "results_a.csv").write_text(CONTENT, encoding="utf-8")
-    (tmp_path / "results_a.csv.gz").write_bytes(gzip.compress(CONTENT.encode()))
-
-    found = csv_compression.find_csvs(tmp_path, "results_*.csv")
-
-    assert [p.name for p in found] == ["results_a.csv.gz"]
+    assert [p.name for p in found] == ["results_a.csv.gz", "results_b.csv.gz"]
 
 
 def test_find_csvs_orders_by_artifact_name(tmp_path):
-    for name in ("results_c.csv", "results_a.csv.gz", "results_b.csv"):
-        (tmp_path / name).write_text(CONTENT, encoding="utf-8")
+    for name in ("results_c.csv.gz", "results_a.csv.gz", "results_b.csv.gz"):
+        (tmp_path / name).write_bytes(gzip.compress(CONTENT.encode()))
 
     found = csv_compression.find_csvs(tmp_path, "results_*.csv")
 
     assert [p.name for p in found] == [
         "results_a.csv.gz",
-        "results_b.csv",
-        "results_c.csv",
+        "results_b.csv.gz",
+        "results_c.csv.gz",
     ]
 
 
@@ -204,31 +157,11 @@ def test_find_csvs_on_empty_directory(tmp_path):
     assert csv_compression.find_csvs(tmp_path, "results_*.csv") == []
 
 
-# =============================================================================
-# resolve_csv
-# =============================================================================
-
-
-def test_resolve_csv_prefers_compressed(tmp_path):
+def test_compressed_name_does_not_fall_back_to_plain(tmp_path):
     plain = tmp_path / "counters.csv"
     plain.write_text(CONTENT, encoding="utf-8")
-    compressed = tmp_path / "counters.csv.gz"
-    compressed.write_bytes(gzip.compress(CONTENT.encode()))
 
-    assert csv_compression.resolve_csv(plain) == compressed
-
-
-def test_resolve_csv_falls_back_to_plain(plain_csv):
-    assert csv_compression.resolve_csv(plain_csv) == plain_csv
-
-
-def test_resolve_csv_returns_compressed_when_neither_exists(tmp_path):
-    absent = tmp_path / "absent.csv"
-
-    resolved = csv_compression.resolve_csv(absent)
-
-    assert resolved == tmp_path / "absent.csv.gz"
-    assert not resolved.is_file()
+    assert csv_compression.compressed_name(plain) == tmp_path / "counters.csv.gz"
 
 
 # =============================================================================

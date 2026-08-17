@@ -9,9 +9,8 @@ standard library only. Rows are ``list[dict]`` or an iterator of dicts, the
 natural representation csv.DictReader/DictWriter use. Counter data is streamed
 rather than loaded, since a single pass can hold millions of rows.
 
-Files are opened through ``csv_compression``, so a caller reads a compressed
-file the same way it reads a plain one and writes a compressed one by asking
-for a compressed name.
+Files are opened through ``csv_compression``. Counter artifacts use ``.csv.gz``;
+other profile CSVs (for example ``pmc_perf.csv``) stay plain.
 
 This module is ONLY used in profile mode. Analyze mode can use pandas freely.
 """
