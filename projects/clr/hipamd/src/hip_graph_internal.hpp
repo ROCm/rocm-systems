@@ -1080,9 +1080,14 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
   bool repeatLaunch_ = false;
   //! parallel streams per device
   std::unordered_map<int, std::vector<hip::Stream*>> parallel_streams_;
+  //! Capture-device stream used as slot 0 by cross-device launches.
+  //! Null until first such launch; owned by parallel_streams_.
+  hip::Stream* cross_device_stream_ = nullptr;
 
   //! Create parallel streams for a device
   hipError_t CreateStreams(uint32_t num_streams, int devId);
+  //! Create the capture-device stream used as slot 0 by cross-device launches
+  hipError_t EnsureCrossDeviceStream();
   //! Compute per-device stream requirements from streams_dev_ids_ mappings
   void FindStreamsReqPerDev();
   //! Update streams_ for a launch and resolve HW queue collisions.
