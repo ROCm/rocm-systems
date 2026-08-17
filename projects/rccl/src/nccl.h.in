@@ -516,7 +516,8 @@ ncclResult_t pncclCommDeregister(const ncclComm_t comm, void* handle);
 
 /*! @brief      Suspend communicator operations to free resources.
     @details    Releases the resources selected by @p flags. The communicator
-                cannot be used until @ref ncclCommResume is called.
+                cannot be used until @ref ncclCommResume is called; a collective
+                issued in the meantime returns ncclInvalidUsage.
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  comm          Communicator to suspend
