@@ -67,6 +67,7 @@ Options:
     --gpus                         GPU IDs for SMI queries (count: unlimited, dtype: int)
     -D, --device                   Enable device-based metrics (max: 1, dtype: bool)
     --ai-nics                      AI NIC IDs for SMI queries (count: unlimited, dtype: list)
+    --nics                         NIC interface names to profile (count: unlimited, dtype: list)
 
     [GENERAL SAMPLING OPTIONS] General sampling options
 
@@ -312,6 +313,7 @@ TEST_F(help_system_test, domain_gpu_extracts_related_options)
     EXPECT_NE(output.find("--device"), std::string::npos);
     EXPECT_NE(output.find("--gpu-events"), std::string::npos);
     EXPECT_NE(output.find("--ai-nics"), std::string::npos);
+    EXPECT_NE(output.find("--nics"), std::string::npos);
     // Should NOT include CPU-only options
     EXPECT_EQ(output.find("--cpu-events"), std::string::npos);
     EXPECT_EQ(output.find("--sampling-freq"), std::string::npos);

@@ -997,6 +997,25 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _data.reg.processed_environs.emplace("sampling_ai-nics");
     }
 
+    if(_data.reg.environ_filter("nics", _data))
+    {
+        _parser
+            .add_argument({ "--nics" },
+                          "NIC interface names to profile. Supports comma-separated list, "
+                          "'all', or 'none'. Conventional NICs are profiled via the PAPI "
+                          "net component; AI NICs (RDMA-capable, detected via AMD SMI) are "
+                          "profiled via AMD SMI. Replaces --ai-nics and manual "
+                          "ROCPROFSYS_PAPI_EVENTS configuration for NIC profiling")
+            .dtype("list of strings")
+            .action([&](parser_t& p) {
+                update_env(_data, env_vars::SAMPLING_NICS,
+                           fmt::format("{}", fmt::join(p.get<strvec_t>("nics"), ",")));
+            });
+
+        _data.reg.processed_environs.emplace("nics");
+        _data.reg.processed_environs.emplace("sampling_nics");
+    }
+
     _parser.start_group("GENERAL SAMPLING OPTIONS",
                         "General options for timer-based sampling per-thread");
 
