@@ -6,6 +6,7 @@
 #include "common/traits.hpp"
 #include "debug.hpp"
 #include <fmt/format.h>
+#include <profiler-hub/version.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -234,7 +235,7 @@ public:
     // =========================================================================
     // Schema & admin
     // =========================================================================
-    void                      initialize_schema();
+    void                      initialize_schema(profiler_hub::version_t schema_version);
     void                      execute(const std::string& query);
     void                      flush();
     [[nodiscard]] std::string get_uuid() const { return m_uuid; }

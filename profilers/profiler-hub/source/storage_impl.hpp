@@ -24,7 +24,9 @@ struct storage_t::impl
         write = 2
     };
 
-    explicit impl(std::string database_path, std::string uuid);
+    explicit impl(std::string             database_path,
+                  std::string             uuid,
+                  profiler_hub::version_t schema_version);
 
     [[nodiscard]] std::string get_database_path() const;
     [[nodiscard]] std::string get_uuid() const;
@@ -35,9 +37,7 @@ struct storage_t::impl
         const storage_type_t& storage_type);
 
 private:
-    profiler_hub::version_t m_version{ PROFILER_HUB_VERSION_MAJOR,
-                                       PROFILER_HUB_VERSION_MINOR,
-                                       PROFILER_HUB_VERSION_PATCH };
+    profiler_hub::version_t m_schema_version{};
 
     storage_type_t                                m_storage_type{ storage_type_t::none };
     std::shared_ptr<data_storage::sqlite_backend> m_database{ nullptr };

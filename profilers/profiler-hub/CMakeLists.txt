@@ -159,38 +159,21 @@ include(nlohmann_json)
 target_link_libraries(profiler-hub-objects PRIVATE nlohmann_json::nlohmann_json)
 
 # ------------------------------------------------------------ #
+# yaml-cpp (schema manifest parsing)
+# ------------------------------------------------------------ #
+
+include(yaml-cpp)
+target_link_libraries(
+    profiler-hub-objects
+    PRIVATE yaml-cpp::yaml-cpp ${CMAKE_DL_LIBS}
+)
+
+# ------------------------------------------------------------ #
 # Schema from rocprofiler-sdk-rocpd
 # ------------------------------------------------------------ #
 
-set(SQL_SCHEMA_DIR ${CMAKE_CURRENT_LIST_DIR}/source/data_storage/schema)
-set(SQL_SCHEMA_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/source/data_storage/)
-
-include(rocm)
+set(SQL_SCHEMA_DIR "${CMAKE_BINARY_DIR}/share/profiler-hub/schema")
 include(rocprofiler-sdk-rocpd)
-
-if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
-    target_link_libraries(
-        profiler-hub-objects
-        PRIVATE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd
-    )
-
-    target_compile_definitions(
-        profiler-hub-objects
-        PRIVATE
-            $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=1>
-    )
-else()
-    target_include_directories(
-        profiler-hub-objects
-        PRIVATE ${SQL_SCHEMA_BINARY_DIR}
-    )
-
-    target_compile_definitions(
-        profiler-hub-objects
-        PRIVATE
-            $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=0>
-    )
-endif()
 
 # ------------------------------------------------------------ #
 # Logging
@@ -326,20 +309,6 @@ endforeach()
 unset(_profiler_hub_dep_target)
 unset(_profiler_hub_dep_aliased)
 unset(_profiler_hub_dep_is_imported)
-if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
-    # rocprofiler-sdk-rocpd is only ever discovered via find_package() (see
-    # cmake/rocprofiler-sdk-rocpd.cmake); unlike fmt/spdlog it has no in-tree
-    # FetchContent fallback, so the target is always IMPORTED here and needs
-    # no IMPORTED-ness check.
-    list(
-        APPEND profiler_hub_static_iface_libs
-        "$<INSTALL_INTERFACE:rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd>"
-    )
-    string(
-        APPEND profiler_hub_static_find_dependencies
-        "find_dependency(rocprofiler-sdk-rocpd)\n"
-    )
-endif()
 set_target_properties(
     profiler-hub-static
     PROPERTIES INTERFACE_LINK_LIBRARIES "${profiler_hub_static_iface_libs}"
@@ -360,6 +329,12 @@ install(
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+install(
+    DIRECTORY "${SQL_SCHEMA_DIR}/"
+    DESTINATION "share/profiler-hub/schema"
+    COMPONENT profiler-hub
 )
 
 install(

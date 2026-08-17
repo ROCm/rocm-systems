@@ -7,35 +7,18 @@
 
 #include "debug.hpp"
 #include "directory.hpp"
+#include "schema_manifest.hpp"
+
+#include <dlfcn.h>
 
 #include <filesystem>
+#include <fstream>
+#include <regex>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
-
-#if defined(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD) &&                                    \
-    USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD > 0
-#    include <rocprofiler-sdk-rocpd/sql.h>
-#    include <rocprofiler-sdk-rocpd/types.h>
-#    include <rocprofiler-sdk-rocpd/version.h>
-// rocpd_sql_load_schema() and its callback gained a schema_version parameter in
-// rocprofiler-sdk-rocpd 1.3.2 (upstream PR #5267). Older installs (e.g. ROCm <= 7.2,
-// version 1.3.1) still use the 8-argument signature without it.
-#    define PROFILER_HUB_ROCPD_SQL_HAS_SCHEMA_VERSION (ROCPD_VERSION >= 10302)
-// ROCPD_SQL_SCHEMA_ROCPD_METADATA was added to rocpd_sql_schema_kind_t in the same
-// upstream PR (#5267 / rocpd 1.3.2) that added schema_version, so gate on the same
-// version check -- older installs don't have this enumerator at all.
-#    define PROFILER_HUB_ROCPD_SQL_HAS_METADATA_KIND                                     \
-        PROFILER_HUB_ROCPD_SQL_HAS_SCHEMA_VERSION
-#else
-#    include <regex>
-
-#    include "schema/data_views.hpp"
-#    include "schema/rocpd_metadata.hpp"
-#    include "schema/rocpd_tables.hpp"
-#    include "schema/rocpd_views.hpp"
-#    include "schema/summary_views.hpp"
 
 namespace
 {
@@ -52,12 +35,6 @@ enum rocpd_sql_schema_kind_t
 };
 }  // namespace
 
-// This local schema is always sourced fresh (bundled or cloned) so the METADATA kind
-// is always present, unlike the installed rocprofiler-sdk-rocpd library above.
-#    define PROFILER_HUB_ROCPD_SQL_HAS_METADATA_KIND 1
-
-#endif
-
 namespace
 {
 [[maybe_unused]] void
@@ -70,114 +47,111 @@ create_directory_for_database_file(const std::string& db_file)
     }
 }
 
-#if defined(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD) &&                                    \
-    USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD > 0
-void
-load_schema_cb(rocpd_sql_engine_t /*unused*/,
-               rocpd_sql_schema_kind_t /*unused*/,
-               rocpd_sql_options_t /*unused*/,
-#    if PROFILER_HUB_ROCPD_SQL_HAS_SCHEMA_VERSION
-               rocpd_version_triplet_t /*unused*/,
-#    endif
-               const rocpd_sql_schema_jinja_variables_t* /*unused*/,
-               const char* /*unused*/,
-               const char* schema_content,
-               void*       user_data)
+[[nodiscard]] static const std::filesystem::path&
+schema_directory()
 {
-    if(user_data == nullptr || schema_content == nullptr)
-    {
-        LOG_ERROR("Invalid user data or schema content pointer");
-        return;
-    }
-    auto* query = static_cast<std::string*>(user_data);
-    if(query == nullptr)
-    {
-        LOG_ERROR("Invalid query pointer");
-        return;
-    }
-    *query = std::string(schema_content);
+    static const std::filesystem::path installed_schema_dir = [] {
+        Dl_info library_info{};
+        if(dladdr(reinterpret_cast<const void*>(&schema_directory), &library_info) != 0 &&
+           library_info.dli_fname != nullptr)
+        {
+            const auto schema_dir = std::filesystem::path{ library_info.dli_fname }
+                                        .parent_path()
+                                        .parent_path() /
+                                    "share/profiler-hub/schema";
+            if(std::filesystem::exists(schema_dir / "versions.yml"))
+            {
+                return schema_dir;
+            }
+        }
+
+        throw std::runtime_error("Unable to locate profiler-hub schema directory "
+                                 "relative to the loaded library");
+    }();
+
+    return installed_schema_dir;
 }
-#endif
+
+[[nodiscard]] static std::filesystem::path
+schema_file_path(const std::string& schema_file_name)
+{
+    return schema_directory() / schema_file_name;
+}
+
+// Reads raw SQL copied by cmake/rocprofiler-sdk-rocpd.cmake into the schema directory.
+[[maybe_unused]] std::string
+read_schema_file(const std::string& schema_file_name)
+{
+    const std::filesystem::path schema_path = schema_file_path(schema_file_name);
+
+    std::ifstream schema_file(schema_path, std::ios::in | std::ios::binary);
+    if(!schema_file)
+    {
+        throw std::runtime_error("Failed to open schema file: " + schema_path.string());
+    }
+
+    std::ostringstream schema_stream;
+    schema_stream << schema_file.rdbuf();
+    return schema_stream.str();
+}
 
 [[maybe_unused]] std::string
-get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& uuid)
+get_schema_query(rocpd_sql_schema_kind_t                                schema_kind,
+                 const profiler_hub::data_storage::kind_filename_map_t& kind_paths,
+                 const profiler_hub::version_t&                         version,
+                 const std::string&                                     uuid)
 {
-#if defined(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD) &&                                    \
-    USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD > 0
-    rocpd_sql_schema_jinja_variables_t const info{
-        sizeof(rocpd_sql_schema_jinja_variables_t), uuid.c_str(), uuid.c_str()
-    };
-
-    std::string query;
-#    if PROFILER_HUB_ROCPD_SQL_HAS_SCHEMA_VERSION
-    rocpd_version_triplet_t schema_version{ 0, 0, 0 };  // 0,0,0 = latest available schema
-#    endif
-    auto status = rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3,
-                                        schema_kind,
-                                        ROCPD_SQL_OPTIONS_NONE,
-#    if PROFILER_HUB_ROCPD_SQL_HAS_SCHEMA_VERSION
-                                        schema_version,
-#    endif
-                                        &info,
-                                        load_schema_cb,
-                                        nullptr,
-                                        0,
-                                        &query);
-    if(status != ROCPD_STATUS_SUCCESS)
-    {
-        LOG_ERROR("Unable to load rocpd schema (error code: {})",
-                  static_cast<int>(status));
-    }
-    return query;
-#else
-    std::string_view schema_content;
+    std::string query_str;
 
     switch(schema_kind)
     {
         case ROCPD_SQL_SCHEMA_ROCPD_TABLES:
-            schema_content = rocpd::data_storage::schema::ROCPD_TABLES_SQL;
+            query_str = read_schema_file(kind_paths.at("rocpd_tables"));
+            break;
+        case ROCPD_SQL_SCHEMA_ROCPD_INDEXES:
+            query_str = read_schema_file(kind_paths.at("rocpd_indexes"));
             break;
         case ROCPD_SQL_SCHEMA_ROCPD_VIEWS:
-            schema_content = rocpd::data_storage::schema::ROCPD_VIEWS_SQL;
+            query_str = read_schema_file(kind_paths.at("rocpd_views"));
             break;
         case ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS:
-            schema_content = rocpd::data_storage::schema::DATA_VIEWS_SQL;
+            query_str = read_schema_file(kind_paths.at("rocpd_data_views"));
             break;
         case ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS:
-            schema_content = rocpd::data_storage::schema::SUMMARY_VIEWS_SQL;
+            query_str = read_schema_file(kind_paths.at("rocpd_summary_views"));
             break;
         case ROCPD_SQL_SCHEMA_ROCPD_METADATA:
-            schema_content = rocpd::data_storage::schema::ROCPD_METADATA_SQL;
+            query_str = read_schema_file(kind_paths.at("rocpd_metadata"));
             break;
         default:
             throw std::runtime_error("Unknown schema kind: " +
                                      std::to_string(schema_kind));
     }
 
-    std::string query_str = std::string(schema_content);
-
-    std::regex upid_pattern("\\{\\{uuid\\}\\}");
-    std::regex guid_pattern("\\{\\{guid\\}\\}");
-    std::regex view_upid_pattern("\\{\\{view_upid\\}\\}");
-
-    // rocpd_metadata.sql references these; hardcoded to the baseline schema version
-    // (3.0.0) for now until schema files are selected by version rather than always
-    // taking the latest cloned/bundled copy.
-    std::regex schema_version_pattern("\\{\\{schema_version\\}\\}");
-    std::regex schema_version_major_pattern("\\{\\{schema_version_major\\}\\}");
-    std::regex schema_version_minor_pattern("\\{\\{schema_version_minor\\}\\}");
-    std::regex schema_version_patch_pattern("\\{\\{schema_version_patch\\}\\}");
+    static const std::regex upid_pattern("\\{\\{uuid\\}\\}");
+    static const std::regex guid_pattern("\\{\\{guid\\}\\}");
+    static const std::regex view_upid_pattern("\\{\\{view_upid\\}\\}");
+    static const std::regex schema_version_pattern("\\{\\{schema_version\\}\\}");
+    static const std::regex schema_version_major_pattern(
+        "\\{\\{schema_version_major\\}\\}");
+    static const std::regex schema_version_minor_pattern(
+        "\\{\\{schema_version_minor\\}\\}");
+    static const std::regex schema_version_patch_pattern(
+        "\\{\\{schema_version_patch\\}\\}");
 
     query_str = std::regex_replace(query_str, upid_pattern, "_" + uuid);
     query_str = std::regex_replace(query_str, guid_pattern, uuid);
     query_str = std::regex_replace(query_str, view_upid_pattern, "");
-    query_str = std::regex_replace(query_str, schema_version_pattern, "3.0.0");
-    query_str = std::regex_replace(query_str, schema_version_major_pattern, "3");
-    query_str = std::regex_replace(query_str, schema_version_minor_pattern, "0");
-    query_str = std::regex_replace(query_str, schema_version_patch_pattern, "0");
+    query_str =
+        std::regex_replace(query_str, schema_version_pattern, version.to_string());
+    query_str = std::regex_replace(
+        query_str, schema_version_major_pattern, std::to_string(version.major));
+    query_str = std::regex_replace(
+        query_str, schema_version_minor_pattern, std::to_string(version.minor));
+    query_str = std::regex_replace(
+        query_str, schema_version_patch_pattern, std::to_string(version.patch));
 
     return query_str;
-#endif
 }
 
 }  // namespace
@@ -291,29 +265,45 @@ database_backend<SqlitePolicy>::discover_uuids()
 
 template <typename SqlitePolicy>
 void
-database_backend<SqlitePolicy>::initialize_schema()
+database_backend<SqlitePolicy>::initialize_schema(profiler_hub::version_t schema_version)
 {
     if(m_initialized)
     {
-        throw std::runtime_error("Database already initialized!");
+        LOG_WARNING("Database already initialized!");
+        return;
     }
 
-    const std::vector<rocpd_sql_schema_kind_t> schema_kinds = {
-        ROCPD_SQL_SCHEMA_ROCPD_TABLES,
-        ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
-        ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS,
-        ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS
-    };
+    version_file_map_t      version_file_map;
+    profiler_hub::version_t latest_version;
+    // Load the manifest before resolving which schema version to initialize.
+    load_schema_manifest(schema_directory(), version_file_map, latest_version);
 
+    // Resolve "latest" or an explicit request to the manifest entry we will apply.
+    const profiler_hub::version_t resolved_version =
+        resolve_schema_version(version_file_map, latest_version, schema_version);
+    const auto& kind_paths = version_file_map.at(resolved_version.to_string());
+
+    LOG_INFO("Initializing rocpd schema version {} (uuid: {})",
+             resolved_version.to_string(),
+             m_uuid);
+
+    // Order matters: indexes are created on tables that must already exist.
+    const std::vector<rocpd_sql_schema_kind_t> schema_kinds = {
+        ROCPD_SQL_SCHEMA_ROCPD_TABLES,        ROCPD_SQL_SCHEMA_ROCPD_INDEXES,
+        ROCPD_SQL_SCHEMA_ROCPD_VIEWS,         ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS,
+        ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS, ROCPD_SQL_SCHEMA_ROCPD_METADATA,
+    };
     for(const auto& schema_kind : schema_kinds)
     {
-        const std::string query = get_schema_query(schema_kind, m_uuid);
+        const std::string query =
+            get_schema_query(schema_kind, kind_paths, resolved_version, m_uuid);
 
         if(query.empty())
         {
-            LOG_ERROR("Failed to get schema query for schema kind: {}",
-                      static_cast<int>(schema_kind));
-            continue;
+            throw std::runtime_error("Empty schema SQL for kind " +
+                                     std::to_string(static_cast<int>(schema_kind)) +
+                                     " (schema version " + resolved_version.to_string() +
+                                     ")");
         }
 
         validate_sqlite3_result(SqlitePolicy::exec(m_sqlite3, query.c_str()),
