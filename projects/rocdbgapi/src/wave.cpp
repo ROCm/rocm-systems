@@ -69,10 +69,16 @@ wave_t::~wave_t ()
     raise_event (AMD_DBGAPI_EVENT_KIND_WAVE_COMMAND_TERMINATED);
 }
 
+cluster_t &
+wave_t::cluster () const
+{
+  return workgroup ().cluster ();
+}
+
 const dispatch_t &
 wave_t::dispatch () const
 {
-  return m_workgroup.dispatch ();
+  return cluster ().dispatch ();
 }
 
 queue_t &

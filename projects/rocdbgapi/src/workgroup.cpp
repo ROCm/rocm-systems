@@ -20,6 +20,7 @@
 
 #include "workgroup.h"
 #include "agent.h"
+#include "cluster.h"
 #include "dispatch.h"
 #include "memory.h"
 #include "process.h"
@@ -27,6 +28,12 @@
 
 namespace amd::dbgapi
 {
+
+const dispatch_t &
+workgroup_t::dispatch () const
+{
+  return cluster ().dispatch ();
+}
 
 queue_t &
 workgroup_t::queue () const

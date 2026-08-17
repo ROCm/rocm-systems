@@ -20,6 +20,7 @@
 
 #include "queue.h"
 #include "architecture.h"
+#include "cluster.h"
 #include "debug.h"
 #include "dispatch.h"
 #include "exception.h"
@@ -276,6 +277,7 @@ compute_queue_t::update_waves ()
 
     if (!wave)
       {
+        cluster_t *cluster = nullptr;
         workgroup_t *workgroup = nullptr;
 
         if (group_leader)
@@ -283,14 +285,17 @@ compute_queue_t::update_waves ()
             /* We already have identified the workgroup_t this wave belongs to,
                it is the same workgroup_t as the thread group leader's.  */
             workgroup = &group_leader->workgroup ();
+            cluster = &workgroup->cluster ();
 
-            if (workgroup->group_ids () != cwsr_record->group_ids ())
+            if (workgroup->group_ids () != cwsr_record->group_ids ()
+                || cluster->cluster_ids () != cwsr_record->cluster_ids ())
               fatal_error ("not in the same workgroup as the group_leader");
           }
         else
           {
             const auto packet_id = get_os_queue_packet_id (*cwsr_record);
             const auto group_ids = cwsr_record->group_ids ();
+            const auto cluster_ids = cwsr_record->cluster_ids ();
 
             /* Find the dispatch this wave belongs to using the packet_id.  The
                packet_id is only unique for a given queue.  */
@@ -302,11 +307,28 @@ compute_queue_t::update_waves ()
 
             if (dispatch)
               {
+                /* Find the workgroup this wave belongs to.
+                   Conceptually this is the dispatch -> cluster ->
+                   workgroup path.  */
                 workgroup = process.find_if (
-                  [dispatch, group_ids] (const workgroup_t &w) {
+                  [dispatch, &group_ids, &cluster_ids] (const workgroup_t &w) {
                     return w.dispatch () == *dispatch
+                           && w.cluster ().cluster_ids () == cluster_ids
                            && w.group_ids () == group_ids;
                   });
+
+                if (workgroup)
+                  cluster = &workgroup->cluster ();
+                else
+                  {
+                    /* Find the cluster this wave belongs to.
+                       Conceptually this is the dispatch -> cluster path.  */
+                    cluster = process.find_if (
+                      [dispatch, &cluster_ids] (const cluster_t &c) {
+                        return c.dispatch () == *dispatch
+                               && c.cluster_ids () == cluster_ids;
+                      });
+                  }
               }
             else if (packet_id)
               {
@@ -321,9 +343,13 @@ compute_queue_t::update_waves ()
                 dispatch = &m_dummy_dispatch;
               }
 
+            if (!cluster)
+              cluster = &process.create<cluster_t>
+                (*dispatch, cluster_ids, cwsr_record->nwg_in_cluster ());
+
             if (!workgroup)
               workgroup = &process.create<workgroup_t> (
-                *dispatch, group_ids, cwsr_record->lds_size ());
+                *cluster, group_ids, cwsr_record->lds_size ());
           }
 
         dbgapi_assert (workgroup != nullptr);
@@ -381,6 +407,7 @@ compute_queue_t::update_waves ()
 
     wave->set_mark (wave_mark);
     wave->workgroup ().set_mark (wave_mark);
+    wave->workgroup ().cluster ().set_mark (wave_mark);
   };
 
   process_t &process = this->process ();
@@ -462,6 +489,13 @@ compute_queue_t::update_waves ()
 
   auto &&workgroup_range = process.range<workgroup_t> ();
   for (auto it = workgroup_range.begin (); it != workgroup_range.end ();)
+    if (it->queue () == *this && it->mark () < wave_mark)
+      it = process.destroy (it);
+    else
+      ++it;
+
+  auto &&cluster_range = process.range<cluster_t> ();
+  for (auto it = cluster_range.begin (); it != cluster_range.end ();)
     if (it->queue () == *this && it->mark () < wave_mark)
       it = process.destroy (it);
     else
@@ -900,6 +934,10 @@ aql_queue_t::~aql_queue_t ()
 
   auto &&workgroup_range = process.range<workgroup_t> ();
   for (auto it = workgroup_range.begin (); it != workgroup_range.end ();)
+    it = (it->queue () == *this) ? process.destroy (it) : ++it;
+
+  auto &&cluster_range = process.range<cluster_t> ();
+  for (auto it = cluster_range.begin (); it != cluster_range.end ();)
     it = (it->queue () == *this) ? process.destroy (it) : ++it;
 
   auto &&dispatch_range = process.range<dispatch_t> ();
