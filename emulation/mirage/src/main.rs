@@ -81,22 +81,27 @@ fn main() -> ExitCode {
     }
 }
 
-/// Top-level subcommands `mirage` understands. Used to decide whether an
-/// invocation is a normal `mirage <subcommand> …` call or a bare,
-/// `rocjitsu`-style `mirage [--config …] [--daemon] -- <app>` call that
-/// should be routed to `run`.
-const SUBCOMMANDS: &[&str] = &[
-    "profile",
-    "topology",
-    "agent",
-    "emulators",
-    "exec",
-    "state",
-    "run",
-    "paths",
-    "about",
-    "help",
-];
+/// Whether `name` is a top-level subcommand `mirage` understands.
+///
+/// Used to decide whether an invocation is a normal `mirage <subcommand>
+/// …` call or a bare, `rocjitsu`-style `mirage [--config …] [--daemon] --
+/// <app>` call that should be routed to `run`.
+///
+/// Asked of clap rather than kept as a list here. It *was* a list, and the
+/// list was missing `cleanup`: `mirage cleanup -- echo hi` did not run
+/// `cleanup`, it brought up a whole emulated session and tried to execute
+/// a program called `cleanup` inside it. Every subcommand added from now
+/// on is covered the moment it is declared, because this is the
+/// declaration.
+///
+/// Aliases count. A subcommand reachable under a second name is still a
+/// subcommand, and missing one would resurrect exactly the bug above.
+fn is_subcommand(name: &str) -> bool {
+    use clap::CommandFactory as _;
+    Cli::command()
+        .get_subcommands()
+        .any(|sub| sub.get_name() == name || sub.get_all_aliases().any(|alias| alias == name))
+}
 
 /// The third-party dependency/license manifest, generated at build time
 /// by `build.rs` from `cargo metadata` and embedded into the binary.
@@ -208,7 +213,7 @@ fn dropin_argv(args: Vec<String>) -> Vec<String> {
     // A recognised subcommand (or a bare `--help`/`--version`) means this
     // is a normal mirage call; leave it alone.
     if let Some(h) = head
-        && (SUBCOMMANDS.contains(&h) || matches!(h, "--help" | "-h" | "--version" | "-V"))
+        && (is_subcommand(h) || matches!(h, "--help" | "-h" | "--version" | "-V"))
     {
         return args;
     }
@@ -251,7 +256,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<ExitCode> {
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-    use super::{Cli, dropin_argv, is_global_flag};
+    use super::{Cli, dropin_argv, is_global_flag, is_subcommand};
 
     fn v_args(args: &[&str]) -> Vec<String> {
         args.iter().map(|s| s.to_string()).collect()
@@ -332,6 +337,42 @@ mod tests {
                 "{v} should be stepped over when splicing `run`"
             );
         }
+    }
+
+    /// `cleanup` was missing from the hardcoded subcommand list, so
+    /// `mirage cleanup -- echo hi` brought up an emulated session and
+    /// tried to run a program called `cleanup` in it. Every subcommand
+    /// clap knows about must be recognised, so ask clap for all of them
+    /// rather than trusting a list — including `run` itself, which must
+    /// not be spliced in front of.
+    #[test]
+    fn every_subcommand_is_recognised() {
+        use clap::CommandFactory as _;
+        for sub in Cli::command().get_subcommands() {
+            let name = sub.get_name().to_string();
+            assert!(
+                is_subcommand(&name),
+                "`{name}` is a subcommand but `is_subcommand` does not know it"
+            );
+            let args = v_args(&["mirage", &name, "--", "./app"]);
+            assert_eq!(
+                dropin_argv(args.clone()),
+                args,
+                "`mirage {name} -- ./app` was rewritten; it names a subcommand \
+                 and must be left alone"
+            );
+        }
+    }
+
+    /// The inverse: something that is *not* a subcommand still routes to
+    /// `run`, so fixing the list did not break the drop-in itself.
+    #[test]
+    fn a_non_subcommand_still_routes_to_run() {
+        assert!(!is_subcommand("definitely-not-a-subcommand"));
+        assert_eq!(
+            dropin_argv(v_args(&["mirage", "--config", "c.json", "--", "./app"])),
+            v_args(&["mirage", "run", "--config", "c.json", "--", "./app"])
+        );
     }
 
     /// `is_global_flag` duplicates knowledge that lives in `Cli`'s derive.
