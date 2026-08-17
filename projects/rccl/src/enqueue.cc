@@ -3712,7 +3712,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           }
         } else if (info->coll == ncclFuncScatter) {
           size_t offset = 0;
-          allowUB = captured ;
+          allowUB = captured;
           if (comm->rank == info->root) {
             for (int r = 0; r < comm->nRanks; r++) {
               void* buff = (void*)((char*)info->sendbuff + offset);

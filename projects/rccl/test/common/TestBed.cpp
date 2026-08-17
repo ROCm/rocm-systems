@@ -198,8 +198,6 @@ namespace RcclUnitTesting
             NULL);
         perror("execl failed");
          _exit(1);
-        // childList[childId]->StartExecutionLoop();
-        // return;
       }
       else if (pid > 0)
       {
@@ -262,7 +260,6 @@ namespace RcclUnitTesting
       PIPE_WRITE(childId, numGroupCalls);
 
       // Send the number of collectives to be run per group call
-      // PIPE_WRITE(childId, numCollectivesInGroup);
       int const numCollSize = this->numCollectivesInGroup.size();
       PIPE_WRITE(childId, numCollSize);
       if (numCollSize > 0) {
@@ -282,7 +279,6 @@ namespace RcclUnitTesting
       PIPE_WRITE(childId, useMulti);
 
       // Send how many streams to use per group call
-      // PIPE_WRITE(childId, numStreamsPerGroup);
       int const numStreamsSize = this->numStreamsPerGroup.size();
       PIPE_WRITE(childId, numStreamsSize);
       if (numStreamsSize > 0) {
@@ -401,9 +397,7 @@ namespace RcclUnitTesting
     for (int childId = 0; childId < this->numActiveChildren; ++childId) {
       PIPE_CHECK(childId);
     }
-    // =========================================================================
-    // PHASE 2: Grouped RCCL Window Registration across all active children
-    // =========================================================================
+    // Grouped RCCL Window Registration across all active children
     int const regCmd = TestBedChild::CHILD_REGISTER_MEM;
     for (auto currGroup : groupList) {
       // 1. Send CHILD_REGISTER_MEM command to ALL active children FIRST
@@ -491,10 +485,7 @@ namespace RcclUnitTesting
           }
         }
       }
-    // }
 
-    // // Wait for child acknowledgement
-    // for (auto currGroup : groupList) {
       for (int childId = 0; childId < this->numActiveChildren; ++childId)
       {
         if ((currentRanks.size() == 0) || (ranksPerChild[childId].size() > 0)) PIPE_CHECK(childId);
@@ -689,7 +680,6 @@ namespace RcclUnitTesting
 
       // Close pipes to child process
       close(childList[childId]->parentWriteFd);
-      
     }
 
     // Wait for processes to stop
@@ -705,7 +695,6 @@ namespace RcclUnitTesting
       {
         TEST_ERROR("Child process %d exited with code %d", childId, WEXITSTATUS(returnVal));
       }
-
       // Only close the read end AFTER the child process is dead
       close(childList[childId]->parentReadFd);
       delete(childList[childId]);
@@ -983,7 +972,6 @@ namespace RcclUnitTesting
               hipDeviceSynchronize(); 
               fflush(stdout);
             }
-            
             this->ValidateResults(isCorrect);
             if (!isCorrect)
             {

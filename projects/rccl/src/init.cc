@@ -2309,8 +2309,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // (globalRmaProxySupport) has no all-P2P symmetric window, and enqueue.cc has a
   // dedicated non-symmetric hostRma path for it.
   comm->hostRmaSupport = (isOneLsaTeams || comm->globalRmaProxySupport);
-   
-
   if (!comm->symmetricSupport) {
     INFO(NCCL_INIT,
          "Symmetric memory is not supported. cuMemEnable %d, "
