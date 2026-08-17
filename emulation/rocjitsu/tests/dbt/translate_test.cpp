@@ -14,6 +14,7 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
+#include "rocjitsu/code/dbt/binary_translator_internal.h"
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
 #include "rocjitsu/code/dbt/semantic/rules.h"
 #include "rocjitsu/code/dbt/semantic_translator.h"
@@ -2351,6 +2352,103 @@ TEST(BinaryTranslatorE2E, VariantConflictedAddressTakenCloneRefusesInsteadOfNami
                                    "relocated .text could not be materialized safely"))
       << (result.diagnostics.empty() ? "" : result.diagnostics.front().message);
   EXPECT_EQ(result.elf_bytes, image) << "fail-closed must leave the object unchanged";
+}
+
+// The two tests above reach the variant-conflict guard through an R_AMDGPU_RELATIVE64 addend. A
+// getpc-plus-literal builder is the other way to hold a code address, and it is resolved by
+// internal::resolve_pending_code_relocations rather than by the addend path, so it needs its own
+// coverage.
+//
+// No image can carry both halves of that case. The conflict set is written only by virtual-LDS
+// sidecar variants, which exist for the CDNA4 -> CDNA3 pair alone, while a PC-relative address
+// builder is recovered only from a getpc followed by s_add_nc_u64 -- an encoding CDNA4 does not
+// have -- so the two never co-occur in anything the translator can be handed. These drive the
+// resolver directly instead.
+//
+// The orderings are the two ways the scope walk can queue a builder relative to the scope that
+// discovers the disagreement. A conflict is only found when a second clone disagrees with the
+// first, so a builder in the earlier scope is queued before the conflict exists and one in the
+// later scope after it. Resolution happens once, after every scope is placed, so both must refuse:
+// the earlier builder must not have been settled against the canonical clone, and the later one
+// must not fall through to the clone its own scope emitted.
+namespace {
+
+constexpr uint64_t kConflictedTargetOffset = 0x40;
+
+/// @brief The refusal every conflicted code address must produce.
+[[nodiscard]] bool
+refused_for_variant_conflict(const std::vector<internal::PendingCodeRelocation> &pending,
+                             const std::unordered_map<uint64_t, uint64_t> &canonical_placement,
+                             std::vector<PcRelativeTextRelocation> &code_relocations) {
+  std::vector<TranslationDiagnostic> diagnostics;
+  const bool resolved = internal::resolve_pending_code_relocations(
+      pending, /*text_relocations=*/{}, canonical_placement,
+      /*canonical_placement_variant_conflict=*/{kConflictedTargetOffset}, code_relocations,
+      diagnostics);
+  if (resolved || diagnostics.empty())
+    return false;
+  return diagnostics.front().message.find("lowered against different LDS models") !=
+         std::string::npos;
+}
+
+} // namespace
+
+// The builder's scope ran before the disagreement was discovered, so nothing had excluded the
+// target yet and a canonical placement for it exists. Settling the builder against that placement
+// at the time it was queued -- as resolving inside the scope walk would -- leaves a code address
+// naming one clone of a body whose clones are not interchangeable.
+TEST(BinaryTranslatorInternal, CodeAddressQueuedBeforeTheVariantConflictIsStillRefused) {
+  const std::vector<internal::PendingCodeRelocation> pending = {
+      {.target_getpc_offset = 0x10,
+       .target_literal_offset = 0x18,
+       .source_target_text_offset = kConflictedTargetOffset,
+       .local_target_text_offset = std::nullopt}};
+  const std::unordered_map<uint64_t, uint64_t> canonical_placement = {
+      {kConflictedTargetOffset, 0x200}};
+
+  std::vector<PcRelativeTextRelocation> code_relocations;
+  EXPECT_TRUE(refused_for_variant_conflict(pending, canonical_placement, code_relocations));
+  EXPECT_TRUE(code_relocations.empty())
+      << "a refused object must not leave a code address pointing at one clone";
+}
+
+// The builder's scope is the one that disagreed, so by the time it is resolved the target is
+// excluded from the canonical map. Preferring the clone this scope emitted would pick between the
+// two by which scope happened to compute the address -- but the address can be dereferenced from
+// either scope, so that choice is not available to make.
+TEST(BinaryTranslatorInternal, CodeAddressQueuedAfterTheVariantConflictDoesNotUseItsLocalClone) {
+  const std::vector<internal::PendingCodeRelocation> pending = {
+      {.target_getpc_offset = 0x10,
+       .target_literal_offset = 0x18,
+       .source_target_text_offset = kConflictedTargetOffset,
+       .local_target_text_offset = 0x300}};
+
+  std::vector<PcRelativeTextRelocation> code_relocations;
+  EXPECT_TRUE(refused_for_variant_conflict(pending, /*canonical_placement=*/{}, code_relocations));
+  EXPECT_TRUE(code_relocations.empty())
+      << "the emitting scope's own clone is not an answer for an address others dereference";
+}
+
+// The control for both: with no disagreement recorded, a builder whose target has a canonical
+// placement resolves to it. Without this the refusals above could be passing because the resolver
+// rejects every deferred code address.
+TEST(BinaryTranslatorInternal, UnconflictedCodeAddressResolvesToItsCanonicalPlacement) {
+  const std::vector<internal::PendingCodeRelocation> pending = {
+      {.target_getpc_offset = 0x10,
+       .target_literal_offset = 0x18,
+       .source_target_text_offset = kConflictedTargetOffset,
+       .local_target_text_offset = 0x300}};
+  const std::unordered_map<uint64_t, uint64_t> canonical_placement = {
+      {kConflictedTargetOffset, 0x200}};
+
+  std::vector<PcRelativeTextRelocation> code_relocations;
+  std::vector<TranslationDiagnostic> diagnostics;
+  EXPECT_TRUE(internal::resolve_pending_code_relocations(
+      pending, /*text_relocations=*/{}, canonical_placement,
+      /*canonical_placement_variant_conflict=*/{}, code_relocations, diagnostics));
+  ASSERT_EQ(code_relocations.size(), 1u);
+  EXPECT_EQ(code_relocations.front().target_text_offset, 0x200u)
+      << "the canonical copy answers for every scope, including the one that emitted a clone";
 }
 
 } // namespace

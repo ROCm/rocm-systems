@@ -1594,69 +1594,6 @@ materialization_diagnostic_kind(const KernelTextAppendResult &materialization) {
   return DiagnosticKind::KernelDescriptor;
 }
 
-/// @brief A code-address builder awaiting the final placement of the body it names.
-struct PendingCodeRelocation {
-  uint64_t target_getpc_offset = 0;
-  uint64_t target_literal_offset = 0;
-  uint64_t source_target_text_offset = 0;
-};
-
-/// @brief Point every deferred code-address builder at the placement its target received.
-///
-/// @details Runs after every scope is placed, which is the first moment a target's final offset
-/// is known. A source offset emitted more than once has no single answer -- a runtime-dereferenced
-/// code address cannot choose between clones -- so that fails closed rather than picking one,
-/// matching how relocate_relative_text_addends treats a conflicting relocation addend.
-///
-/// @returns false when the object must be left unchanged.
-[[nodiscard]] bool resolve_pending_code_relocations(
-    const std::vector<PendingCodeRelocation> &pending,
-    const std::vector<TextOffsetRelocation> &text_relocations,
-    const std::unordered_map<uint64_t, uint64_t> &canonical_placement,
-    const std::unordered_set<uint64_t> &canonical_placement_variant_conflict,
-    std::vector<PcRelativeTextRelocation> &code_relocations,
-    std::vector<TranslationDiagnostic> &diagnostics) {
-  if (pending.empty())
-    return true;
-
-  std::unordered_map<uint64_t, uint64_t> placement;
-  std::unordered_set<uint64_t> conflicting;
-  for (const TextOffsetRelocation &relocation : text_relocations) {
-    auto [it, inserted] = placement.try_emplace(relocation.source_offset, relocation.target_offset);
-    if (!inserted && it->second != relocation.target_offset)
-      conflicting.insert(relocation.source_offset);
-  }
-
-  for (const PendingCodeRelocation &entry : pending) {
-    // A canonical copy only answers for its clones when they are interchangeable. Offsets whose
-    // clones disagreed on kernel-scope variant are not, so they fall through to the placement map
-    // below and fail closed there rather than silently naming whichever clone was nominated first.
-    if (const auto canonical = canonical_placement.find(entry.source_target_text_offset);
-        canonical != canonical_placement.end() &&
-        !canonical_placement_variant_conflict.contains(entry.source_target_text_offset)) {
-      code_relocations.push_back({.target_getpc_offset = entry.target_getpc_offset,
-                                  .target_literal_offset = entry.target_literal_offset,
-                                  .target_text_offset = canonical->second});
-      continue;
-    }
-    const auto placed = placement.find(entry.source_target_text_offset);
-    if (placed == placement.end() || conflicting.contains(entry.source_target_text_offset)) {
-      append_error(diagnostics, DiagnosticKind::Legalization,
-                   conflicting.contains(entry.source_target_text_offset)
-                       ? "PC-relative code address names a body emitted at more than one "
-                         "placement; leaving code object unchanged"
-                       : "PC-relative code address names a body this translation did not emit; "
-                         "leaving code object unchanged",
-                   entry.source_target_text_offset);
-      return false;
-    }
-    code_relocations.push_back({.target_getpc_offset = entry.target_getpc_offset,
-                                .target_literal_offset = entry.target_literal_offset,
-                                .target_text_offset = placed->second});
-  }
-  return true;
-}
-
 /// @brief What one scope added to the three code-address containers, so a skipped scope can take
 /// it back.
 ///
@@ -1685,7 +1622,7 @@ struct ObjectRollbackState {
   std::vector<TextOffsetRelocation> &text_relocations;
   std::vector<PcRelativeDataRelocation> &data_relocations;
   std::vector<PcRelativeTextRelocation> &code_relocations;
-  std::vector<PendingCodeRelocation> &pending_code_relocations;
+  std::vector<internal::PendingCodeRelocation> &pending_code_relocations;
   std::unordered_map<uint64_t, uint64_t> &canonical_placement;
   std::unordered_map<uint64_t, bool> &canonical_placement_is_sidecar;
   std::unordered_set<uint64_t> &canonical_placement_variant_conflict;
@@ -1830,6 +1767,77 @@ bool scope_roots_are_entry_state(std::span<BasicBlock *const> blocks,
     if (hardware_entry_offsets.contains(block->start_offset()) || call_targets.contains(block))
       continue;
     return false;
+  }
+  return true;
+}
+
+bool resolve_pending_code_relocations(
+    const std::vector<PendingCodeRelocation> &pending,
+    const std::vector<TextOffsetRelocation> &text_relocations,
+    const std::unordered_map<uint64_t, uint64_t> &canonical_placement,
+    const std::unordered_set<uint64_t> &canonical_placement_variant_conflict,
+    std::vector<PcRelativeTextRelocation> &code_relocations,
+    std::vector<TranslationDiagnostic> &diagnostics) {
+  if (pending.empty())
+    return true;
+
+  std::unordered_map<uint64_t, uint64_t> placement;
+  std::unordered_set<uint64_t> conflicting;
+  for (const TextOffsetRelocation &relocation : text_relocations) {
+    auto [it, inserted] = placement.try_emplace(relocation.source_offset, relocation.target_offset);
+    if (!inserted && it->second != relocation.target_offset)
+      conflicting.insert(relocation.source_offset);
+  }
+
+  for (const PendingCodeRelocation &entry : pending) {
+    // Clones that disagreed on kernel-scope variant are lowered against different LDS models, so
+    // no one of them answers for the rest. This is checked before anything else and refuses the
+    // object: a computed address can be dereferenced from a scope other than the one that built
+    // it, so neither the canonical copy nor the builder's own clone is a safe answer. Reaching
+    // for the local copy here would pick a clone by which scope happened to compute the address,
+    // which is exactly the choice that is not available to make.
+    if (canonical_placement_variant_conflict.contains(entry.source_target_text_offset)) {
+      append_error(diagnostics, DiagnosticKind::Legalization,
+                   "PC-relative code address names a body whose copies were lowered against "
+                   "different LDS models; leaving code object unchanged",
+                   entry.source_target_text_offset);
+      return false;
+    }
+    // An adopted body has one canonical copy and every code address names it, whatever scope the
+    // builder lives in.
+    if (const auto canonical = canonical_placement.find(entry.source_target_text_offset);
+        canonical != canonical_placement.end()) {
+      code_relocations.push_back({.target_getpc_offset = entry.target_getpc_offset,
+                                  .target_literal_offset = entry.target_literal_offset,
+                                  .target_text_offset = canonical->second});
+      continue;
+    }
+    // Otherwise prefer the copy the computing scope emitted. A body reached by several kernels is
+    // cloned once per scope so each scope's branches resolve through its own placement map, and
+    // patch_recovered_builder_fixups already points a recovered builder at its scope's clone.
+    // Following the same convention keeps a computed address consistent with the code that
+    // computed it, and avoids inventing a conflict between clones distinguishable only by which
+    // scope emitted them.
+    if (entry.local_target_text_offset) {
+      code_relocations.push_back({.target_getpc_offset = entry.target_getpc_offset,
+                                  .target_literal_offset = entry.target_literal_offset,
+                                  .target_text_offset = *entry.local_target_text_offset});
+      continue;
+    }
+    const auto placed = placement.find(entry.source_target_text_offset);
+    if (placed == placement.end() || conflicting.contains(entry.source_target_text_offset)) {
+      append_error(diagnostics, DiagnosticKind::Legalization,
+                   conflicting.contains(entry.source_target_text_offset)
+                       ? "PC-relative code address names a body emitted at more than one "
+                         "placement; leaving code object unchanged"
+                       : "PC-relative code address names a body this translation did not emit; "
+                         "leaving code object unchanged",
+                   entry.source_target_text_offset);
+      return false;
+    }
+    code_relocations.push_back({.target_getpc_offset = entry.target_getpc_offset,
+                                .target_literal_offset = entry.target_literal_offset,
+                                .target_text_offset = placed->second});
   }
   return true;
 }
@@ -2542,7 +2550,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // scope not yet emitted, and a body reached from several kernels is cloned once per scope, so the
   // final offset is only knowable once every placement is recorded. Hold the source-side answer and
   // resolve against the completed map below.
-  std::vector<PendingCodeRelocation> pending_code_relocations;
+  std::vector<internal::PendingCodeRelocation> pending_code_relocations;
   std::vector<PcRelativeTextRelocation> code_relocations;
   // Final offset of the one copy of each adopted body. Code addresses name this copy, so a body a
   // caller also clones still has exactly one address, and that address is stable no matter which
@@ -4139,40 +4147,25 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       if (owned_by_recovered_builder(builder.source_address_add_offset))
         continue;
       const uint64_t source_target = builder.target_vaddr - text_vaddr;
-      // An adopted body has one canonical copy; every code address names it, whatever scope the
-      // builder lives in. Resolving that here rather than after the loop keeps the address stable
-      // even when a caller also clones the body. Offsets whose clones disagreed on kernel-scope
-      // variant are excluded: those clones are lowered against different LDS models, so no single
-      // one of them can answer for the rest.
-      if (const auto canonical = canonical_placement.find(source_target);
-          canonical != canonical_placement.end() &&
-          !canonical_placement_variant_conflict.contains(source_target)) {
-        code_relocations.push_back(
-            {.target_getpc_offset = getpc->second + target_delta,
-             .target_literal_offset = add->second + target_delta + sizeof(uint32_t),
-             .target_text_offset = canonical->second});
-        continue;
-      }
-      // Otherwise prefer this scope's own copy of the target. A body reached by several kernels is
-      // cloned once per scope so each scope's branches resolve through its own placement map, and
-      // patch_recovered_builder_fixups already points a recovered builder at its scope's clone.
-      // Following the same convention keeps a computed address consistent with the code that
-      // computed it, and avoids inventing a conflict between clones that are only distinguishable
-      // by which scope emitted them.
+      // Every code address is resolved after the loop, never here. Both inputs the decision needs
+      // are still being written while scopes are placed: a later scope can nominate a canonical
+      // placement, and a later scope is precisely what records a variant conflict, since the
+      // conflict is only discovered when a second clone disagrees with the first. Resolving in the
+      // loop answers against whatever half of that state exists so far, and the entry is never
+      // revisited once it is in code_relocations.
+      //
+      // The scope's own copy of the target travels with the entry so deferring costs nothing: the
+      // resolver can still prefer it, and now does so knowing whether the offset ended up
+      // conflicted.
+      std::optional<uint64_t> local_target;
       if (const auto local = target_offset_by_source_offset.find(source_target);
-          local != target_offset_by_source_offset.end()) {
-        code_relocations.push_back(
-            {.target_getpc_offset = getpc->second + target_delta,
-             .target_literal_offset = add->second + target_delta + sizeof(uint32_t),
-             .target_text_offset = local->second + target_delta});
-        continue;
-      }
-      // Otherwise the target belongs to another scope -- an adopted body, say -- and can only be
-      // resolved once every placement is known.
+          local != target_offset_by_source_offset.end())
+        local_target = local->second + target_delta;
       pending_code_relocations.push_back(
           {.target_getpc_offset = getpc->second + target_delta,
            .target_literal_offset = add->second + target_delta + sizeof(uint32_t),
-           .source_target_text_offset = source_target});
+           .source_target_text_offset = source_target,
+           .local_target_text_offset = local_target});
     }
 
     if (kernel_context.required_vgpr_count > kernel_context.num_vgprs)
@@ -4338,9 +4331,9 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     return leave_unchanged();
   }
 
-  if (!resolve_pending_code_relocations(pending_code_relocations, text_relocations,
-                                        canonical_placement, canonical_placement_variant_conflict,
-                                        code_relocations, result.diagnostics))
+  if (!internal::resolve_pending_code_relocations(
+          pending_code_relocations, text_relocations, canonical_placement,
+          canonical_placement_variant_conflict, code_relocations, result.diagnostics))
     return leave_unchanged();
 
   if (continue_after_failure && has_error_diagnostic(result.diagnostics))

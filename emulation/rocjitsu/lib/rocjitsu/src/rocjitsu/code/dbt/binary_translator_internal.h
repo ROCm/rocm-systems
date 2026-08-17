@@ -12,9 +12,15 @@
 
 #pragma once
 
+#include "rocjitsu/code/dbt/translation_diagnostic.h"
+#include "rocjitsu/code/patch/code_object_patcher.h"
+
 #include <cstdint>
+#include <optional>
 #include <span>
+#include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace rocjitsu {
 
@@ -44,6 +50,51 @@ namespace internal {
 scope_roots_are_entry_state(std::span<BasicBlock *const> blocks,
                             const std::unordered_set<uint64_t> &hardware_entry_offsets,
                             const std::unordered_set<uint64_t> &table_callee_offsets);
+
+/// @brief A code-address builder awaiting the final placement of the body it names.
+///
+/// @details Every builder waits, including one whose target this scope emitted itself. The
+/// canonical placement and the variant-conflict set are both still being written while scopes are
+/// placed, so a decision taken in the loop is a decision taken against a partial answer. Carrying
+/// the emitting scope's own copy here keeps the deferred resolution able to prefer it without
+/// having to re-derive which scope asked.
+struct PendingCodeRelocation {
+  uint64_t target_getpc_offset = 0;
+  uint64_t target_literal_offset = 0;
+  uint64_t source_target_text_offset = 0;
+  /// @brief This scope's own placement of the target, when it emitted one.
+  std::optional<uint64_t> local_target_text_offset;
+};
+
+/// @brief Point every deferred code-address builder at the placement its target received.
+///
+/// @details Runs after every scope is placed, which is the first moment a target's final offset
+/// is known. A source offset emitted more than once has no single answer -- a runtime-dereferenced
+/// code address cannot choose between clones -- so that fails closed rather than picking one,
+/// matching how relocate_relative_text_addends treats a conflicting relocation addend.
+///
+/// Surfaced here because the two inputs that decide a refusal cannot be produced together by any
+/// buildable image: the variant-conflict set is populated only by virtual-LDS sidecar variants,
+/// which exist for the CDNA4-to-CDNA3 pair alone, while a PC-relative address builder is recovered
+/// only from a getpc plus `s_add_nc_u64`, an encoding CDNA4 does not have. A focused test is the
+/// only way to drive both refusal orderings.
+///
+/// @param pending Deferred builders in the order the scope walk queued them, so an entry queued
+///        before the conflict was discovered comes first.
+/// @param text_relocations Every scope's source-to-target block placement, used only for a target
+///        no scope nominated canonical.
+/// @param canonical_placement Final placement of each address-taken body, keyed by source offset.
+/// @param canonical_placement_variant_conflict Source offsets whose clones disagreed on variant.
+/// @param code_relocations Receives one entry per resolved builder.
+/// @param diagnostics Receives the refusal reason when this returns false.
+/// @returns false when the object must be left unchanged.
+[[nodiscard]] bool resolve_pending_code_relocations(
+    const std::vector<PendingCodeRelocation> &pending,
+    const std::vector<TextOffsetRelocation> &text_relocations,
+    const std::unordered_map<uint64_t, uint64_t> &canonical_placement,
+    const std::unordered_set<uint64_t> &canonical_placement_variant_conflict,
+    std::vector<PcRelativeTextRelocation> &code_relocations,
+    std::vector<TranslationDiagnostic> &diagnostics);
 
 } // namespace internal
 } // namespace rocjitsu
