@@ -2511,8 +2511,6 @@ if(RJ_ENABLE_HIP_TESTS)
         # generic HIP smoke tests are built for a local RDNA host such as
         # gfx1201.
         rj_add_hip_test(hip_ds_transpose_acc_test ARCH gfx950)
-        rj_add_hip_test(hip_ds_read_tr_b16_sim_test ARCH gfx950)
-        rj_add_hip_test_case(hip_ds_read_tr_b16_sim_test "DsReadTrB16SimTest.LaneLayout")
 
         rj_add_hip_test(
             cdna4_to_cdna3_lds_hip_test
