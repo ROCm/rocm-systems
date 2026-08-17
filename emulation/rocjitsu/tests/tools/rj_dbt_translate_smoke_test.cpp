@@ -22,6 +22,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <optional>
 #include <span>
 #include <sstream>
 #include <string>
@@ -278,6 +279,28 @@ std::string read_text_file(const std::filesystem::path &path) {
 
 bool contains(std::string_view haystack, std::string_view needle) {
   return haystack.find(needle) != std::string_view::npos;
+}
+
+/// @brief Read one `name=<count>` field out of the summary line.
+///
+/// @details The counters are space-separated, so a substring search for
+/// "expand=1" also matches "expand=10". Anchoring on the leading space and
+/// reading to the next delimiter makes the comparison numeric, so a count that
+/// drifts fails instead of still matching a prefix.
+std::optional<long long> summary_counter(std::string_view text, std::string_view name) {
+  const std::string key = " " + std::string(name) + "=";
+  const size_t at = text.find(key);
+  if (at == std::string_view::npos)
+    return std::nullopt;
+  const size_t first = at + key.size();
+  const size_t last = text.find_first_not_of("0123456789", first);
+  if (last == first)
+    return std::nullopt;
+  long long value = 0;
+  const auto digits = text.substr(first, last - first);
+  for (const char digit : digits)
+    value = value * 10 + (digit - '0');
+  return value;
 }
 
 bool command_succeeded(int status) {
@@ -722,6 +745,50 @@ TEST(RjDbtTranslate, VerifiesGfx1250ClusterLoadIdempotence) {
   EXPECT_TRUE(stderr_text.empty()) << stderr_text;
   EXPECT_TRUE(contains(stdout_text, "idempotence: verified")) << stdout_text;
   EXPECT_TRUE(contains(stdout_text, "idempotence_diagnostics: 0")) << stdout_text;
+}
+
+// A rule registered in the semantic table with no legalization entry reports through a label and a
+// counter branch that no other fixture reaches: the existing ones all translate through a
+// legalization-classified rule. The MODE separation rule is the only one shaped this way, so
+// without this the label and the partition can drift while the suite stays green.
+TEST(RjDbtTranslate, ReportsUnclassifiedSemanticExpansionInTheDiff) {
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_unclassified_semantic_");
+  const std::filesystem::path temp_path(temp_dir.path());
+  const std::filesystem::path input = temp_path / "mode_setreg_gfx1250.co";
+  const std::filesystem::path output = temp_path / "stdout.txt";
+  const std::filesystem::path error = temp_path / "stderr.txt";
+
+  // s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 0, 32), 0 -- the one write the rule separates.
+  constexpr std::array<uint32_t, 3> text_words = {0xb980f801u, 0x00000001u, 0xbfb00000u};
+  {
+    const std::vector<uint8_t> image = make_gfx1250_smoke_code_object(text_words);
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+
+  const std::string command = shell_quote(g_translate_tool.string()) + " " +
+                              shell_quote(input.string()) +
+                              " --input-target gfx1250 --input-revision b0 --output-target gfx1250 "
+                              "--output-revision a0 --verify-idempotence --output-mode diff > " +
+                              shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+
+  const int status = std::system(command.c_str());
+  const std::string stdout_text = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+
+  ASSERT_TRUE(command_succeeded(status)) << "stderr:\n"
+                                         << stderr_text << "\nstdout:\n"
+                                         << stdout_text;
+  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
+
+  // The label must name the rule that rewrote the instruction rather than a re-encode.
+  EXPECT_TRUE(contains(stdout_text, "expand semantic")) << stdout_text;
+  // The counters must still partition the total: the expansion belongs to expand, not encode.
+  EXPECT_EQ(summary_counter(stdout_text, "expand"), 1) << stdout_text;
+  EXPECT_EQ(summary_counter(stdout_text, "encode"), 0) << stdout_text;
+  EXPECT_EQ(summary_counter(stdout_text, "semantic"), 1) << stdout_text;
+  EXPECT_TRUE(contains(stdout_text, "idempotence: verified")) << stdout_text;
 }
 
 int main(int argc, char **argv) {

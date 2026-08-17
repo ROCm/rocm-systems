@@ -326,7 +326,7 @@ is_text_file(const std::string& filename)
     char             buffer[buffer_size];
     while(_file.read(buffer, sizeof(buffer)))
     {
-        for(char itr : buffer)
+        for(const char itr : buffer)
         {
             if(itr == '\0') return false;
         }
