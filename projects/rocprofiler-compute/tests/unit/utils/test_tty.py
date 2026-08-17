@@ -13,10 +13,10 @@ import pytest
 from utils.tty import (
     build_continuation_indent,
     convert_time_columns,
-    format_duration,
-    format_node_stats,
     format_args_variant_lines,
+    format_duration,
     format_node_args,
+    format_node_stats,
     format_table_output,
     has_time_data,
     print_operator_node,
@@ -25,15 +25,11 @@ from utils.tty import (
     show_operator_summary,
 )
 from utils.utils_analysis import (
+    ARGS_DISPLAY_MAX_VARIANTS,
     CallTreeNode,
     KernelStats,
     build_call_trees,
     build_operator_summary,
-)
-from utils.utils_analysis import (
-    ARGS_DISPLAY_MAX_VARIANTS,
-    CallTreeNode,
-    KernelStats,
 )
 from utils.utils_common import is_gfx115x
 
