@@ -577,11 +577,26 @@ pub struct ExecArgsCli {
     ///
     /// So an exec may not ask for more processes per node than the run
     /// has: the slot after a node's last one is the next node's rank 0,
-    /// and two live processes claiming one rank at one rendezvous
-    /// mis-form the collective built on them instead of failing. Asking
+    /// and an exec process handed that number would be told it is a rank
+    /// of a node it is not running on — wrong `LOCAL_RANK`, wrong
+    /// `NCCL_HOSTID`, wrong host for every peer that resolves it. Asking
     /// for more is refused, naming the shape the session does have;
     /// start the run with `--nproc-per-node` if that is the job you
     /// wanted.
+    ///
+    /// What the cap does *not* do is keep an exec's ranks distinct from
+    /// the live ones, and it is worth being plain about that because the
+    /// bound looks like it should. An exec always duplicates rank numbers
+    /// the run is already using: `mirage exec -- cmd` on a live job puts
+    /// a process on rank 0 while the run's own rank 0 is still running.
+    /// That is the design. An exec is for *tooling that joins the job* —
+    /// a shell, `rocm-smi`, a debugger, a script reading a rank's files —
+    /// and it is given the job's identity so that what it sees matches
+    /// what that rank sees. It is not a way to add a participant to the
+    /// collective, and a command that calls `init_process_group` under
+    /// one will hang against a rendezvous that is already formed. The cap
+    /// bounds where an exec's ranks *land*, not how many processes answer
+    /// to a number.
     #[arg(long, visible_alias = "nproc_per_node", value_parser = clap::value_parser!(u32).range(1..))]
     pub nproc_per_node: Option<u32>,
 

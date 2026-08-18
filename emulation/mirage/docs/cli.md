@@ -542,6 +542,25 @@ node to start one in. Start the run with `--nproc-per-node 5` if that is the
 shape the job should have.
 ```
 
+The refusal is about *where the numbers land*, not about collisions. An
+exec's ranks are deliberately the same numbers the run is already using:
+`mirage exec -- rocm-smi` on a live job puts a process on rank 0 while
+the run's own rank 0 is still running, and that is the point — the exec
+is given the job's identity so that what it sees is what that rank sees.
+The cap exists because the slot after a node's last one belongs to the
+*next* node: a process numbered there would carry another node's
+`LOCAL_RANK` and `NCCL_HOSTID` while running here, which is wrong in a
+way nothing downstream can detect.
+
+Which is worth stating plainly, because the numbering invites the other
+reading: **`mirage exec` is for tooling that joins a job, not for adding
+a participant to it.** A shell, `rocm-smi`, a debugger, a script reading
+a rank's files — these want the rank's identity and its view of the
+world. A command that calls `init_process_group` does not: the
+rendezvous it would join has already formed with the run's own ranks in
+it, and it hangs. To change the shape of the collective, change the run:
+`mirage run --nproc-per-node N`.
+
 ### Borrowing keeps the session alive
 
 That socket connection stays open for as long as the exec runs, and it is
