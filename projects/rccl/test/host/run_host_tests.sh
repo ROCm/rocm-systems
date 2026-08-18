@@ -23,11 +23,14 @@
 #                   prerequisite the host tests compile against
 #   configure       configure test/host
 #   build           build all host binaries (default target)
-#   run             run every host binary (timestamped log + per-binary JUnit XML)
-#   coverage        run every host-test binary under llvm profiling and emit
-#                   text + HTML source-based coverage reports (requires the
-#                   host tests to be built with -DMICRO_COVERAGE=ON, the default)
-#   all             rccl-configure -> hipify -> configure -> build -> run
+#   run             run the suite (timestamped log + JUnit XML). Always emits
+#                   llvm source-based coverage profiles (*.profraw) into
+#                   COVERAGE_DIR (requires the host tests to be built with
+#                   -DMICRO_COVERAGE=ON, the default)
+#   coverage        assemble the *.profraw profiles produced by `run` into a
+#                   merged profile and emit text + HTML coverage reports
+#                   (does not run any binaries -- run the `run` phase first)
+#   all             rccl-configure -> hipify -> configure -> build -> run -> coverage
 #
 # Knobs (environment variables, all optional):
 #   ROCM_PATH     ROCm install prefix              (default: /opt/rocm)
@@ -105,6 +108,15 @@ do_build() {
 
 do_host_tests() {
   echo "==> Run  (filter: $GTEST_FILTER)"
+
+  # Always emit source-based coverage profiles: instrumented binaries (built with
+  # -DMICRO_COVERAGE=ON, the default) write a .profraw into COVERAGE_DIR via
+  # LLVM_PROFILE_FILE. The `coverage` phase later merges these into reports
+  # without re-running anything. Start from a clean profraw set each run.
+  mkdir -p "$COVERAGE_DIR"
+  rm -f "$COVERAGE_DIR"/*.profraw
+  export LLVM_PROFILE_FILE="$COVERAGE_DIR/%m-%p.profraw"
+
   # Prepend a real-UTC timestamp to each line via `ts` (moreutils) when available,
   # tee the full stdout+stderr to LOG_FILE, and preserve each binary's exit code
   # (pipefail) so a failure still fails CI.
@@ -175,14 +187,19 @@ do_guards() {
   "$venv/bin/python" -m pytest "$gd/tests" -v
 }
 
-# Run every host-test binary under llvm source-based coverage and emit both a
-# text summary and a browsable HTML report. Requires the host tests to have been
-# built with -DMICRO_COVERAGE=ON (the default), which instruments every host-only
-# test binary with -fprofile-instr-generate -fcoverage-mapping.
+# Assemble the coverage profiles produced by the `run` phase into a merged
+# profile and emit both a text summary and a browsable HTML report. Does NOT run
+# any binaries -- the .profraw files are produced by `run` (see do_host_tests).
+# Requires the host tests to have been built with -DMICRO_COVERAGE=ON (the
+# default), which instruments every host-only test binary with
+# -fprofile-instr-generate -fcoverage-mapping.
 do_coverage() {
   echo "==> Coverage  (out: $COVERAGE_DIR)"
-  mkdir -p "$COVERAGE_DIR"
-  rm -f "$COVERAGE_DIR"/*.profraw
+
+  if ! compgen -G "$COVERAGE_DIR/*.profraw" >/dev/null; then
+    echo "error: no .profraw files in $COVERAGE_DIR -- run the 'run' phase first" >&2
+    exit 1
+  fi
 
   local test_bins
   mapfile -t test_bins < <(find "$BUILD_DIR" -maxdepth 1 -type f -executable)
@@ -190,11 +207,6 @@ do_coverage() {
     echo "error: no test binaries found in $BUILD_DIR -- run the build phase first" >&2
     exit 1
   fi
-
-  local exe
-  for exe in "${test_bins[@]}"; do
-    LLVM_PROFILE_FILE="$COVERAGE_DIR/%m-%p.profraw" "$exe"
-  done
 
   llvm-profdata merge -sparse "$COVERAGE_DIR"/*.profraw \
     -o "$COVERAGE_DIR/merged.profdata"
@@ -243,6 +255,6 @@ case "$PHASE" in
   guards)         do_guards ;;
   run)            do_run "$@" ;;
   coverage)       do_coverage ;;
-  all)            do_rccl_configure; do_hipify; do_configure; do_build; do_run "$@" ;;
+  all)            do_rccl_configure; do_hipify; do_configure; do_build; do_run "$@"; do_coverage ;;
   *) echo "usage: $0 [deps|rccl-configure|hipify|configure|build|run|guards|coverage|all] [extra gtest args]" >&2; exit 2 ;;
 esac
