@@ -4668,6 +4668,12 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
     return HSA_STATUS_SUCCESS;
   }
 
+  // Every XCC of both sampling methods submits through queues_[QueuePCSampling], and ExecutePM4
+  // returns as soon as the doorbell rings while reusing one indirect buffer per queue. Hold the
+  // lock across both submit-and-wait pairs below, or a concurrent submission overwrites commands
+  // the command processor has not fetched yet.
+  std::lock_guard<std::mutex> pm4_lock(pcs_pm4_mutex_);
+
   uint32_t next_buffer;
   uint64_t reset_write_val;
   uint32_t to_copy = 0;
