@@ -86,7 +86,7 @@ The generated configuration file can be used directly with the NCCL tuner plugin
 
 ```bash
 export NCCL_TUNER_CONFIG_FILE=/path/to/optimized_config.conf
-export NCCL_TUNER_PLUGIN=/path/to/libnccl-tuner.so
+export NCCL_TUNER_PLUGIN=/path/to/librccl-tuner.so
 mpirun -np 8 your_nccl_application
 ```
 
