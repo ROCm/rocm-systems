@@ -84,12 +84,12 @@ ncclDevCommRequirements
 
    .. c:member:: int railGinBarrierCount
 
-      Specifies the number of network barriers to allocate (see :cpp:class:`ncclGinBarrierSession`; available since NCCL
-      2.28.7).
+      Specifies the number of railed network barriers to allocate (see :cpp:class:`ncclGinBarrierSession`;
+      available since NCCL 2.28.7).
 
    .. c:member:: int barrierCount
 
-      Specifies the minimum number for both the memory and network barriers (see above; available since NCCL 2.28.7).
+      Specifies the number of network/rail hybrid barriers to allocate (see :cpp:class:`ncclBarrierSession`; available since NCCL 2.28.7).
 
    .. c:member:: int ginSignalCount
 
@@ -127,6 +127,27 @@ ncclDevCommRequirements
 
       Specifies a list of requirements for particular teams.  This is best set to NULL for now.
 
+   .. c:member:: int ginTrafficClass
+
+      Specifies the GIN traffic class. See :ref:`communicators_qos` for more details. Available since NCCL 2.30.3.
+
+   .. c:member:: int worldGinBarrierCount
+
+      Specifies the number of world network barriers to allocate. Available since NCCL 2.30.3.
+
+   .. c:member:: bool ginStrongSignalsRequired
+
+      Specifies whether GIN strong signals are required.
+      Set to false if kernels using this communicator will not use strong signal operations
+      (such as :cpp:struct:`ncclGin_StrongSignalInc` and :cpp:struct:`ncclGin_StrongVASignalAdd`).
+      Default is true. Available since NCCL 2.30.5.
+ 
+
+   .. c:member:: bool ginVaSignalsRequired
+
+      Specifies whether GIN VA signals are required. Set to false if kernels using this communicator
+      do not use GIN VA signals (such as :cpp:struct:`ncclGin_WeakVASignalInc` and :cpp:struct:`ncclGin_StrongVASignalAdd`).
+      Default is true. Available since NCCL 2.30.5.
 
 ncclCommQueryProperties
 -----------------------
@@ -184,6 +205,10 @@ ncclCommProperties_t
       The railed GIN type supported by the communicator. If equal to :c:macro:`NCCL_GIN_TYPE_NONE`, a
       :c:type:`ncclDevComm` cannot be created with GIN connection type :c:macro:`NCCL_GIN_CONNECTION_RAIL`.
       Available since NCCL 2.29.7.
+
+   .. c:member:: uint64_t commHash
+
+      Communicator hash identifier shared across all ranks in the communicator. Available since NCCL 2.31.
 
 
 ncclGinType_t
