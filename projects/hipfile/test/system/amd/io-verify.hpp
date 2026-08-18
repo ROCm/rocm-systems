@@ -255,8 +255,8 @@ assertConstant(const int32_t *arr, size_t from, size_t to, int32_t value)
 // Launches the int32 verify+modify kernel and asserts neither the payload pattern nor the
 // device sentinel region was corrupted.
 inline void
-launchAndVerify(int32_t *start, size_t alloc_n, int32_t *arr, size_t n, dim3 grid, dim3 workgroup,
-                size_t modify_stride = 1)
+assertVerifyAndModify(int32_t *start, size_t alloc_n, int32_t *arr, size_t n, dim3 grid, dim3 workgroup,
+                      size_t modify_stride = 1)
 {
     ASSERT_NE(0U, modify_stride) << "modify_stride must be >= 1";
     BadIdxFlag bad;
@@ -291,8 +291,8 @@ readFileBytes(int fd, hoff_t byte_offset, size_t n)
 // Launches the byte verify+modify kernel and asserts neither the payload bytes nor the
 // device sentinel region was corrupted.
 inline void
-launchAndVerifyBytes(uint8_t *start, size_t alloc_bytes, uint8_t *arr, size_t n, dim3 grid, dim3 workgroup,
-                     size_t modify_stride)
+assertVerifyAndModifyBytes(uint8_t *start, size_t alloc_bytes, uint8_t *arr, size_t n, dim3 grid,
+                           dim3 workgroup, size_t modify_stride)
 {
     ASSERT_NE(0U, modify_stride) << "modify_stride must be >= 1";
     BadIdxFlag bad;
