@@ -649,11 +649,11 @@ async fn a_lease_is_counted_until_it_is_dropped() {
     let run = start(1).await;
 
     let first = run
-        .attach(None)
+        .attach(None, None)
         .expect("a healthy session accepts a borrower");
     assert_eq!(run.borrowers(), 1);
     let second = run
-        .attach(None)
+        .attach(None, None)
         .expect("several terminals may borrow at once");
     assert_eq!(run.borrowers(), 2);
 
@@ -674,7 +674,7 @@ async fn teardown_does_not_begin_while_a_borrower_holds_a_lease() {
     // socket and scratch directory underneath it.
     let run = start(1).await;
     let lease = run
-        .attach(None)
+        .attach(None, None)
         .expect("a healthy session accepts a borrower");
 
     let destroying = tokio::spawn({
@@ -714,7 +714,7 @@ async fn a_session_that_is_tearing_down_refuses_new_borrowers() {
     let run = start(1).await;
     run.destroy().await;
     assert!(
-        run.attach(None).is_none(),
+        run.attach(None, None).is_none(),
         "a destroyed session handed out a lease on itself"
     );
 }
@@ -726,7 +726,7 @@ async fn teardown_tells_the_borrowers_it_is_not_waiting() {
     // having its container removed or its emulator socket deleted
     // mid-syscall.
     let run = start(1).await;
-    let _lease = run.attach(None).unwrap();
+    let _lease = run.attach(None, None).unwrap();
 
     let told = tokio::spawn({
         let run = Arc::clone(&run);
@@ -889,7 +889,11 @@ async fn attach_over_the_socket(
         .expect("the run is serving its socket");
     let mut framed = tokio_util::codec::Framed::new(stream, codec());
     framed
-        .send(serde_json::to_vec(&Request::Attach).unwrap().into())
+        .send(
+            serde_json::to_vec(&Request::Attach { exec: None })
+                .unwrap()
+                .into(),
+        )
         .await
         .unwrap();
     let frame = framed
@@ -1028,7 +1032,7 @@ async fn a_departing_borrower_does_not_take_a_second_borrowers_workload_with_it(
         line.trim().parse().expect("the pid of its workload")
     };
     let held = run
-        .attach(Some(staying.id()))
+        .attach(Some(staying.id()), None)
         .expect("a healthy session accepts a borrower");
 
     // And the one that leaves.
@@ -1054,6 +1058,148 @@ async fn a_departing_borrower_does_not_take_a_second_borrowers_workload_with_it(
     drop(held);
     let _ = staying.kill();
     let _ = staying.wait();
+    served.abort();
+    run.destroy().await;
+}
+
+#[tokio::test]
+async fn a_reparented_workload_of_a_live_borrower_is_spared() {
+    // The same property as the test above, for the workload that has left
+    // its borrower's process tree.
+    //
+    // Ancestry was the only thing sparing a live borrower's processes.
+    // A borrower's exec id is minted client-side — the run does not start
+    // these processes and never saw the id — so `inner.execs` does not
+    // contain it and the "not one of ours" filter lets every borrower
+    // workload through. What stopped them being killed was descending
+    // from a live borrower pid, and a workload that reparents does not:
+    // `setsid`, a double fork, anything daemonised. Then the next
+    // borrower to disconnect *normally* sent it `SIGTERM` and, a grace
+    // period later, `SIGKILL` — while its own borrower sat there holding
+    // its lease, having done nothing at all.
+    //
+    // Now the lease carries the exec id, and the mark survives
+    // reparenting because it is in the environment rather than in the
+    // process tree.
+    let run = start(1).await;
+    let exec = ExecId::new("x-999999-reparenting").unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let pidfile = dir.path().join("reparented.pid");
+
+    // `setsid --fork` orphans the workload: setsid exits straight after
+    // forking, so the sleep is reparented away from this shell while
+    // keeping every environment mark it inherited. The shell itself stays
+    // alive as the borrower's stand-in.
+    let mut staying = std::process::Command::new("/bin/sh")
+        .args([
+            "-c",
+            &format!(
+                "setsid --fork /bin/sh -c 'echo $$ > {}; exec sleep 600'; sleep 600",
+                pidfile.display()
+            ),
+        ])
+        .env(mirage_supervisor::spec::ENV_EXEC, exec.as_str())
+        .env(mirage_core::container::ENV_SESSION, run.id().as_str())
+        .env(
+            mirage_core::container::ENV_RUNTIME,
+            mirage_core::container::owning_runtime(),
+        )
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("the staying borrower starts");
+
+    // Wait for the reparented workload to exist and say where it is.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let workload: u32 = loop {
+        if let Ok(text) = std::fs::read_to_string(&pidfile)
+            && let Ok(pid) = text.trim().parse::<u32>()
+        {
+            break pid;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the reparented workload never started"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    // The premise of the test: it really has left the borrower's tree, so
+    // the ancestry check cannot save it.
+    assert_ne!(
+        parent_of(workload),
+        Some(staying.id()),
+        "the workload did not reparent, so this test is not testing anything"
+    );
+
+    let held = run
+        .attach(Some(staying.id()), Some(exec.clone()))
+        .expect("a healthy session accepts a borrower");
+
+    // A different borrower comes and goes, which is what runs the sweep.
+    let (path, served) = serving(&run).await;
+    let leaving = attach_over_the_socket(&path).await;
+    let mut stranded = Borrowed::spawn(run.id());
+    drop(leaving);
+
+    assert!(
+        stranded.ends_within(Duration::from_secs(30)).await,
+        "the departed borrower's leftover survived the sweep"
+    );
+    assert!(
+        process_alive(workload),
+        "pid {workload} is a live borrower's workload that had reparented, \
+         and was killed because a different borrower left"
+    );
+
+    drop(held);
+    let _ = nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(workload as i32),
+        nix::sys::signal::Signal::SIGKILL,
+    );
+    let _ = staying.kill();
+    let _ = staying.wait();
+    served.abort();
+    run.destroy().await;
+}
+
+#[tokio::test]
+async fn a_reparented_workload_is_still_reaped_once_its_borrower_leaves() {
+    // The complement, and the reason the one above is not simply "spare
+    // anything with an exec mark". Sparing by mark is scoped to marks a
+    // *live* lease claims; the moment that lease ends, the same process
+    // is exactly the leak the sweep exists for — and a reparented one is
+    // the worst case, because nothing else will ever come looking for it.
+    let run = start(1).await;
+    let exec = format!("x-{}-departing", std::process::id());
+
+    // Tagged with the departing borrower's exec id, and orphaned outright
+    // so it has no live ancestor at all.
+    let mut workload = Borrowed::tagged(run.id(), &exec);
+    let held = run
+        .attach(Some(std::process::id()), Some(ExecId::new(&exec).unwrap()))
+        .expect("a healthy session accepts a borrower");
+
+    // While the lease is held, a sweep spares it.
+    let (path, served) = serving(&run).await;
+    let first = attach_over_the_socket(&path).await;
+    drop(first);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        process_alive(workload.pid()),
+        "a live borrower's workload was reaped while its lease was held"
+    );
+
+    // The borrower goes away, and the next sweep collects it.
+    drop(held);
+    let second = attach_over_the_socket(&path).await;
+    drop(second);
+    assert!(
+        workload.ends_within(Duration::from_secs(30)).await,
+        "a workload whose borrower has gone was spared for carrying a mark \
+         no live lease claims any more"
+    );
+
     served.abort();
     run.destroy().await;
 }
@@ -1304,6 +1450,15 @@ async fn naming_a_node_that_does_not_exist_is_refused() {
 /// Whether `pid` still exists. `kill(pid, 0)` is the standard probe.
 fn process_alive(pid: u32) -> bool {
     nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), None).is_ok()
+}
+
+/// The parent of `pid`, for asserting that a workload really did leave
+/// the process tree a test is about.
+fn parent_of(pid: u32) -> Option<u32> {
+    std::fs::read_to_string(format!("/proc/{pid}/status"))
+        .ok()?
+        .lines()
+        .find_map(|line| line.strip_prefix("PPid:")?.trim().parse().ok())
 }
 
 #[tokio::test]

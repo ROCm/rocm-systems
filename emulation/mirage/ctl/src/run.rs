@@ -449,11 +449,30 @@ pub async fn exec_cmd(a: ExecArgsCli) -> anyhow::Result<ExitCode> {
         Some(id) => id,
         None => sole_live_run().await?,
     };
+    // A client-side exec id, distinct from anything the run process is
+    // using. It names this command's pid files, and two execs in
+    // different processes must not collide on them.
+    //
+    // The pid alone is not enough: pids are recycled, the pid files live
+    // in the run's scratch directory for as long as the *run* lasts, and
+    // a long-lived run outlives many `mirage exec` invocations. A start
+    // timestamp makes the id unique per invocation rather than per pid.
+    //
+    // Minted before the attach, because the attach carries it: the run
+    // has no other way to learn it — the run does not start these
+    // processes — and without it a workload of ours that reparents stops
+    // being attributable to this live lease. See `Session::attach`.
+    let started = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let id = ExecId::new(format!("x-{}-{started}", std::process::id()))
+        .map_err(|e| anyhow::anyhow!("could not build an exec id: {e}"))?;
+
     // Attach rather than merely describe: the lease is held for the whole
     // exec, so the run that owns this session waits for us instead of
     // tearing the emulator and the scratch directory down underneath a
     // live workload.
-    let (desc, mut lease) = attach(&session).await?;
+    let (desc, mut lease) = attach(&session, Some(id.clone())).await?;
 
     // Now that the session has described itself, we know whether the
     // workdir names a directory here or one inside a container.
@@ -473,19 +492,6 @@ pub async fn exec_cmd(a: ExecArgsCli) -> anyhow::Result<ExitCode> {
         a.clear_env_vars,
     )?;
 
-    // A client-side exec id, distinct from anything the run process is
-    // using. It only names this command's pid files, and two execs in
-    // different processes must not collide on them.
-    //
-    // The pid alone is not enough: pids are recycled, the pid files live
-    // in the run's scratch directory for as long as the *run* lasts, and
-    // a long-lived run outlives many `mirage exec` invocations. A start
-    // timestamp makes the id unique per invocation rather than per pid.
-    let started = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_nanos());
-    let id = ExecId::new(format!("x-{}-{started}", std::process::id()))
-        .map_err(|e| anyhow::anyhow!("could not build an exec id: {e}"))?;
     // `mirage exec` spawns its ranks as its own children in its own
     // terminal, so the streams to ask about are this process's; see
     // [`mirage_supervisor::CallerStreams`].
@@ -1140,8 +1146,11 @@ impl Attached {
 /// know they exist — and teardown stops the emulator daemon, runs the
 /// backend's shutdown hook and deletes the scratch directory those
 /// processes are actively reading.
-async fn attach(session: &SessionId) -> anyhow::Result<(SessionDescription, Attached)> {
-    tokio::time::timeout(DESCRIBE_TIMEOUT, attach_inner(session))
+async fn attach(
+    session: &SessionId,
+    exec: Option<ExecId>,
+) -> anyhow::Result<(SessionDescription, Attached)> {
+    tokio::time::timeout(DESCRIBE_TIMEOUT, attach_inner(session, exec))
         .await
         .unwrap_or_else(|_| {
             anyhow::bail!(
@@ -1151,7 +1160,10 @@ async fn attach(session: &SessionId) -> anyhow::Result<(SessionDescription, Atta
         })
 }
 
-async fn attach_inner(session: &SessionId) -> anyhow::Result<(SessionDescription, Attached)> {
+async fn attach_inner(
+    session: &SessionId,
+    exec: Option<ExecId>,
+) -> anyhow::Result<(SessionDescription, Attached)> {
     use futures::{SinkExt as _, StreamExt as _};
     use mirage_core::proto::{Request, Response, codec};
 
@@ -1165,7 +1177,7 @@ async fn attach_inner(session: &SessionId) -> anyhow::Result<(SessionDescription
     })?;
     let mut framed = tokio_util::codec::Framed::new(stream, codec());
 
-    let request = serde_json::to_vec(&Request::Attach)?;
+    let request = serde_json::to_vec(&Request::Attach { exec })?;
     framed.send(request.into()).await?;
 
     let Some(frame) = framed.next().await else {

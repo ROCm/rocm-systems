@@ -24,7 +24,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mirage_core::error::{MirageError, Result};
-use mirage_core::exec::{ExecDef, InjectionDef};
+use mirage_core::exec::{ExecDef, ExecId, InjectionDef};
 use mirage_core::proto::SessionDescription;
 use mirage_core::session::{
     CreateSessionRequest, SessionContext, SessionDef, SessionHealth, SessionId, SessionState, state,
@@ -119,10 +119,17 @@ impl Run {
     ///
     /// `borrower` is the pid of the process taking it, where the caller
     /// can say — the control socket asks the kernel for its client's
-    /// credentials. See [`Session::attach`](crate::session::Session::attach).
+    /// credentials. `exec` is the id that client will stamp into its
+    /// workload's environment, which is how the session recognises that
+    /// workload after it has stopped descending from the client. See
+    /// [`Session::attach`](crate::session::Session::attach).
     #[must_use]
-    pub fn attach(&self, borrower: Option<u32>) -> Option<crate::session::SessionLease> {
-        self.session.attach(borrower)
+    pub fn attach(
+        &self,
+        borrower: Option<u32>,
+        exec: Option<ExecId>,
+    ) -> Option<crate::session::SessionLease> {
+        self.session.attach(borrower, exec)
     }
 
     /// Stop what a borrower that has just gone away left running in the

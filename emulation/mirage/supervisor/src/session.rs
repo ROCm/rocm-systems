@@ -108,17 +108,18 @@ pub struct Session {
     /// consulted from the control socket's accept path, which must not
     /// contend with process bookkeeping.
     leases: watch::Sender<usize>,
-    /// Which process holds each live lease, by the entry number the
-    /// lease was given.
+    /// Who holds each live lease, by the entry number the lease was
+    /// given.
     ///
-    /// Their pids, not their names, because the only question asked of
-    /// this is "is this leftover process one a *live* borrower is still
-    /// using?" — see [`Session::reap_departed_borrowers`]. A borrower
-    /// that could not be identified at all, because the kernel would not
-    /// give up its connection's credentials, is absent rather than
-    /// recorded as some placeholder pid: a placeholder would either
-    /// protect nothing or protect everything descended from it.
-    borrowers: Arc<Mutex<BTreeMap<u64, u32>>>,
+    /// The only question ever asked of this is "is this leftover process
+    /// one a *live* borrower is still using?" — see
+    /// [`Session::reap_departed_borrowers`] — and it is answered two
+    /// ways, because neither alone is enough. A borrower that could not
+    /// be identified at all, because the kernel would not give up its
+    /// connection's credentials, is absent rather than recorded as some
+    /// placeholder: a placeholder would either protect nothing or
+    /// protect everything descended from it.
+    borrowers: Arc<Mutex<BTreeMap<u64, Borrower>>>,
     /// Set when teardown wants its borrowers to let go.
     ///
     /// Published rather than inferred from `tearing_down` because the
@@ -169,7 +170,7 @@ pub struct SessionLease {
     /// is held by a per-connection task, and giving that task an `Arc` to
     /// the whole session to satisfy a `Drop` would make the session's
     /// lifetime depend on its clients'.
-    borrowers: Arc<Mutex<BTreeMap<u64, u32>>>,
+    borrowers: Arc<Mutex<BTreeMap<u64, Borrower>>>,
     entry: u64,
 }
 
@@ -575,7 +576,7 @@ impl Session {
     /// `borrower` is the pid of the process taking the lease, where the
     /// connection could say — see the `borrowers` field.
     #[must_use]
-    pub fn attach(&self, borrower: Option<u32>) -> Option<SessionLease> {
+    pub fn attach(&self, borrower: Option<u32>, exec: Option<ExecId>) -> Option<SessionLease> {
         let mut inner = self.lock();
         if inner.tearing_down {
             return None;
@@ -583,7 +584,7 @@ impl Session {
         let entry = inner.next_lease;
         inner.next_lease += 1;
         if let Some(pid) = borrower {
-            lock(&self.borrowers).insert(entry, pid);
+            lock(&self.borrowers).insert(entry, Borrower { pid, exec });
         }
         // Under the lock, so the increment cannot land between another
         // thread setting `tearing_down` and teardown reading the count.
@@ -807,7 +808,6 @@ impl Session {
         .await
         .map_err(|e| MirageError::other(format!("starting an exec: {e}")))?
     }
-
 
     /// Describe this session for a client that wants to start processes
     /// in it.
@@ -1239,13 +1239,38 @@ impl Session {
             .keys()
             .map(|id| id.as_str().to_string())
             .collect();
-        let live: Vec<u32> = lock(&self.borrowers).values().copied().collect();
+        // Both handles on every live borrower; see [`Borrower`] for why
+        // neither is sufficient alone.
+        let (live_pids, live_execs): (Vec<u32>, std::collections::BTreeSet<String>) = {
+            let borrowers = lock(&self.borrowers);
+            (
+                borrowers.values().map(|b| b.pid).collect(),
+                borrowers
+                    .values()
+                    .filter_map(|b| b.exec.as_ref())
+                    .map(|id| id.as_str().to_string())
+                    .collect(),
+            )
+        };
 
         let leftovers: Vec<u32> = tokio::task::spawn_blocking(move || {
             processes_in_session(&id)
                 .into_iter()
-                .filter(|pid| exec_mark_of(*pid).is_some_and(|exec| !ours.contains(&exec)))
-                .filter(|pid| !descends_from_any(*pid, &live))
+                // Not ours, and not a live borrower's. The second half is
+                // the one that was missing: a client-side exec id is
+                // never in `inner.execs` — the run did not start it and
+                // has no record of it — so a live borrower's workload got
+                // past this filter and was spared only by the ancestry
+                // check below. A workload that had reparented (a
+                // `setsid`, a double fork, anything daemonised) failed
+                // that too, and the next borrower to disconnect normally
+                // sent it `SIGTERM` and then `SIGKILL` while its own
+                // borrower was still sitting there holding the lease.
+                .filter(|pid| {
+                    exec_mark_of(*pid)
+                        .is_some_and(|exec| !ours.contains(&exec) && !live_execs.contains(&exec))
+                })
+                .filter(|pid| !descends_from_any(*pid, &live_pids))
                 .collect()
         })
         .await
@@ -1290,6 +1315,31 @@ impl Session {
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
         lock(&self.inner)
     }
+}
+
+/// What is known about the holder of one live lease.
+///
+/// Two independent handles on the same borrower, because a workload can
+/// slip out of either one.
+///
+/// `pid` is the client's, from `SO_PEERCRED`, and it is unforgeable — but
+/// it only reaches the workload through ancestry, and a workload that
+/// calls `setsid`, double-forks or is otherwise reparented stops
+/// descending from it while remaining very much alive.
+///
+/// `exec` is the id the client stamped into its workload's environment as
+/// `MIRAGE_EXEC`. That mark is inherited by everything the workload forks
+/// and survives reparenting, which is exactly the case ancestry loses. It
+/// is spoofable in the sense that a client names its own id, but the only
+/// thing a false one buys is that the sweep spares somebody else's
+/// leftovers — and the socket already grants `exec` into the session,
+/// which is arbitrary code execution as its owner.
+#[derive(Debug, Clone)]
+struct Borrower {
+    /// The client process holding the lease.
+    pid: u32,
+    /// The exec id its workload carries, when the client said.
+    exec: Option<ExecId>,
 }
 
 /// Take a mutex, treating a poisoned one as merely locked.

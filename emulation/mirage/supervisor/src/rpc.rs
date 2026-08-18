@@ -400,7 +400,7 @@ async fn handle(stream: UnixStream, run: Arc<Run>) {
             Ok(desc) => Response::Description(Box::new(desc)),
             Err(e) => Response::Error(e.to_string()),
         },
-        Ok(Request::Attach) => match run.attach(borrower) {
+        Ok(Request::Attach { exec }) => match run.attach(borrower, exec) {
             // The lease is taken *before* the description is built, not
             // after. Between the two the session could begin tearing
             // down, and a borrower handed a description of containers

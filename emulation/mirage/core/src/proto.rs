@@ -97,7 +97,23 @@ pub enum Request {
     /// holds the connection open and counts it as a borrower until the
     /// client goes away. Refused with [`Response::Error`] if the session
     /// is already tearing down. See the module documentation.
-    Attach,
+    Attach {
+        /// The exec id this client will stamp into its workload's
+        /// environment, so the run can recognise that workload as a live
+        /// borrower's even once it has stopped descending from the
+        /// client — a `setsid`, a double fork, anything daemonised.
+        ///
+        /// The run learns the client's *pid* from the kernel and does not
+        /// have to be told; this is the one thing it cannot observe,
+        /// because the id is minted client-side and the run never starts
+        /// the processes carrying it.
+        ///
+        /// Optional so that a client with nothing to protect — anything
+        /// that attaches only to hold the session open — can say so, and
+        /// so an older client still parses.
+        #[serde(default)]
+        exec: Option<crate::exec::ExecId>,
+    },
 }
 
 /// The run process's answer.
