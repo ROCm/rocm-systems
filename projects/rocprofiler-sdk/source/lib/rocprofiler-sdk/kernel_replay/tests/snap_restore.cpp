@@ -441,8 +441,9 @@ TEST(kernel_replay_snapshot, pool_filter_excludes_kernarg_and_cpu)
 // otherwise trackable (coarse device VRAM -- what a direct-HSA app may put behind the flag), it is
 // recorded in the unsupported side inventory. snap() does not decline on that side inventory: the
 // HIP runtime routinely keeps trackable+executable allocations live, so declining would disable
-// replay for ordinary HIP apps. Assert the inventory exclusion (and side-table bookkeeping) directly
-// via the intercepted HSA table so the check does not depend on replay-window serialization.
+// replay for ordinary HIP apps. Assert the inventory exclusion (and side-table bookkeeping)
+// directly via the intercepted HSA table so the check does not depend on replay-window
+// serialization.
 TEST(kernel_replay_snapshot, executable_flag_excluded_from_inventory)
 {
     if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
@@ -459,8 +460,8 @@ TEST(kernel_replay_snapshot, executable_flag_excluded_from_inventory)
     (void) hsa_amd_agent_iterate_memory_pools(
         agent,
         [](hsa_amd_memory_pool_t p, void* data) -> hsa_status_t {
-            auto*              out = static_cast<pool_pick_t*>(data);
-            hsa_amd_segment_t  segment{};
+            auto*             out = static_cast<pool_pick_t*>(data);
+            hsa_amd_segment_t segment{};
             if(hsa_amd_memory_pool_get_info(p, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment) !=
                HSA_STATUS_SUCCESS)
                 return HSA_STATUS_SUCCESS;
