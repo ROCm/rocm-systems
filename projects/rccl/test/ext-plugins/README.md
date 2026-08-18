@@ -97,7 +97,7 @@ cd rccl/plugins/tuner/example
 make
 ```
 
-This will compile the plugin and create `libnccl-tuner-example.so` in the same directory.
+This will compile the plugin and create `librccl-tuner-example.so` in the same directory.
 
 #### Building the Profiler Plugin
 
