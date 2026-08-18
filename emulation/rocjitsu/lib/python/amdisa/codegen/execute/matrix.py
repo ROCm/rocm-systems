@@ -608,40 +608,17 @@ def gen_mfma(
             # correct extract functions and bit widths.
             L.append(f'  uint32_t s0b = amdgpu::src_base(vb, {s0}.encoding_value_);')
             L.append(f'  uint32_t s1b = amdgpu::src_base(vb, {s1}.encoding_value_);')
-            L.append('  bool dispatched;')
-            L.append('  if (!(inst_.abid & 1u)) {')
             L.append(
-                '    dispatched = amdgpu::dispatch_matrix_fmt_pair(inst_.cbsz, inst_.blgp,'
+                '  bool dispatched = amdgpu::dispatch_matrix_fmt_pair(inst_.cbsz, inst_.blgp,'
+            )
+            L.append('      [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {')
+            L.append(
+                f'        amdgpu::exec_f32_mixed(cu, {M}, {N}, {K}, {B}, a_bits, b_bits,'
             )
             L.append(
-                '        [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {'
+                f'                               dst, s0b, s1b, s2, ea, eb, const_acc);'
             )
-            L.append(
-                f'          amdgpu::exec_f32_mixed(cu, {M}, {N}, {K}, {B}, a_bits, b_bits,'
-            )
-            L.append(
-                f'                                 dst, s0b, s1b, s2, ea, eb, const_acc);'
-            )
-            L.append('        });')
-            L.append('  } else {')
-            L.append(
-                '    uint32_t sa_base = amdgpu::src_base(vb, raw_words_[1] & 0x1FFu);'
-            )
-            L.append(
-                '    uint32_t sb_base = amdgpu::src_base(vb, (raw_words_[1] >> 9) & 0x1FFu);'
-            )
-            L.append('    dispatched = amdgpu::dispatch_matrix_fmt_pair(')
-            L.append(
-                '        inst_.cbsz, inst_.blgp, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {'
-            )
-            L.append(
-                f'          amdgpu::exec_f32_scaled_mixed(cu, {M}, {N}, {K}, {B}, a_bits, b_bits, dst, s0b, s1b, s2, ea,'
-            )
-            L.append(
-                f'                                        eb, const_acc, sa_base, sb_base);'
-            )
-            L.append('        });')
-            L.append('  }')
+            L.append('      });')
             L.append('  if (!dispatched)')
             L.append('    throw util::UnimplementedInst(mnemonic());')
         elif uses_gfx11_wmma_layout and result_type in ('F16', 'BF16'):

@@ -2302,6 +2302,42 @@ bool isVop3pOp(const MachineInst opcode, uint32_t op) {
   return (opcode >> 24) == 0xcc && ((opcode >> 16) & 0xff) == op;
 }
 
+bool isGfx1250WmmaScaleSource(uint32_t selector, bool scale16) {
+  if (selector <= 105u || selector == 128u)
+    return true;
+  if (selector < 256u || selector > 511u)
+    return false;
+  return !scale16 || ((selector - 256u) % 2u == 0u && selector < 511u);
+}
+
+bool isGfx1250WmmaScaleFormatPairLegal(uint32_t matrix_a_fmt, uint32_t matrix_b_fmt,
+                                       uint32_t scale_a_fmt, uint32_t scale_b_fmt) {
+  if (matrix_a_fmt > 4u || matrix_b_fmt > 4u || scale_a_fmt > 2u || scale_b_fmt > 2u)
+    return false;
+  if (scale_a_fmt == 0u && scale_b_fmt == 0u)
+    return true;
+  if ((scale_a_fmt != 0u && matrix_a_fmt != 4u) || (scale_b_fmt != 0u && matrix_b_fmt != 4u))
+    return false;
+  return matrix_a_fmt != 4u || matrix_b_fmt != 4u || scale_a_fmt == scale_b_fmt;
+}
+
+bool isGfx1250WmmaScalePairValid(const MachineInst *opcode) {
+  const auto *scale = reinterpret_cast<const Vop3pMachineInst *>(opcode);
+  const auto *matrix = reinterpret_cast<const Vop3pMachineInst *>(opcode + 2);
+  const bool scale16 = scale->op == 0x3au;
+  if (!isGfx1250WmmaScaleSource(scale->src0, scale16) ||
+      !isGfx1250WmmaScaleSource(scale->src1, scale16))
+    return false;
+
+  const uint32_t scale_a_fmt = scale->neg & 0x3u;
+  const uint32_t scale_b_fmt = scale->neg_hi & 0x3u;
+  if (matrix->op == 0x88u)
+    return isGfx1250WmmaScaleFormatPairLegal(4u, 4u, scale_a_fmt, scale_b_fmt);
+  const uint32_t matrix_a_fmt = matrix->opsel;
+  const uint32_t matrix_b_fmt = (matrix->pad_14 << 2u) | matrix->opsel_hi;
+  return isGfx1250WmmaScaleFormatPairLegal(matrix_a_fmt, matrix_b_fmt, scale_a_fmt, scale_b_fmt);
+}
+
 } // namespace
 
 DecodeResult Decoder::decode(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
@@ -2371,6 +2407,8 @@ DecodeResult DecoderImpl::subDecodeVop3p(const MachineInst *opcode,
 DecodeResult DecoderImpl::decodeVWmmaScaleF32Vop3px2(const MachineInst *opcode,
                                                      const DecodeErrorEmitter &emit_error) {
   if (!isVop3pOp(opcode[2], 0x33) && !isVop3pOp(opcode[2], 0x88))
+    return decodeInvalid(opcode, emit_error);
+  if (!isGfx1250WmmaScalePairValid(opcode))
     return decodeInvalid(opcode, emit_error);
   return std::make_unique<VWmmaScaleF32Vop3px2>(opcode);
 }

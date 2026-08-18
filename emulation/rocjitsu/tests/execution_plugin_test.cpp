@@ -11,6 +11,7 @@
 
 #include "aql_queue.h"
 #include "decode_test_util.h"
+#include "mma_test_util.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -116,6 +117,10 @@ constexpr uint32_t sopp(uint32_t op, uint16_t simm16 = 0) {
 constexpr uint32_t S_NOP = sopp(0);
 constexpr uint32_t S_ENDPGM = sopp(1);
 constexpr uint32_t S_BARRIER = sopp(10);
+
+constexpr uint32_t vgpr_src(uint32_t reg) { return 256u + reg; }
+
+using mma_test::make_cdna4_mfma_scale_words;
 
 // CDNA4 VOP2: opcode[30:25], vdst[24:17], vsrc1[16:9], src0[8:0]. Bit 31 = 0.
 constexpr uint32_t vop2_encode(uint32_t opcode, uint32_t vdst, uint32_t vsrc1, uint32_t src0) {
@@ -2508,6 +2513,144 @@ TEST(ExecutionPluginTest, MfmaReadObservationSkipsConstantAccumulator) {
   expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
                        {S0 + 0, S0 + 1, S0 + 2, S0 + 3, S1 + 0, S1 + 1, S1 + 2, S1 + 3},
                        ~uint64_t{0});
+}
+
+TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaAbidZeroPrefixRejectsBeforeExecuteCallbacks) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *plugin = f.attach_ordering_plugin();
+  const auto scale = make_cdna4_mfma_scale_words(45, /*abid=*/0, vgpr_src(96), vgpr_src(97));
+  const std::array<uint32_t, 5> code = {scale[0], scale[1], scale[2], scale[3], S_ENDPGM};
+
+  f.run_kernel(code.data(), code.size());
+
+  size_t before_count = 0;
+  for (const auto &event : plugin->events)
+    if (event.kind == HookEvent::BEFORE_INSTRUCTION)
+      ++before_count;
+  EXPECT_EQ(before_count, 0u);
+}
+
+TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaCompoundAdvancesCallbacksByFullPrefixSize) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *plugin = f.attach_ordering_plugin();
+  const auto scale = make_cdna4_mfma_scale_words(45, /*abid=*/1, vgpr_src(96), vgpr_src(97));
+  const std::array<uint32_t, 5> code = {scale[0], scale[1], scale[2], scale[3], S_ENDPGM};
+
+  f.run_kernel(code.data(), code.size());
+
+  std::vector<HookEvent> before_events;
+  for (const auto &event : plugin->events)
+    if (event.kind == HookEvent::BEFORE_INSTRUCTION)
+      before_events.push_back(event);
+  ASSERT_EQ(before_events.size(), 2u);
+  EXPECT_EQ(before_events[0].mnemonic, "v_mfma_scale_f32_16x16x128_f8f6f4");
+  EXPECT_EQ(before_events[1].mnemonic, "s_endpgm");
+  ASSERT_GE(before_events[1].pc, before_events[0].pc);
+  EXPECT_EQ(before_events[1].pc - before_events[0].pc, 16u);
+}
+
+TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaScaleReadsUseSelectedByteMask) {
+  constexpr uint32_t kSrc0 = 0;
+  constexpr uint32_t kSrc1 = 16;
+  constexpr uint32_t kAccumulator = 32;
+  constexpr uint32_t kScaleA = 96;
+  constexpr uint32_t kScaleB = 97;
+
+  for (uint32_t byte = 0; byte < 4; ++byte) {
+    PluginFixture f(/*num_wf_slots=*/1);
+    auto *plugin = f.attach_ordering_plugin();
+    auto *cu = f.cu();
+    auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(~uint64_t{0});
+
+    const uint32_t vb = wf->vgpr_alloc().base;
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      for (uint32_t reg = 0; reg < 8; ++reg) {
+        cu->write_vgpr(vb + kSrc0 + reg, lane, 0x2222'2222u);
+        cu->write_vgpr(vb + kSrc1 + reg, lane, 0x2222'2222u);
+      }
+      for (uint32_t reg = 0; reg < 4; ++reg)
+        cu->write_vgpr(vb + kAccumulator + reg, lane, 0);
+      cu->write_vgpr(vb + kScaleA, lane, 0x7F7F'7F7Fu);
+      cu->write_vgpr(vb + kScaleB, lane, 0x7F7F'7F7Fu);
+    }
+
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    const auto words = make_cdna4_mfma_scale_words(45, /*abid=*/1, vgpr_src(kScaleA),
+                                                   vgpr_src(kScaleB), byte, byte);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    cu->execute_instruction(inst.get(), *wf);
+
+    const uint8_t expected_mask = static_cast<uint8_t>(1u << byte);
+    bool saw_scale_a = false;
+    bool saw_scale_b = false;
+    std::map<uint32_t, std::pair<uint64_t, uint8_t>> read_unions;
+    const auto reads = vgpr_read_events(*plugin);
+    for (const auto &event : reads) {
+      auto &[lane_mask, byte_mask] = read_unions[event.physical_reg];
+      lane_mask |= event.lane_mask;
+      byte_mask |= event.byte_mask;
+      if (event.physical_reg == vb + kScaleA) {
+        EXPECT_EQ(event.byte_mask, expected_mask) << "A byte=" << byte;
+        saw_scale_a = true;
+      } else if (event.physical_reg == vb + kScaleB) {
+        EXPECT_EQ(event.byte_mask, expected_mask) << "B byte=" << byte;
+        saw_scale_b = true;
+      }
+    }
+    EXPECT_TRUE(saw_scale_a) << "byte=" << byte;
+    EXPECT_TRUE(saw_scale_b) << "byte=" << byte;
+
+    std::map<uint32_t, std::pair<uint64_t, uint8_t>> expected_unions;
+    for (uint32_t reg :
+         {kSrc0, kSrc0 + 1, kSrc0 + 2, kSrc0 + 3, kSrc1, kSrc1 + 1, kSrc1 + 2, kSrc1 + 3,
+          kAccumulator, kAccumulator + 1, kAccumulator + 2, kAccumulator + 3})
+      expected_unions.emplace(vb + reg, std::pair{~uint64_t{0}, ExecutionPlugin::kFullByteMask});
+    expected_unions.emplace(vb + kScaleA, std::pair{~uint64_t{0}, expected_mask});
+    expected_unions.emplace(vb + kScaleB, std::pair{~uint64_t{0}, expected_mask});
+    EXPECT_EQ(read_unions, expected_unions) << "byte=" << byte;
+  }
+}
+
+TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaInlineScalesDoNotReadVgprs) {
+  constexpr uint32_t kSrc0 = 0;
+  constexpr uint32_t kSrc1 = 16;
+  constexpr uint32_t kAccumulator = 32;
+
+  PluginFixture f(/*num_wf_slots=*/1);
+  auto *plugin = f.attach_ordering_plugin();
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(~uint64_t{0});
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    for (uint32_t reg = 0; reg < 4; ++reg) {
+      cu->write_vgpr(vb + kSrc0 + reg, lane, 0x2222'2222u);
+      cu->write_vgpr(vb + kSrc1 + reg, lane, 0x2222'2222u);
+      cu->write_vgpr(vb + kAccumulator + reg, lane, 0);
+    }
+  }
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  const auto words = make_cdna4_mfma_scale_words(45, /*abid=*/1, /*+1.0f=*/242,
+                                                 /*1/(2*pi)=*/248);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  cu->execute_instruction(inst.get(), *wf);
+
+  std::set<uint32_t> actual_regs;
+  for (const auto &event : vgpr_read_events(*plugin))
+    actual_regs.insert(event.physical_reg - vb);
+  std::set<uint32_t> expected_regs;
+  for (uint32_t reg :
+       {kSrc0, kSrc0 + 1, kSrc0 + 2, kSrc0 + 3, kSrc1, kSrc1 + 1, kSrc1 + 2, kSrc1 + 3,
+        kAccumulator, kAccumulator + 1, kAccumulator + 2, kAccumulator + 3})
+    expected_regs.insert(reg);
+  EXPECT_EQ(actual_regs, expected_regs);
 }
 
 TEST(ExecutionPluginTest, WmmaReadObservationUsesWave32RegisterSet) {

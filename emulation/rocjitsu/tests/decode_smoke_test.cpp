@@ -1796,17 +1796,18 @@ TEST(Cdna4DecodeTest, MfmaF8f6f4SourceWidthsFollowFormatSelectors) {
 TEST(Cdna4DecodeTest, MfmaScaleF8f6f4ConsumesVop3px2Prefix) {
   const uint32_t words[] = {
       0xD3AC0000u,
-      0x00000000u,
-      0xD3AD0000u,
-      0x04020100u,
+      0x0002C360u,
+      0xD3AD0C40u,
+      0x84822100u,
   };
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
-  EXPECT_EQ(inst->mnemonic(), "v_mfma_f32_16x16x128_f8f6f4");
+  EXPECT_EQ(inst->mnemonic(), "v_mfma_scale_f32_16x16x128_f8f6f4");
   EXPECT_EQ(inst->size(), sizeof(words));
+  EXPECT_EQ(inst->num_src_operands(), 5);
 }
 
 // v_accvgpr_read's 9-bit src0 field encodes accumulator N as 256 + N, which the
@@ -1875,19 +1876,4 @@ TEST(Cdna4DecodeTest, RejectsVop3px2PrefixWithoutMfmaSuffix) {
   EXPECT_TRUE(decode_fails(*decoder, wrong_encoding));
 }
 
-TEST(Cdna4DecodeTest, MfmaScaleF8f6f4AcceptsSecondVop3px2Suffix) {
-  const uint32_t words[] = {
-      0xD3AC0000u,
-      0x00000000u,
-      0xD3AE0000u,
-      0x04020100u,
-  };
-
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
-  ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
-  ASSERT_NE(inst, nullptr);
-  EXPECT_EQ(inst->mnemonic(), "v_mfma_f32_32x32x64_f8f6f4");
-  EXPECT_EQ(inst->size(), sizeof(words));
-}
 } // namespace
