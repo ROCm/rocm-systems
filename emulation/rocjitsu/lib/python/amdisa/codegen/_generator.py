@@ -2511,6 +2511,58 @@ class CodeGenerator:
         )
         cpp_file.gen_code()
 
+    def _encoding_extension_word_capacity(self, inst_enc: InstEncoding) -> int:
+        """Return the largest extension storage owned by an encoding."""
+        dpp_struct, dpp8_struct = self._vop_dpp_struct_names(inst_enc.enc_name)
+        owns_dpp_extension = (
+            dpp_struct is not None
+            and self._supports_dpp_for_encoding(inst_enc.enc_name)
+        ) or dpp8_struct is not None
+        default_cond = dict(inst_enc.enc_conds).get('default_encoding', 'true')
+        has_real_default_check = inst_enc.bit_cnt < 64 and default_cond != 'false'
+        literal32_condition = any(
+            name.startswith('has_lit') and not name.startswith('has_lit64')
+            for name, _ in inst_enc.enc_conds
+        )
+
+        capacity = int(owns_dpp_extension)
+        if has_real_default_check and default_cond != 'true':
+            capacity = max(capacity, 1)
+        if literal32_condition:
+            capacity = max(capacity, 1)
+        if self._literal64_condition_names(inst_enc):
+            capacity = max(capacity, 2)
+        if inst_enc.has_implied_literal_ops:
+            capacity = max(capacity, 1, *inst_enc.implied_literal_ops.values())
+        return capacity
+
+    def _max_instruction_word_count(self) -> int:
+        """Return the maximum encoded width and lookahead for this generated decoder."""
+        maximum = 1
+        for inst_enc in self.isa_spec.inst_encodings:
+            if not inst_enc.insts:
+                continue
+            base_words = (inst_enc.bit_cnt + 31) // 32
+            maximum = max(
+                maximum,
+                base_words + self._encoding_extension_word_capacity(inst_enc),
+            )
+
+        for size_bytes in self.isa_spec.profile.inst_size_overrides.values():
+            maximum = max(maximum, (size_bytes + 3) // 4)
+
+        # Bespoke generated decoders do not necessarily have a matching XML
+        # encoding object. VOPD can own one literal DWORD, while VOP3PX2 forms
+        # are a two-DWORD prefix followed by a two-DWORD instruction.
+        if self._supports_generated_vopd():
+            maximum = max(maximum, 3)
+        if (
+            self._supports_gfx1250_scaled_wmma_vop3px2()
+            or self._supports_cdna_mfma_f8f6f4_vop3px2()
+        ):
+            maximum = max(maximum, 4)
+        return maximum
+
     def gen_encodings(self) -> None:
         """Generate encoding classes wrapping raw encoding types."""
         enc_classes = []
@@ -2744,21 +2796,7 @@ class CodeGenerator:
             # not the architecture-wide operand selector table. For example,
             # gfx1250 defines selector 254 for 64-bit literals, but the 64-bit
             # VOP3 and VOP3P encodings only support a 32-bit literal extension.
-            extension_word_capacity = 0
-            if owns_dpp_extension:
-                extension_word_capacity = 1
-            if has_real_default_check and default_cond != 'true':
-                extension_word_capacity = max(extension_word_capacity, 1)
-            if literal32_condition:
-                extension_word_capacity = max(extension_word_capacity, 1)
-            if literal64_condition:
-                extension_word_capacity = max(extension_word_capacity, 2)
-            if inst_enc.has_implied_literal_ops:
-                extension_word_capacity = max(
-                    extension_word_capacity,
-                    1,
-                    *inst_enc.implied_literal_ops.values(),
-                )
+            extension_word_capacity = self._encoding_extension_word_capacity(inst_enc)
             owns_extension_words = extension_word_capacity > 0
             extension_size_line = ''
             if literal64_condition and size_condition is not None:
@@ -6402,7 +6440,7 @@ class CodeGenerator:
             if counter is not None:
                 L.append(f'    d->wait_counter_type = {counter};')
             L.append('    d->lds_dst = true;')
-            L.append('    d->lds_base = wf.m0() + wf.lds_base();')
+            L.append('    d->lds_base = wf.m0() + inst_.offset + wf.lds_base();')
             L.append(f'    d->mtype = {self._mtype_expr()};')
             L.append(f'    d->non_temporal = {nt};')
             L.append(f'    {addr_fn}(inst_, wf, *d);')
@@ -6601,15 +6639,16 @@ class CodeGenerator:
         signal the memory pipeline to apply the cross-lane shuffle after the
         raw read.
         """
-        # TR_B4=1, TR_B6=2, TR_B8=3, TR_B16=4
+        # amdgpu::TransposeKind: TR_B4=1, TR_B6=2, TR_B8=3, TR16_B128=4,
+        # B64_TR_B16=5. Defaults describe the B64 (num_elems=2) forms.
         tr_map = {
             'ds_read_tr_b4': (4, 2, 1),  # elem_size=4, num_elems=2, transpose=1
             'ds_read_tr_b6': (4, 3, 2),  # elem_size=4, num_elems=3, transpose=2
             'ds_read_tr_b8': (4, 2, 3),  # elem_size=4, num_elems=2, transpose=3
-            'ds_read_tr_b16': (4, 2, 4),  # elem_size=4, num_elems=2, transpose=4
+            'ds_read_tr_b16': (4, 2, 5),  # elem_size=4, num_elems=2, transpose=5
         }
         default_esz, default_ne, default_tr_kind = tr_map.get(
-            sem.semantic_class, (4, 2, 4)
+            sem.semantic_class, (4, 2, 5)
         )
         esz = sem.elem_size if sem.elem_size is not None else default_esz
         ne = sem.num_elems if sem.num_elems is not None else default_ne
@@ -12152,6 +12191,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 'Decoder',
                 [
                     cgen.Line('public:'),
+                    cgen.Statement(
+                        f'static constexpr std::size_t kMaxInstructionWords = {self._max_instruction_word_count()}'
+                    ),
                     cgen.FunctionDeclaration(
                         cgen.Value('static std::unique_ptr<Instruction>', 'decode'),
                         [cgen.Value('const MachineInst *', 'opcode')],
@@ -12550,6 +12592,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     ),
                     False,
                 ),
+                ('array', True),
+                ('cstddef', True),
                 ('memory', True),
             ],
             ['Instruction'],
