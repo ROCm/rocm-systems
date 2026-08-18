@@ -13,6 +13,7 @@
 #include "test-common.h"
 #include "test-options.h"
 
+#include <cstdint>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 #include <string>
@@ -72,15 +73,15 @@ struct HipFileVerifyBytes : public testing::TestWithParam<std::tuple<IoTestParam
 
         io_bytes = std::get<1>(GetParam()).bytes;
         // The data modification kernel will also verify that the sentinel regions of the device buffer are
-        // unmodified. Device layout (each sentinel region kFourKiB, data io_bytes):
+        // unmodified. Device layout (each sentinel region 4_KiB, data io_bytes):
         // [head device sentinel region][data][tail device sentinel region]
-        buffer_bytes = io_bytes + 2 * kFourKiB;
+        buffer_bytes = io_bytes + 2 * 4_KiB;
 
-        // File layout (each sentinel region kFourKiB, data io_bytes; data begins at file
+        // File layout (each sentinel region 4_KiB, data io_bytes; data begins at file
         // offset kCombinedFileOff):
         // [head file sentinel region][data][tail file sentinel region]
         const hoff_t tail_off = kCombinedFileOff + static_cast<hoff_t>(io_bytes);
-        ASSERT_EQ(0, ftruncate(tmpfile.fd, tail_off + static_cast<hoff_t>(kFourKiB)));
+        ASSERT_EQ(0, ftruncate(tmpfile.fd, tail_off + static_cast<hoff_t>(4_KiB)));
 
         hipFileDescr_t descr{};
         descr.type      = hipFileHandleTypeOpaqueFD;
@@ -105,20 +106,20 @@ struct HipFileVerifyBytes : public testing::TestWithParam<std::tuple<IoTestParam
         hipFileHandleDeregister(tmpfile_handle);
     }
 
-    unsigned char *bufferStart() const
+    uint8_t *bufferStart() const
     {
-        return static_cast<unsigned char *>(device_buffer);
+        return static_cast<uint8_t *>(device_buffer);
     }
 };
 
 TEST_P(HipFileVerifyBytes, RoundTripGuardsAllRegions)
 {
-    const size_t n        = io_bytes; // one byte per element
-    const size_t slack_n  = kFourKiB; // file sentinel region bracket size in bytes
-    const hoff_t buf_off  = static_cast<hoff_t>(kFourKiB);
-    const hoff_t file_off = kCombinedFileOff;
-    const hoff_t head_off = file_off - static_cast<hoff_t>(kFourKiB); // head file sentinel region byte offset
-    const hoff_t tail_off = file_off + static_cast<hoff_t>(io_bytes);
+    const size_t n           = io_bytes; // one byte per element
+    const size_t slack_n     = 4_KiB;    // file sentinel region bracket size in bytes
+    const hoff_t buf_off     = static_cast<hoff_t>(4_KiB);
+    const hoff_t file_off    = kCombinedFileOff;
+    const hoff_t head_off    = file_off - static_cast<hoff_t>(4_KiB); // head file sentinel region byte offset
+    const hoff_t tail_off    = file_off + static_cast<hoff_t>(io_bytes);
     constexpr size_t kStride = 2; // every-other byte
 
     // File layout (each sentinel region slack_n bytes, data n bytes; data begins at
@@ -132,10 +133,10 @@ TEST_P(HipFileVerifyBytes, RoundTripGuardsAllRegions)
     ASSERT_EQ(static_cast<ssize_t>(io_bytes),
               hipFileRead(tmpfile_handle, device_buffer, io_bytes, file_off, buf_off));
 
-    // Device layout (each sentinel region kFourKiB, data n bytes; data begins at buffer
-    // offset buf_off = kFourKiB):
+    // Device layout (each sentinel region 4_KiB, data n bytes; data begins at buffer
+    // offset buf_off = 4_KiB):
     // [head device sentinel region][data][tail device sentinel region]
-    unsigned char *data = bufferStart() + kFourKiB;
+    uint8_t *data = bufferStart() + 4_KiB;
     launchAndVerifyBytes(bufferStart(), buffer_bytes, data, n, defaultGrid(n), dim3(kDefaultWorkgroupSize),
                          kStride);
 
@@ -143,11 +144,11 @@ TEST_P(HipFileVerifyBytes, RoundTripGuardsAllRegions)
               hipFileWrite(tmpfile_handle, device_buffer, io_bytes, file_off, buf_off));
 
     assertHoleZero(tmpfile.fd, 0, head_off);
-    std::vector<unsigned char> head = readFileBytes(tmpfile.fd, head_off, slack_n);
+    std::vector<uint8_t> head = readFileBytes(tmpfile.fd, head_off, slack_n);
     assertBytesConstant(head.data(), 0, slack_n, kByteFileSlack);
-    std::vector<unsigned char> body = readFileBytes(tmpfile.fd, file_off, n);
+    std::vector<uint8_t> body = readFileBytes(tmpfile.fd, file_off, n);
     assertBytesModified(body.data(), n, kStride);
-    std::vector<unsigned char> tail = readFileBytes(tmpfile.fd, tail_off, slack_n);
+    std::vector<uint8_t> tail = readFileBytes(tmpfile.fd, tail_off, slack_n);
     assertBytesConstant(tail.data(), 0, slack_n, kByteFileSlack);
 }
 
