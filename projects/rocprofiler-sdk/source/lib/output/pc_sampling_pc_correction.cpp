@@ -294,17 +294,22 @@ PCCorrectionManager::correct(rocprofiler_tool_pc_sampling_stochastic_record_t& s
     auto entry = lookup(co_id, offset);
     if(!entry)
     {
-        // should_correct already established this PC is on an internal, so a
-        // missing classification means the code-object bookkeeping raced or a
-        // future change decoupled the two checks. Keeping the sample untouched
-        // is safer than dropping one we don't understand. Warn once per process
-        // (rate-limited) so a broken invariant is visible without flooding logs.
+        // should_correct already established this PC is on an internal with a
+        // disallowed-for-internal signal, so a missing classification means we
+        // have no window to correct against -- most likely the PC is in a
+        // region reached only via a long jump (e.g. into code outside any
+        // registered symbol, which classification does not currently walk); it
+        // could also mean the code-object bookkeeping raced or a future change
+        // decoupled the two checks. Either way we cannot recover the intended
+        // PC, so drop the sample rather than keep one we know is wrong. Warn
+        // once per process (rate-limited) so this is visible without flooding
+        // logs.
         static std::once_flag warn_once;
         std::call_once(warn_once, [] {
             ROCP_WARNING << "PC correction: classification missing for a sampled code object; "
-                            "sample(s) passed through unchanged";
+                            "sample(s) dropped";
         });
-        return CorrectionResult::Keep;
+        return CorrectionResult::Drop;
     }
 
     const InstructionStreamWindow& w = *entry->window;

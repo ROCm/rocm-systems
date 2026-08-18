@@ -1016,7 +1016,7 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
                 // PC correction: build the classification only for stochastic
                 // sampling on a gfx1250 agent (scope the build to agents that can
-                // exhibit the bug; see pc_sampling_pc_correction.hpp).
+                // exhibit the internal instruction skid; see pc_sampling_pc_correction.hpp).
                 if(tool::get_config().pc_sampling_stochastic &&
                    tool::get_config().pc_sampling_correction)
                 {
