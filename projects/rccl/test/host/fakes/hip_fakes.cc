@@ -84,12 +84,16 @@ static hipError_t DefaultHipPointerGetAttribute(void* data,
 std::function<hipError_t(void*, hipPointer_attribute, hipDeviceptr_t)>
     g_hipPointerGetAttribute = DefaultHipPointerGetAttribute;
 
-// --- init.cc device model: runtime version + device properties ----------
+// --- device model: runtime version + device properties ------------------
 static hipError_t DefaultHipRuntimeGetVersion(int* version)
 {
-    if (version) *version = 60443484;  // plausible ROCm 6.x runtime version
+    if (version) {
+        *version = 60443484;  // plausible ROCm 6.x runtime version
+    }
     return hipSuccess;
 }
+std::function<hipError_t(int*)> g_hipRuntimeGetVersion = DefaultHipRuntimeGetVersion;
+
 static hipError_t DefaultHipGetDeviceProperties(hipDeviceProp_t* prop, int)
 {
     if (prop) {
@@ -102,33 +106,60 @@ static hipError_t DefaultHipGetDeviceProperties(hipDeviceProp_t* prop, int)
     }
     return hipSuccess;
 }
-std::function<hipError_t(int*)> g_hipRuntimeGetVersion = DefaultHipRuntimeGetVersion;
 std::function<hipError_t(hipDeviceProp_t*, int)>
     g_hipGetDeviceProperties = DefaultHipGetDeviceProperties;
 
 static hipError_t DefaultHipExtMallocWithFlags(void** ptr, std::size_t size, unsigned)
 {
-    if (ptr) { *ptr = std::malloc(size ? size : 1); return *ptr ? hipSuccess : hipErrorOutOfMemory; }
+    if (ptr) {
+        *ptr = std::malloc(size);
+        return *ptr ? hipSuccess : hipErrorOutOfMemory;
+    }
     return hipErrorInvalidValue;
 }
-static hipError_t DefaultHipFree(void* ptr) { std::free(ptr); return hipSuccess; }
 std::function<hipError_t(void**, std::size_t, unsigned)>
     g_hipExtMallocWithFlags = DefaultHipExtMallocWithFlags;
+
+static hipError_t DefaultHipFree(void* ptr)
+{
+    std::free(ptr);
+    return hipSuccess;
+}
 std::function<hipError_t(void*)> g_hipFree = DefaultHipFree;
 
-// --- init.cc device inventory + current-device state --------------------
+// --- device inventory + current-device state ----------------------------
 int g_deviceCount = 8;
 int g_currentDevice = 0;
-static hipError_t DefaultHipGetDevice(int* dev) { if (dev) *dev = g_currentDevice; return hipSuccess; }
-static hipError_t DefaultHipSetDevice(int dev) { g_currentDevice = dev; return hipSuccess; }
-static hipError_t DefaultHipGetDeviceCount(int* count) { if (count) *count = g_deviceCount; return hipSuccess; }
+
+static hipError_t DefaultHipGetDevice(int* dev)
+{
+    if (dev) {
+        *dev = g_currentDevice;
+    }
+    return hipSuccess;
+}
 std::function<hipError_t(int*)> g_hipGetDevice = DefaultHipGetDevice;
+
+static hipError_t DefaultHipSetDevice(int dev)
+{
+    g_currentDevice = dev;
+    return hipSuccess;
+}
 std::function<hipError_t(int)> g_hipSetDevice = DefaultHipSetDevice;
+
+static hipError_t DefaultHipGetDeviceCount(int* count)
+{
+    if (count) {
+        *count = g_deviceCount;
+    }
+    return hipSuccess;
+}
 std::function<hipError_t(int*)> g_hipGetDeviceCount = DefaultHipGetDeviceCount;
 
-// --- init.cc deep-path result seams (commAlloc/devCommSetup) ------------
-// Default to failure so the p2p tests keep surfacing unexpected calls;
-// commAlloc tests opt into success.
+// --- deep-path result seams (commAlloc/devCommSetup) --------------------
+// Default to failure so any call a test hasn't opted into surfaces as an
+// unexpected call; a test sets the relevant seam to hipSuccess to enable the
+// happy path.
 hipError_t g_hipDeviceGetAttributeResult = hipErrorInvalidValue;
 hipError_t g_hipDeviceGetPCIBusIdResult  = hipErrorInvalidValue;
 hipError_t g_hipEventCreateResult        = hipErrorInvalidValue;
@@ -209,13 +240,14 @@ hipError_t hipDeviceGet(hipDevice_t* device, int)
 
 hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int)
 {
-    if (pi) {
-        if (attr == hipDeviceAttributeWarpSize)
-            *pi = g_hipWarpSize;
-        else if (attr == hipDeviceAttributeDirectManagedMemAccessFromHost)
-            *pi = 1;   // report managed -> ncclCudaHostCalloc takes the extMalloc arm
-        else
-            *pi = 0;
+    if (!pi) return g_hipDeviceGetAttributeResult;
+    switch (attr) {
+        case hipDeviceAttributeWarpSize:
+            *pi = g_hipWarpSize; break;
+        case hipDeviceAttributeDirectManagedMemAccessFromHost:
+            *pi = 1; break;   // report managed -> ncclCudaHostCalloc takes the extMalloc arm
+        default:
+            *pi = 0; break;
     }
     return g_hipDeviceGetAttributeResult;
 }
