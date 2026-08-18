@@ -6,7 +6,9 @@
 
 #pragma once
 
-namespace rocprofsys::common
+namespace rocprofsys
+{
+inline namespace common
 {
 
 struct version
@@ -36,4 +38,5 @@ struct version
     constexpr auto operator<=>(const version&) const = default;
 };
 
-}  // namespace rocprofsys::common
+}  // namespace common
+}  // namespace rocprofsys
