@@ -175,8 +175,9 @@ RegisterKind make_register_kind(RegisterClass reg_class) {
   case RegisterClass::Scalar:
     return RegisterKind::Scalar;
   case RegisterClass::Vector:
-  case RegisterClass::AccumVector:
     return RegisterKind::Vector;
+  case RegisterClass::AccumVector:
+    return RegisterKind::AccumVector;
   case RegisterClass::None:
     break;
   }
@@ -246,7 +247,9 @@ void DataHazardAdapter::on_register_access(const RegisterAccessView &access) {
   event.is_read = access.is_read;
   event.is_write = access.is_write;
 
-  if (is_vector_class(access.register_class)) {
+  if (access.register_class == RegisterClass::AccumVector) {
+    event.resource_kind = ResourceKind::AccumVectorRegister;
+  } else if (is_vector_class(access.register_class)) {
     event.resource_kind = ResourceKind::VectorRegister;
   } else if (access.register_class == RegisterClass::Scalar) {
     event.resource_kind = ResourceKind::ScalarRegister;
@@ -319,7 +322,15 @@ void DataHazardAdapter::on_memory_route(const MemoryRouteView &route) {
     if (reg_class == RegisterClass::Scalar) {
       dest.resource_kind = ResourceKind::ScalarRegister;
       dest.hazards.write_wait = WaitCntType::SMEM;
-    } else if (is_vector_class(reg_class)) {
+    } else if (reg_class == RegisterClass::AccumVector) {
+      dest.resource_kind = ResourceKind::AccumVectorRegister;
+      if (route.resource_kind == ResourceKind::LocalMemory) {
+        dest.hazards.write_wait = WaitCntType::LDS;
+      } else {
+        dest.hazards.write_wait = WaitCntType::VMEM;
+        dest.hazards.write_also_waits_lds = route.is_flat;
+      }
+    } else if (reg_class == RegisterClass::Vector) {
       dest.resource_kind = ResourceKind::VectorRegister;
       if (route.resource_kind == ResourceKind::LocalMemory) {
         dest.hazards.write_wait = WaitCntType::LDS;

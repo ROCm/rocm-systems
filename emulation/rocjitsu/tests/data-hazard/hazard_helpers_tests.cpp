@@ -21,42 +21,52 @@ namespace {
 
 using hazard_core::EntityId;
 using hazard_core::PendingAsyncOp;
+using hazard_core::PendingRegisterSet;
 using hazard_core::WaitCntType;
+
+constexpr hazard_core::VectorRegisterFile kVgpr = hazard_core::VectorRegisterFile::Vector;
+
+const PendingAsyncOp *vgpr_pending(const hazard_core::WaveState &wave, PendingRegisterSet set,
+                                   uint32_t reg, EntityId current_instruction_id) {
+  return hazard_core::check_vector_hazard_info(&wave, kVgpr, set, reg, 1, current_instruction_id)
+      .pending;
+}
 
 } // namespace
 
 TEST(HazardCoreAccessHandlingTest, TracksAndChecksVgprWriteReadAndWait) {
   hazard_core::WaveState wave;
 
-  hazard_core::track_vgpr_write(&wave, 10, 0x100, 4, 2, WaitCntType::VMEM);
+  hazard_core::track_vector_write(&wave, kVgpr, 10, 0x100, 4, 2, WaitCntType::VMEM);
 
-  const auto *raw = hazard_core::check_vgpr_read_hazard(&wave, 4, 1, 20);
+  const auto *raw = vgpr_pending(wave, PendingRegisterSet::Writes, 4, 20);
   ASSERT_NE(raw, nullptr);
   EXPECT_EQ(raw->instruction_id, 10u);
   EXPECT_EQ(raw->pc, 0x100u);
   EXPECT_EQ(raw->wait_type, WaitCntType::VMEM);
-  EXPECT_NE(hazard_core::check_vgpr_waw_hazard(&wave, 5, 1, 20), nullptr);
-  EXPECT_EQ(hazard_core::check_vgpr_read_hazard(&wave, 6, 1, 20), nullptr);
-  EXPECT_EQ(hazard_core::check_vgpr_read_hazard(&wave, 4, 1, 10), nullptr)
+  EXPECT_NE(hazard_core::check_vector_waw_hazard_info(&wave, kVgpr, 5, 1, 20).pending, nullptr);
+  EXPECT_EQ(vgpr_pending(wave, PendingRegisterSet::Writes, 6, 20), nullptr);
+  EXPECT_EQ(vgpr_pending(wave, PendingRegisterSet::Writes, 4, 10), nullptr)
       << "same instruction should not self-hazard";
 
-  const auto raw_info = hazard_core::check_vgpr_read_hazard_info(&wave, 3, 4, 20);
+  const auto raw_info =
+      hazard_core::check_vector_hazard_info(&wave, kVgpr, PendingRegisterSet::Writes, 3, 4, 20);
   ASSERT_NE(raw_info.pending, nullptr);
   EXPECT_EQ(raw_info.register_index, 4u);
   EXPECT_EQ(raw_info.pending->instruction_id, 10u);
 
-  hazard_core::track_vgpr_read(&wave, 11, 0x120, 8, 2);
-  const auto *war = hazard_core::check_vgpr_war_hazard(&wave, 9, 1, 20);
+  hazard_core::track_vector_read(&wave, kVgpr, 11, 0x120, 8, 2);
+  const auto *war = vgpr_pending(wave, PendingRegisterSet::Reads, 9, 20);
   ASSERT_NE(war, nullptr);
   EXPECT_EQ(war->instruction_id, 11u);
   EXPECT_EQ(war->wait_type, WaitCntType::STORE);
 
   hazard_core::process_wait_instruction(&wave, WaitCntType::VMEM, 0);
-  EXPECT_EQ(hazard_core::check_vgpr_read_hazard(&wave, 4, 1, 20), nullptr);
-  EXPECT_NE(hazard_core::check_vgpr_war_hazard(&wave, 8, 1, 20), nullptr);
+  EXPECT_EQ(vgpr_pending(wave, PendingRegisterSet::Writes, 4, 20), nullptr);
+  EXPECT_NE(vgpr_pending(wave, PendingRegisterSet::Reads, 8, 20), nullptr);
 
   hazard_core::process_wait_instruction(&wave, WaitCntType::STORE, 0);
-  EXPECT_EQ(hazard_core::check_vgpr_war_hazard(&wave, 8, 1, 20), nullptr);
+  EXPECT_EQ(vgpr_pending(wave, PendingRegisterSet::Reads, 8, 20), nullptr);
 }
 
 TEST(WaitcntDecodeTest, DecodesLegacyWaitcntSplitVmcntBits) {
@@ -168,25 +178,25 @@ TEST(HazardCoreAccessHandlingTest, LdsWaitKeepsAllEntriesWhenKeepCountExceedsPen
 TEST(HazardCoreAccessHandlingTest, TracksFlatDsSideSeparately) {
   hazard_core::WaveState wave;
 
-  hazard_core::track_flat_vgpr_ds(&wave, 16, 0x400, 30, 2, true);
+  hazard_core::track_vector_flat_ds(&wave, kVgpr, 16, 0x400, 30, 2, true);
 
-  const auto *pending = hazard_core::check_vgpr_ds_read_hazard(&wave, 31, 1, 20);
+  const auto *pending = vgpr_pending(wave, PendingRegisterSet::DsWrites, 31, 20);
   ASSERT_NE(pending, nullptr);
   EXPECT_EQ(pending->instruction_id, 16u);
   EXPECT_TRUE(pending->is_flat_ds);
-  EXPECT_EQ(hazard_core::check_vgpr_read_hazard(&wave, 31, 1, 20), nullptr);
+  EXPECT_EQ(vgpr_pending(wave, PendingRegisterSet::Writes, 31, 20), nullptr);
 
   hazard_core::process_wait_instruction(&wave, WaitCntType::LDS, 0);
-  EXPECT_EQ(hazard_core::check_vgpr_ds_read_hazard(&wave, 31, 1, 20), nullptr);
+  EXPECT_EQ(vgpr_pending(wave, PendingRegisterSet::DsWrites, 31, 20), nullptr);
 }
 
 TEST(HazardCoreAccessHandlingTest, IteratesPendingInstructionIdsAcrossCoreState) {
   hazard_core::WaveState wave;
 
-  hazard_core::track_vgpr_write(&wave, 10, 0x100, 4, 1, WaitCntType::VMEM);
+  hazard_core::track_vector_write(&wave, kVgpr, 10, 0x100, 4, 1, WaitCntType::VMEM);
   hazard_core::track_sgpr_write(&wave, 11, 0x104, 8, WaitCntType::SMEM);
-  hazard_core::track_flat_vgpr_ds(&wave, 12, 0x108, 16, 1, true);
-  hazard_core::track_vgpr_read(&wave, 13, 0x10c, 20, 1);
+  hazard_core::track_vector_flat_ds(&wave, kVgpr, 12, 0x108, 16, 1, true);
+  hazard_core::track_vector_read(&wave, kVgpr, 13, 0x10c, 20, 1);
   hazard_core::track_lds_write(&wave, 14, 0x110, 0x80, 4);
   hazard_core::track_lds_read(&wave, 15, 0x114, 0x90, 4);
   hazard_core::track_tensor_lds(&wave, 16, 0x118, 0xa0, 4);
@@ -413,7 +423,7 @@ TEST_F(ClearPendingOpsTest, VmemWaitNCombinesRegisterAndLdsOperations) {
 TEST_F(ClearPendingOpsTest, ClearsLdsWriteReadAndFlatDsState) {
   push_lds(0x40, 1);
   wave.lds_read_fifo.push_back({0x80, make_op(2, WaitCntType::LDS)});
-  hazard_core::track_flat_vgpr_ds(&wave, 3, 0x100, 4, 1);
+  hazard_core::track_vector_flat_ds(&wave, kVgpr, 3, 0x100, 4, 1);
 
   hazard_core::clear_pending_ops(&wave, WaitCntType::LDS, 0);
 

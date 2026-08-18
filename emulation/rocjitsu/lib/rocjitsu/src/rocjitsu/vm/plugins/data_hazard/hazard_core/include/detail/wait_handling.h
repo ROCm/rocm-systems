@@ -100,9 +100,12 @@ inline bool consume_vmem_pending_ref(VmemPendingRefCounts &counts, const VmemPen
 
 inline void clear_vmem_pending_ops(WaveState &wave, uint32_t keep_count) {
   std::vector<VmemPendingRef> pending;
-  pending.reserve(wave.vmem_load_fifo.size() + wave.lds_fifo.size());
+  pending.reserve(wave.vmem_load_fifo.size() + wave.acc_vmem_load_fifo.size() +
+                  wave.lds_fifo.size());
 
   for (const auto &entry : wave.vmem_load_fifo)
+    pending.push_back({VmemPendingSource::Register, entry.first, entry.second.instruction_id});
+  for (const auto &entry : wave.acc_vmem_load_fifo)
     pending.push_back({VmemPendingSource::Register, entry.first, entry.second.instruction_id});
   for (const auto &entry : wave.lds_fifo) {
     if (entry.second.wait_type == WaitCntType::VMEM)
@@ -121,17 +124,31 @@ inline void clear_vmem_pending_ops(WaveState &wave, uint32_t keep_count) {
   for (auto it = pending.begin(); it != pending.end() - keep_count; ++it)
     ++to_remove[*it];
 
-  std::vector<uint32_t> removed_registers;
-  decltype(wave.vmem_load_fifo) kept_vmem_load_fifo;
-  for (auto &entry : wave.vmem_load_fifo) {
-    VmemPendingRef ref{VmemPendingSource::Register, entry.first, entry.second.instruction_id};
-    if (consume_vmem_pending_ref(to_remove, ref)) {
-      removed_registers.push_back(entry.first);
-      continue;
+  auto drain_register_fifo = [&](std::deque<std::pair<uint32_t, PendingAsyncOp>> &load_fifo,
+                                 std::unordered_map<uint32_t, PendingAsyncOp> &pending_writes) {
+    std::vector<uint32_t> removed_registers;
+    std::deque<std::pair<uint32_t, PendingAsyncOp>> kept_load_fifo;
+    for (auto &entry : load_fifo) {
+      VmemPendingRef ref{VmemPendingSource::Register, entry.first, entry.second.instruction_id};
+      if (consume_vmem_pending_ref(to_remove, ref)) {
+        removed_registers.push_back(entry.first);
+        continue;
+      }
+      kept_load_fifo.push_back(std::move(entry));
     }
-    kept_vmem_load_fifo.push_back(std::move(entry));
-  }
-  wave.vmem_load_fifo = std::move(kept_vmem_load_fifo);
+    load_fifo = std::move(kept_load_fifo);
+
+    for (uint32_t reg : removed_registers) {
+      const bool still_pending =
+          std::any_of(load_fifo.begin(), load_fifo.end(),
+                      [reg](const auto &entry) { return entry.first == reg; });
+      if (!still_pending)
+        pending_writes.erase(reg);
+    }
+  };
+
+  drain_register_fifo(wave.vmem_load_fifo, wave.pending_vgpr_writes);
+  drain_register_fifo(wave.acc_vmem_load_fifo, wave.pending_acc_vgpr_writes);
 
   decltype(wave.lds_fifo) kept_lds_fifo;
   for (auto &entry : wave.lds_fifo) {
@@ -141,13 +158,6 @@ inline void clear_vmem_pending_ops(WaveState &wave, uint32_t keep_count) {
     kept_lds_fifo.push_back(std::move(entry));
   }
   wave.lds_fifo = std::move(kept_lds_fifo);
-
-  for (uint32_t reg : removed_registers) {
-    const bool still_pending = std::any_of(wave.vmem_load_fifo.begin(), wave.vmem_load_fifo.end(),
-                                           [reg](const auto &entry) { return entry.first == reg; });
-    if (!still_pending)
-      wave.pending_vgpr_writes.erase(reg);
-  }
 }
 
 /// True when [address, address + size) and [other_address, other_address + other_size) intersect.
@@ -260,12 +270,14 @@ inline bool clear_pending_ops(WaveState *wave, WaitCntType type, uint32_t keep_c
 
   case WaitCntType::STORE:
     clear_register_fifo(wave->vmem_store_fifo, wave->pending_vgpr_reads, keep_count);
+    clear_register_fifo(wave->acc_vmem_store_fifo, wave->pending_acc_vgpr_reads, keep_count);
     break;
 
   case WaitCntType::LDS: {
     clear_address_fifo(wave->lds_fifo, keep_count, WaitCntType::LDS);
 
     clear_register_fifo(wave->flat_vgpr_ds_fifo, wave->pending_vgpr_writes_ds, keep_count);
+    clear_register_fifo(wave->flat_acc_vgpr_ds_fifo, wave->pending_acc_vgpr_writes_ds, keep_count);
 
     auto &read_fifo = wave->lds_read_fifo;
     if (keep_count == 0) {

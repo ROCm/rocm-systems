@@ -260,8 +260,8 @@ TEST(DataHazardAdapterTest, RegisterCallbacksMapScalarVectorAccumAndDropUnknown)
   EXPECT_FALSE(api.resources[1].is_read);
   EXPECT_TRUE(api.resources[1].is_write);
 
-  EXPECT_EQ(api.resources[2].resource_kind, ResourceKind::VectorRegister);
-  EXPECT_EQ(api.resources[2].register_kind, RegisterKind::Vector);
+  EXPECT_EQ(api.resources[2].resource_kind, ResourceKind::AccumVectorRegister);
+  EXPECT_EQ(api.resources[2].register_kind, RegisterKind::AccumVector);
   EXPECT_EQ(api.resources[2].resource_index, 31u);
   EXPECT_TRUE(api.resources[2].is_read);
   EXPECT_TRUE(api.resources[2].is_write);
