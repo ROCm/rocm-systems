@@ -386,6 +386,26 @@ hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int)
     return g_hipStreamCreateResult;
 }
 
+hipError_t hipStreamCreateWithPriority(hipStream_t* stream, unsigned int, int)
+{
+    if (stream) {
+        *stream = (g_hipStreamCreateResult == hipSuccess)
+                      ? reinterpret_cast<hipStream_t>(0x1) : nullptr;
+    }
+    return g_hipStreamCreateResult;
+}
+
+hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority, int* greatestPriority)
+{
+    if (leastPriority) {
+        *leastPriority = 0;
+    }
+    if (greatestPriority) {
+        *greatestPriority = 0;
+    }
+    return hipSuccess;
+}
+
 hipError_t hipStreamDestroy(hipStream_t)     { return hipSuccess; }  // benign teardown (ncclDestroySideStream)
 hipError_t hipStreamSynchronize(hipStream_t) { return hipErrorInvalidValue; }
 

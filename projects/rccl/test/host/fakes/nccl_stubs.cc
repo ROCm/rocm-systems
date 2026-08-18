@@ -14,6 +14,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <sched.h>
 
@@ -50,12 +51,16 @@ ncclResult_t ncclNetFinalize(struct ncclComm* comm) { return ncclSuccess; }
 int ncclOsCpuCount(const ncclAffinity& affinity) { ::abort(); }
 ncclResult_t ncclOsGetAffinity(ncclAffinity* affinity) { ::abort(); }
 ncclResult_t ncclOsSetAffinity(const ncclAffinity& affinity) { ::abort(); }
-// Early env/system read (checkHsaEnvSetting reaches this): succeed with an
-// empty value rather than abort so the reached path doesn't crash.
+// Early env/system read reached by ncclInit(). Return a plausible, non-empty,
+// multi-token value: ncclInit() strtok_r()s the /proc/version read and then
+// strstr()s the resulting token, which would segfault on an empty string
+// (strtok_r("") -> NULL). This value is also not "1" and not the Hyper-V BIOS
+// string, so the numa_balancing / bios_version branches stay on their benign
+// arms.
 ncclResult_t ncclOsTopoGetStrFromSys(const char* path, const char* fileName, char* strValue, int maxLen)
 {
     if (strValue && maxLen > 0) {
-        strValue[0] = '\0';
+        std::snprintf(strValue, maxLen, "Linux version 6.8.0-microtest");
     }
     return ncclSuccess;
 }
@@ -64,8 +69,8 @@ ncclResult_t ncclProfilerPluginInit(struct ncclComm* comm) { ::abort(); }
 void ncclProfilerProxyTraceDumpIfAny(void* profilerContext) { }
 ncclResult_t ncclRasCommFini(const struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRegCleanup(struct ncclComm* comm) { return ncclSuccess; }
-ncclResult_t ncclRmaInit(struct ncclComm* comm) { ::abort(); }
-ncclResult_t ncclRmaInitFromParent(struct ncclComm* comm, struct ncclComm* parent) { ::abort(); }
+ncclResult_t ncclRmaInit(struct ncclComm* comm) { return ncclSuccess; }  // reached by commAlloc happy path
+ncclResult_t ncclRmaInitFromParent(struct ncclComm* comm, struct ncclComm* parent) { return ncclSuccess; }
 ncclResult_t ncclRmaProxyFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclStrongStreamDestruct(struct ncclStrongStream* ss) { return ncclSuccess; }
 ncclResult_t ncclSymkFinalize(struct ncclComm* comm) { ::abort(); }
