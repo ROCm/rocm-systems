@@ -65,6 +65,6 @@ jobs:
         run: |
           python3 scripts/clang-tidy-check.py \
             --base "origin/${{ github.base_ref }}" \
-            --build-path build/debug \
+            --build-path build/mpi-debug \
             -j $(nproc) \
             --timeout 120
