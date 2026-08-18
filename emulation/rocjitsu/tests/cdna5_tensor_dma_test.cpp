@@ -17,6 +17,74 @@ void write_tensor_dma_d0(amdgpu::ComputeUnitCore &cu, amdgpu::Wavefront &wf, uin
                   static_cast<uint32_t>((global_addr >> 32) & 0x01ffffffu) | 0x80000000u);
 }
 
+TEST(Gfx1250ExecutionTest, TensorDmaUsesWaveProcessPageTable) {
+  constexpr uint32_t kProcessId = 1250;
+  constexpr uint32_t kElements = 4;
+  constexpr uint64_t kLoadGlobal = 0x20000000;
+  constexpr uint64_t kStoreGlobal = kLoadGlobal + KfdProcess::kPageSize;
+  constexpr std::array<uint32_t, kElements> kLoadValues = {
+      0x11000000u,
+      0x22000000u,
+      0x33000000u,
+      0x44000000u,
+  };
+  constexpr std::array<uint32_t, kElements> kStoreValues = {
+      0x55000000u,
+      0x66000000u,
+      0x77000000u,
+      0x88000000u,
+  };
+
+  KfdProcess process(kProcessId);
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_process_id(kProcessId);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  std::array<uint32_t, kElements> load_storage = kLoadValues;
+  std::array<uint32_t, kElements> store_storage{};
+  process.map_pages(kLoadGlobal, load_storage.data(), sizeof(load_storage));
+  process.map_pages(kStoreGlobal, store_storage.data(), sizeof(store_storage));
+  sim.memory->register_process(kProcessId, &process.page_table_, &process.page_table_mutex_,
+                               process.page_table_generation());
+
+  // The same GPU VA intentionally resolves to different storage for VMID zero
+  // and for the dispatched process. Tensor DMA must use the wave's process ID.
+  EXPECT_EQ(sim.memory->read32(kLoadGlobal), 0u);
+  EXPECT_EQ(sim.memory->read32(kLoadGlobal, kProcessId), kLoadValues[0]);
+
+  write_tensor_dma_d0(*cu, *wf, 0, kLoadGlobal);
+  write_wave_sgpr(*cu, *wf, 12, 2u << 16);        // i32 elements.
+  write_wave_sgpr(*cu, *wf, 13, kElements << 16); // Tensor dim0.
+  write_wave_sgpr(*cu, *wf, 14, 0);
+  write_wave_sgpr(*cu, *wf, 15, kElements << 16); // Tile dim0.
+  write_wave_sgpr(*cu, *wf, 16, 0);
+  write_wave_sgpr(*cu, *wf, 17, 0);
+  write_wave_sgpr(*cu, *wf, 18, 0);
+  write_wave_sgpr(*cu, *wf, 19, 0);
+
+  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
+  auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
+  ASSERT_NE(load, nullptr);
+  load->execute(*load, wf);
+  for (uint32_t i = 0; i < kElements; ++i)
+    EXPECT_EQ(cu->lds().read32(wf->lds_base() + i * sizeof(uint32_t)), kLoadValues[i]);
+
+  for (uint32_t i = 0; i < kElements; ++i)
+    cu->lds().write32(wf->lds_base() + i * sizeof(uint32_t), kStoreValues[i]);
+
+  write_tensor_dma_d0(*cu, *wf, 0, kStoreGlobal);
+  const std::array<uint32_t, 3> store_words = {0xd0714001u, 0x7c000000u, 0x7c7c0c00u};
+  auto store = decode_gfx1250(store_words, "tensor_store_from_lds");
+  ASSERT_NE(store, nullptr);
+  store->execute(*store, wf);
+  EXPECT_EQ(store_storage, kStoreValues);
+
+  sim.memory->unregister_process(kProcessId);
+}
+
 TEST(Gfx1250ExecutionTest, TensorDmaD2CopiesGlobalAndLds) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();
@@ -288,14 +356,16 @@ TEST(Gfx1250ExecutionTest, TensorDmaByteLoadUsesDwordPaddingUnits) {
   EXPECT_EQ(cu->lds().read8(wf->lds_base() + 275), 3u);
 }
 
-TEST(Gfx1250ExecutionTest, TensorDmaPaddedStoreIsRejected) {
+TEST(Gfx1250ExecutionTest, TensorDmaPaddedStoreIgnoresPadding) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
   wf->set_lds_base(cu->allocate_lds(256));
 
-  write_tensor_dma_d0(*cu, *wf, 0, 0x121000);
+  constexpr uint64_t kGlobal = 0x122000;
+  constexpr uint32_t kSentinel = 0xAC1DAC1Du;
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
   write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 20)); // i32, pad enabled.
   write_wave_sgpr(*cu, *wf, 13, 4u << 16);
   write_wave_sgpr(*cu, *wf, 14, 0);
@@ -305,9 +375,17 @@ TEST(Gfx1250ExecutionTest, TensorDmaPaddedStoreIsRejected) {
   write_wave_sgpr(*cu, *wf, 18, 0);
   write_wave_sgpr(*cu, *wf, 19, 0);
 
+  for (uint32_t i = 0; i < 4; ++i) {
+    write_global_u32(*sim.memory, kGlobal + i * sizeof(uint32_t), kSentinel);
+    cu->lds().write32(wf->lds_base() + i * sizeof(uint32_t), 0x34000000u + i);
+  }
+
   const std::array<uint32_t, 3> store_words = {0xd0714001u, 0x7c000000u, 0x7c7c0c00u};
   cdna5::TensorStoreFromLdsVimage store_inst(store_words.data());
-  EXPECT_THROW(store_inst.execute_impl(*wf), util::UnimplementedInst);
+  store_inst.execute_impl(*wf);
+
+  for (uint32_t i = 0; i < 4; ++i)
+    EXPECT_EQ(read_global_u32(*sim.memory, kGlobal + i * sizeof(uint32_t)), 0x34000000u + i);
 }
 
 TEST(Gfx1250ExecutionTest, TensorDmaIterateCopiesMultipleTiles) {
@@ -325,7 +403,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaIterateCopiesMultipleTiles) {
   write_wave_sgpr(*cu, *wf, 14, 2u << 16);                // tensor dim1.
   write_wave_sgpr(*cu, *wf, 15, 2u << 16);                // tile dim0.
   write_wave_sgpr(*cu, *wf, 16, 1u);                      // tile dim1.
-  write_wave_sgpr(*cu, *wf, 17, 0);
+  write_wave_sgpr(*cu, *wf, 17, 2u);                      // tensor dim0 stride.
   write_wave_sgpr(*cu, *wf, 18, 0);
   write_wave_sgpr(*cu, *wf, 19, 0);
   write_wave_sgpr(*cu, *wf, 20, 0);
@@ -437,6 +515,567 @@ TEST(Gfx1250ExecutionTest, TensorDmaUnsupportedCountEncodingsAreRejected) {
     EXPECT_THROW(load->execute(*load, wf), util::UnimplementedInst);
     EXPECT_TRUE(wf->wait_counters().empty());
   }
+}
+
+TEST(Gfx1250ExecutionTest, TensorDmaIterateMasksRowsBeyondTensorDimension) {
+  // Two iterations cover four rows, but the tensor has only three. The final
+  // repeated row must be zero-filled instead of copied from global memory.
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  constexpr uint64_t kGlobal = 0x131000;
+  constexpr uint32_t kCols = 2;
+  constexpr uint32_t kRows = 3;
+  constexpr uint32_t kTileRows = 2;
+  constexpr uint32_t kIterations = 2;
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
+  write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 19)); // i32, iterate enabled.
+  write_wave_sgpr(*cu, *wf, 13, kCols << 16);             // tensor dim0.
+  write_wave_sgpr(*cu, *wf, 14, kRows << 16);             // tensor dim1.
+  write_wave_sgpr(*cu, *wf, 15, kCols << 16);             // tile dim0.
+  write_wave_sgpr(*cu, *wf, 16, kTileRows);               // tile dim1.
+  write_wave_sgpr(*cu, *wf, 17, kCols);                   // tensor dim0 stride.
+  write_wave_sgpr(*cu, *wf, 18, 0);
+  write_wave_sgpr(*cu, *wf, 19, 0);
+  write_wave_sgpr(*cu, *wf, 20, 0);
+  write_wave_sgpr(*cu, *wf, 21, kCols * kTileRows); // LDS increment in elements.
+  write_wave_sgpr(*cu, *wf, 22, kCols * kTileRows); // Global increment in elements.
+  write_wave_sgpr(*cu, *wf, 23, (kIterations - 1) << 16);
+
+  for (uint32_t row = 0; row < kTileRows * kIterations; ++row) {
+    for (uint32_t col = 0; col < kCols; ++col)
+      write_global_u32(*sim.memory, kGlobal + (row * kCols + col) * 4,
+                       0x45000000u + row * 0x100u + col);
+  }
+
+  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c140c00u};
+  auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
+  ASSERT_NE(load, nullptr);
+  load->execute(*load, wf);
+
+  for (uint32_t row = 0; row < kTileRows * kIterations; ++row) {
+    for (uint32_t col = 0; col < kCols; ++col) {
+      const uint32_t actual =
+          cu->lds().read32(wf->lds_base() + (row * kCols + col) * sizeof(uint32_t));
+      const uint32_t expected = row < kRows ? 0x45000000u + row * 0x100u + col : 0u;
+      EXPECT_EQ(actual, expected) << "row " << row << ", col " << col;
+    }
+  }
+}
+
+TEST(Gfx1250ExecutionTest, TensorDmaIterateStoreSkipsRowsBeyondTensorDimension) {
+  // Two iterations source four LDS rows, but the tensor has only three. The
+  // final repeated row must not overwrite global memory.
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  constexpr uint64_t kGlobal = 0x136000;
+  constexpr uint32_t kCols = 2;
+  constexpr uint32_t kRows = 3;
+  constexpr uint32_t kTileRows = 2;
+  constexpr uint32_t kIterations = 2;
+  constexpr uint32_t kSentinel = 0xAC1DAC1Du;
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
+  write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 19)); // i32, iterate enabled.
+  write_wave_sgpr(*cu, *wf, 13, kCols << 16);             // tensor dim0.
+  write_wave_sgpr(*cu, *wf, 14, kRows << 16);             // tensor dim1.
+  write_wave_sgpr(*cu, *wf, 15, kCols << 16);             // tile dim0.
+  write_wave_sgpr(*cu, *wf, 16, kTileRows);               // tile dim1.
+  write_wave_sgpr(*cu, *wf, 17, kCols);                   // tensor dim0 stride.
+  write_wave_sgpr(*cu, *wf, 18, 0);
+  write_wave_sgpr(*cu, *wf, 19, 0);
+  write_wave_sgpr(*cu, *wf, 20, 0);
+  write_wave_sgpr(*cu, *wf, 21, kCols * kTileRows); // LDS increment in elements.
+  write_wave_sgpr(*cu, *wf, 22, kCols * kTileRows); // Global increment in elements.
+  write_wave_sgpr(*cu, *wf, 23, (kIterations - 1) << 16);
+
+  for (uint32_t row = 0; row < kTileRows * kIterations; ++row) {
+    for (uint32_t col = 0; col < kCols; ++col) {
+      write_global_u32(*sim.memory, kGlobal + (row * kCols + col) * 4, kSentinel);
+      cu->lds().write32(wf->lds_base() + (row * kCols + col) * sizeof(uint32_t),
+                        0x4B000000u + row * 0x100u + col);
+    }
+  }
+
+  const std::array<uint32_t, 3> store_words = {0xd0714001u, 0x7c000000u, 0x7c140c00u};
+  auto store = decode_gfx1250(store_words, "tensor_store_from_lds");
+  ASSERT_NE(store, nullptr);
+  store->execute(*store, wf);
+
+  for (uint32_t row = 0; row < kTileRows * kIterations; ++row) {
+    for (uint32_t col = 0; col < kCols; ++col) {
+      const uint32_t actual =
+          read_global_u32(*sim.memory, kGlobal + (row * kCols + col) * sizeof(uint32_t));
+      const uint32_t expected = row < kRows ? 0x4B000000u + row * 0x100u + col : kSentinel;
+      EXPECT_EQ(actual, expected) << "row " << row << ", col " << col;
+    }
+  }
+}
+
+TEST(Gfx1250ExecutionTest, TensorDmaZeroLengthDimensionMasksEntireTile) {
+  // Global memory contains data and LDS starts nonzero. A zero active tensor
+  // extent must actively zero-fill the tile rather than copy or do nothing.
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  constexpr uint64_t kGlobal = 0x132000;
+  constexpr uint32_t kCols = 2;
+  constexpr uint32_t kTileRows = 2;
+  constexpr uint32_t kSentinel = 0xDEADDEADu;
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
+  write_wave_sgpr(*cu, *wf, 12, 2u << 16);    // i32 elements.
+  write_wave_sgpr(*cu, *wf, 13, kCols << 16); // tensor dim0.
+  write_wave_sgpr(*cu, *wf, 14, 0);           // tensor dim1 has no valid rows.
+  write_wave_sgpr(*cu, *wf, 15, kCols << 16); // tile dim0.
+  write_wave_sgpr(*cu, *wf, 16, kTileRows);   // tile dim1.
+  write_wave_sgpr(*cu, *wf, 17, kCols);       // tensor dim0 stride.
+  write_wave_sgpr(*cu, *wf, 18, 0);
+  write_wave_sgpr(*cu, *wf, 19, 0);
+
+  for (uint32_t row = 0; row < kTileRows; ++row) {
+    for (uint32_t col = 0; col < kCols; ++col)
+      write_global_u32(*sim.memory, kGlobal + (row * kCols + col) * 4,
+                       0x46000000u + row * 0x100u + col);
+  }
+  for (uint32_t i = 0; i < kCols * kTileRows; ++i)
+    cu->lds().write32(wf->lds_base() + i * sizeof(uint32_t), kSentinel);
+
+  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x18140c00u};
+  auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
+  ASSERT_NE(load, nullptr);
+  load->execute(*load, wf);
+
+  for (uint32_t i = 0; i < kCols * kTileRows; ++i)
+    EXPECT_EQ(cu->lds().read32(wf->lds_base() + i * sizeof(uint32_t)), 0u) << "element " << i;
+}
+
+TEST(Gfx1250ExecutionTest, TensorDmaRankThreeNullD2MasksTransfersAndCompletes) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  constexpr uint64_t kGlobal = 0x137000;
+  constexpr uint32_t kElements = 2;
+  constexpr uint32_t kBarrierLdsAddr = 64;
+  constexpr uint32_t kGlobalSentinel = 0xAC1DAC1Du;
+  constexpr uint32_t kLdsSentinel = 0xDEADDEADu;
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
+  write_wave_sgpr(*cu, *wf, 12,
+                  (2u << 16) | (1u << 18)); // i32 elements, atomic barrier enabled.
+  write_wave_sgpr(*cu, *wf, 13,
+                  (2u << 16) | (kBarrierLdsAddr >> 3)); // tensor dim0 and barrier address.
+  write_wave_sgpr(*cu, *wf, 14, 1u << 16);              // tensor dim1.
+  write_wave_sgpr(*cu, *wf, 15, kElements << 16);       // tile dim0.
+  write_wave_sgpr(*cu, *wf, 16, 1u | (1u << 16));       // tile dim1 and dim2.
+  write_wave_sgpr(*cu, *wf, 17, 2u);                    // tensor dim0 stride.
+  write_wave_sgpr(*cu, *wf, 18, 2u << 16);              // tensor dim1 stride.
+  write_wave_sgpr(*cu, *wf, 19, 0);
+
+  for (uint32_t i = 0; i < kElements; ++i) {
+    write_global_u32(*sim.memory, kGlobal + i * sizeof(uint32_t), 0x4C000000u + i);
+    cu->lds().write32(wf->lds_base() + i * sizeof(uint32_t), kLdsSentinel);
+  }
+  cu->lds().write64(wf->lds_base() + kBarrierLdsAddr, 0);
+
+  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
+  auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
+  ASSERT_NE(load, nullptr);
+  load->execute(*load, wf);
+
+  for (uint32_t i = 0; i < kElements; ++i)
+    EXPECT_EQ(cu->lds().read32(wf->lds_base() + i * sizeof(uint32_t)), 0u) << "element " << i;
+  EXPECT_EQ(wf->wait_counters().tensorcnt, 0u);
+  EXPECT_TRUE(wf->wait_counters().empty());
+  uint64_t barrier_state = cu->lds().read64(wf->lds_base() + kBarrierLdsAddr);
+  EXPECT_EQ(barrier_state, 0xffffull << 16);
+  EXPECT_TRUE(amdgpu::lds_barrier_cell_phase_parity(barrier_state));
+
+  for (uint32_t i = 0; i < kElements; ++i) {
+    write_global_u32(*sim.memory, kGlobal + i * sizeof(uint32_t), kGlobalSentinel);
+    cu->lds().write32(wf->lds_base() + i * sizeof(uint32_t), 0x4D000000u + i);
+  }
+  cu->lds().write64(wf->lds_base() + kBarrierLdsAddr, 0);
+
+  const std::array<uint32_t, 3> store_words = {0xd0714001u, 0x7c000000u, 0x7c7c0c00u};
+  auto store = decode_gfx1250(store_words, "tensor_store_from_lds");
+  ASSERT_NE(store, nullptr);
+  store->execute(*store, wf);
+
+  for (uint32_t i = 0; i < kElements; ++i)
+    EXPECT_EQ(read_global_u32(*sim.memory, kGlobal + i * sizeof(uint32_t)), kGlobalSentinel)
+        << "element " << i;
+  EXPECT_EQ(wf->wait_counters().tensorcnt, 0u);
+  EXPECT_TRUE(wf->wait_counters().empty());
+  barrier_state = cu->lds().read64(wf->lds_base() + kBarrierLdsAddr);
+  EXPECT_EQ(barrier_state, 0xffffull << 16);
+  EXPECT_TRUE(amdgpu::lds_barrier_cell_phase_parity(barrier_state));
+}
+
+TEST(Gfx1250ExecutionTest, TensorDmaNonIteratingRankFiveAvoidsOriginDecomposition) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  constexpr uint64_t kGlobal = 0x138000;
+  constexpr uint32_t kValue = 0x4C000000u;
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
+  write_wave_sgpr(*cu, *wf, 12, 2u << 16); // i32 elements.
+  write_wave_sgpr(*cu, *wf, 13, 0);
+  write_wave_sgpr(*cu, *wf, 14, 1u);              // tensor dim0 = 65536.
+  write_wave_sgpr(*cu, *wf, 15, 1u | (1u << 16)); // tensor dim1 = 65536, tile dim0 = 1.
+  write_wave_sgpr(*cu, *wf, 16, 1u | (1u << 16)); // tile dim1 and dim2.
+  write_wave_sgpr(*cu, *wf, 17, 0);
+  write_wave_sgpr(*cu, *wf, 18, 0);
+  write_wave_sgpr(*cu, *wf, 19, 0);
+  write_wave_sgpr(*cu, *wf, 20, 65536u); // tensor dim2.
+  write_wave_sgpr(*cu, *wf, 21, 65536u); // tensor dim3.
+  write_wave_sgpr(*cu, *wf, 22, 0);
+  write_wave_sgpr(*cu, *wf, 23, 1u << 16); // tile dim3.
+  write_wave_sgpr(*cu, *wf, 24, 0);
+  write_wave_sgpr(*cu, *wf, 25, 1u << 16); // tensor dim4.
+  write_wave_sgpr(*cu, *wf, 26, 1u << 16); // tile dim4.
+  write_wave_sgpr(*cu, *wf, 27, 0);
+
+  write_global_u32(*sim.memory, kGlobal, kValue);
+  cu->lds().write32(wf->lds_base(), 0xDEADDEADu);
+
+  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x18140c00u};
+  auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
+  ASSERT_NE(load, nullptr);
+  load->execute(*load, wf);
+
+  EXPECT_EQ(cu->lds().read32(wf->lds_base()), kValue);
+}
+
+TEST(Gfx1250ExecutionTest, TensorDmaIterateMasksSubrowOriginBeyondTensor) {
+  // Three one-element iterations walk a 2x1 tensor. The first two origins are
+  // valid dim0 coordinates; the third carries into dim1 and must zero-fill.
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  constexpr uint64_t kGlobal = 0x133000;
+  constexpr uint32_t kSentinel = 0xBAD0BAD0u;
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
+  write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 19)); // i32, iterate enabled.
+  write_wave_sgpr(*cu, *wf, 13, 2u << 16);                // tensor dim0.
+  write_wave_sgpr(*cu, *wf, 14, 1u << 16);                // tensor dim1.
+  write_wave_sgpr(*cu, *wf, 15, 1u << 16);                // tile dim0.
+  write_wave_sgpr(*cu, *wf, 16, 1u);                      // tile dim1.
+  write_wave_sgpr(*cu, *wf, 17, 2u);                      // tensor dim0 stride.
+  write_wave_sgpr(*cu, *wf, 18, 0);
+  write_wave_sgpr(*cu, *wf, 19, 0);
+  write_wave_sgpr(*cu, *wf, 20, 0);
+  write_wave_sgpr(*cu, *wf, 21, 1u);       // LDS increment in elements.
+  write_wave_sgpr(*cu, *wf, 22, 1u);       // Global increment in elements.
+  write_wave_sgpr(*cu, *wf, 23, 2u << 16); // iteration_count - 1.
+
+  for (uint32_t i = 0; i < 3; ++i) {
+    write_global_u32(*sim.memory, kGlobal + i * sizeof(uint32_t), 0x49000000u + i);
+    cu->lds().write32(wf->lds_base() + i * sizeof(uint32_t), kSentinel);
+  }
+
+  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c140c00u};
+  auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
+  ASSERT_NE(load, nullptr);
+  load->execute(*load, wf);
+
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 0 * 4), 0x49000000u);
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 1 * 4), 0x49000001u);
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 2 * 4), 0u);
+}
+
+TEST(Gfx1250ExecutionTest, TensorDmaIterateMasksPlanesBeyondTensorDimension) {
+  // The descriptor iterates across two planes of a tensor whose depth is one.
+  // The second plane must be zero-filled rather than copied.
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  constexpr uint64_t kGlobal = 0x134000;
+  constexpr uint32_t kSentinel = 0xFACEFACEu;
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
+  write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 19)); // i32, iterate enabled.
+  write_wave_sgpr(*cu, *wf, 13, 2u << 16);                // tensor dim0.
+  write_wave_sgpr(*cu, *wf, 14, 2u << 16);                // tensor dim1.
+  write_wave_sgpr(*cu, *wf, 15, 2u << 16);                // tile dim0.
+  write_wave_sgpr(*cu, *wf, 16, 1u | (1u << 16));         // tile dim1 and dim2.
+  write_wave_sgpr(*cu, *wf, 17, 2u);                      // tensor dim0 stride.
+  write_wave_sgpr(*cu, *wf, 18, 4u << 16);                // tensor dim1 stride.
+  write_wave_sgpr(*cu, *wf, 19, 0);
+  write_wave_sgpr(*cu, *wf, 20, 1u);       // tensor dim2.
+  write_wave_sgpr(*cu, *wf, 21, 2u);       // LDS increment in elements.
+  write_wave_sgpr(*cu, *wf, 22, 4u);       // Global increment in elements.
+  write_wave_sgpr(*cu, *wf, 23, 1u << 16); // iteration_count - 1.
+
+  for (uint32_t i = 0; i < 6; ++i)
+    write_global_u32(*sim.memory, kGlobal + i * sizeof(uint32_t), 0x4A000000u + i);
+  for (uint32_t i = 0; i < 4; ++i)
+    cu->lds().write32(wf->lds_base() + i * sizeof(uint32_t), kSentinel);
+
+  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c140c00u};
+  auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
+  ASSERT_NE(load, nullptr);
+  load->execute(*load, wf);
+
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 0 * 4), 0x4A000000u);
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 1 * 4), 0x4A000001u);
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 2 * 4), 0u);
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 3 * 4), 0u);
+}
+
+TEST(Gfx1250ExecutionTest, TensorDmaIterateRejectsOverlappingStrides) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  write_tensor_dma_d0(*cu, *wf, 0, 0x135000);
+  write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 19)); // i32, iterate enabled.
+  write_wave_sgpr(*cu, *wf, 13, 2u << 16);                // tensor dim0.
+  write_wave_sgpr(*cu, *wf, 14, 2u << 16);                // tensor dim1.
+  write_wave_sgpr(*cu, *wf, 15, 1u << 16);                // tile dim0.
+  write_wave_sgpr(*cu, *wf, 16, 1u);                      // tile dim1.
+  write_wave_sgpr(*cu, *wf, 17, 1u);                      // Overlaps tensor dim0.
+  write_wave_sgpr(*cu, *wf, 18, 0);
+  write_wave_sgpr(*cu, *wf, 19, 0);
+  write_wave_sgpr(*cu, *wf, 20, 0);
+  write_wave_sgpr(*cu, *wf, 21, 1u);
+  write_wave_sgpr(*cu, *wf, 22, 1u);
+  write_wave_sgpr(*cu, *wf, 23, 1u << 16);
+
+  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c140c00u};
+  auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
+  ASSERT_NE(load, nullptr);
+  EXPECT_THROW(load->execute(*load, wf), util::UnimplementedInst);
+}
+
+TEST(Gfx1250ExecutionTest, TensorDmaIterateAllowsAliasedUnitExtent) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  constexpr uint64_t kGlobal = 0x185000;
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
+  write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 19)); // i32, iterate enabled.
+  write_wave_sgpr(*cu, *wf, 13, 2u << 16);                // tensor dim0.
+  write_wave_sgpr(*cu, *wf, 14, 1u << 16);                // unit tensor dim1.
+  write_wave_sgpr(*cu, *wf, 15, 1u << 16);                // tile dim0.
+  write_wave_sgpr(*cu, *wf, 16, 1u);                      // tile dim1.
+  write_wave_sgpr(*cu, *wf, 17, 1u); // dim1 aliases dim0 but has only one coordinate.
+  write_wave_sgpr(*cu, *wf, 18, 0);
+  write_wave_sgpr(*cu, *wf, 19, 0);
+  write_wave_sgpr(*cu, *wf, 20, 0);
+  write_wave_sgpr(*cu, *wf, 21, 1u);       // LDS increment in elements.
+  write_wave_sgpr(*cu, *wf, 22, 1u);       // advance along tensor dim0.
+  write_wave_sgpr(*cu, *wf, 23, 1u << 16); // iteration_count - 1.
+
+  write_global_u32(*sim.memory, kGlobal, 0x55000000u);
+  write_global_u32(*sim.memory, kGlobal + sizeof(uint32_t), 0x55000001u);
+
+  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c140c00u};
+  auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
+  ASSERT_NE(load, nullptr);
+  load->execute(*load, wf);
+
+  EXPECT_EQ(cu->lds().read32(wf->lds_base()), 0x55000000u);
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + sizeof(uint32_t)), 0x55000001u);
+}
+
+TEST(Gfx1250ExecutionTest, TensorDmaIterateAllowsPermutedNonOverlappingStrides) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  constexpr uint64_t kGlobal = 0x183000;
+  constexpr uint32_t kSentinel = 0xDEADDEADu;
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
+  write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 19)); // i32, iterate enabled.
+  write_wave_sgpr(*cu, *wf, 13, 2u << 16);                // tensor dim0.
+  write_wave_sgpr(*cu, *wf, 14, 2u << 16);                // tensor dim1.
+  write_wave_sgpr(*cu, *wf, 15, 1u << 16);                // tile dim0.
+  write_wave_sgpr(*cu, *wf, 16, 1u | (1u << 16));         // tile dim1 and dim2.
+  write_wave_sgpr(*cu, *wf, 17, 4u);                      // tensor dim1 stride.
+  write_wave_sgpr(*cu, *wf, 18, 2u << 16);                // tensor dim2 stride.
+  write_wave_sgpr(*cu, *wf, 19, 0);
+  write_wave_sgpr(*cu, *wf, 20, 2u);       // tensor dim2.
+  write_wave_sgpr(*cu, *wf, 21, 1u);       // LDS increment in elements.
+  write_wave_sgpr(*cu, *wf, 22, 2u);       // advance along tensor dim2.
+  write_wave_sgpr(*cu, *wf, 23, 1u << 16); // iteration_count - 1.
+
+  for (uint32_t i = 0; i < 8; ++i)
+    write_global_u32(*sim.memory, kGlobal + i * sizeof(uint32_t), 0x52000000u + i);
+  cu->lds().write32(wf->lds_base(), kSentinel);
+  cu->lds().write32(wf->lds_base() + sizeof(uint32_t), kSentinel);
+
+  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c140c00u};
+  auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
+  ASSERT_NE(load, nullptr);
+  load->execute(*load, wf);
+
+  EXPECT_EQ(cu->lds().read32(wf->lds_base()), 0x52000000u);
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + sizeof(uint32_t)), 0x52000002u);
+}
+
+TEST(Gfx1250ExecutionTest, TensorDmaIterateAllowsRepeatedOriginWithOverlappingStrides) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  constexpr uint64_t kGlobal = 0x139000;
+  constexpr uint32_t kValue = 0x4D000000u;
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
+  write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 19)); // i32, iterate enabled.
+  write_wave_sgpr(*cu, *wf, 13, 2u << 16);                // tensor dim0.
+  write_wave_sgpr(*cu, *wf, 14, 2u << 16);                // tensor dim1.
+  write_wave_sgpr(*cu, *wf, 15, 1u << 16);                // tile dim0.
+  write_wave_sgpr(*cu, *wf, 16, 1u);                      // tile dim1.
+  write_wave_sgpr(*cu, *wf, 17, 1u);                      // overlapping tensor dim0 stride.
+  write_wave_sgpr(*cu, *wf, 18, 0);
+  write_wave_sgpr(*cu, *wf, 19, 0);
+  write_wave_sgpr(*cu, *wf, 20, 0);
+  write_wave_sgpr(*cu, *wf, 21, 1u);       // LDS increment in elements.
+  write_wave_sgpr(*cu, *wf, 22, 0);        // Global origin does not advance.
+  write_wave_sgpr(*cu, *wf, 23, 1u << 16); // iteration_count - 1.
+
+  write_global_u32(*sim.memory, kGlobal, kValue);
+  cu->lds().write32(wf->lds_base() + 0 * sizeof(uint32_t), 0xDEADDEADu);
+  cu->lds().write32(wf->lds_base() + 1 * sizeof(uint32_t), 0xDEADDEADu);
+
+  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c140c00u};
+  auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
+  ASSERT_NE(load, nullptr);
+  load->execute(*load, wf);
+
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 0 * sizeof(uint32_t)), kValue);
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + 1 * sizeof(uint32_t)), kValue);
+}
+
+TEST(Gfx1250ExecutionTest, TensorDmaIterateAllowsPaddedRowPlaneStride) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  constexpr uint64_t kGlobal = 0x13A000;
+  constexpr uint32_t kSentinel = 0xDEADDEADu;
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
+  write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 19)); // i32, iterate enabled.
+  write_wave_sgpr(*cu, *wf, 13, 2u << 16);                // tensor dim0.
+  write_wave_sgpr(*cu, *wf, 14, 2u << 16);                // tensor dim1.
+  write_wave_sgpr(*cu, *wf, 15, 1u << 16);                // tile dim0.
+  write_wave_sgpr(*cu, *wf, 16, 1u | (1u << 16));         // tile dim1 and dim2.
+  write_wave_sgpr(*cu, *wf, 17, 4u);                      // padded tensor dim0 stride.
+  write_wave_sgpr(*cu, *wf, 18, 6u << 16);                // occupied plane span.
+  write_wave_sgpr(*cu, *wf, 19, 0);
+  write_wave_sgpr(*cu, *wf, 20, 2u);       // tensor dim2.
+  write_wave_sgpr(*cu, *wf, 21, 1u);       // LDS increment in elements.
+  write_wave_sgpr(*cu, *wf, 22, 6u);       // Global plane increment in elements.
+  write_wave_sgpr(*cu, *wf, 23, 1u << 16); // iteration_count - 1.
+
+  write_global_u32(*sim.memory, kGlobal, 0x4E000000u);
+  write_global_u32(*sim.memory, kGlobal + 6 * sizeof(uint32_t), 0x4E000001u);
+  cu->lds().write32(wf->lds_base(), kSentinel);
+  cu->lds().write32(wf->lds_base() + sizeof(uint32_t), kSentinel);
+
+  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c140c00u};
+  auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
+  ASSERT_NE(load, nullptr);
+  load->execute(*load, wf);
+
+  EXPECT_EQ(cu->lds().read32(wf->lds_base()), 0x4E000000u);
+  EXPECT_EQ(cu->lds().read32(wf->lds_base() + sizeof(uint32_t)), 0x4E000001u);
+}
+
+TEST(Gfx1250ExecutionTest, TensorDmaIterateZeroExtentSkipsLayoutValidationAndCompletes) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  constexpr uint64_t kGlobal = 0x13B000;
+  constexpr uint32_t kElements = 4;
+  constexpr uint32_t kBarrierLdsAddr = 64;
+  constexpr uint32_t kGlobalSentinel = 0xAC1DAC1Du;
+  constexpr uint32_t kLdsSentinel = 0xDEADDEADu;
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
+  write_wave_sgpr(*cu, *wf, 12,
+                  (2u << 16) | (1u << 18) | (1u << 19)); // i32, atomic barrier and iterate enabled.
+  write_wave_sgpr(*cu, *wf, 13,
+                  (2u << 16) | (kBarrierLdsAddr >> 3)); // tensor dim0 and barrier address.
+  write_wave_sgpr(*cu, *wf, 14, 0);                     // tensor dim1 is empty.
+  write_wave_sgpr(*cu, *wf, 15, 2u << 16);              // tile dim0.
+  write_wave_sgpr(*cu, *wf, 16, 1u);                    // tile dim1.
+  write_wave_sgpr(*cu, *wf, 17, 1u);                    // overlaps tensor dim0.
+  write_wave_sgpr(*cu, *wf, 18, 0);
+  write_wave_sgpr(*cu, *wf, 19, 0);
+  write_wave_sgpr(*cu, *wf, 20, 0);
+  write_wave_sgpr(*cu, *wf, 21, 2u);       // LDS increment in elements.
+  write_wave_sgpr(*cu, *wf, 22, 1u);       // Global increment in elements.
+  write_wave_sgpr(*cu, *wf, 23, 1u << 16); // iteration_count - 1.
+
+  for (uint32_t i = 0; i < kElements; ++i)
+    cu->lds().write32(wf->lds_base() + i * sizeof(uint32_t), kLdsSentinel);
+  cu->lds().write64(wf->lds_base() + kBarrierLdsAddr, 0);
+
+  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c140c00u};
+  auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
+  ASSERT_NE(load, nullptr);
+  load->execute(*load, wf);
+
+  for (uint32_t i = 0; i < kElements; ++i)
+    EXPECT_EQ(cu->lds().read32(wf->lds_base() + i * sizeof(uint32_t)), 0u) << "element " << i;
+  EXPECT_EQ(wf->wait_counters().tensorcnt, 0u);
+  EXPECT_TRUE(wf->wait_counters().empty());
+  uint64_t barrier_state = cu->lds().read64(wf->lds_base() + kBarrierLdsAddr);
+  EXPECT_EQ(barrier_state, 0xffffull << 16);
+  EXPECT_TRUE(amdgpu::lds_barrier_cell_phase_parity(barrier_state));
+
+  for (uint32_t i = 0; i < 3; ++i)
+    write_global_u32(*sim.memory, kGlobal + i * sizeof(uint32_t), kGlobalSentinel);
+  for (uint32_t i = 0; i < kElements; ++i)
+    cu->lds().write32(wf->lds_base() + i * sizeof(uint32_t), 0x4F000000u + i);
+  cu->lds().write64(wf->lds_base() + kBarrierLdsAddr, 0);
+
+  const std::array<uint32_t, 3> store_words = {0xd0714001u, 0x7c000000u, 0x7c140c00u};
+  auto store = decode_gfx1250(store_words, "tensor_store_from_lds");
+  ASSERT_NE(store, nullptr);
+  store->execute(*store, wf);
+
+  for (uint32_t i = 0; i < 3; ++i)
+    EXPECT_EQ(read_global_u32(*sim.memory, kGlobal + i * sizeof(uint32_t)), kGlobalSentinel)
+        << "element " << i;
+  EXPECT_EQ(wf->wait_counters().tensorcnt, 0u);
+  EXPECT_TRUE(wf->wait_counters().empty());
+  barrier_state = cu->lds().read64(wf->lds_base() + kBarrierLdsAddr);
+  EXPECT_EQ(barrier_state, 0xffffull << 16);
+  EXPECT_TRUE(amdgpu::lds_barrier_cell_phase_parity(barrier_state));
 }
 
 TEST(Gfx1250ExecutionTest, TensorDmaAtomicBarrierArrivesAfterCopy) {
@@ -848,6 +1487,209 @@ TEST(Gfx1250ExecutionTest, TensorDmaGatherSupportsI16Indices) {
                 0x69000000u + src_row * 0x100u + col);
     }
   }
+}
+
+TEST(Gfx1250ExecutionTest, TensorDmaGatherZeroStrideAliasesRows) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  constexpr uint64_t kGlobal = 0x180800;
+  constexpr uint32_t kCols = 2;
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
+  write_wave_sgpr(*cu, *wf, 0, 1u | (1u << 31)); // gather enabled.
+  write_wave_sgpr(*cu, *wf, 12, 2u << 16);       // i32 elements.
+  write_wave_sgpr(*cu, *wf, 13, kCols << 16);    // tensor dim0.
+  write_wave_sgpr(*cu, *wf, 14, 2u << 16);       // tensor dim1.
+  write_wave_sgpr(*cu, *wf, 15, kCols << 16);    // tile dim0.
+  write_wave_sgpr(*cu, *wf, 16, 2u);             // two valid gather indices.
+  write_wave_sgpr(*cu, *wf, 17, 0);              // literal zero row stride.
+  write_wave_sgpr(*cu, *wf, 18, 0);
+  write_wave_sgpr(*cu, *wf, 19, 0);
+  write_wave_sgpr(*cu, *wf, 20, 0u | (1u << 16)); // gather rows 0 and 1.
+  write_wave_sgpr(*cu, *wf, 21, 0);
+  write_wave_sgpr(*cu, *wf, 22, 0);
+  write_wave_sgpr(*cu, *wf, 23, 0);
+  write_wave_sgpr(*cu, *wf, 24, 0);
+  write_wave_sgpr(*cu, *wf, 25, 0);
+  write_wave_sgpr(*cu, *wf, 26, 0);
+  write_wave_sgpr(*cu, *wf, 27, 0);
+
+  for (uint32_t col = 0; col < kCols; ++col)
+    write_global_u32(*sim.memory, kGlobal + col * sizeof(uint32_t), 0x6B000000u + col);
+
+  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x18140c00u};
+  auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
+  ASSERT_NE(load, nullptr);
+  load->execute(*load, wf);
+
+  for (uint32_t row = 0; row < 2; ++row) {
+    for (uint32_t col = 0; col < kCols; ++col)
+      EXPECT_EQ(cu->lds().read32(wf->lds_base() + (row * kCols + col) * sizeof(uint32_t)),
+                0x6B000000u + col);
+  }
+}
+
+TEST(Gfx1250ExecutionTest, TensorDmaGatherZeroExtentMasksEntireTile) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  constexpr uint64_t kGlobal = 0x181000;
+  constexpr uint32_t kTileElements = 2;
+  constexpr uint32_t kSentinel = 0xDEADDEADu;
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
+  write_wave_sgpr(*cu, *wf, 0, 1u | (1u << 31)); // gather enabled.
+  write_wave_sgpr(*cu, *wf, 12, 2u << 16);       // i32 elements.
+  write_wave_sgpr(*cu, *wf, 13, 0);              // tensor dim0 is empty.
+  write_wave_sgpr(*cu, *wf, 14, 0);
+  write_wave_sgpr(*cu, *wf, 15, kTileElements << 16);
+  write_wave_sgpr(*cu, *wf, 16, 1u); // one valid gather index.
+  write_wave_sgpr(*cu, *wf, 17, 0);
+  write_wave_sgpr(*cu, *wf, 18, 0);
+  write_wave_sgpr(*cu, *wf, 19, 0);
+  write_wave_sgpr(*cu, *wf, 20, 1u); // gather index.
+  write_wave_sgpr(*cu, *wf, 21, 0);
+  write_wave_sgpr(*cu, *wf, 22, 0);
+  write_wave_sgpr(*cu, *wf, 23, 0);
+  write_wave_sgpr(*cu, *wf, 24, 0);
+  write_wave_sgpr(*cu, *wf, 25, 0);
+  write_wave_sgpr(*cu, *wf, 26, 0);
+  write_wave_sgpr(*cu, *wf, 27, 0);
+
+  for (uint32_t i = 0; i < 3; ++i)
+    write_global_u32(*sim.memory, kGlobal + i * sizeof(uint32_t), 0x6A000000u + i);
+  for (uint32_t i = 0; i < kTileElements; ++i)
+    cu->lds().write32(wf->lds_base() + i * sizeof(uint32_t), kSentinel);
+
+  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x18140c00u};
+  auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
+  ASSERT_NE(load, nullptr);
+  load->execute(*load, wf);
+
+  for (uint32_t i = 0; i < kTileElements; ++i)
+    EXPECT_EQ(cu->lds().read32(wf->lds_base() + i * sizeof(uint32_t)), 0u) << "element " << i;
+}
+
+TEST(Gfx1250ExecutionTest, TensorDmaGatherRankTwoZeroExtentMasksLoadAndStore) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  constexpr uint64_t kGlobal = 0x182000;
+  constexpr uint32_t kRows = 4;
+  constexpr uint32_t kTileElements = 2;
+  constexpr uint32_t kGlobalSentinel = 0xAC1DAC1Du;
+  constexpr uint32_t kLdsSentinel = 0xDEADDEADu;
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
+  write_wave_sgpr(*cu, *wf, 0, 1u | (1u << 31)); // gather enabled.
+  write_wave_sgpr(*cu, *wf, 12, 2u << 16);       // i32 elements.
+  write_wave_sgpr(*cu, *wf, 13, 0);              // tensor dim0 is empty.
+  write_wave_sgpr(*cu, *wf, 14, kRows << 16);    // tensor dim1 keeps rank two.
+  write_wave_sgpr(*cu, *wf, 15, kTileElements << 16);
+  write_wave_sgpr(*cu, *wf, 16, 1u); // one valid gather index.
+  write_wave_sgpr(*cu, *wf, 17, kTileElements);
+  write_wave_sgpr(*cu, *wf, 18, 0);
+  write_wave_sgpr(*cu, *wf, 19, 0);
+  write_wave_sgpr(*cu, *wf, 20, 1u); // gather index.
+  write_wave_sgpr(*cu, *wf, 21, 0);
+  write_wave_sgpr(*cu, *wf, 22, 0);
+  write_wave_sgpr(*cu, *wf, 23, 0);
+  write_wave_sgpr(*cu, *wf, 24, 0);
+  write_wave_sgpr(*cu, *wf, 25, 0);
+  write_wave_sgpr(*cu, *wf, 26, 0);
+  write_wave_sgpr(*cu, *wf, 27, 0);
+
+  for (uint32_t i = 0; i < kRows * kTileElements; ++i)
+    write_global_u32(*sim.memory, kGlobal + i * sizeof(uint32_t), 0x50000000u + i);
+  for (uint32_t i = 0; i < kTileElements; ++i)
+    cu->lds().write32(wf->lds_base() + i * sizeof(uint32_t), kLdsSentinel);
+
+  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x18140c00u};
+  auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
+  ASSERT_NE(load, nullptr);
+  load->execute(*load, wf);
+
+  for (uint32_t i = 0; i < kTileElements; ++i)
+    EXPECT_EQ(cu->lds().read32(wf->lds_base() + i * sizeof(uint32_t)), 0u) << "element " << i;
+
+  for (uint32_t i = 0; i < kRows * kTileElements; ++i)
+    write_global_u32(*sim.memory, kGlobal + i * sizeof(uint32_t), kGlobalSentinel);
+  for (uint32_t i = 0; i < kTileElements; ++i)
+    cu->lds().write32(wf->lds_base() + i * sizeof(uint32_t), 0x51000000u + i);
+
+  const std::array<uint32_t, 3> store_words = {0xd0714001u, 0x7c000000u, 0x18140c00u};
+  auto store = decode_gfx1250(store_words, "tensor_store_from_lds");
+  ASSERT_NE(store, nullptr);
+  store->execute(*store, wf);
+
+  for (uint32_t i = 0; i < kRows * kTileElements; ++i)
+    EXPECT_EQ(read_global_u32(*sim.memory, kGlobal + i * sizeof(uint32_t)), kGlobalSentinel)
+        << "element " << i;
+}
+
+TEST(Gfx1250ExecutionTest, TensorDmaGatherRankTwoZeroOuterExtentMasksLoadAndStore) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  constexpr uint64_t kGlobal = 0x184000;
+  constexpr uint32_t kTileElements = 2;
+  constexpr uint32_t kGlobalSentinel = 0xAC1DAC1Du;
+  constexpr uint32_t kLdsSentinel = 0xDEADDEADu;
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
+  write_wave_sgpr(*cu, *wf, 0, 1u | (1u << 31)); // gather enabled.
+  write_wave_sgpr(*cu, *wf, 12, 2u << 16);       // i32 elements.
+  write_wave_sgpr(*cu, *wf, 13, 2u << 16);       // tensor dim0.
+  write_wave_sgpr(*cu, *wf, 14, 0);              // tensor dim1 is empty.
+  write_wave_sgpr(*cu, *wf, 15, kTileElements << 16);
+  write_wave_sgpr(*cu, *wf, 16, 1u); // one valid gather index.
+  write_wave_sgpr(*cu, *wf, 17, kTileElements);
+  write_wave_sgpr(*cu, *wf, 18, 0);
+  write_wave_sgpr(*cu, *wf, 19, 0);
+  write_wave_sgpr(*cu, *wf, 20, 0); // gather index.
+  write_wave_sgpr(*cu, *wf, 21, 0);
+  write_wave_sgpr(*cu, *wf, 22, 0);
+  write_wave_sgpr(*cu, *wf, 23, 0);
+  write_wave_sgpr(*cu, *wf, 24, 0);
+  write_wave_sgpr(*cu, *wf, 25, 0);
+  write_wave_sgpr(*cu, *wf, 26, 0);
+  write_wave_sgpr(*cu, *wf, 27, 0);
+
+  for (uint32_t i = 0; i < kTileElements; ++i) {
+    write_global_u32(*sim.memory, kGlobal + i * sizeof(uint32_t), 0x53000000u + i);
+    cu->lds().write32(wf->lds_base() + i * sizeof(uint32_t), kLdsSentinel);
+  }
+
+  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x18140c00u};
+  auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
+  ASSERT_NE(load, nullptr);
+  load->execute(*load, wf);
+
+  for (uint32_t i = 0; i < kTileElements; ++i)
+    EXPECT_EQ(cu->lds().read32(wf->lds_base() + i * sizeof(uint32_t)), 0u) << "element " << i;
+
+  for (uint32_t i = 0; i < kTileElements; ++i) {
+    write_global_u32(*sim.memory, kGlobal + i * sizeof(uint32_t), kGlobalSentinel);
+    cu->lds().write32(wf->lds_base() + i * sizeof(uint32_t), 0x54000000u + i);
+  }
+
+  const std::array<uint32_t, 3> store_words = {0xd0714001u, 0x7c000000u, 0x18140c00u};
+  auto store = decode_gfx1250(store_words, "tensor_store_from_lds");
+  ASSERT_NE(store, nullptr);
+  store->execute(*store, wf);
+
+  for (uint32_t i = 0; i < kTileElements; ++i)
+    EXPECT_EQ(read_global_u32(*sim.memory, kGlobal + i * sizeof(uint32_t)), kGlobalSentinel)
+        << "element " << i;
 }
 
 } // namespace

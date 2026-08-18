@@ -665,6 +665,7 @@ if(BUILD_TESTS)
       ce/CeInternalMPITests.cpp
       GrowMPITests.cpp
       GinNcclTimeoutMPITests.cpp
+      InspectorPromP2pMPITests.cpp
       SymmetricKernelMPITests.cpp
       SymmetricWindowMPITests.cpp
       DeviceApiMPITests.cpp
@@ -674,6 +675,14 @@ if(BUILD_TESTS)
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsMPI)
+
+    # Hand the in-tree Inspector plugin to InspectorPromP2pMPITests so it can
+    # load a profiler without the caller setting NCCL_INSPECTOR_PLUGIN_SO.
+    if(TARGET rccl-profiler-inspector)
+      add_dependencies(rccl-UnitTestsMPI rccl-profiler-inspector)
+      target_compile_definitions(rccl-UnitTestsMPI PRIVATE
+        RCCL_INSPECTOR_PLUGIN_SO="$<TARGET_FILE:rccl-profiler-inspector>")
+    endif()
   endif()
 
   foreach(test_executable IN LISTS RCCL_TEST_EXECUTABLES)

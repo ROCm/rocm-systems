@@ -1776,4 +1776,40 @@ TEST(AccVgprSrcCanonicalizationTest, LegalRawSrcResolvesToUnifiedAccIndex) {
   }
 }
 
+TEST(Cdna4DecodeTest, RejectsVop3px2PrefixWithoutMfmaSuffix) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  const uint32_t unrelated_opcode[] = {
+      0xD3AC0000u,
+      0x00000000u,
+      0xD3AC0000u,
+      0x00000000u,
+  };
+  EXPECT_THROW(static_cast<void>(decoder->decode(unrelated_opcode)), util::InvalidInst);
+
+  const uint32_t wrong_encoding[] = {
+      0xD3AC0000u,
+      0x00000000u,
+      0xD32D0000u,
+      0x00000000u,
+  };
+  EXPECT_THROW(static_cast<void>(decoder->decode(wrong_encoding)), util::InvalidInst);
+}
+
+TEST(Cdna4DecodeTest, MfmaScaleF8f6f4AcceptsSecondVop3px2Suffix) {
+  const uint32_t words[] = {
+      0xD3AC0000u,
+      0x00000000u,
+      0xD3AE0000u,
+      0x04020100u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_mfma_f32_32x32x64_f8f6f4");
+  EXPECT_EQ(inst->size(), sizeof(words));
+}
 } // namespace

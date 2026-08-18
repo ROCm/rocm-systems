@@ -1692,7 +1692,7 @@ TEST(ExecutionPluginTest, SdwaFloatingModifiersUseSemanticSourceWidth) {
     std::unique_ptr<Instruction> bf16_inst(
         decoder->decode(reinterpret_cast<const uint32_t *>(&cvt_bf16)));
     ASSERT_NE(bf16_inst, nullptr);
-    ASSERT_EQ(std::string_view(bf16_inst->mnemonic()), "v_cvt_f32_bf16_e32");
+    ASSERT_EQ(std::string_view(bf16_inst->mnemonic()), "v_cvt_f32_bf16_sdwa");
     cu->write_vgpr(vb + kSrc0, 0, 0xCAFE'C000u);
     cu->execute_instruction(bf16_inst.get(), *wf);
     EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), std::bit_cast<uint32_t>(2.0f));
