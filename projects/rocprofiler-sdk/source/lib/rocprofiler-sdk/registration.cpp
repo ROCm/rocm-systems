@@ -395,7 +395,7 @@ emplace_client(Tp&                                 data,
         }
     }
 
-    ROCP_WARNING << fmt::format("registering new client library '{}'", _name);
+    ROCP_INFO << fmt::format("registering new client library '{}'", _name);
     auto& client = data.emplace_back(std::move(_client_v));
     return client;
 }
@@ -1174,7 +1174,11 @@ rocprofiler_is_finalized(int* status)
 rocprofiler_status_t
 rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
 {
+    using scoped_lock_t = rocprofiler::registration::scoped_lock_t;
+
     rocprofiler::registration::init_logging();
+
+    if(rocprofiler::registration::get_fini_status() != 0) return ROCPROFILER_STATUS_ERROR_FINALIZED;
 
     ROCP_INFO << "forcing rocprofiler configuration";
 
@@ -1189,6 +1193,7 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
     auto _forced_cfg_info = forced_config_info{};
     if(forced_configs)
     {
+        auto _lk         = scoped_lock_t{rocprofiler::registration::get_registration_mutex()};
         _forced_cfg_info = forced_configs->wlock(
             [](auto& _forced_configures, auto _configure_func) {
                 if(_forced_configures.find(_configure_func) != _forced_configures.end())
@@ -1212,8 +1217,6 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
     {
         ROCP_INFO << "adding forced configure";
         {
-            using scoped_lock_t = rocprofiler::registration::scoped_lock_t;
-
             auto  _lk     = scoped_lock_t{rocprofiler::registration::get_registration_mutex()};
             auto& _client = emplace_client(*rocprofiler::registration::get_clients(),
                                            "(forced...)",
