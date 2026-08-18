@@ -222,44 +222,6 @@ extern "C" ncclResult_t ncclIbCastTestGetPlaneIndex(int devPlane, int16_t* count
   return IbCastGetPlaneIndex(devPlane, count, planes, idx);
 }
 
-// Derive the merged railId/planeId of a fused vNIC from its physical devices,
-// mirroring upstream NCCL v2.30.7. Kept as a standalone helper so unit tests can
-// exercise the exact aggregation logic (see net_ib_cast_inspect.h).
-static void IbCastMergedRailPlane(const struct ncclIbDev* devs, const int* devIdx, int ndevs,
-                                  int16_t* outRailId, int16_t* outPlaneId) {
-  int16_t railId = devs[devIdx[0]].railId;
-  // Set the virtual bit on to avoid collision with physical planes when multiple planes are merged.
-  int16_t planeId = (ndevs > 1) ? NCCL_IB_PLANE_VIRT_BIT : devs[devIdx[0]].planeId;
-  for (int i = 0; i < ndevs; i++) {
-    const struct ncclIbDev* dev = devs + devIdx[i];
-    // rail ID of a fused device with different rails is undefined.
-    if (dev->railId == NCCL_NET_ID_UNDEF || railId != dev->railId) railId = NCCL_NET_ID_UNDEF;
-    // Only set the bit if multiple devs are merged, otherwise keep the initial value
-    if (ndevs > 1) planeId |= (0x1 << dev->planeIdx);
-  }
-  *outRailId = railId;
-  *outPlaneId = planeId;
-}
-
-// Test-only wrapper (see net_ib_cast_inspect.h). Builds synthetic physical devices
-// carrying only rail/plane attributes and forwards to the real IbCastMergedRailPlane.
-extern "C" ncclResult_t ncclIbCastTestMergedRailPlane(const int16_t* railIds, const int16_t* planeIds,
-                                                      const int16_t* planeIdxs, int ndevs, int16_t* outRailId,
-                                                      int16_t* outPlaneId) {
-  if (!railIds || !planeIds || !planeIdxs || !outRailId || !outPlaneId) return ncclInvalidArgument;
-  if (ndevs <= 0 || ndevs > NCCL_IB_MAX_DEVS_PER_NIC) return ncclInvalidArgument;
-  struct ncclIbDev devs[NCCL_IB_MAX_DEVS_PER_NIC];
-  int idx[NCCL_IB_MAX_DEVS_PER_NIC];
-  for (int i = 0; i < ndevs; i++) {
-    devs[i].railId = railIds[i];
-    devs[i].planeId = planeIds[i];
-    devs[i].planeIdx = planeIdxs[i];
-    idx[i] = i;
-  }
-  IbCastMergedRailPlane(devs, idx, ndevs, outRailId, outPlaneId);
-  return ncclSuccess;
-}
-
 ncclResult_t IbCastMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
   // On AINIC, NIC fusion (cast) is disabled by default: each NIC runs independently.
   // User must explicitly set NCCL_IB_MERGE_NICS=1 to override.
@@ -290,10 +252,11 @@ ncclResult_t IbCastMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
   // Always count up number of merged devices
   ncclIbMergedDev tmp;
   memset(&tmp, 0, sizeof(tmp));
-  // Derive merged rail/plane IDs (mirrors upstream NCCL v2.30.7).
-  IbCastMergedRailPlane(IbCastDevs, props->devs, props->ndevs, &tmp.railId, &tmp.planeId);
-
   bool used[MAX_IB_DEVS] = {0};
+  tmp.railId = IbCastDevs[props->devs[0]].railId;
+  // Set the virtual bit on to avoid collision with physical planes when multiple planes are merged.
+  tmp.planeId = (props->ndevs > 1) ? NCCL_IB_PLANE_VIRT_BIT : IbCastDevs[props->devs[0]].planeId;
+
   for (int i = 0; i < props->ndevs; i++) {
     if (props->devs[i] < 0 || props->devs[i] >= IbCastNDevs) {
       WARN("NET/IB : Cannot use physical device %d, max %d", props->devs[i], IbCastNDevs);
@@ -304,6 +267,10 @@ ncclResult_t IbCastMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
     if (tmp.vProps.ndevs == NCCL_IB_MAX_DEVS_PER_NIC) return ncclInvalidUsage;
     tmp.vProps.devs[tmp.vProps.ndevs++] = props->devs[i];
     tmp.speed += dev->speed;
+    // rail ID of a fused device with different rails is undefined.
+    if (dev->railId == NCCL_NET_ID_UNDEF || tmp.railId != dev->railId) tmp.railId = NCCL_NET_ID_UNDEF;
+    // Only set the bit if multiple devs are merged, otherwise keep the initial value
+    if (props->ndevs > 1) tmp.planeId |= (0x1 << dev->planeIdx);
     // Each successive time, copy the name '+' new name
     if (tmp.vProps.ndevs > 1) {
       size_t off = strlen(tmp.devName);

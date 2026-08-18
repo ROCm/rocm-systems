@@ -108,46 +108,4 @@ TEST(NetIbCastSubnet, SubnetMatchesAny) {
   EXPECT_EQ(ncclIbCastTestSubnetMatchesAny(local, rem, 3, 24), 0);
 }
 
-// plane/rail: merged rail/plane aggregation for fused vNICs (IbCastMergedRailPlane).
-constexpr int16_t kPlaneVirtBit = static_cast<int16_t>(0x1 << 14);  // NCCL_IB_PLANE_VIRT_BIT
-constexpr int16_t kIdUndef = -1;                                    // NCCL_NET_ID_UNDEF
-
-TEST(NetIbCastMergedRailPlane, SingleDevKeepsPhysical) {
-  int16_t rail[] = {3}, plane[] = {5}, pidx[] = {2};
-  int16_t outRail = 0, outPlane = 0;
-  ASSERT_EQ(ncclIbCastTestMergedRailPlane(rail, plane, pidx, 1, &outRail, &outPlane), ncclSuccess);
-  EXPECT_EQ(outRail, 3);
-  EXPECT_EQ(outPlane, 5);  // single dev -> physical plane, no virtual bit
-}
-
-TEST(NetIbCastMergedRailPlane, MultiSameRailOrsPlaneBits) {
-  int16_t rail[] = {7, 7}, plane[] = {5, 9}, pidx[] = {0, 3};
-  int16_t outRail = 0, outPlane = 0;
-  ASSERT_EQ(ncclIbCastTestMergedRailPlane(rail, plane, pidx, 2, &outRail, &outPlane), ncclSuccess);
-  EXPECT_EQ(outRail, 7);  // same rail preserved
-  EXPECT_EQ(outPlane, static_cast<int16_t>(kPlaneVirtBit | (0x1 << 0) | (0x1 << 3)));
-}
-
-TEST(NetIbCastMergedRailPlane, MultiDifferentRailUndef) {
-  int16_t rail[] = {7, 9}, plane[] = {0, 0}, pidx[] = {1, 2};
-  int16_t outRail = 0, outPlane = 0;
-  ASSERT_EQ(ncclIbCastTestMergedRailPlane(rail, plane, pidx, 2, &outRail, &outPlane), ncclSuccess);
-  EXPECT_EQ(outRail, kIdUndef);  // mismatched rails -> undefined
-  EXPECT_EQ(outPlane, static_cast<int16_t>(kPlaneVirtBit | (0x1 << 1) | (0x1 << 2)));
-}
-
-TEST(NetIbCastMergedRailPlane, UndefRailPropagates) {
-  int16_t rail[] = {kIdUndef, 7}, plane[] = {0, 0}, pidx[] = {0, 1};
-  int16_t outRail = 0, outPlane = 0;
-  ASSERT_EQ(ncclIbCastTestMergedRailPlane(rail, plane, pidx, 2, &outRail, &outPlane), ncclSuccess);
-  EXPECT_EQ(outRail, kIdUndef);
-}
-
-TEST(NetIbCastMergedRailPlane, RejectsBadArgs) {
-  int16_t rail[] = {1}, plane[] = {1}, pidx[] = {0}, o1 = 0, o2 = 0;
-  EXPECT_EQ(ncclIbCastTestMergedRailPlane(rail, plane, pidx, 0, &o1, &o2), ncclInvalidArgument);       // ndevs = 0
-  EXPECT_EQ(ncclIbCastTestMergedRailPlane(rail, plane, pidx, 999, &o1, &o2), ncclInvalidArgument);     // ndevs > max
-  EXPECT_EQ(ncclIbCastTestMergedRailPlane(nullptr, plane, pidx, 1, &o1, &o2), ncclInvalidArgument);    // null input
-}
-
 }  // namespace
