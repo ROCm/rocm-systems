@@ -39,22 +39,36 @@ if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx906$" OR ROCPROFILER_MEMCHECK)
     set(IS_HW_COUNTERS_DISABLED ON)
 endif()
 
-# The pmc-check tests below validate a specific counter list that includes GL2C_HIT. GL2C
-# is an RDNA (gfx10/11/12) cache block; on CDNA (e.g. gfx9xx / MI300) the equivalent L2
-# counter is TCC_HIT, so this exact list cannot be resolved there and pmc-check fails.
-# Restrict these checks to the architectures where the listed counters actually exist
-# (RDNA, e.g. a gfx11-class GPU on WSL2).
-#
-# Additionally require /dev/kfd: these tests target device 0 (`-d 0` / `device=0`), but on
-# WSL the only GPU is enumerated at index 1 (a synthetic CPU agent occupies index 0), so
-# `-d 0` resolves to the CPU and pmc-check aborts with "Invalid device id : 0". Gating on
-# /dev/kfd skips them on the WSL/dxg path (where hardware counters cannot be collected
-# anyway) while leaving them enabled on native Linux with a real KFD device.
-set(IS_RDNA_COUNTER_CHECK_DISABLED ON)
-if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx(10|11|12)[0-9][0-9]$"
-   AND NOT ROCPROFILER_MEMCHECK
-   AND _KFD_AVAILABLE)
-    set(IS_RDNA_COUNTER_CHECK_DISABLED OFF)
+# The pmc-check tests below validate a concrete counter list, and its L2-cache counter is
+# spelled per-family: CDNA/GCN (gfx9xx) defines TCC_HIT and RDNA (gfx10/11/12) defines
+# GL2C_HIT. See source/share/rocprofiler-sdk/config.yaml, which is the file the SDK loads
+# at run time. Emitting the wrong one makes the list unresolvable and pmc-check fails, so
+# select the name that GPU-0 actually defines.
+set(COUNTER_CHECK_L2_HIT "")
+if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx9[0-9a-f][0-9a-f]$"
+   AND NOT "${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx906$")
+    # gfx906 is excluded for the same reason as IS_HW_COUNTERS_DISABLED above: its
+    # counters cannot be queried.
+    set(COUNTER_CHECK_L2_HIT TCC_HIT)
+elseif("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx(10|11|12)[0-9][0-9]$"
+       AND _KFD_AVAILABLE)
+    # RDNA additionally requires /dev/kfd: these tests target device 0 (`-d 0` /
+    # `device=0`), but on the WSL/dxg path the only GPU is enumerated at index 1 (a
+    # synthetic CPU agent occupies index 0), so `-d 0` resolves to the CPU and pmc-check
+    # aborts with "Invalid device id : 0". Only RDNA reaches the dxg path, so a missing
+    # /dev/kfd on CDNA means the *build* host has no KFD passthrough, which says nothing
+    # about the test host and must not skip the test.
+    set(COUNTER_CHECK_L2_HIT GL2C_HIT)
+endif()
+
+set(IS_COUNTER_CHECK_DISABLED ON)
+if(COUNTER_CHECK_L2_HIT AND NOT ROCPROFILER_MEMCHECK)
+    set(IS_COUNTER_CHECK_DISABLED OFF)
+else()
+    # Nothing selected the counter, so the tests below are disabled; still name one, so a
+    # disabled test is registered with a well-formed command rather than a bare
+    # ":device=0".
+    set(COUNTER_CHECK_L2_HIT TCC_HIT)
 endif()
 
 # PC sampling is not available on navi2/3/4 (gfx10/11/12), gfx906, under memcheck, or when
@@ -116,22 +130,22 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-avail-test-check-hw-counters
     COMMAND ${Python3_EXECUTABLE} $<TARGET_FILE:rocprofiler-sdk::rocprofv3-avail> -d 0
-            pmc-check SQ_WAVES GRBM_COUNT GL2C_HIT
+            pmc-check SQ_WAVES GRBM_COUNT ${COUNTER_CHECK_L2_HIT}
     DEPENDS rocprofiler-sdk::rocprofv3-avail
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
-    DISABLED "${IS_RDNA_COUNTER_CHECK_DISABLED}")
+    DISABLED "${IS_COUNTER_CHECK_DISABLED}")
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-avail-test-check-hw-counters_2
     COMMAND ${Python3_EXECUTABLE} $<TARGET_FILE:rocprofiler-sdk::rocprofv3-avail>
-            pmc-check SQ_WAVES GRBM_COUNT GL2C_HIT:device=0
+            pmc-check SQ_WAVES GRBM_COUNT ${COUNTER_CHECK_L2_HIT}:device=0
     DEPENDS rocprofiler-sdk::rocprofv3-avail
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
-    DISABLED "${IS_RDNA_COUNTER_CHECK_DISABLED}")
+    DISABLED "${IS_COUNTER_CHECK_DISABLED}")
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-avail-test-info
