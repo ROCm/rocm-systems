@@ -19,17 +19,21 @@
 #     "smoke": true); schedule/manual run the full plan (all enabled suites).
 #
 # Triggers: manual (workflow_dispatch), nightly (schedule) against the default
-# branch, and label-gated on PRs -- add the "crusoe-linux-slurm-scale-runner" label to run the smoke
-# subset. Not a required merge gate.
+# branch, and label-gated on PRs -- add the "crusoe-linux-slurm-scale-runner"
+# label to run the smoke subset. Not a required merge gate.
 #
 # Build strategy: the runner is a SLURM submit node with no local GPUs, so
-# everything runs inside one SLURM batch job (sbatch --wait) on the GPU compute
-# nodes. Phase 0 builds RCCL fresh with --enable-mpi-tests from this run's own
-# checkout on the compute node (install.sh defaults -j to $(nproc), using all of
-# the node's cores). The single test run then loads that fresh build: gtest
-# suites use the freshly built rccl-UnitTestsMPI binary, and rccl-tests perf
-# suites use prebuilt rccl-tests binaries that load the fresh librccl.so via
+# everything runs inside one SLURM batch job on the GPU compute nodes. Phase 0
+# builds RCCL fresh with --enable-mpi-tests from this run's own checkout on the
+# compute node (install.sh defaults -j to $(nproc), using all of the node's
+# cores). The single test run then loads that fresh build: gtest suites use the
+# freshly built rccl-UnitTestsMPI binary, and rccl-tests perf suites use
+# prebuilt rccl-tests binaries that load the fresh librccl.so via
 # LD_LIBRARY_PATH.
+#
+# Crusoe SLURM note: this cluster's sbatch wrapper has no --wait, so the submit
+# step uses sbatch --parsable, streams the NFS log with tail -F, and takes the
+# job's ExitCode from scontrol once the job leaves the queue.
 name: RCCL AINIC Crusoe gfx950 Runner
 
 on:
@@ -66,10 +70,6 @@ on:
         description: 'SLURM partition to allocate GPU nodes from (empty = env default)'
         required: false
         default: ''
-      salloc_account:
-        description: 'SLURM account to charge (empty = env default)'
-        required: false
-        default: ''
       salloc_reservation:
         description: 'SLURM reservation holding the AINIC GPU nodes (empty = env default)'
         required: false
@@ -99,10 +99,10 @@ permissions:
   contents: read
 
 env:
-  # Shared CI root on the Crusoe cluster (configs, prebuilt libs, artifacts).
-  RCCL_CI_ROOT: /it-shared/rccl-ci
+  # Shared CI root on the Crusoe cluster. /it-shared is read-only; artifacts go to /shared_nfs.
+  RCCL_CI_ROOT: /shared_nfs/rccl-ci
   TEST_RUNNER_DIR: projects/rccl/tools/scripts/test_runner
-  DEFAULT_WORKDIR: /it-shared/rccl-ci/rocm-systems
+  DEFAULT_WORKDIR: /shared_nfs/rccl-ci/rocm-systems
   DEFAULT_MPI_PATH: /opt/openmpi
   DEFAULT_ROCM_PATH: /opt/rocm
   # Prebuilt rccl-tests perf binaries for the rccl-tests-sweeps category (they
@@ -112,7 +112,6 @@ env:
   # SLURM allocation defaults (single source of truth; workflow_dispatch inputs
   # override them when non-empty).
   DEFAULT_SALLOC_PARTITION: amd-spur
-  DEFAULT_SALLOC_ACCOUNT: amd-spur
   DEFAULT_SALLOC_RESERVATION: ''
   DEFAULT_SALLOC_NODES: '2'
   DEFAULT_SALLOC_TIME: '04:00:00'
@@ -122,9 +121,10 @@ env:
 jobs:
   crusoe-ainic-test-runner:
     # On PRs, run only for same-repo branches (never forks) that carry the
-    # "crusoe-linux-slurm-scale-runner" label -- the same-repo guard stops a labeled fork PR from
-    # running updated fork code on the self-hosted runner via later synchronize
-    # events. All other events (workflow_dispatch, schedule) always run.
+    # "crusoe-linux-slurm-scale-runner" label -- the same-repo guard stops a
+    # labeled fork PR from running updated fork code on the self-hosted runner
+    # via later synchronize events. All other events (workflow_dispatch,
+    # schedule) always run.
     if: >-
       github.event_name != 'pull_request' ||
       (github.event.pull_request.head.repo.full_name == github.repository &&
@@ -173,7 +173,6 @@ jobs:
           # schedule runs the full plan.
           SCOPE: ${{ github.event_name == 'pull_request' && 'smoke' || (github.event.inputs.scope || 'nightly') }}
           SALLOC_PARTITION: ${{ github.event.inputs.salloc_partition || env.DEFAULT_SALLOC_PARTITION }}
-          SALLOC_ACCOUNT: ${{ github.event.inputs.salloc_account || env.DEFAULT_SALLOC_ACCOUNT }}
           SALLOC_RESERVATION: ${{ github.event.inputs.salloc_reservation || env.DEFAULT_SALLOC_RESERVATION }}
           SALLOC_NODES: ${{ github.event.inputs.salloc_nodes || env.DEFAULT_SALLOC_NODES }}
           SALLOC_TIME: ${{ github.event.inputs.salloc_time || env.DEFAULT_SALLOC_TIME }}
@@ -183,8 +182,7 @@ jobs:
 
           # Run inside a SLURM batch job (sbatch, not interactive salloc): it
           # decouples compute from the runner's shell so a transient runner hiccup
-          # can't tear down the allocation, and `--wait` makes sbatch's exit code
-          # equal the job's exit code for gating. Inside the job
+          # can't tear down the allocation. Inside the job
           # SLURM_JOB_ID/SLURM_NODELIST are set, test_runner calls
           # `scontrol show hostnames`, and mpirun lands ranks on real GPUs.
           # --exclusive gives full CPUs per node so `--bind-to numa` has room.
@@ -214,16 +212,19 @@ jobs:
           cat > "${BATCH_SCRIPT}" <<'BATCH'
           #!/bin/bash
           set -o pipefail
+          ulimit -l unlimited 2>/dev/null || true
+          export PATH="/opt/openmpi/bin:/opt/rocm/bin:${PATH}"
+          export LD_LIBRARY_PATH="/opt/ucx/lib:/opt/openmpi/lib:/opt/rocm/lib:${LD_LIBRARY_PATH:-}"
           cd "${GITHUB_WORKSPACE}/${TEST_RUNNER_DIR}"
 
           # Phase 0: build RCCL with --enable-mpi-tests on THIS compute node
-          # rather than the 8-core submit node. RCCL_BUILD_DIR is intentionally not
+          # rather than the submit node. RCCL_BUILD_DIR is intentionally not
           # in the environment here (only RUN_RCCL_BUILD_DIR is), so test_runner
           # does a real build instead of treating it as a prebuilt library:
           # test_runner.py invokes install.sh, which defaults -j to $(nproc) and
           # therefore uses ALL of the compute node's cores. WORKDIR points at this
           # run's own checkout so install.sh and the build tree resolve there (on
-          # NFS /home, shared with every node in the allocation). The build is
+          # NFS, shared with every node in the allocation). The build is
           # always required: gtest suites need the fresh rccl-UnitTestsMPI binary,
           # and the perf suites load the freshly built librccl.so via
           # LD_LIBRARY_PATH.
@@ -260,28 +261,25 @@ jobs:
             --system ainic \
             --no-build \
             --scope "${SCOPE}" \
-            --report-suffix crusoe \
+            --report-suffix ainic \
             2>&1 | tee "${RUNNER_TEMP}/crusoe_run.log"
           exit $?
           BATCH
 
+          # The workflow `run: |` block indents the heredoc body; strip that so
+          # the job script starts with a valid shebang for this cluster's sbatch.
+          sed -i 's/^          //' "${BATCH_SCRIPT}"
           chmod +x "${BATCH_SCRIPT}"
           : > "${SLURM_OUT}"
 
           echo "Submitting sbatch job (partition=${SALLOC_PARTITION} nodes=${SALLOC_NODES} time=${SALLOC_TIME})..."
-          # --wait: sbatch blocks until the job finishes and exits with the job's
-          # exit code. Backgrounded so we can stream the job's output live into the
-          # step log via tail -F while it runs.
-          ACCOUNT_ARG=""
-          if [ -n "${SALLOC_ACCOUNT}" ]; then
-            ACCOUNT_ARG="--account=${SALLOC_ACCOUNT}"
-          fi
-
-          sbatch --wait \
+          # Crusoe's sbatch wrapper has no --wait. Submit, stream the NFS log,
+          # then take the job's ExitCode from scontrol once it leaves the queue.
+          JOBID=$(sbatch --parsable \
             --job-name=ainic-crusoe \
             --output="${SLURM_OUT}" \
+            --error="${SLURM_OUT}" \
             --partition="${SALLOC_PARTITION}" \
-            ${ACCOUNT_ARG} \
             ${RESV_ARG} \
             ${EXCLUDE_ARG} \
             --nodes="${SALLOC_NODES}" \
@@ -289,31 +287,44 @@ jobs:
             --gres=gpu:mi355x:8 \
             --exclusive \
             --time="${SALLOC_TIME}" \
-            "${BATCH_SCRIPT}" &
-          SBATCH_PID=$!
+            "${BATCH_SCRIPT}")
+          echo "Submitted SLURM job ${JOBID}"
 
           tail -n +1 -F "${SLURM_OUT}" 2>/dev/null &
           TAIL_PID=$!
 
-          wait "${SBATCH_PID}"
-          rc=$?
+          while true; do
+            st=$(squeue -j "${JOBID}" -h -o '%T' 2>/dev/null || true)
+            if [ -z "${st}" ]; then
+              break
+            fi
+            sleep 15
+          done
 
           sleep 2
           kill "${TAIL_PID}" 2>/dev/null || true
+          wait "${TAIL_PID}" 2>/dev/null || true
+
+          job_state=$(scontrol show job "${JOBID}" | sed -n 's/.*JobState=\([^ ]*\).*/\1/p' | head -n1)
+          exitcode=$(scontrol show job "${JOBID}" | sed -n 's/.*[[:space:]]ExitCode=\([0-9-]*\):.*/\1/p' | head -n1)
+          rc="${exitcode:-1}"
+          if [ "${job_state}" != "COMPLETED" ]; then
+            rc=1
+          fi
 
           # Collect this run's report directory. test_runner writes it to
-          # ${WORKDIR}/rccl_test_artifacts_crusoe_<timestamp>; copy the newest into
+          # ${WORKDIR}/rccl_test_artifacts_ainic_<timestamp>; copy the newest into
           # RUNNER_TEMP so the upload step captures the full per-test logs/reports
           # (not just the tee'd console log) without picking up older runs that
           # share this WORKDIR.
           REPORTS_DIR="${RUNNER_TEMP}/reports"
           mkdir -p "${REPORTS_DIR}"
-          newest="$(ls -dt "${WORKDIR}"/rccl_test_artifacts_crusoe_* 2>/dev/null | head -n1)"
+          newest="$(ls -dt "${WORKDIR}"/rccl_test_artifacts_ainic_* 2>/dev/null | head -n1)"
           if [ -n "${newest}" ]; then
             cp -a "${newest}" "${REPORTS_DIR}/" 2>/dev/null || true
           fi
 
-          echo "sbatch --wait exit code: ${rc}"
+          echo "sbatch job ${JOBID} state=${job_state} ExitCode=${exitcode:-?} rc=${rc}"
           exit "${rc}"
 
       - name: Upload run log and reports
