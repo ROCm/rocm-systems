@@ -608,35 +608,6 @@ typedef struct _HsaMemFlags
     };
 } HsaMemFlags;
 
-typedef struct _HsaMemMapFlags
-{
-    union
-    {
-        struct
-        {
-            unsigned int Reserved1      :  1; //
-            unsigned int CachePolicy    :  2; // see HSA_CACHING_TYPE
-            unsigned int ReadOnly       :  1; // memory is not modified while mapped
-            	    	    	    	      // allows migration scale-out
-	    unsigned int PageSize	    :  2; // see HSA_PAGE_SIZE, hint to use
-					  // this page size if possible and
-					  // smaller than default
-	    unsigned int HostAccess     :  1; // default = 0: GPU access only
-	    unsigned int Migrate        :  1; // Hint: Allows migration to local mem
-						  // of mapped GPU(s), instead of mapping
-						  // physical location
-            unsigned int Probe          :  1;     // default = 0: Indicates that a range
-                                                  // will be mapped by the process soon,
-						  // but does not initiate a map operation
-						  // may trigger eviction of nonessential
-						  // data from the memory, reduces latency
-						  // “cleanup hint” only, may be ignored
-            unsigned int Reserved       : 23;
-        } ui32;
-        HSAuint32 Value;
-    };
-} HsaMemMapFlags;
-
 typedef struct _HsaGraphicsResourceInfo {
     void       *MemoryAddress;      // For use in hsaKmtMapMemoryToGPU(Nodes)
     HSAuint64  SizeInBytes;         // Buffer size (OUT)
@@ -645,6 +616,25 @@ typedef struct _HsaGraphicsResourceInfo {
     HSAuint32  NodeId;              // GPU exported the buffer
     HSAuint64  SizeHintInBytes;     // Caller-provided size hint for foreign (non-ROCr) resources (IN, 0 if unknown)
 } HsaGraphicsResourceInfo;
+
+// Windows-only metadata populated in HsaGraphicsResourceInfo::Metadata when the imported
+// resource's VCAM_SURFACE_DESC is available. Provides swizzle mode as a fallback for when
+// the DXX extension (CLQueryResource11/CLQueryResource) or GL extension(wglResourceAttachAMD)
+// is not available.
+// The interop layer (clr) copies this blob opaquely into the ROCr image descriptor's data[] dwords
+// (starting at data[0]) when a full SRD is not available (Windows Vulkan image interop). clr does NOT
+// interpret any field — it stamps the descriptor's version with
+// HSA_AMD_IMAGE_DESC_VERSION_WDDM_SURFACE_METADATA (defined in hsa_ext_amd.h) and memcpy's the bytes.
+// The gfx image managers cast data[] back to HsaWddmSurfaceMetadata and interpret the surface fields
+// to reconstruct the SRD. The `version` field below is unused (retained for ABI stability).
+typedef struct _HsaWddmSurfaceMetadata {
+    HSAuint32 version;           // Unused. clr stamps the descriptor version directly.
+    HSAuint32 swizzle_mode;      // VCAM_SURFACE_DESC.swizzleMode (union value)
+    HSAuint32 tile_swizzle;      // VCAM_SURFACE_DESC.ulTileSwizzle (pipe-bank XOR)
+    HSAuint32 compression_mode;  // VCAM_SURFACE_DESC.ulCompressionMode (0 = uncompressed). gfx12+.
+    HSAuint32 max_comp_blk;      // VCAM_SURFACE_DESC.maxCompressedBlockSize. gfx12+.
+    HSAuint32 max_uncomp_blk;    // VCAM_SURFACE_DESC.maxUncompressedBlockSize. gfx12+.
+} HsaWddmSurfaceMetadata;
 
 typedef enum _HSA_CACHING_TYPE
 {

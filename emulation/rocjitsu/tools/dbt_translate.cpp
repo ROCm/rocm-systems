@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/code_object_identity.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/isa/decoder.h"
@@ -86,6 +87,13 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
     size_t pc = 0;
 
     while (pc < word_count) {
+      // Linked gfx1250 objects use zero-filled holes between independently
+      // aligned function bodies. BasicBlock::build() treats these words as
+      // padding rather than instructions, so host validation must do the same.
+      if (arch == ROCJITSU_CODE_ARCH_GFX1250 && words[pc] == 0) {
+        ++pc;
+        continue;
+      }
       try {
         std::unique_ptr<Instruction> inst(decoder->decode(&words[pc]));
         if (!inst) {
@@ -179,6 +187,7 @@ make_binary_translator_options(const TranslateOptions &options) {
   translator_options.debug_min_free_vgpr = options.debug_min_free_vgpr;
   translator_options.debug_continue_after_failure = options.debug_continue_after_failure;
   translator_options.skip_failed_kernels = options.skip_failed_kernels;
+  translator_options.verify_rewrite_discharge = options.verify_rewrite_discharge;
   translator_options.input_revision = options.input_revision;
   translator_options.output_revision = options.output_revision;
   return translator_options;
@@ -441,6 +450,15 @@ std::optional<std::string_view> translation_request_error(const TranslateOptions
     return "--verify-idempotence requires matching input and output architectures";
   if (options.verify_idempotence && options.skip_failed_kernels)
     return "--verify-idempotence cannot be combined with --skip-failed-kernels";
+  if (options.verify_rewrite_discharge &&
+      !(options.guest_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+        options.host_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+        options.input_revision == ProcessorRevision::Gfx1250B0 &&
+        options.output_revision == ProcessorRevision::Gfx1250A0)) {
+    return "--verify-rewrite-discharge requires gfx1250 b0-to-a0 translation";
+  }
+  if (options.verify_rewrite_discharge && options.skip_failed_kernels)
+    return "--verify-rewrite-discharge cannot be combined with --skip-failed-kernels";
   return std::nullopt;
 }
 
@@ -468,6 +486,8 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
     add_error(output, kInputError, error.empty() ? "failed to load input" : error);
     return output;
   }
+  output.value.source_code_object_id =
+      stable_code_object_id(input.code_object->image_data(), input.code_object->image_size());
 
   const bool need_report = options.collect_diagnostics;
   const bool need_source_disassembly = options.disassembly == DisassemblyMode::Source ||
@@ -498,6 +518,8 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
     output.value.target_mach =
         options.target_mach ? options.target_mach : elf_mach_for_arch(output.value.host_arch);
     output.value.diagnostics = std::move(translated.diagnostics);
+    output.value.rewrite_discharge_checked = translated.rewrite_discharge_checked;
+    output.value.rewrite_discharge_verified = translated.rewrite_discharge_verified;
   } catch (const std::exception &e) {
     add_error(output, kTranslationError, std::string("translation threw exception: ") + e.what());
     return output;
@@ -526,7 +548,8 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
     output.value.disassembly += translated_inspection.disassembly;
   }
 
-  if (!validate_host_decode(output.value.translated_report, error)) {
+  const bool data_only = has_diagnostic_kind(output.value.diagnostics, DiagnosticKind::DataOnly);
+  if (!data_only && !validate_host_decode(output.value.translated_report, error)) {
     add_error(output, kValidationError, error);
     return output;
   }
@@ -534,8 +557,14 @@ ToolResult<TranslateOutput> translate_code_object(const TranslateOptions &option
   if (options.verify_idempotence) {
     output.value.idempotence_checked = true;
     try {
+      auto verifier_options = make_binary_translator_options(options);
+      // The first translation already audited the authoritative output. The
+      // idempotence pass only needs to prove that translating those bytes again
+      // does not change them; auditing its temporary output would duplicate the
+      // final-stream scan and raise peak memory on large code objects.
+      verifier_options.verify_rewrite_discharge = false;
       BinaryTranslator verifier(options.guest_arch, options.host_arch, options.target_mach,
-                                make_binary_translator_options(options));
+                                verifier_options);
       TranslatedCodeObject second = verifier.translate(translated_obj);
       const bool second_ok = second.ok();
       output.value.idempotence_diagnostics = std::move(second.diagnostics);

@@ -36,8 +36,10 @@ template <rj_code_arch_t Arch> struct IsaTrait;
 /// templates depend on:
 ///   - `WF_SIZE`               — lanes per wavefront.
 ///   - `WF_SIZE_MAX`           — largest supported wavefront size.
+///   - `MAX_WF_SLOTS`          — maximum simulated wavefront slots per CU.
 ///   - `MAX_SGPRS_PER_WF`      — maximum scalar GPRs.
 ///   - `MAX_VGPRS_PER_WF`      — maximum vector GPRs.
+///   - `MAX_ADDRESSABLE_VGPRS_PER_WF` — maximum ordinary VGPR address span.
 ///   - `MAX_ACC_VGPRS_PER_WF`  — maximum accumulator VGPRs (0 if absent).
 ///   - `WAITCNT_LGKMCNT_MASK`  — lgkmcnt field mask in S_WAITCNT (0 if no
 ///                               monolithic S_WAITCNT — RDNA4 only).
@@ -49,8 +51,10 @@ template <typename Isa>
 concept GpuIsa = requires {
   { Isa::WF_SIZE } -> std::convertible_to<uint32_t>;
   { Isa::WF_SIZE_MAX } -> std::convertible_to<uint32_t>;
+  { Isa::MAX_WF_SLOTS } -> std::convertible_to<uint32_t>;
   { Isa::MAX_SGPRS_PER_WF } -> std::convertible_to<uint32_t>;
   { Isa::MAX_VGPRS_PER_WF } -> std::convertible_to<uint32_t>;
+  { Isa::MAX_ADDRESSABLE_VGPRS_PER_WF } -> std::convertible_to<uint32_t>;
   { Isa::MAX_ACC_VGPRS_PER_WF } -> std::convertible_to<uint32_t>;
   { Isa::WAITCNT_LGKMCNT_MASK } -> std::convertible_to<uint32_t>;
   { Isa::MODE_HAS_GPR_IDX_EN } -> std::convertible_to<bool>;
@@ -104,6 +108,16 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
 /// RDNA and gfx1250 descriptors use the ordinary ISA SGPR maximum. gfx1250 is
 /// kept out of arch_is_rdna() because several of its descriptor and register
 /// allocation rules differ from generic RDNA despite sharing the GFX10+ ABI.
+/// @brief Whether @p arch encodes wavefront SGPR allocation in the kernel descriptor.
+///
+/// @details GFX10+ leaves COMPUTE_PGM_RSRC1.GRANULATED_WAVEFRONT_SGPR_COUNT reserved and gives
+/// every wave the architectural SGPR file, so a count decoded from that field is an artifact of
+/// the granule-0 encoding rather than a budget any caller depends on. Only where the field is
+/// live can an SGPR requirement above the decoded count under-provision anyone.
+[[nodiscard]] inline constexpr bool arch_descriptor_encodes_sgpr_allocation(rj_code_arch_t arch) {
+  return !(arch_is_rdna(arch) || arch == ROCJITSU_CODE_ARCH_GFX1250);
+}
+
 [[nodiscard]] inline constexpr uint32_t arch_descriptor_sgpr_allocation_limit(rj_code_arch_t arch) {
   // Architectural descriptor SGPR-allocation ceilings. CDNA descriptors may name
   // up to 112 SGPRs; RDNA up to 106. These are fixed ISA facts (not the smaller

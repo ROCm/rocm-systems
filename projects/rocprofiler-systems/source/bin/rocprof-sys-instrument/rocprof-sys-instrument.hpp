@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/path.hpp"
 #include "core/common_types.hpp"
 #include "core/demangler.hpp"
 #include "function_signature.hpp"
@@ -12,7 +13,6 @@
 #include "module_function.hpp"
 
 #include <spdlog/fmt/ranges.h>
-#include <timemory/utility/filepath.hpp>
 
 #include <dlfcn.h>
 #include <string>
@@ -130,13 +130,13 @@ private:
 //======================================================================================//
 //
 static inline bool
-rocprofsys_get_is_executable(std::string_view _cmd, bool _default_v)
+rocprofsys_get_is_executable(const std::string& _cmd, bool _default_v)
 {
     bool _is_executable = _default_v;
 
-    if(_cmd.empty())
+    if(!_cmd.empty())
     {
-        if(!tim::filepath::exists(std::string{ _cmd }))
+        if(!rocprofsys::path::is_regular_file(_cmd))
         {
             verbprintf(
                 0,
@@ -149,7 +149,9 @@ rocprofsys_get_is_executable(std::string_view _cmd, bool _default_v)
         if(Dyninst::SymtabAPI::Symtab::openFile(_symtab, _cmd.data()))
         {
             _is_executable = _symtab->isExecutable() && _symtab->isExec();
-            Dyninst::SymtabAPI::Symtab::closeSymtab(_symtab);
+            // Workaround introduced in ROCm/rocm-systems#10171
+            // Tracking with JIRA AIPROFSYST-730
+            // Dyninst::SymtabAPI::Symtab::closeSymtab(_symtab);
         }
     }
     return _is_executable;

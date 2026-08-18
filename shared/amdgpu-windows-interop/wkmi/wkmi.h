@@ -83,6 +83,7 @@ struct DeviceInfo {
   uint32_t max_scratch_slots_per_cu;          ///< Maximum scratch slots per CU
   uint32_t num_shader_engine;                 ///< Number of shader engines
   uint32_t shader_array_per_shader_engine;    ///< Number of shader arrays per shader engine
+  uint32_t max_phys_cu_per_engine;            ///< Max CUs per SE before harvest
   
   // Clock frequencies
   uint32_t max_engine_clock_mhz;              ///< Maximum engine clock frequency in MHz
@@ -403,6 +404,20 @@ void FillinUnregisterEventPrivData(void* priv_data,  ///< Pointer to event unreg
 /// @brief Query the size of a memory allocation from its private data
 /// @return Allocation size in bytes
 uint64_t GetMemoryAllocationSize(const void* priv_data);  ///< Pointer to allocation private data structure
+
+/// @brief Surface swizzle information extracted from VCAM_SURFACE_DESC
+struct SurfaceSwizzleInfo {
+  uint32_t swizzle_mode;     ///< Generic swizzle mode (union of eSwizzleMode/gfx12SwizzleMode/eTilingMode)
+  uint32_t tile_swizzle;     ///< Pipe-bank XOR value (ulTileSwizzle) for plane 0
+  uint32_t compression_mode; ///< Distributed compression mode (ulCompressionMode); 0 == none. gfx12+.
+  uint32_t max_comp_blk;     ///< Max compressed block size for plane 0 (maxCompressedBlockSize). gfx12+.
+  uint32_t max_uncomp_blk;   ///< Max uncompressed block size for plane 0 (maxUncompressedBlockSize). gfx12+.
+  bool     valid;            ///< True if surfaceDesc was present and parsed successfully
+};
+
+/// @brief Extract swizzle mode and tile swizzle from allocation private data
+/// @return SurfaceSwizzleInfo with valid=true if surfaceDesc is present, valid=false otherwise
+SurfaceSwizzleInfo GetSurfaceSwizzleInfo(const void* priv_data);  ///< Pointer to allocation private data structure
 
 /// @brief Get the size of the proxy resource info structure
 /// @return Size in bytes of the PROXY_RESOURCE_INFO structure

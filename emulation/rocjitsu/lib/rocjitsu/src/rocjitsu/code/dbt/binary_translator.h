@@ -28,6 +28,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "rocjitsu/code/dbt/encoding_translator.h"
@@ -132,6 +133,13 @@ struct BinaryTranslatorOptions {
   /// skipped-kernel warning. The symbol remains loadable so other kernels in the
   /// same code object are not blocked by one untranslated kernel.
   bool skip_failed_kernels = false;
+
+  /// @brief Audit registered rewrites that remain actionable in final output.
+  ///
+  /// @details The audit is available only for translation profiles with registered semantic or
+  /// operand-level residual checks. Requesting it for any other profile produces an error
+  /// diagnostic. Runtime translation does not enable this development check by default.
+  bool verify_rewrite_discharge = false;
 };
 
 /// @brief Result of translating a code object.
@@ -139,6 +147,8 @@ struct TranslatedCodeObject {
   std::vector<uint8_t> elf_bytes;                        ///< Translated ELF for the host ISA.
   rj_code_arch_t host_arch = ROCJITSU_CODE_ARCH_INVALID; ///< Host ISA architecture.
   std::vector<TranslationDiagnostic> diagnostics;        ///< Translation warnings/errors.
+  bool rewrite_discharge_checked = false;                ///< Final output scan was attempted.
+  bool rewrite_discharge_verified = false; ///< No registered rewrite remained actionable.
 
   /// @brief True if translation produced no error diagnostics.
   ///
@@ -192,6 +202,16 @@ public:
   [[nodiscard]] TranslatedCodeObject translate(const AmdGpuCodeObject &obj);
 
 private:
+  /// @brief Translate without final-output validation.
+  /// @details Keeping the translation body in a separate call ensures its
+  /// analysis state is destroyed before translate() audits the resulting ELF.
+  [[nodiscard]] TranslatedCodeObject translate_impl(const AmdGpuCodeObject &obj);
+
+  /// @brief Whether this translator is running the gfx1250 B0-to-A0 profile.
+  [[nodiscard]] bool is_gfx1250_b0_to_a0() const;
+
+  void verify_rewrite_discharge(TranslatedCodeObject &result) const;
+
   /// @brief Return the generated or revision-specific legalization for an instruction.
   [[nodiscard]] const InstructionLegalization *lookup_legalization(const Instruction &inst) const;
 
@@ -209,7 +229,7 @@ private:
   /// @returns true if the instruction was translated or copied safely.
   [[nodiscard]] bool handle_encoding(const Instruction &inst, uint64_t offset,
                                      std::vector<uint8_t> &text, uint16_t dst_opcode,
-                                     std::span<const uint8_t> orig_text, bool collect_trace_words,
+                                     std::span<const uint8_t> orig_text, bool collect_target_words,
                                      bool &copied_original, bool &changed,
                                      std::vector<uint32_t> &target_words);
 
@@ -221,6 +241,14 @@ private:
   EncodingTranslateFn encoding_translate_;                  ///< Per-pair encoding translator.
   LegalizationLookupFn legalization_lookup_;                ///< Per-pair legalization table.
   std::unique_ptr<SemanticTranslator> semantic_translator_; ///< Per-pair semantic rule engine.
+
+  /// @brief Deferred-family mnemonics already reported in this translation.
+  ///
+  /// @details Cleared at the start of every translate() call. Scoping the
+  /// suppression to one code object keeps the report informative without
+  /// letting the first object that uses a deferred mnemonic hide the same gap
+  /// in every object loaded after it.
+  std::unordered_set<std::string> reported_deferred_families_;
 };
 
 } // namespace rocjitsu

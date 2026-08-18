@@ -14,16 +14,16 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 
-#include "rocjitsu/isa/arch/amdgpu/cdna1/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna2/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna1/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna2/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3_5/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/test_encodings.h"
 
 #include <gtest/gtest.h>
 
@@ -96,7 +96,7 @@ std::optional<EncodingWords> rdna4_encoding(std::string_view mnemonic) {
 }
 
 std::optional<EncodingWords> gfx1250_encoding(std::string_view mnemonic) {
-  return find_test_encoding(gfx1250::test_data::ENCODINGS, mnemonic);
+  return find_test_encoding(cdna5::test_data::ENCODINGS, mnemonic);
 }
 
 class ScalarSccProfile {

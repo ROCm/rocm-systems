@@ -19,7 +19,7 @@ set -euxo pipefail
 GPU_TARGETS="${GPU_TARGETS:-gfx950}"
 build_jobs="${RCCL_BUILD_JOBS:-$(nproc)}"
 
-: "${ROCM_PATH:?build-rocshmem.sh: ROCM_PATH must be set (run fetch-rocm.sh first)}"
+: "${ROCM_PATH:?build-rocshmem.sh: ROCM_PATH must be set (source .ci-out/rocm.env first)}"
 : "${MPI_HOME:?build-rocshmem.sh: MPI_HOME must be set (run build-ompi.sh first)}"
 
 WORKDIR="${RCCL_DEVICE_API_WORKDIR:-${WORKDIR:-}}"

@@ -9,7 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
@@ -22,12 +22,34 @@
 
 #include <algorithm>
 #include <cassert>
-#include <cstring>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 
 namespace rocjitsu {
 namespace amdgpu {
+
+template <GpuIsa Isa> void validate_compute_unit_config(const ComputeUnitCore::Config &config) {
+  using Limits = IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, Isa>;
+
+  if (config.num_wf_slots > Isa::MAX_WF_SLOTS) {
+    throw util::ConfigError("num_wf_slots exceeds the ISA maximum of " +
+                            std::to_string(Isa::MAX_WF_SLOTS));
+  }
+
+  const uint32_t vgprs_per_block =
+      std::max(config.vgprs_per_wf, Limits::MAX_ACCVGPR_PHYSICAL_LIMIT);
+  if (vgprs_per_block > Limits::MAX_VGPRS_PER_BLOCK) {
+    throw util::ConfigError("effective VGPRs per wavefront exceeds the ISA maximum of " +
+                            std::to_string(Limits::MAX_VGPRS_PER_BLOCK));
+  }
+
+  const uint64_t vgpr_file_registers = static_cast<uint64_t>(config.num_wf_slots) * vgprs_per_block;
+  if (vgpr_file_registers > std::numeric_limits<uint32_t>::max() ||
+      vgpr_file_registers > Limits::MAX_VGPR_FILE_REGISTERS) {
+    throw util::ConfigError("configured VGPR file exceeds the ISA maximum capacity");
+  }
+}
 
 ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory,
                                  L2Cache *l2, uint32_t wf_size)
@@ -63,6 +85,7 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
   // Helper: instantiate the ISA-specific CU for the given execution mode.
 #define ROCJITSU_CU_CASE(ARCH_ENUM, ISA_TYPE)                                                      \
   case ARCH_ENUM:                                                                                  \
+    validate_compute_unit_config<ISA_TYPE>(config);                                                \
     switch (exec_mode) {                                                                           \
     case simdojo::ExecMode::FUNCTIONAL:                                                            \
       return std::make_unique<IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, ISA_TYPE>>(        \
@@ -84,7 +107,7 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
     ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA3, rdna3::Isa);
     ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA3_5, rdna3_5::Isa);
     ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA4, rdna4::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_GFX1250, gfx1250::Isa);
+    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_GFX1250, cdna5::Isa);
   default:
     break;
   }
@@ -112,6 +135,15 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t nu
   if (slot >= config_.num_wf_slots)
     return nullptr;
 
+  return dispatch_wf_at(static_cast<uint32_t>(slot), wg_id, pc, num_sgprs, num_vgprs);
+}
+
+Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint64_t pc,
+                                           uint32_t num_sgprs, uint32_t num_vgprs) {
+  assert(wfs_.size() == config_.num_wf_slots && "wavefront slots not properly initialized");
+  if (wf_id >= config_.num_wf_slots || !wfs_[wf_id]->is_halted())
+    return nullptr;
+
   int32_t sgpr_base = sgpr_file_.allocate(num_sgprs);
   if (sgpr_base < 0)
     return nullptr;
@@ -122,18 +154,12 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t nu
     return nullptr;
   }
 
-  // Zero the allocated register blocks so reused slots don't inherit stale
-  // values from previous kernel runs.
-  std::fill(&sgpr_file_[sgpr_base], &sgpr_file_[sgpr_base] + config_.sgprs_per_wf, 0u);
-  std::memset(raw_vgpr_data(static_cast<uint32_t>(vgpr_base)), 0,
-              vgpr_allocation_block_size() * wf_size_ * sizeof(uint32_t));
-
   // Invalidate the L1 scalar cache so this wavefront reads fresh kernel
   // arguments from L2/memory rather than stale lines from a prior kernel.
   // On real hardware, the driver issues s_dcache_inv at kernel launch.
   l1_scalar_.invalidate_all();
 
-  auto *wf = wfs_[slot].get();
+  auto *wf = wfs_[wf_id].get();
   wf->wg_id_ = wg_id;
   wf->pc = pc;
   wf->sgpr_alloc_ = {static_cast<uint32_t>(sgpr_base), num_sgprs};
@@ -152,7 +178,7 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t nu
   std::fill(sgpr_to_wave_.begin() + sgpr_base, sgpr_to_wave_.begin() + sgpr_base + num_sgprs, wf);
   fill_vgpr_to_wave(static_cast<uint32_t>(vgpr_base), vgpr_allocation_block_size(), wf);
 
-  util::Logger::cp("DISPATCH_WF cu=", this->full_path(), " wf=", wf->wf_id(), " slot=", slot,
+  util::Logger::cp("DISPATCH_WF cu=", this->full_path(), " wf=", wf->wf_id(), " slot=", wf_id,
                    " pc=0x", std::hex, pc, std::dec, " wg=", wg_id, " pid=", wf->process_id());
 
   schedule_work();
@@ -497,7 +523,7 @@ ROCJITSU_CU_INSTANTIATE(rdna2::Isa);
 ROCJITSU_CU_INSTANTIATE(rdna3::Isa);
 ROCJITSU_CU_INSTANTIATE(rdna3_5::Isa);
 ROCJITSU_CU_INSTANTIATE(rdna4::Isa);
-ROCJITSU_CU_INSTANTIATE(gfx1250::Isa);
+ROCJITSU_CU_INSTANTIATE(cdna5::Isa);
 
 #undef ROCJITSU_CU_INSTANTIATE
 

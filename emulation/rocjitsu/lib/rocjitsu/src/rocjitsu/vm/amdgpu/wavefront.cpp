@@ -12,6 +12,18 @@ Lds &Wavefront::lds() { return lds_ ? *lds_ : cu_.lds(); }
 
 const Lds &Wavefront::lds() const { return lds_ ? *lds_ : cu_.lds(); }
 
+bool Wavefront::has_gpu_memory() const { return cu_.memory() != nullptr; }
+
+void Wavefront::read_gpu_memory(uint64_t addr, std::span<uint8_t> dst) const {
+  assert(has_gpu_memory());
+  cu_.memory()->read_block(addr, dst, process_id_);
+}
+
+void Wavefront::write_gpu_memory(uint64_t addr, std::span<const uint8_t> src) {
+  assert(has_gpu_memory());
+  cu_.memory()->write_block(addr, src, process_id_);
+}
+
 void Wavefront::halt() {
   // s_endpgm terminates the wave, frees its resources, and notifies the CP as one
   // action, mirroring hardware. Order matters:

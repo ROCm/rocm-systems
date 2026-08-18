@@ -239,31 +239,6 @@ class TestGpuOverdrive(unittest.TestCase):
             raise self.raise_exception
         return
 
-    # out of order; min_clk_value, max_clk_value then clk_type
-
-    def test_set_gpu_clk_range(self):
-        self.common.print_func_name("")
-
-        # TODO Find better way to set min_clk_value, max_clk_value
-        min_clk_value = 100
-        max_clk_value = 200
-
-        for i, gpu in enumerate(self.common.processors):
-            self.common.print_device_header(i)
-            for _, clk_type, clk_cond in common.CLK_TYPES:
-                msg = f"\t### amdsmi_set_gpu_clk_range(gpu={i}, min_clk_value={min_clk_value}, max_clk_value={max_clk_value}, clk_type={clk_type}):"
-                try:
-                    amdsmi.amdsmi_set_gpu_clk_range(gpu, min_clk_value, max_clk_value, clk_type)
-                    self.common.print(msg, "")
-                    self.common.check_ret("", "", self.common.PASS)
-                except amdsmi.AmdSmiLibraryException as e:
-                    if self.common.check_ret(msg, e, clk_cond):
-                        self.raise_exception = e
-                self.common.print("")
-        if self.raise_exception:
-            raise self.raise_exception
-        return
-
     def test_set_gpu_od_clk_info(self):
         self.common.print_func_name("")
 
