@@ -732,7 +732,11 @@ namespace RcclUnitTesting
         continue;
       }
       const std::vector<int>& gpuPriorityOrder = ev.GetGpuPriorityOrder();
+      auto _initT0 = std::chrono::steady_clock::now();
       this->InitComms(this->GetDeviceIdsList(numChildren, numGpus, ranksPerGpu, gpuPriorityOrder));
+      TEST_INFO("[PHASE] InitComms %lld ms (isMultiProcess=%d)",
+                (long long)std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - _initT0).count(), isMultiProcess);
       if (testing::Test::HasFailure())
       {
         isCorrect = false;
@@ -800,7 +804,9 @@ namespace RcclUnitTesting
                             (funcTypes[ftIdx] == ncclCollBroadcast ||
                              funcTypes[ftIdx] == ncclCollReduce    ||
                              funcTypes[ftIdx] == ncclCollAllReduce));
+            auto _phT0 = std::chrono::steady_clock::now();
             if (!canSkip) this->PrepareData();
+            auto _phT1 = std::chrono::steady_clock::now();
             if (testing::Test::HasFailure())
             {
               isCorrect = false;
@@ -824,12 +830,21 @@ namespace RcclUnitTesting
               this->LaunchGraphs();
               this->DestroyGraphs();
             }
+            auto _phT2 = std::chrono::steady_clock::now();
             if (testing::Test::HasFailure())
             {
               isCorrect = false;
               continue;
             }
             this->ValidateResults(isCorrect);
+            auto _phT3 = std::chrono::steady_clock::now();
+            {
+              auto _ms = [](std::chrono::steady_clock::time_point a,
+                            std::chrono::steady_clock::time_point b) {
+                return (long long)std::chrono::duration_cast<std::chrono::milliseconds>(b - a).count(); };
+              TEST_INFO("[PHASE] %s prepare=%lld ms execute=%lld ms validate=%lld ms",
+                        name.c_str(), _ms(_phT0, _phT1), _ms(_phT1, _phT2), _ms(_phT2, _phT3));
+            }
             if (!isCorrect)
             {
               TEST_ERROR("Incorrect output for %s", name.c_str());
