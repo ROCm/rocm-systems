@@ -3373,6 +3373,131 @@ def test_gfx1250_helper_blocks_emit_scaled_wmma_table_decoder(
     assert 'if (!isVop3pOp(opcode[2], 0x33)' in decoder
 
 
+def test_generated_decoders_publish_instruction_lookahead_bounds(
+    amdgpu_generated_root: Path,
+) -> None:
+    expected_bounds = {
+        'cdna1': 4,
+        'cdna2': 4,
+        'cdna3': 4,
+        'cdna4': 4,
+        'cdna5': 4,
+        'rdna1': 3,
+        'rdna2': 3,
+        'rdna3': 3,
+        'rdna3_5': 3,
+        'rdna4': 3,
+    }
+    emitted_bounds = {}
+    for decoder_path in amdgpu_generated_root.glob('*/decoder.h'):
+        match = re.search(r'kMaxInstructionWords\s*=\s*(\d+)', decoder_path.read_text())
+        assert match is not None, decoder_path
+        emitted_bounds[decoder_path.parent.name] = int(match.group(1))
+
+    assert emitted_bounds == expected_bounds
+
+
+@pytest.mark.parametrize(
+    ('arch_name', 'profile_type', 'expected_bound'),
+    [
+        ('cdna1', Cdna1Profile, 4),
+        ('cdna2', Cdna2Profile, 4),
+        ('cdna3', CdnaProfile, 4),
+        ('cdna4', CdnaProfile, 4),
+        ('gfx1250', Gfx1250Profile, 4),
+        ('rdna1', Rdna1Profile, 3),
+        ('rdna2', Rdna2Profile, 3),
+        ('rdna3', Rdna3Profile, 3),
+        ('rdna3_5', Rdna3_5Profile, 3),
+        ('rdna4', Rdna4Profile, 3),
+    ],
+)
+def test_instruction_lookahead_bound_is_derived_from_isa(
+    arch_name: str, profile_type, expected_bound: int
+) -> None:
+    isa_xml = _mrisa_dir() / f'amdgpu_isa_{arch_name}.xml'
+    if not isa_xml.is_file():
+        pytest.skip(f'{arch_name} semantics XML not available')
+    spec = Parser(str(isa_xml), profile_type()).parse()
+    generator = CodeGenerator(spec, '', derive_all_semantics(spec))
+    assert generator._max_instruction_word_count() == expected_bound
+
+
+def test_instruction_lookahead_derivation_covers_each_width_source() -> None:
+    def generator_for(
+        *,
+        bit_count: int = 32,
+        conditions=(),
+        implied_words=(),
+        size_overrides=None,
+        has_vopd: bool = False,
+        arch_name: str = 'synthetic',
+        scaled_wmma: bool = False,
+        owns_dpp_extension: bool = False,
+    ) -> CodeGenerator:
+        instruction = SimpleNamespace(
+            name='SYNTHETIC',
+            enc_name='SYNTHETIC_INST',
+            is_implied_literal_enc=False,
+        )
+        implied = dict(implied_words)
+        encoding = SimpleNamespace(
+            enc_name='SYNTHETIC_ENC',
+            bit_cnt=bit_count,
+            insts=[instruction],
+            enc_conds=list(conditions),
+            has_implied_literal_ops=bool(implied),
+            implied_literal_ops=implied,
+        )
+        profile = SimpleNamespace(
+            inst_size_overrides=size_overrides or {},
+            has_vopd=has_vopd,
+            generate_scaled_wmma_vop3px2=scaled_wmma,
+        )
+        generator = object.__new__(CodeGenerator)
+        generator.isa_spec = SimpleNamespace(
+            arch_name=arch_name,
+            profile=profile,
+            inst_encodings=[encoding],
+        )
+        generator._vop_dpp_struct_names = lambda _name: (
+            ('SyntheticDppMachineInst', None) if owns_dpp_extension else (None, None)
+        )
+        return generator
+
+    assert generator_for(bit_count=96)._max_instruction_word_count() == 3
+    assert generator_for(owns_dpp_extension=True)._max_instruction_word_count() == 2
+    assert (
+        generator_for(
+            conditions=(('default_encoding', 'inst.op == 0'),)
+        )._max_instruction_word_count()
+        == 2
+    )
+    assert (
+        generator_for(
+            conditions=(('has_literal', 'inst.src0 == 255'),)
+        )._max_instruction_word_count()
+        == 2
+    )
+    assert (
+        generator_for(conditions=(('has_lit64', 'true'),))._max_instruction_word_count()
+        == 3
+    )
+    assert generator_for(implied_words=((1, 3),))._max_instruction_word_count() == 4
+    assert (
+        generator_for(size_overrides={'SYNTHETIC': 20})._max_instruction_word_count()
+        == 5
+    )
+    assert generator_for(has_vopd=True)._max_instruction_word_count() == 3
+    assert generator_for(arch_name='cdna4')._max_instruction_word_count() == 4
+    assert (
+        generator_for(
+            arch_name='gfx1250', scaled_wmma=True
+        )._max_instruction_word_count()
+        == 4
+    )
+
+
 @pytest.mark.parametrize(
     ('arch_name', 'expected_vopd_indices'),
     [
@@ -3924,6 +4049,88 @@ def test_gfx1250_cluster_load_generators_force_request_l1_bypass():
 
     assert 'd->request_force_l1_bypass = true;' in cluster_async_body
     assert 'd->request_force_l1_bypass = true;' not in global_async_body
+
+
+def test_gfx1250_async_lds_generators_apply_signed_ioffset():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='gfx1250',
+        profile=Gfx1250Profile(),
+    )
+
+    expected_load_address = (
+        'd->per_lane_lds_addr[lane] = '
+        'async_lds_lane_address(inst_, wf, lane_lds_addr, 4);'
+    )
+
+    global_async = SimpleNamespace(
+        name='GLOBAL_LOAD_ASYNC_TO_LDS_B32',
+        elem_size=4,
+        num_elems=1,
+    )
+    global_async_body = codegen._gen_global_load_async_to_lds([], [], global_async)
+    assert expected_load_address in global_async_body
+
+    cluster_async_cases = [
+        ('CLUSTER_LOAD_ASYNC_TO_LDS_B8', 1, 1),
+        ('CLUSTER_LOAD_ASYNC_TO_LDS_B32', 4, 1),
+        ('CLUSTER_LOAD_ASYNC_TO_LDS_B64', 4, 2),
+        ('CLUSTER_LOAD_ASYNC_TO_LDS_B128', 4, 4),
+    ]
+    for name, elem_size, num_elems in cluster_async_cases:
+        cluster_async = SimpleNamespace(
+            name=name,
+            elem_size=elem_size,
+            num_elems=num_elems,
+        )
+        cluster_async_body = codegen._gen_global_load_async_to_lds(
+            [], [], cluster_async
+        )
+        assert (
+            'd->per_lane_lds_addr[lane] = '
+            f'async_lds_lane_address(inst_, wf, lane_lds_addr, {elem_size * num_elems});'
+            in cluster_async_body
+        )
+
+    global_store_cases = [
+        ('GLOBAL_STORE_ASYNC_FROM_LDS_B8', 1, 1),
+        ('GLOBAL_STORE_ASYNC_FROM_LDS_B32', 4, 1),
+        ('GLOBAL_STORE_ASYNC_FROM_LDS_B64', 4, 2),
+        ('GLOBAL_STORE_ASYNC_FROM_LDS_B128', 4, 4),
+    ]
+    for name, elem_size, num_elems in global_store_cases:
+        global_store = SimpleNamespace(
+            name=name,
+            elem_size=elem_size,
+            num_elems=num_elems,
+        )
+        global_store_body = codegen._gen_global_store_async_from_lds(
+            [], [], global_store
+        )
+        assert (
+            'uint32_t lds_addr = '
+            f'async_lds_lane_address(inst_, wf, lane_lds_addr, {elem_size * num_elems});'
+            in global_store_body
+        )
+
+    addtid_lines = []
+    codegen._append_global_addtid_addresses(addtid_lines)
+    assert (
+        '    int64_t offset = static_cast<int64_t>(signed_ioffset(inst_.ioffset));'
+        in addtid_lines
+    )
+
+    rdna4_codegen = object.__new__(CodeGenerator)
+    rdna4_codegen.isa_spec = SimpleNamespace(
+        arch_name='gfx1201',
+        profile=Rdna4Profile(),
+    )
+    rdna4_addtid_lines = []
+    rdna4_codegen._append_global_addtid_addresses(rdna4_addtid_lines)
+    assert (
+        '    int64_t offset = static_cast<int64_t>('
+        'static_cast<int32_t>(inst_.ioffset << 8) >> 8);' in rdna4_addtid_lines
+    )
 
 
 def test_gfx1250_buffer_cmpswap_payload_width_is_independent_of_element_width():

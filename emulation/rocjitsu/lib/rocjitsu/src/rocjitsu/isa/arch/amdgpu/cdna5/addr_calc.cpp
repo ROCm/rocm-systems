@@ -6,6 +6,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -117,7 +118,7 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
   auto &cu = wf.cu();
   init_vector_mem_state(wf, d);
   uint64_t exec = d.exec_mask;
-  int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst.ioffset << 8) >> 8);
+  int64_t offset = static_cast<int64_t>(signed_ioffset(inst.ioffset));
   bool saddr_present = has_saddr(inst.saddr);
   uint64_t saddr_val = saddr_present ? read_sreg64_operand(wf, inst.saddr) : 0;
   uint32_t scale = saddr_present && inst.scale_offset ? scaled_vaddr_factor(d) : 1;
@@ -156,7 +157,7 @@ uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &
   uint32_t sbase = wf.sgpr_alloc().base + inst.sbase * 2;
   uint64_t base = (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_sgpr(sbase + 1)) << 32) |
                   amdgpu::RegisterAccess(cu).read_sgpr(sbase);
-  int64_t off = static_cast<int64_t>(static_cast<int32_t>(inst.ioffset << 8) >> 8);
+  int64_t off = static_cast<int64_t>(signed_ioffset(inst.ioffset));
   uint32_t scale = inst.scale_offset ? access_size_bytes : 1;
   if (has_smem_offset(inst.soffset))
     off += static_cast<int64_t>(read_sreg_m0_operand(wf, inst.soffset)) * scale;
@@ -176,12 +177,24 @@ void flat_calculate_addresses(const VglobalMachineInst &inst, amdgpu::Wavefront 
   flat_global_calculate_addresses(inst, wf, d, false);
 }
 
+uint32_t async_lds_lane_address(const VglobalMachineInst &inst, const amdgpu::Wavefront &wf,
+                                uint32_t lds_operand, uint32_t access_size_bytes) {
+  int64_t relative_addr = static_cast<int64_t>(lds_operand) + signed_ioffset(inst.ioffset);
+  if (relative_addr < 0 || static_cast<uint64_t>(relative_addr) + access_size_bytes > wf.lds_size())
+    return amdgpu::kInvalidLdsAddress;
+
+  uint64_t absolute_addr = static_cast<uint64_t>(wf.lds_base()) + relative_addr;
+  if (absolute_addr >= UINT32_MAX)
+    return amdgpu::kInvalidLdsAddress;
+  return static_cast<uint32_t>(absolute_addr);
+}
+
 void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront &wf,
                               amdgpu::VectorMemState &d) {
   auto &cu = wf.cu();
   init_vector_mem_state(wf, d);
   uint64_t exec = d.exec_mask;
-  int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst.ioffset << 8) >> 8);
+  int64_t offset = static_cast<int64_t>(signed_ioffset(inst.ioffset));
   uint64_t scratch_base = wf.scratch_base();
   uint32_t saddr_val = 0;
   if (has_saddr(inst.saddr))
@@ -225,7 +238,7 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   uint32_t stride = buffer_stride(srd3);
   bool oob_raw = buffer_oob_raw(srd3);
   uint32_t soffset_val = has_smem_offset(inst.soffset) ? read_sreg_m0_operand(wf, inst.soffset) : 0;
-  int64_t ioff = static_cast<int64_t>(static_cast<int32_t>(inst.ioffset << 8) >> 8);
+  int64_t ioff = static_cast<int64_t>(signed_ioffset(inst.ioffset));
   uint32_t vbase = 0;
   if (inst.idxen || inst.offen)
     vbase = resolved_vgpr_base(wf, inst.vaddr, amdgpu::VgprMsbRole::Src0);

@@ -35,6 +35,13 @@ if(BUILD_TESTS)
             "${PROJECT_SOURCE_DIR}/src/device/ce_reduce/test_generate_ce_reduce.py"
   )
 
+  # The kernel-count leak guards (src/device/test_generate_kernel_counts.py and
+  # src/device/symmetric/test_generate_symmetric.py) are intentionally NOT
+  # registered as ctest cases here: nothing in RCCL CI runs `ctest`, so an
+  # add_test() would never gate. They run in CI via the CPU-only host-test
+  # pipeline instead -- see test/host/run_host_tests.sh (the `guards` phase,
+  # folded into `run`).
+
   if (ENABLE_CODE_COVERAGE)
     add_compile_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
     add_link_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
@@ -300,6 +307,10 @@ if(BUILD_TESTS)
       DdaCollCommonTests.cpp
       VersionInfoTests.cpp
       device/TestOp128.cpp
+      device/TestTDM.cpp
+      device/TestTdmCopy.cpp
+      device/TestAsyncCopy.cpp
+      device/TestLdsTransfer.cpp
       device/GinDeviceTests.cpp
       device/GinAnvilIpcDevice_test.cpp
       device/HierarchicalShuffleTests.cpp
@@ -331,6 +342,18 @@ if(BUILD_TESTS)
       ${PROJECT_BINARY_DIR}/hipify/src/include
       ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device
     )
+
+    # device/TestTdmCopy.cpp exercises tdm/tdmCopy.h, which detects TDM toolchain
+    # support via __has_include(<hip/amd_detail/amd_gfx1250_TDM.h>). An SDK that omits
+    # that descriptor header compiles every tdm:: entry point to a deleted stub and
+    # IsTdmCopySupported() reports the GPU as unsupported, so warn rather than let the
+    # TDM coverage silently degrade to no-ops.
+    find_path(RCCL_GFX1250_TDM_HEADER
+      NAMES hip/amd_detail/amd_gfx1250_TDM.h
+      PATHS ${RCCL_COMMON_INCLUDE_DIRS} "${ROCM_PATH}/include")
+    if(NOT RCCL_GFX1250_TDM_HEADER)
+      message(WARNING "SDK lacks hip/amd_detail/amd_gfx1250_TDM.h; tdm:: entry points will compile to no-op stubs and device/TestTdmCopy.cpp will report TDM as unsupported")
+    endif()
 
   if(ENABLE_ROCSHMEM_GIN)
     target_compile_definitions(rccl-UnitTestsFixtures PRIVATE ENABLE_ROCSHMEM_GIN)

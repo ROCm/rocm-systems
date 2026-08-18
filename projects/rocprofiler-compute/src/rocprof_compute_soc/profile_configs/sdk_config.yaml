@@ -12314,7 +12314,21 @@ rocprofiler-sdk:
       - gfx941
       - gfx942
       - gfx950
+      - gfx1250
       expression: accumulate(SQ_INST_LEVEL_LDS, HIGH_RES)
+  - name: SQ_INST_LEVEL_LDS_ACCUM_sum
+    description: Accumulate SQ_INST_LEVEL_LDS
+    properties: []
+    definitions:
+    - architectures:
+      - gfx908
+      - gfx90a
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      - gfx1250
+      expression: reduce(SQ_INST_LEVEL_LDS_ACCUM, sum)
   - name: SQ_INST_LEVEL_SMEM_ACCUM
     description: Accumulate SQ_INST_LEVEL_SMEM
     properties: []
@@ -12377,6 +12391,27 @@ rocprofiler-sdk:
       - gfx950
       - gfx1250
       expression: accumulate(SQC_ICACHE_INFLIGHT_LEVEL, HIGH_RES)
+  - name: SQC_ICACHE_TC_INFLIGHT_LEVEL_ACCUM
+    description: Accumulate SQC_ICACHE_TC_INFLIGHT_LEVEL
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1250
+      expression: accumulate(SQC_ICACHE_TC_INFLIGHT_LEVEL, HIGH_RES)
+  - name: SQC_DCACHE_TC_INFLIGHT_LEVEL_ACCUM
+    description: Accumulate SQC_DCACHE_TC_INFLIGHT_LEVEL
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1250
+      expression: accumulate(SQC_DCACHE_TC_INFLIGHT_LEVEL, HIGH_RES)
+  - name: SQG_LEVEL_WGP_ACTIVE_ACCUM_sum
+    description: Accumulated SQG_LEVEL_WGP_ACTIVE (sum across SQG instances).
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1250
+      expression: reduce(accumulate(SQG_LEVEL_WGP_ACTIVE, HIGH_RES),sum)
   - name: TCC_PROBE_EVICT_sum
     description: Number of evictions/invalidations due to probes. Not windowable. Sum over TCC instances.
     properties: []
@@ -18418,8 +18453,8 @@ rocprofiler-sdk:
       - gfx1250
       block: GC_UTCL1
       event: 9
-  - name: UTCL1_UTCL2_REQS_OUTSTANDING_ACCUM
-    description: UTCL1 UTCL2 REQS OUTSTANDING ACCUM.
+  - name: UTCL1_UTCL2_REQS_OUTSTANDING
+    description: UTCL1 UTCL2 REQS OUTSTANDING.
     properties: []
     definitions:
     - architectures:
@@ -19323,48 +19358,6 @@ rocprofiler-sdk:
     - architectures:
       - gfx1250
       expression: reduce(GLARBC_GL2_REQ_WRITE_LEVEL,sum)
-  - name: SQC_DCACHE_INFLIGHT_LEVEL_sum
-    description: sum of sqc dcache inflight level.
-    properties: []
-    definitions:
-    - architectures:
-      - gfx1250
-      expression: reduce(SQC_DCACHE_INFLIGHT_LEVEL,sum)
-  - name: SQC_DCACHE_TC_INFLIGHT_LEVEL_sum
-    description: sum of sqc dcache tc inflight level.
-    properties: []
-    definitions:
-    - architectures:
-      - gfx1250
-      expression: reduce(SQC_DCACHE_TC_INFLIGHT_LEVEL,sum)
-  - name: SQC_ICACHE_INFLIGHT_LEVEL_sum
-    description: sum of sqc icache inflight level.
-    properties: []
-    definitions:
-    - architectures:
-      - gfx1250
-      expression: reduce(SQC_ICACHE_INFLIGHT_LEVEL,sum)
-  - name: SQC_ICACHE_TC_INFLIGHT_LEVEL_sum
-    description: sum of sqc icache tc inflight level.
-    properties: []
-    definitions:
-    - architectures:
-      - gfx1250
-      expression: reduce(SQC_ICACHE_TC_INFLIGHT_LEVEL,sum)
-  - name: SQG_LEVEL_WGP_ACTIVE_sum
-    description: sum of sqg level wgp active.
-    properties: []
-    definitions:
-    - architectures:
-      - gfx1250
-      expression: reduce(SQG_LEVEL_WGP_ACTIVE,sum)
-  - name: SQ_IFETCH_LEVEL_sum
-    description: sum of sq ifetch level.
-    properties: []
-    definitions:
-    - architectures:
-      - gfx1250
-      expression: reduce(SQ_IFETCH_LEVEL,sum)
   - name: CHA_STALL_RET_CONFLICT_CHC0_sum
     description: sum of CHA STALL RET CONFLICT CHC0.
     properties: []
@@ -24713,13 +24706,13 @@ rocprofiler-sdk:
     - architectures:
       - gfx1250
       expression: reduce(SQ_WAIT_SLEEP,sum)
-  - name: UTCL1_UTCL2_REQS_OUTSTANDING_ACCUM_sum
-    description: sum of UTCL1_UTCL2_REQS_OUTSTANDING_ACCUM.
+  - name: UTCL1_UTCL2_REQS_OUTSTANDING_sum
+    description: sum of UTCL1_UTCL2_REQS_OUTSTANDING.
     properties: []
     definitions:
     - architectures:
       - gfx1250
-      expression: reduce(UTCL1_UTCL2_REQS_OUTSTANDING_ACCUM,sum)
+      expression: reduce(UTCL1_UTCL2_REQS_OUTSTANDING,sum)
   fw-restriction-schema-version: 1
   firmware_restrictions:
   - affected_architectures:
