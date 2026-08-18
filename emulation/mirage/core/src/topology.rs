@@ -57,11 +57,12 @@ impl TopologyDef {
 /// also where that reference is checked: a name that arrived inside a
 /// document, rather than from a command line, is interpolated into
 /// `<config>/topology/<name>.json` by exactly the same rule and escapes
-/// the config directory just as easily.
+/// the config directory just as easily. It is also where a reference that
+/// resolves to nothing is reported as the dangling reference it is.
 pub mod store {
     use super::TopologyDef;
     use crate::error::{MirageError, Result};
-    use crate::store::validate_name;
+    use crate::store::{DocKind, dangling_ref, validate_name};
     use std::path::PathBuf;
 
     /// List the names of all topology files on disk.
@@ -93,10 +94,15 @@ pub mod store {
     /// # Errors
     ///
     /// Returns an error if `name` is not a single path component, if
-    /// there is no such topology, or if it is malformed.
+    /// there is no such topology — reported as the dangling reference it
+    /// is, since a profile is what brought the name here — or if the
+    /// document is malformed.
     pub fn get(name: &str) -> Result<TopologyDef> {
-        validate_name("topology", name)?;
+        validate_name(DocKind::Topology, name)?;
         let p = crate::paths::topology_path(name);
+        if !p.exists() {
+            return Err(dangling_ref(DocKind::Profile, DocKind::Topology, name));
+        }
         crate::state::read_json(&p)
     }
 
@@ -107,7 +113,7 @@ pub mod store {
     /// Returns an error if `name` is not a single path component or the
     /// document cannot be written.
     pub fn put(name: &str, topology: &TopologyDef) -> Result<PathBuf> {
-        validate_name("topology", name)?;
+        validate_name(DocKind::Topology, name)?;
         let p = crate::paths::topology_path(name);
         crate::state::write_json(&p, topology)?;
         Ok(p)

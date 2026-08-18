@@ -347,7 +347,8 @@ fn guard_delete(kind: DocKind, name: &str) -> Result<()> {
 /// # Errors
 ///
 /// Returns [`MirageError::Id`]-shaped rejection describing what is wrong.
-pub fn validate_name(kind: &str, name: &str) -> Result<()> {
+pub fn validate_name(kind: DocKind, name: &str) -> Result<()> {
+    let kind = kind.as_str();
     let bad = |why: &str| {
         Err(MirageError::other(format!(
             "invalid {kind} name {}: {why}",
@@ -418,7 +419,7 @@ fn validate_stored_name(kind: DocKind, name: &str) -> Result<()> {
 /// Returns a rejection naming the reference and what is wrong with it.
 pub fn validate_profile_refs(profile: &ProfileDef) -> Result<()> {
     match &profile.emulator.topology {
-        MaybeRef::Ref(name) => validate_name("topology", name),
+        MaybeRef::Ref(name) => validate_name(DocKind::Topology, name),
         MaybeRef::Owned(topology) => validate_topology_refs(topology),
     }
 }
@@ -431,9 +432,37 @@ pub fn validate_profile_refs(profile: &ProfileDef) -> Result<()> {
 /// Returns a rejection naming the reference and what is wrong with it.
 pub fn validate_topology_refs(topology: &TopologyDef) -> Result<()> {
     match &topology.agent {
-        MaybeRef::Ref(name) => validate_name("agent", name),
+        MaybeRef::Ref(name) => validate_name(DocKind::Agent, name),
         MaybeRef::Owned(_) => Ok(()),
     }
+}
+
+/// Report a reference that points at a document which is not there.
+///
+/// A reference is followed by interpolating it into a path, so a missing
+/// target surfaced as `io error on <path>: No such file or directory` —
+/// the filesystem's account of an operation nobody asked for, naming a
+/// file the user has never typed and cannot connect to anything they did
+/// type. What actually happened is that one document names another that
+/// does not exist, and none of the three things the reader needs — which
+/// kind of document did the referring, which name failed to resolve, and
+/// how to see the names that would have worked — is in the errno.
+///
+/// The referring kind is a property of where the reference lives rather
+/// than of the call: a topology is referred to by a profile, and an agent
+/// by a topology, which is why the two resolvers pass a constant. See
+/// [`crate::topology::store::get`] and [`crate::agent::store::get`].
+#[must_use]
+pub fn dangling_ref(referrer: DocKind, missing: DocKind, name: &str) -> MirageError {
+    let referrer = referrer.as_str();
+    let kind = missing.as_str();
+    MirageError::other(format!(
+        "dangling {kind} reference: a {referrer} refers to the {kind} {}, and there is \
+         no such {kind} (mirage looked for {}). Run `mirage {kind} list` for the \
+         {kind} names this machine has.",
+        shown(name),
+        missing.path(name).display()
+    ))
 }
 
 /// List every profile name, sorted.
@@ -452,7 +481,7 @@ pub fn profile_list() -> Result<Vec<String>> {
 /// Returns [`MirageError::ProfileNotFound`] if there is no such profile,
 /// or a parse error if it is malformed.
 pub fn profile_get(name: &str) -> Result<ProfileDef> {
-    validate_name("profile", name)?;
+    validate_name(DocKind::Profile, name)?;
     let path = crate::paths::profile_path(name);
     if !path.exists() {
         return Err(MirageError::not_found(DocKind::Profile, name));
@@ -475,7 +504,7 @@ pub fn profile_get(name: &str) -> Result<ProfileDef> {
 /// emulator rejects the profile, if a profile of that name already exists
 /// and is not an untouched builtin, or if the document cannot be written.
 pub fn profile_put(profile: &ProfileDef) -> Result<Stored> {
-    validate_name("profile", &profile.name)?;
+    validate_name(DocKind::Profile, &profile.name)?;
     validate_stored_name(DocKind::Profile, &profile.name)?;
     validate_profile_refs(profile)?;
     profile
@@ -492,7 +521,7 @@ pub fn profile_put(profile: &ProfileDef) -> Result<Stored> {
 /// or a rejection if it is an untouched builtin (which mirage would
 /// simply write back — see [`guard_delete`]).
 pub fn profile_delete(name: &str) -> Result<()> {
-    validate_name("profile", name)?;
+    validate_name(DocKind::Profile, name)?;
     let path = crate::paths::profile_path(name);
     if !path.exists() {
         return Err(MirageError::not_found(DocKind::Profile, name));
@@ -516,7 +545,7 @@ pub fn topology_list() -> Result<Vec<String>> {
 ///
 /// Returns an error if there is no such topology, or it is malformed.
 pub fn topology_get(name: &str) -> Result<TopologyDef> {
-    validate_name("topology", name)?;
+    validate_name(DocKind::Topology, name)?;
     let path = crate::paths::topology_path(name);
     if !path.exists() {
         return Err(MirageError::not_found(DocKind::Topology, name));
@@ -537,7 +566,7 @@ pub fn topology_get(name: &str) -> Result<TopologyDef> {
 /// topology of that name already exists and is not an untouched builtin,
 /// or if the document cannot be written.
 pub fn topology_put(name: &str, topology: &TopologyDef) -> Result<Stored> {
-    validate_name("topology", name)?;
+    validate_name(DocKind::Topology, name)?;
     validate_topology_refs(topology)?;
     put_document(DocKind::Topology, name, topology)
 }
@@ -550,7 +579,7 @@ pub fn topology_put(name: &str, topology: &TopologyDef) -> Result<Stored> {
 /// untouched builtin (which mirage would simply write back — see
 /// [`guard_delete`]).
 pub fn topology_delete(name: &str) -> Result<()> {
-    validate_name("topology", name)?;
+    validate_name(DocKind::Topology, name)?;
     let path = crate::paths::topology_path(name);
     if !path.exists() {
         return Err(MirageError::not_found(DocKind::Topology, name));
@@ -574,7 +603,7 @@ pub fn agent_list() -> Result<Vec<String>> {
 ///
 /// Returns an error if there is no such agent, or it is malformed.
 pub fn agent_get(name: &str) -> Result<AgentDef> {
-    validate_name("agent", name)?;
+    validate_name(DocKind::Agent, name)?;
     let path = crate::paths::agent_path(name);
     if !path.exists() {
         return Err(MirageError::not_found(DocKind::Agent, name));
@@ -590,7 +619,7 @@ pub fn agent_get(name: &str) -> Result<AgentDef> {
 /// already exists and is not an untouched builtin, or if the document
 /// cannot be written.
 pub fn agent_put(name: &str, agent: &AgentDef) -> Result<Stored> {
-    validate_name("agent", name)?;
+    validate_name(DocKind::Agent, name)?;
     validate_stored_name(DocKind::Agent, name)?;
     put_document(DocKind::Agent, name, agent)
 }
@@ -602,7 +631,7 @@ pub fn agent_put(name: &str, agent: &AgentDef) -> Result<Stored> {
 /// Returns an error if there is no such agent, or if it is an untouched
 /// builtin (which mirage would simply write back — see [`guard_delete`]).
 pub fn agent_delete(name: &str) -> Result<()> {
-    validate_name("agent", name)?;
+    validate_name(DocKind::Agent, name)?;
     let path = crate::paths::agent_path(name);
     if !path.exists() {
         return Err(MirageError::not_found(DocKind::Agent, name));
@@ -1044,16 +1073,86 @@ mod tests {
         // to produce a 5000-character error line, which scrolls the
         // sentence explaining the problem out of the terminal.
         let huge = "x".repeat(5000);
-        let err = validate_name("profile", &huge).unwrap_err().to_string();
+        let err = validate_name(DocKind::Profile, &huge)
+            .unwrap_err()
+            .to_string();
         assert!(err.len() < 200, "{} characters", err.len());
         assert!(err.contains("5000 characters"), "{err}");
         assert!(err.contains("xxxx"), "the prefix identifies it: {err}");
 
         // A name short enough to read is still quoted whole.
-        let err = validate_name("profile", "has a space")
+        let err = validate_name(DocKind::Profile, "has a space")
             .unwrap_err()
             .to_string();
         assert!(err.contains("\"has a space\""), "{err}");
+    }
+
+    #[test]
+    fn a_dangling_reference_is_reported_as_one_rather_than_as_an_errno() {
+        // Following a reference interpolates it into a path, so a profile
+        // whose topology is not on disk failed with `io error on
+        // /…/topology/ghosttopo.json: No such file or directory` — the
+        // filesystem's account of an operation the user never asked for,
+        // naming a file they had never typed. None of what they need is in
+        // that: which kind of document did the referring, which name did
+        // not resolve, and how to see the names that would have worked.
+        let _g = crate::paths::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        crate::paths::set_test_root(dir.path());
+
+        let err = crate::topology::store::get("ghosttopo")
+            .unwrap_err()
+            .full_message();
+        assert!(!err.contains("io error"), "{err}");
+        assert!(err.contains("dangling topology reference"), "{err}");
+        assert!(err.contains("a profile refers to"), "{err}");
+        assert!(err.contains("ghosttopo"), "{err}");
+        assert!(err.contains("mirage topology list"), "{err}");
+
+        let err = crate::agent::store::get("ghostagent")
+            .unwrap_err()
+            .full_message();
+        assert!(!err.contains("io error"), "{err}");
+        assert!(err.contains("dangling agent reference"), "{err}");
+        assert!(err.contains("a topology refers to"), "{err}");
+        assert!(err.contains("ghostagent"), "{err}");
+        assert!(err.contains("mirage agent list"), "{err}");
+
+        crate::paths::clear_test_root();
+    }
+
+    #[test]
+    fn a_rejected_name_is_reported_under_the_kind_it_belongs_to() {
+        // `validate_name` took the kind as a string, so the word in the
+        // message was whatever the call site happened to type rather than
+        // the one word `DocKind::as_str` defines for that kind. Nothing
+        // stopped a resource verb from telling a user their *topology*
+        // name was an invalid profile name.
+        let _g = crate::paths::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        crate::paths::set_test_root(dir.path());
+
+        for (kind, err) in [
+            (DocKind::Profile, profile_get("has a space").unwrap_err()),
+            (DocKind::Topology, topology_get("has a space").unwrap_err()),
+            (DocKind::Agent, agent_get("has a space").unwrap_err()),
+            (
+                DocKind::Topology,
+                crate::topology::store::get("has a space").unwrap_err(),
+            ),
+            (
+                DocKind::Agent,
+                crate::agent::store::get("has a space").unwrap_err(),
+            ),
+        ] {
+            let err = err.to_string();
+            assert!(
+                err.starts_with(&format!("invalid {} name", kind.as_str())),
+                "{err}"
+            );
+        }
+
+        crate::paths::clear_test_root();
     }
 
     #[test]

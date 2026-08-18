@@ -92,14 +92,14 @@ impl EmulatorBackend for Rocjitsu {
         check_config(&def.emulator).map_err(|e| format!("rocjitsu cannot use this profile: {e}"))
     }
 
-    fn installed(&self) -> bool {
-        is_installed()
-    }
-
     fn runtime(&self) -> RuntimeStatus {
         // rocjitsu is installed exactly when its one library is on the
         // machine, so the search that answers "where?" also answers
-        // "installed?" — see `runtime_location`.
+        // "installed?" — see `runtime_location`. Which is why
+        // `installed` is left to the trait: its default reads the flag
+        // out of this, and the override that used to sit here was a
+        // second route to the same search that could only ever agree or
+        // be a bug.
         RuntimeStatus::from_location(runtime_location())
     }
 
@@ -773,6 +773,20 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
+
+    #[test]
+    fn the_installed_flag_and_the_located_library_are_one_answer() {
+        // `installed` used to be overridden here with `is_installed()`,
+        // a second route to the same search. It agreed, and that is the
+        // problem with it: two implementations of "is rocjitsu here?"
+        // can only ever agree or be a bug, and the one a caller happens
+        // to reach decides which. The override is gone and the trait's
+        // default reads the flag out of `runtime`, so there is one
+        // search and one verdict.
+        let backend = Rocjitsu;
+        assert_eq!(backend.installed(), backend.runtime().installed);
+        assert_eq!(backend.installed(), is_installed());
+    }
 
     /// An [`EmulatorDef`] with an owned topology of `gpus_per_node`
     /// GPUs on a default agent, resolvable without touching the stores.

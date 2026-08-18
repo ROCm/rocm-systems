@@ -46,7 +46,13 @@ extern crate mirage_rocjitsu as _;
 )]
 struct Cli {
     /// Emit machine-readable JSON output where applicable.
-    #[arg(long, global = true)]
+    ///
+    /// `overrides_with` naming the flag itself is clap's way of saying a
+    /// repeat is not an error. Without it `mirage paths --json --json`
+    /// exits 2, which a user hits by composing a command from a variable
+    /// that already carries the flag -- and refusing to do a thing twice
+    /// that is idempotent the first time is a strange place to be strict.
+    #[arg(long, global = true, overrides_with = "json")]
     json: bool,
 
     /// Increase logging verbosity (-v info, -vv debug). Can also set
@@ -229,11 +235,6 @@ fn is_global_flag(arg: &str) -> bool {
 /// that also honours [`ATTACH`].
 const RUN: &str = "run";
 
-/// The rocjitsu-only spelling of `--daemon`. Mirage manages the daemon's
-/// lifecycle, so "attach to a daemon" and "use a daemon" collapse to the
-/// same opt-in, and the alias is translated away before clap sees it.
-const ATTACH: &str = "--attach";
-
 /// The one-line shape shown by every usage error [`dropin_argv`] raises.
 const DROPIN_USAGE: &str = "Usage: mirage [OPTIONS] -- <COMMAND> [ARGS]...";
 
@@ -289,11 +290,7 @@ impl DropinFlags {
         // `help` and `version` are clap's own and are not in the
         // declared argument list of an unbuilt `Command`, but they are
         // accepted everywhere, so a drop-in may carry them too.
-        let mut longs = vec![
-            ATTACH.trim_start_matches('-').to_string(),
-            "help".to_string(),
-            "version".to_string(),
-        ];
+        let mut longs = vec!["help".to_string(), "version".to_string()];
         let mut shorts = vec!['h', 'V'];
         let globals = cmd.get_arguments().filter(|a| a.is_global_set());
         let run = cmd
@@ -361,17 +358,15 @@ impl DropinFlags {
 /// subcommand. `mirage` is subcommand-based, so when an invocation has
 /// the `rocjitsu` shape — a `--` application separator with no
 /// recognised subcommand before it — we splice in `run` and translate
-/// [`ATTACH`] to `--daemon`. Everything `run` already accepts
+/// `--attach` to `--daemon`. Everything `run` already accepts
 /// (`--config`, `--profile`, `--daemon`, `--env`, …) then flows straight
 /// through.
 ///
 /// Invocations that name a subcommand (`mirage run …`, `mirage profile
 /// …`, `mirage exec --session s -- cmd`) and those with no `--` separator
-/// (so `--help`/`--version` keep working) are left untouched, except that
-/// an explicit `mirage run` gets the same `--attach` translation: the
-/// alias was documented as accepted and worked only on the rewriting
-/// path, so `mirage run --attach -- app` passed `--attach` to the
-/// workload and exited 127.
+/// (so `--help`/`--version` keep working) are left untouched. `run`
+/// declares `--attach` as an alias of `--daemon` itself, so an explicit
+/// `mirage run --attach` needs nothing from here.
 ///
 /// # Errors
 ///
@@ -400,15 +395,12 @@ fn dropin_argv(args: Vec<String>) -> Result<Vec<String>, String> {
         head_idx = i;
         break;
     }
-    // A recognised subcommand means this is a normal mirage call. Leave
-    // it alone — `run` excepted, which understands `--attach` wherever
-    // the drop-in shape does.
-    if let Some(h) = head.filter(|h| is_subcommand(h)) {
-        return Ok(if h == RUN {
-            map_attach(args, head_idx + 1, scan_end)
-        } else {
-            args
-        });
+    // A recognised subcommand means this is a normal mirage call, so
+    // leave it alone. That includes `run --attach`: `--attach` is a clap
+    // alias of `--daemon` on `run` itself now, so there is nothing here
+    // to translate.
+    if head.is_some_and(is_subcommand) {
+        return Ok(args);
     }
     // A bare `--help`/`--version` is not a drop-in either.
     if matches!(head, Some("--help" | "-h" | "--version" | "-V")) {
@@ -443,21 +435,8 @@ fn dropin_argv(args: Vec<String>) -> Result<Vec<String>, String> {
     let mut out = Vec::with_capacity(args.len() + 1);
     out.extend(args[..head_idx].iter().cloned());
     out.push(RUN.to_string());
-    out.extend(map_attach(args, head_idx, sep).into_iter().skip(head_idx));
+    out.extend(args[head_idx..].iter().cloned());
     Ok(out)
-}
-
-/// `args` with every [`ATTACH`] in `args[from..to]` replaced by
-/// `--daemon`, leaving the rest — in particular the workload's own
-/// arguments after `--` — byte for byte as the user typed them.
-fn map_attach(mut args: Vec<String>, from: usize, to: usize) -> Vec<String> {
-    let len = args.len();
-    for a in &mut args[from.min(len)..to.min(len)] {
-        if a == ATTACH {
-            *a = "--daemon".to_string();
-        }
-    }
-    args
 }
 
 /// The message for a flag-shaped token before `--` that mirage does not
@@ -577,32 +556,41 @@ mod tests {
         );
     }
 
+    /// `--attach` is the upstream `rocjitsu` spelling of `--daemon`, and
+    /// `run` declares it as a clap alias, so the rewriter passes it
+    /// through untouched rather than translating it. It used to do the
+    /// translation itself, which meant the alias worked only on the
+    /// drop-in path: `mirage run --attach -- app` brought a session up
+    /// and exited 127 with `command not found: --attach`. One mechanism
+    /// cannot disagree with itself.
     #[test]
-    fn attach_maps_to_daemon() {
+    fn attach_reaches_run_untranslated() {
         assert_eq!(
             rewrite(&["mirage", "--attach", "--config", "c.json", "--", "./app"]),
             v_args(&[
-                "mirage", "run", "--daemon", "--config", "c.json", "--", "./app"
+                "mirage", "run", "--attach", "--config", "c.json", "--", "./app"
             ])
         );
+        for argv in [
+            &["mirage", "run", "--attach", "--", "./app"][..],
+            &["mirage", "run", "--attach", "./app"][..],
+        ] {
+            assert_eq!(rewrite(argv), v_args(argv), "{argv:?} needs no rewriting");
+        }
     }
 
-    /// `--attach` was documented as an accepted alias and translated only
-    /// on the rewriting path, so naming `run` explicitly turned it back
-    /// into a workload argument: `mirage run --attach -- app` brought a
-    /// session up and exited 127 with `command not found: --attach`.
+    /// And the alias really is accepted by the parser, which is the half
+    /// the rewriter now relies on: if `run` ever stopped declaring it,
+    /// the test above would still pass while every spelling broke.
     #[test]
-    fn attach_maps_to_daemon_on_an_explicit_run_too() {
-        assert_eq!(
-            rewrite(&["mirage", "run", "--attach", "--", "./app"]),
-            v_args(&["mirage", "run", "--daemon", "--", "./app"])
-        );
-        // Including without a separator, so the two spellings of the same
-        // invocation cannot disagree.
-        assert_eq!(
-            rewrite(&["mirage", "run", "--attach", "./app"]),
-            v_args(&["mirage", "run", "--daemon", "./app"])
-        );
+    fn run_accepts_the_attach_alias() {
+        use clap::Parser as _;
+        for argv in [
+            &["mirage", "run", "--attach", "--", "./app"][..],
+            &["mirage", "run", "--daemon", "--", "./app"][..],
+        ] {
+            Cli::try_parse_from(argv).unwrap_or_else(|e| panic!("{argv:?} should parse: {e}"));
+        }
     }
 
     /// The translation stops at the separator: `--attach` is a mirage
@@ -820,6 +808,27 @@ mod tests {
         assert_eq!(
             rewrite(&["mirage", "--config", "c.json", "--", "./app"]),
             v_args(&["mirage", "run", "--config", "c.json", "--", "./app"])
+        );
+    }
+
+    /// Repeating a boolean flag is not an error anywhere else, and a
+    /// user reaches this by composing a command line from a variable that
+    /// already carries `--json`.
+    #[test]
+    fn a_repeated_json_flag_is_accepted() {
+        use clap::Parser as _;
+        for argv in [
+            &["mirage", "paths", "--json"][..],
+            &["mirage", "paths", "--json", "--json"][..],
+            &["mirage", "--json", "paths", "--json"][..],
+        ] {
+            let cli =
+                Cli::try_parse_from(argv).unwrap_or_else(|e| panic!("{argv:?} should parse: {e}"));
+            assert!(cli.json, "{argv:?} should set --json");
+        }
+        assert!(
+            !Cli::try_parse_from(["mirage", "paths"]).unwrap().json,
+            "--json must still default to off"
         );
     }
 

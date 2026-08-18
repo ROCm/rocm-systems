@@ -16,9 +16,12 @@
 //! mysteriously fails under `exec`. Sharing the builder makes that class
 //! of bug unrepresentable.
 //!
-//! The mapping is a function of its inputs, so the whole of it is
-//! testable without a container runtime or an emulator. Two things are
-//! read from the process rather than passed in, and both are properties
+//! The mapping is very nearly a function of its inputs, and everything
+//! it decides is testable without a container runtime or an emulator.
+//! The one thing it asks the world about is a containerised
+//! `--workdir`, which is a question only the image can answer and is
+//! asked only when the caller passed one. Two more things are read from
+//! the process rather than passed in, and both are properties
 //! of the terminal mirage was started from rather than of the session:
 //! whether the caller's streams are a terminal, and which runtime
 //! directory this mirage resolved. Both callers — `mirage run` and
@@ -88,11 +91,33 @@ pub(crate) const CONTAINER_RUNTIME_DIR: &str = "/mnt/mirage/runtime";
 ///   the next node's rank 0, and two live processes claiming one rank in
 ///   one rendezvous is the failure this whole section exists to prevent.
 ///
+/// # Where a containerised workload starts
+///
+/// The two paths do not share a default working directory, and cannot.
+///
+/// On the host, a workload with no `--workdir` starts in
+/// [`SessionDescription::workdir`] — the directory `mirage run` was
+/// typed in — which is what makes `mirage run -- ./my-app` behave like
+/// running `./my-app`.
+///
+/// In a container there is no equivalent, because the host's directory
+/// is a host path and the container has its own filesystem. Carrying it
+/// across would fail every run started anywhere but a bind-mounted
+/// directory, and fail it in the most confusing possible way: with a
+/// `chdir` error about a path the user never asked for. So mirage passes
+/// no `-w` at all and the workload starts wherever the image says it
+/// does — its `WORKDIR`, which is `/` for an image that declares none.
+/// That is the image's answer to the same question rather than a guess
+/// of mirage's, and `--workdir` overrides it; a path there is checked
+/// against the container before anything runs, so getting it wrong costs
+/// an error and not a failed workload.
+///
 /// # Errors
 ///
 /// Returns an error if the world size exceeds [`MAX_WORLD_SIZE`], if the
-/// exec asks for more processes per node than the job has slots for, or
-/// if the pid-file directory cannot be created.
+/// exec asks for more processes per node than the job has slots for, if
+/// a containerised `--workdir` names a directory the image does not
+/// have, or if the pid-file directory cannot be created.
 pub fn build_specs(
     desc: &SessionDescription,
     def: &ExecDef,
@@ -183,6 +208,15 @@ pub fn build_specs(
     // could differ.
     let runtime = mirage_core::container::owning_runtime();
 
+    // Which `--workdir` values have already been put to a container.
+    // Every node of a session runs the same image with the same mounts,
+    // so one answer settles the question for all of them, and an exec
+    // that names a worker command has at most two distinct directories
+    // between them. Without this the probe would be an extra provider
+    // invocation per rank of a wide job, to be told the same thing each
+    // time.
+    let mut asked: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+
     let mut specs = Vec::with_capacity(nodes.len() * nproc as usize);
     for node in nodes {
         for local in 0..nproc {
@@ -210,13 +244,34 @@ pub fn build_specs(
                         })?
                         .to_string();
                     // No [`Cancel`](mirage_container::Cancel) on this
-                    // one, and it is the one engine that needs none: it
-                    // is used purely to build an argv, which starts no
-                    // child and waits on nothing. The engine that does
-                    // run providers — the session's bring-up — is given
-                    // the session's switch where it is built, in
+                    // one. It builds an argv, and asks the container one
+                    // bounded question about its filesystem below;
+                    // neither is a step a user waits on, so there is
+                    // nothing here for an interrupt to shorten. The
+                    // engine that does run long providers — the
+                    // session's bring-up — is given the session's switch
+                    // where it is built, in
                     // [`Run::bring_up_containers`](crate::Run).
                     let engine = mirage_container::Engine::with_provider(&targets.provider);
+                    // A `--workdir` in a containerised session names a
+                    // path in the *image's* filesystem, so the host-side
+                    // check `mirage run` and `mirage exec` do before they
+                    // ever reach here cannot answer it — and skips it for
+                    // exactly this reason. Asked of the container
+                    // instead, before a single process is started, so a
+                    // mistyped directory is `--workdir /wrok: there is no
+                    // such directory inside container …` rather than an
+                    // OCI runtime error about `chdir to cwd` and a
+                    // container id the user has never seen. A container
+                    // that cannot answer is believed; see
+                    // [`Engine::check_workdir`](mirage_container::Engine::check_workdir).
+                    if let Some(workdir) = args.workdir.as_deref()
+                        && asked.insert(workdir)
+                    {
+                        engine
+                            .check_workdir(&container, workdir)
+                            .map_err(|e| MirageError::other(e.to_string()))?;
+                    }
                     let mut env = env;
                     // Inside the container the host's runtime directory is
                     // a path that does not exist; what is mounted there is
@@ -251,6 +306,9 @@ pub fn build_specs(
                     let _ = std::fs::remove_file(&pid_file);
                     let (command, rest) =
                         pid_recording_command(&args.command, &args.args, exec_id, global);
+                    // No `--workdir`, no `-w`, and deliberately no
+                    // default: see "Where a containerised workload
+                    // starts" on [`build_specs`].
                     let argv = engine.exec_command_line(
                         &container,
                         args.workdir.as_deref(),
@@ -430,13 +488,32 @@ fn proc_env(
     world_size: u32,
     runtime: &str,
 ) -> Vec<(String, String)> {
-    // Processes on the head node reach the rendezvous over loopback;
-    // everyone else needs the head's address.
-    let head = if node == 0 {
-        "localhost"
-    } else {
-        &desc.head_addr
-    };
+    // The rendezvous address — and the *same string* on every rank of
+    // the job, which is the whole of the requirement.
+    //
+    // Rank 0 used to be handed `localhost` instead, on the reasoning
+    // that the head reaches its own rendezvous over loopback. That is
+    // true and it is beside the point: a rendezvous address is not only
+    // dialled, it is compared. `torch.distributed` builds its store key
+    // and NCCL its `hostname:port` identity out of the literal string,
+    // so a job whose ranks spell the head two ways can form two
+    // rendezvous that never meet — on a machine where every one of those
+    // connections succeeded, which is the kind of failure that survives
+    // a whole afternoon of looking at the network.
+    //
+    // `desc.head_addr` is the value every rank can be given. On a host
+    // session it is `127.0.0.1`, which reaches the head from any node
+    // including the head itself, since all of them are processes on this
+    // machine. On a containerised one it is the head container's name,
+    // which resolves on the session's own network from inside every node
+    // — node 0 included, because that is its own hostname.
+    //
+    // Taking the literal address rather than `localhost` also settles a
+    // question that used to depend on which rank was asking: `localhost`
+    // resolves to `::1` ahead of `127.0.0.1` on a dual-stack host, so a
+    // store bound to IPv4 was reachable by the name on some machines and
+    // not on others.
+    let head = &desc.head_addr;
     let head_port = desc.head_port;
     let session = &desc.session;
     vec![
@@ -685,16 +762,50 @@ mod tests {
     }
 
     #[test]
-    fn the_head_node_uses_loopback_and_workers_use_the_head_address() {
-        let specs = build_specs(&desc(2), &exec_def(1, None), &id()).unwrap();
+    fn every_rank_spells_the_rendezvous_address_the_same_way() {
+        // Rank 0 was given `localhost` and every other rank the head's
+        // address, which are two strings for one endpoint. Frameworks
+        // compare them: a `torch.distributed` store keyed on the address
+        // and a NCCL identity built from it both take the ranks at their
+        // word, so the disagreement forms two rendezvous rather than
+        // failing to connect.
+        let specs = build_specs(&job(3, 2), &exec_def(2, None), &id()).unwrap();
+        let addrs: Vec<&str> = specs
+            .iter()
+            .filter_map(|s| s.env.get("MASTER_ADDR").map(String::as_str))
+            .collect();
+        assert_eq!(addrs.len(), specs.len(), "every rank must be given one");
         assert_eq!(
-            specs[0].env.get("MASTER_ADDR").map(String::as_str),
-            Some("localhost")
+            addrs,
+            vec!["mirage-s-node-0"; specs.len()],
+            "the ranks disagree about where the rendezvous is"
         );
-        assert_eq!(
-            specs[1].env.get("MASTER_ADDR").map(String::as_str),
-            Some("mirage-s-node-0")
-        );
+        // `MIRAGE_HEAD_ADDR` is the same value under mirage's own name,
+        // so it splits in exactly the same way if it is computed twice.
+        let heads: Vec<&str> = specs
+            .iter()
+            .filter_map(|s| s.env.get("MIRAGE_HEAD_ADDR").map(String::as_str))
+            .collect();
+        assert_eq!(heads, addrs);
+    }
+
+    #[test]
+    fn a_host_session_rendezvouses_on_the_loopback_address() {
+        // What the session describes, unedited — including on rank 0,
+        // which is the rank that used to be handed `localhost` instead.
+        // The literal address is also the one that cannot resolve to
+        // `::1` on a dual-stack host while a store listens on IPv4.
+        let mut d = desc(2);
+        d.head_addr = "127.0.0.1".to_string();
+        let specs = build_specs(&d, &exec_def(1, None), &id()).unwrap();
+        for spec in &specs {
+            assert_eq!(
+                spec.env.get("MASTER_ADDR").map(String::as_str),
+                Some("127.0.0.1"),
+                "rank {} disagrees",
+                spec.node
+            );
+        }
     }
 
     #[test]
@@ -896,6 +1007,121 @@ mod tests {
         def.clear_env = true;
         let specs = build_specs(&d, &def, &id()).unwrap();
         assert!(specs[0].inherit_env);
+    }
+
+    /// A provider whose `exec` simply runs what it is handed, so the
+    /// workdir probe is answered by this machine's filesystem standing
+    /// in for the container's. The same stand-in `mirage_container`'s
+    /// own tests use, because there is no other way to hold a container
+    /// filesystem still in a unit test.
+    fn executing_provider(dir: &std::path::Path) -> String {
+        use std::os::unix::fs::PermissionsExt as _;
+        let provider = dir.join("exec-provider.sh");
+        std::fs::write(
+            &provider,
+            "#!/bin/sh\n\
+             case \"$1\" in\n\
+             exec)\n\
+             shift\n\
+             while [ $# -gt 0 ]; do\n\
+             case \"$1\" in -i|-t) shift ;; -w|-e) shift 2 ;; *) break ;; esac\n\
+             done\n\
+             shift\n\
+             exec \"$@\" ;;\n\
+             *) exit 0 ;;\n\
+             esac\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+        provider.to_string_lossy().to_string()
+    }
+
+    /// A one-node containerised session driven by `provider`, with its
+    /// scratch under `scratch`.
+    fn containerised(provider: String, scratch: &std::path::Path) -> SessionDescription {
+        let mut d = desc(1);
+        d.containers = Some(ContainerTargets {
+            provider,
+            names: vec!["mirage-s-node-0".to_string()],
+            scratch: scratch.to_path_buf(),
+        });
+        d
+    }
+
+    /// `exec_def(1, None)` asking to start in `workdir`.
+    fn exec_def_in(workdir: &str) -> ExecDef {
+        let mut def = exec_def(1, None);
+        def.exec.workdir = Some(workdir.to_string());
+        def
+    }
+
+    #[test]
+    fn a_containerised_workdir_the_image_lacks_is_refused_by_name() {
+        // The host-side check both callers run skips a containerised
+        // session, correctly: the path is in the image's filesystem, not
+        // this one. Nothing then asked the image, so the user's answer
+        // came from the provider — `OCI runtime exec failed: … chdir to
+        // cwd ("/nope/nope") … no such file or directory` plus a
+        // container id they have never seen, which names neither the
+        // flag they passed nor the reason the path being on the host is
+        // beside the point.
+        let dir = tempfile::tempdir().unwrap();
+        let d = containerised(executing_provider(dir.path()), dir.path());
+        let err = build_specs(&d, &exec_def_in("/nope/nope"), &id()).unwrap_err();
+
+        let message = err.to_string();
+        assert!(message.contains("--workdir /nope/nope"), "{message}");
+        assert!(message.contains("mirage-s-node-0"), "{message}");
+        // The part nobody guesses, and the reason this is not simply the
+        // host check run again: which filesystem was asked.
+        assert!(
+            message.contains("has to exist in the *container*"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn a_containerised_workdir_the_image_has_is_passed_through() {
+        // The check must not invent a failure for a directory that is
+        // there — the probe stands in this machine's filesystem for the
+        // container's, so a real directory is a real answer.
+        let dir = tempfile::tempdir().unwrap();
+        let d = containerised(executing_provider(dir.path()), dir.path());
+        let here = dir.path().to_string_lossy().to_string();
+        let specs = build_specs(&d, &exec_def_in(&here), &id()).unwrap();
+        assert!(
+            specs[0]
+                .args
+                .windows(2)
+                .any(|w| w[0] == "-w" && w[1] == here),
+            "{:?}",
+            specs[0].args
+        );
+    }
+
+    #[test]
+    fn a_containerised_exec_with_no_workdir_asks_the_container_nothing() {
+        // The common case, and the one that must stay a pure function of
+        // its inputs: no `--workdir` means no `-w`, no probe, and the
+        // image's own `WORKDIR` decides where the workload starts. See
+        // "Where a containerised workload starts" on `build_specs` for
+        // why the host's directory is not carried across instead.
+        let dir = tempfile::tempdir().unwrap();
+        // A provider that fails whatever it is asked: reaching it at all
+        // would be the bug.
+        let d = containerised(
+            dir.path()
+                .join("no-such-engine")
+                .to_string_lossy()
+                .to_string(),
+            dir.path(),
+        );
+        let specs = build_specs(&d, &exec_def(1, None), &id()).unwrap();
+        assert!(
+            !specs[0].args.iter().any(|a| a == "-w"),
+            "{:?}",
+            specs[0].args
+        );
     }
 
     #[test]

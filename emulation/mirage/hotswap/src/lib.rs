@@ -115,15 +115,22 @@ impl EmulatorBackend for Hotswap {
         installed_lib_dir().map(|_| ())
     }
 
-    fn installed(&self) -> bool {
-        is_installed()
-    }
-
     fn runtime(&self) -> RuntimeStatus {
         // Finding the intercept is not the same as being installed here:
         // HotSwap is three co-located libraries, and a tree missing one
         // of them cannot emulate. Both answers come out of this one
         // search, so `mirage emulators` still stats the candidates once.
+        //
+        // Which is also why the trait's default `installed` is left in
+        // place rather than overridden with [`is_installed`]. The two
+        // are the same walk — locate the intercept, take its directory,
+        // insist the directory is complete — and the reason this backend
+        // is the one worth checking is that the walk has a second half
+        // an override could quietly lose. It did once: `installed` was
+        // "the intercept is here" while the injection demanded the whole
+        // tree, so a half-staged install was reported missing, injected
+        // anyway, and ran on the host GPU unemulated. `is_installed`
+        // stays because callers outside the trait use it.
         let location = discovery::locate_emulator_lib(&lib_search());
         let installed = location
             .path()
@@ -589,6 +596,25 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
+
+    #[test]
+    fn the_installed_flag_accounts_for_the_whole_tree() {
+        // The backend worth checking, because HotSwap's install is three
+        // co-located libraries and "is it here?" is not "was the
+        // intercept found". The override that used to sit on `installed`
+        // called `is_installed()`, which walks the same three steps
+        // — locate the intercept, take its directory, insist the
+        // directory is complete — and agreeing was the most it could do.
+        // The trait's default now reads the flag `runtime` computed, so
+        // a tree missing its ROCR or COMGR cannot be reported installed
+        // by one path and missing by the other.
+        let backend = Hotswap;
+        assert_eq!(backend.installed(), backend.runtime().installed);
+        assert_eq!(backend.installed(), is_installed());
+        // And the location came with the verdict, whichever way it went.
+        let status = backend.runtime();
+        assert_eq!(status.location.is_found(), status.location.path().is_some());
+    }
 
     #[test]
     fn search_targets_the_intercept_lib() {

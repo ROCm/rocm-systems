@@ -46,19 +46,7 @@ pub async fn run_cmd(a: RunArgs) -> anyhow::Result<ExitCode> {
     // Before anything that could need cleaning up. See [`Interrupts`].
     let mut interrupts = Interrupts::install()?;
 
-    let mut profile = mirage_core::store::profile_get(&a.profile).map_err(|e| {
-        // Where mirage looked, because the commonest cause of "profile
-        // not found" for a name the user knows exists is a config
-        // directory somewhere other than the one they are editing.
-        if e.is_not_found() {
-            anyhow::anyhow!(
-                "{e}. mirage looked in {}; `mirage profile list` shows what is there.",
-                mirage_core::paths::profile_root().display()
-            )
-        } else {
-            anyhow::Error::new(e)
-        }
-    })?;
+    let mut profile = mirage_core::store::profile_get(&a.profile).map_err(profile_error)?;
     let profile_ref = apply_profile_overrides(&mut profile, &a)?;
     check_run_args(&a, &profile)?;
 
@@ -106,6 +94,23 @@ pub async fn run_cmd(a: RunArgs) -> anyhow::Result<ExitCode> {
     let outcome = run_owned(&run, &a, &socket, &mut interrupts).await;
     run.destroy().await;
     outcome
+}
+
+/// Blame a `--profile` the store could not hand over.
+///
+/// Only one thing is added, and only to the not-found case: the command
+/// that lists what *is* there. Where mirage looked used to be added here
+/// too, and is not any more — [`MirageError::ProfileNotFound`] carries
+/// the directory itself now, so saying it again printed the same path
+/// twice in one sentence.
+///
+/// [`MirageError::ProfileNotFound`]: mirage_core::error::MirageError::ProfileNotFound
+fn profile_error(e: mirage_core::error::MirageError) -> anyhow::Error {
+    if e.is_not_found() {
+        anyhow::anyhow!("{e}. `mirage profile list` shows what is there.")
+    } else {
+        anyhow::Error::new(e)
+    }
 }
 
 /// Refuse a `mirage run` that cannot work, before it costs a session.
@@ -1242,6 +1247,44 @@ mod tests {
         // grid of zero processes is a session with nothing in it.
         let def = exec_def(session(), &argv(), &[], None, Some(0), None, false).unwrap();
         assert_eq!(def.nproc_per_node, 1);
+    }
+
+    #[test]
+    fn a_missing_profile_says_where_mirage_looked_exactly_once() {
+        // The store's error names the directory, and this call site used
+        // to name it a second time in the very next clause: "profile not
+        // found: ghost (mirage looked in /…/profile). mirage looked in
+        // /…/profile; `mirage profile list` shows what is there."
+        use mirage_core::store::DocKind;
+        // The config directory is process-wide state another test can be
+        // moving, and this asserts on the path inside the message.
+        let _lock = mirage_core::paths::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(root.path());
+        let dir = DocKind::Profile.root().display().to_string();
+        let e = format!(
+            "{:#}",
+            profile_error(mirage_core::error::MirageError::not_found(
+                DocKind::Profile,
+                "ghost"
+            ))
+        );
+        mirage_core::paths::clear_test_root();
+        assert_eq!(
+            e.matches(&dir).count(),
+            1,
+            "the directory belongs in the error that knows it, and only there: {e}"
+        );
+        // The half the error does not carry is still said.
+        assert!(e.contains("mirage profile list"), "{e}");
+
+        // Anything that is not a missing profile is passed through
+        // untouched; there is no list to point at.
+        let other = format!(
+            "{:#}",
+            profile_error(mirage_core::error::MirageError::other("disk on fire"))
+        );
+        assert_eq!(other, "disk on fire");
     }
 
     /// A single-threaded runtime for the async helpers below.

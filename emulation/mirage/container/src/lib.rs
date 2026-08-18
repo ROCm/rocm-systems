@@ -1600,22 +1600,36 @@ impl Engine {
     }
 
     /// Whether `image` is already present locally.
+    ///
+    /// A question, so an engine that will not answer it is reported as
+    /// "no" — including the engine this one *stopped* asking because the
+    /// caller cancelled. Bring-up reads its own switch straight
+    /// afterwards; see [`Self::probe`].
     pub fn image_present(&self, image: &str) -> bool {
-        self.status(&[
-            "image".to_string(),
-            "inspect".to_string(),
-            image.to_string(),
-        ])
+        self.probe(
+            &[
+                "image".to_string(),
+                "inspect".to_string(),
+                image.to_string(),
+            ],
+            &format!("looking for image {image}"),
+        )
         .unwrap_or(false)
     }
 
     /// Whether a network named `name` already exists.
+    ///
+    /// Answered like [`Self::image_present`], and cancellable for the
+    /// same reason.
     pub fn network_exists(&self, name: &str) -> bool {
-        self.status(&[
-            "network".to_string(),
-            "inspect".to_string(),
-            name.to_string(),
-        ])
+        self.probe(
+            &[
+                "network".to_string(),
+                "inspect".to_string(),
+                name.to_string(),
+            ],
+            &format!("looking for network {name}"),
+        )
         .unwrap_or(false)
     }
 
@@ -1914,7 +1928,15 @@ impl Engine {
 
         // Pull the image unless it is already present locally; pulling a
         // large image is the slowest, most visible step, so report it.
-        if self.image_present(&def.image) {
+        let present = self.image_present(&def.image);
+        // An interrupted probe answers "the image is not here", which is
+        // indistinguishable from the image genuinely not being here — so
+        // the switch is read rather than inferred from the answer.
+        // Without this a Ctrl-C during a wedged `image inspect` fell
+        // through into a pull that was spawned only to be killed on its
+        // first poll.
+        self.check_cancelled(&format!("looking for image {}", def.image))?;
+        if present {
             progress(BringUpPhase::ImagePresent {
                 image: def.image.clone(),
             });
@@ -1943,6 +1965,10 @@ impl Engine {
         // created by something else entirely — and removing it would
         // disconnect whatever is using it.
         let network_existed = self.network_exists(&network);
+        // And the same reading here, for the same reason: an interrupted
+        // `network inspect` says "no such network", and acting on it
+        // would have this bring-up create one on its way out.
+        self.check_cancelled(&format!("looking for network {network}"))?;
 
         // Helper that removes anything created so far on failure.
         // Killing the clients first stops the containers; `rm -f` then
@@ -2113,7 +2139,48 @@ impl Engine {
         }
     }
 
-    /// Run the provider with `args` and return whether it exited zero.
+    /// Ask the provider a yes/no question, ending it if the caller
+    /// cancels.
+    ///
+    /// The interruptible twin of [`Self::status`], and the one every
+    /// question bring-up asks *before* it creates anything goes through.
+    /// `image inspect` and `network inspect` are instant against a
+    /// healthy engine, which is why they were waited on the same way a
+    /// `--version` probe is — but they are provider invocations like any
+    /// other, and an engine whose daemon has wedged answers neither.
+    /// Blocking on that one hung a `mirage run` before the pull, with no
+    /// output to say what it was doing and no response to `SIGTERM`,
+    /// which is precisely the failure [`Cancel`] exists to end. The
+    /// hung-`pull` case was fixed first only because it is the one users
+    /// hit often enough to report.
+    ///
+    /// The removal paths ([`Self::rm`], [`Self::network_rm`]) keep the
+    /// uninterruptible [`Self::status`] deliberately. They run *during*
+    /// teardown, when the switch is already flipped, and a cancellable
+    /// `rm -f` would therefore kill itself on its first poll and leave
+    /// behind the container it was called to remove.
+    fn probe(&self, args: &[String], what: &str) -> Result<bool> {
+        // No pipes, which is what makes this safe to wait on by polling:
+        // see [`Self::wait_cancellable`].
+        let mut child = spawn_retrying_etxtbsy(|| {
+            Command::new(&self.provider)
+                .args(args)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+        })
+        .map_err(|source| ContainerError::Spawn {
+            provider: self.provider.clone(),
+            args: args.to_vec(),
+            source,
+        })?;
+        Ok(self.wait_cancellable(&mut child, args, what)?.success())
+    }
+
+    /// Run the provider with `args` and return whether it exited zero,
+    /// however long it takes. See [`Self::probe`] for the cancellable
+    /// form and for which callers want which.
     fn status(&self, args: &[String]) -> Result<bool> {
         let status = spawn_retrying_etxtbsy(|| {
             Command::new(&self.provider)
@@ -2959,6 +3026,99 @@ mod tests {
         assert!(
             waited < std::time::Duration::from_secs(5),
             "the pull was waited out rather than ended: {waited:?}"
+        );
+    }
+
+    #[test]
+    fn a_provider_that_hangs_before_the_pull_is_still_cancellable() {
+        // The pull is the step everyone thinks of, and it was the step
+        // that got fixed first. But bring-up asks the engine two
+        // questions before it: is the image here, and does the network
+        // exist. Both are instant against a healthy engine and neither
+        // is instant against one whose daemon has wedged — and waiting
+        // on them uninterruptibly hung the run with nothing printed and
+        // no answer to `SIGTERM`, which is the worst version of this
+        // failure rather than a lesser one.
+        let dir = tempfile::tempdir().unwrap();
+        let provider = scripted_provider(
+            dir.path(),
+            "wedged-inspect.sh",
+            "if [ \"$1\" = image ] && [ \"$2\" = inspect ]; then sleep 30; fi\n\
+             exit 0\n",
+        );
+        let cancel = Cancel::new();
+        let engine = Engine::with_provider(provider.to_string_lossy().to_string())
+            .with_cancel(cancel.clone());
+
+        let started = std::time::Instant::now();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            cancel.cancel();
+        });
+        let err = bring_up_one(&engine, &def_with(&provider, vec![])).unwrap_err();
+        let waited = started.elapsed();
+
+        assert!(
+            matches!(err, ContainerError::Cancelled { .. }),
+            "a bring-up interrupted at `image inspect` must say so: {err}"
+        );
+        assert!(
+            err.to_string().contains("looking for image img:latest"),
+            "the error must name what was interrupted: {err}"
+        );
+        assert!(
+            waited < std::time::Duration::from_secs(5),
+            "the wedged inspect was waited out rather than ended: {waited:?}"
+        );
+    }
+
+    #[test]
+    fn a_wedged_network_inspect_does_not_become_a_network() {
+        // The second of the two questions. It has to end on the switch
+        // like the first, and its answer must not be believed once it
+        // has: an interrupted `network inspect` reports "no such
+        // network", which is exactly what sends the next line into
+        // `network create`.
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("log");
+        let provider = scripted_provider(
+            dir.path(),
+            "wedged-network.sh",
+            &format!(
+                "echo \"$@\" >> {log}\n\
+                 if [ \"$1\" = network ] && [ \"$2\" = inspect ]; then sleep 30; fi\n\
+                 exit 0\n",
+                log = log.display()
+            ),
+        );
+        let cancel = Cancel::new();
+        let engine = Engine::with_provider(provider.to_string_lossy().to_string())
+            .with_cancel(cancel.clone());
+
+        let started = std::time::Instant::now();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            cancel.cancel();
+        });
+        let err = bring_up_one(&engine, &def_with(&provider, vec![])).unwrap_err();
+        let waited = started.elapsed();
+
+        assert!(
+            err.to_string().contains("looking for network mirage-s"),
+            "the error must name what was interrupted: {err}"
+        );
+        assert!(
+            waited < std::time::Duration::from_secs(5),
+            "the wedged inspect was waited out rather than ended: {waited:?}"
+        );
+        let recorded = std::fs::read_to_string(&log).unwrap_or_default();
+        assert!(
+            !recorded.contains("network create"),
+            "an interrupted probe was read as `no such network`:\n{recorded}"
+        );
+        assert!(
+            !recorded.contains("run --rm"),
+            "a cancelled bring-up started a container anyway:\n{recorded}"
         );
     }
 

@@ -249,10 +249,29 @@ impl Hack {
     }
 }
 
+/// The hacks a derivative image is really built from: each distinct hack
+/// once, in slug order.
+///
+/// Hacks are a set, not a sequence — each is an idempotent upgrade of the
+/// base image, and `--hack X --hack X` asks for X, not for X twice. The
+/// tag was already computed from the sorted, deduplicated slugs, so it is
+/// the *Dockerfile* that has to agree: two orderings that share a tag must
+/// share a build, and a repeated hack must not be applied (and paid for)
+/// twice under a tag saying it happened once. Both callers therefore
+/// normalise here rather than each in its own way.
+fn distinct_hacks(hacks: &[Hack]) -> Vec<Hack> {
+    let mut out = hacks.to_vec();
+    out.sort_unstable_by_key(|h| h.slug());
+    out.dedup();
+    out
+}
+
 /// Generate the Dockerfile that builds a derivative of `base` with each
-/// of `hacks` applied as an additional layer, in order. Returns `None`
-/// when `hacks` is empty (no derivative image is needed).
+/// distinct hack in `hacks` applied as an additional layer, in the order
+/// [`distinct_hacks`] fixes. Returns `None` when `hacks` is empty (no
+/// derivative image is needed).
 pub fn hacks_dockerfile(base: &str, hacks: &[Hack]) -> Option<String> {
+    let hacks = distinct_hacks(hacks);
     if hacks.is_empty() {
         return None;
     }
@@ -270,14 +289,13 @@ pub fn hacks_dockerfile(base: &str, hacks: &[Hack]) -> Option<String> {
 /// built image instead of rebuilding it. Returns `None` when `hacks` is
 /// empty.
 pub fn hacks_image_tag(base: &str, hacks: &[Hack]) -> Option<String> {
+    let hacks = distinct_hacks(hacks);
     if hacks.is_empty() {
         return None;
     }
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
-    let mut slugs: Vec<&str> = hacks.iter().map(|h| h.slug()).collect();
-    slugs.sort_unstable();
-    slugs.dedup();
+    let slugs: Vec<&str> = hacks.iter().map(|h| h.slug()).collect();
     let mut hasher = DefaultHasher::new();
     base.hash(&mut hasher);
     slugs.hash(&mut hasher);
@@ -456,6 +474,30 @@ mod tests {
         assert_eq!(p.container_port, 53);
         assert_eq!(p.protocol.as_deref(), Some("udp"));
         assert_eq!(p.to_publish_arg(), "53:53/udp");
+    }
+
+    #[test]
+    fn a_repeated_hack_is_built_once_because_the_tag_says_it_was() {
+        // The tag deduplicated the slugs and the Dockerfile did not, so
+        // `--hack X --hack X` layered X twice — an apt upgrade paid for
+        // twice — and cached the result under a tag meaning "X, once".
+        let once = hacks_dockerfile("rocm/dev", &[Hack::UpdateGccViaPpa]).unwrap();
+        let twice =
+            hacks_dockerfile("rocm/dev", &[Hack::UpdateGccViaPpa, Hack::UpdateGccViaPpa]).unwrap();
+        assert_eq!(once, twice);
+        assert_eq!(
+            twice
+                .matches(Hack::UpdateGccViaPpa.dockerfile_step())
+                .count(),
+            1,
+            "{twice}"
+        );
+        assert_eq!(
+            hacks_image_tag("rocm/dev", &[Hack::UpdateGccViaPpa]),
+            hacks_image_tag("rocm/dev", &[Hack::UpdateGccViaPpa, Hack::UpdateGccViaPpa]),
+            "the tag was already order- and duplicate-independent"
+        );
+        assert_eq!(hacks_dockerfile("rocm/dev", &[]), None);
     }
 
     #[test]

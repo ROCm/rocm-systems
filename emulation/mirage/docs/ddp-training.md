@@ -305,8 +305,13 @@ the session goes with it and further execs fail.
   emulator and cannot share GPU memory. Drop `--in-process` so the
   default shared, out-of-process emulator is used.
 - **Several ranks' lines are interleaved and you cannot tell them
-  apart.** A multi-rank job labels every line with the rank
-  that wrote it. Remove it again when you want a rank to have stdin.
+  apart.** When mirage is the thing launching the ranks it already
+  labels every line with the rank that wrote it. A job `torchrun` forks
+  is a single process as far as mirage can see, so any labels there are
+  the fixture's own — launch the ranks with `--num-nodes` /
+  `--nproc-per-node` instead if you want mirage's. There is no flag
+  either way: the shape of the job decides it, and the price of the
+  labels is that no rank gets stdin.
 - **`Duplicate GPU detected` / `ncclInvalidUsage` at the first
   collective.** Two ranks pinned to the same emulated GPU. Give the
   run at least as many GPUs as ranks (`--gpus-per-node N`) so each

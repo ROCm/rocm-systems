@@ -99,13 +99,12 @@ impl EmulatorBackend for RocjitsuDbt {
         self.validate_profile_with(def, &ProcessEnv)
     }
 
-    fn installed(&self) -> bool {
-        is_installed()
-    }
-
     fn runtime(&self) -> RuntimeStatus {
         // The hook library is the whole of the DBT install, so one
-        // search answers both "installed?" and "where?".
+        // search answers both "installed?" and "where?" — and the
+        // trait's default `installed` takes the first of those from
+        // here, rather than an override running the identical search a
+        // second time.
         RuntimeStatus::from_location(runtime_location())
     }
 
@@ -534,6 +533,18 @@ mod tests {
     use super::*;
     use mirage_core::common::SimpleValue;
     use mirage_core::emulator::ExecMode;
+
+    #[test]
+    fn the_installed_flag_and_the_located_library_are_one_answer() {
+        // The hook library is the whole of the DBT install, so the
+        // search that finds it settles both halves. `installed` is left
+        // to the trait rather than overridden with `is_installed()`,
+        // which ran that identical search again and could therefore
+        // only agree or be a bug.
+        let backend = RocjitsuDbt;
+        assert_eq!(backend.installed(), backend.runtime().installed);
+        assert_eq!(backend.installed(), is_installed());
+    }
 
     fn def_with(topology: MaybeRef<TopologyDef>) -> EmulatorDef {
         EmulatorDef {

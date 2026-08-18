@@ -22,11 +22,11 @@ background, and nothing outlives the process you typed it into.
 | ------------- | ---------------------------------------------------------------- |
 | `--json`      | Emit JSON output where applicable.                               |
 | `-v`, `-vv`   | Increase logging verbosity (`-v` = info, `-vv` = debug).         |
-| `--help`      | Print help (top level or per command).                           |
-| `--version`   | Print the mirage version.                                        |
+| `-h`, `--help` | Print help (top level or per command).                          |
+| `-V`, `--version` | Print the mirage version.                                    |
 
-Global flags may appear before or after the subcommand, e.g.
-`mirage --json profile list`.
+Global flags may appear before or after the subcommand, e.g. both
+`mirage --json profile list` and `mirage profile list --json`.
 
 ## Command summary
 
@@ -66,9 +66,9 @@ overrides below), waits for it to become healthy, starts your command in
 it, and tears the whole thing down when the command exits — every workload
 process reaped, every container removed, the scratch directory deleted.
 The session lives in *this* process's memory, so it exists exactly as long
-as this command does. Ctrl-C is part of that contract: the first interrupt
-is forwarded to the workload so it can clean up, the second stops waiting
-for it, and either way teardown runs.
+as this command does. Interrupting it is part of that contract rather
+than an escape from it — see [Interrupts, and closing the
+terminal](#interrupts-and-closing-the-terminal) below.
 
 The session id is printed on stderr as soon as it is created:
 
@@ -99,6 +99,50 @@ mistaken for a session that will not come up.
 
 A session that fails to come up is destroyed and the reason reported,
 rather than left behind for you to clean up.
+
+### Interrupts, and closing the terminal
+
+`SIGINT`, `SIGTERM` and `SIGHUP` all mean the same thing to a run —
+nobody is watching this any more, take it down — and all three run
+teardown. `SIGHUP` is the one worth naming: closing a terminal window is
+how people end a run they have lost interest in, and its default
+disposition is to terminate the process outright, so it used to exit 129
+with the workload still running, the socket still in `runs` claiming a
+session that no longer existed, and the scratch directory still on disk.
+
+The handlers are armed before anything else happens, not at the point
+the workload is awaited. Until a handler exists a signal keeps its
+default disposition, so arming them late left the whole of bring-up
+unprotected — and a Ctrl-C during a multi-minute image pull, which is
+exactly when a user reaches for one, killed mirage with the network and
+containers it had already created still there.
+
+Each interrupt is narrated, because one that visibly does nothing cannot
+be told from one that was never delivered — and a workload that ignores
+`SIGINT` is not rare:
+
+```text
+mirage: interrupted: asked the workload to stop; interrupt again to stop waiting for it
+mirage: not waiting any longer; stopping the workload
+mirage: killing the workload outright
+```
+
+The first interrupt is forwarded to the workload as the signal that
+actually arrived, so a program that distinguishes a hangup from an
+interrupt still can. The second stops waiting and terminates it,
+escalating `SIGTERM` to `SIGKILL` on its own. A third kills it outright,
+which exists for the case where the second is slow rather than stuck: on
+a containerised grid, terminating is a provider round trip per node, and
+somebody who has already said twice that they are done waiting should
+not have to guess whether the third interrupt did anything either.
+Teardown runs after all of them.
+
+One exception follows from "your terminal, not a pipe": once a
+single-process workload has taken the terminal it is the foreground
+process group, so Ctrl-C goes to *it* and not to mirage. That is
+ordinary job control, and it is what makes `mirage run -- bash` behave
+like a shell. The handover is lazy, so a workload that never asks for
+the terminal never takes the interrupt either.
 
 ### Selecting what to emulate
 
@@ -161,12 +205,45 @@ rather than left behind for you to clean up.
   that means — docker silently makes a root-owned directory on your host,
   podman refuses to start the container — and neither is what you asked
   for. Creating it yourself makes the two behave identically.
+
+  The **container** path has one reservation: `/mnt/mirage`, which is
+  where every containerised session mounts mirage's own binary, config
+  directory, session scratch and emulator libraries. A mount at that path
+  or above it (`/mnt`, `/`) is refused, naming both paths. It is not a
+  conflict the engine resolves in your favour: it lays your host
+  directory *underneath* mirage's, so the container creates mirage's
+  destinations inside it and you get root-owned `bin`, `config`, `lib`
+  and `runtime` entries in a directory of your own, while the run reports
+  success. Only the reserved directory and its ancestors are refused —
+  a path *below* it cannot be told from one of mirage's own, so testing
+  for those would refuse every containerised session. Everything outside
+  `/mnt/mirage` is yours.
 * `--port HOST_PORT[:CONTAINER_PORT][/tcp|/udp]` publishes a container
   port on the host, like docker's `-p`. Repeatable. Port `0` is rejected:
   to an engine it means "pick one", and a published port nobody named is
   a port nothing can connect to.
+
+  A published port is a host resource and a session's nodes are identical
+  containers, which makes two shapes impossible rather than unlucky. Both
+  are refused before any container or network is created:
+
+  * **Any `--port` at all on more than one node.** Every node gets the
+    same argv, so all of them publish onto the same host port; node 0
+    binds it and the rest cannot. That used to fail halfway through
+    bring-up in the engine's own words, with node 0 already running.
+    Publish from a single node (`--num-nodes 1`), or drop `--port` —
+    nodes already reach each other by container name on the session's
+    own network.
+  * **Two different mappings for one host port.** Repeating an identical
+    `--port` is not a mistake and the duplicate is simply dropped; two
+    that disagree are refused as one error naming both, rather than
+    reaching the engine as an `address already in use` about a process
+    that does not exist.
 * `--container-provider podman|docker|PATH` chooses the engine;
-  autodetected (podman, then docker) when omitted.
+  autodetected (podman, then docker) when omitted. It outranks
+  `MIRAGE_CONTAINER_PROVIDER`, which is the default for when nothing
+  names an engine — see [Environment
+  variables](#environment-variables).
 * `--hack HACK` builds a derivative image from the base before launching.
   The only value today is `update-gcc-via-ppa`, which updates
   `libstdc++6`/`libgcc-s1` from the `ubuntu-toolchain-r/test` PPA and
@@ -229,11 +306,27 @@ every rank as well, aliasing mirage's own `MIRAGE_HEAD_ADDR`/
 `MIRAGE_HEAD_PORT`. Give each node at least N GPUs (`--gpus-per-node`) so
 every process can pin its own device.
 
-Only one process can meaningfully read a terminal, so rank 0 inherits
-stdin and every other rank reads `/dev/null` and sees an immediate EOF.
-Rank 0 also stays in mirage's process group for that reason — a
-background process group reading the controlling terminal is stopped with
-`SIGTTIN`.
+Only one process can meaningfully read a terminal, so as soon as there
+is more than one, **no rank gets stdin**: every one of them reads
+`/dev/null` and sees an immediate EOF. Handing it to rank 0 instead
+would send your keystrokes to a process whose output is one labelled
+stream among several, which is worse than not being interactive at all.
+
+Mirage says so once, on stderr, when you piped something in that nothing
+will read — an immediate EOF in every rank is otherwise indistinguishable
+from a broken pipe or a bad path:
+
+```text
+mirage: this job runs several processes, so none of them is given stdin — one
+        terminal cannot be shared between readers. What you piped in is being
+        discarded; pass it as a file the workload opens, or run one process
+        (`mirage exec --node N`) if it has to be read.
+```
+
+Only when stdin is not already a terminal, because an interactive caller
+has piped nothing in and does not need telling that nothing is reading
+it. For a terminal on one node of a multi-process job, use `mirage exec
+--node N` — see below.
 
 ### Output, and who gets the terminal
 
@@ -383,17 +476,51 @@ and no stdin relay.
   $ mirage exec --node 2 -- bash
   ```
 
-  The process still believes it is that node — it gets rank 2's
+  The process still believes it is that node — it gets node 2's rank
   variables and the session's `WORLD_SIZE`, and points at the same
   rendezvous — so it is a shell *inside* the job rather than beside it.
-  Naming a node the session does not have is an error, not a silent
-  fallback to node 0.
+  Naming a node the session does not have is an error naming the range
+  it does have, not a silent fallback to node 0.
 * `--nproc-per-node N`, `--env KEY=VALUE`, `--clear-env-vars` and
   `--workdir DIR` mean exactly what they mean on `run`, including which
   jobs get the terminal and which get `[<rank>] ` prefixes.
 * The exec's processes die with this command, and this command exits with
   the workload's exit code. Ctrl-C is forwarded, then escalates, exactly
   as in `run`.
+
+### An exec's ranks are the session's ranks
+
+Every rank variable an exec sets is numbered in the grid of the job the
+*run* started, not in the grid of the exec. A run of `--num-nodes 2
+--nproc-per-node 3` has ranks 0–5 and `WORLD_SIZE` 6, and an exec into
+it joins that numbering:
+
+```sh
+$ mirage exec -- sh -c 'echo RANK=$RANK LOCAL_RANK=$LOCAL_RANK WORLD_SIZE=$WORLD_SIZE'
+[0] RANK=0 LOCAL_RANK=0 WORLD_SIZE=6
+[3] RANK=3 LOCAL_RANK=0 WORLD_SIZE=6
+
+$ mirage exec --node 1 -- sh -c 'echo RANK=$RANK LOCAL_RANK=$LOCAL_RANK WORLD_SIZE=$WORLD_SIZE'
+RANK=3 LOCAL_RANK=0 WORLD_SIZE=6
+```
+
+Node 1's first slot is global rank 3 because node 0 holds three of them.
+That arithmetic is what makes "same rank variables, same `WORLD_SIZE`,
+same rendezvous as its neighbours" true rather than nearly true. An exec
+that counted its own processes instead reported `RANK` 0/1 and
+`WORLD_SIZE` 2 into that session — while pointing at the run's own
+rendezvous, which is worse than being merely wrong, because a collective
+formed from those numbers hangs or mis-forms rather than failing.
+
+It follows that an exec cannot ask for more processes per node than the
+run has slots for. `--nproc-per-node 5` into that session is refused,
+because there is no fifth slot on a node to number:
+
+```text
+error: this session runs 3 process(es) per node, so it has no 5th slot on a
+node to start one in. Start the run with `--nproc-per-node 5` if that is the
+shape the job should have.
+```
 
 ### Borrowing keeps the session alive
 
@@ -547,13 +674,44 @@ mirage agent delete <name> [-f|--force]
 that is already there and is not an untouched builtin has to be deleted
 before it can be replaced.
 
+## Confirmation prompts
+
+Every destructive verb asks first — `profile`, `topology` and `agent
+delete`, and `state purge` — and every one of them takes `-f`/`--force`
+to skip the question. The prompt is written to **stderr**, so a `--json`
+command still puts exactly one document on stdout.
+
+```sh
+$ mirage profile delete cdna4
+delete profile cdna4? [y/N] n
+profile cdna4 not deleted: you declined
+$ echo $?
+2
+```
+
+Three things follow from that, and each is something a script can act
+on:
+
+* **Declining exits 2**, not 0, and says so on stdout. Under `--json`
+  the answer is a document of its own — `"declined": true` alongside
+  `"deleted": false` (or `"purged": false` for `state purge`) — because
+  a caller that asked for machine-readable output must be able to read
+  that answer rather than infer it from empty output.
+* **A prompt nobody can answer is an error**, not a "no". With stdin at
+  end-of-file — `< /dev/null`, or a pipe that closed — mirage reports
+  that there is nobody to answer the question, names `--force`, and
+  exits 1 without touching anything.
+* **A piped answer still counts.** `echo y | mirage profile delete x`
+  works, because that is a stdin with somebody on the other end of it;
+  only `y` and `yes`, in any case, are yes.
+
 ## Configuration documents reject what they do not understand
 
 Profiles, agents and topologies are parsed strictly. A key the schema does
 not know is a parse error naming it —
 
 ```text
-error: unknown field `emulaotr`, expected one of `name`, `description`, `emulator`, `containerize` at line 1 column 193
+error: json error on <stdin>: unknown field `emulaotr`, expected one of `name`, `description`, `emulator`, `containerize` at line 1 column 42
 ```
 
 — rather than a field quietly dropped on the way in. The two outcomes are
@@ -577,8 +735,35 @@ refreshes the ones that exist, which is what you want after upgrading —
 but it refreshes only the ones you have not touched. A builtin whose file
 differs from the shipped version is *your* document that happens to share
 a name, and rewriting it would discard your edits with no way back, so
-those are refused by name and everything else is still refreshed. Take the
-shipped version by deleting the file and running the command again.
+that one is left alone and everything else is still refreshed.
+
+It reports both halves, one line per document, so the two outcomes are
+told apart at a glance rather than inferred from what is missing:
+
+```sh
+$ mirage state builtins
+wrote agent     mi300x -> /home/me/.config/mirage/agent/mi300x.json
+kept  agent     mi350x -> /home/me/.config/mirage/agent/mi350x.json
+wrote topology  MI350X-1x1 -> /home/me/.config/mirage/topology/MI350X-1x1.json
+…
+mirage: 1 builtin document differs from the one mirage ships and was left alone:
+  agent     mi350x -> /home/me/.config/mirage/agent/mi350x.json
+mirage: rewriting one would discard your edits, and everything else was refreshed. To take the shipped version of one after all, delete it (`mirage <kind> delete <name>`) and run `mirage state builtins` again.
+```
+
+The list of edited documents covers **all three kinds at once**, on
+stderr, after the report of what did land — so a script reading the list
+of what changed does not have to filter it out, and repairing an edited
+agent, an edited topology and an edited profile takes one run rather
+than three. Take the shipped version of one by deleting the file and
+running the command again.
+
+**Having edited a builtin is not a failure**, and `state builtins` exits
+0 on it. Every document that could be refreshed was, nothing was lost,
+and there is nothing to fix unless you want the shipped version back — a
+non-zero exit would fail an upgrade script on a machine where the
+upgrade fully succeeded. A document that could not be *written* is a
+different matter and still fails.
 
 Deleting follows from the same fact, in both directions:
 
@@ -611,8 +796,8 @@ Deleting follows from the same fact, in both directions:
   document — `purged` is the verdict, `removed` the directories, `failures`
   the reasons, and the reclamation nested under `reclaimed` — so it can be
   piped straight into `jq`. Declining the confirmation prompt is also a
-  document (`"declined": true`), because a script has to be able to read
-  that answer rather than infer it from empty output.
+  document (`"declined": true`), and exits 2 rather than 0; see
+  [Confirmation prompts](#confirmation-prompts).
 
 ## `mirage cleanup`
 
@@ -704,11 +889,13 @@ that environment overrides took effect.
 
 ```sh
 $ mirage paths
-config:   /home/me/.config/mirage
-runtime:  /run/user/1000/mirage
-profiles: /home/me/.config/mirage/profile
-sessions: /run/user/1000/mirage/session
-runs:     /run/user/1000/mirage/run
+config:     /home/me/.config/mirage
+runtime:    /run/user/1000/mirage
+profiles:   /home/me/.config/mirage/profile
+topologies: /home/me/.config/mirage/topology
+agents:     /home/me/.config/mirage/agent
+sessions:   /run/user/1000/mirage/session
+runs:       /run/user/1000/mirage/run
 ```
 
 `runs` is where each live `mirage run` serves its socket, as
@@ -735,14 +922,76 @@ mirage --attach --config cfg.json -- ./app  # --attach maps to --daemon
 ```
 
 Invocations that name a subcommand, or that have no `--` separator (so
-`--help`/`--version` keep working), are left untouched.
+`--help`/`--version` keep working), are left untouched. `mirage --help`
+lists the shape too, under a **Drop-in mode** heading: clap can only
+list subcommands, and this is the one invocation that has none.
+
+### `--attach` works on `mirage run` as well
+
+`--attach` is the rocjitsu-only spelling of `--daemon`, and mirage
+translates it away before parsing wherever it appears — in the bare
+drop-in form *and* after an explicit `run`:
+
+```sh
+mirage run --attach --config cfg.json -- ./app   # same as --daemon
+```
+
+It used to be translated only on the rewriting path, so `mirage run
+--attach -- ./app` handed `--attach` to the workload and exited 127. A
+flag the reference calls accepted has to be accepted by both spellings
+of the same command. It stays out of `mirage run --help`, which lists
+`--daemon`: the alias exists for scripts written against `rocjitsu`, not
+as a second name to choose between.
+
+### A mistyped flag before `--` is refused, not run
+
+Everything before the separator is read as mirage's own flags and
+everything after it as the workload, so a flag-shaped token before `--`
+that `run` does not accept is a mistake mirage reports rather than a
+program to execute:
+
+```sh
+$ mirage --nodes 2 -- ./app
+error: unexpected argument '--nodes' found
+
+Everything before `--` is read as mirage's own flags and everything after it as the
+command to run, so '--nodes' is a mistyped flag rather than part of the workload.
+
+  tip: a similar flag exists: '--num-nodes'
+
+Usage: mirage [OPTIONS] -- <COMMAND> [ARGS]...
+
+For more information, try 'mirage run --help'.
+$ echo $?
+2
+```
+
+This used to bring a whole emulated machine up and then exit 127 with
+`command not found: --nodes`, which spends a bring-up to deliver a worse
+version of the message clap would have given for free. The accepted set
+is asked of the parser rather than listed here, so it is exactly the
+global flags plus everything `mirage run` takes — aliases included — plus
+`--attach`.
+
+Two neighbouring shapes are diagnosed the same way, both exit 2:
+
+* `mirage --` with nothing after it, which asks for a workload and then
+  names none.
+* `mirage ./app` — a `--` that was forgotten. Only when what you typed
+  looks like a program (it contains a path separator, or names a file
+  that exists); anything that could be a misspelt subcommand gets clap's
+  own "did you mean" instead, which is the better answer there.
+
+A negative number is still a value, not a flag, so `--num-nodes -1` gets
+clap's message about the accepted range rather than one about an unknown
+flag.
 
 ## Environment variables
 
 | Variable                     | Purpose                                                          |
 | ---------------------------- | ---------------------------------------------------------------- |
 | `MIRAGE_LOG`                 | Tracing-subscriber filter, e.g. `debug` or `mirage_supervisor=debug`. Takes precedence over `-v`/`-vv`. |
-| `MIRAGE_CONTAINER_PROVIDER`  | Default container provider when none is given (`podman`/`docker`/path). |
+| `MIRAGE_CONTAINER_PROVIDER`  | Default container provider when nothing else names one (`podman`/`docker`/path). See below. |
 | `MIRAGE_CONFIG`              | Override the config dir (else `$XDG_CONFIG_HOME/mirage`).         |
 | `MIRAGE_RUNTIME`             | Override the runtime dir — run sockets and emulator scratch (else `$XDG_RUNTIME_DIR/mirage`). Also stamped on every workload; see below. |
 | `XDG_CONFIG_HOME` / `XDG_RUNTIME_DIR` | Standard XDG base directories used when the `MIRAGE_*` overrides are unset. |
@@ -770,6 +1019,22 @@ such a session is still attributed correctly — the container carries the
 `mirage.runtime` label and the engine client process carries the host
 path.
 
+`MIRAGE_CONTAINER_PROVIDER` is read as a *default*, and the order is
+**named engine, then this variable, then autodetection** (podman, then
+docker). "Named" covers both `--container-provider` and a provider
+pinned on the profile, because the flag is applied to the profile before
+the session is built and the two are the same string in the same field
+by the time an engine is chosen. Putting the variable above them would
+therefore let something you exported once silently beat a flag you just
+typed, which is a worse surprise than the one it would fix. It is not
+silent about losing, though: a variable that is set and disagrees with
+the engine the session names is reported, with both values and which one
+won.
+
+One place it does outrank everything: `mirage cleanup` consults *every*
+engine installed on the machine, but a set `MIRAGE_CONTAINER_PROVIDER`
+names one deliberately and is then the only one asked.
+
 Finding an emulator's runtime library has its own set: `ROCJITSU_LIB` and
 `ROCJITSU_HOOKS_LIB` name a library file outright, `LD_LIBRARY_PATH`,
 `ROCM_HOME` and `ROCM_PATH` are searched, and the ROCm SDK install root
@@ -782,9 +1047,28 @@ emulators -l` prints which one was used, or every path that was tried; see
 | Code | Meaning                                                              |
 | ---- | ------------------------------------------------------------------- |
 | 0    | Success.                                                            |
-| 1    | A mirage-level error (bad arguments, resource not found, a session that failed to come up, no run serving the named session, …). For `cleanup` and `state purge`, also: something they set out to remove is still there. |
-| 2    | Argument parse error (clap), including a flag combination that is refused outright — `--config` with `--gpus-per-node`, a count of `0`. |
+| 1    | A mirage-level error (bad arguments, resource not found, a session that failed to come up, no run serving the named session, a prompt nobody could answer, …). For `cleanup` and `state purge`, also: something they set out to remove is still there. |
+| 2    | Either a usage error — clap's own, a flag combination refused outright (`--config` with `--gpus-per-node`, a count of `0`), or a mistyped flag before a drop-in `--` — **or a confirmation you declined**. |
 | N    | For `run` and `exec`: the workload's exit code, masked to a byte — which preserves the shell's `128 + signal` convention for a signal-killed workload. |
+
+Two of those are worth spelling out, because both used to be `0` and a
+script could not act on either.
+
+A **declined confirmation exits 2**. Nothing happened and nothing went
+wrong, which are different things that `0` cannot tell apart: a script
+has to be able to distinguish "the profile is gone" (`0`) from "you were
+asked and said no" (`2`) from "mirage tried and could not" (`1`). See
+[Confirmation prompts](#confirmation-prompts).
+
+A **prompt that reaches end-of-file is an error**, exit 1, not a silent
+"no". `mirage profile delete x < /dev/null` used to take the immediate
+EOF for a declined confirmation, delete nothing and exit 0, so a script
+that forgot `--force` was told its cleanup had run. It now says there is
+nobody to answer and names `--force`.
+
+Sharing `2` between a usage error and a declined prompt is deliberate:
+in both cases the command did nothing, and both are answered by fixing
+the invocation — pass `--force`, or correct the flag.
 
 ## JSON output
 
@@ -799,12 +1083,19 @@ $ mirage --json profile list
 ]
 $ mirage --json paths
 {
+  "agents": "/home/me/.config/mirage/agent",
   "config": "/home/me/.config/mirage",
   "profiles": "/home/me/.config/mirage/profile",
   "runs": "/run/user/1000/mirage/run",
   "runtime": "/run/user/1000/mirage",
-  "sessions": "/run/user/1000/mirage/session"
+  "sessions": "/run/user/1000/mirage/session",
+  "topologies": "/home/me/.config/mirage/topology"
 }
 ```
 
 `run` and `exec` have no JSON form: their output is the workload's own.
+A command that fails under `--json` renders the failure as
+`{"error": "…"}` on **stderr** and exits 1, so stdout still carries
+either exactly one result document or nothing at all — a caller that
+asked for machine-readable output should not have to scrape prose on
+the one path it cannot parse.

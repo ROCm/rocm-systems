@@ -376,6 +376,13 @@ pub enum CtlCmd {
     /// session's scratch directory stays on disk. This is the command
     /// that removes them.
     ///
+    /// Derived `--hack` images too, which are the one thing here that a
+    /// healthy run also leaves behind: an image is built once per base
+    /// and hack combination and reused by every session that asks for
+    /// the same one, so teardown keeps it on purpose and this is the only
+    /// command that ever reclaims one. An image a container still
+    /// references is left where it is.
+    ///
     /// Safe to run at any time: sessions whose `mirage run` still answers
     /// are left completely alone, as is anything mirage did not create.
     ///
@@ -557,7 +564,23 @@ pub struct ExecArgsCli {
     #[arg(long, short = 's')]
     pub session: Option<SessionId>,
 
-    /// Number of workload processes to launch per node.
+    /// How many of each node's process slots this exec fills. Defaults
+    /// to `1`, which is what makes a plain `mirage exec` interactive.
+    ///
+    /// It is not the job's shape and cannot change it. Ranks are
+    /// numbered in the *session's* grid — the one the `mirage run` that
+    /// owns it was started with — so a process started here sees the
+    /// same `WORLD_SIZE` and the same rendezvous as the ranks already
+    /// running, and `mirage exec --node 2` is that node's rank 0 of the
+    /// job the run started rather than rank 0 of a job of its own.
+    ///
+    /// So an exec may not ask for more processes per node than the run
+    /// has: the slot after a node's last one is the next node's rank 0,
+    /// and two live processes claiming one rank at one rendezvous
+    /// mis-form the collective built on them instead of failing. Asking
+    /// for more is refused, naming the shape the session does have;
+    /// start the run with `--nproc-per-node` if that is the job you
+    /// wanted.
     #[arg(long, visible_alias = "nproc_per_node", value_parser = clap::value_parser!(u32).range(1..))]
     pub nproc_per_node: Option<u32>,
 
@@ -756,9 +779,17 @@ pub struct RunArgs {
     )]
     config: Option<String>,
     /// Run the emulator in out-of-process daemon mode. This is the
-    /// default; the flag is accepted for explicitness and for the
-    /// `rocjitsu --daemon/--attach` drop-in alias.
-    #[arg(long, conflicts_with = "in_process")]
+    /// default; the flag is accepted for explicitness and under the
+    /// upstream `rocjitsu` spelling `--attach`, which means the same
+    /// thing here: mirage owns the emulator's whole lifecycle, so
+    /// "attach to a daemon" and "use a daemon" are one request.
+    ///
+    /// Declared here rather than only rewritten on the way in.
+    /// `mirage run --attach` already worked, but the rewrite happens
+    /// before clap ever sees the arguments, so `mirage run --help`
+    /// omitted a spelling the drop-in help offers — and the one page a
+    /// user checks a `run` flag against was the page that denied it.
+    #[arg(long, visible_alias = "attach", conflicts_with = "in_process")]
     daemon: bool,
     /// Run the emulator in-process (local mode) instead of the default
     /// out-of-process daemon. In-process mode cannot share GPU memory
@@ -1993,23 +2024,49 @@ fn parse_envs(entries: &[String]) -> anyhow::Result<std::collections::BTreeMap<S
 
 // ----- cleanup ---------------------------------------------------------------
 
-/// One container or network a cleanup pass found.
+/// One container, network or image a cleanup pass found.
 ///
 /// Kept whole rather than reduced to a name, because a user acts on the
-/// three facts together: what kind of thing it is, which engine holds it,
-/// and which session it came from. Reported as "container resource
-/// <id>", a network and a container were the same sentence and neither
-/// said which engine to type the id at.
+/// facts together: what kind of thing it is, which engine holds it, and
+/// which session it came from. Reported as "container resource <id>", a
+/// network and a container were the same sentence and neither said which
+/// engine to type the id at.
 #[derive(Debug)]
 struct Resource {
     /// The id the engine listed it under.
     id: String,
-    /// `"container"` or `"network"`.
+    /// `"container"`, `"network"` or `"image"`.
     kind: &'static str,
     /// The engine holding it (`podman`, `docker`, or a path).
     provider: String,
-    /// The session it was created for.
-    session: String,
+    /// The session it was created for, or `None` for a derived image.
+    ///
+    /// An image is keyed by its base plus the hacks applied to it, built
+    /// once and reused by every later session that asks for the same
+    /// combination, so it carries no session label — see
+    /// [`mirage_core::container::image_labels`]. Naming the session that
+    /// happened to build it would name an owner gone for days.
+    session: Option<String>,
+}
+
+impl Resource {
+    /// One line of the text report.
+    ///
+    /// `verb` is already tensed by the caller, because a dry run says
+    /// "would remove" and a real one "removed", and that difference is
+    /// the whole reason to offer a dry run.
+    fn describe(&self, verb: &str) -> String {
+        let Self {
+            id,
+            kind,
+            provider,
+            session,
+        } = self;
+        match session {
+            Some(session) => format!("{verb} {kind} {id} of session {session} ({provider})"),
+            None => format!("{verb} {kind} {id} ({provider})"),
+        }
+    }
 }
 
 /// What one cleanup pass found — and, unless it was a dry run, removed.
@@ -2017,7 +2074,8 @@ struct Resource {
 struct Reclaimed {
     /// Sessions that had something to reclaim.
     sessions: std::collections::BTreeSet<String>,
-    /// Containers and networks, across every engine consulted.
+    /// Containers, networks and derived images, across every engine
+    /// consulted.
     resources: Vec<Resource>,
     /// Stranded workload processes.
     processes: Vec<mirage_core::reclaim::Stranded>,
@@ -2087,14 +2145,7 @@ impl Reclaimed {
             );
         }
         for r in &self.resources {
-            println!(
-                "{} {} {} of session {} ({})",
-                verb("removed", "would remove"),
-                r.kind,
-                r.id,
-                r.session,
-                r.provider
-            );
+            println!("{}", r.describe(verb("removed", "would remove")));
         }
         for s in &self.scratch {
             println!(
@@ -2138,6 +2189,206 @@ fn cleanup_providers() -> Vec<String> {
         .collect()
 }
 
+/// A derived `--hack` image one runtime directory's mirage built.
+#[derive(Debug, PartialEq, Eq)]
+struct DerivedImage {
+    /// The id the engine listed it under, and what it is removed by. A
+    /// tag can be one of several on one image; the id cannot.
+    id: String,
+    /// `repository:tag` where the engine reports one, for the report — a
+    /// user recognises `mirage-hack-…:latest`, not twelve hex digits.
+    name: String,
+}
+
+/// `<provider> <args…>`, its stdout trimmed.
+///
+/// `None` covers every way the question can fail to be answered: the
+/// engine could not be spawned, or it exited non-zero. Both mean "no
+/// answer", and each caller decides what to do about that — which for a
+/// removal is always "leave it alone".
+fn provider_output(provider: &str, args: &[&str]) -> Option<String> {
+    let out = std::process::Command::new(provider)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// The `mirage.owner` and `mirage.runtime` labels an engine reports for
+/// an image, each `None` when it is absent.
+///
+/// One `inspect` for both, through `.Config.Labels`, which is the one
+/// place both engines expose an image's labels as a map: podman also
+/// carries a top-level `.Labels` and docker does not, and a template
+/// naming a field the engine has never heard of does not render an empty
+/// value — it makes the whole call exit non-zero, which would read as
+/// "this image is not ours" for every image on a docker host.
+fn image_marks(provider: &str, id: &str) -> Option<(Option<String>, Option<String>)> {
+    use mirage_core::container::{LABEL_OWNER, LABEL_RUNTIME};
+    let template = format!(
+        "{{{{index .Config.Labels {LABEL_OWNER:?}}}}}\t{{{{index .Config.Labels {LABEL_RUNTIME:?}}}}}"
+    );
+    let out = provider_output(provider, &["image", "inspect", "--format", &template, id])?;
+    let (owner, runtime) = out.split_once('\t')?;
+    // Go renders a missing key as `<no value>`, and an empty label as the
+    // empty string; both mean the mark is not there.
+    let present = |v: &str| {
+        let v = v.trim();
+        (!v.is_empty() && v != "<no value>").then(|| v.to_string())
+    };
+    Some((present(owner), present(runtime)))
+}
+
+/// Every derived `--hack` image this runtime directory built and can
+/// still remove.
+///
+/// Images are the third kind of host state a run creates, and the only
+/// one deliberately outliving the session that made it: a derived image
+/// is built once, keyed by its base plus the hacks applied to it, and
+/// reused by every later session asking for the same combination. That
+/// is why teardown does not remove it — the next run probably wants it —
+/// and it is also why nothing ever did, so a machine that had run
+/// `--hack` accumulated a base-image-sized copy per combination with
+/// nothing looking for them.
+///
+/// What makes them reclaimable now is that they are marked like
+/// everything else mirage creates. Both marks are required *positively*:
+/// `mirage.owner` says a mirage built this, and `mirage.runtime` says
+/// which one. An image the engine listed that carries neither is
+/// somebody else's — including a `mirage-hack-…` left by a mirage older
+/// than the labels, which has to go by hand, exactly as an unattributable
+/// container does.
+///
+/// An image a container still references is the last thing excluded, and
+/// `reclaimed` is what makes that judgement right in both modes: the
+/// containers this pass has removed, or on a dry run would remove, do not
+/// count as users. Asking first — rather than running `rmi` and reading
+/// the failure — is what keeps `--dry-run` a preview of the real pass
+/// rather than a list of what it would attempt.
+///
+/// Blocks on the provider binary.
+fn reclaimable_images(provider: &str, reclaimed: &[String]) -> Vec<DerivedImage> {
+    use mirage_core::container::{LABEL_OWNER, LABEL_OWNER_VALUE};
+    let ours = mirage_core::container::owning_runtime();
+    let filter = format!("label={LABEL_OWNER}={LABEL_OWNER_VALUE}");
+    let Some(listed) = provider_output(
+        provider,
+        &[
+            "images",
+            "--filter",
+            &filter,
+            "--format",
+            "{{.ID}}\t{{.Repository}}:{{.Tag}}",
+        ],
+    ) else {
+        return Vec::new();
+    };
+    // No answer to "what is still in use" is not an empty answer; see
+    // [`images_in_use`]. Nothing is reclaimed until the engine says.
+    let Some(in_use) = images_in_use(provider, reclaimed) else {
+        return Vec::new();
+    };
+
+    // One image with several tags is listed once per tag. It has one id,
+    // is removed once, and is in use if a container names *any* of them.
+    let mut tags: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    let mut order = Vec::new();
+    for line in listed.lines() {
+        let (id, tag) = line.split_once('\t').unwrap_or((line, ""));
+        let id = id.trim();
+        if id.is_empty() {
+            continue;
+        }
+        let entry = tags.entry(id.to_string()).or_insert_with(|| {
+            order.push(id.to_string());
+            Vec::new()
+        });
+        // An untagged image reads as `<none>:<none>`, which is not a name
+        // a user can type and not one a container can reference.
+        let tag = tag.trim();
+        if !tag.is_empty() && !tag.contains("<none>") {
+            entry.push(tag.to_string());
+        }
+    }
+
+    let mut found = Vec::new();
+    for id in order {
+        let tags = tags.remove(&id).unwrap_or_default();
+        let Some((Some(owner), Some(runtime))) = image_marks(provider, &id) else {
+            continue;
+        };
+        if owner != LABEL_OWNER_VALUE || !mirage_core::container::same_runtime(&runtime, &ours) {
+            continue;
+        }
+        // A container names its image either by a reference or by an id,
+        // and an id may be the short one this listing gave or the whole
+        // digest — so the id side is a prefix match and the tag side an
+        // exact one.
+        if in_use
+            .iter()
+            .any(|used| used.starts_with(&id) || tags.iter().any(|tag| tag == used))
+        {
+            continue;
+        }
+        let name = tags.first().cloned().unwrap_or_else(|| id.clone());
+        found.push(DerivedImage { id, name });
+    }
+    found
+}
+
+/// What every container on this engine was created from, as the engine
+/// names it, discounting the containers this pass is removing.
+///
+/// One listing read by reference, rather than a `--filter ancestor=`
+/// query per image, because the two engines do not agree on what that
+/// filter takes: docker matches an image id, podman only a name, so an
+/// id-based query silently finds nothing on podman and every image looks
+/// unused. What a container says it came from is the question both of
+/// them answer the same way.
+///
+/// `None` is not an empty set. It means the engine could not be asked,
+/// and an unanswerable question is not an answer: read as "nothing is in
+/// use" it would take an image out from under a session whose run is
+/// alive and well.
+fn images_in_use(provider: &str, reclaimed: &[String]) -> Option<Vec<String>> {
+    let listed = provider_output(
+        provider,
+        &["ps", "--all", "--format", "{{.ID}}\t{{.Image}}"],
+    )?;
+    Some(
+        listed
+            .lines()
+            .filter_map(|line| {
+                let (id, image) = line.split_once('\t')?;
+                let image = image.trim().trim_start_matches("sha256:");
+                if image.is_empty() || reclaimed.iter().any(|gone| gone == id.trim()) {
+                    return None;
+                }
+                Some(image.to_string())
+            })
+            .collect(),
+    )
+}
+
+/// Remove each derived image, best-effort and never forced.
+///
+/// Plain `rmi`: `-f` untags an image a container is still using, and the
+/// only containers still using one at this point belong to sessions this
+/// command exists not to disturb. [`reclaimable_images`] has already
+/// excluded those, so forcing could only ever act against that decision.
+///
+/// Blocks on the provider binary.
+fn remove_images(provider: &str, images: &[DerivedImage]) {
+    for image in images {
+        let _ = provider_output(provider, &["rmi", &image.id]);
+    }
+}
+
 /// Whether a bare executable name resolves on `PATH`.
 fn on_path(name: &str) -> bool {
     std::env::var_os("PATH")
@@ -2153,7 +2404,8 @@ fn on_path(name: &str) -> bool {
 /// make this refuse to clean up in exactly the situation it exists for.
 ///
 /// The order is the order teardown uses, for the same reason: processes
-/// stop before the containers they run in, and the scratch directory —
+/// stop before the containers they run in, images go after the
+/// containers that were built from them, and the scratch directory —
 /// which every node container bind-mounts — goes last.
 async fn cleanup(dry_run: bool) -> Reclaimed {
     let live = run::answering_runs().await;
@@ -2203,6 +2455,14 @@ async fn cleanup(dry_run: bool) -> Reclaimed {
         })
         .await
         .unwrap_or_default();
+        // The containers this pass removed — or, on a dry run, would
+        // have. An image is only reclaimable once nothing references it,
+        // and these are exactly the references that are going away.
+        let gone: Vec<String> = found
+            .iter()
+            .filter(|orphan| !orphan.is_network)
+            .map(|orphan| orphan.name.clone())
+            .collect();
         for orphan in found {
             out.sessions.insert(orphan.session.clone());
             out.resources.push(Resource {
@@ -2213,12 +2473,40 @@ async fn cleanup(dry_run: bool) -> Reclaimed {
                     "container"
                 },
                 provider: provider.clone(),
-                session: orphan.session,
+                session: Some(orphan.session),
+            });
+        }
+
+        // 3. Derived `--hack` images, found by the same owner label and
+        //    attributed by the same runtime mark. After the containers,
+        //    because an engine will not remove an image one still
+        //    references — see [`reclaimable_images`].
+        let images = tokio::task::spawn_blocking({
+            let provider = provider.clone();
+            move || {
+                let found = reclaimable_images(&provider, &gone);
+                if !dry_run {
+                    remove_images(&provider, &found);
+                }
+                found
+            }
+        })
+        .await
+        .unwrap_or_default();
+        for image in images {
+            out.resources.push(Resource {
+                id: image.name,
+                kind: "image",
+                provider: provider.clone(),
+                // No session: a derived image outlives the one that
+                // built it, deliberately, and says so by carrying no
+                // session label.
+                session: None,
             });
         }
     }
 
-    // 3. Scratch directories, one per session that was never torn down.
+    // 4. Scratch directories, one per session that was never torn down.
     //
     // Against a *fresh* answer to "what is live". Everything above shells
     // out to a container engine, which takes as long as an engine takes,
@@ -2799,6 +3087,75 @@ mod tests {
         Wrap::try_parse_from(argv).map(|w| w.run)
     }
 
+    /// `mirage run --help`, as clap renders it.
+    fn run_long_help() -> String {
+        use clap::CommandFactory as _;
+        #[derive(clap::Parser)]
+        struct Wrap {
+            #[command(flatten)]
+            run: RunArgs,
+        }
+        Wrap::command().render_long_help().to_string()
+    }
+
+    #[test]
+    fn run_declares_the_rocjitsu_spelling_of_daemon_rather_than_only_accepting_it() {
+        // `--attach` reached `run` by a rewrite in the binary, before
+        // clap saw the arguments, so `mirage run --help` did not list a
+        // flag the drop-in help offers — and the page a user checks a
+        // `run` flag against was the page that denied it.
+        // As clap's own alias line, not as a word in the prose beside it:
+        // a flag that is only *described* is still a flag `--help` does
+        // not offer.
+        let help = run_long_help();
+        assert!(
+            help.contains("[aliases: --attach]"),
+            "`mirage run --help` must list the spelling it accepts:\n{help}"
+        );
+
+        // Declared, so it parses here too and means exactly `--daemon`.
+        let a = parse_run(&["--attach", "--", "./app"]).unwrap();
+        assert!(a.daemon, "--attach is --daemon");
+        assert!(!parse_run(&["--", "./app"]).unwrap().daemon);
+        // Including the conflict, which is the whole content of the flag:
+        // one emulator cannot be both in-process and out of it.
+        parse_run(&["--attach", "--in-process", "--", "./app"])
+            .expect_err("`--attach --in-process` contradicts itself");
+    }
+
+    #[test]
+    fn exec_help_says_how_nproc_per_node_relates_to_the_shape_of_the_job() {
+        // The field carried no doc comment at all, so the flag appeared
+        // in `mirage exec --help` with nothing beside it — and the rule
+        // `build_specs` enforces (ranks are numbered in the session's own
+        // grid, and an exec may not ask for more than the run has) was
+        // discoverable only by being refused by it.
+        use clap::CommandFactory as _;
+        #[derive(clap::Parser)]
+        struct Wrap {
+            #[command(flatten)]
+            exec: ExecArgsCli,
+        }
+        let help = Wrap::command().render_long_help().to_string();
+        let (_, after) = help
+            .split_once("--nproc-per-node")
+            .expect("`mirage exec --help` must list --nproc-per-node");
+        // Up to the next option's header, so what is asserted is this
+        // flag's own paragraph. The header is the only `--` at the start
+        // of an indented line; `--node` appears inside the prose too.
+        let described = after
+            .split_once("\n      --")
+            .map_or(after, |(before, _)| before);
+        assert!(
+            described.contains("WORLD_SIZE"),
+            "the flag must say which grid its ranks are numbered in:\n{described}"
+        );
+        assert!(
+            described.contains("may not ask for more"),
+            "the flag must say that the job's shape bounds it:\n{described}"
+        );
+    }
+
     #[test]
     fn a_log_filter_that_would_silence_everything_is_refused() {
         // `EnvFilter` reads a bare word as a target at trace level, so
@@ -2985,13 +3342,19 @@ mod tests {
                     id: "9f2c1a".to_string(),
                     kind: "container",
                     provider: "docker".to_string(),
-                    session: "s-1".to_string(),
+                    session: Some("s-1".to_string()),
                 },
                 Resource {
                     id: "mirage-s-1".to_string(),
                     kind: "network",
                     provider: "docker".to_string(),
-                    session: "s-1".to_string(),
+                    session: Some("s-1".to_string()),
+                },
+                Resource {
+                    id: "mirage-hack-90d1e055da77723c:latest".to_string(),
+                    kind: "image",
+                    provider: "docker".to_string(),
+                    session: None,
                 },
             ],
             failures: vec!["could not remove /run/mirage/s-2: denied".to_string()],
@@ -3004,10 +3367,130 @@ mod tests {
             .iter()
             .map(|r| r["kind"].as_str().unwrap())
             .collect();
-        assert_eq!(kinds, vec!["container", "network"]);
+        assert_eq!(kinds, vec!["container", "network", "image"]);
         assert_eq!(doc["resources"][0]["provider"], "docker");
         assert_eq!(doc["resources"][1]["session"], "s-1");
         assert_eq!(doc["failures"].as_array().unwrap().len(), 1);
+
+        // An image is a different kind of loss from a container, and the
+        // text has to say so — a user reading "removed mirage-hack-…"
+        // needs to know a *rebuild* is what it costs them, not a restart.
+        assert_eq!(
+            reclaimed.resources[0].describe("removed"),
+            "removed container 9f2c1a of session s-1 (docker)"
+        );
+        // And a derived image has no session to name: it outlives the one
+        // that built it, which is why it carries no session label.
+        assert_eq!(
+            reclaimed.resources[2].describe("would remove"),
+            "would remove image mirage-hack-90d1e055da77723c:latest (docker)"
+        );
+        assert_eq!(doc["resources"][2]["session"], serde_json::Value::Null);
+    }
+
+    /// A stand-in container engine, answering the three questions
+    /// [`reclaimable_images`] asks with canned output.
+    ///
+    /// A script rather than a mock, because what is under test is a
+    /// conversation with another program: the flags, the Go templates and
+    /// the shape of what comes back are the part that was wrong before
+    /// and the part a Rust double would assume away.
+    ///
+    /// The listing deliberately includes an image the real engine's
+    /// `--filter label=…` would never have returned. That is the negative
+    /// case: attribution is re-checked here, positively, so a filter that
+    /// is broader than expected — or an engine that ignores the filter —
+    /// still cannot cost somebody their image.
+    fn fake_engine(dir: &std::path::Path, ours: &str, referenced_by: &str) -> String {
+        let path = dir.join("fake-engine");
+        let script = format!(
+            r#"#!/bin/sh
+case "$1" in
+  images)
+    printf 'aaa111\tmirage-hack-ours:latest\naaa111\tmirage-hack-ours:also\nbbb222\tmirage-hack-theirs:latest\nccc333\tsomebody-elses:latest\n'
+    ;;
+  image)
+    # $5 is the id; the template asks for owner and runtime, tab-joined.
+    case "$5" in
+      aaa111) printf 'mirage\t{ours}\n' ;;
+      bbb222) printf 'mirage\t/some/other/runtime\n' ;;
+      *)      printf '<no value>\t<no value>\n' ;;
+    esac
+    ;;
+  ps)
+    # One `<container id>\t<the image it came from>` line per container.
+    printf '{referenced_by}'
+    ;;
+esac
+exit 0
+"#
+        );
+        std::fs::write(&path, script).unwrap();
+        std::fs::set_permissions(
+            &path,
+            <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o700),
+        )
+        .unwrap();
+        path.display().to_string()
+    }
+
+    #[test]
+    fn cleanup_reclaims_only_the_derived_images_this_runtime_built() {
+        // `--hack` builds a derived image and nothing ever removed one:
+        // teardown keeps it deliberately (the next run wants it) and
+        // cleanup did not look for images at all, so a machine that had
+        // run `--hack` grew a base-image-sized copy per combination.
+        let _lock = mirage_core::paths::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(root.path());
+        std::fs::create_dir_all(mirage_core::paths::mirage_runtime_dir()).unwrap();
+        let ours = mirage_core::container::owning_runtime();
+        let engine = fake_engine(root.path(), &ours, "");
+
+        let found = reclaimable_images(&engine, &[]);
+        mirage_core::paths::clear_test_root();
+
+        assert_eq!(
+            found,
+            vec![DerivedImage {
+                id: "aaa111".to_string(),
+                name: "mirage-hack-ours:latest".to_string(),
+            }],
+            "only the image marked as this runtime directory's, and once \
+             despite its two tags"
+        );
+    }
+
+    #[test]
+    fn an_image_a_live_session_is_still_running_is_left_alone() {
+        // The one case that makes removing an image unsafe. A derived
+        // image is shared, so a container of a session cleanup is
+        // deliberately not touching can be running from it — and the
+        // preview has to agree with that, or `--dry-run` names something
+        // a real pass would leave behind.
+        let _lock = mirage_core::paths::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(root.path());
+        std::fs::create_dir_all(mirage_core::paths::mirage_runtime_dir()).unwrap();
+        let ours = mirage_core::container::owning_runtime();
+        let engine = fake_engine(
+            root.path(),
+            &ours,
+            "live-container\\tmirage-hack-ours:also\\n",
+        );
+
+        let held = reclaimable_images(&engine, &[]);
+        // ...unless the container holding it is one this very pass is
+        // removing, which is the ordinary case: the orphan containers go
+        // first and the image they were built from goes after them.
+        let released = reclaimable_images(&engine, &["live-container".to_string()]);
+        mirage_core::paths::clear_test_root();
+
+        assert!(
+            held.is_empty(),
+            "an image a container still references must be left: {held:?}"
+        );
+        assert_eq!(released.len(), 1, "{released:?}");
     }
 
     #[test]

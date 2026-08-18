@@ -267,11 +267,12 @@ pub struct AgentDef {
 /// access should read the file at [`crate::paths::agent_path`].
 ///
 /// [`get`] is where a `MaybeRef::Ref` on a topology is followed, so it is
-/// also where that reference is checked — see [`crate::topology::store`].
+/// also where that reference is checked, and where one that resolves to
+/// nothing is reported — see [`crate::topology::store`].
 pub mod store {
     use super::AgentDef;
     use crate::error::{MirageError, Result};
-    use crate::store::validate_name;
+    use crate::store::{DocKind, dangling_ref, validate_name};
     use std::path::PathBuf;
 
     /// List the names of all agent files on disk.
@@ -303,10 +304,15 @@ pub mod store {
     /// # Errors
     ///
     /// Returns an error if `name` is not a single path component, if
-    /// there is no such agent, or if it is malformed.
+    /// there is no such agent — reported as the dangling reference it is,
+    /// since a topology is what brought the name here — or if the
+    /// document is malformed.
     pub fn get(name: &str) -> Result<AgentDef> {
-        validate_name("agent", name)?;
+        validate_name(DocKind::Agent, name)?;
         let p = crate::paths::agent_path(name);
+        if !p.exists() {
+            return Err(dangling_ref(DocKind::Topology, DocKind::Agent, name));
+        }
         crate::state::read_json(&p)
     }
 
@@ -317,7 +323,7 @@ pub mod store {
     /// Returns an error if `name` is not a single path component or the
     /// document cannot be written.
     pub fn put(name: &str, agent: &AgentDef) -> Result<PathBuf> {
-        validate_name("agent", name)?;
+        validate_name(DocKind::Agent, name)?;
         let p = crate::paths::agent_path(name);
         crate::state::write_json(&p, agent)?;
         Ok(p)

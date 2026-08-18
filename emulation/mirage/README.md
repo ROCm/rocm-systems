@@ -32,9 +32,13 @@ terminal, and takes everything with it when it exits.
   decides what to remove, so a Ctrl-C during an image pull takes the
   containers that pull was still creating with it. Every exit path a
   signal can reach ends the same way: no orphans, no zombies, no stray
-  containers. The exception is deliberate and cannot be otherwise: a
-  `SIGKILL` runs no code of mirage's at all, so its leftovers are
-  *recovered* rather than prevented — see `mirage cleanup` below.
+  containers. `SIGHUP` is one of them, so closing the terminal window on
+  a run you have lost interest in takes the run down with it — that is
+  the commonest way a run is abandoned, and it used to be the one that
+  left everything behind. The remaining exception is deliberate and
+  cannot be otherwise: a `SIGKILL` runs no code of mirage's at all, so
+  its leftovers are *recovered* rather than prevented — see
+  `mirage cleanup` below.
 * **Your terminal, not a pipe.** A workload inherits your real stdin,
   stdout and stderr, so `mirage run -- bash` is a real shell: prompt,
   echo, line editing and Ctrl-C all work. There is no pseudo-terminal in
@@ -54,9 +58,17 @@ terminal, and takes everything with it when it exits.
   process and disappears with it.
 * **Easy to script.** Every list/show command accepts `--json` for
   machine-readable output, and `mirage run` exits with the workload's own
-  exit code.
+  exit code. Exit codes distinguish the answers a script has to act on
+  differently: a confirmation you declined exits 2 rather than 0, so
+  "you said no" is not mistaken for "it is done", and a prompt that
+  reaches end-of-file with nobody to answer it is an error naming
+  `--force` rather than a silent "no".
 * **A drop-in for `rocjitsu`.** `mirage --config cfg.json -- ./app` works
-  just like the upstream `rocjitsu` CLI, so existing scripts keep running.
+  just like the upstream `rocjitsu` CLI, so existing scripts keep
+  running — including `--attach`, which mirage takes as a spelling of
+  `--daemon`. A flag before the `--` that mirage does not accept is a
+  typo rather than a program to run, and is refused before anything
+  boots.
 
 ## Core concepts
 
@@ -152,7 +164,9 @@ thing `docker compose up` does, for the same reason:
 
 No rank gets stdin in that mode. One terminal cannot be shared between
 readers, and quietly handing it to rank 0 would mean keystrokes going
-somewhere you cannot see.
+somewhere you cannot see. If you piped something in, mirage says once
+that nothing will read it: an immediate end-of-file in every rank is
+otherwise indistinguishable from a broken pipe or a bad path.
 
 ### A terminal on one node of a multi-node job
 
@@ -171,7 +185,8 @@ is a shell *inside* the job rather than beside it.
 ## Where things live
 
 ```sh
-mirage paths        # config, runtime, profiles, sessions, runs
+mirage paths        # config, runtime, profiles, topologies, agents,
+                    # sessions, runs
 ```
 
 The `runs` directory is the interesting one: a live run publishes a
