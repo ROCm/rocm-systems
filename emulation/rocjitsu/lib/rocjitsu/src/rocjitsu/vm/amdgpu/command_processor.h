@@ -241,7 +241,7 @@ private:
 
   /// @brief Parse an AQL dispatch packet, read its kernel descriptor, and create a DispatchEntry.
   void process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt, const HwQueue &queue,
-                          uint64_t pkt_addr, HwQueueState &qs,
+                          uint64_t pkt_addr, uint32_t queue_packet_id, HwQueueState &qs,
                           ClusterDispatchShape cluster_shape = {});
 
   rocr::llvm::amdhsa::kernel_descriptor_t
