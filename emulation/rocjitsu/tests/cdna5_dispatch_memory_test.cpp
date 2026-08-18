@@ -309,6 +309,41 @@ TEST(Gfx1250SimulationTest, SLoadB32DoesNotScaleImmediateOffset) {
   EXPECT_EQ(sim.snapshot->snapshots().front().sgpr(4), kExpected);
 }
 
+TEST(Gfx1250SimulationTest, TtmpWaveIdCarriesWaveIndexWithinWorkgroup) {
+  // LLVM lowers llvm.amdgcn.wave.id to an unsigned bitfield extract of
+  // TTMP8[29:25] on any subtarget with architected SGPRs (legalizeWaveID(),
+  // lowerWaveID()). Under wavegroup launch mode the backend also builds the
+  // flat work-item ID out of this field rather than reading v0 -- see
+  // buildWorkitemIdWavegroupMode(), which computes mbcnt + (waveId << 5).
+  // Left at zero the field tells every wave in a workgroup that it is wave 0,
+  // so all of them address the slice belonging to the first.
+  // Mirrors kGfx12Ttmp8 / kGfx12Ttmp8WaveIdShift / kGfx12Ttmp8WaveIdMask in
+  // command_processor.cpp, which is a .cpp-local detail of the launch payload.
+  constexpr uint32_t kTtmp8 = 116;
+  constexpr uint32_t kWaveIdShift = 25;
+  constexpr uint32_t kWaveIdMask = 0x1Fu;
+
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code));
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  // 128 work-items at wave32 is four waves in a single workgroup.
+  queue.dispatch(kernel_object, 128, 128);
+  step_until_xcd_halted(sim);
+
+  ASSERT_EQ(sim.snapshot->snapshots().size(), 4u);
+  std::vector<uint32_t> wave_ids;
+  for (const auto &s : sim.snapshot->snapshots()) {
+    // TTMP8 carries no other launch state, so the rest stays clear.
+    EXPECT_EQ(s.sgpr(kTtmp8) & ~(kWaveIdMask << kWaveIdShift), 0u);
+    wave_ids.push_back((s.sgpr(kTtmp8) >> kWaveIdShift) & kWaveIdMask);
+  }
+  // Waves halt in an unspecified order; the dispatch must hand out each index once.
+  std::sort(wave_ids.begin(), wave_ids.end());
+  EXPECT_EQ(wave_ids, (std::vector<uint32_t>{0, 1, 2, 3}));
+}
+
 TEST(Gfx1250SimulationTest, TtmpWorkgroupIdsUseGridCoordinatesFor2DDispatch) {
   Gfx1250Sim sim;
   const uint32_t code[] = {S_ENDPGM_GFX12};

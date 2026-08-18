@@ -71,6 +71,7 @@ static_assert(kMaxClusterWorkgroups <= 16,
 // and cluster identity sequences.
 constexpr uint32_t kGfx12Ttmp6 = 114;
 constexpr uint32_t kGfx12Ttmp7 = 115;
+constexpr uint32_t kGfx12Ttmp8 = 116;
 constexpr uint32_t kGfx12Ttmp9 = 117;
 
 // LLVM's gfx1250 architected-SGPR ABI maps TTMP6 as seven 4-bit fields:
@@ -84,6 +85,14 @@ constexpr uint32_t kGfx12Ttmp6ClusterMaxYShift = 16;
 constexpr uint32_t kGfx12Ttmp6ClusterMaxZShift = 20;
 constexpr uint32_t kGfx12Ttmp6ClusterMaxFlatIdShift = 24;
 constexpr uint32_t kGfx12Ttmp7ClusterGridDimensionMask = 0xFFFFu;
+
+// TTMP8[29:25] is the wave's index within its workgroup. LLVM lowers
+// llvm.amdgcn.wave.id to exactly this field whenever the subtarget has
+// architected SGPRs -- see legalizeWaveID() and lowerWaveID(), both of which
+// emit an unsigned bitfield extract at offset 25, width 5. A workgroup holds at
+// most 1024 work-items, so at wave32 or wave64 the index always fits in 5 bits.
+constexpr uint32_t kGfx12Ttmp8WaveIdShift = 25;
+constexpr uint32_t kGfx12Ttmp8WaveIdMask = 0x1Fu;
 
 struct PlannedWorkgroup {
   uint32_t local_wg_id = 0;
@@ -397,6 +406,11 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
     uint32_t ttmp6 = 0;
     uint32_t ttmp7 = ((wg_id_z & kGfx12Ttmp7ClusterGridDimensionMask) << 16) |
                      (wg_id_y & kGfx12Ttmp7ClusterGridDimensionMask);
+    // Truncating instead would hand two waves the same id, which is exactly
+    // the symptom this field exists to remove -- diagnose rather than mask.
+    assert(wf_index_in_wg <= kGfx12Ttmp8WaveIdMask &&
+           "wave index within workgroup exceeds the 5-bit TTMP8 wave-id field");
+    const uint32_t ttmp8 = (wf_index_in_wg & kGfx12Ttmp8WaveIdMask) << kGfx12Ttmp8WaveIdShift;
     uint32_t ttmp9 = grid_wg_id_x;
     if (properties.uses_cluster_ttmp_workgroup_ids) {
       const uint32_t cluster_size_x = nonzero_or_one(pkt.cluster_size_x);
@@ -424,6 +438,7 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
     }
     cu->write_sgpr(sbase + kGfx12Ttmp6, ttmp6);
     cu->write_sgpr(sbase + kGfx12Ttmp7, ttmp7);
+    cu->write_sgpr(sbase + kGfx12Ttmp8, ttmp8);
     cu->write_sgpr(sbase + kGfx12Ttmp9, ttmp9);
   }
 
