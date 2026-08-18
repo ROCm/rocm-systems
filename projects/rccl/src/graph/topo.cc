@@ -591,14 +591,17 @@ struct kvDict kvDictPciGen[] = {{"2.5 GT/s", 15},
                                 {"64.0 GT/s PCIe", 480},
                                 {NULL, 60 /* Default fallback */}}; // x100 Mbps per lane
 
+NCCL_PARAM(TopoSplitMlopart, "TOPO_SPLIT_MLOPART", 1);
+
 // Return all DEV nodes whose id matches baseId with mlopart bits masked out.
 ncclResult_t ncclTopoGetDevNodes(struct ncclTopoSystem* system, int64_t baseId, struct ncclTopoNode** nodes,
                                  int* nNodes) {
   *nNodes = 0;
-  int64_t maskedBase = baseId & ~(int64_t)NCCL_TOPO_MLOPART_MASK;
+  int64_t idMask = ncclParamTopoSplitMlopart() ? ~(int64_t)NCCL_TOPO_MLOPART_MASK : ~(int64_t)0;
+  int64_t maskedBase = baseId & idMask;
   for (int d = 0; d < system->nodes[DEV].count; d++) {
     struct ncclTopoNode* dev = &system->nodes[DEV].nodes[d];
-    if ((dev->id & ~(int64_t)NCCL_TOPO_MLOPART_MASK) == maskedBase) {
+    if ((dev->id & idMask) == maskedBase) {
       if (*nNodes == NCCL_TOPO_MLOPART_DEV_MAX) {
         WARN("ncclTopoGetDevNodes : too many DEV nodes for busId %lx (max %d)", baseId, NCCL_TOPO_MLOPART_DEV_MAX);
         return ncclInternalError;
@@ -621,14 +624,12 @@ static ncclResult_t ncclTopoCheckMloPartBusId(int64_t busId) {
   return ncclSuccess;
 }
 
-NCCL_PARAM(TopoSplitMlopart, "TOPO_SPLIT_MLOPART", 1);
-
 static ncclResult_t ncclTopoAddGpuSub(struct ncclXmlNode* xmlPci, struct ncclXmlNode* xmlGpu,
                                       struct ncclTopoSystem* system, struct ncclTopoNode* parent, int systemId,
                                       int64_t busId, float bw) {
   int mloPart = 0, sm = 0;
   int64_t devBusId = busId;
-  NCCLCHECK(ncclTopoCheckMloPartBusId(busId));
+  if (ncclParamTopoSplitMlopart()) NCCLCHECK(ncclTopoCheckMloPartBusId(busId));
   NCCLCHECK(xmlGetAttrIntDefault(xmlGpu, "mlopart", &mloPart, NCCL_TOPO_UNDEF));
   NCCLCHECK(xmlGetAttrInt(xmlGpu, "sm", &sm));
   if (mloPart != NCCL_TOPO_UNDEF && ncclParamTopoSplitMlopart()) {
@@ -846,7 +847,7 @@ static ncclResult_t ncclTopoGetGpuDevNode(struct ncclXmlNode* xmlGpu, const char
   int mloPart, sm;
   int64_t rawBusId;
   NCCLCHECK(busIdToInt64(busId, &rawBusId));
-  NCCLCHECK(ncclTopoCheckMloPartBusId(rawBusId));
+  if (ncclParamTopoSplitMlopart()) NCCLCHECK(ncclTopoCheckMloPartBusId(rawBusId));
   NCCLCHECK(xmlGetAttrIntDefault(xmlGpu, "mlopart", &mloPart, NCCL_TOPO_UNDEF));
   NCCLCHECK(xmlGetAttrInt(xmlGpu, "sm", &sm));
   int64_t devBusId =
@@ -902,6 +903,9 @@ ncclResult_t ncclTopoAddXGMI(struct ncclXmlNode* node, struct ncclTopoSystem* sy
     NCCLCHECK(xmlGetAttrStr(node, "tclass", &targetClass));
     int targetType;
     NCCLCHECK(kvConvertToInt(targetClass, &targetType, kvDictPciClass));
+    // gfx1250 DPX exposes its .1 function as class 0x028000 even though it is
+    // a GPU fabric endpoint, not a NIC.
+    if (strcmp(targetClass, "0x028000") == 0 && IsArchMatch(devNode->dev.gcn, "gfx1250")) targetType = GPU;
     struct ncclTopoNode* remote = NULL;
     if (targetType == GPU) {
       // XGMI P2P connection to another GPU (between physical DEV nodes)
@@ -923,7 +927,21 @@ ncclResult_t ncclTopoAddXGMI(struct ncclXmlNode* node, struct ncclTopoSystem* sy
     if (remote) {
       float nvlSpeed = ncclTopoXGMISpeed(devNode->dev.gcn);
       NCCLCHECK(ncclTopoConnectNodes(devNode, remote, LINK_NVL, count * nvlSpeed));
-      if (targetType != GPU) {
+      /*if (targetType == GPU) {
+        bool forward = false, reverse = false;
+        for (int l = 0; l < devNode->nlinks; l++) {
+          if (devNode->links[l].remNode == remote && devNode->links[l].type == LINK_NVL) forward = true;
+        }
+        for (int l = 0; l < remote->nlinks; l++) {
+          if (remote->links[l].remNode == devNode && remote->links[l].type == LINK_NVL) reverse = true;
+        }
+        if (!forward) NCCLCHECK(ncclTopoConnectNodes(devNode, remote, LINK_NVL, count * nvlSpeed));
+        if (!reverse) NCCLCHECK(ncclTopoConnectNodes(remote, devNode, LINK_NVL, count * nvlSpeed));
+      } else {
+        NCCLCHECK(ncclTopoConnectNodes(devNode, remote, LINK_NVL, count * nvlSpeed));
+        NCCLCHECK(ncclTopoConnectNodes(remote, devNode, LINK_NVL, count * nvlSpeed));
+      }*/
+      if(targetType != GPU) {
         NCCLCHECK(ncclTopoConnectNodes(remote, devNode, LINK_NVL, count * nvlSpeed));
       }
     }
