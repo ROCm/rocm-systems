@@ -4,16 +4,12 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only unit tests for net_ib_cast internals via the wrappers in
-// net_ib_cast_inspect.h (no RDMA/MPI/GPU): plane/rail dedup, subnet detection
-// and merged rail/plane aggregation.
-
 #include <cstdint>
 #include <cstring>
 #include <arpa/inet.h>
 #include <gtest/gtest.h>
 
-#include "net_ib_cast_inspect.h"  // extern "C" wrappers; include directly (pulls in nccl.h)
+#include "net_ib_cast_inspect.h"
 
 namespace {
 
@@ -36,7 +32,7 @@ void MakeGidV6(uint8_t g[16], uint8_t prefix0, uint8_t iface) {
 // plane/rail: IbCastGetPlaneIndex dedups plane IDs into a compact index space.
 TEST(NetIbCastPlaneRail, GetPlaneIndexDedup) {
   int16_t count = 1;
-  int16_t planes[14] = {-1};  // slot 0 seeded with NCCL_NET_ID_UNDEF
+  int16_t planes[14] = {-1};
   int16_t idx = -1;
 
   const int   seq[]    = {-1, 5, 5, 7, -1, 5};

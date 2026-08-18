@@ -215,8 +215,6 @@ static ncclResult_t IbCastGetPlaneIndex(int devPlane, int16_t* count, int16_t* p
   return ncclSuccess;
 }
 
-// Test-only wrapper (see net_ib_cast_inspect.h). Forwards to the real
-// IbCastGetPlaneIndex above so unit tests exercise the actual logic.
 extern "C" ncclResult_t ncclIbCastTestGetPlaneIndex(int devPlane, int16_t* count, int16_t* planes, int16_t* idx) {
   if (!count || !planes || !idx) return ncclInvalidArgument;
   return IbCastGetPlaneIndex(devPlane, count, planes, idx);

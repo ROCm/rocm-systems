@@ -622,9 +622,6 @@ static bool subnetMatchesAny(union ibv_gid* localGid, union ibv_gid* remoteGids,
   return false;
 }
 
-// Test-only wrappers (see net_ib_cast_inspect.h). Reconstruct union ibv_gid from
-// raw 16-byte arrays and forward to the real static helpers above so unit tests
-// exercise the actual subnet-detection logic.
 extern "C" int ncclIbCastTestGidSameSubnet(const uint8_t localGid[16], const uint8_t remoteGid[16], int prefixLen) {
   union ibv_gid l, r;
   memcpy(l.raw, localGid, 16);

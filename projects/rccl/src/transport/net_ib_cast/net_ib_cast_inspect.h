@@ -50,21 +50,9 @@ ncclResult_t ncclIbCastSetTokens(void* sendComm, const int* qpTokens, int nqps);
 ncclResult_t ncclIbCastSetSchedParms(void* sendComm, bool schedEnable, bool doWrr, bool splitData,
                                      uint32_t splitDataMin);
 
-/* ── Test-only wrappers over the backported feature logic (host-only, no HW) ──
- * These forward to the internal static helpers in init.cc / connect.cc so the
- * unit tests exercise the real code, not a copy. GIDs are passed as raw 16-byte
- * arrays to keep this header free of <infiniband/verbs.h>. */
-
-/* plane/rail: dedup a plane ID into a compact plane index. Mirrors the sort-loop
- * call IbCastGetPlaneIndex(). Returns ncclInvalidUsage on overflow / bad ID. */
+/* ── Test-only wrappers over internal static helpers (host-only, no HW). ── */
 ncclResult_t ncclIbCastTestGetPlaneIndex(int devPlane, int16_t* count, int16_t* planes, int16_t* idx);
-
-/* subnet detection: 1 if two RoCE GIDs share a subnet, else 0. prefixLen in
- * [1,32] applies to IPv4-mapped GIDs; native IPv6 compares the 64-bit prefix. */
 int ncclIbCastTestGidSameSubnet(const uint8_t localGid[16], const uint8_t remoteGid[16], int prefixLen);
-
-/* subnet detection: 1 if localGid shares a subnet with ANY of nRemote GIDs
- * (each 16 bytes, laid out contiguously), else 0. */
 int ncclIbCastTestSubnetMatchesAny(const uint8_t localGid[16], const uint8_t* remoteGids, int nRemote, int prefixLen);
 
 /* ── Resiliency state introspection (requires ENABLE_FAULT_INJECTION) ── */
