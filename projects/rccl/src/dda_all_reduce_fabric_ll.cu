@@ -184,6 +184,14 @@ static bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* r
                                    ncclDataType_t datatype, ncclRedOp_t op) {
   (void)sendbuff;
   (void)recvbuff;
+  if (rcclParamDdaLL() == 0) {
+      return false;
+  }
+
+  if (count * ncclTypeSize(datatype) > (size_t)rcclParamDdaLLOneShotThreshold()) {
+      return false;
+  }
+
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
@@ -224,6 +232,14 @@ static bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* r
                                    ncclDataType_t datatype, ncclRedOp_t op) {
   (void)sendbuff;
   (void)recvbuff;
+  if (rcclParamDdaLL() == 0) {
+      return false;
+  }
+
+  if (count * ncclTypeSize(datatype) > (size_t)rcclParamDdaLLTwoShotThreshold()) {
+      return false;
+  }
+
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
@@ -268,35 +284,23 @@ static bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* r
   return true;
 }
 
+} // namespace
+
 // Tier selection: enabled, within this tier's threshold, and shape-eligible.
 // One-shot is tested first, so a message that qualifies for both takes it; a run
 // hands sizes over to two-shot by lowering DDA_LL_THRESHOLD and raising
 // DDA_LL_TWOSHOT_THRESHOLD.
-static bool ddaLLArOneShotSelected(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                                   ncclDataType_t datatype, ncclRedOp_t op) {
-  return rcclParamDdaLL() != 0 && (count * ncclTypeSize(datatype)) <= (size_t)rcclParamDdaLLOneShotThreshold() &&
-         ddaLLArOneShotEligible(comm, sendbuff, recvbuff, count, datatype, op);
-}
-
-static bool ddaLLArTwoShotSelected(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                                   ncclDataType_t datatype, ncclRedOp_t op) {
-  return rcclParamDdaLL() != 0 && (count * ncclTypeSize(datatype)) <= (size_t)rcclParamDdaLLTwoShotThreshold() &&
-         ddaLLArTwoShotEligible(comm, sendbuff, recvbuff, count, datatype, op);
-}
-
-} // namespace
-
 bool ncclAllReduceDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                       ncclDataType_t datatype, ncclRedOp_t op) {
-  return ddaLLArOneShotSelected(comm, sendbuff, recvbuff, count, datatype, op) ||
-         ddaLLArTwoShotSelected(comm, sendbuff, recvbuff, count, datatype, op);
+  return ddaLLArOneShotEligible(comm, sendbuff, recvbuff, count, datatype, op) ||
+         ddaLLArTwoShotEligible(comm, sendbuff, recvbuff, count, datatype, op);
 }
 
 ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                       ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
   const size_t bytes = count * ncclTypeSize(datatype);
 
-  if (ddaLLArOneShotSelected(comm, sendbuff, recvbuff, count, datatype, op)) {
+  if (ddaLLArOneShotEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
     INFO(NCCL_COLL, "AllReduce: taking DDA fabric LL one-shot path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
          comm->nRanks, comm->nNodes, count, (int)datatype, bytes);
     (void)op;
@@ -312,7 +316,7 @@ ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size
     }
   }
 
-  if (ddaLLArTwoShotSelected(comm, sendbuff, recvbuff, count, datatype, op)) {
+  if (ddaLLArTwoShotEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
     INFO(NCCL_COLL, "AllReduce: taking DDA fabric LL two-shot path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
          comm->nRanks, comm->nNodes, count, (int)datatype, bytes);
     switch (datatype) {
