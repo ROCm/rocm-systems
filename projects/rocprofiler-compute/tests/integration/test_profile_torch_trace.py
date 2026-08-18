@@ -4,6 +4,7 @@
 """Integration tests for PyTorch operator tracing during profiling."""
 
 import csv
+import gzip
 import os
 import re
 import time
@@ -66,12 +67,13 @@ def test_torch_trace_profile(
     integration_common.check_csv_files(workload_dir, num_devices, 1)
 
     # 3. Marker/counter CSV pairs exist and counts match
-    marker_api_trace_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv"))
-    assert marker_api_trace_files, "No marker_api_trace.csv produced"
+    marker_api_trace_files = list(
+        Path(workload_dir).glob("**/*marker_api_trace.csv.gz")
+    )
+    assert marker_api_trace_files, "No marker_api_trace.csv.gz produced"
     for marker_file in marker_api_trace_files:
-        corresponding_counter_file = csv_compression.compressed_name(
-            marker_file.parent
-            / marker_file.name.replace("marker_api_trace", "counter_collection")
+        corresponding_counter_file = marker_file.parent / marker_file.name.replace(
+            "marker_api_trace", "counter_collection"
         )
         assert corresponding_counter_file.is_file(), (
             f"counter_collection CSV not found for {marker_file}"
@@ -86,7 +88,7 @@ def test_torch_trace_profile(
             "Start_Timestamp",
             "End_Timestamp",
         }
-        with open(marker_file, newline="") as f:
+        with gzip.open(marker_file, "rt", newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             fieldnames = reader.fieldnames
             assert fieldnames is not None, f"No columns in {marker_file}"

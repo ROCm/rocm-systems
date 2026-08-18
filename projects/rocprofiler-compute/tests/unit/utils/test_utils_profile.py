@@ -958,8 +958,8 @@ def test_augment_marker_csv_untagged_row_warns(tmp_path, monkeypatch):
     """Untagged rows are tagged 'unknown' and emit a warning."""
     from utils import utils_profile
 
-    src = tmp_path / "src_marker_api_trace.csv"
-    dst = tmp_path / "ml_api_trace_dst_marker_api_trace.csv"
+    src = tmp_path / "src_marker_api_trace.csv.gz"
+    dst = tmp_path / "ml_api_trace_dst_marker_api_trace.csv.gz"
     pd.DataFrame({"Function": ["aten::sum"]}).to_csv(src, index=False)
 
     warnings: list[tuple] = []
@@ -976,8 +976,8 @@ def test_augment_marker_csv_untagged_row_warns(tmp_path, monkeypatch):
 
 def test_augment_marker_csv_adds_backend_column(tmp_path):
     """End-to-end: tagged + untagged rows survive copy; Backend is populated."""
-    src = tmp_path / "src_marker_api_trace.csv"
-    dst = tmp_path / "ml_api_trace_dst_marker_api_trace.csv"
+    src = tmp_path / "src_marker_api_trace.csv.gz"
+    dst = tmp_path / "ml_api_trace_dst_marker_api_trace.csv.gz"
 
     src_df = pd.DataFrame({
         "Domain": ["MARKER_CORE_RANGE_API"] * 3,

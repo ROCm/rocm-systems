@@ -455,13 +455,13 @@ def process_ml_api_trace_output(
     """
     console_log(f"Looking for marker and counter csv files in {workload_dir}")
     marker_api_trace_csvs = list(
-        Path(workload_dir).glob("**/ml_api_trace*_marker_api_trace.csv")
+        Path(workload_dir).glob(
+            f"**/ml_api_trace*_marker_api_trace.csv{csv_compression.GZIP_SUFFIX}"
+        )
     )
     counter_collection_csvs = [
-        csv_compression.compressed_name(
-            markers_file.parent
-            / markers_file.name.replace("_marker_api_trace.", "_counter_collection.")
-        )
+        markers_file.parent
+        / markers_file.name.replace("_marker_api_trace.", "_counter_collection.")
         for markers_file in marker_api_trace_csvs
     ]
     existing_csv_files = [
