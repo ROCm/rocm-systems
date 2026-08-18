@@ -469,6 +469,21 @@ impl Run {
             return Ok(());
         };
         let plan = crate::session::plan_container(&session.ctx, injection);
+        // Checked here, before the two lists become one, because after
+        // that there is nothing left to tell them apart.
+        //
+        // `resolve_mount` runs on the combined list and can only ask
+        // `covers_mirage_dir`, which is true for the reserved directory
+        // and its ancestors and false for everything *below* it — it has
+        // to be, because mirage's own mounts are all down there and a
+        // check that caught them would refuse every containerised
+        // session. So a user mount at `/mnt/mirage/runtime/rj_config.json`
+        // passed it, overlaid the emulator's config inside the scratch
+        // mount, and the workload ran unemulated against the real device
+        // with nothing said. Provenance is what the later check lacks,
+        // and at this line it is still free: everything in `def.mounts`
+        // is the user's and everything in `plan.mounts` is mirage's.
+        reject_mounts_over_mirages_own(&def.mounts, &plan.mounts)?;
         def.mounts.extend(plan.mounts);
 
         // The shape the session was created with, not a fresh read of the
@@ -587,6 +602,49 @@ impl Run {
         }
         Ok(())
     }
+}
+
+/// Refuse a user mount that overlaps one of mirage's own.
+///
+/// `mirage` bind-mounts its binary, the session scratch directory, the
+/// config directory and the emulator's libraries into every node
+/// container. A user `--mount` landing on any of those destinations —
+/// at it, above it, or inside it — replaces something the session needs,
+/// and the failure is silent in the worst case: overlaying the scratch
+/// mount hides the emulator's `rj_config.json`, so the interposer finds
+/// no simulation config and the workload runs unemulated against the
+/// real device, at full speed, producing results that look fine.
+///
+/// # Errors
+///
+/// Returns an error naming both the user's mount and the mirage
+/// destination it lands on.
+fn reject_mounts_over_mirages_own(
+    user: &[mirage_core::profile::FileMount],
+    ours: &[mirage_core::profile::FileMount],
+) -> Result<()> {
+    for mount in user {
+        let Some(hit) = ours.iter().find(|ours| {
+            mirage_core::container::container_paths_overlap(
+                &mount.container_path,
+                &ours.container_path,
+            )
+        }) else {
+            continue;
+        };
+        return Err(MirageError::other(format!(
+            "--mount {}: `{}` inside the container is mirage's own — it is where mirage \
+             mounts {} for this session, and a mount there would replace it. A session whose \
+             scratch or library mounts are covered runs without emulation rather than \
+             failing, so this is refused before anything is created. Choose another \
+             destination; every path outside `{}` is yours.",
+            mount.to_volume_arg(),
+            hit.container_path,
+            hit.host_path,
+            mirage_core::container::CONTAINER_MIRAGE_DIR,
+        )));
+    }
+    Ok(())
 }
 
 impl Drop for Run {

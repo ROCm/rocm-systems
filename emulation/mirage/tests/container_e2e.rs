@@ -1354,16 +1354,50 @@ fn a_mount_laid_over_mirages_own_directory_is_refused() {
         "a container was created for a mount that could never work:\n{log}"
     );
 
-    // A mount *below* the reserved directory is still the user's to make;
-    // only the paths that cover mirage's own are refused. (Everything
-    // mirage itself mounts is below it, so a check that caught those
-    // would refuse every containerised session there is.)
+    // And a mount *inside* one of mirage's own, which is the same
+    // collision in the direction that reads as harmless. `/mnt/mirage` is
+    // where the session scratch is mounted, and `rj_config.json` in it is
+    // what tells the emulator's interposer which device to simulate.
+    // Overlaying that one file does not fail: the interposer finds no
+    // config, declines to interpose, and the workload runs on the real
+    // device at full speed, producing results that look exactly like a
+    // successful emulated run.
+    //
+    // The at-or-above check cannot catch this. It has to answer "no" for
+    // every path below the reserved directory, because mirage's own
+    // mounts are all down there — so this was refused by nothing until
+    // the user's mounts were checked against mirage's concrete
+    // destinations before the two lists were combined.
+    let config = env.base.root().join("my-config.json");
+    std::fs::write(&config, "{}").unwrap();
+    let err = env.base.fails(&[
+        "run",
+        "--profile",
+        "cp",
+        "--mount",
+        &format!("{}:/mnt/mirage/runtime/rj_config.json", config.display()),
+        "--",
+        "/bin/true",
+    ]);
+    assert!(
+        err.contains("/mnt/mirage/runtime"),
+        "the refusal must name the mirage mount the user's lands inside: {err}"
+    );
+    let log = env.provider_log();
+    assert!(
+        !log.contains("run --rm"),
+        "a container was created for a mount that would disable emulation:\n{log}"
+    );
+
+    // A mount that merely shares a textual prefix with the reserved
+    // directory is the user's to make, and a check that compared strings
+    // rather than path components would refuse it.
     let out = env.base.ok(&[
         "run",
         "--profile",
         "cp",
         "--mount",
-        &format!("{}:/mnt/mine", mine.display()),
+        &format!("{}:/mnt/mirage-of-my-own", mine.display()),
         "--",
         "/bin/echo",
         "mounted-elsewhere",

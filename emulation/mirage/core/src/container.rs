@@ -185,6 +185,27 @@ pub fn covers_mirage_dir(container_path: &str) -> bool {
     reserved.starts_with(&normalise_container_path(container_path))
 }
 
+/// Whether two container paths name overlapping locations.
+///
+/// True when they are the same location, and when either is a directory
+/// prefix of the other. Both are the cases that matter for a bind mount:
+/// mounting at a path *above* another mount buries it, and mounting at a
+/// path *below* one overlays a piece of it — and the second is the one
+/// that looks harmless.
+///
+/// Component-wise via [`normalise_container_path`], so `/mnt/mirage` and
+/// `/mnt/mirage/../mirage/runtime` overlap and `/mnt/mirage` and
+/// `/mnt/mirage-of-my-own` do not. A textual `starts_with` would get the
+/// second wrong in the direction that refuses honest mounts.
+#[must_use]
+pub fn container_paths_overlap(a: &str, b: &str) -> bool {
+    if a.is_empty() || b.is_empty() {
+        return false;
+    }
+    let (a, b) = (normalise_container_path(a), normalise_container_path(b));
+    a.starts_with(&b) || b.starts_with(&a)
+}
+
 /// The components a container path names, with `.`, `..`, empty segments
 /// and any trailing separator resolved away.
 ///
@@ -1136,6 +1157,40 @@ mod tests {
         assert!(!covers_mirage_dir("/mnt/mine"));
         assert!(!covers_mirage_dir("/data"));
         assert!(!covers_mirage_dir(""));
+    }
+
+    #[test]
+    fn an_overlapping_mount_is_recognised_in_both_directions() {
+        // Above: the case `covers_mirage_dir` already had. A mount at
+        // `/mnt` buries everything mirage put under `/mnt/mirage`.
+        assert!(container_paths_overlap("/mnt", "/mnt/mirage/runtime"));
+        // Below: the case it could not have, and the one that reads as
+        // harmless. `covers_mirage_dir` answers "no" for every path under
+        // the reserved tree, because mirage's own mounts are all down
+        // there — so a user mount at
+        // `/mnt/mirage/runtime/rj_config.json` passed it, overlaid the
+        // emulator's config inside the scratch mount, and left the
+        // workload running unemulated against the real device.
+        assert!(container_paths_overlap(
+            "/mnt/mirage/runtime/rj_config.json",
+            "/mnt/mirage/runtime"
+        ));
+        // The same location, however it is spelled.
+        assert!(container_paths_overlap("/mnt/mirage", "/mnt/mirage/"));
+        assert!(container_paths_overlap(
+            "/mnt/mirage",
+            "/mnt/mirage/../mirage"
+        ));
+
+        // A shared textual prefix is not a shared location, and a check
+        // that confused the two would refuse honest mounts.
+        assert!(!container_paths_overlap(
+            "/mnt/mirage",
+            "/mnt/mirage-of-mine"
+        ));
+        assert!(!container_paths_overlap("/data", "/mnt/mirage"));
+        // An empty path is not a mount over anything.
+        assert!(!container_paths_overlap("", "/mnt/mirage"));
     }
 
     #[test]
