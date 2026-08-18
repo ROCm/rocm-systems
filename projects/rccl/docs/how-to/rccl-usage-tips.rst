@@ -119,8 +119,10 @@ in NCCL 2.28.7), with no host round-trip:
 - ``ptr`` is any address that falls within a registered symmetric window's
   ``[base, base + size)`` range.
 
-``ncclFindWindow`` walks the registry that ``ncclDevCommCreate`` populated and
-returns the matching ``ncclWindow_t``. Passing a pointer that no registered
+``ncclFindWindow`` walks the communicator's window registry, which
+``ncclCommWindowRegister`` populates, and returns the matching ``ncclWindow_t``.
+``ncclDevCommCreate`` does not fill this registry; it only publishes a pointer
+to it into the device communicator. Passing a pointer that no registered
 window covers is undefined behavior rather than a recoverable error: the lookup
 returns only from its hit path, so a miss runs past the end of the registry and
 faults. Make sure the pointer is covered by a registration instead of testing
@@ -181,9 +183,13 @@ communicator before launching:
 
    readPeerValue<<<1, 64, 0, stream>>>(buffer, out, devComm);
 
-``ncclFindWindow`` can only resolve windows that were registered before the
-device communicator was created, on a communicator for which symmetric memory
-is available. If ``ncclDevCommCreate`` returns ``ncclInvalidUsage``, or a kernel
+The device communicator holds a pointer to the communicator's live window
+registry, so ``ncclFindWindow`` resolves any window registered with
+``NCCL_WIN_COLL_SYMMETRIC``, whether it was registered before or after
+``ncclDevCommCreate``. The only ordering requirement is that the registration
+completes before the kernel that calls ``ncclFindWindow`` runs, on a
+communicator for which symmetric memory is available. If ``ncclDevCommCreate``
+returns ``ncclInvalidUsage``, or a kernel
 faults inside the lookup, confirm the prerequisites above
 (``NCCL_CUMEM_ENABLE=1``, ``NCCL_WIN_ENABLE=1``, peer-to-peer capable ranks),
 that the buffer was registered with ``NCCL_WIN_COLL_SYMMETRIC``, and that the
