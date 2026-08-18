@@ -121,7 +121,7 @@ CLUSTER_CONFIGS = {
             "NCCL_IB_GID_INDEX": "3",
             "NCCL_IB_TC": "104",
             "NCCL_IB_QPS_PER_CONNECTION": "4",
-            "NCCL_SOCKET_IFNAME": "fenic0,enp49s0f0np0",
+            "NCCL_SOCKET_IFNAME": "fenic0",
             "NCCL_DEBUG": "WARN",
         },
         "results_base": "/apps/rccl-ci/perf",
