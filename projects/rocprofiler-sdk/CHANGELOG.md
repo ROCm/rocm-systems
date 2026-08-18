@@ -49,10 +49,6 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
     - SPM records are stored as `rocpd_track` rows labelled `SPM`, with counter values grouped by timestamp into `rocpd_sample` rows and per-dimension data in `rocpd_pmc_event` rows.
     - The rocpd schema gains the `sample_id`, `xcc`, `shader_engine`, and `instance` columns.
     - SPM data is consumable by any tool that reads the rocpd database and is convertible to CSV via `rocpd convert`. Conversion to the other output formats, such as Perfetto and OTF2, is not yet supported.
-  - Streaming Performance Monitor (SPM) counter collection support (beta):
-    - New experimental API in `rocprofiler-sdk/experimental/spm.h`:
-    - GPU-timestamped counter values alongside kernel dispatch information.
-  - Added `spm_support` along with reserved padding to `rocprofiler_counter_info_v1_t`
 
 **rocprofv3 (CLI):**
 
@@ -98,12 +94,18 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 **API:**
 
+- Streaming Performance Monitor (SPM) counter collection support (beta):
+    - New experimental API in `rocprofiler-sdk/experimental/spm.h`:
+    - GPU-timestamped counter values alongside kernel dispatch information.
+  - Added `spm_support` along with reserved padding to `rocprofiler_counter_info_v1_t`
+
+**rocprofv3(CLI):**
   - SPM counter collection support in `rocprofv3` (beta):
     - `--spm <counter>` flag to specify counters for SPM collection.
     - `--spm-sample-interval` and `--spm-sample-interval-unit` parameters to configure sampling rate.
     - `--spm-beta-enabled` flag to opt in to the beta SPM feature.
     - `--spm-config` option in `rocprofv3-avail` to list available SPM configurations.
-  - JSON and rocpd output format support for SPM.
+  - JSON output format support for SPM.
 
 **Documentation:**
 
