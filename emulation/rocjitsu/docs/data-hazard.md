@@ -199,7 +199,7 @@ python -m mutate_and_test --hazard-detection --arch gfx950 shaders/*.hip
 - **No register-level WAR**: the engine can represent a WAR on a VGPR still
   being read by a pending store, and the previous `vm/plugins/hazard`
   integration reported them, but nothing in the current rocjitsu store path
-  feeds `track_vgpr_read`, so no register WAR is reported today. LDS WAR is
+  feeds `track_vector_read`, so no register WAR is reported today. LDS WAR is
   reported. This is a known coverage gap rather than a design decision.
 
 - **Wait immediates only**: hazards are resolved by `s_wait_*` and `s_barrier`.

@@ -23,6 +23,35 @@ namespace {
 constexpr uint64_t kGlobalShadowAlignment = 4;
 constexpr uint64_t kGlobalShadowAlignMask = ~(kGlobalShadowAlignment - 1);
 
+// How one vector register file is looked up in wave state and named in a
+// report. VGPRs and accumulator VGPRs run the same hazard logic over their own
+// pending state, so the handlers below differ only by this descriptor.
+struct VectorRegisterFileInfo {
+  VectorRegisterFile file;
+  HazardRegisterKind hazard_kind;
+  ResourceKind resource_kind;
+  const char *file_label;
+  char reg_prefix;
+  uint32_t max_index;
+};
+
+VectorRegisterFileInfo vector_register_file(ResourceKind resource_kind) {
+  if (resource_kind == ResourceKind::AccumVectorRegister) {
+    return {VectorRegisterFile::AccumVector,
+            HazardRegisterKind::AccumVector,
+            ResourceKind::AccumVectorRegister,
+            "AccVGPR",
+            'a',
+            MAX_ACC_VGPR_INDEX};
+  }
+  return {VectorRegisterFile::Vector,
+          HazardRegisterKind::Vector,
+          ResourceKind::VectorRegister,
+          "VGPR",
+          'v',
+          MAX_VGPR_INDEX};
+}
+
 constexpr WaitCntType kIdleWaitCounters[] = {
     WaitCntType::VMEM, WaitCntType::STORE, WaitCntType::SMEM, WaitCntType::LDS, WaitCntType::TENSOR,
 };
@@ -139,6 +168,7 @@ merge_resource_semantics(const InstructionHazardSemantics &instruction_hazards,
   InstructionHazardSemantics hazards = instruction_hazards;
   switch (event.resource_kind) {
   case ResourceKind::VectorRegister:
+  case ResourceKind::AccumVectorRegister:
     if (event.hazards.write_wait != WaitCntType::NONE)
       hazards.vector_write_wait = event.hazards.write_wait;
     if (event.hazards.read_wait != WaitCntType::NONE)
@@ -412,6 +442,7 @@ void DataHazardEngine::on_resource_access(const ResourceAccessEvent &event) {
 
   switch (event.resource_kind) {
   case ResourceKind::VectorRegister:
+  case ResourceKind::AccumVectorRegister:
     handle_vector_access(*wave, ctx, event, hazards.vector_write_wait,
                          hazards.vector_write_also_waits_lds, hazards.vector_read_wait);
     break;
@@ -728,44 +759,49 @@ void DataHazardEngine::handle_vector_access(
   if (!check_access_size("handle_vector_access", event.size_bytes))
     return;
 
-  const uint32_t vgpr = event.resource_index;
+  const uint32_t reg = event.resource_index;
   const uint32_t count = hazard_core::bytes_to_dwords(event.size_bytes);
 
   if (event.is_read)
-    check_vector_raw_hazards(wave, ctx, event, vgpr, count);
+    check_vector_raw_hazards(wave, ctx, event, event.resource_kind, reg, count);
   if (event.is_write)
-    check_vector_war_waw_hazards(wave, ctx, event, vgpr, count);
-  track_vector_pending(wave, ctx, event, vgpr, count, vector_write_wait,
+    check_vector_war_waw_hazards(wave, ctx, event, event.resource_kind, reg, count);
+  track_vector_pending(wave, ctx, event, event.resource_kind, reg, count, vector_write_wait,
                        vector_write_also_waits_lds, vector_read_wait);
 }
 
 void DataHazardEngine::check_vector_raw_hazards(EngineWaveState &wave,
                                                 const EngineInstructionContext &ctx,
-                                                const ResourceAccessEvent &event, uint32_t vgpr,
+                                                const ResourceAccessEvent &event,
+                                                ResourceKind resource_kind, uint32_t reg,
                                                 uint32_t count) {
+  const VectorRegisterFileInfo regs = vector_register_file(resource_kind);
+  const auto &pending_writes = pending_registers(wave.core, regs.file, PendingRegisterSet::Writes);
+  const auto &pending_writes_ds =
+      pending_registers(wave.core, regs.file, PendingRegisterSet::DsWrites);
   const EntityId current_id = event.instruction.instruction_id;
 
   // These handlers walk register by register because the pending vmem and LDS
   // sides have to be consulted separately, but only the first register of a
   // run reports: the rest are folded into it by the pair rule. Naming the run
   // keeps the folded registers visible.
-  const uint32_t last_access_vgpr = vgpr + count - 1;
-  const auto vgpr_label = [&](const std::unordered_map<uint32_t, PendingAsyncOp> &pending_map,
-                              uint32_t first, EntityId producer) {
-    return register_label("VGPR", 'v', first,
-                          hazard_core::pending_span_end(pending_map, first, last_access_vgpr,
-                                                        hazard_core::MAX_VGPR_INDEX, producer));
+  const uint32_t last_access_reg = reg + count - 1;
+  const auto reg_label = [&](const std::unordered_map<uint32_t, PendingAsyncOp> &pending_map,
+                             uint32_t first, EntityId producer) {
+    return register_label(regs.file_label, regs.reg_prefix, first,
+                          hazard_core::pending_span_end(pending_map, first, last_access_reg,
+                                                        regs.max_index, producer));
   };
 
   for (uint32_t i = 0; i < count; ++i) {
-    const uint32_t read_vgpr = vgpr + i;
-    if (read_vgpr > hazard_core::MAX_VGPR_INDEX)
+    const uint32_t read_reg = reg + i;
+    if (read_reg > regs.max_index)
       break;
 
-    const auto vmem_hazard =
-        hazard_core::check_vgpr_read_hazard_info(&wave.core, read_vgpr, 1, current_id);
-    const auto ds_hazard =
-        hazard_core::check_vgpr_ds_read_hazard_info(&wave.core, read_vgpr, 1, current_id);
+    const auto vmem_hazard = check_vector_hazard_info(
+        &wave.core, regs.file, PendingRegisterSet::Writes, read_reg, 1, current_id);
+    const auto ds_hazard = check_vector_hazard_info(
+        &wave.core, regs.file, PendingRegisterSet::DsWrites, read_reg, 1, current_id);
 
     const PendingAsyncOp *vmem_pending = vmem_hazard.pending;
     const PendingAsyncOp *ds_pending = ds_hazard.pending;
@@ -773,17 +809,16 @@ void DataHazardEngine::check_vector_raw_hazards(EngineWaveState &wave,
                                       vmem_pending->instruction_id == ds_pending->instruction_id;
 
     if (report_combined_flat) {
-      if (claim_register_hazard(wave.core.reported_raw_hazards, wave.core.reported_raw_pairs,
-                                std::make_pair(vmem_pending->instruction_id, read_vgpr),
-                                {vmem_pending->instruction_id, current_id,
-                                 hazard_core::HazardRegisterKind::Vector})) {
+      if (claim_register_hazard(
+              wave.core.reported_raw_hazards, wave.core.reported_raw_pairs,
+              WawHazardKey{vmem_pending->instruction_id, regs.hazard_kind, read_reg},
+              {vmem_pending->instruction_id, current_id, regs.hazard_kind})) {
         const std::string message = format_pending_message(
-            "RAW",
-            vgpr_label(wave.core.pending_vgpr_writes, read_vgpr, vmem_pending->instruction_id),
-            "read", "load", *vmem_pending);
+            "RAW", reg_label(pending_writes, read_reg, vmem_pending->instruction_id), "read",
+            "load", *vmem_pending);
         record_warning(
-            ctx, event, HazardKind::RAW, ResourceKind::VectorRegister, HazardAccessKind::Read,
-            read_vgpr, 0, event.size_bytes, vmem_pending->wait_type, *vmem_pending,
+            ctx, event, HazardKind::RAW, regs.resource_kind, HazardAccessKind::Read, read_reg, 0,
+            event.size_bytes, vmem_pending->wait_type, *vmem_pending,
             get_pending_raw_isa(wave, vmem_pending->instruction_id), vmem_pending->pc, message,
             "Add s_wait_loadcnt_dscnt 0 before reading this register (flat load uses both "
             "LOADcnt and DScnt)");
@@ -792,83 +827,82 @@ void DataHazardEngine::check_vector_raw_hazards(EngineWaveState &wave,
     }
 
     if (const auto *pending = vmem_pending) {
-      if (claim_register_hazard(
-              wave.core.reported_raw_hazards, wave.core.reported_raw_pairs,
-              std::make_pair(pending->instruction_id, read_vgpr),
-              {pending->instruction_id, current_id, hazard_core::HazardRegisterKind::Vector})) {
+      if (claim_register_hazard(wave.core.reported_raw_hazards, wave.core.reported_raw_pairs,
+                                WawHazardKey{pending->instruction_id, regs.hazard_kind, read_reg},
+                                {pending->instruction_id, current_id, regs.hazard_kind})) {
         const std::string message = format_pending_message(
-            "RAW", vgpr_label(wave.core.pending_vgpr_writes, read_vgpr, pending->instruction_id),
-            "read", "load", *pending);
-        record_warning(ctx, event, HazardKind::RAW, ResourceKind::VectorRegister,
-                       HazardAccessKind::Read, read_vgpr, 0, event.size_bytes, pending->wait_type,
-                       *pending, get_pending_raw_isa(wave, pending->instruction_id), pending->pc,
-                       message,
+            "RAW", reg_label(pending_writes, read_reg, pending->instruction_id), "read", "load",
+            *pending);
+        record_warning(ctx, event, HazardKind::RAW, regs.resource_kind, HazardAccessKind::Read,
+                       read_reg, 0, event.size_bytes, pending->wait_type, *pending,
+                       get_pending_raw_isa(wave, pending->instruction_id), pending->pc, message,
                        register_read_suggestion(instruction_formatter(), pending->wait_type));
       }
     }
 
     if (const auto *pending = ds_pending; pending && !pending->is_flat_ds) {
-      if (!claim_register_hazard(
-              wave.core.reported_raw_hazards, wave.core.reported_raw_pairs,
-              std::make_pair(pending->instruction_id, read_vgpr),
-              {pending->instruction_id, current_id, hazard_core::HazardRegisterKind::Vector}))
+      if (!claim_register_hazard(wave.core.reported_raw_hazards, wave.core.reported_raw_pairs,
+                                 WawHazardKey{pending->instruction_id, regs.hazard_kind, read_reg},
+                                 {pending->instruction_id, current_id, regs.hazard_kind}))
         continue;
       const std::string message = format_pending_message(
-          "RAW", vgpr_label(wave.core.pending_vgpr_writes_ds, read_vgpr, pending->instruction_id),
-          "read", "load", *pending);
-      record_warning(ctx, event, HazardKind::RAW, ResourceKind::VectorRegister,
-                     HazardAccessKind::Read, read_vgpr, 0, event.size_bytes, pending->wait_type,
-                     *pending, get_pending_raw_isa(wave, pending->instruction_id), pending->pc,
-                     message,
+          "RAW", reg_label(pending_writes_ds, read_reg, pending->instruction_id), "read", "load",
+          *pending);
+      record_warning(ctx, event, HazardKind::RAW, regs.resource_kind, HazardAccessKind::Read,
+                     read_reg, 0, event.size_bytes, pending->wait_type, *pending,
+                     get_pending_raw_isa(wave, pending->instruction_id), pending->pc, message,
                      register_read_suggestion(instruction_formatter(), pending->wait_type));
     }
   }
 }
 
-// The WAR half of this only fires for pending entries put in by track_vgpr_read,
+// The WAR half of this only fires for pending entries put in by track_vector_read,
 // which needs an adapter to set ResourceHazardSemantics::read_wait on a store's
 // data source. No rocjitsu store path does that today, so register WAR is
 // currently unreported there even though the engine can represent it.
 void DataHazardEngine::check_vector_war_waw_hazards(EngineWaveState &wave,
                                                     const EngineInstructionContext &ctx,
-                                                    const ResourceAccessEvent &event, uint32_t vgpr,
+                                                    const ResourceAccessEvent &event,
+                                                    ResourceKind resource_kind, uint32_t reg,
                                                     uint32_t count) {
+  const VectorRegisterFileInfo regs = vector_register_file(resource_kind);
+  const auto &pending_writes = pending_registers(wave.core, regs.file, PendingRegisterSet::Writes);
+  const auto &pending_reads = pending_registers(wave.core, regs.file, PendingRegisterSet::Reads);
   const EntityId current_id = event.instruction.instruction_id;
-  const uint32_t last_access_vgpr = vgpr + count - 1;
-  const auto vgpr_label = [&](const std::unordered_map<uint32_t, PendingAsyncOp> &pending_map,
-                              uint32_t first, EntityId producer) {
-    return register_label("VGPR", 'v', first,
-                          hazard_core::pending_span_end(pending_map, first, last_access_vgpr,
-                                                        hazard_core::MAX_VGPR_INDEX, producer));
+  const uint32_t last_access_reg = reg + count - 1;
+  const auto reg_label = [&](const std::unordered_map<uint32_t, PendingAsyncOp> &pending_map,
+                             uint32_t first, EntityId producer) {
+    return register_label(regs.file_label, regs.reg_prefix, first,
+                          hazard_core::pending_span_end(pending_map, first, last_access_reg,
+                                                        regs.max_index, producer));
   };
 
   for (uint32_t i = 0; i < count; ++i) {
-    const uint32_t written_vgpr = vgpr + i;
-    if (written_vgpr > hazard_core::MAX_VGPR_INDEX)
+    const uint32_t written_reg = reg + i;
+    if (written_reg > regs.max_index)
       break;
-    const auto war_hazard =
-        hazard_core::check_vgpr_war_hazard_info(&wave.core, written_vgpr, 1, current_id);
+    const auto war_hazard = check_vector_hazard_info(
+        &wave.core, regs.file, PendingRegisterSet::Reads, written_reg, 1, current_id);
     if (!war_hazard.pending)
       continue;
 
     const auto &pending = *war_hazard.pending;
-    if (!claim_register_hazard(
-            wave.core.reported_war_hazards, wave.core.reported_war_pairs,
-            std::make_pair(current_id, written_vgpr),
-            {pending.instruction_id, current_id, hazard_core::HazardRegisterKind::Vector}))
+    if (!claim_register_hazard(wave.core.reported_war_hazards, wave.core.reported_war_pairs,
+                               WawHazardKey{current_id, regs.hazard_kind, written_reg},
+                               {pending.instruction_id, current_id, regs.hazard_kind}))
       continue;
-    const std::string message = format_pending_message(
-        "WAR", vgpr_label(wave.core.pending_vgpr_reads, written_vgpr, pending.instruction_id),
-        "written", "store", pending);
-    record_warning(ctx, event, HazardKind::WAR, ResourceKind::VectorRegister,
-                   HazardAccessKind::Write, written_vgpr, 0, event.size_bytes, pending.wait_type,
-                   pending, get_pending_raw_isa(wave, pending.instruction_id), pending.pc, message,
+    const std::string message =
+        format_pending_message("WAR", reg_label(pending_reads, written_reg, pending.instruction_id),
+                               "written", "store", pending);
+    record_warning(ctx, event, HazardKind::WAR, regs.resource_kind, HazardAccessKind::Write,
+                   written_reg, 0, event.size_bytes, pending.wait_type, pending,
+                   get_pending_raw_isa(wave, pending.instruction_id), pending.pc, message,
                    register_write_suggestion(instruction_formatter(), pending.wait_type));
   }
 
   for (uint32_t i = 0; i < count; ++i) {
-    const uint32_t written_vgpr = vgpr + i;
-    if (written_vgpr > hazard_core::MAX_VGPR_INDEX)
+    const uint32_t written_reg = reg + i;
+    if (written_reg > regs.max_index)
       break;
 
     // Memory-read destinations are not available until the relevant wait
@@ -876,23 +910,21 @@ void DataHazardEngine::check_vector_war_waw_hazards(EngineWaveState &wave,
     // ordering hazard because the pending memory read can still write the
     // old value later.
     const auto waw_hazard =
-        hazard_core::check_vgpr_waw_hazard_info(&wave.core, written_vgpr, 1, current_id);
+        check_vector_waw_hazard_info(&wave.core, regs.file, written_reg, 1, current_id);
     if (const auto *pending = waw_hazard.pending) {
       // A flat load's DScnt-side marker can remain after LOADcnt clears.
       // By itself it is not a separate destination-write hazard.
       if (pending->is_flat_ds)
         continue;
 
-      if (claim_register_hazard(
-              wave.core.reported_waw_hazards, wave.core.reported_waw_pairs,
-              {current_id, hazard_core::HazardRegisterKind::Vector, written_vgpr},
-              {pending->instruction_id, current_id, hazard_core::HazardRegisterKind::Vector})) {
+      if (claim_register_hazard(wave.core.reported_waw_hazards, wave.core.reported_waw_pairs,
+                                {current_id, regs.hazard_kind, written_reg},
+                                {pending->instruction_id, current_id, regs.hazard_kind})) {
         const std::string message = format_pending_message(
-            "WAW", vgpr_label(wave.core.pending_vgpr_writes, written_vgpr, pending->instruction_id),
-            "written", "load", *pending);
-        record_warning(ctx, event, HazardKind::WAW, ResourceKind::VectorRegister,
-                       HazardAccessKind::Write, written_vgpr, 0, event.size_bytes,
-                       pending->wait_type, *pending,
+            "WAW", reg_label(pending_writes, written_reg, pending->instruction_id), "written",
+            "load", *pending);
+        record_warning(ctx, event, HazardKind::WAW, regs.resource_kind, HazardAccessKind::Write,
+                       written_reg, 0, event.size_bytes, pending->wait_type, *pending,
                        get_pending_raw_isa(wave, pending->instruction_id), pending->pc, message,
                        register_write_suggestion(instruction_formatter(), pending->wait_type));
       }
@@ -900,12 +932,11 @@ void DataHazardEngine::check_vector_war_waw_hazards(EngineWaveState &wave,
   }
 }
 
-void DataHazardEngine::track_vector_pending(EngineWaveState &wave,
-                                            const EngineInstructionContext &ctx,
-                                            const ResourceAccessEvent &event, uint32_t vgpr,
-                                            uint32_t count, WaitCntType vector_write_wait,
-                                            bool vector_write_also_waits_lds,
-                                            WaitCntType vector_read_wait) {
+void DataHazardEngine::track_vector_pending(
+    EngineWaveState &wave, const EngineInstructionContext &ctx, const ResourceAccessEvent &event,
+    ResourceKind resource_kind, uint32_t reg, uint32_t count, WaitCntType vector_write_wait,
+    bool vector_write_also_waits_lds, WaitCntType vector_read_wait) {
+  const VectorRegisterFile file = vector_register_file(resource_kind).file;
   // A read-modify-write access produces neither a pending read nor a pending
   // write, so it tracks nothing.
   if (event.is_read == event.is_write)
@@ -917,7 +948,7 @@ void DataHazardEngine::track_vector_pending(EngineWaveState &wave,
     if (vector_read_wait == WaitCntType::NONE)
       return;
     track_pending_raw_isa(wave, ctx);
-    hazard_core::track_vgpr_read(&wave.core, current_id, ctx.pc, vgpr, count, vector_read_wait);
+    track_vector_read(&wave.core, file, current_id, ctx.pc, reg, count, vector_read_wait);
     return;
   }
 
@@ -927,16 +958,14 @@ void DataHazardEngine::track_vector_pending(EngineWaveState &wave,
   track_pending_raw_isa(wave, ctx);
 
   if (vector_write_wait == WaitCntType::LDS) {
-    hazard_core::track_flat_vgpr_ds(&wave.core, current_id, ctx.pc, vgpr, count,
-                                    /*is_flat_ds=*/false);
+    track_vector_flat_ds(&wave.core, file, current_id, ctx.pc, reg, count, /*is_flat_ds=*/false);
     return;
   }
 
-  hazard_core::track_vgpr_write(&wave.core, current_id, ctx.pc, vgpr, count, vector_write_wait);
+  track_vector_write(&wave.core, file, current_id, ctx.pc, reg, count, vector_write_wait);
 
   if (vector_write_also_waits_lds)
-    hazard_core::track_flat_vgpr_ds(&wave.core, current_id, ctx.pc, vgpr, count,
-                                    /*is_flat_ds=*/true);
+    track_vector_flat_ds(&wave.core, file, current_id, ctx.pc, reg, count, /*is_flat_ds=*/true);
 }
 
 void DataHazardEngine::handle_scalar_access(EngineWaveState &wave,
@@ -957,13 +986,15 @@ void DataHazardEngine::handle_scalar_access(EngineWaveState &wave,
           const PendingAsyncOp &pending = *span.pending;
           const auto report_from =
               first_unreported_register(wave.core.reported_raw_hazards, span, [&](uint32_t reg) {
-                return std::make_pair(pending.instruction_id, reg);
+                return hazard_core::WawHazardKey{pending.instruction_id,
+                                                 hazard_core::HazardRegisterKind::Scalar, reg};
               });
           if (!report_from)
             return;
           if (!claim_register_hazard(
                   wave.core.reported_raw_hazards, wave.core.reported_raw_pairs,
-                  std::make_pair(pending.instruction_id, *report_from),
+                  hazard_core::WawHazardKey{pending.instruction_id,
+                                            hazard_core::HazardRegisterKind::Scalar, *report_from},
                   {pending.instruction_id, current_id, hazard_core::HazardRegisterKind::Scalar}))
             return;
 

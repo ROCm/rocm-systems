@@ -14,8 +14,10 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <deque>
 #include <limits>
 #include <unordered_map>
+#include <utility>
 
 namespace hazard_core {
 
@@ -117,70 +119,82 @@ find_pending_register_op(const std::unordered_map<uint32_t, PendingAsyncOp> &pen
       .pending;
 }
 
+// vN and accN are separate architectural namespaces (see isa/register_set.h),
+// so every lookup and update names the file it applies to and an operation
+// pending on one file is never visible through the other.
+enum class VectorRegisterFile {
+  Vector,
+  AccumVector,
+};
+
+// The pending-op maps a vector register file keeps, one per kind of in-flight
+// operation a later access can conflict with.
+enum class PendingRegisterSet {
+  Writes,   // async load destinations, drained by the load's own counter
+  DsWrites, // DScnt side of a flat load destination
+  Reads,    // async sources that must stay live until the operation drains
+};
+
+inline uint32_t max_register_index(VectorRegisterFile file) {
+  return file == VectorRegisterFile::AccumVector ? MAX_ACC_VGPR_INDEX : MAX_VGPR_INDEX;
+}
+
+// Templated on the wave so a const wave yields a const map: checking only
+// reads the state while tracking has to write it.
+template <typename Wave>
+inline auto &pending_registers(Wave &wave, VectorRegisterFile file, PendingRegisterSet set) {
+  const bool accum = file == VectorRegisterFile::AccumVector;
+  switch (set) {
+  case PendingRegisterSet::DsWrites:
+    return accum ? wave.pending_acc_vgpr_writes_ds : wave.pending_vgpr_writes_ds;
+  case PendingRegisterSet::Reads:
+    return accum ? wave.pending_acc_vgpr_reads : wave.pending_vgpr_reads;
+  case PendingRegisterSet::Writes:
+    break;
+  }
+  return accum ? wave.pending_acc_vgpr_writes : wave.pending_vgpr_writes;
+}
+
+// The FIFO that drains the matching pending map. Tracking appends to both and
+// a wait clears both, so the two always move together.
+inline std::deque<std::pair<uint32_t, PendingAsyncOp>> &
+pending_register_fifo(WaveState &wave, VectorRegisterFile file, PendingRegisterSet set) {
+  const bool accum = file == VectorRegisterFile::AccumVector;
+  switch (set) {
+  case PendingRegisterSet::DsWrites:
+    return accum ? wave.flat_acc_vgpr_ds_fifo : wave.flat_vgpr_ds_fifo;
+  case PendingRegisterSet::Reads:
+    return accum ? wave.acc_vmem_store_fifo : wave.vmem_store_fifo;
+  case PendingRegisterSet::Writes:
+    break;
+  }
+  return accum ? wave.acc_vmem_load_fifo : wave.vmem_load_fifo;
+}
+
+/// Search one pending set of one vector register file for a conflict with
+/// [index, index + size_dwords).
 inline PendingRegisterHazard
-check_vgpr_read_hazard_info(const WaveState *wave, uint32_t vgpr_index, uint32_t size_dwords,
-                            EntityId current_instruction_id = NO_INSTRUCTION_FILTER) {
+check_vector_hazard_info(const WaveState *wave, VectorRegisterFile file, PendingRegisterSet set,
+                         uint32_t index, uint32_t size_dwords,
+                         EntityId current_instruction_id = NO_INSTRUCTION_FILTER) {
   if (!wave)
     return {};
-  return find_pending_register_hazard(wave->pending_vgpr_writes, vgpr_index, size_dwords,
+  return find_pending_register_hazard(pending_registers(*wave, file, set), index, size_dwords,
                                       current_instruction_id);
 }
 
-inline const PendingAsyncOp *
-check_vgpr_read_hazard(const WaveState *wave, uint32_t vgpr_index, uint32_t size_dwords,
-                       EntityId current_instruction_id = NO_INSTRUCTION_FILTER) {
-  return check_vgpr_read_hazard_info(wave, vgpr_index, size_dwords, current_instruction_id).pending;
-}
-
+/// A destination stays unsafe while either counter side of a flat load is
+/// outstanding, so a WAW check spans both write sets.
 inline PendingRegisterHazard
-check_vgpr_ds_read_hazard_info(const WaveState *wave, uint32_t vgpr_index, uint32_t size_dwords,
-                               EntityId current_instruction_id = NO_INSTRUCTION_FILTER) {
-  if (!wave)
-    return {};
-  return find_pending_register_hazard(wave->pending_vgpr_writes_ds, vgpr_index, size_dwords,
-                                      current_instruction_id);
-}
-
-inline const PendingAsyncOp *
-check_vgpr_ds_read_hazard(const WaveState *wave, uint32_t vgpr_index, uint32_t size_dwords,
-                          EntityId current_instruction_id = NO_INSTRUCTION_FILTER) {
-  return check_vgpr_ds_read_hazard_info(wave, vgpr_index, size_dwords, current_instruction_id)
-      .pending;
-}
-
-inline PendingRegisterHazard
-check_vgpr_waw_hazard_info(const WaveState *wave, uint32_t vgpr_index, uint32_t size_dwords,
-                           EntityId current_instruction_id = NO_INSTRUCTION_FILTER) {
-  if (!wave)
-    return {};
-
-  auto hazard = find_pending_register_hazard(wave->pending_vgpr_writes, vgpr_index, size_dwords,
-                                             current_instruction_id);
+check_vector_waw_hazard_info(const WaveState *wave, VectorRegisterFile file, uint32_t index,
+                             uint32_t size_dwords,
+                             EntityId current_instruction_id = NO_INSTRUCTION_FILTER) {
+  const auto hazard = check_vector_hazard_info(wave, file, PendingRegisterSet::Writes, index,
+                                               size_dwords, current_instruction_id);
   if (hazard.pending)
     return hazard;
-  return find_pending_register_hazard(wave->pending_vgpr_writes_ds, vgpr_index, size_dwords,
-                                      current_instruction_id);
-}
-
-inline const PendingAsyncOp *
-check_vgpr_waw_hazard(const WaveState *wave, uint32_t vgpr_index, uint32_t size_dwords,
-                      EntityId current_instruction_id = NO_INSTRUCTION_FILTER) {
-  return check_vgpr_waw_hazard_info(wave, vgpr_index, size_dwords, current_instruction_id).pending;
-}
-
-inline PendingRegisterHazard
-check_vgpr_war_hazard_info(const WaveState *wave, uint32_t vgpr_index, uint32_t size_dwords,
-                           EntityId current_instruction_id = NO_INSTRUCTION_FILTER) {
-  if (!wave)
-    return {};
-  return find_pending_register_hazard(wave->pending_vgpr_reads, vgpr_index, size_dwords,
-                                      current_instruction_id);
-}
-
-inline const PendingAsyncOp *
-check_vgpr_war_hazard(const WaveState *wave, uint32_t vgpr_index, uint32_t size_dwords,
-                      EntityId current_instruction_id = NO_INSTRUCTION_FILTER) {
-  return check_vgpr_war_hazard_info(wave, vgpr_index, size_dwords, current_instruction_id).pending;
+  return check_vector_hazard_info(wave, file, PendingRegisterSet::DsWrites, index, size_dwords,
+                                  current_instruction_id);
 }
 
 inline PendingRegisterHazard
@@ -231,14 +245,22 @@ template <typename Fn> inline void for_each_pending_op(const WaveState *wave, Fn
 
   for (const auto &[_, op] : wave->pending_vgpr_writes)
     visit(op);
+  for (const auto &[_, op] : wave->pending_acc_vgpr_writes)
+    visit(op);
   for (const auto &[_, op] : wave->pending_sgpr_writes)
     visit(op);
   for (const auto &[_, op] : wave->pending_vgpr_writes_ds)
     visit(op);
+  for (const auto &[_, op] : wave->pending_acc_vgpr_writes_ds)
+    visit(op);
   for (const auto &[_, op] : wave->pending_vgpr_reads)
+    visit(op);
+  for (const auto &[_, op] : wave->pending_acc_vgpr_reads)
     visit(op);
 
   for (const auto &entry : wave->vmem_load_fifo)
+    visit(entry.second);
+  for (const auto &entry : wave->acc_vmem_load_fifo)
     visit(entry.second);
   for (const auto &entry : wave->smem_load_fifo)
     visit(entry.second);
@@ -246,9 +268,13 @@ template <typename Fn> inline void for_each_pending_op(const WaveState *wave, Fn
     visit(entry.second);
   for (const auto &entry : wave->vmem_store_fifo)
     visit(entry.second);
+  for (const auto &entry : wave->acc_vmem_store_fifo)
+    visit(entry.second);
   for (const auto &entry : wave->lds_read_fifo)
     visit(entry.second);
   for (const auto &entry : wave->flat_vgpr_ds_fifo)
+    visit(entry.second);
+  for (const auto &entry : wave->flat_acc_vgpr_ds_fifo)
     visit(entry.second);
   for (const auto &entry : wave->tensor_lds_fifo)
     visit(entry.second);
@@ -270,59 +296,54 @@ inline PendingAsyncOp make_pending_op(EntityId instruction_id, uint64_t pc, Wait
   return op;
 }
 
-inline void track_vgpr_write(WaveState *wave, EntityId instruction_id, uint64_t pc,
-                             uint32_t vgpr_index, uint32_t size_dwords, WaitCntType wait_type) {
-  if (!wave || size_dwords == 0 || wait_type == WaitCntType::NONE)
-    return;
-
-  const PendingAsyncOp op =
-      make_pending_op(instruction_id, pc, wait_type, bytes_for_dwords(size_dwords));
-  for (uint32_t i = 0; i < size_dwords; ++i) {
-    const uint32_t reg = vgpr_index + i;
-    if (reg > MAX_VGPR_INDEX)
-      break;
-
-    if (wait_type == WaitCntType::LDS) {
-      wave->pending_vgpr_writes_ds[reg] = op;
-      wave->flat_vgpr_ds_fifo.push_back({reg, op});
-    } else {
-      wave->pending_vgpr_writes[reg] = op;
-      wave->vmem_load_fifo.push_back({reg, op});
-    }
-  }
-}
-
-inline void track_flat_vgpr_ds(WaveState *wave, EntityId instruction_id, uint64_t pc,
-                               uint32_t vgpr_index, uint32_t size_dwords, bool is_flat_ds = true) {
+inline void track_pending_registers(WaveState *wave, VectorRegisterFile file,
+                                    PendingRegisterSet set, uint32_t first_reg,
+                                    uint32_t size_dwords, const PendingAsyncOp &op) {
   if (!wave || size_dwords == 0)
     return;
 
-  const PendingAsyncOp op = make_pending_op(instruction_id, pc, WaitCntType::LDS,
-                                            bytes_for_dwords(size_dwords), is_flat_ds);
+  auto &pending = pending_registers(*wave, file, set);
+  auto &fifo = pending_register_fifo(*wave, file, set);
+  const uint32_t max_index = max_register_index(file);
   for (uint32_t i = 0; i < size_dwords; ++i) {
-    const uint32_t reg = vgpr_index + i;
-    if (reg > MAX_VGPR_INDEX)
+    const uint32_t reg = first_reg + i;
+    if (reg > max_index)
       break;
-    wave->pending_vgpr_writes_ds[reg] = op;
-    wave->flat_vgpr_ds_fifo.push_back({reg, op});
+    pending[reg] = op;
+    fifo.push_back({reg, op});
   }
 }
 
-inline void track_vgpr_read(WaveState *wave, EntityId instruction_id, uint64_t pc,
-                            uint32_t vgpr_index, uint32_t size_dwords,
-                            WaitCntType wait_type = WaitCntType::STORE) {
-  if (!wave || size_dwords == 0 || wait_type == WaitCntType::NONE)
+inline void track_vector_write(WaveState *wave, VectorRegisterFile file, EntityId instruction_id,
+                               uint64_t pc, uint32_t first_reg, uint32_t size_dwords,
+                               WaitCntType wait_type) {
+  if (wait_type == WaitCntType::NONE)
     return;
 
-  const PendingAsyncOp op =
-      make_pending_op(instruction_id, pc, wait_type, bytes_for_dwords(size_dwords));
-  for (uint32_t i = 0; i < size_dwords; ++i) {
-    const uint32_t reg = vgpr_index + i;
-    if (reg > MAX_VGPR_INDEX)
-      break;
-    wave->pending_vgpr_reads[reg] = op;
-    wave->vmem_store_fifo.push_back({reg, op});
-  }
+  // An LDS-guarded destination is outstanding on the DScnt side only.
+  const PendingRegisterSet set =
+      wait_type == WaitCntType::LDS ? PendingRegisterSet::DsWrites : PendingRegisterSet::Writes;
+  track_pending_registers(
+      wave, file, set, first_reg, size_dwords,
+      make_pending_op(instruction_id, pc, wait_type, bytes_for_dwords(size_dwords)));
+}
+
+inline void track_vector_flat_ds(WaveState *wave, VectorRegisterFile file, EntityId instruction_id,
+                                 uint64_t pc, uint32_t first_reg, uint32_t size_dwords,
+                                 bool is_flat_ds = true) {
+  track_pending_registers(wave, file, PendingRegisterSet::DsWrites, first_reg, size_dwords,
+                          make_pending_op(instruction_id, pc, WaitCntType::LDS,
+                                          bytes_for_dwords(size_dwords), is_flat_ds));
+}
+
+inline void track_vector_read(WaveState *wave, VectorRegisterFile file, EntityId instruction_id,
+                              uint64_t pc, uint32_t first_reg, uint32_t size_dwords,
+                              WaitCntType wait_type = WaitCntType::STORE) {
+  if (wait_type == WaitCntType::NONE)
+    return;
+  track_pending_registers(
+      wave, file, PendingRegisterSet::Reads, first_reg, size_dwords,
+      make_pending_op(instruction_id, pc, wait_type, bytes_for_dwords(size_dwords)));
 }
 
 inline void track_sgpr_write(WaveState *wave, EntityId instruction_id, uint64_t pc,

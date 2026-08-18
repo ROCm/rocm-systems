@@ -22,6 +22,7 @@ enum class ResourceKind {
   Unknown,
   ScalarRegister,
   VectorRegister,
+  AccumVectorRegister,
   LocalMemory,
   ScratchMemory,
   GlobalMemory,
@@ -32,6 +33,7 @@ enum class RegisterKind {
   None,
   Scalar,
   Vector,
+  AccumVector,
   Memory,
 };
 

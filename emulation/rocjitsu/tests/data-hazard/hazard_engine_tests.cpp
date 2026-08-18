@@ -95,6 +95,44 @@ TEST(GenericDataHazardEngineTest, DetectsRawHazardFromGenericEvents) {
   EXPECT_EQ(warnings[0].suggestion, "fake wait vector-load");
 }
 
+TEST(GenericDataHazardEngineTest, PendingVgprWriteDoesNotHazardUnrelatedAccRead) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent load;
+  load.instruction = make_instruction(1, 0x100);
+  load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(load);
+
+  ResourceAccessEvent load_write;
+  load_write.instruction = load.instruction;
+  load_write.resource_kind = ResourceKind::VectorRegister;
+  load_write.register_kind = RegisterKind::Vector;
+  load_write.resource_index = 0;
+  load_write.size_bytes = 4;
+  load_write.is_write = true;
+  engine.on_resource_access(load_write);
+
+  InstructionEvent read;
+  read.instruction = make_instruction(2, 0x104);
+  engine.on_instruction(read);
+
+  ResourceAccessEvent acc_read;
+  acc_read.instruction = read.instruction;
+  acc_read.resource_kind = ResourceKind::AccumVectorRegister;
+  acc_read.register_kind = RegisterKind::AccumVector;
+  acc_read.resource_index = 0;
+  acc_read.size_bytes = 4;
+  acc_read.is_read = true;
+  engine.on_resource_access(acc_read);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}
+
 TEST(GenericDataHazardEngineTest, DetectsVectorRawInsideMultiDwordReadRange) {
   FakeFormatter formatter;
   auto &engine = reset_generic_engine(formatter);

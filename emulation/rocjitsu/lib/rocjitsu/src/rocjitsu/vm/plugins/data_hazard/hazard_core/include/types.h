@@ -48,6 +48,7 @@ enum class WaitCntType {
 // =============================================================================
 
 constexpr uint32_t MAX_VGPR_INDEX = 255;
+constexpr uint32_t MAX_ACC_VGPR_INDEX = 255;
 constexpr uint32_t MAX_SGPR_INDEX = 105;
 constexpr uint32_t BYTES_PER_DWORD = 4;
 constexpr uint32_t MAX_ACCESS_SIZE_BYTES = 1024 * 1024; // 1MB sanity limit
@@ -94,6 +95,7 @@ struct LdsHazardKey {
 
 enum class HazardRegisterKind {
   Vector,
+  AccumVector,
   Scalar,
 };
 
@@ -151,6 +153,14 @@ struct WaveState {
   std::unordered_map<uint32_t, PendingAsyncOp> pending_vgpr_writes_ds;
   std::deque<std::pair<uint32_t, PendingAsyncOp>> flat_vgpr_ds_fifo;
 
+  // === Accumulator VGPR tracking (separate architectural namespace from VGPR) ===
+  std::unordered_map<uint32_t, PendingAsyncOp> pending_acc_vgpr_writes;
+  std::deque<std::pair<uint32_t, PendingAsyncOp>> acc_vmem_load_fifo;
+  std::unordered_map<uint32_t, PendingAsyncOp> pending_acc_vgpr_writes_ds;
+  std::deque<std::pair<uint32_t, PendingAsyncOp>> flat_acc_vgpr_ds_fifo;
+  std::unordered_map<uint32_t, PendingAsyncOp> pending_acc_vgpr_reads;
+  std::deque<std::pair<uint32_t, PendingAsyncOp>> acc_vmem_store_fifo;
+
   // === WAR hazard tracking (writes before async reads complete) ===
   std::unordered_map<uint32_t, PendingAsyncOp> pending_vgpr_reads;
 
@@ -166,8 +176,8 @@ struct WaveState {
   std::deque<std::pair<uint32_t, PendingAsyncOp>> tensor_lds_fifo;
 
   // === Deduplication ===
-  std::set<std::pair<EntityId, uint32_t>> reported_raw_hazards;
-  std::set<std::pair<EntityId, uint32_t>> reported_war_hazards;
+  std::set<WawHazardKey> reported_raw_hazards;
+  std::set<WawHazardKey> reported_war_hazards;
   std::set<WawHazardKey> reported_waw_hazards;
   std::set<LdsHazardKey> reported_lds_hazards;
 
@@ -187,6 +197,12 @@ struct WaveState {
     lds_fifo.clear();
     pending_vgpr_writes_ds.clear();
     flat_vgpr_ds_fifo.clear();
+    pending_acc_vgpr_writes.clear();
+    acc_vmem_load_fifo.clear();
+    pending_acc_vgpr_writes_ds.clear();
+    flat_acc_vgpr_ds_fifo.clear();
+    pending_acc_vgpr_reads.clear();
+    acc_vmem_store_fifo.clear();
     pending_vgpr_reads.clear();
     vmem_store_fifo.clear();
     lds_read_fifo.clear();

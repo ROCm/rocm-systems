@@ -70,14 +70,15 @@ private:
                             const ResourceAccessEvent &event, WaitCntType vector_write_wait,
                             bool vector_write_also_waits_lds, WaitCntType vector_read_wait);
   void check_vector_raw_hazards(EngineWaveState &wave, const EngineInstructionContext &ctx,
-                                const ResourceAccessEvent &event, uint32_t vgpr, uint32_t count);
+                                const ResourceAccessEvent &event, ResourceKind resource_kind,
+                                uint32_t reg, uint32_t count);
   void check_vector_war_waw_hazards(EngineWaveState &wave, const EngineInstructionContext &ctx,
-                                    const ResourceAccessEvent &event, uint32_t vgpr,
-                                    uint32_t count);
+                                    const ResourceAccessEvent &event, ResourceKind resource_kind,
+                                    uint32_t reg, uint32_t count);
   void track_vector_pending(EngineWaveState &wave, const EngineInstructionContext &ctx,
-                            const ResourceAccessEvent &event, uint32_t vgpr, uint32_t count,
-                            WaitCntType vector_write_wait, bool vector_write_also_waits_lds,
-                            WaitCntType vector_read_wait);
+                            const ResourceAccessEvent &event, ResourceKind resource_kind,
+                            uint32_t reg, uint32_t count, WaitCntType vector_write_wait,
+                            bool vector_write_also_waits_lds, WaitCntType vector_read_wait);
   void handle_scalar_access(EngineWaveState &wave, const EngineInstructionContext &ctx,
                             const ResourceAccessEvent &event, WaitCntType scalar_write_wait);
   void handle_lds_access(EngineWaveState &wave, const EngineInstructionContext &ctx,
