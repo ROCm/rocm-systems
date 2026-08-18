@@ -184,6 +184,10 @@ main()
             pc_sampling_kernel<<<num_blocks, threads_per_block>>>(threads_per_block);
             // Check for kernel launch errors
             checkHipErrors(hipGetLastError());
+            // The launches above are asynchronous, but profiling data (PC samples in
+            // particular) is only recorded while the region is resumed. Wait for the
+            // kernels to execute so the region does not close before they run.
+            checkHipErrors(hipDeviceSynchronize());
             roctxProfilerPause(tid);
         }
     }
