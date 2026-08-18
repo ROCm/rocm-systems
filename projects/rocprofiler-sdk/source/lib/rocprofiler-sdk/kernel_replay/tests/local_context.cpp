@@ -218,9 +218,10 @@ TEST(kernel_replay_local_context, last_write_wins_in_arm_window)
     EXPECT_FALSE(*lc::local_context_override({9}));
 }
 
-// Per-service consumer models used at dispatch time. Dispatch counters and SPM replace the global
-// enabled flag with the override; ATT skips only when forced off; PC sampling is agent-wide and
-// ignores the override (a local stop is a recorded no-op).
+// Per-service consumer models used at dispatch time. Dispatch counters and SPM AND the override
+// with the global enabled flag (local start cannot promote a globally stopped context); ATT skips
+// only when forced off; PC sampling is agent-wide and ignores the override (a local stop is a
+// recorded no-op).
 TEST(kernel_replay_local_context, simulated_service_consumers)
 {
     const rocprofiler_context_id_t counters{10};
@@ -228,9 +229,11 @@ TEST(kernel_replay_local_context, simulated_service_consumers)
     const rocprofiler_context_id_t spm{30};
     const rocprofiler_context_id_t pcs{40};
 
+    // Mirrors counters/spm dispatch_handlers: enabled = enabled && *ov.
     const auto dispatch_enabled = [](rocprofiler_context_id_t id, bool globally_on) {
-        if(auto ov = lc::local_context_override(id)) return *ov;
-        return globally_on;
+        bool enabled = globally_on;
+        if(auto ov = lc::local_context_override(id)) enabled = enabled && *ov;
+        return enabled;
     };
     const auto att_runs = [](rocprofiler_context_id_t id) {
         if(auto ov = lc::local_context_override(id); ov && !*ov) return false;
@@ -268,4 +271,29 @@ TEST(kernel_replay_local_context, simulated_service_consumers)
     EXPECT_EQ(att_ran, (std::vector<bool>{true, false, false, false}));
     EXPECT_EQ(spm_ran, (std::vector<bool>{true, false, false, false}));
     EXPECT_EQ(pcs_ran, (std::vector<bool>{true, true, true, true}));
+}
+
+// Local start must not resurrect a globally-stopped dispatch service: the override is ANDed with
+// the global enabled flag at the consumer (mirrors counters/spm dispatch_handlers).
+TEST(kernel_replay_local_context, consumer_no_promotion_of_globally_stopped)
+{
+    const rocprofiler_context_id_t counters{11};
+
+    const auto dispatch_enabled = [](rocprofiler_context_id_t id, bool globally_on) {
+        bool enabled = globally_on;
+        if(auto ov = lc::local_context_override(id)) enabled = enabled && *ov;
+        return enabled;
+    };
+
+    fake_active_contexts             active{counters.handle};
+    lc::scoped_local_context_control loop{active.array};
+    lc::set_toggles_armed(true);
+    EXPECT_EQ(lc::replay_local_start_context(counters), ROCPROFILER_STATUS_SUCCESS);
+    lc::set_toggles_armed(false);
+
+    EXPECT_TRUE(*lc::local_context_override(counters));
+    EXPECT_FALSE(dispatch_enabled(counters, /*globally_on=*/false))
+        << "local start must not promote a globally stopped context";
+    EXPECT_TRUE(dispatch_enabled(counters, /*globally_on=*/true))
+        << "local start must undo a prior local stop when globally on";
 }

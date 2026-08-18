@@ -195,3 +195,37 @@ TEST(core, local_context_override_restarts_queue_cb)
     registration::finalize();
     context::pop_client(1);
 }
+
+// A local start override must not promote a context whose global enabled flag is false: the
+// dispatch handler ANDs the override with the global flag (enabled = enabled && *ov).
+TEST(core, local_context_start_cannot_promote_globally_stopped)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+
+    context::context ctx{};
+    ctx.context_idx = 44;
+    ctx.dispatch_counter_collection =
+        std::make_unique<context::dispatch_counter_collection_service>();
+    ctx.dispatch_counter_collection->enabled.wlock([](auto& data) { data = false; });
+
+    std::atomic<int>                            hits{0};
+    auto                                        active = as_active(ctx);
+    kernel_replay::scoped_local_context_control loop{active};
+
+    kernel_replay::set_toggles_armed(true);
+    EXPECT_EQ(kernel_replay::replay_local_start_context({.handle = ctx.context_idx}),
+              ROCPROFILER_STATUS_SUCCESS);
+    kernel_replay::set_toggles_armed(false);
+
+    invoke_queue_cb(ctx, &hits);
+    EXPECT_EQ(hits.load(), 0) << "local start must not promote a globally stopped context";
+
+    registration::set_init_status(1);
+    registration::finalize();
+    context::pop_client(1);
+}
