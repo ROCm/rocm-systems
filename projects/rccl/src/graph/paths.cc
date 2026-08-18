@@ -1220,7 +1220,27 @@ static ncclResult_t ncclTopoGetNchannels(struct ncclComm* comm, int g /*local gp
 }
 
 NCCL_PARAM(MinP2pNChannels, "MIN_P2P_NCHANNELS", 1);
-NCCL_PARAM(MaxP2pNChannels, "MAX_P2P_NCHANNELS", MAXCHANNELS);
+NCCL_PARAM(MaxP2pNChannels, "MAX_P2P_NCHANNELS", -2);
+
+int ncclMaxP2pNchannels() {
+  int maxP2pNchannels = MAXCHANNELS;
+  if (ncclParamMaxP2pNChannels() != -2) maxP2pNchannels = (int)ncclParamMaxP2pNChannels();
+  maxP2pNchannels = std::min(maxP2pNchannels, (int)MAXCHANNELS);
+  if (maxP2pNchannels < 1) {
+    INFO(NCCL_GRAPH | NCCL_ENV, "User asked for a maximum of %d P2P channels, setting it to 1", maxP2pNchannels);
+    maxP2pNchannels = 1;
+  }
+  return maxP2pNchannels;
+}
+
+int ncclP2pChannelsUpperBound(bool* userOptedHigherOut) {
+  int64_t userMaxP2pParam = ncclParamMaxP2pNChannels();
+  int defaultMax = 4 * CHANNEL_LIMIT;
+  bool userOptedHigher = (userMaxP2pParam != -2 && userMaxP2pParam > defaultMax);
+  if (userOptedHigherOut != nullptr) *userOptedHigherOut = userOptedHigher;
+  return userOptedHigher ? std::min((int)userMaxP2pParam, (int)MAXCHANNELS) : defaultMax;
+}
+
 // When enabled, caps p2pnChannels to 16 on gfx950 (MI350) for large-scale jobs
 // (nNodes >= 16) to reduce P2P CU usage. Disabled by default.
 NCCL_PARAM(P2pCuReduceScaleEnable, "P2P_CU_REDUCE_SCALE_ENABLE", 0);
@@ -1250,11 +1270,11 @@ ncclResult_t ncclTopoComputeP2pChannelsPerPeer(struct ncclComm* comm) {
 ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
   /* here we already honor comm->max/minCTAs for p2pnChannels. */
   if (comm->sharedRes->owner != comm) {
-    comm->p2pnChannels = std::min(comm->nChannels, (int)ncclParamMaxP2pNChannels());
+    comm->p2pnChannels = std::min(comm->nChannels, ncclMaxP2pNchannels());
     comm->p2pnChannels =
       std::min(std::max(comm->p2pnChannels, (int)ncclParamMinP2pNChannels()), comm->sharedRes->tpP2pNChannels);
   } else {
-    comm->p2pnChannels = std::min(comm->nChannels, (int)ncclParamMaxP2pNChannels());
+    comm->p2pnChannels = std::min(comm->nChannels, ncclMaxP2pNchannels());
     comm->p2pnChannels = std::max(comm->p2pnChannels, (int)ncclParamMinP2pNChannels());
   }
 
@@ -1293,11 +1313,10 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     // (=64), treat it as an opt-in to the extended upper bound (up to MAXCHANNELS).
     // Otherwise keep the historical 64 cap and per-arch multi-node caps below.
     {
-      int userMaxP2p = (int)ncclParamMaxP2pNChannels();
-      int defaultMax = 4 * CHANNEL_LIMIT;
-      int upper = (userMaxP2p > defaultMax) ? std::min(userMaxP2p, (int)MAXCHANNELS) : defaultMax;
+      bool userOptedHigher = false;
+      int upper = ncclP2pChannelsUpperBound(&userOptedHigher);
       comm->p2pnChannels = std::min(std::max(pow2Up(comm->p2pnChannels), pow2Up(comm->p2pnChannelsPerPeer)), upper);
-      if (upper == defaultMax) {
+      if (!userOptedHigher) {
         // p2pnChannelsPerPeer cannot be greater than MAXCHANNELS
         // Capping the comm->p2pnChannels to 32 for send/recv based collectives on multi-node MI350 (2 and 4 nodes)
         if (((comm->nNodes == 2 && comm->topo->nRanks == 16) || (comm->nNodes == 4 && comm->topo->nRanks == 32)) &&
