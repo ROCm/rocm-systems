@@ -28,19 +28,12 @@ else()
     set(_ttc_unavailable_severity STATUS)
 endif()
 
-# Interpreter used for the torch/python probe below.
+# Interpreter used to locate Torch and to run the probe.
 if(TORCH_TRACE_PYTHON)
-    set(_ttc_python "${TORCH_TRACE_PYTHON}")
-else()
-    find_package(Python3 COMPONENTS Interpreter QUIET)
-    if(Python3_FOUND)
-        set(_ttc_python "${Python3_EXECUTABLE}")
-    else()
-        set(_ttc_python "")
-    endif()
+    set(Python3_EXECUTABLE "${TORCH_TRACE_PYTHON}")
 endif()
-
-if(NOT _ttc_python)
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(NOT Python3_FOUND)
     message(
         ${_ttc_unavailable_severity}
         "torch_trace_collector: no Python3 interpreter available; the extension is "
@@ -48,6 +41,32 @@ if(NOT _ttc_python)
     )
     return()
 endif()
+set(_ttc_python "${Python3_EXECUTABLE}")
+
+set(_ttc_torch_dir "")
+foreach(_ttc_site IN LISTS Python3_SITEARCH Python3_SITELIB)
+    if(EXISTS "${_ttc_site}/torch/share/cmake/Torch/TorchConfig.cmake")
+        set(_ttc_torch_dir "${_ttc_site}/torch/share/cmake/Torch")
+        break()
+    endif()
+endforeach()
+if(_ttc_torch_dir AND NOT Torch_DIR)
+    set(Torch_DIR "${_ttc_torch_dir}")
+endif()
+
+find_package(Torch CONFIG QUIET)
+if(NOT TORCH_FOUND)
+    message(
+        ${_ttc_unavailable_severity}
+        "torch_trace_collector: find_package(Torch) failed for ${_ttc_python}; the "
+        "extension is not built."
+    )
+    return()
+endif()
+message(
+    STATUS
+    "torch_trace_collector: find_package(Torch) ${TORCH_INSTALL_PREFIX}"
+)
 
 # Probe the environment for python/torch metadata and the source fingerprint.
 # Exit code 3 means torch or torch.utils.cpp_extension is unavailable.
