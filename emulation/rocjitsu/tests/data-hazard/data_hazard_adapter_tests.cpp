@@ -1653,6 +1653,56 @@ TEST(DataHazardAdapterTest, WorkgroupBarrierFlushesLdsEpochRaceDetection) {
   EXPECT_EQ(warnings.back().finding.address, 0x100u);
 }
 
+// s_barrier_wait is seen before the wave stalls, so a wave that arrives early
+// must not close the epoch for the waves still issuing pre-barrier accesses.
+TEST(DataHazardAdapterTest, EarlyBarrierWaitKeepsLaterWaveInSameLdsEpoch) {
+  AdapterHarness h;
+
+  ExecutionKey late_wave = h.wave;
+  late_wave.wave_id = 1;
+  h.adapter.on_wave_begin(late_wave);
+
+  h.adapter.on_instruction(h.instruction(1, 0x100));
+
+  dh::MemoryRouteView write;
+  write.instruction = h.instruction(1, 0x100);
+  write.resource_kind = ResourceKind::LocalMemory;
+  write.address = 0x100;
+  write.size_bytes = 4;
+  write.is_store = true;
+  h.adapter.on_memory_route(write);
+
+  dh::InstructionView barrier_wait = h.instruction(2, 0x104);
+  barrier_wait.wait.kind = dh::WaitKind::BarrierWait;
+  h.adapter.on_instruction(barrier_wait);
+
+  EXPECT_TRUE(h.engine.warning_snapshot().empty())
+      << "reaching s_barrier_wait must not close the epoch on its own";
+
+  dh::InstructionView read_inst;
+  read_inst.execution = late_wave;
+  read_inst.instruction_id = 3;
+  read_inst.pc = 0x108;
+  h.adapter.on_instruction(read_inst);
+
+  dh::MemoryRouteView read;
+  read.instruction = read_inst;
+  read.resource_kind = ResourceKind::LocalMemory;
+  read.address = 0x100;
+  read.size_bytes = 4;
+  read.is_load = true;
+  h.adapter.on_memory_route(read);
+
+  // onAmdgpuBarrierResolved reports every wave once they have all arrived.
+  h.adapter.on_workgroup_barrier(h.wave);
+  h.adapter.on_workgroup_barrier(late_wave);
+
+  const auto warnings = h.engine.warning_snapshot();
+  ASSERT_FALSE(warnings.empty());
+  EXPECT_EQ(warnings.back().finding.kind, HazardKind::LocalMemoryRace);
+  EXPECT_EQ(warnings.back().finding.address, 0x100u);
+}
+
 TEST(DataHazardAdapterTest, LocalAtomicBarrierClearsLdsPendingOps) {
   AdapterHarness h;
 
@@ -1974,9 +2024,13 @@ TEST(DataHazardAdapterTest, MapsWaitInfoToGenericWaitActions) {
   EXPECT_TRUE(action.waits_for_idle);
   EXPECT_TRUE(action.counters.empty());
 
+  // s_barrier_wait is classified before it stalls, so it must not claim the
+  // barrier has completed; the epoch is closed on barrier resolution instead.
   wait.kind = dh::WaitKind::BarrierWait;
   action = dh::make_wait_action(wait);
-  EXPECT_TRUE(action.is_workgroup_barrier);
+  EXPECT_TRUE(action.is_wait_instruction);
+  EXPECT_FALSE(action.is_workgroup_barrier);
+  EXPECT_TRUE(action.counters.empty());
 
   wait.kind = dh::WaitKind::AddressTranslation;
   action = dh::make_wait_action(wait);
