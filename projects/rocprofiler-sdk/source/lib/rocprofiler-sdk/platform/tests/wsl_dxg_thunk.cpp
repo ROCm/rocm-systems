@@ -44,12 +44,10 @@ namespace
 {
 using rocprofiler::platform::wsl::DxgLoaderOps;
 using rocprofiler::platform::wsl::DxgThunk;
-using rocprofiler::platform::wsl::kHsaKmtStatusKernelAlreadyOpened;
-using rocprofiler::platform::wsl::kHsaKmtStatusSuccess;
 using rocprofiler::platform::wsl::read_dxg_gpu_topology;
 using rocprofiler::platform::wsl::resolve_dxg_thunk;
 
-constexpr int32_t kFailure = -1;
+constexpr HSAKMT_STATUS kFailure = HSAKMT_STATUS_ERROR;
 
 // The fake thunk's answers and its call log. A DxgThunk is a table of plain
 // function pointers, so the trampolines below reach the fixture through this
@@ -58,12 +56,12 @@ struct FakeThunkState
 {
     std::vector<std::string> calls;
 
-    int32_t  open_status    = kHsaKmtStatusSuccess;
-    int32_t  acquire_status = kHsaKmtStatusSuccess;
-    uint32_t num_nodes      = 0;
+    HSAKMT_STATUS open_status    = HSAKMT_STATUS_SUCCESS;
+    HSAKMT_STATUS acquire_status = HSAKMT_STATUS_SUCCESS;
+    uint32_t      num_nodes      = 0;
 
     // per-node answers, indexed by node id
-    std::vector<int32_t>           node_status;
+    std::vector<HSAKMT_STATUS>     node_status;
     std::vector<HsaNodeProperties> nodes;
 
     int count(const std::string& name) const
@@ -102,19 +100,19 @@ struct FakeThunk
     FakeThunk(const FakeThunk&) = delete;
     FakeThunk& operator=(const FakeThunk&) = delete;
 
-    static int32_t OpenKfd()
+    static HSAKMT_STATUS OpenKfd()
     {
         g_state->calls.emplace_back("open_kfd");
         return g_state->open_status;
     }
 
-    static int32_t CloseKfd()
+    static HSAKMT_STATUS CloseKfd()
     {
         g_state->calls.emplace_back("close_kfd");
-        return kHsaKmtStatusSuccess;
+        return HSAKMT_STATUS_SUCCESS;
     }
 
-    static int32_t AcquireSnapshot(HsaSystemProperties* props)
+    static HSAKMT_STATUS AcquireSnapshot(HsaSystemProperties* props)
     {
         g_state->calls.emplace_back("acquire_snapshot");
         // The node count is read back out of this, so a caller that passed
@@ -124,27 +122,27 @@ struct FakeThunk
         return g_state->acquire_status;
     }
 
-    static int32_t ReleaseSnapshot()
+    static HSAKMT_STATUS ReleaseSnapshot()
     {
         g_state->calls.emplace_back("release_snapshot");
-        return kHsaKmtStatusSuccess;
+        return HSAKMT_STATUS_SUCCESS;
     }
 
-    static int32_t GetNode(uint32_t node_id, HsaNodeProperties* out)
+    static HSAKMT_STATUS GetNode(HSAuint32 node_id, HsaNodeProperties* out)
     {
         g_state->calls.emplace_back("get_node");
         EXPECT_NE(out, nullptr) << "the node read must be handed somewhere to write";
 
         if(node_id >= g_state->node_status.size()) return kFailure;
-        if(g_state->node_status.at(node_id) != kHsaKmtStatusSuccess)
+        if(g_state->node_status.at(node_id) != HSAKMT_STATUS_SUCCESS)
             return g_state->node_status.at(node_id);
 
         *out = g_state->nodes.at(node_id);
-        return kHsaKmtStatusSuccess;
+        return HSAKMT_STATUS_SUCCESS;
     }
 
     // A thunk built against the same hsakmt revision as this test.
-    static int32_t AbiCheck(HsaStructureSizes* sizes)
+    static HSAKMT_STATUS AbiCheck(HsaStructureSizes* sizes)
     {
         g_state->calls.emplace_back("abi_check");
         EXPECT_NE(sizes, nullptr) << "the handshake must advertise something to negotiate over";
@@ -153,15 +151,15 @@ struct FakeThunk
         EXPECT_EQ(sizes->StructureSizes, static_cast<uint16_t>(sizeof(HsaStructureSizes)));
         EXPECT_EQ(sizes->SizeOfHsaNodeProperties, static_cast<uint16_t>(sizeof(HsaNodeProperties)))
             << "the caller must advertise the record size it actually reads";
-        return kHsaKmtStatusSuccess;
+        return HSAKMT_STATUS_SUCCESS;
     }
 
     // A thunk whose HsaNodeProperties is not the one this build reads.
     // HSAKMT_STATUS_DRIVER_MISMATCH is what librocdxg answers with.
-    static int32_t AbiCheckMismatch(HsaStructureSizes*)
+    static HSAKMT_STATUS AbiCheckMismatch(HsaStructureSizes*)
     {
         g_state->calls.emplace_back("abi_check");
-        return 2;
+        return HSAKMT_STATUS_DRIVER_MISMATCH;
     }
 
     DxgThunk table() const
@@ -182,7 +180,7 @@ struct FakeThunk
         for(uint32_t i = 0; i < count; ++i)
         {
             state.nodes.emplace_back(make_gpu_node());
-            state.node_status.emplace_back(kHsaKmtStatusSuccess);
+            state.node_status.emplace_back(HSAKMT_STATUS_SUCCESS);
         }
     }
 };
@@ -281,7 +279,7 @@ TEST(wsl_dxg_thunk, a_healthy_thunk_is_called_in_order_and_left_balanced)
 TEST(wsl_dxg_thunk, an_already_open_thunk_is_used_and_still_closed)
 {
     auto fake              = FakeThunk{};
-    fake.state.open_status = kHsaKmtStatusKernelAlreadyOpened;
+    fake.state.open_status = HSAKMT_STATUS_KERNEL_ALREADY_OPENED;
     fake.publish_gpu_nodes(1);
 
     const auto nodes = read_dxg_gpu_topology(fake.table());

@@ -43,12 +43,14 @@ namespace platform
 {
 namespace wsl
 {
-using PFN_hsaKmtOpenKFD                 = int32_t (*)();
-using PFN_hsaKmtAcquireSystemProperties = int32_t (*)(HsaSystemProperties*);
-using PFN_hsaKmtGetNodeProperties       = int32_t (*)(uint32_t, HsaNodeProperties*);
-using PFN_hsaKmtReleaseSystemProperties = int32_t (*)();
-using PFN_hsaKmtCloseKFD                = int32_t (*)();
-using PFN_DxgAbiCheck                   = int32_t (*)(HsaStructureSizes*);
+// Spelled the way ROCr's own thunk_loader.h spells them, so the two describe the same
+// exports in the same terms.
+using PFN_hsaKmtOpenKFD                 = HSAKMT_STATUS (*)();
+using PFN_hsaKmtAcquireSystemProperties = HSAKMT_STATUS (*)(HsaSystemProperties*);
+using PFN_hsaKmtGetNodeProperties       = HSAKMT_STATUS (*)(HSAuint32, HsaNodeProperties*);
+using PFN_hsaKmtReleaseSystemProperties = HSAKMT_STATUS (*)();
+using PFN_hsaKmtCloseKFD                = HSAKMT_STATUS (*)();
+using PFN_DxgAbiCheck                   = HSAKMT_STATUS (*)(HsaStructureSizes*);
 
 // The unversioned soname, matching ThunkLoader::whoami() in the HSA runtime.
 // Never a versioned name (librocdxg.so.1 / .so.7): hard-coding a soversion

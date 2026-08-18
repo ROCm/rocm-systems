@@ -68,10 +68,6 @@ namespace wsl
 // the read is bounded by a destination larger than the record to keep the
 // undetectable cases from becoming memory corruption.
 
-// HSAKMT_STATUS values this file cares about.
-inline constexpr int32_t kHsaKmtStatusSuccess             = 0;
-inline constexpr int32_t kHsaKmtStatusKernelAlreadyOpened = 22;
-
 // One KMT node as this process read it.
 //
 // Internal bookkeeping, not an interface: nothing outside this library sees it

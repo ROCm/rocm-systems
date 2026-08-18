@@ -54,8 +54,10 @@
 #    include <libdrm/amdgpu_drm.h>
 #endif
 
-#include <fcntl.h>
-#include <unistd.h>
+#ifndef _WIN32
+#    include <fcntl.h>
+#    include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -981,6 +983,11 @@ parse_gfx_target_version(std::string_view gfx_name)
 bool
 kfd_device_available()
 {
+#ifdef _WIN32
+    // Native Windows has no KFD at all - GPU work is scheduled through D3DKMT - so the
+    // answer is fixed and there is no device node to probe for.
+    return false;
+#else
     // Open-probe the KFD device node once. On a real KFD platform this succeeds;
     // on WSL2/DXG (which exposes /dev/dxg but not /dev/kfd) it fails, letting
     // callers gracefully degrade (e.g. disable KFD event tracing) instead of
@@ -992,6 +999,7 @@ kfd_device_available()
         return true;
     }();
     return _available;
+#endif
 }
 }  // namespace agent
 }  // namespace rocprofiler

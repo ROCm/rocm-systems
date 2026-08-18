@@ -127,7 +127,7 @@ layout_agrees(const DxgThunk& dxg)
     sizes.StructureSizes          = static_cast<uint16_t>(sizeof(HsaStructureSizes));
     sizes.SizeOfHsaNodeProperties = static_cast<uint16_t>(sizeof(HsaNodeProperties));
 
-    if(auto st = dxg.abi_check(&sizes); st != kHsaKmtStatusSuccess)
+    if(auto st = dxg.abi_check(&sizes); st != HSAKMT_STATUS_SUCCESS)
     {
         ROCP_ERROR << fmt::format(
             "wsl topology: {} rejected the HsaNodeProperties layout this build was compiled "
@@ -138,7 +138,7 @@ layout_agrees(const DxgThunk& dxg)
             "package that provides this thunk.",
             kLibRocdxgSoname,
             sizeof(HsaNodeProperties),
-            st);
+            static_cast<int>(st));
         return false;
     }
 
@@ -231,9 +231,10 @@ read_dxg_gpu_topology(const DxgThunk& dxg)
     // means the HSA runtime (or another consumer) had it open and we took an
     // additional reference. Both require the matching close below.
     if(auto st = dxg.open_kfd();
-       st != kHsaKmtStatusSuccess && st != kHsaKmtStatusKernelAlreadyOpened)
+       st != HSAKMT_STATUS_SUCCESS && st != HSAKMT_STATUS_KERNEL_ALREADY_OPENED)
     {
-        ROCP_WARNING << fmt::format("wsl topology: hsaKmtOpenKFD failed (status={})", st);
+        ROCP_WARNING << fmt::format("wsl topology: hsaKmtOpenKFD failed (status={})",
+                                    static_cast<int>(st));
         return out;
     }
 
@@ -246,10 +247,10 @@ read_dxg_gpu_topology(const DxgThunk& dxg)
     // Refcounted, like the open above: the HSA runtime's reference on this
     // snapshot outlives the release below, which drops only ours.
     auto sys_props = HsaSystemProperties{};
-    if(auto st = dxg.acquire_snapshot(&sys_props); st != kHsaKmtStatusSuccess)
+    if(auto st = dxg.acquire_snapshot(&sys_props); st != HSAKMT_STATUS_SUCCESS)
     {
         ROCP_WARNING << fmt::format(
-            "wsl topology: hsaKmtAcquireSystemProperties failed (status={})", st);
+            "wsl topology: hsaKmtAcquireSystemProperties failed (status={})", static_cast<int>(st));
         return out;
     }
 
@@ -264,10 +265,12 @@ read_dxg_gpu_topology(const DxgThunk& dxg)
     for(uint32_t node_id = 0; node_id < num_nodes; ++node_id)
     {
         auto scratch = NodePropsScratch{};
-        if(auto st = dxg.get_node(node_id, &scratch.props); st != kHsaKmtStatusSuccess)
+        if(auto st = dxg.get_node(node_id, &scratch.props); st != HSAKMT_STATUS_SUCCESS)
         {
             ROCP_WARNING << fmt::format(
-                "wsl topology: hsaKmtGetNodeProperties(node={}) failed (status={})", node_id, st);
+                "wsl topology: hsaKmtGetNodeProperties(node={}) failed (status={})",
+                node_id,
+                static_cast<int>(st));
             continue;
         }
 
