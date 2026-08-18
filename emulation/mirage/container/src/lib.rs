@@ -210,6 +210,51 @@ fn exit_phrase(code: &Option<i32>, signal: &Option<i32>) -> String {
     }
 }
 
+/// The host port an engine's refusal is about, when that is what it is
+/// about.
+///
+/// Matched on the engines' own words rather than on an exit code, which
+/// is 125 for every way a `run` can be refused. docker says `Bind for
+/// 0.0.0.0:8080 failed: port is already allocated`; podman's rootless
+/// port forwarder says `cannot listen on the TCP port: listen tcp4
+/// :8080: bind: address already in use`. Both name the port in a
+/// `host:port` or `:port` token, which is what is read back out — the
+/// number is the whole point of the message mirage writes instead, and a
+/// remedy that cannot name the port is not much better than the engine's.
+///
+/// A message that matches but names no port is not a match: mirage would
+/// be replacing the engine's specific words with vaguer ones of its own.
+fn host_port_in_use(said: &str) -> Option<String> {
+    const SIGNATURES: &[&str] = &["port is already allocated", "address already in use"];
+    if !SIGNATURES.iter().any(|s| said.contains(s)) {
+        return None;
+    }
+    said.split(|c: char| c.is_whitespace() || c == ',')
+        .filter_map(|token| {
+            let token = token.trim_end_matches([':', '.', ';', ')', '"', '\'']);
+            let (_, port) = token.rsplit_once(':')?;
+            (!port.is_empty() && port.bytes().all(|b| b.is_ascii_digit())).then(|| port.to_string())
+        })
+        .next()
+}
+
+/// An engine's words with its "now go and read the manual" trailer
+/// removed.
+///
+/// `docker run` ends a refusal with `See 'docker run --help'.`, which is
+/// advice for someone who mistyped a flag. Kept in a message that has
+/// nothing else to offer, dropped from one where mirage supplies the
+/// remedy itself — the pointer would then be the only imperative
+/// sentence in the error, and the wrong one.
+fn without_usage_pointer(said: &str) -> String {
+    said.split("; ")
+        .filter(|line| !(line.starts_with("See ") && line.contains("--help")))
+        .collect::<Vec<_>>()
+        .join("; ")
+        .trim()
+        .to_string()
+}
+
 impl NodeClient {
     /// Adopt a freshly-spawned provider client, draining what it writes.
     fn adopt(rank: u32, name: String, mut child: std::process::Child) -> Self {
@@ -315,15 +360,26 @@ impl NodeClient {
 
     /// The error describing a client that ended before its container
     /// could be used, having lasted `waited`.
+    ///
+    /// One refusal is picked out of the rest by name. See
+    /// [`ContainerError::HostPortInUse`].
     fn exited(&self, waited: std::time::Duration) -> ContainerError {
         self.settle_output();
+        let said = self.output_tail();
+        if let Some(port) = host_port_in_use(&said) {
+            return ContainerError::HostPortInUse {
+                name: self.name.clone(),
+                port,
+                said: without_usage_pointer(&said),
+            };
+        }
         let (code, signal) = self.exit_codes();
         ContainerError::ClientExited {
             name: self.name.clone(),
             waited,
             code,
             signal,
-            output: self.output_tail(),
+            output: said,
         }
     }
 }
@@ -416,6 +472,32 @@ pub enum ContainerError {
         /// What the client wrote, on either stream, trimmed. Empty when
         /// it said nothing.
         output: String,
+    },
+
+    /// A node container could not start because the host port it
+    /// publishes is held by something else.
+    ///
+    /// Carved out of [`ContainerError::ClientExited`] because it is the
+    /// one refusal in that family whose fix belongs to the user rather
+    /// than to the image: the engine reports it as a driver or
+    /// forwarder failure, ends with `See 'docker run --help'`, and never
+    /// mentions `--port` — so the reader is sent to the manual for a
+    /// flag mirage passed on their behalf, about a conflict with a
+    /// process that has nothing to do with this session.
+    #[error(
+        "container `{name}` could not start: host port {port} is already in use on this \
+         machine, so the container could not publish onto it. Nothing of mirage's is holding \
+         it — a `--port` conflict *within* a session is refused before bring-up — so this is \
+         another program: `ss -ltnp \"sport = :{port}\"` names it. Publish a different host \
+         port (`--port <other>:{port}`), or stop what is on it. The engine said: {said}"
+    )]
+    HostPortInUse {
+        /// The container that could not be started.
+        name: String,
+        /// The host port it was asked to publish onto.
+        port: String,
+        /// What the engine said, minus its pointer at `--help`.
+        said: String,
     },
 
     /// A bind mount names a host path no container can be given.
@@ -551,6 +633,49 @@ pub enum ContainerError {
         workdir: String,
         /// The container it was not found in.
         container: String,
+    },
+
+    /// The working directory an exec asked for is there, and is not a
+    /// directory.
+    ///
+    /// A separate variant because [`ContainerError::Workdir`]'s two
+    /// sentences are both wrong about it: the path *is* in the image, so
+    /// "there is no such directory" sends the user looking for a
+    /// spelling mistake that is not there, and `--mount`ing something at
+    /// an occupied path is not the remedy either. Distinguished by the
+    /// probe rather than assumed, so an image that has the path as a
+    /// file, a socket or a dangling symlink is told apart from one that
+    /// does not have it at all.
+    #[error(
+        "--workdir {workdir}: inside container `{container}` that path exists but is not a \
+         directory, so nothing can be started in it. Name the directory that holds it, or \
+         another the image already has."
+    )]
+    WorkdirNotADirectory {
+        /// The path that was asked for.
+        workdir: String,
+        /// The container it was found in.
+        container: String,
+    },
+
+    /// The working directory an exec asked for is not an absolute path.
+    ///
+    /// The host-side check skips a containerised `--workdir` entirely —
+    /// it names a path in the image, which this machine cannot answer
+    /// for — and a relative one then reached the engine, which refuses
+    /// it with `workdir must be an absolute path` and an OCI runtime
+    /// error naming a container the user has never seen. It is also the
+    /// one thing about a container path that can be settled without
+    /// asking the container.
+    #[error(
+        "--workdir {workdir}: a containerised working directory must be an absolute path. \
+         There is nothing for a relative one to be relative *to*: the host directory you are \
+         standing in is not the container's, and the workload would otherwise start wherever \
+         the image's own `WORKDIR` happens to be. Write the path in full, e.g. `/{workdir}`."
+    )]
+    WorkdirRelative {
+        /// The path that was asked for, as the user spelled it.
+        workdir: String,
     },
 
     /// The caller asked for the operation to stop before it finished.
@@ -1472,8 +1597,35 @@ impl Engine {
     /// [`image_labels`](mirage_core::container::image_labels) for why
     /// those marks are the owner and the runtime directory but not a
     /// session.
+    ///
+    /// # Interruptible, at both ends
+    ///
+    /// A derived image is the *other* multi-minute step of bring-up, and
+    /// teardown waits for a bring-up in flight before it decides what to
+    /// remove. An uninterruptible build therefore did not merely ignore
+    /// the switch: a Ctrl-C during one sat out the whole `apt-get`
+    /// upgrade with the user's terminal held and nothing to say for
+    /// itself, which is precisely the failure [`Cancel`] exists to end.
+    /// The provider is polled and killed like the pull's.
+    ///
+    /// The check on entry answers a different question, and it is the
+    /// one the caller cannot ask for itself. The hacks path reaches here
+    /// because [`Self::image_present`] said the derived image was not
+    /// there — an answer a *cancelled* probe also gives, being unable to
+    /// give any other. Acting on it started a build for a session that
+    /// was already being torn down; reading the switch again is what
+    /// tells the two answers apart, exactly as
+    /// [`Self::bring_up`] does before its pull.
+    ///
+    /// # Errors
+    ///
+    /// [`ContainerError::Cancelled`] if the caller flipped this engine's
+    /// [`Cancel`] before or during the build, and
+    /// [`ContainerError::Command`] carrying the build's own output if the
+    /// provider refused it.
     pub fn build_image(&self, tag: &str, dockerfile: &str) -> Result<()> {
         use std::io::IsTerminal as _;
+        self.check_cancelled(&format!("building image {tag}"))?;
         let echo = std::io::stderr().is_terminal();
         let mut args = vec!["build".to_string(), "-t".to_string(), tag.to_string()];
         for (k, v) in mirage_core::container::image_labels() {
@@ -1564,11 +1716,20 @@ impl Engine {
             });
         }
 
-        let status = child.wait().map_err(|source| ContainerError::Spawn {
-            provider: self.provider.clone(),
-            args: args.clone(),
-            source,
-        })?;
+        // Polled rather than waited on, so the switch is read while the
+        // build runs. Safe to poll despite the two pipes: they are being
+        // drained by the threads above rather than by this one, which is
+        // the condition [`Self::wait_cancellable`] names.
+        //
+        // The drains are joined only once the build has finished of its
+        // own accord, which is when their end is in sight: the provider
+        // has closed its streams and each thread is one read from
+        // returning. A cancelled build is exactly the case where that is
+        // not true — killing the provider does not kill whatever it
+        // spawned, and a `RUN apt-get` still holding the pipes would
+        // keep this thread here for the whole of the build the user just
+        // interrupted, which is the wait this change exists to end.
+        let status = self.wait_cancellable(&mut child, &args, &format!("building image {tag}"))?;
         if let Some(h) = out_handle {
             let _ = h.join();
         }
@@ -1742,25 +1903,47 @@ impl Engine {
     /// or directory` and the container's exit code, which names neither
     /// the flag the user passed nor the filesystem it was wrong about.
     ///
+    /// # A relative path is answered without asking
+    ///
+    /// Both engines refuse a relative `-w`, and they are right to: a
+    /// container has no notion of the directory the caller was standing
+    /// in, so there is nothing for the path to be relative to. That is
+    /// settled here rather than in the container, because the container
+    /// cannot say anything useful about it — a probe would resolve it
+    /// against whatever the image's own `WORKDIR` is and answer a
+    /// question nobody asked.
+    ///
     /// # Only a positive answer counts
     ///
-    /// The probe is a shell in the container, and the exit code it is
-    /// asked for is one the image cannot produce by accident: `3` means
-    /// "I ran, and that directory is not there". *Every* other outcome —
-    /// an image with no `/bin/sh` (127), a container that has gone away,
-    /// an engine that refused — leaves the question unanswered, and this
-    /// returns `Ok` for all of them. Refusing on an unanswered question
-    /// would mean mirage inventing a failure for a workload that was
-    /// going to run perfectly well, which is worse than the raw engine
-    /// error this exists to replace.
+    /// The probe is a shell in the container, and the exit codes it is
+    /// asked for are ones the image cannot produce by accident: `3`
+    /// means "I ran, and there is nothing at that path", `4` means "I
+    /// ran, there is something there, and it is not a directory".
+    /// *Every* other outcome — an image with no `/bin/sh` (127), a
+    /// container that has gone away, an engine that refused — leaves the
+    /// question unanswered, and this returns `Ok` for all of them.
+    /// Refusing on an unanswered question would mean mirage inventing a
+    /// failure for a workload that was going to run perfectly well,
+    /// which is worse than the raw engine error this exists to replace.
     ///
     /// # Errors
     ///
-    /// [`ContainerError::Workdir`], naming the directory and the
-    /// container, when the container positively reports it is not there.
+    /// [`ContainerError::WorkdirRelative`] for a path that is not
+    /// absolute; [`ContainerError::Workdir`], naming the directory and
+    /// the container, when the container positively reports there is
+    /// nothing at that path; and [`ContainerError::WorkdirNotADirectory`]
+    /// when it reports something that is not a directory.
     pub fn check_workdir(&self, container: &str, workdir: &str) -> Result<()> {
-        /// The exit code the probe uses for "no such directory".
+        /// The exit code the probe uses for "nothing at that path".
         const MISSING: i32 = 3;
+        /// And for "something is there, and it is not a directory".
+        const NOT_A_DIRECTORY: i32 = 4;
+
+        if !std::path::Path::new(workdir).is_absolute() {
+            return Err(ContainerError::WorkdirRelative {
+                workdir: workdir.to_string(),
+            });
+        }
 
         let argv = Self::exec_argv(
             container,
@@ -1769,7 +1952,18 @@ impl Engine {
             "/bin/sh",
             &[
                 "-c".to_string(),
-                format!("test -d \"$1\" || exit {MISSING}"),
+                // `-L` as well as `-e`, for the symlink with nothing
+                // behind it: `-e` follows the link and answers about the
+                // target, so a path that is plainly occupied in the
+                // image would otherwise be reported as one the image
+                // does not have — sending the reader to look for a
+                // spelling mistake while the link sits there.
+                format!(
+                    "test -d \"$1\" && exit 0; \
+                     test -e \"$1\" && exit {NOT_A_DIRECTORY}; \
+                     test -L \"$1\" && exit {NOT_A_DIRECTORY}; \
+                     exit {MISSING}"
+                ),
                 // `$0` for the shell itself, so the path lands in `$1`
                 // as data rather than being spliced into the script.
                 "sh".to_string(),
@@ -1790,6 +1984,12 @@ impl Engine {
                 workdir: workdir.to_string(),
                 container: container.to_string(),
             }),
+            Ok(status) if status.code() == Some(NOT_A_DIRECTORY) => {
+                Err(ContainerError::WorkdirNotADirectory {
+                    workdir: workdir.to_string(),
+                    container: container.to_string(),
+                })
+            }
             Ok(_) => Ok(()),
             Err(e) => {
                 tracing::debug!(
@@ -3560,6 +3760,234 @@ mod tests {
         // The Dockerfile still arrives on stdin, so the context argument
         // has to stay last.
         assert!(recorded.trim_end().ends_with(" -"), "{recorded}");
+    }
+
+    #[test]
+    fn a_build_is_not_started_for_a_bring_up_that_is_already_cancelled() {
+        // The hacks path asks `image_present` whether the derived image
+        // is there and builds it when the answer is no — and a cancelled
+        // probe answers no, being unable to answer anything else. Reading
+        // the switch again is what tells "not built yet" from "stop",
+        // and without it a Ctrl-C during bring-up bought the user an
+        // entire `apt-get` upgrade.
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("log");
+        let provider = scripted_provider(
+            dir.path(),
+            "building-provider.sh",
+            &format!(
+                "echo \"$@\" >> {log}\n\
+                 cat > /dev/null\n\
+                 exit 0\n",
+                log = log.display()
+            ),
+        );
+        let cancel = Cancel::new();
+        cancel.cancel();
+        let engine =
+            Engine::with_provider(provider.to_string_lossy().to_string()).with_cancel(cancel);
+
+        let err = engine
+            .build_image("mirage-hack-abc:latest", "FROM img:latest\n")
+            .unwrap_err();
+
+        assert!(
+            matches!(err, ContainerError::Cancelled { .. }),
+            "a build asked for after a cancellation must say so: {err}"
+        );
+        assert!(
+            err.to_string().contains("building image mirage-hack-abc"),
+            "the error must name what was not started: {err}"
+        );
+        assert!(
+            !Path::new(&log).exists(),
+            "the provider was invoked for a cancelled build:\n{}",
+            std::fs::read_to_string(&log).unwrap_or_default()
+        );
+    }
+
+    #[test]
+    fn a_build_stops_when_the_caller_cancels() {
+        // A derived image is the other multi-minute step of bring-up,
+        // and teardown waits for a bring-up in flight before it decides
+        // what to remove — so a build that ignores the switch is not a
+        // slow exit, it is a Ctrl-C that does nothing for as long as the
+        // build lasts.
+        let dir = tempfile::tempdir().unwrap();
+        let provider = scripted_provider(
+            dir.path(),
+            "slow-build.sh",
+            "case \"$1\" in\n\
+             build) sleep 30; exit 0 ;;\n\
+             *) exit 0 ;;\n\
+             esac\n",
+        );
+        let cancel = Cancel::new();
+        let engine = Engine::with_provider(provider.to_string_lossy().to_string())
+            .with_cancel(cancel.clone());
+
+        let started = std::time::Instant::now();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            cancel.cancel();
+        });
+        let err = engine
+            .build_image("mirage-hack-abc:latest", "FROM img:latest\n")
+            .unwrap_err();
+        let waited = started.elapsed();
+
+        assert!(
+            matches!(err, ContainerError::Cancelled { .. }),
+            "a cancelled build must say so: {err}"
+        );
+        assert!(
+            err.to_string().contains("building image mirage-hack-abc"),
+            "the error must name what was interrupted: {err}"
+        );
+        assert!(
+            waited < std::time::Duration::from_secs(5),
+            "the build was waited out rather than ended: {waited:?}"
+        );
+    }
+
+    #[test]
+    fn a_host_port_already_taken_names_the_port_and_the_remedy() {
+        // The engine's own words are about a driver failing to program
+        // external connectivity, and they end by recommending `docker
+        // run --help` — a manual page about flags, for a conflict with
+        // another program entirely, and about a `-p` mirage passed on
+        // the user's behalf.
+        let dir = tempfile::tempdir().unwrap();
+        let provider = scripted_provider(
+            dir.path(),
+            "bound-port-provider.sh",
+            &[
+                "case \"$1\" in",
+                "run)",
+                // docker's own words, on one line as it writes them.
+                "echo 'docker: Error response from daemon: driver failed programming external \
+                 connectivity: Bind for 0.0.0.0:8080 failed: port is already allocated.' >&2",
+                "echo >&2",
+                "echo \"See 'docker run --help'.\" >&2",
+                "exit 125 ;;",
+                "inspect) echo false; exit 0 ;;",
+                "*) exit 0 ;;",
+                "esac",
+            ]
+            .join("\n"),
+        );
+        let engine = Engine::with_provider(provider.to_string_lossy().to_string());
+
+        let mut client = engine
+            .launch_node("mirage-s-node-0", &bare_spec(), &[], 0)
+            .unwrap();
+        let err = engine
+            .await_running(&mut client, std::time::Duration::from_secs(30))
+            .unwrap_err();
+
+        let message = err.to_string();
+        assert!(
+            matches!(err, ContainerError::HostPortInUse { .. }),
+            "a bound host port is its own failure, not an anonymous one: {message}"
+        );
+        assert!(
+            message.contains("8080"),
+            "the error must name the port: {message}"
+        );
+        assert!(
+            message.contains("--port"),
+            "the error must name the flag that chose it: {message}"
+        );
+        assert!(
+            !message.contains("--help"),
+            "the engine's pointer at its own manual must not survive: {message}"
+        );
+        // The engine's own words still do, because they are evidence.
+        assert!(
+            message.contains("port is already allocated"),
+            "the engine's words are the evidence for all of this: {message}"
+        );
+    }
+
+    #[test]
+    fn podmans_spelling_of_a_bound_port_is_recognised_too() {
+        // Same failure, different words and a different port token:
+        // podman's rootless forwarder reports the listen(2) that failed.
+        let said = "Error: rootlessport cannot expose privileged port 80: listen tcp4 :8080:                     bind: address already in use";
+        assert_eq!(host_port_in_use(said).as_deref(), Some("8080"));
+
+        // And a refusal that is not about a port at all stays anonymous.
+        assert_eq!(host_port_in_use("docker: invalid reference format."), None);
+        // As does one that matches but names no port, where mirage would
+        // only be making the engine's words vaguer.
+        assert_eq!(host_port_in_use("bind: address already in use"), None);
+    }
+
+    #[test]
+    fn a_relative_workdir_is_refused_without_asking_the_container() {
+        // The host-side check skips a containerised `--workdir` — it
+        // names a path in the image — so a relative one used to reach
+        // the engine, which answers with `workdir must be an absolute
+        // path` wrapped in an OCI runtime error about a container id the
+        // user has never seen.
+        let dir = tempfile::tempdir().unwrap();
+        let engine = executing_provider(dir.path());
+
+        let err = engine
+            .check_workdir("mirage-s-node-0", "build")
+            .unwrap_err();
+        let message = err.to_string();
+        assert!(
+            matches!(err, ContainerError::WorkdirRelative { .. }),
+            "{message}"
+        );
+        assert!(
+            message.contains("--workdir build") && message.contains("absolute"),
+            "the error must name the flag, the path and what is wrong with it: {message}"
+        );
+        assert!(
+            !message.contains("no such directory"),
+            "a relative path is not a missing one: {message}"
+        );
+
+        // Including the spellings that only look relative-ish, which are
+        // absolute and are the container's business, not this check's.
+        engine
+            .check_workdir("mirage-s-node-0", &dir.path().to_string_lossy())
+            .unwrap();
+    }
+
+    #[test]
+    fn a_workdir_that_is_a_file_is_not_reported_as_a_missing_directory() {
+        // "There is no such directory ... name a directory the image
+        // already has, or `--mount` one there" is wrong twice over about
+        // a path that is right there and is a file: nothing is missing,
+        // and mounting over it is not the fix.
+        let dir = tempfile::tempdir().unwrap();
+        let engine = executing_provider(dir.path());
+        let file = dir.path().join("config.json");
+        std::fs::write(&file, b"{}").unwrap();
+
+        let err = engine
+            .check_workdir("mirage-s-node-0", &file.to_string_lossy())
+            .unwrap_err();
+        let message = err.to_string();
+        assert!(
+            matches!(err, ContainerError::WorkdirNotADirectory { .. }),
+            "{message}"
+        );
+        assert!(
+            message.contains("not a directory") && message.contains("mirage-s-node-0"),
+            "the error must say what the path is and where: {message}"
+        );
+        assert!(
+            !message.contains("no such directory"),
+            "the path is there; only its kind is wrong: {message}"
+        );
+        assert!(
+            !message.contains("--mount"),
+            "mounting something over an occupied path is not the remedy: {message}"
+        );
     }
 
     #[test]

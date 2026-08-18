@@ -117,10 +117,24 @@ impl Run {
 
     /// Take a borrower's lease on this session, unless it is tearing down.
     ///
-    /// See [`Session::attach`](crate::session::Session::attach).
+    /// `borrower` is the pid of the process taking it, where the caller
+    /// can say — the control socket asks the kernel for its client's
+    /// credentials. See [`Session::attach`](crate::session::Session::attach).
     #[must_use]
-    pub fn attach(&self) -> Option<crate::session::SessionLease> {
-        self.session.attach()
+    pub fn attach(&self, borrower: Option<u32>) -> Option<crate::session::SessionLease> {
+        self.session.attach(borrower)
+    }
+
+    /// Stop what a borrower that has just gone away left running in the
+    /// session.
+    ///
+    /// See
+    /// [`Session::reap_departed_borrowers`](crate::session::Session::reap_departed_borrowers):
+    /// called by the control socket when a lease ends because its client
+    /// did, which is the moment the run learns that a `mirage exec` is
+    /// not coming back.
+    pub async fn reap_departed_borrowers(&self) {
+        self.session.reap_departed_borrowers().await;
     }
 
     /// How many `mirage exec` clients are borrowing this session.
@@ -381,8 +395,18 @@ impl Run {
                     }
                     // Refused when teardown got here first; the daemon is
                     // then ours to stop, and nothing else knows it exists.
+                    //
+                    // `debug`, not `warn`. Nothing has gone wrong here:
+                    // this is the design working — a Ctrl-C landed while
+                    // a blocking start was in flight, and the thing it
+                    // produced is being handed back and stopped. As a
+                    // warning it was the only output an interrupted
+                    // bring-up produced, so the user's Ctrl-C was
+                    // answered with an internal tracing line about
+                    // mirage's own bookkeeping and nothing else. What
+                    // they should see instead is printed by `mirage run`.
                     if let Some(orphan) = session.set_emulator_daemon(handle) {
-                        tracing::warn!(
+                        tracing::debug!(
                             session = %session.id(),
                             "emulator daemon started after teardown; stopping it"
                         );
@@ -545,7 +569,11 @@ impl Run {
         // the containers back in that case and they are ours to remove —
         // nothing else knows they exist.
         if let Some((containers, mut clients)) = session.set_containers(containers, clients) {
-            tracing::warn!(
+            // `debug`, for the reason given where the emulator daemon is
+            // handed back: this is the interrupt path behaving correctly,
+            // and a warning about it is mirage narrating its own
+            // internals over the top of the answer the user asked for.
+            tracing::debug!(
                 session = %session.id(),
                 "container bring-up finished after teardown; removing what it created"
             );

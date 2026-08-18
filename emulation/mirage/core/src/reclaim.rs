@@ -68,6 +68,15 @@
 //! leak, recoverable with `kill` by the user who can see it, and a much
 //! smaller wrong than destroying somebody's running job.
 //!
+//! Skipped, though, is not the same as unmentioned. "`mirage cleanup`
+//! found nothing" and "`mirage cleanup` found a running process it dared
+//! not touch" are different facts about the machine, and only the second
+//! one leaves the user with something to do. [`scan`] therefore returns
+//! both lists — what it will reclaim, and what it deliberately would not
+//! — so a caller can reclaim the first and report the second instead of
+//! discarding it. `kill` by hand is only an option for a user who has
+//! been told the process is there.
+//!
 //! [`LABEL_SESSION`]: crate::container::LABEL_SESSION
 //! [`LABEL_RUNTIME`]: crate::container::LABEL_RUNTIME
 
@@ -83,6 +92,44 @@ pub struct Stranded {
     pub pid: u32,
     /// The session it was started for.
     pub session: SessionId,
+}
+
+/// What one pass over `/proc` found: what may be reclaimed, and what was
+/// deliberately left alone.
+///
+/// Two lists rather than one because the second is news. A process that
+/// cannot be attributed to a runtime directory is skipped — see *Which
+/// mirage* in the [module documentation](self) — and a caller that only
+/// ever saw the first list reported "nothing to clean up" about a machine
+/// with a stranded workload still running on it, and then deleted that
+/// session's scratch directory, which was the last record anything had of
+/// it.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Scan {
+    /// Workloads this runtime directory started whose session no live run
+    /// accounts for. These are the ones [`reap`] may kill.
+    pub reclaimable: Vec<Stranded>,
+    /// Workloads tagged with a session but with no runtime directory
+    /// recorded, so there is no way to tell whose they are. Never killed;
+    /// always worth saying.
+    pub unattributable: Vec<Stranded>,
+}
+
+impl Scan {
+    /// The sessions that have an unattributable process still running.
+    ///
+    /// A session in this set is not finished with, whatever the socket
+    /// registry says, so nothing of it should be thrown away — its
+    /// scratch directory least of all, since with the process
+    /// unattributable that directory is the only remaining evidence the
+    /// session ever existed.
+    #[must_use]
+    pub fn unattributable_sessions(&self) -> std::collections::BTreeSet<&str> {
+        self.unattributable
+            .iter()
+            .map(|s| s.session.as_str())
+            .collect()
+    }
 }
 
 /// Every process this runtime directory started whose session is not in
@@ -105,6 +152,21 @@ pub struct Stranded {
 /// session you are standing in would kill your own shell mid-command.
 #[must_use]
 pub fn stranded_workloads(live: &[SessionId]) -> Vec<Stranded> {
+    scan(live).reclaimable
+}
+
+/// One pass over `/proc`, keeping both what may be reclaimed and what was
+/// skipped for want of a runtime mark.
+///
+/// The filters are exactly those [`stranded_workloads`] describes; the
+/// difference is only that a candidate rejected by the runtime test — and
+/// rejected for the one reason a caller can act on, that it records no
+/// runtime at all — is kept rather than dropped. A process belonging to a
+/// *different* runtime directory is still dropped without a word: it is
+/// somebody else's healthy job, and it is not this cleanup's business
+/// that it exists.
+#[must_use]
+pub fn scan(live: &[SessionId]) -> Scan {
     let mut excluded: HashSet<String> = live.iter().map(|s| s.as_str().to_string()).collect();
     if let Ok(own) = std::env::var(ENV_SESSION) {
         excluded.insert(own);
@@ -116,29 +178,43 @@ pub fn stranded_workloads(live: &[SessionId]) -> Vec<Stranded> {
     let ours = owning_runtime();
 
     let Ok(entries) = std::fs::read_dir("/proc") else {
-        return Vec::new();
+        return Scan::default();
     };
-    let mut found: Vec<Stranded> = entries
-        .flatten()
-        .filter_map(|entry| {
-            let pid: u32 = entry.file_name().to_str()?.parse().ok()?;
-            if pid == me {
-                return None;
+    let mut out = Scan::default();
+    for entry in entries.flatten() {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|n| n.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        if pid == me {
+            continue;
+        }
+        let Some((session, runtime)) = marker_of(pid) else {
+            continue;
+        };
+        if excluded.contains(session.as_str()) {
+            continue;
+        }
+        match runtime {
+            Some(recorded) if same_runtime(&recorded, &ours) => {
+                out.reclaimable.push(Stranded { pid, session });
             }
-            let (session, runtime) = marker_of(pid)?;
-            if excluded.contains(session.as_str()) {
-                return None;
-            }
-            if !runtime.is_some_and(|recorded| same_runtime(&recorded, &ours)) {
-                return None;
-            }
-            Some(Stranded { pid, session })
-        })
-        .collect();
+            // Someone else's runtime directory, and so none of this
+            // cleanup's business either to kill or to mention.
+            Some(_) => {}
+            None => out.unattributable.push(Stranded { pid, session }),
+        }
+    }
     // Deterministic order, so the summary a user reads is stable and two
     // runs of `--dry-run` against the same machine agree.
-    found.sort_by(|a, b| (a.session.as_str(), a.pid).cmp(&(b.session.as_str(), b.pid)));
-    found
+    let by_session_then_pid =
+        |a: &Stranded, b: &Stranded| (a.session.as_str(), a.pid).cmp(&(b.session.as_str(), b.pid));
+    out.reclaimable.sort_by(by_session_then_pid);
+    out.unattributable.sort_by(by_session_then_pid);
+    out
 }
 
 /// `SIGKILL` each of `stranded`.
@@ -413,10 +489,22 @@ mod tests {
         reap(&mine);
 
         // The child is ours, so it becomes a zombie rather than
-        // disappearing outright; the exit status is what says the signal
-        // landed.
+        // disappearing outright; the exit status is what says which
+        // signal landed. Which signal, not merely "it did not exit 0":
+        // `SIGTERM` also fails that weaker assertion, and `SIGTERM` is
+        // the wrong answer here — these processes are supervised by
+        // nobody and waited on by nobody, so a grace period preserves an
+        // exit status for a reader who does not exist, and a workload
+        // that ignores `SIGTERM` (which is why the supervisor's own
+        // teardown escalates) would simply survive the cleanup.
+        use std::os::unix::process::ExitStatusExt as _;
         let status = child.0.wait().unwrap();
         assert!(!status.success(), "the process should have been killed");
+        assert_eq!(
+            status.signal(),
+            Some(nix::sys::signal::Signal::SIGKILL as i32),
+            "a reclaimed workload must be killed outright, not asked: {status:?}"
+        );
     }
 
     #[test]
@@ -471,6 +559,97 @@ mod tests {
             );
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
+    }
+
+    #[test]
+    fn an_unattributable_process_is_reported_rather_than_silently_skipped() {
+        // Not killing it is right: "no runtime recorded" is exactly what
+        // somebody else's process looks like, and killing what cannot be
+        // attributed is the bug this whole marker exists to prevent. But
+        // a cleanup that skips it *and says nothing* tells the user their
+        // machine is clean while a workload of theirs is still running on
+        // it — and the caller then deleted that session's scratch
+        // directory, the last record anything had that the session had
+        // ever existed.
+        let _runtime = PinnedRuntime::new();
+        let session = unique("unattributable");
+        let child = Tagged::owned_by(session.as_str(), None, "exec sleep 300");
+
+        let scan = scan(&[]);
+        assert!(
+            !scan.reclaimable.iter().any(|s| s.pid == child.pid()),
+            "an unattributable process must never be reclaimed: {scan:?}"
+        );
+        assert!(
+            scan.unattributable.iter().any(|s| s.pid == child.pid()),
+            "an unattributable process must still be reported: {scan:?}"
+        );
+        assert!(
+            scan.unattributable_sessions().contains(session.as_str()),
+            "its session has something running and is not finished with: {scan:?}"
+        );
+    }
+
+    #[test]
+    fn a_process_of_another_runtime_is_not_even_mentioned() {
+        // The other side of the report: an unattributable process is the
+        // caller's problem to hear about, and a healthy workload of a
+        // different `MIRAGE_RUNTIME` is not. Listing it would invite
+        // exactly the "clean it up then" reaction the runtime mark exists
+        // to prevent.
+        let _runtime = PinnedRuntime::new();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let session = unique("elsewhere-report");
+        let child = Tagged::owned_by(
+            session.as_str(),
+            Some(&elsewhere.path().to_string_lossy()),
+            "exec sleep 300",
+        );
+        let scan = scan(&[]);
+        assert!(
+            !scan.reclaimable.iter().any(|s| s.pid == child.pid()),
+            "{scan:?}"
+        );
+        assert!(
+            !scan.unattributable.iter().any(|s| s.pid == child.pid()),
+            "another runtime's healthy workload is not this cleanup's news: {scan:?}"
+        );
+    }
+
+    #[test]
+    fn a_tag_is_found_beside_an_environment_variable_that_is_not_utf8() {
+        // An environment is arbitrary bytes. `read_to_string` on
+        // `/proc/<pid>/environ` fails outright on the first invalid one,
+        // so a single non-UTF-8 variable anywhere in the block — a path
+        // in a legacy encoding, a locale-mangled value inherited from the
+        // shell — hid the session tag and made the whole workload
+        // invisible to `mirage cleanup`. It is read as bytes and split on
+        // NUL for exactly this, and nothing was holding that in place.
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt as _;
+
+        let _runtime = PinnedRuntime::new();
+        let session = unique("nonutf8");
+        let mut command = std::process::Command::new("/bin/sh");
+        command
+            .args(["-c", "exec sleep 300"])
+            .env(ENV_SESSION, session.as_str())
+            .env(ENV_RUNTIME, owning_runtime())
+            // Invalid UTF-8: a lone 0xff can begin no sequence. Not a NUL
+            // and not an `=`, so it stays one variable in the block and
+            // the only thing wrong with it is that it cannot be decoded.
+            .env("MIRAGE_TEST_NON_UTF8", OsString::from_vec(vec![0xff, 0xfe]))
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        let child = Tagged(command.spawn().unwrap());
+
+        let found = mine(&session);
+        assert!(
+            found.iter().any(|s| s.pid == child.pid()),
+            "a workload was hidden by an unrelated variable that is not \
+             UTF-8: {found:?}"
+        );
     }
 
     /// The stranded processes belonging to one test's session.

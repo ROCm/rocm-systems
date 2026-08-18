@@ -108,6 +108,17 @@ pub struct Session {
     /// consulted from the control socket's accept path, which must not
     /// contend with process bookkeeping.
     leases: watch::Sender<usize>,
+    /// Which process holds each live lease, by the entry number the
+    /// lease was given.
+    ///
+    /// Their pids, not their names, because the only question asked of
+    /// this is "is this leftover process one a *live* borrower is still
+    /// using?" — see [`Session::reap_departed_borrowers`]. A borrower
+    /// that could not be identified at all, because the kernel would not
+    /// give up its connection's credentials, is absent rather than
+    /// recorded as some placeholder pid: a placeholder would either
+    /// protect nothing or protect everything descended from it.
+    borrowers: Arc<Mutex<BTreeMap<u64, u32>>>,
     /// Set when teardown wants its borrowers to let go.
     ///
     /// Published rather than inferred from `tearing_down` because the
@@ -151,10 +162,20 @@ pub struct Session {
 #[derive(Debug)]
 pub struct SessionLease {
     leases: watch::Sender<usize>,
+    /// The register this lease's borrower is listed in, and its entry.
+    ///
+    /// Shared with the session rather than reached through it, so that
+    /// dropping the lease needs nothing of the session but this: a lease
+    /// is held by a per-connection task, and giving that task an `Arc` to
+    /// the whole session to satisfy a `Drop` would make the session's
+    /// lifetime depend on its clients'.
+    borrowers: Arc<Mutex<BTreeMap<u64, u32>>>,
+    entry: u64,
 }
 
 impl Drop for SessionLease {
     fn drop(&mut self) {
+        lock(&self.borrowers).remove(&self.entry);
         self.leases.send_modify(|n| *n = n.saturating_sub(1));
     }
 }
@@ -165,6 +186,11 @@ struct Inner {
     execs: BTreeMap<ExecId, Arc<Exec>>,
     /// Counter for the next exec id.
     next_exec: u32,
+    /// Counter for the next lease entry. Entries are numbered rather
+    /// than keyed by pid: two `mirage exec`s could in principle come
+    /// from one process, and a lease must remove its own claim and not
+    /// somebody else's.
+    next_lease: u64,
     /// Containers backing this session, once brought up.
     containers: Option<ContainerState>,
     /// The provider clients running those containers. Each one *is* its
@@ -242,6 +268,7 @@ impl Session {
             quiescent: watch::channel(true).0,
             torn_down: watch::channel(false).0,
             leases: watch::channel(0).0,
+            borrowers: Arc::new(Mutex::new(BTreeMap::new())),
             closing: watch::channel(false).0,
             bringing_up: watch::channel(false).0,
             cancel: mirage_container::Cancel::new(),
@@ -544,11 +571,19 @@ impl Session {
     /// the user interrupts it. Teardown's own duty to a borrower is to
     /// *tell* it: it publishes `closing`, which drops the connection the
     /// lease is made of.
+    ///
+    /// `borrower` is the pid of the process taking the lease, where the
+    /// connection could say — see the `borrowers` field.
     #[must_use]
-    pub fn attach(&self) -> Option<SessionLease> {
-        let inner = self.lock();
+    pub fn attach(&self, borrower: Option<u32>) -> Option<SessionLease> {
+        let mut inner = self.lock();
         if inner.tearing_down {
             return None;
+        }
+        let entry = inner.next_lease;
+        inner.next_lease += 1;
+        if let Some(pid) = borrower {
+            lock(&self.borrowers).insert(entry, pid);
         }
         // Under the lock, so the increment cannot land between another
         // thread setting `tearing_down` and teardown reading the count.
@@ -556,6 +591,8 @@ impl Session {
         drop(inner);
         Some(SessionLease {
             leases: self.leases.clone(),
+            borrowers: Arc::clone(&self.borrowers),
+            entry,
         })
     }
 
@@ -1106,18 +1143,101 @@ impl Session {
             // Nothing is "live" for this purpose: the question is not
             // which sessions still have an owner but which processes are
             // in *this* session, which is about to have none.
-            mirage_core::reclaim::stranded_workloads(&[])
+            processes_in_session(&id)
+        })
+        .await
+        .unwrap_or_default();
+        self.stop_leftovers(leftovers).await;
+    }
+
+    /// Stop what a borrower that has just gone away left running, while
+    /// the run carries on.
+    ///
+    /// The same leak as the sweep teardown runs, and the same evidence,
+    /// caught at the other end of it. Teardown reaps a dead borrower's
+    /// processes because nothing may be left in a session that is going
+    /// away; this reaps them because nothing may be left in a session that
+    /// is *staying*. Without it, `mirage exec --help`'s promise that the
+    /// workload "dies with it" held only for a borrower that outlived the
+    /// run — `SIGKILL` a `mirage exec` while its run is still up and its
+    /// workload carried on inside the session indefinitely, holding the
+    /// emulated device and invisible to `mirage cleanup`, which is right
+    /// not to touch a live session.
+    ///
+    /// # Whose processes these are
+    ///
+    /// Everything in the session carries the same session and runtime
+    /// marks — that is what being in one session means — so the tag pair
+    /// finds this run's own live workloads just as readily as a departed
+    /// borrower's leftovers, and killing those would be very much worse
+    /// than the leak. Two things narrow the set, and both are needed:
+    ///
+    /// * [`ENV_EXEC`](crate::spec::ENV_EXEC) says which exec started a
+    ///   process. Every exec of this run's is in its own map, so a
+    ///   process whose exec is one of ours is ours however far it has
+    ///   been reparented — a workload that double-forked into the
+    ///   background is still the run's business and not a borrower's
+    ///   leftover. A process with no exec mark at all is left alone:
+    ///   unattributable is not the same as unowned, which is the rule
+    ///   [`mirage_core::reclaim`] states for the same reason.
+    /// * A borrower still holding a lease owns whatever descends from it.
+    ///   Two `mirage exec`s at once is ordinary — one finishing must not
+    ///   take the other's workload with it — and the first's departure is
+    ///   exactly when this runs.
+    ///
+    /// What is left after both is a process started by a `mirage exec`
+    /// that no longer holds a lease, which is the definition of the leak.
+    ///
+    /// A containerised borrower is reached only as far as its provider
+    /// client, which is the host process the mark is on; the workload
+    /// inside the container is the container's until the session's
+    /// teardown removes it. That is the same reach teardown's own sweep
+    /// has.
+    pub async fn reap_departed_borrowers(&self) {
+        if self.is_tearing_down() {
+            // Teardown is already doing this, and doing more of it: it
+            // stops *everything* in the session, ours included, and
+            // waits for the result. Racing it would only mean two
+            // signals arriving at one process.
+            return;
+        }
+        let id = self.def.id.clone();
+        let ours: std::collections::BTreeSet<String> = self
+            .lock()
+            .execs
+            .keys()
+            .map(|id| id.as_str().to_string())
+            .collect();
+        let live: Vec<u32> = lock(&self.borrowers).values().copied().collect();
+
+        let leftovers: Vec<u32> = tokio::task::spawn_blocking(move || {
+            processes_in_session(&id)
                 .into_iter()
-                .filter(|s| s.session == id)
-                .map(|s| s.pid)
+                .filter(|pid| exec_mark_of(*pid).is_some_and(|exec| !ours.contains(&exec)))
+                .filter(|pid| !descends_from_any(*pid, &live))
                 .collect()
         })
         .await
         .unwrap_or_default();
+        self.stop_leftovers(leftovers).await;
+    }
+
+    /// `SIGTERM` each of `leftovers`, and `SIGKILL` whatever is still
+    /// there after the grace period.
+    ///
+    /// The same escalation a workload of our own gets: a borrower that is
+    /// still alive and winding down deserves the chance to exit on its
+    /// own terms, and a stranded one has nobody left to care either way.
+    ///
+    /// The pid alone is signalled, not `kill(-pid)`, for the reason
+    /// [`mirage_core::reclaim::reap`] gives: the scan already returns
+    /// every descendant that kept the tag, and the group form would
+    /// additionally reach processes that had *dropped* it by joining a
+    /// mirage-led group — a wider claim than the tag supports.
+    async fn stop_leftovers(&self, leftovers: Vec<u32>) {
         if leftovers.is_empty() {
             return;
         }
-
         tracing::info!(
             session = %self.def.id,
             "reaping {} process(es) left in the session by a borrower that did not",
@@ -1137,8 +1257,100 @@ impl Session {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
-        self.inner.lock().unwrap_or_else(|e| e.into_inner())
+        lock(&self.inner)
     }
+}
+
+/// Take a mutex, treating a poisoned one as merely locked.
+///
+/// A panic while one of these is held leaves the data it guards
+/// consistent — every critical section in this file is a few field
+/// assignments — and refusing to lock afterwards would turn a survivable
+/// panic into a teardown that cannot run.
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Every process on this machine tagged as belonging to `session`.
+///
+/// [`mirage_core::reclaim::stranded_workloads`] with no live session
+/// excluded, filtered to one session: the question here is never "which
+/// sessions still have an owner" — this run is the owner and is asking —
+/// but "what is running in mine". Every other session under this runtime
+/// directory is somebody's live job.
+fn processes_in_session(session: &SessionId) -> Vec<u32> {
+    mirage_core::reclaim::stranded_workloads(&[])
+        .into_iter()
+        .filter(|s| &s.session == session)
+        .map(|s| s.pid)
+        .collect()
+}
+
+/// The exec a process was started by, if it says.
+///
+/// Read from `/proc/<pid>/environ`, which is the same place and the same
+/// evidence [`mirage_core::reclaim`] reads the session mark from, and for
+/// the same reason: it is inherited by everything the process forks and
+/// it cannot go stale, because it is gone the moment the process is.
+///
+/// `None` for a process that carries no [`ENV_EXEC`] — one started by a
+/// mirage older than the mark, or one that scrubbed its own environment.
+/// The caller must read that as "not attributable" rather than as "not
+/// mine".
+fn exec_mark_of(pid: u32) -> Option<String> {
+    // Not `read_to_string`: an environment is arbitrary bytes and need
+    // not be UTF-8, and one invalid byte in an unrelated variable must
+    // not hide the mark.
+    let raw = std::fs::read(format!("/proc/{pid}/environ")).ok()?;
+    let prefix = format!("{}=", crate::spec::ENV_EXEC);
+    raw.split(|b| *b == 0)
+        .filter_map(|entry| std::str::from_utf8(entry).ok())
+        .find_map(|entry| entry.strip_prefix(&prefix))
+        .map(str::to_string)
+}
+
+/// Whether `pid` is one of `ancestors`, or descends from one of them.
+///
+/// Walks `/proc/<pid>/stat` upwards. An empty `ancestors` — the ordinary
+/// case, one borrower and it has just left — costs nothing at all, which
+/// is why the check is written to be asked before the walk rather than
+/// during it.
+///
+/// The walk stops at init, at a pid it cannot read, and at a hard bound
+/// on its length: a `/proc` that reported a cycle would otherwise be a
+/// loop that never ends, and this runs on a blocking thread pool that
+/// teardown later waits on.
+fn descends_from_any(pid: u32, ancestors: &[u32]) -> bool {
+    const MAX_DEPTH: usize = 64;
+    if ancestors.is_empty() {
+        return false;
+    }
+    let mut current = pid;
+    for _ in 0..MAX_DEPTH {
+        if ancestors.contains(&current) {
+            return true;
+        }
+        match parent_of(current) {
+            Some(parent) if parent > 1 => current = parent,
+            _ => return false,
+        }
+    }
+    false
+}
+
+/// The parent of `pid`, as `/proc` reports it.
+///
+/// The comm field is parenthesised and may itself contain spaces and
+/// brackets, so the fields are counted from after the *last* `)`, which
+/// is the parse `proc(5)` documents: state first, then the parent's pid.
+fn parent_of(pid: u32) -> Option<u32> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let close = stat.rfind(')')?;
+    stat.get(close + 1..)?
+        .split_whitespace()
+        .nth(1)?
+        .parse()
+        .ok()
 }
 
 /// Send `sig` to one process and to nothing else.

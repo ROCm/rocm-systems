@@ -62,7 +62,7 @@ impl TopologyDef {
 pub mod store {
     use super::TopologyDef;
     use crate::error::{MirageError, Result};
-    use crate::store::{DocKind, dangling_ref, validate_name};
+    use crate::store::{DocKind, Referrer, dangling_ref, validate_name};
     use std::path::PathBuf;
 
     /// List the names of all topology files on disk.
@@ -89,7 +89,13 @@ pub mod store {
         Ok(out)
     }
 
-    /// Read a topology by name.
+    /// Read a topology by name, for a caller that cannot say which
+    /// profile sent it.
+    ///
+    /// Prefer [`get_referred_by`] wherever the referring profile is in
+    /// scope: a user with a dozen profiles cannot act on "a profile
+    /// refers to a topology that is not there" without grepping for the
+    /// one that does.
     ///
     /// # Errors
     ///
@@ -98,10 +104,25 @@ pub mod store {
     /// is, since a profile is what brought the name here — or if the
     /// document is malformed.
     pub fn get(name: &str) -> Result<TopologyDef> {
+        get_referred_by(Referrer::anonymous(DocKind::Profile), name)
+    }
+
+    /// Read a topology by name on behalf of the document that named it.
+    ///
+    /// The referrer is carried in rather than assumed because it is the
+    /// half of a dangling-reference error the reader recognises — usually
+    /// the very word they typed on the command line — and it is known one
+    /// frame up from here and nowhere else.
+    ///
+    /// # Errors
+    ///
+    /// As [`get`], with the referring document named in a dangling
+    /// reference.
+    pub fn get_referred_by(referrer: Referrer<'_>, name: &str) -> Result<TopologyDef> {
         validate_name(DocKind::Topology, name)?;
         let p = crate::paths::topology_path(name);
         if !p.exists() {
-            return Err(dangling_ref(DocKind::Profile, DocKind::Topology, name));
+            return Err(dangling_ref(referrer, DocKind::Topology, name));
         }
         crate::state::read_json(&p)
     }

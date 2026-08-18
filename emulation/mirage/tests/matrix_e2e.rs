@@ -312,23 +312,29 @@ impl Combo {
     }
 }
 
-/// The full cross product of every dimension.
-fn all_combos() -> Vec<Combo> {
+/// The cross product of the remaining dimensions for one
+/// emulator/hosting slice of the matrix.
+///
+/// Sliced rather than enumerated whole because each cell is a real
+/// `mirage run` — a bring-up, a workload and a teardown — and seventy-two
+/// of them inside one `#[test]` is seventy-two of them in sequence. The
+/// two outer dimensions are the ones worth cutting on: they are what a
+/// cell's *cost* varies with (a containerised cell shells out to a
+/// provider several times per node) and they are how a failure is
+/// usually described ("docker is broken", "dbt is broken"), so a slice
+/// that fails names something a person would say.
+fn combos_in(emulator: Emulator, container: Container) -> Vec<Combo> {
     let mut combos = Vec::new();
-    for emulator in [Emulator::Rocjitsu, Emulator::RocjitsuDbt] {
-        for container in [Container::Node, Container::Podman, Container::Docker] {
-            for hardware in [Hardware::Mi350x, Hardware::Mi450x] {
-                for payload in [Payload::TinyTorch, Payload::Rccl, Payload::Crash] {
-                    for plugin in [Plugin::None, Plugin::Race] {
-                        combos.push(Combo {
-                            emulator,
-                            container,
-                            hardware,
-                            payload,
-                            plugin,
-                        });
-                    }
-                }
+    for hardware in [Hardware::Mi350x, Hardware::Mi450x] {
+        for payload in [Payload::TinyTorch, Payload::Rccl, Payload::Crash] {
+            for plugin in [Plugin::None, Plugin::Race] {
+                combos.push(Combo {
+                    emulator,
+                    container,
+                    hardware,
+                    payload,
+                    plugin,
+                });
             }
         }
     }
@@ -696,13 +702,10 @@ fn assert_dimensions_reached_the_emulator(c: &Combo, stdout: &str, profile: &str
 /// whole job is saying *which* dimensions are broken must not stop at the
 /// first one, so each cell's failure is caught here and reported with the
 /// rest at the end.
-fn attempt(c: &Combo, caps: &Caps, hook: &PanicSite) -> Outcome {
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_combo(c, caps))) {
+fn attempt(c: &Combo, caps: &Caps) -> Outcome {
+    match panic_site::capturing(|| run_combo(c, caps)) {
         Ok(outcome) => outcome,
-        Err(payload) => Outcome::Failed(match hook.take() {
-            Some(site) => format!("{} ({site})", panic_message(&*payload)),
-            None => panic_message(&*payload),
-        }),
+        Err(why) => Outcome::Failed(why),
     }
 }
 
@@ -721,36 +724,63 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
 ///
 /// The unwind payload carries the assertion's message but not its
 /// location, and the location is half of what makes a failed cell
-/// actionable. It is only available to a panic hook, so this is the hook:
-/// it records the site and prints nothing, because the default hook's
-/// output would interleave with the table and every message it swallows
-/// is reported by [`attempt`] anyway.
-#[derive(Clone)]
-struct PanicSite(std::sync::Arc<std::sync::Mutex<Option<String>>>);
+/// actionable. It is only available to a panic hook, and a panic hook is
+/// process-wide while the slices below are separate `#[test]`s the
+/// harness runs in parallel — so the hook is installed once for the whole
+/// binary and everything it remembers is thread-local. A slice that swaps
+/// the hook in and out around its own combinations would be swapping it
+/// out from under another slice's.
+///
+/// It is also only *capturing* while a combination is running. Outside
+/// that window it hands the panic to the hook it displaced, so a genuine
+/// failure of one of these tests is still reported the ordinary way, with
+/// its message and its backtrace.
+mod panic_site {
+    use std::cell::{Cell, RefCell};
 
-/// The hook [`PanicSite::install`] displaced, to be put back afterwards.
-type PanicHook = Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Sync + Send + 'static>;
-
-impl PanicSite {
-    /// Install the hook, returning both the handle and the hook it
-    /// replaced so the caller can put it back.
-    fn install() -> (Self, PanicHook) {
-        let site = Self(std::sync::Arc::new(std::sync::Mutex::new(None)));
-        let previous = std::panic::take_hook();
-        let sink = site.clone();
-        std::panic::set_hook(Box::new(move |info| {
-            if let Some(location) = info.location()
-                && let Ok(mut slot) = sink.0.lock()
-            {
-                *slot = Some(format!("{}:{}", location.file(), location.line()));
-            }
-        }));
-        (site, previous)
+    thread_local! {
+        /// The site of the most recent captured panic on this thread.
+        static SITE: RefCell<Option<String>> = const { RefCell::new(None) };
+        /// Whether this thread is inside a combination.
+        static CAPTURING: Cell<bool> = const { Cell::new(false) };
     }
 
-    /// The site of the most recent panic, consuming it.
-    fn take(&self) -> Option<String> {
-        self.0.lock().ok().and_then(|mut slot| slot.take())
+    /// Install the process-wide hook, once.
+    fn install() {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            let previous = std::panic::take_hook();
+            std::panic::set_hook(Box::new(move |info| {
+                if !CAPTURING.with(Cell::get) {
+                    previous(info);
+                    return;
+                }
+                if let Some(location) = info.location() {
+                    let site = format!("{}:{}", location.file(), location.line());
+                    SITE.with(|slot| *slot.borrow_mut() = Some(site));
+                }
+            }));
+        });
+    }
+
+    /// Run `body`, capturing a panic's message and the line it came from.
+    ///
+    /// Nothing is printed while capturing: the default hook's output
+    /// would interleave with the table, and every message it swallows is
+    /// reported by the caller anyway.
+    pub(super) fn capturing<T>(body: impl FnOnce() -> T) -> Result<T, String> {
+        install();
+        SITE.with(|slot| *slot.borrow_mut() = None);
+        CAPTURING.with(|c| c.set(true));
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(body));
+        CAPTURING.with(|c| c.set(false));
+        outcome.map_err(|payload| {
+            let message = super::panic_message(&*payload);
+            match SITE.with(|slot| slot.borrow_mut().take()) {
+                Some(site) => format!("{message} ({site})"),
+                None => message,
+            }
+        })
     }
 }
 
@@ -766,60 +796,87 @@ fn session_id(stderr: &str) -> Option<String> {
 }
 
 // ---------------------------------------------------------------------------
-// The matrix test
+// The matrix, one slice per test
 // ---------------------------------------------------------------------------
+//
+// The whole cross product used to be a single `#[test]`, which meant
+// seventy-two real bring-ups in sequence: 94.8 seconds of a 146-second
+// suite, on one core, while the rest of the machine sat idle. The
+// combinations are independent — each one has its own XDG root, its own
+// profile and its own mock provider — so the only thing making them
+// sequential was the function they shared.
+//
+// One test per emulator/hosting slice, then, and the test harness
+// parallelises them. The slice is also the useful unit of failure: "the
+// docker rows are broken" is a sentence, where "cell 43 of 72 is broken"
+// is a lookup. Each slice prints its own table and fails with its own
+// list, so a red run still says which dimensions are red.
 
-#[test]
-fn matrix_lifecycle_across_all_dimensions() {
-    assert_suite_can_run();
+/// What the host can run, probed once for the whole binary.
+///
+/// [`probe_caps`] shells out to the binary, and asking it per slice would
+/// add a process spawn — and a temporary XDG root — to every one of them
+/// for an answer that cannot change while the suite runs.
+fn caps() -> &'static Caps {
+    static CAPS: std::sync::OnceLock<Caps> = std::sync::OnceLock::new();
+    CAPS.get_or_init(probe_caps)
+}
+
+/// Drive every combination in one slice and fail with the whole table.
+///
+/// `expect_a_run` is the guard against a slice that quietly does nothing:
+/// a skip is a legitimate outcome for a cell, but a slice in which
+/// *every* cell skipped on a host that has the emulator is a suite
+/// reporting success for work it never did.
+fn run_slice(emulator: Emulator, container: Container, expect_a_run: bool) {
     if skip_without_emulator() {
         return;
     }
-    let caps = probe_caps();
-
-    let combos = all_combos();
+    let caps = caps();
+    let combos = combos_in(emulator, container);
     let total = combos.len();
+    let slice = format!("{}+{}", emulator.kind(), container.label());
     let mut ran = 0usize;
     let mut skipped = 0usize;
     let mut failures: Vec<(String, String)> = Vec::new();
 
-    eprintln!("\nmirage testing matrix — {total} combinations\n");
-    eprintln!(
-        "  {:<58}  RESULT",
-        "COMBINATION (emulator+container+hw+payload+plugin)"
-    );
-
-    let (site, previous_hook) = PanicSite::install();
+    eprintln!("\n[{slice}] {total} combinations");
     for c in &combos {
-        // The name goes out *before* the combination runs. A combination
-        // that hangs takes the whole suite with it — the run timeout is a
-        // bound on a run, not on a deadlock in the harness — and a table
-        // that only printed completed rows would name every combination
-        // except the one that wedged.
-        eprint!("  {:<58}  ", c.name());
-        match attempt(c, &caps, &site) {
+        // Whole lines, and each one naming its slice. These tests run in
+        // parallel, so a row printed as a prefix now and a result later
+        // would be split down the middle by another slice's row under
+        // `--nocapture`.
+        //
+        // The name still goes out *before* the combination runs: a cell
+        // that hangs takes the suite with it — the run timeout bounds a
+        // run, not a deadlock in the harness — and a table of completed
+        // rows only would name every combination except the one that
+        // wedged.
+        eprintln!("[{slice}] .. {}", c.name());
+        match attempt(c, caps) {
             Outcome::Ran => {
                 ran += 1;
-                eprintln!("RAN");
+                eprintln!("[{slice}] RAN  {}", c.name());
             }
             Outcome::Skipped(reason) => {
                 skipped += 1;
-                eprintln!("SKIP ({reason})");
+                eprintln!("[{slice}] SKIP {} ({reason})", c.name());
             }
             Outcome::Failed(why) => {
                 // One line here, because the table is meant to be
                 // scannable; the whole message is reprinted below.
-                eprintln!("FAIL ({})", why.lines().next().unwrap_or_default());
+                eprintln!(
+                    "[{slice}] FAIL {} ({})",
+                    c.name(),
+                    why.lines().next().unwrap_or_default()
+                );
                 failures.push((c.name(), why));
             }
         }
     }
-    // Restored before the assertions below, so a genuine failure of this
-    // test is reported the ordinary way.
-    std::panic::set_hook(previous_hook);
 
     eprintln!(
-        "\nmatrix summary: {ran} ran, {} failed, {skipped} skipped, {total} total\n",
+        "[{slice}] summary: {ran} ran, {} failed, {skipped} skipped, {total} total",
         failures.len()
     );
 
@@ -828,7 +885,7 @@ fn matrix_lifecycle_across_all_dimensions() {
             eprintln!("--- {name}\n{why}\n");
         }
         panic!(
-            "{} of {total} matrix combinations failed: {}",
+            "{} of {total} {slice} combinations failed: {}",
             failures.len(),
             failures
                 .iter()
@@ -838,19 +895,74 @@ fn matrix_lifecycle_across_all_dimensions() {
         );
     }
 
-    // Sanity: the matrix must be coherent. Every dbt + mi450x and every
-    // race-plugin combinations are expected to skip on a host without
-    // that hardware/plugin, but the suite must never silently skip
-    // *everything* on a host where the software emulator is available.
-    if caps
-        .emulators
-        .get("rocjitsu")
-        .map(|(installed, _)| *installed)
-        .unwrap_or(false)
-    {
+    if expect_a_run {
         assert!(
             ran > 0,
-            "rocjitsu is installed but no matrix combination ran"
+            "{slice} is runnable on this host but no combination in it ran"
         );
     }
+}
+
+/// Whether a slice on this emulator must produce at least one run.
+///
+/// `rocjitsu` is a software emulator: if the binary reports it installed
+/// there is no further excuse for a cell to skip, whatever the hosting.
+/// `rocjitsu-dbt` translates onto a real GPU and every one of its cells
+/// legitimately skips on a host without one, so demanding a run there
+/// would fail the suite on every laptop.
+fn must_run(emulator: Emulator) -> bool {
+    emulator == Emulator::Rocjitsu
+        && caps()
+            .emulators
+            .get(emulator.kind())
+            .is_some_and(|(installed, _)| *installed)
+}
+
+#[test]
+fn matrix_rocjitsu_on_the_node() {
+    run_slice(
+        Emulator::Rocjitsu,
+        Container::Node,
+        must_run(Emulator::Rocjitsu),
+    );
+}
+
+#[test]
+fn matrix_rocjitsu_under_podman() {
+    run_slice(
+        Emulator::Rocjitsu,
+        Container::Podman,
+        must_run(Emulator::Rocjitsu),
+    );
+}
+
+#[test]
+fn matrix_rocjitsu_under_docker() {
+    run_slice(
+        Emulator::Rocjitsu,
+        Container::Docker,
+        must_run(Emulator::Rocjitsu),
+    );
+}
+
+#[test]
+fn matrix_rocjitsu_dbt_on_the_node() {
+    run_slice(Emulator::RocjitsuDbt, Container::Node, false);
+}
+
+#[test]
+fn matrix_rocjitsu_dbt_under_podman() {
+    run_slice(Emulator::RocjitsuDbt, Container::Podman, false);
+}
+
+#[test]
+fn matrix_rocjitsu_dbt_under_docker() {
+    run_slice(Emulator::RocjitsuDbt, Container::Docker, false);
+}
+
+#[test]
+fn the_suite_can_actually_run() {
+    // Guards against the matrix going green while every slice in it
+    // skipped for a missing emulator runtime. See `assert_suite_can_run`.
+    assert_suite_can_run();
 }

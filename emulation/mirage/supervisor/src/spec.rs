@@ -32,7 +32,8 @@ use std::collections::BTreeMap;
 
 use mirage_core::container::{
     ENV_HEAD_ADDR, ENV_HEAD_PORT, ENV_LOCAL_RANK, ENV_MASTER_ADDR, ENV_MASTER_PORT,
-    ENV_NCCL_HOSTID, ENV_RANK, ENV_RUNTIME, ENV_SESSION, ENV_TORCH_RANK, ENV_WORLD_SIZE,
+    ENV_NCCL_HOSTID, ENV_NCCL_SOCKET_IFNAME, ENV_RANK, ENV_RUNTIME, ENV_SESSION, ENV_TORCH_RANK,
+    ENV_WORLD_SIZE, NCCL_IFNAME_LOOPBACK, NCCL_IFNAME_NOT_LOOPBACK,
 };
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::{ExecArgs, ExecDef, ExecId};
@@ -50,6 +51,23 @@ pub const MAX_WORLD_SIZE: u32 = 4096;
 
 /// Per-session scratch directory inside every node container.
 pub(crate) const CONTAINER_RUNTIME_DIR: &str = "/mnt/mirage/runtime";
+
+/// The exec a workload process was started by, recorded in its
+/// environment.
+///
+/// The third mark, beside [`ENV_SESSION`] and [`ENV_RUNTIME`], and the
+/// one that answers a question the other two cannot: *which* mirage
+/// process in this session started it. A run and every `mirage exec`
+/// borrowing its session tag their workloads identically, because they
+/// are all in the same session under the same runtime directory — so a
+/// run that has just watched a borrower disappear can see the processes
+/// that borrower left behind and cannot tell them from its own.
+///
+/// Declared here rather than beside the pair in
+/// [`mirage_core::container`] because nothing outside this crate sets it
+/// or reads it: it is a supervisor-internal attribution, not part of the
+/// on-process contract `mirage cleanup` recovers from a crash with.
+pub const ENV_EXEC: &str = "MIRAGE_EXEC";
 
 /// Build the spawn specs for one exec.
 ///
@@ -146,8 +164,9 @@ pub fn build_specs(
     if nproc > job_nproc {
         return Err(MirageError::other(format!(
             "this session runs {job_nproc} process(es) per node, so it has no \
-             {nproc}th slot on a node to start one in. Start the run with \
-             `--nproc-per-node {nproc}` if that is the shape the job should have."
+             {} slot on a node to start one in. Start the run with \
+             `--nproc-per-node {nproc}` if that is the shape the job should have.",
+            ordinal(nproc)
         )));
     }
 
@@ -228,7 +247,24 @@ pub fn build_specs(
             } else {
                 def.worker_exec.as_ref().unwrap_or(&def.exec)
             };
-            let env = process_env(desc, args, global, node, local, world_size, &runtime);
+            let mut env = process_env(desc, args, global, node, local, world_size, &runtime);
+            // Which exec started this process. Set here rather than in
+            // [`proc_env`] because it is the one variable that is about
+            // the *invocation* rather than about the job: every other
+            // entry there is the same for two execs of the same shape,
+            // and this one must not be.
+            //
+            // It is what lets the owning run tell its own workloads from
+            // a borrower's after the fact. Both carry the same session
+            // and runtime marks — they are in the same session, which is
+            // the point of `mirage exec` — so a run reaping what a
+            // departed borrower left behind (see
+            // [`Session::reap_departed_borrowers`](crate::session::Session::reap_departed_borrowers))
+            // would otherwise have to guess, and the wrong guess kills a
+            // live workload of its own. Inherited like the session mark,
+            // so a workload's own forks are attributed to the exec that
+            // started their ancestor rather than to nobody.
+            env.insert(ENV_EXEC.to_string(), exec_id.as_str().to_string());
 
             specs.push(match &desc.containers {
                 // Containerised: run the workload inside the node's
@@ -340,6 +376,12 @@ pub fn build_specs(
                         env: BTreeMap::from([
                             (ENV_SESSION.to_string(), desc.session.as_str().to_string()),
                             (ENV_RUNTIME.to_string(), runtime.clone()),
+                            // And which exec it belongs to, for the same
+                            // reason the workload above carries it: this
+                            // client is the host-side process a run has
+                            // to attribute correctly when a borrower
+                            // disappears.
+                            (ENV_EXEC.to_string(), exec_id.as_str().to_string()),
                         ]),
                         workdir: None,
                         stdio,
@@ -376,6 +418,25 @@ pub fn build_specs(
     Ok(specs)
 }
 
+/// `n` as an English ordinal: `1st`, `2nd`, `3rd`, `4th`, `21st`.
+///
+/// Written out because the error above is a sentence a person reads, and
+/// interpolating `{n}th` into it produced "it has no 2th slot" — the sort
+/// of thing that makes a reader stop trusting the rest of the message.
+/// The teens are the exception the rule needs: eleven, twelve and
+/// thirteen take `th` despite ending in one, two and three, and so does
+/// every hundred-and-eleventh after them.
+fn ordinal(n: u32) -> String {
+    let suffix = match (n % 100, n % 10) {
+        (11..=13, _) => "th",
+        (_, 1) => "st",
+        (_, 2) => "nd",
+        (_, 3) => "rd",
+        _ => "th",
+    };
+    format!("{n}{suffix}")
+}
+
 /// Whether a containerised exec should be given a pseudo-terminal.
 ///
 /// Two conditions, and both are load-bearing.
@@ -401,12 +462,42 @@ fn wants_tty(stdio: StdioMode, all_streams_are_terminals: bool) -> bool {
     stdio.owns_terminal() && all_streams_are_terminals
 }
 
+/// Whether this session's ranks have to reach each other over the
+/// container network rather than over the host's loopback.
+///
+/// True for a containerised session with more than one node, and for
+/// nothing else. Every other shape keeps its ranks inside one network
+/// namespace: on the host they are processes on this machine, and a
+/// single containerised node holds all of its processes in one
+/// container.
+///
+/// The distinction is not cosmetic. An emulator that models no fabric
+/// pins `NCCL_SOCKET_IFNAME` to `lo` so a collective stays off the
+/// transports the simulation does not have, which is exactly right while
+/// every rank shares a network namespace. Split the ranks across
+/// containers and the two halves of the rendezvous describe different
+/// networks: `MASTER_ADDR` is the head *container's* name, resolvable
+/// only on the session's bridge, while the transport has been told to
+/// use an interface that reaches nothing but the rank itself. The
+/// symptom is a job that hangs in `init_process_group` — every rank
+/// waiting on peers whose address it was given and told not to use.
+fn collectives_cross_containers(desc: &SessionDescription) -> bool {
+    desc.containers.is_some() && desc.node_count > 1
+}
+
 /// The environment one workload process runs with.
 ///
 /// Layering order: the emulator's injection first, then the user's
 /// per-exec environment, then mirage's own rank variables. Mirage's go
 /// last so a workload cannot accidentally break its own rendezvous by
 /// exporting `RANK` or `WORLD_SIZE`.
+///
+/// The one correction mirage makes to the emulator's own layer sits at
+/// the bottom rather than the top: the collective's interface selection
+/// (see [`collectives_cross_containers`]) is a fact about the shape of
+/// the session that the emulator cannot know, but it is not part of the
+/// job's identity, so `--env NCCL_SOCKET_IFNAME=…` still beats it like
+/// any other emulator default.
 fn process_env(
     desc: &SessionDescription,
     args: &ExecArgs,
@@ -417,6 +508,14 @@ fn process_env(
     runtime: &str,
 ) -> BTreeMap<String, String> {
     let mut env = desc.env.clone();
+    if collectives_cross_containers(desc)
+        && env.get(ENV_NCCL_SOCKET_IFNAME).map(String::as_str) == Some(NCCL_IFNAME_LOOPBACK)
+    {
+        env.insert(
+            ENV_NCCL_SOCKET_IFNAME.to_string(),
+            NCCL_IFNAME_NOT_LOOPBACK.to_string(),
+        );
+    }
     env.extend(args.env.clone());
     env.extend(proc_env(desc, global, node, local, world_size, runtime));
 
@@ -759,6 +858,26 @@ mod tests {
         let text = err.to_string();
         assert!(text.contains("2 process(es) per node"), "{text}");
         assert!(text.contains("--nproc-per-node 3"), "{text}");
+        // And it counts the way a person does. "no 3th slot" is a
+        // sentence that makes a reader doubt the rest of the message.
+        assert!(text.contains("no 3rd slot"), "{text}");
+    }
+
+    #[test]
+    fn slots_are_counted_the_way_a_person_counts_them() {
+        // The suffix table, including the teens that break the rule the
+        // last digit suggests.
+        let ordinals: Vec<String> = [1, 2, 3, 4, 11, 12, 13, 21, 22, 23, 101, 111, 112]
+            .into_iter()
+            .map(ordinal)
+            .collect();
+        assert_eq!(
+            ordinals,
+            [
+                "1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st", "22nd", "23rd",
+                "101st", "111th", "112th"
+            ]
+        );
     }
 
     #[test]
@@ -903,6 +1022,27 @@ mod tests {
     }
 
     #[test]
+    fn every_process_says_which_exec_started_it() {
+        // The mark that lets a run tell its own workloads from a
+        // borrower's after that borrower has gone. Without it the two are
+        // indistinguishable — same session, same runtime directory, which
+        // is what being in one session means — and a run reaping what a
+        // departed `mirage exec` left behind would take its own live
+        // workload with it.
+        let specs = build_specs(&job(2, 2), &exec_def(2, None), &id()).unwrap();
+        assert_eq!(specs.len(), 4);
+        for spec in &specs {
+            assert_eq!(
+                spec.env.get(ENV_EXEC).map(String::as_str),
+                Some(id().as_str()),
+                "a workload that cannot be attributed to an exec is one a \
+                 sweep has to leave alone: {:?}",
+                spec.env
+            );
+        }
+    }
+
+    #[test]
     fn a_containerised_provider_client_is_tagged_too() {
         // `owning_runtime` reads the process-wide directory
         // resolution, which another test in this binary moves under a
@@ -938,6 +1078,13 @@ mod tests {
         assert_eq!(
             specs[0].env.get("MIRAGE_RUNTIME").map(String::as_str),
             Some(mirage_core::container::owning_runtime().as_str())
+        );
+        // And it says which exec it belongs to, for the same reason: it
+        // is the host-side process a run has to attribute correctly when
+        // a borrower disappears.
+        assert_eq!(
+            specs[0].env.get(ENV_EXEC).map(String::as_str),
+            Some(id().as_str())
         );
         // The workload's is the in-container mount, matching what the
         // container itself was given: the host path does not exist in
@@ -1053,6 +1200,112 @@ mod tests {
         let mut def = exec_def(1, None);
         def.exec.workdir = Some(workdir.to_string());
         def
+    }
+
+    /// The value a containerised rank is handed for `key`, which for a
+    /// containerised exec travels in the provider's `-e` arguments
+    /// rather than in the spec's own environment.
+    fn exec_env(spec: &SpawnSpec, key: &str) -> Option<String> {
+        let prefix = format!("{key}=");
+        spec.args
+            .windows(2)
+            .find(|pair| pair[0] == "-e" && pair[1].starts_with(&prefix))
+            .map(|pair| pair[1][prefix.len()..].to_string())
+    }
+
+    /// A containerised session of `nodes` nodes whose emulator pinned the
+    /// collective to loopback, as one that models no fabric does.
+    fn containerised_nodes(nodes: u32, scratch: &std::path::Path) -> SessionDescription {
+        let mut d = containerised("no-such-provider".to_string(), scratch);
+        d.node_count = nodes;
+        d.containers = d.containers.map(|mut c| {
+            c.names = (0..nodes).map(|n| format!("mirage-s-node-{n}")).collect();
+            c
+        });
+        d.env.insert(
+            ENV_NCCL_SOCKET_IFNAME.to_string(),
+            NCCL_IFNAME_LOOPBACK.to_string(),
+        );
+        d
+    }
+
+    #[test]
+    fn a_collective_spread_over_containers_is_not_pinned_to_loopback() {
+        // The two halves of the rendezvous described different networks.
+        // `MASTER_ADDR` is the head *container's* name, which resolves
+        // only on the session's bridge, while `NCCL_SOCKET_IFNAME=lo`
+        // told the transport to use an interface that reaches nothing
+        // outside the rank's own container — so `init_process_group`
+        // hung with every rank holding an address it had been forbidden
+        // to dial.
+        let dir = tempfile::tempdir().unwrap();
+        let d = containerised_nodes(2, dir.path());
+
+        let specs = build_specs(&d, &exec_def(1, None), &id()).unwrap();
+
+        assert_eq!(specs.len(), 2);
+        for spec in &specs {
+            assert_eq!(
+                exec_env(spec, ENV_NCCL_SOCKET_IFNAME).as_deref(),
+                Some(NCCL_IFNAME_NOT_LOOPBACK),
+                "a rank that has to reach a peer container was pinned to loopback"
+            );
+            // The setting this contradicted, unchanged: the peer really
+            // is named on the session's network.
+            assert_eq!(
+                exec_env(spec, ENV_MASTER_ADDR).as_deref(),
+                Some("mirage-s-node-0")
+            );
+        }
+    }
+
+    #[test]
+    fn a_collective_inside_one_network_namespace_keeps_its_loopback_pin() {
+        // Loopback is right — and cheaper than anything else — whenever
+        // the ranks share a namespace, which is every shape but the one
+        // above: processes on this host, or several processes inside a
+        // single node container.
+        let dir = tempfile::tempdir().unwrap();
+        let one_container = containerised_nodes(1, dir.path());
+        let specs = build_specs(&one_container, &exec_def(1, None), &id()).unwrap();
+        assert_eq!(
+            exec_env(&specs[0], ENV_NCCL_SOCKET_IFNAME).as_deref(),
+            Some(NCCL_IFNAME_LOOPBACK)
+        );
+
+        let mut host = job(2, 1);
+        host.env.insert(
+            ENV_NCCL_SOCKET_IFNAME.to_string(),
+            NCCL_IFNAME_LOOPBACK.to_string(),
+        );
+        let specs = build_specs(&host, &exec_def(1, None), &id()).unwrap();
+        for spec in &specs {
+            assert_eq!(
+                spec.env.get(ENV_NCCL_SOCKET_IFNAME).map(String::as_str),
+                Some(NCCL_IFNAME_LOOPBACK),
+                "a host job's ranks are processes on one machine"
+            );
+        }
+    }
+
+    #[test]
+    fn an_interface_the_user_named_beats_mirages_correction() {
+        // The correction is a repair of the emulator's default, not part
+        // of the job's identity, so it sits under `--env` like every
+        // other default rather than over it.
+        let dir = tempfile::tempdir().unwrap();
+        let d = containerised_nodes(2, dir.path());
+        let mut def = exec_def(1, None);
+        def.exec
+            .env
+            .insert(ENV_NCCL_SOCKET_IFNAME.to_string(), "eth1".to_string());
+
+        let specs = build_specs(&d, &def, &id()).unwrap();
+
+        assert_eq!(
+            exec_env(&specs[0], ENV_NCCL_SOCKET_IFNAME).as_deref(),
+            Some("eth1")
+        );
     }
 
     #[test]

@@ -96,7 +96,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use nix::sys::signal::Signal;
@@ -701,26 +701,62 @@ fn spawn_error(command: &str, e: &std::io::Error) -> String {
 /// multi-rank job printing faster than the terminal drains looks exactly
 /// like a wedged pipe, and lengthening the timeout only moves the point
 /// at which output starts disappearing. Naming the state instead makes
-/// the distinction exact and costs two atomics per stream.
+/// the distinction exact and costs one atomic per stream.
+///
+/// # Why one atomic and not two
+///
+/// The count and the flag were separate atomics, and the drain's
+/// correctness rests on their *order*: the count must appear to advance
+/// before the flag clears, so that a sample taken in between reads a
+/// pump that has just delivered as one that is still delivering rather
+/// than as one wedged on a pipe. Two `Relaxed` stores to two locations
+/// give no such guarantee — relaxed operations are ordered per location
+/// and not against each other, so a reader is entitled to observe the
+/// cleared flag and the stale count, which is exactly the sample that
+/// aborts a healthy pump and truncates the workload's output.
+///
+/// Release/acquire pairs would have restored the ordering. Packing both
+/// into one `u64` removes the question instead: there is one location,
+/// one store per transition, and a coherence order every observer agrees
+/// on — so "these two values are consistent with each other" stops being
+/// something the code has to arrange and becomes something it cannot
+/// express otherwise. The reader takes one snapshot and compares it with
+/// the last, rather than reading two fields that were never read at the
+/// same instant anyway.
 #[derive(Debug, Default)]
 struct PumpProgress {
-    /// Chunks handed over so far. A pump whose count advances is making
-    /// progress even when no single sample catches it mid-send.
-    delivered: AtomicU64,
-    /// Set while the pump holds a chunk it has read from the child and
-    /// not yet passed on.
-    holding: AtomicBool,
+    /// The delivered count in the upper bits and the holding flag in bit
+    /// zero. Written only by the pump task, which is what makes a plain
+    /// `store` of the whole state sound: no other writer can be
+    /// interleaved with it, so nothing has to read-modify-write.
+    state: AtomicU64,
+}
+
+/// One sample of a pump's [`PumpProgress`].
+///
+/// Compared as a whole, because either half changing is progress: the
+/// count advancing means a chunk was handed over, and the flag rising
+/// means one has been read and is being handed over now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PumpState(u64);
+
+impl PumpState {
+    /// Whether the pump is holding output it has read but not delivered.
+    fn holding(self) -> bool {
+        self.0 & 1 == 1
+    }
 }
 
 impl PumpProgress {
-    /// How many chunks the pump has delivered.
-    fn delivered(&self) -> u64 {
-        self.delivered.load(Ordering::Relaxed)
+    /// What the pump is doing right now.
+    fn snapshot(&self) -> PumpState {
+        PumpState(self.state.load(Ordering::Relaxed))
     }
 
-    /// Whether the pump is holding output it has read but not delivered.
-    fn holding(&self) -> bool {
-        self.holding.load(Ordering::Relaxed)
+    /// Publish `delivered` chunks handed over, and whether one is in hand.
+    fn publish(&self, delivered: u64, holding: bool) {
+        self.state
+            .store((delivered << 1) | u64::from(holding), Ordering::Relaxed);
     }
 }
 
@@ -767,6 +803,10 @@ async fn pump<R>(
     R: tokio::io::AsyncRead + Unpin + Send + 'static,
 {
     let mut buf = vec![0u8; READ_CHUNK];
+    // Counted here rather than read back from the atomic: this task is
+    // the only writer, so its own tally is authoritative and each
+    // transition is a single store of the whole state.
+    let mut delivered: u64 = 0;
     loop {
         match reader.read(&mut buf).await {
             // EOF: the child closed this stream.
@@ -777,22 +817,21 @@ async fn pump<R>(
                     stream,
                     data: buf[..n].to_vec(),
                 };
-                // Announce the chunk *before* offering it, and only clear
-                // the flag once the channel has taken it: the whole point
-                // is to be visible while this `await` is what is blocking.
-                //
-                // The counter is bumped before the flag is cleared, and
-                // the order is the whole guarantee. Cleared first, there
-                // is an instant in which the pump is neither holding
-                // anything nor has advanced its count — and a
+                // Announce the chunk *before* offering it, and record the
+                // delivery in the same instant the flag clears: the whole
+                // point is to be visible while this `await` is what is
+                // blocking, and to leave no instant in which the pump is
+                // neither holding anything nor has advanced its count. A
                 // `drain_pumps` that sampled exactly there read a pump
-                // that had just delivered as one blocked on a pipe
-                // nobody will close, and aborted it. This way every
-                // sample sees one or the other.
-                progress.holding.store(true, Ordering::Relaxed);
+                // that had just delivered as one blocked on a pipe nobody
+                // will close, and aborted it — which is why both halves
+                // live in one atomic and change with one store rather
+                // than being two values written in a careful order that
+                // nothing was actually enforcing. See [`PumpProgress`].
+                progress.publish(delivered, true);
                 let sent = tx.send(chunk).await;
-                progress.delivered.fetch_add(1, Ordering::Relaxed);
-                progress.holding.store(false, Ordering::Relaxed);
+                delivered += 1;
+                progress.publish(delivered, false);
                 // A closed receiver means the exec is being torn down and
                 // nobody is listening any more. Stop reading rather than
                 // spinning on a dead channel.
@@ -1048,7 +1087,7 @@ impl Spawned {
         let pid = self.pid;
         while let Some(pump) = self.pumps.last_mut() {
             loop {
-                let delivered = pump.progress.delivered();
+                let before = pump.progress.snapshot();
                 if tokio::time::timeout(DRAIN_GRACE, &mut pump.task)
                     .await
                     .is_ok()
@@ -1059,10 +1098,11 @@ impl Spawned {
                     break;
                 }
                 // Still running. Give it another period for as long as it
-                // has output in hand or delivered some during the last
-                // one — those bytes are the workload's and dropping them
-                // is the truncation this check exists to prevent.
-                if pump.progress.holding() || pump.progress.delivered() != delivered {
+                // has output in hand or moved at all during the last one
+                // — those bytes are the workload's and dropping them is
+                // the truncation this check exists to prevent.
+                let now = pump.progress.snapshot();
+                if now.holding() || now != before {
                     continue;
                 }
                 pump.task.abort();
@@ -1487,6 +1527,45 @@ mod tests {
             );
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
+    }
+
+    #[test]
+    fn a_pump_that_has_just_delivered_can_never_be_sampled_as_idle() {
+        // The invariant `drain_pumps` rests on, and the reason it is one
+        // atomic rather than two. With the count and the flag in separate
+        // locations, "delivered a chunk" and "no longer holding one"
+        // became visible independently — both were `Relaxed`, which
+        // orders each location against itself and neither against the
+        // other — so an observer was entitled to the combination that
+        // means "wedged on a pipe, abort it": flag clear, count
+        // unchanged. Packed together, that combination cannot be
+        // constructed: the state after a delivery differs from the state
+        // before it, always, because it is one value.
+        let progress = PumpProgress::default();
+        let idle = progress.snapshot();
+        assert!(!idle.holding());
+
+        progress.publish(0, true);
+        let holding = progress.snapshot();
+        assert!(holding.holding(), "a chunk in hand must be visible as one");
+        assert_ne!(holding, idle);
+
+        progress.publish(1, false);
+        let delivered = progress.snapshot();
+        assert!(!delivered.holding());
+        assert_ne!(
+            delivered, idle,
+            "a pump that delivered a chunk read as one that had done nothing"
+        );
+
+        // And it keeps reading as progress for every chunk after the
+        // first, which is what makes "moved during the last grace period"
+        // a usable test rather than one that only works once.
+        progress.publish(1, true);
+        let second = progress.snapshot();
+        progress.publish(2, false);
+        assert_ne!(progress.snapshot(), second);
+        assert_ne!(progress.snapshot(), delivered);
     }
 
     #[tokio::test]

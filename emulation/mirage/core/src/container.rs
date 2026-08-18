@@ -111,6 +111,33 @@ pub const ENV_LOCAL_RANK: &str = "LOCAL_RANK";
 /// node keep the same value and disambiguate by local GPU index.
 pub const ENV_NCCL_HOSTID: &str = "NCCL_HOSTID";
 
+/// RCCL/NCCL network interface selection. Accepts a comma-separated list
+/// of interface names, a `=` prefix for an exact match, or a `^` prefix
+/// for exclusion (`^lo` is "anything but loopback").
+///
+/// Named here because a session's *shape* decides whether the emulator's
+/// own answer to this can stand. An emulator that models no fabric pins
+/// it to `lo`, which is right for every rank running as a process on one
+/// host — and wrong the moment the ranks are in separate containers,
+/// where the peer a rank dials is a name on the session's bridge network
+/// and loopback cannot reach it. See
+/// `mirage_supervisor::spec` for where that override is applied.
+pub const ENV_NCCL_SOCKET_IFNAME: &str = "NCCL_SOCKET_IFNAME";
+
+/// The loopback-only value an emulator pins [`ENV_NCCL_SOCKET_IFNAME`]
+/// to for a job whose ranks all share a host.
+pub const NCCL_IFNAME_LOOPBACK: &str = "lo";
+
+/// [`ENV_NCCL_SOCKET_IFNAME`] for ranks that must reach each other over
+/// a container network: everything except loopback.
+///
+/// Spelled as an exclusion rather than as an interface name because the
+/// name is the engine's to choose — `eth0` under a netavark or docker
+/// bridge, something else under another network backend — while "not the
+/// interface that cannot reach another container" is true whatever it
+/// picked.
+pub const NCCL_IFNAME_NOT_LOOPBACK: &str = "^lo";
+
 /// The directory inside every node container that belongs to mirage.
 ///
 /// A node container is not only the user's image. Mirage bind-mounts its
@@ -138,14 +165,56 @@ pub const CONTAINER_MIRAGE_DIR: &str = "/mnt/mirage";
 /// so a test that answered "yes" there could not tell mirage's own mounts
 /// from a user's and would refuse every containerised session.
 ///
-/// The comparison is by path component, so `/mnt/mirage/`, `/mnt//mirage`
-/// and `/mnt/./mirage` are all read as the path they name.
+/// # The spelling is not the path
+///
+/// Both sides are reduced to their components first, by
+/// [`normalise_container_path`], because a mount destination has many
+/// spellings and the engine acts on the location rather than on the
+/// text. `/mnt/mirage/../mirage` names the reserved directory and used
+/// to pass this test — the comparison was textual-by-component, `..` is
+/// a component like any other, and the original bug came straight back
+/// through a path that merely looked like it was somewhere else.
 #[must_use]
 pub fn covers_mirage_dir(container_path: &str) -> bool {
-    // An empty prefix is a prefix of everything to `Path::starts_with`,
-    // and an empty container path is not a mount over anything.
-    !container_path.is_empty()
-        && std::path::Path::new(CONTAINER_MIRAGE_DIR).starts_with(container_path)
+    // An empty container path is not a mount over anything; it is also
+    // not a path, and normalising it would make it the root.
+    if container_path.is_empty() {
+        return false;
+    }
+    let reserved = normalise_container_path(CONTAINER_MIRAGE_DIR);
+    reserved.starts_with(&normalise_container_path(container_path))
+}
+
+/// The components a container path names, with `.`, `..`, empty segments
+/// and any trailing separator resolved away.
+///
+/// Purely lexical: the path names a location inside a container that
+/// does not exist yet, so there is no filesystem to ask and no symlink
+/// to follow. That is also why `..` is resolved by dropping the
+/// preceding component rather than by resolving the parent — the two
+/// differ only through symlinks, and the engine's own mount destination
+/// handling is lexical in the same way.
+///
+/// A path with no leading separator is read from the root as well. A
+/// mount destination is always an absolute location to the engine (both
+/// refuse a relative one outright), so `mnt/mirage` describes the
+/// reserved directory just as `/mnt/mirage` does, and reading it any
+/// other way would let a relative spelling walk past the check on its
+/// way to being refused for an unrelated reason.
+///
+/// `..` above the root is dropped, as it is by the kernel: `/..` is `/`.
+fn normalise_container_path(path: &str) -> Vec<&str> {
+    let mut components: Vec<&str> = Vec::new();
+    for part in path.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                components.pop();
+            }
+            name => components.push(name),
+        }
+    }
+    components
 }
 
 /// Deterministic container name for a node of a session.
@@ -1067,6 +1136,47 @@ mod tests {
         assert!(!covers_mirage_dir("/mnt/mine"));
         assert!(!covers_mirage_dir("/data"));
         assert!(!covers_mirage_dir(""));
+    }
+
+    #[test]
+    fn a_mount_that_reaches_the_reserved_directory_through_dot_dot_is_recognised() {
+        // The check went in to stop a `--mount` from being laid over
+        // mirage's own tree, and a reviewer walked the original bug back
+        // through it with a `..`: the comparison was by literal
+        // component, so `/mnt/mirage/../mirage` was two components
+        // longer than the reserved path and read as somewhere else
+        // entirely — while naming exactly the directory the check
+        // exists to protect.
+        assert!(covers_mirage_dir("/mnt/mirage/../mirage"));
+        assert!(covers_mirage_dir("/mnt/mirage/lib/.."));
+        assert!(covers_mirage_dir("/mnt/mirage/lib/../.."));
+        assert!(covers_mirage_dir("/data/../mnt/mirage"));
+        // `..` past the root is the root, which is the widest cover
+        // there is.
+        assert!(covers_mirage_dir("/mnt/../.."));
+        assert!(covers_mirage_dir("/.."));
+        assert!(covers_mirage_dir("/data/.."));
+
+        // The other spellings of the same path, each of which a provider
+        // resolves before it mounts anything.
+        assert!(covers_mirage_dir("/mnt/mirage/"));
+        assert!(covers_mirage_dir("/mnt//mirage"));
+        assert!(covers_mirage_dir("/mnt/./mirage"));
+        assert!(covers_mirage_dir("//mnt/mirage//"));
+        assert!(covers_mirage_dir("/mnt/."));
+
+        // A destination with no leading separator is read from the root
+        // as well: it is the only reading under which it names a
+        // location at all, and it is the reading that keeps the check
+        // from being sidestepped by dropping one character.
+        assert!(covers_mirage_dir("mnt/mirage"));
+        assert!(covers_mirage_dir("mnt/mirage/../mirage"));
+
+        // And a `..` that genuinely leads somewhere else is still the
+        // user's to mount, including back below the reserved tree, where
+        // mirage's own mounts live.
+        assert!(!covers_mirage_dir("/mnt/mirage/../mine"));
+        assert!(!covers_mirage_dir("/mnt/mirage/lib/../lib"));
     }
 
     #[test]

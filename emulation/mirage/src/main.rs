@@ -46,12 +46,12 @@ extern crate mirage_rocjitsu as _;
 )]
 struct Cli {
     /// Emit machine-readable JSON output where applicable.
-    ///
-    /// `overrides_with` naming the flag itself is clap's way of saying a
-    /// repeat is not an error. Without it `mirage paths --json --json`
-    /// exits 2, which a user hits by composing a command from a variable
-    /// that already carries the flag -- and refusing to do a thing twice
-    /// that is idempotent the first time is a strange place to be strict.
+    // `overrides_with` naming the flag itself is clap's way of saying a
+    // repeat is not an error. Without it `mirage paths --json --json`
+    // exits 2, which a user hits by composing a command line from a
+    // variable that already carries the flag. Written with `//` and not
+    // `///`: a doc comment here is printed to the user by `--help`, and
+    // why the attribute is there is nobody's business but ours.
     #[arg(long, global = true, overrides_with = "json")]
     json: bool,
 

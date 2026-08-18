@@ -172,6 +172,19 @@ async fn run_owned(
     let health = tokio::select! {
         health = run.wait_ready(READY_TIMEOUT) => health?,
         sig = interrupts.next() => {
+            // Said, like every other interrupt path says it. This one
+            // printed nothing at all: the prompt came back, and the only
+            // output was whatever internal `tracing` line the abandoned
+            // bring-up happened to emit on its way out — which describes
+            // mirage's own bookkeeping and reads like a fault. What the
+            // user needs to know is that the interrupt arrived and that
+            // the half-built session is being removed, which is what the
+            // caller does next.
+            eprintln!(
+                "mirage: {}: session {} was still starting; removing what it had created",
+                signal_name(sig),
+                run.id()
+            );
             return Ok(ExitCode::from(u8::try_from(128 + sig).unwrap_or(130)));
         }
         () = report_progress(run.watch_health()) => {
@@ -498,9 +511,16 @@ fn exec_def(
     // Say so when a `--env` will lose. The precedence is deliberate — a
     // rank that disagrees with the grid deadlocks its own collectives —
     // but silence made `--env RANK=3` look like it had been applied.
+    //
+    // A `mirage:` line on stderr, not a `tracing` record: this is mirage
+    // talking to the person who typed the flag, and every other thing
+    // mirage says to them looks the same. As a log line it arrived with a
+    // timestamp, a level and this module's path in front of it — the
+    // shape of an internal fault rather than of an answer — and only when
+    // the user had passed `-v`, which is to say not when it mattered.
     for key in crate::mirage_owned_env(env.keys()) {
-        tracing::warn!(
-            "--env {key}=… is ignored: mirage sets {key} itself on every process, \
+        eprintln!(
+            "mirage: --env {key}=… is ignored: mirage sets {key} itself on every process, \
              so that every rank agrees on the shape of the job"
         );
     }
@@ -599,11 +619,20 @@ async fn supervise_locally(
 }
 
 /// The name a user would recognise for `sig`.
+///
+/// The first four are named by what happened rather than by the constant,
+/// because that is how the line reads: `mirage: interrupted: …`. The two
+/// a scheduler sends have no such word — nothing about `SIGUSR1` says
+/// what the sender meant by it — so they are named as themselves, which
+/// is also the string the user will find in their scheduler's manual.
 fn signal_name(sig: i32) -> &'static str {
     match sig {
         libc::SIGINT => "interrupted",
+        libc::SIGQUIT => "quit",
         libc::SIGHUP => "hangup",
         libc::SIGTERM => "terminated",
+        libc::SIGUSR1 => "SIGUSR1",
+        libc::SIGUSR2 => "SIGUSR2",
         _ => "signalled",
     }
 }
@@ -618,12 +647,17 @@ fn signal_name(sig: i32) -> &'static str {
 /// EOF in every rank, which from the outside is indistinguishable from a
 /// broken pipe, a bad path, or mirage dropping the data.
 ///
-/// Only when stdin is *not* a terminal, because that is the only case in
-/// which the user supplied any: an interactive caller has not piped
-/// anything in and does not need telling that nothing is reading it.
+/// Only when the caller actually supplied input, because the sentence is
+/// about *their* bytes: an interactive caller has piped nothing in, and
+/// neither has one who wrote `< /dev/null` — telling either of them that
+/// what they piped in is being discarded is mirage describing something
+/// that did not happen.
 fn warn_if_stdin_is_dropped(exec: &Arc<Exec>) {
-    use std::io::IsTerminal as _;
-    if !stdin_is_being_discarded(exec.owns_terminal(), std::io::stdin().is_terminal()) {
+    use std::os::fd::AsRawFd as _;
+    if !stdin_is_being_discarded(
+        exec.owns_terminal(),
+        stdin_source(std::io::stdin().as_raw_fd()),
+    ) {
         return;
     }
     eprintln!(
@@ -634,14 +668,58 @@ fn warn_if_stdin_is_dropped(exec: &Arc<Exec>) {
     );
 }
 
+/// What is on the other end of stdin, as far as the notice cares.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StdinSource {
+    /// A terminal. The caller is typing; nothing was piped in.
+    Terminal,
+    /// A pipe, a socket or a file — bytes somebody redirected here
+    /// meaning a process to read them.
+    Redirected,
+    /// Nothing that carries input: `< /dev/null`, a closed descriptor, a
+    /// descriptor that cannot be described at all.
+    Nothing,
+}
+
+/// Classify the descriptor `fd`, which is stdin everywhere but in tests.
+///
+/// `isatty` first and then the file *type*, because "not a terminal" was
+/// the whole test before and it is not the same question. `< /dev/null`
+/// is not a terminal; neither is a closed stdin, nor stdin inherited from
+/// a service manager that opened it on the null device. All three used to
+/// count as input the user had supplied and was losing.
+///
+/// A character device is read as carrying nothing. That is exactly right
+/// for `/dev/null`, which is what redirections in this position
+/// overwhelmingly are, and wrong for the rare `< /dev/zero` — an endless
+/// stream that really is being discarded and will not be mentioned. The
+/// two are indistinguishable without hard-coding device numbers, and
+/// silence about an infinite source of nothing is the cheaper mistake.
+fn stdin_source(fd: std::os::fd::RawFd) -> StdinSource {
+    use nix::sys::stat::SFlag;
+    if nix::unistd::isatty(fd).unwrap_or(false) {
+        return StdinSource::Terminal;
+    }
+    let Ok(stat) = nix::sys::stat::fstat(fd) else {
+        // No such descriptor: stdin was closed before mirage started.
+        return StdinSource::Nothing;
+    };
+    let kind = SFlag::from_bits_truncate(stat.st_mode) & SFlag::S_IFMT;
+    if kind == SFlag::S_IFIFO || kind == SFlag::S_IFSOCK || kind == SFlag::S_IFREG {
+        StdinSource::Redirected
+    } else {
+        StdinSource::Nothing
+    }
+}
+
 /// Whether the caller piped something in that no rank will ever read.
 ///
 /// The two conditions are independent and both load-bearing: a
-/// single-process exec is handed the caller's stdin whatever it is, and
-/// an interactive caller has piped nothing in — so only a multi-process
-/// job started with a redirected stdin loses anything.
-fn stdin_is_being_discarded(owns_terminal: bool, stdin_is_terminal: bool) -> bool {
-    !owns_terminal && !stdin_is_terminal
+/// single-process exec is handed the caller's stdin whatever it is, so it
+/// loses nothing, and a caller who supplied no input has nothing to lose
+/// either.
+fn stdin_is_being_discarded(owns_terminal: bool, stdin: StdinSource) -> bool {
+    !owns_terminal && stdin == StdinSource::Redirected
 }
 
 /// How often a lent terminal's borrower is checked for having asked.
@@ -779,40 +857,62 @@ fn resume(pid: u32) {
     );
 }
 
-/// The signals that must never kill mirage outright, armed once.
+/// Every signal that means "stop this", and the rule that picks them.
 ///
-/// `SIGTERM` as well as `SIGINT`: a CI runner cancelling a job, or a
-/// shell script's `kill`, sends the former, and both have to reach the
-/// cleanup path.
+/// The set used to be extended one bug report at a time — `SIGINT`, then
+/// `SIGTERM`, then `SIGHUP` — and each addition was the same discovery
+/// made again: a signal whose default disposition kills mirage outright
+/// runs no teardown, so the workload survives, the socket stays in `run/`
+/// claiming a session that no longer exists, and the scratch directory
+/// stays on disk. So the membership rule is written down here instead,
+/// and the list is everything that satisfies it:
 ///
-/// And `SIGHUP`, which is the one a user is most likely to send without
-/// meaning to send anything: it is what closing a terminal window does,
-/// and closing the window is how people end a run they have lost
-/// interest in. Its default disposition is "terminate immediately", so
-/// mirage exited 129 having run no teardown at all — the workload
-/// survived, the socket stayed in `run/` claiming a session that no
-/// longer existed, and the scratch directory stayed on disk. Handled
-/// exactly like `SIGTERM`, because a hangup means the same thing:
-/// nobody is watching this any more, take it down.
+/// **a signal whose default disposition ends the process, and which a
+/// person or a scheduler sends to say they want this command to stop.**
+///
+/// * `SIGINT` — Ctrl-C, the one everybody means.
+/// * `SIGQUIT` — Ctrl-\, the *same keyboard*, and the same intent said
+///   more forcefully. Its default action also writes a core file, which
+///   handling it gives up: a core dump of mirage tells nobody anything,
+///   and the exchange is a stranded session for a file that gets deleted.
+/// * `SIGTERM` — `kill`, a CI runner cancelling a job, a service manager
+///   stopping a unit.
+/// * `SIGHUP` — the terminal window closed, which is the commonest way a
+///   run is abandoned.
+/// * `SIGUSR1` and `SIGUSR2` — a batch scheduler warning a job that it is
+///   about to be preempted or has reached its time limit. Slurm sends
+///   `SIGUSR1` for this by default. They are "user-defined" in the sense
+///   that nothing else claims them, not in the sense that they are
+///   harmless: their default disposition kills the process just as
+///   surely as `SIGTERM`'s does.
+///
+/// What is deliberately *not* here is as much of the rule as what is.
+/// `SIGTSTP`, `SIGTTIN` and `SIGTTOU` are job control rather than
+/// stopping — suspending a run must keep working, and `SIGTTOU` in
+/// particular is blocked around the terminal handoff rather than caught
+/// (see [`TerminalHandoff`]). `SIGPIPE` is already ignored process-wide
+/// by the Rust runtime and would be a lie about intent anyway. `SIGKILL`
+/// and `SIGSTOP` cannot be caught at all, which is precisely why
+/// `mirage cleanup` exists.
 ///
 /// # Why this is installed before anything else happens
 ///
 /// A tokio signal handler is registered the first time a `Signal` stream
 /// is *created*, and until then the signal keeps its default
-/// disposition — which for both of these is "terminate immediately". Arm
-/// them lazily, at the point the workload is awaited, and everything
-/// before that point is unprotected: a Ctrl-C during a multi-minute
-/// image pull killed mirage outright, with no teardown, leaving the
-/// containers and the network it had already created behind. That is the
-/// exact moment a user is most likely to press Ctrl-C.
+/// disposition — which for every one of these is "terminate
+/// immediately". Arm them lazily, at the point the workload is awaited,
+/// and everything before that point is unprotected: a Ctrl-C during a
+/// multi-minute image pull killed mirage outright, with no teardown,
+/// leaving the containers and the network it had already created behind.
+/// That is the exact moment a user is most likely to press Ctrl-C.
 ///
 /// Installing them first makes the guarantee unconditional: from the
 /// first line of the command to the last, an interrupt is something
 /// mirage handles rather than something that happens to it.
 struct Interrupts {
-    sigint: tokio::signal::unix::Signal,
-    sigterm: tokio::signal::unix::Signal,
-    sighup: tokio::signal::unix::Signal,
+    /// One armed stream per signal, paired with the number that armed it
+    /// so [`Interrupts::next`] can report which one arrived.
+    signals: Vec<(i32, tokio::signal::unix::Signal)>,
 }
 
 impl Interrupts {
@@ -824,11 +924,18 @@ impl Interrupts {
     /// worth failing on rather than continuing unprotected.
     fn install() -> anyhow::Result<Self> {
         use tokio::signal::unix::{SignalKind, signal};
-        Ok(Self {
-            sigint: signal(SignalKind::interrupt())?,
-            sigterm: signal(SignalKind::terminate())?,
-            sighup: signal(SignalKind::hangup())?,
-        })
+        let mut signals = Vec::new();
+        for number in [
+            libc::SIGINT,
+            libc::SIGQUIT,
+            libc::SIGTERM,
+            libc::SIGHUP,
+            libc::SIGUSR1,
+            libc::SIGUSR2,
+        ] {
+            signals.push((number, signal(SignalKind::from_raw(number))?));
+        }
+        Ok(Self { signals })
     }
 
     /// Resolve on the next interrupt, yielding its signal number.
@@ -839,14 +946,26 @@ impl Interrupts {
     ///
     /// The number is the one that actually arrived, so the exit status
     /// mirage reports and the signal it forwards to the workload are
-    /// both the truth — a hangup is forwarded as a hangup, which is what
-    /// a workload that cares about the difference is entitled to.
+    /// both the truth — a hangup is forwarded as a hangup, and a
+    /// scheduler's `SIGUSR1` reaches a workload that checkpoints on it,
+    /// which is what a workload that cares about the difference is
+    /// entitled to.
     async fn next(&mut self) -> i32 {
-        tokio::select! {
-            _ = self.sigint.recv() => libc::SIGINT,
-            _ = self.sigterm.recv() => libc::SIGTERM,
-            _ = self.sighup.recv() => libc::SIGHUP,
-        }
+        // `select_all` rather than a `select!` arm per signal: the arms
+        // were identical and the list is now long enough that adding one
+        // by hand is how a signal comes to be armed and then never
+        // waited for. Each future is boxed because `select_all` needs
+        // `Unpin`, and all of them are dropped when one wins —
+        // `Signal::recv` is cancel-safe, so a signal that arrives in
+        // that instant is still buffered for the next call.
+        let waits = self.signals.iter_mut().map(|(number, signal)| {
+            let number = *number;
+            Box::pin(async move {
+                signal.recv().await;
+                number
+            })
+        });
+        futures::future::select_all(waits).await.0
     }
 }
 
@@ -1380,15 +1499,85 @@ mod tests {
         // pipe: `mirage run --nproc-per-node 2 -- ./job < input` gives
         // every rank an immediate EOF, silently.
         assert!(
-            stdin_is_being_discarded(false, false),
+            stdin_is_being_discarded(false, StdinSource::Redirected),
             "a grid started with a redirected stdin loses what was piped in"
         );
         // Not a warning anyone else needs. One process is handed the
         // caller's stdin whatever it is...
-        assert!(!stdin_is_being_discarded(true, false));
-        assert!(!stdin_is_being_discarded(true, true));
-        // ...and an interactive caller piped nothing in to lose.
-        assert!(!stdin_is_being_discarded(false, true));
+        assert!(!stdin_is_being_discarded(true, StdinSource::Redirected));
+        assert!(!stdin_is_being_discarded(true, StdinSource::Terminal));
+        // ...and a caller who supplied no input has nothing to lose.
+        assert!(!stdin_is_being_discarded(false, StdinSource::Terminal));
+        assert!(!stdin_is_being_discarded(false, StdinSource::Nothing));
+    }
+
+    #[test]
+    fn nothing_is_being_discarded_when_nothing_was_piped_in() {
+        // The notice says "What you piped in is being discarded", and it
+        // said it to people who had piped nothing in: the test was "stdin
+        // is not a terminal", which `< /dev/null`, a closed stdin and a
+        // service manager's null stdin all satisfy. Every one of those is
+        // a multi-process run being told it has lost data that never
+        // existed.
+        use std::os::fd::AsRawFd as _;
+
+        let null = std::fs::File::open("/dev/null").unwrap();
+        assert_eq!(stdin_source(null.as_raw_fd()), StdinSource::Nothing);
+
+        // A descriptor that is not open at all — `mirage run … 0<&-`.
+        assert_eq!(stdin_source(-1), StdinSource::Nothing);
+
+        // What the notice is actually for: a pipe, and a file.
+        let (read, _write) = nix::unistd::pipe().unwrap();
+        assert_eq!(stdin_source(read.as_raw_fd()), StdinSource::Redirected);
+        let file = tempfile::NamedTempFile::new().unwrap();
+        assert_eq!(
+            stdin_source(file.as_file().as_raw_fd()),
+            StdinSource::Redirected
+        );
+    }
+
+    /// Serialises the tests that raise real signals at this process.
+    ///
+    /// A signal is delivered to the process, not to a test: every armed
+    /// [`Interrupts`] in this binary is woken by it, so two of these
+    /// running at once would each be answered with the other's signal.
+    /// A tokio mutex rather than a `std` one because the guard is held
+    /// across the awaits below, which the workspace denies for the
+    /// blocking kind and for good reason.
+    static RAISING_SIGNALS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    #[tokio::test]
+    async fn every_signal_that_means_stop_is_handled_rather_than_fatal() {
+        let _serialised = RAISING_SIGNALS.lock().await;
+        // `SIGQUIT` is Ctrl-\ — the same keyboard as Ctrl-C, and the same
+        // intent — and `SIGUSR1` is what a batch scheduler sends a job it
+        // is about to preempt. Unhandled, the default disposition of each
+        // ends mirage where it stands: no teardown, the workload still
+        // running, the socket still claiming a live session and the
+        // scratch directory still on disk. Like the hangup test below,
+        // this does not merely fail before the fix — it takes the test
+        // binary down with it, which is the same thing happening for the
+        // same reason.
+        let mut interrupts = Interrupts::install().unwrap();
+        for signal in [
+            nix::sys::signal::Signal::SIGQUIT,
+            nix::sys::signal::Signal::SIGUSR1,
+            nix::sys::signal::Signal::SIGUSR2,
+        ] {
+            nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(std::process::id() as i32),
+                signal,
+            )
+            .unwrap();
+            let sig = tokio::time::timeout(Duration::from_secs(10), interrupts.next())
+                .await
+                .unwrap_or_else(|_| panic!("{signal:?} must reach the interrupt handling"));
+            assert_eq!(sig, signal as i32);
+            // And it is named for the user rather than reported as an
+            // anonymous "signalled".
+            assert_ne!(signal_name(sig), "signalled", "{signal:?}");
+        }
     }
 
     #[tokio::test]
@@ -1403,6 +1592,7 @@ mod tests {
         // This test would not merely fail before the fix — it would take
         // the test binary down with it, which is the same thing happening
         // for the same reason.
+        let _serialised = RAISING_SIGNALS.lock().await;
         let mut interrupts = Interrupts::install().unwrap();
         nix::sys::signal::kill(
             nix::unistd::Pid::from_raw(std::process::id() as i32),

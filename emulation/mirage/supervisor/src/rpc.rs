@@ -371,6 +371,16 @@ async fn hold_lease(framed: &mut Control, closing: impl Future<Output = ()>) -> 
 
 /// Answer one client's request, and hold its lease if it took one.
 async fn handle(stream: UnixStream, run: Arc<Run>) {
+    // Who is on the other end, asked of the kernel rather than of the
+    // client. A borrower cannot misreport it, and it is the only thing
+    // that distinguishes one borrower's live processes from another
+    // borrower's leftovers once a lease has ended — see
+    // [`Session::reap_departed_borrowers`](mirage_supervisor::session::Session::reap_departed_borrowers).
+    let borrower = stream
+        .peer_cred()
+        .ok()
+        .and_then(|cred| cred.pid())
+        .and_then(|pid| u32::try_from(pid).ok());
     let mut framed = Framed::new(stream, codec());
 
     let Some(frame) = first_request(&mut framed).await else {
@@ -390,7 +400,7 @@ async fn handle(stream: UnixStream, run: Arc<Run>) {
             Ok(desc) => Response::Description(Box::new(desc)),
             Err(e) => Response::Error(e.to_string()),
         },
-        Ok(Request::Attach) => match run.attach() {
+        Ok(Request::Attach) => match run.attach(borrower) {
             // The lease is taken *before* the description is built, not
             // after. Between the two the session could begin tearing
             // down, and a borrower handed a description of containers
@@ -427,10 +437,28 @@ async fn handle(stream: UnixStream, run: Arc<Run>) {
     };
 
     // Hold the connection open for as long as the borrower wants it.
-    if let LeaseEnd::SessionClosing = hold_lease(&mut framed, run.wait_closing()).await {
-        tracing::debug!(session = %run.id(), "closing a borrower's lease: session is tearing down");
-    }
+    let ended = hold_lease(&mut framed, run.wait_closing()).await;
+    // Released before the sweep below, so the departing borrower is not
+    // counted among the live ones it must not touch.
     drop(lease);
+
+    match ended {
+        LeaseEnd::SessionClosing => {
+            tracing::debug!(
+                session = %run.id(),
+                "closing a borrower's lease: session is tearing down"
+            );
+        }
+        LeaseEnd::ClientGone => {
+            // The borrower is gone, and this is the instant the run finds
+            // out. Anything it started and did not stop is running in a
+            // session that is still very much alive, so nothing else will
+            // notice it until teardown — which is how `mirage exec`'s
+            // promise that a workload "dies with it" came to hold only
+            // for the borrowers that outlived their run.
+            run.reap_departed_borrowers().await;
+        }
+    }
 }
 
 #[cfg(test)]

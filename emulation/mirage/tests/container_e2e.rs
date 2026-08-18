@@ -1490,6 +1490,163 @@ fn a_derived_hack_image_is_labelled_like_everything_else_mirage_creates() {
     );
 }
 
+/// A stand-in engine whose answers about *images* a test dictates.
+///
+/// The shared mock above is built for a session's lifecycle and has no
+/// images at all, which leaves the image half of `mirage cleanup` — the
+/// only host state mirage deliberately lets outlive a session — resting
+/// on two decisions that no test could reach: whether an image is in use,
+/// and whether it is mirage's. Both are answered by the engine, so both
+/// need an engine that can be told what to say.
+///
+/// `ps` is the interesting one: cleanup asks it twice with different
+/// arguments. `ps --all --filter … --format {{.ID}}` lists mirage's
+/// containers, and `ps --all --format {{.ID}}\t{{.Image}}` asks what
+/// every container is running — so the script tells them apart by the
+/// presence of `--filter` and only applies `ps_all` to the second.
+fn write_image_provider(
+    path: &Path,
+    image_id: &str,
+    image_tag: &str,
+    owner: &str,
+    runtime: &str,
+    ps_all: &str,
+) {
+    use std::os::unix::fs::PermissionsExt;
+    let script = r#"#!/bin/sh
+case "$1" in
+  ps)
+    for a in "$@"; do
+      [ "$a" = "--filter" ] && exit 0
+    done
+    __PS_ALL__
+    ;;
+  images)
+    printf '%s\t%s\n' '__IMAGE_ID__' '__IMAGE_TAG__'
+    exit 0 ;;
+  image)
+    # `image inspect --format '<owner>\t<runtime>' <id>`.
+    printf '%s\t%s\n' '__OWNER__' '__RUNTIME__'
+    exit 0 ;;
+  *) exit 0 ;;
+esac
+"#
+    .replace("__PS_ALL__", ps_all)
+    .replace("__IMAGE_ID__", image_id)
+    .replace("__IMAGE_TAG__", image_tag)
+    .replace("__OWNER__", owner)
+    .replace("__RUNTIME__", runtime);
+    std::fs::write(path, script).unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// The images `mirage cleanup --dry-run --json` says it would remove.
+fn images_cleanup_would_remove(env: &Env, provider: &Path) -> Vec<String> {
+    let out = env
+        .base
+        .mirage()
+        .args(["cleanup", "--dry-run", "--json"])
+        .env("MIRAGE_CONTAINER_PROVIDER", provider)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "cleanup failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_else(|e| {
+        panic!("{e}: {}", String::from_utf8_lossy(&out.stdout));
+    });
+    report["resources"]
+        .as_array()
+        .expect("a cleanup report lists resources")
+        .iter()
+        .filter(|r| r["kind"] == "image")
+        .map(|r| r["id"].as_str().unwrap_or_default().to_string())
+        .collect()
+}
+
+#[test]
+fn an_image_is_left_alone_when_the_engine_cannot_say_what_is_using_it() {
+    // "No answer" is not "nothing". Cleanup asks the engine what every
+    // container was created from, and reading a failed question as an
+    // empty answer makes every image on the host look unused — including
+    // the one a live session's containers are running right now, which
+    // cleanup would then remove out from under it.
+    //
+    // The pair is the test. A single "no image was reclaimed" proves
+    // nothing, because an image can fail to be reclaimed for a dozen
+    // reasons; the control run differs in exactly one thing, whether `ps`
+    // answers at all.
+    let env = Env::new();
+    let id = "abcdef012345";
+    let tag = "mirage-hack-demo:latest";
+
+    let mute = env.base.root().join("mute-engine.sh");
+    write_image_provider(&mute, id, tag, "mirage", &env.own_runtime(), "exit 1");
+    assert!(
+        images_cleanup_would_remove(&env, &mute).is_empty(),
+        "an image was reclaimed on an engine that could not be asked what \
+         is using it"
+    );
+
+    let answers = env.base.root().join("answering-engine.sh");
+    write_image_provider(&answers, id, tag, "mirage", &env.own_runtime(), "exit 0");
+    assert_eq!(
+        images_cleanup_would_remove(&env, &answers),
+        vec![tag.to_string()],
+        "the same image must be reclaimed once the engine answers, or the \
+         assertion above proved nothing"
+    );
+}
+
+#[test]
+fn an_image_is_reclaimed_only_when_it_says_mirage_built_it() {
+    // The engine is asked for images carrying `mirage.owner=mirage` and
+    // then asked again, per image, what that label actually says. The
+    // re-check is not redundant: the filter is the engine's to honour,
+    // the answer arrives as a Go template that renders a missing key as
+    // text rather than failing, and `mirage-hack-…` images left by a
+    // mirage older than the labels look exactly like ours by name. Only
+    // a positive `mirage.owner` makes an image mirage's to delete.
+    let env = Env::new();
+    let id = "abcdef012345";
+    let tag = "mirage-hack-demo:latest";
+
+    let theirs = env.base.root().join("someone-elses.sh");
+    write_image_provider(&theirs, id, tag, "not-mirage", &env.own_runtime(), "exit 0");
+    assert!(
+        images_cleanup_would_remove(&env, &theirs).is_empty(),
+        "an image the engine says is not mirage's was reclaimed anyway"
+    );
+
+    // An image whose owner label is absent altogether: the Go template
+    // renders `<no value>`, which is a string and would compare equal to
+    // nothing at all if it were not recognised as "no label".
+    let unlabelled = env.base.root().join("unlabelled.sh");
+    write_image_provider(
+        &unlabelled,
+        id,
+        tag,
+        "<no value>",
+        &env.own_runtime(),
+        "exit 0",
+    );
+    assert!(
+        images_cleanup_would_remove(&env, &unlabelled).is_empty(),
+        "an image with no owner label was reclaimed"
+    );
+
+    let ours = env.base.root().join("ours.sh");
+    write_image_provider(&ours, id, tag, "mirage", &env.own_runtime(), "exit 0");
+    assert_eq!(
+        images_cleanup_would_remove(&env, &ours),
+        vec![tag.to_string()],
+        "an image mirage built under this runtime directory must be \
+         reclaimable, or the two assertions above proved nothing"
+    );
+}
+
 /// A real container engine on this machine that already has the image
 /// these tests need, preferring podman exactly as mirage does.
 ///

@@ -643,9 +643,13 @@ async fn a_session_with_no_borrowers_does_not_wait_for_any() {
 async fn a_lease_is_counted_until_it_is_dropped() {
     let run = start(1).await;
 
-    let first = run.attach().expect("a healthy session accepts a borrower");
+    let first = run
+        .attach(None)
+        .expect("a healthy session accepts a borrower");
     assert_eq!(run.borrowers(), 1);
-    let second = run.attach().expect("several terminals may borrow at once");
+    let second = run
+        .attach(None)
+        .expect("several terminals may borrow at once");
     assert_eq!(run.borrowers(), 2);
 
     drop(second);
@@ -664,7 +668,9 @@ async fn teardown_does_not_begin_while_a_borrower_holds_a_lease() {
     // while another terminal was mid-job removed that job's emulator
     // socket and scratch directory underneath it.
     let run = start(1).await;
-    let lease = run.attach().expect("a healthy session accepts a borrower");
+    let lease = run
+        .attach(None)
+        .expect("a healthy session accepts a borrower");
 
     let destroying = tokio::spawn({
         let run = Arc::clone(&run);
@@ -703,7 +709,7 @@ async fn a_session_that_is_tearing_down_refuses_new_borrowers() {
     let run = start(1).await;
     run.destroy().await;
     assert!(
-        run.attach().is_none(),
+        run.attach(None).is_none(),
         "a destroyed session handed out a lease on itself"
     );
 }
@@ -715,7 +721,7 @@ async fn teardown_tells_the_borrowers_it_is_not_waiting() {
     // having its container removed or its emulator socket deleted
     // mid-syscall.
     let run = start(1).await;
-    let _lease = run.attach().unwrap();
+    let _lease = run.attach(None).unwrap();
 
     let told = tokio::spawn({
         let run = Arc::clone(&run);
@@ -743,18 +749,27 @@ async fn teardown_tells_the_borrowers_it_is_not_waiting() {
 /// A process standing in for one a `mirage exec` started and then failed
 /// to reap, killed when the test ends however it ends.
 ///
-/// Tagged exactly as a real one is — [`ENV_SESSION`] and [`ENV_RUNTIME`],
-/// which is the whole marker — because that tag is the only thing that
-/// survives the borrower dying, and finding it is what the code under
-/// test does. Spawned directly rather than through an `Exec`, since the
-/// point is that it belongs to no exec of the run's.
+/// Tagged exactly as a real one is — [`ENV_SESSION`] and [`ENV_RUNTIME`]
+/// say which session it is in, and `MIRAGE_EXEC` which invocation started
+/// it — because that tag is the only thing that survives the borrower
+/// dying, and finding it is what the code under test does. Spawned
+/// directly rather than through an `Exec`, since the point is that it
+/// belongs to no exec of the run's.
 struct Borrowed(std::process::Child);
 
 impl Borrowed {
+    /// A stand-in whose exec id is a borrower's: the shape `mirage exec`
+    /// builds for itself, which is by construction not one the run has
+    /// ever issued.
     fn spawn(session: &mirage_core::session::SessionId) -> Self {
+        Self::tagged(session, &format!("x-{}-stand-in", std::process::id()))
+    }
+
+    fn tagged(session: &mirage_core::session::SessionId, exec: &str) -> Self {
         use mirage_core::container::{ENV_RUNTIME, ENV_SESSION, owning_runtime};
         Self(
             std::process::Command::new("/bin/sh")
+                .env(mirage_supervisor::spec::ENV_EXEC, exec)
                 // `exec`, so there is exactly one tagged process and the
                 // test is not racing a shell's own child.
                 .args(["-c", "exec sleep 600"])
@@ -793,6 +808,26 @@ impl Borrowed {
             std::thread::sleep(Duration::from_millis(20));
         }
     }
+
+    /// The same wait, for a test whose *runtime* has to keep running.
+    ///
+    /// Blocking the thread is fine when what will end the process has
+    /// already happened — a teardown that was awaited — and fatal when it
+    /// has not: these tests wait on a sweep that runs in the run's own
+    /// task, on this very runtime, so a `std::thread::sleep` here would
+    /// stop the thing being waited for and time out every time.
+    async fn ends_within(&mut self, timeout: Duration) -> bool {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            if matches!(self.0.try_wait(), Ok(Some(_))) {
+                return true;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
 }
 
 impl Drop for Borrowed {
@@ -829,6 +864,193 @@ async fn a_borrower_that_died_does_not_leave_its_workload_in_the_session() {
         "pid {pid} was started in this session by a borrower that died, and \
          outlived the run that owned the session"
     );
+}
+
+/// Attach to `run`'s control socket the way `mirage exec` does, and hand
+/// back the connection that *is* the lease.
+///
+/// Over a real socket rather than through `Run::attach`, because what
+/// these tests are about is the run noticing a borrower it can only see
+/// as a connection: the peer credentials, the disconnect and the sweep
+/// that follows are all on this path and on no other.
+async fn attach_over_the_socket(
+    path: &std::path::Path,
+) -> tokio_util::codec::Framed<tokio::net::UnixStream, tokio_util::codec::LengthDelimitedCodec> {
+    use futures::{SinkExt as _, StreamExt as _};
+    use mirage_core::proto::{Request, Response, codec};
+
+    let stream = tokio::net::UnixStream::connect(path)
+        .await
+        .expect("the run is serving its socket");
+    let mut framed = tokio_util::codec::Framed::new(stream, codec());
+    framed
+        .send(serde_json::to_vec(&Request::Attach).unwrap().into())
+        .await
+        .unwrap();
+    let frame = framed
+        .next()
+        .await
+        .expect("the run answers an attach")
+        .unwrap();
+    match serde_json::from_slice::<Response>(&frame).unwrap() {
+        Response::Description(_) => framed,
+        Response::Error(e) => panic!("the run refused a borrower: {e}"),
+    }
+}
+
+/// A run serving its control socket, with the socket kept alive.
+async fn serving(run: &Arc<Run>) -> (std::path::PathBuf, tokio::task::JoinHandle<()>) {
+    let path = mirage_core::paths::run_socket_path(run.id());
+    let socket = mirage_supervisor::rpc::ControlSocket::bind(&path)
+        .await
+        .expect("the control socket binds");
+    let run = Arc::clone(run);
+    let serving = tokio::spawn(async move { socket.serve(run).await });
+    (path, serving)
+}
+
+#[tokio::test]
+async fn a_borrower_that_disappears_has_its_workload_reaped_before_teardown() {
+    // `kill -9` on a `mirage exec` *while its run carries on*. Teardown
+    // already swept up after a borrower that died — but only at teardown,
+    // so a run that lasts all afternoon left the borrower's workload
+    // running in the session all afternoon: holding the emulated device,
+    // and untouchable by `mirage cleanup`, which will not reclaim a live
+    // session's processes and is right not to. `mirage exec --help`
+    // promises the workload "dies with it"; this is the half of that
+    // promise the run has to keep.
+    let run = start(1).await;
+    let (path, served) = serving(&run).await;
+
+    let borrower = attach_over_the_socket(&path).await;
+    let mut stranded = Borrowed::spawn(run.id());
+    let pid = stranded.pid();
+    assert!(process_alive(pid), "the setup must leave a live process");
+
+    // The borrower goes away without stopping what it started, which is
+    // what a `SIGKILL` looks like from this side of the socket.
+    drop(borrower);
+
+    assert!(
+        stranded.ends_within(Duration::from_secs(30)).await,
+        "pid {pid} was started in session {} by a borrower that is gone, and \
+         is still running in it",
+        run.id()
+    );
+
+    served.abort();
+    run.destroy().await;
+}
+
+#[tokio::test]
+async fn a_departing_borrower_does_not_take_the_runs_own_workload_with_it() {
+    // The sweep's whole hazard. Everything in a session carries the same
+    // session mark — that is what one session means — so a run that
+    // reaped by that mark alone would answer a borrower's disconnect by
+    // killing its own running workload, which is very much worse than
+    // the leak it is fixing.
+    let run = start(1).await;
+    let (path, served) = serving(&run).await;
+
+    let (exec, mut output) = run
+        .exec(&def(&run, "sleep 600", None))
+        .await
+        .expect("the run's own workload starts");
+    let drain = tokio::spawn(async move { while output.recv().await.is_some() {} });
+    let ours = exec.live_pids();
+    assert!(!ours.is_empty(), "the run must have a workload to protect");
+
+    let borrower = attach_over_the_socket(&path).await;
+    let stranded = Borrowed::spawn(run.id());
+    drop(borrower);
+
+    // The borrower's leftover is what goes; the run's own workload is
+    // what stays. Asserted in that order, so the sweep has demonstrably
+    // run by the time the survival check is made — otherwise this passes
+    // for a sweep that never happened at all.
+    let mut stranded = stranded;
+    assert!(
+        stranded.ends_within(Duration::from_secs(30)).await,
+        "the borrower's leftover survived the sweep"
+    );
+    for pid in &ours {
+        assert!(
+            process_alive(*pid),
+            "the run's own workload (pid {pid}) was killed by another \
+             terminal's `mirage exec` exiting"
+        );
+    }
+    assert!(
+        !exec.is_ended(),
+        "the run's own exec was ended underneath it"
+    );
+
+    served.abort();
+    run.destroy().await;
+    let _ = drain.await;
+}
+
+#[tokio::test]
+async fn a_departing_borrower_does_not_take_a_second_borrowers_workload_with_it() {
+    // Two terminals borrowing at once is ordinary, and the first of them
+    // finishing is exactly when this sweep runs. The second borrower's
+    // processes carry a foreign exec mark just as a stranded one does;
+    // what separates them is that theirs still has a live borrower above
+    // it, and that borrower still holds its lease.
+    let run = start(1).await;
+
+    // A stand-in for the borrower that is staying: a process holding a
+    // lease, with a tagged workload of its own beneath it.
+    let mut staying = std::process::Command::new("/bin/sh")
+        .args(["-c", "sleep 600 & echo $!; wait"])
+        .env(mirage_supervisor::spec::ENV_EXEC, "x-999999-staying")
+        .env(mirage_core::container::ENV_SESSION, run.id().as_str())
+        .env(
+            mirage_core::container::ENV_RUNTIME,
+            mirage_core::container::owning_runtime(),
+        )
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("the second borrower starts");
+    let workload: u32 = {
+        use std::io::BufRead as _;
+        let stdout = staying.stdout.take().expect("piped");
+        let mut line = String::new();
+        std::io::BufReader::new(stdout)
+            .read_line(&mut line)
+            .unwrap();
+        line.trim().parse().expect("the pid of its workload")
+    };
+    let held = run
+        .attach(Some(staying.id()))
+        .expect("a healthy session accepts a borrower");
+
+    // And the one that leaves.
+    let (path, served) = serving(&run).await;
+    let leaving = attach_over_the_socket(&path).await;
+    let mut stranded = Borrowed::spawn(run.id());
+    drop(leaving);
+
+    assert!(
+        stranded.ends_within(Duration::from_secs(30)).await,
+        "the departed borrower's leftover survived the sweep"
+    );
+    assert!(
+        process_alive(workload),
+        "pid {workload} belongs to a borrower that is still attached, and was \
+         killed because a different borrower left"
+    );
+    assert!(
+        process_alive(staying.id()),
+        "the second borrower itself was killed"
+    );
+
+    drop(held);
+    let _ = staying.kill();
+    let _ = staying.wait();
+    served.abort();
+    run.destroy().await;
 }
 
 #[tokio::test]
@@ -1134,6 +1356,116 @@ async fn a_single_process_exec_writes_straight_to_the_terminal() {
         "an inheriting exec must pipe nothing through mirage"
     );
     run.destroy().await;
+}
+
+// ---------------------------------------------------------------------
+// Cancelling a bring-up that is still in flight
+// ---------------------------------------------------------------------
+
+/// A container engine that answers `--version` and then wedges.
+///
+/// `image inspect` is the first blocking provider call a containerised
+/// bring-up makes, so hanging there puts the run in exactly the state
+/// this test is about: inside a child process that no future can be
+/// dropped to hurry along. `exec` so the script *is* the sleep — killing
+/// the provider then kills the wait, rather than leaving a minute-long
+/// orphan behind for the rest of the suite.
+fn wedged_provider(dir: &std::path::Path, probed: &std::path::Path) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt as _;
+    let script = dir.join("wedged-provider.sh");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\n\
+             if [ \"$1\" = image ] && [ \"$2\" = inspect ]; then\n\
+             \t: > {probed}\n\
+             \texec sleep 120\n\
+             fi\n\
+             exit 0\n",
+            probed = probed.display()
+        ),
+    )
+    .expect("the fake provider is written");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
+        .expect("the fake provider is executable");
+    script
+}
+
+#[tokio::test]
+async fn tearing_down_ends_a_container_bring_up_rather_than_waiting_it_out() {
+    // The `Cancel` switch has thorough tests in `mirage_container` and
+    // one in the supervisor for teardown flipping it — and every one of
+    // them constructs the switch itself. The single line of production
+    // code that hands a session's switch to the engine it is meant to
+    // interrupt had none, so deleting `.with_cancel(cancel)` from
+    // `Run::bring_up_containers` left the whole suite green while a
+    // Ctrl-C during a ten-minute image pull went back to sitting out the
+    // rest of that pull with mirage looking like it had ignored the
+    // signal.
+    //
+    // This is the only test that can catch that, because it is the only
+    // one that lets the real bring-up build the real engine.
+    isolate();
+    let dir = tempfile::tempdir().expect("scratch dir");
+    let probed = dir.path().join("probed");
+    let provider = wedged_provider(dir.path(), &probed);
+
+    let mut p = profile(1);
+    p.containerize = Some(mirage_core::profile::ContainerizedDef {
+        provider: Some(provider.to_string_lossy().into_owned()),
+        image: "img:latest".to_string(),
+        mounts: Vec::new(),
+        ports: Vec::new(),
+        devices: Vec::new(),
+        groups: Vec::new(),
+        hacks: Vec::new(),
+    });
+
+    let run = Arc::new(
+        Run::start(CreateSessionRequest {
+            id: None,
+            profile: MaybeRef::Owned(p),
+            workdir: "/tmp".to_string(),
+            daemon: false,
+        })
+        .expect("run starts"),
+    );
+
+    // Wait for the bring-up to be provably *inside* the provider. Without
+    // this the teardown below could beat it there, the engine would
+    // refuse to start at all, and the test would pass whether or not the
+    // switch was ever wired up.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    while !probed.exists() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the bring-up never reached the container engine, so this test \
+             would have proved nothing about cancelling one"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    // Generously less than the provider's own sleep, and generously more
+    // than a cancellation costs: the engine polls its switch every 25ms.
+    let started = std::time::Instant::now();
+    tokio::time::timeout(Duration::from_secs(30), run.destroy())
+        .await
+        .expect("teardown must end the bring-up it waits for, not wait it out");
+    let waited = started.elapsed();
+    assert!(
+        waited < Duration::from_secs(20),
+        "teardown sat out the provider it was supposed to interrupt: {waited:?}"
+    );
+
+    // And it ended for the right reason. The timing alone would also be
+    // satisfied by a provider that happened to die on its own, so the
+    // fingerprint of `ContainerError::Cancelled` — which nothing but the
+    // switch produces — is what says the interrupt is why.
+    let reason = format!("{:?}", run.health());
+    assert!(
+        reason.contains("interrupted while"),
+        "the bring-up did not end as a cancellation: {reason}"
+    );
 }
 
 /// A daemon that will not start must fail the session, not become a

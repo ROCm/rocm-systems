@@ -101,6 +101,110 @@ fn topology_create_show_delete() {
     assert!(!list.lines().any(|l| l.trim() == "t1"), "{list}");
 }
 
+/// A minimal but complete agent document, for the tests that need an
+/// agent of their own.
+///
+/// Written rather than taken from the builtins because both tests below
+/// delete it, and a pristine builtin refuses to be deleted — mirage would
+/// write it straight back, so reporting success would be a lie.
+const A_MINIMAL_AGENT: &str = r#"{"vm":{},"topology":{"root":{"name":"soc","type":"soc"}}}"#;
+
+#[test]
+fn a_topology_naming_an_agent_that_is_not_there_is_refused() {
+    // The two write verbs held references to different standards.
+    // `profile create` follows the chain — its emulator backend has to,
+    // to answer "can you run this?" — and refuses a reference that
+    // resolves to nothing. `topology create` checked only that the name
+    // was a legal filename, so this exited 0 and wrote a document that
+    // fails at every later command, with nothing said at the moment the
+    // mistake was made.
+    let env = Env::new();
+    let err = env.fails(&["topology", "create", "t-ghost", "--agent", "ghostagent"]);
+    assert!(err.contains("dangling agent reference"), "{err}");
+    assert!(err.contains("ghostagent"), "{err}");
+    assert!(err.contains("mirage agent list"), "{err}");
+    // And it names the document holding the reference — which is the
+    // word the user just typed, and the one they need to fix it.
+    assert!(
+        err.contains("the topology \"t-ghost\""),
+        "the error must name the document that holds the reference: {err}"
+    );
+    let list = env.ok(&["topology", "list"]);
+    assert!(
+        !list.lines().any(|l| l.trim() == "t-ghost"),
+        "a refused topology reached the disk anyway: {list}"
+    );
+
+    // The same command succeeds once the agent exists, which is what
+    // makes the refusal a diagnosis rather than a ban.
+    let agent = env.root().join("agent.json");
+    std::fs::write(&agent, A_MINIMAL_AGENT).unwrap();
+    env.ok(&["agent", "import", "ghostagent", agent.to_str().unwrap()]);
+    env.ok(&["topology", "create", "t-ghost", "--agent", "ghostagent"]);
+}
+
+#[test]
+fn deleting_a_document_says_which_others_it_just_broke() {
+    // The delete is allowed: these files are the user's and mirage has no
+    // veto over which of them exist. Saying nothing is not. A reference
+    // that stops resolving surfaces later, in a command with no visible
+    // connection to the delete, as an error about a name the user has
+    // half forgotten typing.
+    let env = Env::new();
+    let agent = env.root().join("agent.json");
+    std::fs::write(&agent, A_MINIMAL_AGENT).unwrap();
+    env.ok(&["agent", "import", "doomed", agent.to_str().unwrap()]);
+    env.ok(&["topology", "create", "t-refers", "--agent", "doomed"]);
+
+    let out = env.run(&["agent", "delete", "doomed", "--force"]);
+    assert!(out.status.success(), "the delete itself must go through");
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        said.contains("topology t-refers"),
+        "deleting an agent must name what still refers to it: {said}"
+    );
+    let list = env.ok(&["agent", "list"]);
+    assert!(!list.lines().any(|l| l.trim() == "doomed"), "{list}");
+
+    // A profile naming a topology is the same breakage one level up.
+    // Built by rewriting a real profile rather than by hand, so the
+    // document is exactly the shape mirage writes.
+    let mut profile: serde_json::Value = serde_json::from_str(&env.ok(&[
+        "profile",
+        "create",
+        "seed",
+        "--emulator",
+        TEST_EMULATOR,
+        "--no-input",
+        "--json",
+    ]))
+    .unwrap();
+    env.ok(&["topology", "create", "t-named"]);
+    profile["name"] = serde_json::json!("by-name");
+    profile["emulator"]["topology"] = serde_json::json!("t-named");
+    let path = env.root().join("by-name.json");
+    std::fs::write(&path, profile.to_string()).unwrap();
+    env.ok(&["profile", "import", path.to_str().unwrap()]);
+
+    let out = env.run(&["topology", "delete", "t-named", "--force"]);
+    assert!(out.status.success(), "the delete itself must go through");
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        said.contains("profile by-name"),
+        "deleting a topology must name the profile that refers to it: {said}"
+    );
+
+    // And a document nobody names is deleted without a word about
+    // referrers, or the warning would be noise on the ordinary path.
+    env.ok(&["topology", "create", "t-lonely"]);
+    let out = env.run(&["topology", "delete", "t-lonely", "--force"]);
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !said.contains("referring"),
+        "an unreferenced document was reported as breaking something: {said}"
+    );
+}
+
 #[test]
 fn the_builtin_agents_are_unpacked_on_first_use() {
     // Every invocation writes any missing builtins, so a fresh machine
@@ -250,30 +354,62 @@ fn a_run_serves_a_socket_only_while_it_is_alive() {
     assert!(!env.run_socket_dir().join(format!("{id}.sock")).exists());
 }
 
+// `interrupting_a_run_takes_its_workload_with_it` used to sit here. It is
+// `strain.rs::interrupting_a_run_tears_down_its_workload` line for line —
+// same signal, same tagged sleep, same `assert_no_leaks` — except that
+// the strain copy also asserts the scratch directory went. Two full
+// bring-ups for one property, and the weaker of the two would have been
+// the one to keep.
+
 #[test]
-fn interrupting_a_run_takes_its_workload_with_it() {
+fn an_interrupted_run_exits_with_128_plus_the_signal() {
+    // The convention every shell and CI system reads a killed job by, and
+    // the one `mirage run` has to speak because it reports its workload's
+    // exit code as its own. Three commits this cycle depend on it — the
+    // interrupt that arrives during bring-up returns it directly, the one
+    // that arrives during the workload inherits it from the workload, and
+    // `SIGHUP` reaches the handling at all rather than taking the default
+    // action — and nothing asserted the number that comes out.
+    //
+    // `SIGHUP` is the one worth the extra bring-up: unhandled it is fatal
+    // by default, so the failure it guards against is not "the wrong
+    // code" but "no teardown at all", and its exit code is the cheapest
+    // outward sign of which of the two happened.
     let env = Env::new();
     if skip_without_emulator() {
         return;
     }
     env.create_profile("p");
-    let tag = marker("interrupt");
-    let started = env.root().join("workload-started");
 
-    let script = format!("touch {}; {}", started.display(), tagged_sleep(&tag));
-    let mut run = env.spawn_run(&["--profile", "p"], &["/bin/sh", "-c", &script]);
-    run.await_ready(Duration::from_secs(90));
-    wait_for("the workload to start", Duration::from_secs(30), || {
-        started.exists()
-    });
+    for (signal, expected) in [
+        (Signal::SIGINT, 130),
+        (Signal::SIGTERM, 143),
+        (Signal::SIGHUP, 129),
+    ] {
+        let tag = marker("exit-code");
+        let started = env.root().join(format!("started-{signal:?}"));
+        let script = format!("touch {}; {}", started.display(), tagged_sleep(&tag));
+        let mut run = env.spawn_run(&["--profile", "p"], &["/bin/sh", "-c", &script]);
+        run.await_ready(Duration::from_secs(90));
+        // Signalling a run whose workload has not started yet takes the
+        // bring-up path, which returns the same number for a different
+        // reason — so the test would pass without saying anything about
+        // the path it is named for.
+        wait_for("the workload to start", Duration::from_secs(30), || {
+            started.exists()
+        });
 
-    // A workload leads its own process group, so the terminal's Ctrl-C
-    // never reaches it: mirage catches the signal and forwards it. Losing
-    // that forwarding leaves the workload running with nothing supervising
-    // it, still holding the emulated device.
-    run.signal(Signal::SIGINT);
-    run.wait(Duration::from_secs(30));
-    assert_no_leaks(&tag);
+        run.signal(signal);
+        let out = run.wait(Duration::from_secs(30));
+        assert_eq!(
+            out.status.code(),
+            Some(expected),
+            "{signal:?} must leave `mirage run` exiting 128 + {}: {}",
+            signal as i32,
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_no_leaks(&tag);
+    }
 }
 
 #[test]
@@ -1060,24 +1196,33 @@ fn a_profile_reference_that_escapes_the_config_directory_is_refused() {
 /// script reports success for work it never did.
 #[test]
 fn a_declined_delete_changes_nothing_and_reports_that_it_did_not() {
-    use std::io::Write as _;
-
     let env = Env::new();
     if skip_without_emulator() {
         return;
     }
     env.create_profile("survivor");
 
-    // Answered, deliberately, with "no".
+    // Answered, deliberately, with "no" — from a real terminal, because
+    // that is now the only place mirage will ask. A pipe carrying the
+    // byte `n` is not a person saying no, and treating it as one is what
+    // let a cron job read its own input as a decline and carry on.
+    let pty = nix::pty::openpty(None, None).unwrap();
     let mut child = env
         .mirage()
         .args(["--json", "profile", "delete", "survivor"])
-        .stdin(std::process::Stdio::piped())
+        // The prompt needs a terminal on stdin to be offered at all; the
+        // answer is written to the master below.
+        .stdin(std::process::Stdio::from(pty.slave.try_clone().unwrap()))
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
-    child.stdin.take().unwrap().write_all(b"n\n").unwrap();
+    {
+        use std::io::Write as _;
+        let mut master = std::fs::File::from(pty.master);
+        master.write_all(b"n\n").unwrap();
+        master.flush().unwrap();
+    }
     let out = child.wait_with_output().unwrap();
     assert_eq!(
         out.status.code(),

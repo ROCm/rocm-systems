@@ -40,7 +40,16 @@
 //!   is reset to the shipped version.
 //! * A profile is checked before it lands, not when a session later tries
 //!   to use it: its name, the topology and agent references inside it,
-//!   and whether its emulator backend will accept it at all.
+//!   and whether its emulator backend will accept it at all. A topology
+//!   is checked the same way, for the same reason — see [`topology_put`].
+//!
+//! # A delete says what it broke
+//!
+//! Nothing here refuses a delete because another document refers to the
+//! victim: the files are the user's. But a reference that stops resolving
+//! is a failure they will meet later, in a command that has no visible
+//! connection to the delete, so [`referrers_to`] names the documents that
+//! just lost their target and the delete says so on the way out.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -321,6 +330,121 @@ fn guard_delete(kind: DocKind, name: &str) -> Result<()> {
     )))
 }
 
+/// One document that names another.
+///
+/// Kept as a kind and a name rather than flattened to a string because
+/// the two are what a user needs to go and fix it: which command edits
+/// it, and which argument to give that command.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Reference {
+    /// The kind of document holding the reference.
+    pub kind: DocKind,
+    /// Its name, spelled as the command line addresses it.
+    pub name: String,
+}
+
+impl std::fmt::Display for Reference {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}", self.kind.as_str(), self.name)
+    }
+}
+
+/// Every document on disk that refers to `target` by name.
+///
+/// Nothing refers to a profile, so asking about one is an empty answer
+/// rather than a mistake.
+///
+/// A document that cannot be read or parsed is passed over. It is not
+/// evidence of a reference — mirage cannot see one in it — and treating
+/// "unreadable" as "referring" would attach a warning about somebody's
+/// broken file to an unrelated delete.
+///
+/// The comparison is per kind: an agent named `MI350X` and one named
+/// `mi350x` are the same document and a topology may spell the reference
+/// either way, where topology names are stored verbatim and are not.
+#[must_use]
+pub fn referrers_to(target: DocKind, name: &str) -> Vec<Reference> {
+    let wanted = target.canonical(name);
+    let same = |reference: &str| target.canonical(reference) == wanted;
+    let mut found = Vec::new();
+
+    if target == DocKind::Agent {
+        for topology in topology_list().unwrap_or_default() {
+            let Ok(def) =
+                crate::state::read_json::<TopologyDef>(&DocKind::Topology.path(&topology))
+            else {
+                continue;
+            };
+            if matches!(&def.agent, MaybeRef::Ref(agent) if same(agent)) {
+                found.push(Reference {
+                    kind: DocKind::Topology,
+                    name: topology,
+                });
+            }
+        }
+    }
+
+    if matches!(target, DocKind::Agent | DocKind::Topology) {
+        for profile in profile_list().unwrap_or_default() {
+            let Ok(def) = crate::state::read_json::<ProfileDef>(&DocKind::Profile.path(&profile))
+            else {
+                continue;
+            };
+            // A profile reaches an agent through the topology it carries
+            // inline, and reaches a topology directly. Both are the same
+            // breakage to whoever runs the profile afterwards.
+            let refers = match (&def.emulator.topology, target) {
+                (MaybeRef::Ref(topology), DocKind::Topology) => same(topology),
+                (MaybeRef::Owned(topology), DocKind::Agent) => {
+                    matches!(&topology.agent, MaybeRef::Ref(agent) if same(agent))
+                }
+                _ => false,
+            };
+            if refers {
+                found.push(Reference {
+                    kind: DocKind::Profile,
+                    name: profile,
+                });
+            }
+        }
+    }
+
+    found.sort();
+    found
+}
+
+/// Say which documents a delete has just broken.
+///
+/// The delete itself is allowed: these files are the user's and mirage
+/// does not get a veto over which of them exist. What it may not do is
+/// stay silent, which is what it did — `deleted agent mi350x` exited 0
+/// and left every topology naming that agent failing at the next command
+/// with an error about a reference the user had no reason to connect to
+/// the delete they had just run.
+///
+/// A warning rather than a refusal, and after the fact rather than
+/// before: deleting a document and then repointing what referred to it is
+/// an ordinary way to work, and a prompt in the middle of it would be
+/// friction for the case that is not a mistake.
+fn warn_broken_referrers(kind: DocKind, name: &str, referrers: &[Reference]) {
+    if referrers.is_empty() {
+        return;
+    }
+    let named: Vec<String> = referrers.iter().map(Reference::to_string).collect();
+    tracing::warn!(
+        "deleting the {kind} {name} leaves {} referring to a {kind} that is no longer \
+         there: {}. Each will fail wherever that reference is followed until it is \
+         repointed or a {kind} of that name exists again.",
+        if referrers.len() == 1 {
+            "one document".to_string()
+        } else {
+            format!("{} documents", referrers.len())
+        },
+        named.join(", "),
+        kind = kind.as_str(),
+    );
+}
+
 /// Reject a document name that would escape its directory.
 ///
 /// Every path here is built by interpolation —
@@ -437,6 +561,49 @@ pub fn validate_topology_refs(topology: &TopologyDef) -> Result<()> {
     }
 }
 
+/// The document a reference was read out of.
+///
+/// A dangling reference is a fact about *two* documents, and the one a
+/// user recognises is the one they named: told only that "a topology
+/// refers to the agent \"ghost\"", someone with a dozen topologies has to
+/// grep the config directory to find out which. The name is optional
+/// because the resolvers are also reached from paths that genuinely do
+/// not know it — a profile arriving over a run's socket carries a
+/// topology reference that no name of the caller's ever passed through.
+#[derive(Debug, Clone, Copy)]
+pub struct Referrer<'a> {
+    /// The kind of document the reference was found in.
+    kind: DocKind,
+    /// Its name, when whoever followed the reference knew it.
+    name: Option<&'a str>,
+}
+
+impl<'a> Referrer<'a> {
+    /// The referring document, named.
+    #[must_use]
+    pub fn named(kind: DocKind, name: &'a str) -> Self {
+        Self {
+            kind,
+            name: Some(name),
+        }
+    }
+
+    /// A referring document of this kind whose name is not known here.
+    #[must_use]
+    pub fn anonymous(kind: DocKind) -> Self {
+        Self { kind, name: None }
+    }
+
+    /// How an error names it: the definite article and the name when
+    /// there is one, and the indefinite article when there is not.
+    fn describe(self) -> String {
+        match self.name {
+            Some(name) => format!("the {} {}", self.kind.as_str(), shown(name)),
+            None => format!("a {}", self.kind.as_str()),
+        }
+    }
+}
+
 /// Report a reference that points at a document which is not there.
 ///
 /// A reference is followed by interpolating it into a path, so a missing
@@ -444,20 +611,22 @@ pub fn validate_topology_refs(topology: &TopologyDef) -> Result<()> {
 /// the filesystem's account of an operation nobody asked for, naming a
 /// file the user has never typed and cannot connect to anything they did
 /// type. What actually happened is that one document names another that
-/// does not exist, and none of the three things the reader needs — which
-/// kind of document did the referring, which name failed to resolve, and
-/// how to see the names that would have worked — is in the errno.
+/// does not exist, and none of the four things the reader needs — which
+/// document did the referring, which name failed to resolve, where mirage
+/// looked, and how to see the names that would have worked — is in the
+/// errno.
 ///
-/// The referring kind is a property of where the reference lives rather
+/// The referring *kind* is a property of where the reference lives rather
 /// than of the call: a topology is referred to by a profile, and an agent
-/// by a topology, which is why the two resolvers pass a constant. See
-/// [`crate::topology::store::get`] and [`crate::agent::store::get`].
+/// by a topology. The referring *name* is not, which is why it travels in
+/// with the call. See [`crate::topology::store::get_referred_by`] and
+/// [`crate::agent::store::get_referred_by`].
 #[must_use]
-pub fn dangling_ref(referrer: DocKind, missing: DocKind, name: &str) -> MirageError {
-    let referrer = referrer.as_str();
+pub fn dangling_ref(referrer: Referrer<'_>, missing: DocKind, name: &str) -> MirageError {
+    let referrer = referrer.describe();
     let kind = missing.as_str();
     MirageError::other(format!(
-        "dangling {kind} reference: a {referrer} refers to the {kind} {}, and there is \
+        "dangling {kind} reference: {referrer} refers to the {kind} {}, and there is \
          no such {kind} (mirage looked for {}). Run `mirage {kind} list` for the \
          {kind} names this machine has.",
         shown(name),
@@ -560,15 +729,42 @@ pub fn topology_get(name: &str) -> Result<TopologyDef> {
 /// discarded. This one used to be the odd one out and went straight to
 /// disk.
 ///
+/// The agent reference is *resolved* here as well, not merely checked for
+/// shape. A profile naming a topology that does not exist is refused when
+/// it is written — the emulator backend follows the chain to answer
+/// "can you run this?" — and the same user writing a topology naming an
+/// agent that does not exist got exit 0 and a document that fails at
+/// every later command. Two parallel verbs cannot hold references to
+/// different standards.
+///
 /// # Errors
 ///
-/// Returns an error if the name or the agent reference is invalid, if a
-/// topology of that name already exists and is not an untouched builtin,
-/// or if the document cannot be written.
+/// Returns an error if the name or the agent reference is invalid, if the
+/// agent reference resolves to nothing, if a topology of that name
+/// already exists and is not an untouched builtin, or if the document
+/// cannot be written.
 pub fn topology_put(name: &str, topology: &TopologyDef) -> Result<Stored> {
     validate_name(DocKind::Topology, name)?;
     validate_topology_refs(topology)?;
+    resolve_topology_refs(Referrer::named(DocKind::Topology, name), topology)?;
     put_document(DocKind::Topology, name, topology)
+}
+
+/// Refuse a topology whose agent reference points at nothing.
+///
+/// Existence, not a parse: this answers "is there an agent by that name",
+/// and an agent that is on disk but malformed is a different complaint,
+/// owed to whoever reads it rather than to whoever writes a topology
+/// beside it. Reading it here would also make writing a topology depend
+/// on every agent staying parseable by *this* build.
+fn resolve_topology_refs(referrer: Referrer<'_>, topology: &TopologyDef) -> Result<()> {
+    let MaybeRef::Ref(agent) = &topology.agent else {
+        return Ok(());
+    };
+    if DocKind::Agent.path(agent).exists() {
+        return Ok(());
+    }
+    Err(dangling_ref(referrer, DocKind::Agent, agent))
 }
 
 /// Delete a topology.
@@ -585,7 +781,13 @@ pub fn topology_delete(name: &str) -> Result<()> {
         return Err(MirageError::not_found(DocKind::Topology, name));
     }
     guard_delete(DocKind::Topology, name)?;
-    std::fs::remove_file(&path).map_err(|e| MirageError::io(path, e))
+    // Collected before the file goes, so a delete that fails warns about
+    // nothing; reported after, so the warning describes what happened
+    // rather than what was about to.
+    let referrers = referrers_to(DocKind::Topology, name);
+    std::fs::remove_file(&path).map_err(|e| MirageError::io(path, e))?;
+    warn_broken_referrers(DocKind::Topology, name, &referrers);
+    Ok(())
 }
 
 /// List every agent name, sorted.
@@ -637,7 +839,12 @@ pub fn agent_delete(name: &str) -> Result<()> {
         return Err(MirageError::not_found(DocKind::Agent, name));
     }
     guard_delete(DocKind::Agent, name)?;
-    std::fs::remove_file(&path).map_err(|e| MirageError::io(path, e))
+    // See [`topology_delete`] for why this is read before the removal and
+    // said after it.
+    let referrers = referrers_to(DocKind::Agent, name);
+    std::fs::remove_file(&path).map_err(|e| MirageError::io(path, e))?;
+    warn_broken_referrers(DocKind::Agent, name, &referrers);
+    Ok(())
 }
 
 /// The `.json` stems in a directory, sorted.
@@ -776,6 +983,7 @@ mod tests {
 
         // Topologies are stored verbatim, so their case is nobody's
         // business but the user's.
+        seed_agent();
         topology_put("MI350X-1x8", &topology()).unwrap();
         assert_eq!(topology_list().unwrap(), vec!["MI350X-1x8"]);
         crate::paths::clear_test_root();
@@ -815,6 +1023,7 @@ mod tests {
         let _g = crate::paths::test_env_lock();
         let dir = tempfile::tempdir().unwrap();
         crate::paths::set_test_root(dir.path());
+        seed_agent();
 
         let mut mine = topology();
         mine.gpus_per_node = 3;
@@ -977,6 +1186,15 @@ mod tests {
         }
     }
 
+    /// Put the agent [`topology`] refers to on disk.
+    ///
+    /// `topology_put` resolves that reference rather than merely checking
+    /// its shape, so a test that stores a topology has to store its agent
+    /// first — which is the order a user works in too.
+    fn seed_agent() {
+        agent_put("mi350x", &AgentDef::default()).unwrap();
+    }
+
     #[test]
     fn a_missing_directory_lists_as_empty() {
         let _g = crate::paths::test_env_lock();
@@ -1040,6 +1258,7 @@ mod tests {
         let _g = crate::paths::test_env_lock();
         let dir = tempfile::tempdir().unwrap();
         crate::paths::set_test_root(dir.path());
+        seed_agent();
 
         const WORKERS: u32 = 8;
         let start = std::sync::Barrier::new(WORKERS as usize);
@@ -1109,6 +1328,9 @@ mod tests {
         assert!(err.contains("ghosttopo"), "{err}");
         assert!(err.contains("mirage topology list"), "{err}");
 
+        // Anonymous because nothing one frame up knew a profile name:
+        // the indefinite article is the honest form, and inventing a name
+        // would be worse than not having one.
         let err = crate::agent::store::get("ghostagent")
             .unwrap_err()
             .full_message();
@@ -1118,6 +1340,148 @@ mod tests {
         assert!(err.contains("ghostagent"), "{err}");
         assert!(err.contains("mirage agent list"), "{err}");
 
+        crate::paths::clear_test_root();
+    }
+
+    #[test]
+    fn a_topology_naming_an_agent_that_is_not_there_is_refused_like_a_profile() {
+        // The two write verbs held references to different standards.
+        // `profile create` follows the chain (the emulator backend has to,
+        // to answer "can you run this?") and refuses a reference that
+        // resolves to nothing; `topology create` checked only that the
+        // name was a legal filename and wrote the document, so the user
+        // got exit 0 and a topology that fails at every later command.
+        let _g = crate::paths::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        crate::paths::set_test_root(dir.path());
+
+        let mut ghostly = topology();
+        ghostly.agent = MaybeRef::Ref("ghostagent".to_string());
+        let err = topology_put("mine", &ghostly).unwrap_err().to_string();
+        assert!(err.contains("dangling agent reference"), "{err}");
+        assert!(err.contains("ghostagent"), "{err}");
+        assert!(err.contains("mirage agent list"), "{err}");
+        assert!(
+            topology_list().unwrap().is_empty(),
+            "a refused topology may not reach the disk"
+        );
+
+        // The same document is accepted once the agent it names exists,
+        // which is what makes the refusal a diagnosis rather than a ban.
+        agent_put("ghostagent", &AgentDef::default()).unwrap();
+        topology_put("mine", &ghostly).unwrap();
+        assert_eq!(topology_list().unwrap(), vec!["mine"]);
+
+        // An inline agent refers to nothing and is nobody's to resolve.
+        let mut inline = topology();
+        inline.agent = MaybeRef::Owned(AgentDef::default());
+        topology_put("inline", &inline).unwrap();
+        crate::paths::clear_test_root();
+    }
+
+    #[test]
+    fn a_dangling_reference_names_the_document_that_holds_it() {
+        // "a topology refers to the agent \"ghostagent\"" is unactionable
+        // on a machine with a dozen topologies: the reader has to grep the
+        // config directory to find out which one, and they had just typed
+        // its name on the command line.
+        let _g = crate::paths::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        crate::paths::set_test_root(dir.path());
+
+        let mut ghostly = topology();
+        ghostly.agent = MaybeRef::Ref("ghostagent".to_string());
+        let err = topology_put("mi350x-1x8", &ghostly)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("the topology \"mi350x-1x8\""), "{err}");
+
+        // And directly, for the callers that resolve a reference rather
+        // than write one.
+        let err = crate::agent::store::get_referred_by(
+            Referrer::named(DocKind::Topology, "mi350x-1x8"),
+            "ghostagent",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("the topology \"mi350x-1x8\""), "{err}");
+
+        let err = crate::topology::store::get_referred_by(
+            Referrer::named(DocKind::Profile, "cdna4"),
+            "ghosttopo",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("the profile \"cdna4\""), "{err}");
+        assert!(err.contains("ghosttopo"), "{err}");
+
+        crate::paths::clear_test_root();
+    }
+
+    #[test]
+    fn deleting_a_document_reports_what_still_refers_to_it() {
+        // A delete used to succeed in silence and break every document
+        // that named the victim, which the user then met as an error
+        // about a reference, in an unrelated command, with nothing
+        // connecting it to what they had done.
+        let _g = crate::paths::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        crate::paths::set_test_root(dir.path());
+        seed_agent();
+
+        topology_put("by-name", &topology()).unwrap();
+        // Spelled the other way: agents are addressed case-insensitively,
+        // so this is the same reference written differently and has to be
+        // found as one.
+        let mut lowercase = topology();
+        lowercase.agent = MaybeRef::Ref("mi350x".to_string());
+        topology_put("lowercase", &lowercase).unwrap();
+
+        // A profile reaching the agent through an inline topology is the
+        // same breakage to whoever runs it.
+        let inline = profile_referring_to("inline", MaybeRef::Owned(topology()));
+        profile_put(&inline).unwrap();
+        // …and a profile naming the topology directly is a referrer of
+        // *that*.
+        profile_put(&profile_referring_to(
+            "byname",
+            MaybeRef::Ref("by-name".to_string()),
+        ))
+        .unwrap();
+
+        assert_eq!(
+            referrers_to(DocKind::Agent, "MI350X"),
+            vec![
+                Reference {
+                    kind: DocKind::Profile,
+                    name: "inline".to_string()
+                },
+                Reference {
+                    kind: DocKind::Topology,
+                    name: "by-name".to_string()
+                },
+                Reference {
+                    kind: DocKind::Topology,
+                    name: "lowercase".to_string()
+                },
+            ]
+        );
+        assert_eq!(
+            referrers_to(DocKind::Topology, "by-name"),
+            vec![Reference {
+                kind: DocKind::Profile,
+                name: "byname".to_string()
+            }]
+        );
+
+        // Nothing refers to a profile, and a document nobody names is not
+        // a warning waiting to happen.
+        assert!(referrers_to(DocKind::Profile, "inline").is_empty());
+        assert!(referrers_to(DocKind::Agent, "never-referenced").is_empty());
+
+        // The delete still goes through: these files are the user's.
+        agent_delete("mi350x").unwrap();
+        assert!(agent_list().unwrap().is_empty());
         crate::paths::clear_test_root();
     }
 

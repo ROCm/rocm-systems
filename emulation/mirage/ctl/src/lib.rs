@@ -325,7 +325,7 @@ pub fn validate_profile(def: &ProfileDef) -> Result<(), String> {
     let kind = &def.emulator.emulator;
     match mirage_core::emulator::get_emulator_backend(kind) {
         Some(backend) => backend.validate_profile(def),
-        None => Err(format!("unknown emulator `{kind}`")),
+        None => Err(unknown_emulator(kind)),
     }
 }
 
@@ -557,10 +557,11 @@ pub struct ExecArgsCli {
     /// live — one terminal running the job, another one exec'ing into it
     /// — mirage picks it. Naming one is only needed when several runs
     /// are up at once.
-    ///
-    /// A flag rather than a positional because everything after `--`
-    /// belongs to the command: with both positional, `mirage exec --
-    /// bash` could equally mean "session bash".
+    // A flag rather than a positional because everything after `--`
+    // belongs to the command: with both positional, `mirage exec --
+    // bash` could equally mean "session bash". Not a doc comment:
+    // `--help` prints those, and why the flag is shaped this way is a
+    // maintainer's question rather than a user's.
     #[arg(long, short = 's')]
     pub session: Option<SessionId>,
 
@@ -669,9 +670,10 @@ pub enum StateCmd {
         /// Don't prompt for confirmation.
         #[arg(short = 'f', long)]
         force: bool,
-        /// Also remove the mirage config directory (profiles +
-        /// topologies). Builtin topologies will be re-written the
-        /// next time mirage runs.
+        /// Also remove the mirage config directory: every agent,
+        /// topology and profile, including the ones you wrote. Mirage
+        /// writes its own builtin agents, topologies and profiles back
+        /// the next time it runs; nothing else comes back.
         #[arg(long)]
         all: bool,
     },
@@ -783,12 +785,12 @@ pub struct RunArgs {
     /// upstream `rocjitsu` spelling `--attach`, which means the same
     /// thing here: mirage owns the emulator's whole lifecycle, so
     /// "attach to a daemon" and "use a daemon" are one request.
-    ///
-    /// Declared here rather than only rewritten on the way in.
-    /// `mirage run --attach` already worked, but the rewrite happens
-    /// before clap ever sees the arguments, so `mirage run --help`
-    /// omitted a spelling the drop-in help offers — and the one page a
-    /// user checks a `run` flag against was the page that denied it.
+    // Declared here rather than only rewritten on the way in. `mirage
+    // run --attach` already worked, but the rewrite happens before clap
+    // ever sees the arguments, so `mirage run --help` omitted a spelling
+    // the drop-in help offers — and the one page a user checks a `run`
+    // flag against was the page that denied it. Not a doc comment:
+    // `--help` prints those.
     #[arg(long, visible_alias = "attach", conflicts_with = "in_process")]
     daemon: bool,
     /// Run the emulator in-process (local mode) instead of the default
@@ -861,6 +863,150 @@ impl Default for RunArgs {
 }
 
 // =============================================================================
+// A mistyped mirage flag is not a workload
+// =============================================================================
+
+/// The status clap exits with on a usage error, and therefore the one a
+/// usage error mirage diagnoses for itself must use too.
+const USAGE_EXIT: u8 = 2;
+
+/// Whether `arg` looks like a flag rather than a value.
+///
+/// Deliberately stricter than "starts with `-`": a negative number is a
+/// value, and a lone `-` is the conventional name for standard input.
+/// Neither is a mistyped flag, and reading them as one would replace a
+/// message about the real problem with a message about this one. A short
+/// flag is a letter, so that is the test.
+fn is_flag_token(arg: &str) -> bool {
+    if let Some(long) = arg.strip_prefix("--") {
+        return !long.is_empty();
+    }
+    arg.strip_prefix('-')
+        .and_then(|rest| rest.chars().next())
+        .is_some_and(char::is_alphabetic)
+}
+
+/// The mirage flag that ended up inside a workload's `argv`, if one did.
+///
+/// `run` and `exec` declare `argv` as `trailing_var_arg` +
+/// `allow_hyphen_values`, which is what lets a *workload's* own flags
+/// through untouched: `mirage run -- ./app --verbose` runs `./app
+/// --verbose` rather than raising mirage's `--verbose`. The same setting
+/// is what lets a mirage flag mirage does not have become the command.
+/// Clap cannot match `--nodes`, so the positional starts there, and
+/// `mirage run --nodes 2 -- ./app` brought a whole emulated machine up
+/// and then ran a program called `--nodes` in it — with the program the
+/// user actually named discarded into its arguments.
+///
+/// The rule is the one the drop-in spelling of the same invocation
+/// already applies: everything after `--` is the workload's and
+/// everything before it is mirage's, so a flag-shaped token before the
+/// separator is a usage error. What makes it detectable after the parse
+/// is that clap consumes the separator only when it reaches one before
+/// the positional has begun — so a `--` still *in* `argv` is one the
+/// parse never got to, which is exactly the case where a token before it
+/// was read as the command. `mirage run -- git log -- path` keeps its
+/// separator too, and is not this: the first token is a program name.
+fn misplaced_flag(argv: &[String]) -> Option<&str> {
+    let first = argv.first()?;
+    if !is_flag_token(first) {
+        return None;
+    }
+    argv.iter().any(|a| a == "--").then_some(first.as_str())
+}
+
+/// Every long flag `spec` accepts, without its `--`, sorted so that a
+/// suggestion is deterministic when several are equally close.
+///
+/// Asked of clap rather than listed, so a flag added to `RunArgs` or
+/// `ExecArgsCli` is suggestible the moment it is declared. Aliases count:
+/// `--nproc_per_node` is a real spelling of a real flag, and a "did you
+/// mean" that could not name it would be pointing at the wrong list.
+///
+/// The root command's global flags (`--json`, `--verbose`) are not here.
+/// They are declared in the binary crate, which this one cannot see —
+/// and clap accepts them after the subcommand, so a correctly spelled
+/// one never reaches this path at all.
+fn long_flags(spec: &clap::Command) -> Vec<String> {
+    // `help` and `version` are clap's own: accepted everywhere, and not
+    // in the declared argument list of a `Command` that has not been
+    // built yet.
+    let mut longs = vec!["help".to_string(), "version".to_string()];
+    for arg in spec.get_arguments() {
+        longs.extend(arg.get_long().map(str::to_string));
+        longs.extend(
+            arg.get_all_aliases()
+                .unwrap_or_default()
+                .into_iter()
+                .map(str::to_string),
+        );
+    }
+    longs.sort();
+    longs.dedup();
+    longs
+}
+
+/// The accepted flag closest to `token`, for a "did you mean".
+///
+/// Containment in either direction, which is what a dropped or
+/// mis-remembered word looks like: `--nodes` for `--num-nodes`,
+/// `--profil` for `--profile`. Anything shorter than three characters is
+/// left alone, because at that length almost everything contains almost
+/// everything.
+fn nearest_flag(token: &str, known: &[String]) -> Option<String> {
+    let name = token.trim_start_matches('-');
+    let name = name.split('=').next().unwrap_or(name);
+    if name.len() < 3 {
+        return None;
+    }
+    known
+        .iter()
+        .filter(|candidate| candidate.contains(name) || name.contains(candidate.as_str()))
+        .min_by_key(|candidate| candidate.len().abs_diff(name.len()))
+        .map(|candidate| format!("--{candidate}"))
+}
+
+/// The usage message for an invocation whose workload starts with a
+/// mirage flag, or `None` when it does not.
+///
+/// Word for word the message the drop-in path prints for
+/// `mirage --nodes 2 -- ./app`, because `mirage run --nodes 2 -- ./app`
+/// is the same mistake in the more common spelling and the two must not
+/// disagree about it. Only the usage line and the `--help` pointer name
+/// the subcommand, since that is the part that differs.
+fn misplaced_flag_error(argv: &[String], spec: &clap::Command) -> Option<String> {
+    let flag = misplaced_flag(argv)?;
+    let name = spec.get_name();
+    let mut msg = format!(
+        "error: unexpected argument '{flag}' found\n\n\
+         Everything before `--` is read as mirage's own flags and everything \
+         after it as the\ncommand to run, so '{flag}' is a mistyped flag \
+         rather than part of the workload.\n"
+    );
+    if let Some(nearest) = nearest_flag(flag, &long_flags(spec)) {
+        msg.push_str(&format!("\n  tip: a similar flag exists: '{nearest}'\n"));
+    }
+    msg.push_str(&format!(
+        "\nUsage: mirage {name} [OPTIONS] -- <COMMAND> [ARGS]...\n\n\
+         For more information, try 'mirage {name} --help'."
+    ));
+    Some(msg)
+}
+
+/// Print that message and the code to exit with, for the invocations
+/// that have one.
+///
+/// On stderr and as plain text even under `--json`, which is how clap
+/// reports a usage error and how the drop-in path reports this one: the
+/// argument list never parsed into a request, so there is no result
+/// document for the failure to belong to.
+fn refuse_misplaced_flag(argv: &[String], spec: &clap::Command) -> Option<ExitCode> {
+    let usage = misplaced_flag_error(argv, spec)?;
+    eprintln!("{usage}");
+    Some(ExitCode::from(USAGE_EXIT))
+}
+
+// =============================================================================
 // Dispatch
 // =============================================================================
 
@@ -922,7 +1068,13 @@ async fn dispatch_inner(cmd: CtlCmd, json: bool) -> anyhow::Result<ExitCode> {
             emulators_cmd(long, json);
             Ok(ExitCode::from(0))
         }
-        CtlCmd::Exec(a) => run::exec_cmd(a).await,
+        CtlCmd::Exec(a) => {
+            let spec = ExecArgsCli::augment_args(clap::Command::new("exec"));
+            match refuse_misplaced_flag(&a.argv, &spec) {
+                Some(code) => Ok(code),
+                None => run::exec_cmd(a).await,
+            }
+        }
         CtlCmd::State(c) => state_cmd(c, json).await,
         CtlCmd::Cleanup { dry_run } => {
             let reclaimed = cleanup(dry_run).await;
@@ -932,7 +1084,13 @@ async fn dispatch_inner(cmd: CtlCmd, json: bool) -> anyhow::Result<ExitCode> {
             // out to remove is still there.
             Ok(ExitCode::from(u8::from(unfinished > 0)))
         }
-        CtlCmd::Run(a) => run::run_cmd(a).await,
+        CtlCmd::Run(a) => {
+            let spec = RunArgs::augment_args(clap::Command::new("run"));
+            match refuse_misplaced_flag(&a.argv, &spec) {
+                Some(code) => Ok(code),
+                None => run::run_cmd(a).await,
+            }
+        }
         CtlCmd::Paths => {
             print_paths(json);
             Ok(ExitCode::from(0))
@@ -1177,17 +1335,24 @@ fn report_change(json: bool, kind: DocKind, name: &str, verb: &str) -> anyhow::R
 /// which is how `--force` came to be documented on one of them and not
 /// the others.
 ///
-/// Two things a delete has to say, and used to say neither of:
+/// Three things a delete has to say, and used to say none of:
 ///
 /// * A declined prompt is not a completed delete. Both exited 0, and in
 ///   text mode both printed nothing at all, so `mirage profile delete x`
 ///   answered with `n` was indistinguishable from one that worked. It
 ///   now exits [`DECLINED`] and says so.
+/// * There is nothing to decline when there was nothing there. The
+///   prompt used to come first, so a mistyped name asked "delete profile
+///   proflie?" and, on `n`, reported a document that never existed as
+///   one deliberately spared — and on `y` reported it as missing, which
+///   is the answer the user wanted before they were asked anything.
+///   Whether the document is there is settled first now.
 /// * Deleting a builtin the user has *edited* really does remove their
-///   copy — and the shipped one immediately takes its place, by design.
-///   `deleted profile mi350x` followed by `mi350x` still being listed
-///   reads as a delete that failed. Saying which one went, and what came
-///   back, is the difference.
+///   copy, and the shipped one takes its place. `deleted profile mi350x`
+///   followed by `mi350x` still being listed reads as a delete that
+///   failed. Saying which one went, and what came back, is the
+///   difference — see [`restore_shipped`] for why that claim is made
+///   after the shipped version is on disk rather than before.
 fn delete_document(
     json: bool,
     kind: DocKind,
@@ -1196,6 +1361,13 @@ fn delete_document(
     delete: impl FnOnce(&str) -> mirage_core::error::Result<()>,
 ) -> anyhow::Result<ExitCode> {
     let word = kind.as_str();
+    // Through the store's own name check first, so a name that could
+    // never address a document (`../../etc/passwd`) is refused as the
+    // bad name it is rather than probed for on disk.
+    mirage_core::store::validate_name(kind, name)?;
+    if !kind.path(name).exists() {
+        return Err(mirage_core::error::MirageError::not_found(kind, name).into());
+    }
     if !force && !confirm(&format!("delete {word} {name}?"))? {
         if json {
             println!(
@@ -1212,10 +1384,8 @@ fn delete_document(
         }
         return Ok(ExitCode::from(DECLINED));
     }
-    // Asked before the delete, because afterwards the file mirage rewrote
-    // is indistinguishable from the one that was there.
-    let shipped_returns = mirage_core::store::shipped(kind, name).is_some();
     delete(name)?;
+    let restored = restore_shipped(kind, name);
     if json {
         println!(
             "{}",
@@ -1223,18 +1393,45 @@ fn delete_document(
                 "kind": word,
                 "name": name,
                 "deleted": true,
-                "shipped_version_restored": shipped_returns,
+                "shipped_version_restored": restored,
             }))?
         );
-    } else if shipped_returns {
+    } else if restored {
         println!(
             "deleted your {word} {name}; mirage ships a builtin of that name, \
-             so the shipped version is back in its place"
+             and the shipped version is back in its place"
         );
     } else {
         println!("deleted {word} {name}");
     }
     Ok(ExitCode::from(0))
+}
+
+/// Put the shipped version of a just-deleted builtin back, and report
+/// whether it is there.
+///
+/// The claim this answers — "the shipped version is back in its place" —
+/// used to be printed, and asserted as `shipped_version_restored` under
+/// `--json`, on the strength of mirage *shipping* a document of that
+/// name. Nothing had written it: a delete removes a file and stops, and
+/// the shipped copy reappears only when the next command's
+/// [`ensure_builtins_present`] notices it missing. So `mirage agent
+/// delete mi300x` said the builtin was back while the directory it names
+/// no longer held it, and a script that believed the field went looking
+/// for a file that would not exist until it ran mirage again.
+///
+/// Writing it here is what makes the sentence true when it is printed,
+/// and the same call every command already makes on the way in, so
+/// nothing new can appear on disk that would not have appeared anyway.
+/// The verdict is then read off the filesystem rather than inferred: a
+/// config directory mirage cannot write is exactly the case where the
+/// old claim was worst, and it is the case where this one says no.
+fn restore_shipped(kind: DocKind, name: &str) -> bool {
+    if mirage_core::store::shipped(kind, name).is_none() {
+        return false;
+    }
+    ensure_builtins_present();
+    kind.path(name).exists()
 }
 
 /// Read one document named on the command line, or stdin for `-`,
@@ -1292,12 +1489,47 @@ fn build_containerize(
             hacks: Vec::new(),
         })),
         None => {
-            if !mounts.is_empty() || !ports.is_empty() || provider.is_some() {
-                anyhow::bail!("--mount/--port/--container-provider require --image");
+            let given = container_flags_given(mounts, ports, provider.as_ref(), &[]);
+            if !given.is_empty() {
+                anyhow::bail!(
+                    "{} {} --image",
+                    and_list(&given),
+                    Plural(given.len()).pick("requires", "require")
+                );
             }
             Ok(None)
         }
     }
+}
+
+/// Which of the container flags the user actually passed, in the order
+/// they are documented.
+///
+/// The refusal used to name all of them — `--mount/--port/
+/// --container-provider/--hack require a containerised profile or
+/// --image` — which reads as a rule rather than as a report, and leaves
+/// the user checking their own command line for three flags they never
+/// typed. Naming the one they did is the whole message.
+fn container_flags_given<'a>(
+    mounts: &[String],
+    ports: &[String],
+    provider: Option<&'a String>,
+    hacks: &[HackArg],
+) -> Vec<&'a str> {
+    let mut given = Vec::new();
+    if !mounts.is_empty() {
+        given.push("--mount");
+    }
+    if !ports.is_empty() {
+        given.push("--port");
+    }
+    if provider.is_some() {
+        given.push("--container-provider");
+    }
+    if !hacks.is_empty() {
+        given.push("--hack");
+    }
+    given
 }
 
 /// Build a [`ProfileDef`] for `profile create`.
@@ -1331,14 +1563,7 @@ fn build_profile_create(a: ProfileCreateArgs, interactive: bool) -> anyhow::Resu
     let spec = match a.emulator.as_deref() {
         Some(n) => match find_emulator(n) {
             Some(s) => s,
-            None => anyhow::bail!(
-                "unknown emulator: {n}. Known: {}",
-                registry()
-                    .into_iter()
-                    .map(|e| e.name)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
+            None => anyhow::bail!(unknown_emulator(n)),
         },
         None if interactive => {
             let specs = registry();
@@ -1604,6 +1829,21 @@ fn parse_plugin(spec: &str) -> anyhow::Result<(String, SimpleMap)> {
     Ok((name.to_string(), SimpleMap::new()))
 }
 
+/// The one way mirage says it has no such emulator.
+///
+/// Three sentences said this in one file — a bare `unknown emulator
+/// \`x\``, an `unknown emulator: x. Known: …` and an `unknown emulator
+/// \`x\`; available backends: …` — so which of them a user saw depended
+/// on whether they had mistyped `--emulator` on a `create` or on a
+/// `run`, and only two of the three told them what to type instead. The
+/// list is the useful half and belongs in all of them.
+fn unknown_emulator(name: &str) -> String {
+    format!(
+        "unknown emulator `{name}`; this build has: {}. See `mirage emulators`.",
+        name_list(registry().into_iter().map(|e| e.name).collect())
+    )
+}
+
 /// The option names a backend accepts, in schema order.
 fn option_names(spec: &EmulatorInfo) -> Vec<String> {
     spec.options_schema.iter().map(|o| o.name.clone()).collect()
@@ -1615,6 +1855,43 @@ fn name_list(names: Vec<String>) -> String {
         "(none)".to_string()
     } else {
         names.join(", ")
+    }
+}
+
+/// `a`, `a and b`, `a, b and c` — a list inside a sentence.
+///
+/// [`name_list`] is the other one, and the two are not interchangeable:
+/// that one enumerates a machine's answer to "what would have worked",
+/// where the comma is a delimiter and an empty list has to say so. This
+/// one is prose, read aloud, and never empty because its callers only
+/// build it from things the user typed.
+fn and_list(items: &[&str]) -> String {
+    match items {
+        [] => String::new(),
+        [only] => (*only).to_string(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// The words a sentence about `count` things needs, so that one count
+/// cannot inflect two of them differently.
+///
+/// A five-way `if n == 1` in a single `eprintln!` is where this started;
+/// sixty lines below it a second sentence gave up and wrote
+/// `process(es)`, which reads as a form nobody finished filling in. Both
+/// ask this now, and so does every sentence added since.
+#[derive(Clone, Copy, Debug)]
+struct Plural(usize);
+
+impl Plural {
+    /// `one` when there is exactly one of them, `many` otherwise.
+    ///
+    /// Both forms are given rather than a suffix appended, because
+    /// English does not agree with itself about the suffix: a noun takes
+    /// `s` in the plural and a verb takes it in the singular, and
+    /// `process` takes `es`.
+    fn pick<'a>(self, one: &'a str, many: &'a str) -> &'a str {
+        if self.0 == 1 { one } else { many }
     }
 }
 
@@ -1761,36 +2038,76 @@ fn profile_node_count(profile: &ProfileDef) -> Option<u32> {
     }
 }
 
+/// The sections a document has to have before it is an emulator config
+/// rather than merely some JSON.
+///
+/// `vm` is the machine to emulate and `topology` is how its devices are
+/// wired together; a synthesised config always carries both, and the
+/// emulator refuses to start without either. Everything else a config
+/// can say has a default, so requiring more would refuse files that
+/// work.
+const CONFIG_SECTIONS: [&str; 2] = ["vm", "topology"];
+
 /// Resolve `--config <path>` to an absolute path, having checked that it
 /// is a config file the emulator can actually be given.
 ///
-/// Read here rather than trusted, because the backend's own failure is
-/// almost silent: an unreadable or malformed config makes the emulator
-/// daemon refuse to start, and the session then continues in-process with
-/// nothing on stdout, a `tracing::warn!` nobody sees without `-v`, and an
-/// exit code of zero. In-process is not a smaller version of the daemon —
-/// it cannot share GPU memory between processes, so a multi-GPU RCCL job
-/// silently becomes a different experiment.
+/// Read here rather than trusted, and read the same way whichever
+/// emulation mode the run asked for. That is the point of doing it here:
+/// the two modes used to disagree about the same file. `--daemon` starts
+/// the emulator daemon during bring-up, which parses the config and
+/// refuses — loudly, and with advice to "pass `--in-process` to run
+/// without it". `--in-process` parses nothing: the interposer loads the
+/// config lazily, in the workload, at its first GPU call, so a workload
+/// that never makes one exits 0 having emulated nothing from a config
+/// mirage had already been told was unusable. Following mirage's own
+/// advice therefore turned a refusal into a silent success, and the
+/// advice is only honest while a config bad enough to stop the daemon is
+/// stopped before either mode is chosen.
+///
+/// The check is structural, and deliberately not a second
+/// implementation of the emulator's own parser — two of those can only
+/// ever agree or be a bug: the file exists, is readable, is a JSON
+/// object, and has the sections that make it a description of a machine
+/// (see [`CONFIG_SECTIONS`]). What is left to the backend is the
+/// contents of those sections, and a config that gets that far and is
+/// still refused is refused by the emulator saying so. What mirage
+/// itself will not accept no longer depends on which mode was asked
+/// for, which is the part that was making the advice dishonest.
 ///
 /// # Errors
 ///
-/// Returns an error naming the path and what is wrong with it.
+/// Returns an error naming the path — as the user spelled it, which is
+/// the spelling they can compare against what they typed — and what is
+/// wrong with it.
 fn check_config_file(path: &str) -> anyhow::Result<std::path::PathBuf> {
     let abs = std::fs::canonicalize(path).map_err(|e| {
-        anyhow::anyhow!("--config {path:?}: {e}. Name an emulator config file that exists.")
+        anyhow::anyhow!("--config {path}: {e}. Name an emulator config file that exists.")
     })?;
     // `read` covers both halves of "can the emulator open this": a
     // directory fails with `EISDIR`, an unreadable file with `EACCES`.
-    let bytes =
-        std::fs::read(&abs).map_err(|e| anyhow::anyhow!("--config {}: {e}", abs.display()))?;
-    serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|e| {
+    let bytes = std::fs::read(&abs).map_err(|e| anyhow::anyhow!("--config {path}: {e}"))?;
+    let doc: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| {
         anyhow::anyhow!(
-            "--config {}: this is not a usable emulator config ({e}). \
+            "--config {path}: this is not a usable emulator config ({e}). \
              It must be a JSON document — the same file the upstream \
-             `rocjitsu --config` takes.",
-            abs.display()
+             `rocjitsu --config` takes."
         )
     })?;
+    let missing: Vec<&str> = CONFIG_SECTIONS
+        .iter()
+        .copied()
+        .filter(|section| doc.get(section).is_none())
+        .collect();
+    if !missing.is_empty() {
+        anyhow::bail!(
+            "--config {path}: this is JSON, but not an emulator config — it has no {} \
+             {}. A config describes the machine to emulate, and is the same file the \
+             upstream `rocjitsu --config` takes; `mirage profile show <name>` is the \
+             profile mirage would have built one from.",
+            and_list(&missing),
+            Plural(missing.len()).pick("section", "sections")
+        );
+    }
     Ok(abs)
 }
 
@@ -1855,7 +2172,17 @@ fn apply_profile_overrides(
             }
             None => {
                 let image = a.image.clone().ok_or_else(|| {
-                    anyhow::anyhow!("--mount/--port/--container-provider/--hack require a containerised profile or --image")
+                    let given = container_flags_given(
+                        &a.mounts,
+                        &a.ports,
+                        a.container_provider.as_ref(),
+                        &a.hacks,
+                    );
+                    anyhow::anyhow!(
+                        "{} {} a containerised profile or --image",
+                        and_list(&given),
+                        Plural(given.len()).pick("requires", "require")
+                    )
                 })?;
                 profile.containerize = Some(ContainerizedDef {
                     provider: a.container_provider.clone(),
@@ -1873,12 +2200,7 @@ fn apply_profile_overrides(
     // Emulator overrides.
     if let Some(name) = &a.emulator {
         if find_emulator(name).is_none() {
-            let available = registry()
-                .into_iter()
-                .map(|e| e.name)
-                .collect::<Vec<_>>()
-                .join(", ");
-            anyhow::bail!("unknown emulator `{name}`; available backends: {available}");
+            anyhow::bail!(unknown_emulator(name));
         }
         profile.emulator.emulator = name.clone();
     }
@@ -2647,14 +2969,15 @@ fn builtins_cmd(json: bool) -> anyhow::Result<ExitCode> {
         .flat_map(|(kind, ensured)| ensured.edited.iter().map(move |(n, p)| (*kind, n, p)))
         .collect();
     if !edited.is_empty() {
+        let n = Plural(edited.len());
         eprintln!(
             "mirage: {} builtin document{} differ{} from the one{} mirage ships and \
              {} left alone:",
             edited.len(),
-            if edited.len() == 1 { "" } else { "s" },
-            if edited.len() == 1 { "s" } else { "" },
-            if edited.len() == 1 { "" } else { "s" },
-            if edited.len() == 1 { "was" } else { "were" },
+            n.pick("", "s"),
+            n.pick("s", ""),
+            n.pick("", "s"),
+            n.pick("was", "were"),
         );
         for (kind, name, path) in &edited {
             eprintln!("  {:<9} {name} -> {}", kind.as_str(), path.display());
@@ -2685,15 +3008,19 @@ async fn purge(all: bool, json: bool) -> anyhow::Result<ExitCode> {
     // are unlinked on the way past.
     let live = run::answering_runs().await;
     if !live.is_empty() {
+        let n = Plural(live.len());
         anyhow::bail!(
-            "{} `mirage run` process(es) are still running ({}). \
-             Stop them first: each one owns its session and cleans up \
+            "{} `mirage run` process{} {} still running ({}). \
+             Stop {} first: each one owns its session and cleans up \
              when it exits.",
             live.len(),
+            n.pick("", "es"),
+            n.pick("is", "are"),
             live.iter()
                 .map(SessionId::as_str)
                 .collect::<Vec<_>>()
                 .join(", "),
+            n.pick("it", "them"),
         );
     }
 
@@ -2717,14 +3044,17 @@ async fn purge(all: bool, json: bool) -> anyhow::Result<ExitCode> {
     // be deleted. The check that mattered is the one taken last.
     let racing = run::answering_runs().await;
     if !racing.is_empty() {
+        let n = Plural(racing.len());
         anyhow::bail!(
-            "a `mirage run` started while this purge was working ({}); \
-             nothing further was removed. Stop it and run the purge again.",
+            "{} `mirage run` started while this purge was working ({}); \
+             nothing further was removed. Stop {} and run the purge again.",
+            n.pick("a", "several"),
             racing
                 .iter()
                 .map(SessionId::as_str)
                 .collect::<Vec<_>>()
                 .join(", "),
+            n.pick("it", "them"),
         );
     }
 
@@ -2772,7 +3102,8 @@ async fn purge(all: bool, json: bool) -> anyhow::Result<ExitCode> {
         }
         if !ok {
             eprintln!(
-                "mirage: the purge is incomplete; {unfinished} thing(s) could not be removed"
+                "mirage: the purge is incomplete; {unfinished} thing{} could not be removed",
+                Plural(unfinished).pick("", "s")
             );
         }
     }
@@ -2807,34 +3138,69 @@ fn purge_json(
 
 /// Ask a yes/no question on stderr and read the answer from stdin.
 ///
-/// A prompt nobody can answer is a failure, not a "no". `mirage profile
-/// delete x < /dev/null` reached end-of-file on the first read, took that
-/// for a declined confirmation, deleted nothing and exited 0 — so a
-/// script that forgot `--force` was told its cleanup had run. The
-/// end-of-file case is now named and refused; a piped answer (`echo y |
-/// mirage …`) still works, because that is a stdin with somebody on the
-/// other end of it.
+/// Only ever asked of a terminal. A prompt is a question put to a person
+/// who is watching, and mirage cannot tell whether anybody is on the far
+/// end of a pipe until it has already committed to waiting for them: an
+/// open stdin that never sends a line — a `make` recipe, a CI step, a job
+/// in the background — leaves `mirage topology delete x` blocked forever,
+/// with the prompt itself invisible in whatever collected the output. Not
+/// a terminal therefore means not askable, and `--force` is the answer,
+/// named in the error so it can be found from the log.
+///
+/// End-of-file on a terminal is the same refusal for the same reason:
+/// Ctrl-D is not a "no". Taking it for one is how `mirage profile delete
+/// x < /dev/null` used to delete nothing, exit 0, and tell a script that
+/// forgot `--force` that its cleanup had run.
 ///
 /// stderr rather than stdout: a prompt is not a result, and `--json`
 /// promises stdout carries exactly one document.
 ///
 /// # Errors
 ///
-/// Returns an error if stdin cannot be read, or if it ends without an
-/// answer.
+/// Returns an error if stdin is not a terminal, cannot be read, or ends
+/// without an answer.
 fn confirm(prompt: &str) -> anyhow::Result<bool> {
-    use std::io::{BufRead, Write};
-    eprint!("{prompt} [y/N] ");
-    let _ = std::io::stderr().flush();
-    let mut line = String::new();
-    let stdin = std::io::stdin();
-    if stdin.lock().read_line(&mut line)? == 0 {
+    confirm_answer(prompt, std::io::stdin().is_terminal(), || {
+        use std::io::{BufRead, Write};
+        eprint!("{prompt} [y/N] ");
+        let _ = std::io::stderr().flush();
+        let mut line = String::new();
+        let read = std::io::stdin().lock().read_line(&mut line)?;
+        Ok((read > 0).then_some(line))
+    })
+}
+
+/// The decision itself, separated from the terminal it is taken at.
+///
+/// `ask` prints the prompt and reads one line, returning `None` at
+/// end-of-file. It is called only when there is somebody to read from,
+/// which is the whole of this function: reaching for the prompt first
+/// and discovering afterwards that nobody could answer it is what
+/// blocked, and what printed a question into a log where nobody would
+/// see it.
+///
+/// # Errors
+///
+/// Returns the reason there is no answer: stdin is not a terminal, it
+/// could not be read, or it ended without a reply.
+fn confirm_answer(
+    prompt: &str,
+    interactive: bool,
+    ask: impl FnOnce() -> std::io::Result<Option<String>>,
+) -> anyhow::Result<bool> {
+    if !interactive {
+        anyhow::bail!(
+            "there is nobody to answer \"{prompt}\": stdin is not a terminal, so waiting \
+             for a reply would wait forever. Pass --force to skip the question."
+        );
+    }
+    let Some(line) = ask()? else {
         eprintln!();
         anyhow::bail!(
             "there is nobody to answer \"{prompt}\": stdin ended without a reply. \
              Pass --force to skip the question."
         );
-    }
+    };
     Ok(matches!(
         line.trim().to_ascii_lowercase().as_str(),
         "y" | "yes"
@@ -3075,6 +3441,11 @@ mod tests {
     }
 
     /// Parse `mirage run`'s arguments exactly as the real command does.
+    /// A workload `argv`, written the way it is typed.
+    fn v(argv: &str) -> Vec<String> {
+        argv.split_whitespace().map(str::to_string).collect()
+    }
+
     fn parse_run(args: &[&str]) -> Result<RunArgs, clap::Error> {
         use clap::Parser;
         #[derive(Parser)]
@@ -3288,11 +3659,63 @@ mod tests {
         assert!(e.contains(&missing.display().to_string()), "{e}");
 
         let good = dir.path().join("good.json");
-        std::fs::write(&good, r#"{"vm": {}}"#).unwrap();
+        std::fs::write(&good, r#"{"vm": {}, "topology": {}}"#).unwrap();
         assert!(
             check_config_file(&good.to_string_lossy())
                 .unwrap()
                 .is_absolute()
+        );
+    }
+
+    /// A config that parses and describes nothing is refused here, which
+    /// is the only place both emulation modes pass through.
+    ///
+    /// `--daemon` used to be the only thing that looked: the daemon
+    /// parsed the file during bring-up and refused, advising
+    /// `--in-process` — which parses nothing at all, because the
+    /// interposer loads the config in the workload at its first GPU
+    /// call. Taking mirage's advice therefore turned a config mirage had
+    /// rejected into an exit code of zero, having emulated nothing.
+    #[test]
+    fn a_config_that_describes_no_machine_is_refused_whichever_mode_runs_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let json_but_not_a_config = dir.path().join("nope.json");
+        std::fs::write(&json_but_not_a_config, r#"{"nope": 1}"#).unwrap();
+        let e = check_config_file(&json_but_not_a_config.to_string_lossy())
+            .unwrap_err()
+            .to_string();
+        // Both missing sections, named, and the path the user typed.
+        for expected in ["vm", "topology", "sections"] {
+            assert!(e.contains(expected), "{expected} missing from: {e}");
+        }
+        assert!(
+            e.contains(&json_but_not_a_config.display().to_string()),
+            "{e}"
+        );
+
+        // One section present is still not a machine, and the message
+        // names only the half that is missing.
+        let half = dir.path().join("half.json");
+        std::fs::write(&half, r#"{"vm": {}}"#).unwrap();
+        let e = check_config_file(&half.to_string_lossy())
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("no topology section"), "{e}");
+        assert!(!e.contains("vm and topology"), "{e}");
+
+        // JSON that is not even an object cannot carry a section.
+        let array = dir.path().join("array.json");
+        std::fs::write(&array, "[]").unwrap();
+        assert!(check_config_file(&array.to_string_lossy()).is_err());
+
+        // The path is quoted one way throughout, not three.
+        let missing = dir.path().join("absent.json");
+        let e = check_config_file(&missing.to_string_lossy())
+            .unwrap_err()
+            .to_string();
+        assert!(
+            !e.contains(&format!("{:?}", missing.display().to_string())),
+            "one spelling of the path, unquoted, as `--workdir` uses: {e}"
         );
     }
 
@@ -3735,6 +4158,325 @@ exit 0
     /// line. `profile` is the only field where the two could disagree —
     /// every other one defaults to `None`, an empty `Vec`, or `false` in
     /// both — so it is the only one worth pinning here.
+    /// A mistyped mirage flag is refused rather than executed, in the
+    /// spelling that names the subcommand as well as the one that does
+    /// not.
+    ///
+    /// `mirage --nodes 2 -- ./app` was already refused by the drop-in
+    /// rewriter, before clap saw it. `mirage run --nodes 2 -- ./app` —
+    /// the commoner spelling of the same mistake — brought a whole
+    /// emulated machine up and ran a program called `--nodes` inside it,
+    /// with `./app` handed to it as an argument.
+    #[test]
+    fn a_mistyped_flag_before_the_separator_is_not_the_workload() {
+        use clap::Args as _;
+
+        let run = RunArgs::augment_args(clap::Command::new("run"));
+        let argv = parse_run(&["--nodes", "2", "--", "./app"]).unwrap().argv;
+        assert_eq!(
+            argv,
+            vec!["--nodes", "2", "--", "./app"],
+            "clap reads the whole line as the workload, which is the bug"
+        );
+        let msg = misplaced_flag_error(&argv, &run).expect("`--nodes` is not a `run` flag");
+        assert!(msg.contains("unexpected argument '--nodes'"), "{msg}");
+        assert!(
+            msg.contains("tip: a similar flag exists: '--num-nodes'"),
+            "{msg}"
+        );
+        assert!(
+            msg.contains("Usage: mirage run [OPTIONS] -- <COMMAND> [ARGS]..."),
+            "{msg}"
+        );
+        assert!(msg.contains("try 'mirage run --help'"), "{msg}");
+
+        // `exec` parses its workload by the same rules and must answer
+        // the same way, naming its own page.
+        let exec = ExecArgsCli::augment_args(clap::Command::new("exec"));
+        let msg = misplaced_flag_error(&v("--nodes 2 -- ./app"), &exec)
+            .expect("`--nodes` is not an `exec` flag either");
+        assert!(
+            msg.contains("Usage: mirage exec [OPTIONS] -- <COMMAND> [ARGS]..."),
+            "{msg}"
+        );
+
+        // A flag `run` does accept never reaches this path: clap matched
+        // it, so it is not in `argv` at all.
+        assert_eq!(
+            parse_run(&["--num-nodes", "2", "--", "./app"])
+                .unwrap()
+                .argv,
+            vec!["./app"]
+        );
+    }
+
+    /// The refusal must not fire on a workload that is merely
+    /// flag-shaped, or on one carrying a `--` of its own.
+    #[test]
+    fn a_workloads_own_flags_and_separators_still_pass_through() {
+        use clap::Args as _;
+        let run = RunArgs::augment_args(clap::Command::new("run"));
+        let cases = [
+            // The whole point of `allow_hyphen_values`.
+            "./app --verbose --num-nodes 4",
+            // `git log -- path`: a separator the workload owns, with no
+            // flag before it.
+            "git log -- path",
+            // A program that really is named like a flag, spelled the
+            // only way that can be: after mirage's own separator, which
+            // clap consumes.
+            "--weird",
+            // Nothing at all is `required`'s problem, not this one.
+            "",
+        ];
+        for case in cases {
+            let argv = v(case);
+            assert!(
+                misplaced_flag_error(&argv, &run).is_none(),
+                "{case:?} is a workload, not a usage error"
+            );
+        }
+    }
+
+    /// The two `--help` pages must not carry notes to whoever maintains
+    /// the flags.
+    ///
+    /// A doc comment on a clap field is printed to the user. Two of them
+    /// explained why a flag is declared the way it is — clap aliases, a
+    /// rewrite in the binary crate — which is a maintainer's question
+    /// and reads, on the page a user checks a flag against, as noise
+    /// between them and the answer.
+    #[test]
+    fn help_does_not_explain_the_implementation_to_the_user() {
+        use clap::CommandFactory as _;
+        #[derive(clap::Parser)]
+        struct ExecWrap {
+            #[command(flatten)]
+            exec: ExecArgsCli,
+        }
+        let exec = ExecWrap::command().render_long_help().to_string();
+        assert!(
+            !exec.contains("A flag rather than a positional"),
+            "why `--session` is a flag is not a user's question:\n{exec}"
+        );
+        // What the flag is for is still there.
+        assert!(exec.contains("Session to run in"), "{exec}");
+
+        let run = run_long_help();
+        assert!(
+            !run.contains("Declared here rather than only rewritten"),
+            "why `--attach` is declared here is not a user's question:\n{run}"
+        );
+        assert!(run.contains("[aliases: --attach]"), "{run}");
+    }
+
+    /// A prompt is put only to a terminal, and to nothing else.
+    ///
+    /// End-of-file was already refused, so `mirage topology delete x <
+    /// /dev/null` said so. An *open* stdin that never sends a line — a
+    /// `make` recipe, a CI step, a background job — reached the read and
+    /// stayed there, with the prompt itself buried in whatever collected
+    /// the output.
+    #[test]
+    fn a_prompt_is_never_put_to_something_that_cannot_answer() {
+        let e = confirm_answer("delete topology t1?", false, || {
+            panic!("nothing may be read from a stdin nobody is typing at")
+        })
+        .expect_err("a non-terminal stdin cannot answer");
+        let e = e.to_string();
+        assert!(e.contains("delete topology t1?"), "{e}");
+        assert!(e.contains("--force"), "the way out has to be named: {e}");
+
+        // A terminal is still asked, and still told when the answer runs
+        // out.
+        assert!(confirm_answer("go?", true, || Ok(Some("y\n".to_string()))).unwrap());
+        assert!(!confirm_answer("go?", true, || Ok(Some("n\n".to_string()))).unwrap());
+        let e = confirm_answer("go?", true, || Ok(None))
+            .expect_err("end-of-file is not a \"no\"")
+            .to_string();
+        assert!(e.contains("--force"), "{e}");
+    }
+
+    /// Nothing is deleted, and nothing is asked, about a document that is
+    /// not there.
+    ///
+    /// The prompt came first, so `mirage profile delete proflie` asked
+    /// about a profile that had never existed and then reported the
+    /// answer as though something had been spared.
+    #[test]
+    fn a_name_that_names_nothing_is_answered_before_anybody_is_asked() {
+        let _lock = mirage_core::paths::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(root.path());
+        ensure_builtins_present();
+
+        let e = delete_document(false, DocKind::Profile, "proflie", false, |_| {
+            panic!("nothing may be deleted")
+        })
+        .expect_err("there is no profile of that name")
+        .to_string();
+        assert!(e.contains("proflie"), "{e}");
+        assert!(
+            !e.contains("answer"),
+            "the missing document is the answer, not the prompt: {e}"
+        );
+    }
+
+    /// The shipped version is on disk before mirage says it is back.
+    ///
+    /// Deleting an edited builtin removes the user's copy and the
+    /// shipped one takes its place — but nothing wrote it: the claim was
+    /// made from the fact that mirage *ships* one, and the file only
+    /// reappeared when a later command noticed it missing.
+    #[test]
+    fn a_restored_builtin_is_on_disk_before_it_is_claimed() {
+        let _lock = mirage_core::paths::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(root.path());
+        ensure_builtins_present();
+
+        // Edited, because a pristine builtin is refused a delete
+        // outright: removing it would report a change that never
+        // happened.
+        let mut agent = mirage_core::store::agent_get("mi300x").unwrap();
+        agent.vm.gpu.num_xcds = 7;
+        mirage_core::state::write_json(&mirage_core::paths::agent_path("mi300x"), &agent).unwrap();
+
+        let code = delete_document(false, DocKind::Agent, "mi300x", true, |name| {
+            mirage_core::store::agent_delete(name)
+        })
+        .unwrap();
+        assert_eq!(code, ExitCode::from(0));
+        assert!(
+            mirage_core::paths::agent_path("mi300x").is_file(),
+            "the shipped agent has to be where the message says it is"
+        );
+        assert_eq!(
+            mirage_core::store::agent_get("mi300x")
+                .unwrap()
+                .vm
+                .gpu
+                .num_xcds,
+            0,
+            "and it has to be the shipped one, not the edited copy"
+        );
+    }
+
+    /// A refusal names the container flag that was passed, not the four
+    /// that could have been.
+    #[test]
+    fn the_container_refusal_names_what_was_typed() {
+        let mut p = sample_profile();
+        let a = RunArgs {
+            profile: "mi450x".into(),
+            hacks: vec![HackArg::UpdateGccViaPpa],
+            ..Default::default()
+        };
+        let e = apply_profile_overrides(&mut p, &a)
+            .expect_err("a hack needs an image to build from")
+            .to_string();
+        assert!(e.starts_with("--hack requires"), "{e}");
+        assert!(!e.contains("--mount"), "{e}");
+
+        // Two of them read as a sentence rather than as a slash-list.
+        let a = RunArgs {
+            profile: "mi450x".into(),
+            mounts: vec!["/tmp".to_string()],
+            ports: vec!["8080".to_string()],
+            ..Default::default()
+        };
+        let e = apply_profile_overrides(&mut sample_profile(), &a)
+            .expect_err("a mount needs an image to mount into")
+            .to_string();
+        assert!(e.starts_with("--mount and --port require"), "{e}");
+    }
+
+    /// One sentence for "mirage has no such emulator", wherever it is
+    /// said.
+    #[test]
+    fn every_unknown_emulator_is_reported_the_same_way() {
+        let mut profile = sample_profile();
+        profile.emulator.emulator = EmulatorKind::from("nope");
+        let from_validate = validate_profile(&profile).expect_err("no such backend");
+
+        let mut p = sample_profile();
+        let a = RunArgs {
+            profile: "mi450x".into(),
+            emulator: Some("nope".to_string()),
+            ..Default::default()
+        };
+        let from_run = apply_profile_overrides(&mut p, &a)
+            .expect_err("no such backend")
+            .to_string();
+
+        let a = ProfileCreateArgs {
+            name: Some("p".to_string()),
+            emulator: Some("nope".to_string()),
+            agent: None,
+            num_nodes: None,
+            gpus_per_node: None,
+            description: None,
+            image: None,
+            mounts: Vec::new(),
+            ports: Vec::new(),
+            provider: None,
+            no_input: true,
+        };
+        let from_create = build_profile_create(a, false)
+            .expect_err("no such backend")
+            .to_string();
+
+        assert_eq!(from_validate, from_run, "run and validation must agree");
+        assert_eq!(from_validate, from_create, "create must agree with both");
+        assert!(from_validate.contains("`nope`"), "{from_validate}");
+        assert!(
+            from_validate.contains("mirage emulators"),
+            "the list of what would have worked: {from_validate}"
+        );
+    }
+
+    /// `state purge --all` says what it destroys and what comes back,
+    /// and agents are in both lists.
+    #[test]
+    fn purge_all_admits_that_agents_go_too() {
+        use clap::CommandFactory as _;
+        #[derive(clap::Parser)]
+        struct Wrap {
+            #[command(subcommand)]
+            state: StateCmd,
+        }
+        let help = Wrap::command()
+            .find_subcommand_mut("purge")
+            .expect("state purge is a subcommand")
+            .render_long_help()
+            .to_string();
+        // The flag's own block, not the mention of it in the command's
+        // description: `rsplit` because the declaration comes last.
+        let (_, all) = help.rsplit_once("--all").expect("--all is documented");
+        let all = all.split("\n\n").next().unwrap_or_default().to_string();
+        for word in ["agent", "topolog", "profile"] {
+            assert!(
+                all.matches(word).count() >= 2,
+                "`--all` removes {word}s and writes the builtin ones back; both \
+                 belong in its help:\n{all}"
+            );
+        }
+    }
+
+    /// One count, one set of inflections.
+    #[test]
+    fn a_sentence_agrees_with_its_own_count() {
+        assert_eq!(Plural(1).pick("process", "processes"), "process");
+        assert_eq!(Plural(0).pick("process", "processes"), "processes");
+        assert_eq!(Plural(2).pick("is", "are"), "are");
+        assert_eq!(and_list(&["--mount"]), "--mount");
+        assert_eq!(and_list(&["--mount", "--port"]), "--mount and --port");
+        assert_eq!(
+            and_list(&["--mount", "--port", "--hack"]),
+            "--mount, --port and --hack"
+        );
+    }
+
     #[test]
     fn run_args_default_matches_clap() {
         use clap::Parser;

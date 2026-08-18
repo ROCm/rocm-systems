@@ -272,7 +272,7 @@ pub struct AgentDef {
 pub mod store {
     use super::AgentDef;
     use crate::error::{MirageError, Result};
-    use crate::store::{DocKind, dangling_ref, validate_name};
+    use crate::store::{DocKind, Referrer, dangling_ref, validate_name};
     use std::path::PathBuf;
 
     /// List the names of all agent files on disk.
@@ -299,7 +299,12 @@ pub mod store {
         Ok(out)
     }
 
-    /// Read an agent by name.
+    /// Read an agent by name, for a caller that cannot say which
+    /// topology sent it.
+    ///
+    /// Prefer [`get_referred_by`] wherever the referring topology is in
+    /// scope; see [`crate::topology::store::get`] for why the name of the
+    /// referring document is the half that makes the error actionable.
     ///
     /// # Errors
     ///
@@ -308,10 +313,24 @@ pub mod store {
     /// since a topology is what brought the name here — or if the
     /// document is malformed.
     pub fn get(name: &str) -> Result<AgentDef> {
+        get_referred_by(Referrer::anonymous(DocKind::Topology), name)
+    }
+
+    /// Read an agent by name on behalf of the document that named it.
+    ///
+    /// The referrer may be a topology or the profile that carries one
+    /// inline, which is why it is a value rather than the constant it
+    /// used to be.
+    ///
+    /// # Errors
+    ///
+    /// As [`get`], with the referring document named in a dangling
+    /// reference.
+    pub fn get_referred_by(referrer: Referrer<'_>, name: &str) -> Result<AgentDef> {
         validate_name(DocKind::Agent, name)?;
         let p = crate::paths::agent_path(name);
         if !p.exists() {
-            return Err(dangling_ref(DocKind::Topology, DocKind::Agent, name));
+            return Err(dangling_ref(referrer, DocKind::Agent, name));
         }
         crate::state::read_json(&p)
     }
