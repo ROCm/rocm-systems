@@ -4,6 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 #pragma once
+#include <type_traits>
+
 #include "PtrUnion.hpp"
 #include "PrepDataFuncs.hpp"
 #include "rccl/rccl.h"
@@ -97,6 +99,14 @@ namespace RcclUnitTesting
     size_t          recvcounts[MAX_RANKS*MAX_RANKS];
     size_t          rdispls[MAX_RANKS*MAX_RANKS];
   };
+
+  // OptionalColArgs is shipped whole over the parent<->child pipe (see TestBed PIPE_WRITE /
+  // TestBedChild PIPE_READ), so it MUST stay self-contained: fixed-size fields only, no
+  // std::vector / std::string / owned heap pointer. A non-trivially-copyable member would ship
+  // a pointer that is meaningless in the reused pool worker -> out-of-bounds/SEGV. If this fires,
+  // serialize the offending field by value (size + elements) like numStreamsPerGroup does.
+  static_assert(std::is_trivially_copyable<OptionalColArgs>::value,
+                "OptionalColArgs is sent by value over the IPC pipe; keep it trivially copyable");
 
   // Function pointer for functions that operate on CollectiveArgs
   // e.g. For filling input / computing expected results

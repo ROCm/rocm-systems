@@ -3,10 +3,15 @@
  *
  * See LICENSE.txt for license information
  ************************************************************************/
+#include <csignal>
 #include <unistd.h>
 #include "TestBed.hpp"
 #include <rccl/rccl.h>
 
+// Writes val by raw bytes, so val must be self-contained (POD / trivially copyable): a pointer
+// or std::vector control block would be meaningless in a reused pool worker. Serialize any
+// variable-length field by value (size + elements) instead - see the numStreamsPerGroup handling
+// in InitComms and the static_assert on OptionalColArgs in CollectiveArgs.hpp.
 #define PIPE_WRITE(childId, val)                                        \
   ASSERT_EQ(write(childList[childId]->parentWriteFd, &val, sizeof(val)), sizeof(val))
 
@@ -52,6 +57,11 @@ namespace RcclUnitTesting
     numActiveChildren(0),
     numActiveRanks(0)
   {
+    // Writing to a pipe whose read end has closed (a pool worker died) would otherwise raise
+    // SIGPIPE and terminate the parent. Ignore it so such a write fails with EPIPE and we can
+    // surface a diagnosable error instead of an abrupt death. Idempotent across TestBeds.
+    signal(SIGPIPE, SIG_IGN);
+
     // Collect the number of GPUs
     this->numDevicesAvailable = ev.maxGpus;
     if (ev.verbose) TEST_INFO("Detected %d GPUs", this->numDevicesAvailable);
@@ -91,6 +101,15 @@ namespace RcclUnitTesting
       }
     }
 
+    // A prior config must have been torn down (DestroyComms) before this call. In correct
+    // flow childList is always empty here (DestroyComms clears it on both the pool-reuse and
+    // fork-fresh paths); a non-empty childList means DestroyComms was skipped. Guard both
+    // paths here (the pool-reuse branch below would otherwise silently overwrite childList).
+    if (childList.size() > 0)
+    {
+      FAIL() << "DestroyComms must be called prior to subsequent call to InitComms";
+    }
+
     // ---- Communicator process pool (UT_COMM_POOL): reuse persistent workers ----
     // The 99MB -O0 debug librccl loads its GPU device-code object on a process's first
     // GPU use (~15-30s); it then stays resident, so a second ncclCommInitRank in the same
@@ -102,6 +121,11 @@ namespace RcclUnitTesting
     if (this->poolMode)
     {
       // Lazily fork the persistent pool once (one worker per device).
+      // INVARIANT: each worker's environment is snapshotted at this fork and RCCL's NCCL_PARAM
+      // system caches env in per-process statics on first read. A pooled worker therefore does
+      // NOT observe setenv() the parent performs later. A test that changes env between configs
+      // must call Finalize() (the pool-reset boundary) before the next InitComms so the pool is
+      // re-forked with the new env; otherwise the reused workers silently run under stale env.
       if (this->poolChildren.empty())
       {
         // Size the pool to the devices that actually exist. numDevicesAvailable comes from
@@ -195,11 +219,7 @@ namespace RcclUnitTesting
     if (!this->configUsedPool)
     {
       // ---- Classic fork-fresh path (pool disabled, or an unmappable config) ----
-      if (childList.size() > 0)
-      {
-        TEST_ERROR("DestroyComms must be called prior to subsequent call to InitComms");
-        return;
-      }
+      // (The "DestroyComms must precede InitComms" guard is hoisted above, covering both paths.)
       childList.resize(this->numActiveChildren);
       for (int childId = 0; childId < this->numActiveChildren; ++childId)
       {
