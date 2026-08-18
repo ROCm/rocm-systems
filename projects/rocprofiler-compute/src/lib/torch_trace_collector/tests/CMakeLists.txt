@@ -13,6 +13,7 @@ target_link_libraries(${target} PRIVATE torch-trace-collector gtest_main)
 target_link_options(${target} PRIVATE LINKER:--allow-shlib-undefined)
 
 get_filename_component(_roctx_lib_dir "${ROCTX_LIB}" DIRECTORY)
+set(_torch_lib_search_dirs "${TORCH_INSTALL_PREFIX}/lib")
 set_target_properties(
     ${target}
     PROPERTIES INSTALL_RPATH "${_torch_lib_search_dirs};${_roctx_lib_dir}"
