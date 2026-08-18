@@ -1092,9 +1092,12 @@ class TestCdna5Profile:
                 chunk_overhead=0,
             )
 
-    def test_detect_profile_uses_filename_override(self, tmp_path):
-        xml = tmp_path / 'amdgpu_isa_gfx1250.xml'
-        xml.write_text('<Spec />')
+    def test_detect_profile_uses_public_cdna5_architecture(self, tmp_path):
+        xml = tmp_path / 'amdgpu_isa_cdna5.xml'
+        xml.write_text(
+            '<Spec><ISA><Architecture><ArchitectureName>AMD CDNA 5</ArchitectureName>'
+            '</Architecture></ISA></Spec>'
+        )
         assert _detect_profile(str(xml)) == 'cdna5'
 
     def test_test_encoding_uses_primary_decode_key(self):
