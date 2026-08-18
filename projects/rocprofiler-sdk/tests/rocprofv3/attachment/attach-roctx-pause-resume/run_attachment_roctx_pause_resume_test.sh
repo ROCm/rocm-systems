@@ -41,6 +41,28 @@ wait_for_attach_ready() {
     return 1
 }
 
+wait_for_profiler_attached() {
+    local pid=$1
+    local log_file=$2
+    local max_wait=30
+    local elapsed=0
+    echo "Waiting for rocprofv3 to finish attaching to PID ${pid}..."
+    while [ $elapsed -lt $max_wait ]; do
+        if grep -q "Attaching to PID ${pid} .* :: success" "${log_file}" 2>/dev/null; then
+            echo "rocprofv3 attach completed (${elapsed}s elapsed)"
+            return 0
+        fi
+        if ! kill -0 ${ROCPROF_PID} 2>/dev/null; then
+            echo "rocprofv3 exited before reporting attach success"
+            return 1
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+    echo "Timed out after ${max_wait}s waiting for rocprofv3 attach success"
+    return 1
+}
+
 TEST_APP=$1
 ROCPROFV3=$2
 OUTPUT_DIR=${3:-${PWD}}
@@ -52,6 +74,22 @@ export ROCP_TOOL_ATTACH=1
 
 OUTPUT_SUBDIR="attachment-roctx-${MODE}-output"
 TRIGGER_FILE="${OUTPUT_DIR}/${OUTPUT_SUBDIR}/start-workload"
+ROCPROF_LOG="${OUTPUT_DIR}/${OUTPUT_SUBDIR}/rocprofv3.log"
+APP_PID=""
+APP_OUTPUT_PID=""
+ROCPROF_PID=""
+
+cleanup() {
+    if [ -n "${ROCPROF_PID}" ]; then
+        kill "${ROCPROF_PID}" 2>/dev/null || true
+    fi
+
+    if [ -n "${APP_PID}" ]; then
+        kill -2 "${APP_PID}" 2>/dev/null || true
+    fi
+}
+
+trap cleanup EXIT
 
 if [ "${MODE}" = "normal" ]; then
     ROCPROFV3_FLAGS=(--marker-trace --kernel-trace)
@@ -79,6 +117,7 @@ fi
 echo "Launching ROCTx attach pause/resume target in ${MODE} mode"
 LD_PRELOAD=${ROCPROF_PRELOAD} ${TEST_APP} ${MODE} ${TRIGGER_FILE} &
 APP_PID=$!
+APP_OUTPUT_PID=$APP_PID
 
 wait_for_attach_ready $APP_PID
 
@@ -89,38 +128,45 @@ fi
 
 if [ ! -f "${ROCPROFV3}" ]; then
     echo "Error: rocprofv3 not found at ${ROCPROFV3}"
-    kill $APP_PID 2>/dev/null
     exit 1
 fi
 
 echo "Attaching profiler to PID $APP_PID in ${MODE} mode..."
-LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID \
+PYTHONUNBUFFERED=1 LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID \
     --attach-duration-msec 8000 \
     "${ROCPROFV3_FLAGS[@]}" \
     -f json --attach-sync-output \
     -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} \
-    --log-level ${LOG_LEVEL} &
+    --log-level ${LOG_LEVEL} >"${ROCPROF_LOG}" 2>&1 &
 ROCPROF_PID=$!
 
-sleep 2
+if ! wait_for_profiler_attached $APP_PID "${ROCPROF_LOG}"; then
+    echo "rocprofv3 output:"
+    cat "${ROCPROF_LOG}" 2>/dev/null || true
+    wait $ROCPROF_PID 2>/dev/null || true
+    ROCPROF_PID=""
+    exit 1
+fi
+
 touch ${TRIGGER_FILE}
 
-wait $ROCPROF_PID
-ROCPROF_EXIT_CODE=$?
-
-if [ $ROCPROF_EXIT_CODE -ne 0 ]; then
+if wait $ROCPROF_PID; then
+    ROCPROF_PID=""
+else
+    ROCPROF_EXIT_CODE=$?
+    ROCPROF_PID=""
     echo "rocprofv3 attach test failed with exit code $ROCPROF_EXIT_CODE"
-    kill $APP_PID 2>/dev/null
     exit 1
 fi
 
 echo "Profiler detached successfully"
 
 kill -2 $APP_PID 2>/dev/null
-wait $APP_PID
-APP_EXIT_CODE=$?
-
-if [ $APP_EXIT_CODE -ne 0 ]; then
+if wait $APP_PID; then
+    APP_PID=""
+else
+    APP_EXIT_CODE=$?
+    APP_PID=""
     echo "Test application failed with exit code $APP_EXIT_CODE"
     exit 1
 fi
@@ -134,18 +180,18 @@ if [ $JSON_COUNT -eq 0 ]; then
     exit 1
 fi
 
-APP_JSON=$(find ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/ -name "${APP_PID}_results.json" | head -1)
+APP_JSON=$(find ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/ -name "${APP_OUTPUT_PID}_results.json" | head -1)
 if [ -z "$APP_JSON" ]; then
-    echo "Error: Could not find app (PID ${APP_PID}) JSON output in ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/"
+    echo "Error: Could not find app (PID ${APP_OUTPUT_PID}) JSON output in ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/"
     exit 1
 fi
 echo "Found app JSON output: $APP_JSON"
 
 APP_OUTPUT_DIR=$(dirname "$APP_JSON")
 
-for src in "${APP_OUTPUT_DIR}/${APP_PID}"_*.json; do
+for src in "${APP_OUTPUT_DIR}/${APP_OUTPUT_PID}"_*.json; do
     [ -f "$src" ] || continue
-    dst_name=$(basename "$src" | sed "s/^${APP_PID}_/${OUTPUT_FILENAME}_/")
+    dst_name=$(basename "$src" | sed "s/^${APP_OUTPUT_PID}_/${OUTPUT_FILENAME}_/")
     cp "$src" "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${dst_name}"
     echo "Copied $(basename $src) -> ${dst_name}"
 done
