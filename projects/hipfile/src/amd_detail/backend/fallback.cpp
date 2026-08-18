@@ -41,6 +41,42 @@ using std::unique_ptr;
 
 static const size_t DefaultChunkSize = 16 * 1024 * 1024;
 
+namespace {
+
+// Makes the buffer's GPU current for the lifetime of the guard (hipMemcpy operates on the current
+// device's context) and restores the caller's device on scope exit, including during exceptions.
+class DeviceGuard {
+public:
+    DeviceGuard(int prev_device, int buffer_device) : prev_device_{prev_device}
+    {
+        if (buffer_device != prev_device_) {
+            Context<Hip>::get()->hipSetDevice(buffer_device);
+            switched_ = true;
+        }
+    }
+    ~DeviceGuard()
+    {
+        if (switched_) {
+            try {
+                Context<Hip>::get()->hipSetDevice(prev_device_);
+            }
+            catch (...) {
+                Context<Sys>::get()->syslog(LOG_CRIT, "Unable to restore the caller's HIP device.");
+            }
+        }
+    }
+    DeviceGuard(const DeviceGuard &)            = delete;
+    DeviceGuard &operator=(const DeviceGuard &) = delete;
+    DeviceGuard(DeviceGuard &&)                 = delete;
+    DeviceGuard &operator=(DeviceGuard &&)      = delete;
+
+private:
+    int  prev_device_;
+    bool switched_{false};
+};
+
+} // namespace
+
 int
 Fallback::score(const std::shared_ptr<IFile> &file, const std::shared_ptr<IBuffer> &buffer, size_t size,
                 hoff_t file_offset, hoff_t buffer_offset) const
@@ -84,26 +120,7 @@ Fallback::_io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBu
         throw std::invalid_argument("The selected file or buffer region is invalid");
     }
 
-    // hipMemcpy operates on the current device's context, so make the buffer's GPU current for the
-    // duration of the copies and restore the caller's device on exit (including exceptions).
-    int  prev_device   = Context<Hip>::get()->hipGetDevice();
-    int  buffer_device = buffer->getGpuId();
-    bool device_switched{false};
-    if (buffer_device != prev_device) {
-        Context<Hip>::get()->hipSetDevice(buffer_device);
-        device_switched = true;
-    }
-    auto device_deleter = [&](void *) {
-        if (device_switched) {
-            try {
-                Context<Hip>::get()->hipSetDevice(prev_device);
-            }
-            catch (...) {
-                Context<Sys>::get()->syslog(LOG_CRIT, "Unable to restore the caller's HIP device.");
-            }
-        }
-    };
-    unique_ptr<void, decltype(device_deleter)> device_guard{&device_switched, device_deleter};
+    DeviceGuard device_guard{Context<Hip>::get()->hipGetDevice(), buffer->getGpuId()};
 
     auto ptr     = Context<Sys>::get()->mmap(nullptr, chunk_size, PROT_READ | PROT_WRITE,
                                              MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);

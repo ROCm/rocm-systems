@@ -816,4 +816,105 @@ TEST_F(FallbackRead, FallbackReadWithNonZeroBufferOffsetAndFileOffset)
     ASSERT_TRUE(device_buffer_contains_expected_data(file_offset, buffer_offset, read_size));
 }
 
+// Exercises the device-switch scope guard in _io_impl: when the buffer's GPU differs from the
+// caller's current device, hipSetDevice must switch before the copies and restore afterwards,
+// including when a copy throws.
+struct FallbackDeviceSwitch : public FallbackIo {
+
+    static constexpr int    kCallerDevice{0};
+    static constexpr int    kBufferDevice{3};
+    static constexpr size_t kIoSize{4096};
+
+    shared_ptr<IBuffer>  other_device_buffer{};
+    std::vector<uint8_t> other_device_buffer_data{};
+
+    FallbackDeviceSwitch() : other_device_buffer_data(64 * 1024)
+    {
+        // Register a buffer whose GPU id differs from the caller's current device (0).
+        hipPointerAttribute_t attrs{};
+        attrs.type   = hipMemoryTypeDevice;
+        attrs.device = kBufferDevice;
+        HipMemAddressRange range{reinterpret_cast<void *>(0x1), UINT64_MAX - 1};
+        EXPECT_CALL(mhip, hipPointerGetAttributes).WillOnce(testing::Return(attrs));
+        EXPECT_CALL(mhip, hipMemGetAddressRange).WillOnce(testing::Return(range));
+        Context<DriverState>::get()->registerBuffer(other_device_buffer_data.data(),
+                                                    other_device_buffer_data.size(), 0);
+        other_device_buffer =
+            Context<DriverState>::get()->getRegisteredBuffer(other_device_buffer_data.data());
+    }
+
+    ~FallbackDeviceSwitch() override
+    {
+        other_device_buffer.reset();
+    }
+};
+
+TEST_F(FallbackDeviceSwitch, WriteSwitchesToBufferDeviceBeforeCopyAndRestoresAfter)
+{
+    Sequence s;
+    EXPECT_CALL(mhip, hipSetDevice(kBufferDevice)).InSequence(s);
+    EXPECT_CALL(mhip, hipMemcpy).InSequence(s);
+    EXPECT_CALL(mhip, hipSetDevice(kCallerDevice)).InSequence(s);
+
+    EXPECT_CALL(mcfg, fallback()).WillOnce(testing::Return(true));
+    EXPECT_CALL(msys, mmap).WillOnce(testing::Invoke(::mmap));
+    EXPECT_CALL(mhip, hipStreamSynchronize);
+    EXPECT_CALL(msys, pwrite).WillOnce(testing::Return(static_cast<ssize_t>(kIoSize)));
+    EXPECT_CALL(msys, fdatasync).Times(AnyNumber());
+    EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
+    EXPECT_CALL(mstats, addIo).Times(1);
+
+    ASSERT_EQ(kIoSize,
+              Fallback().io(IoType::Write, file, other_device_buffer, kIoSize, 0, 0, kIoSize));
+}
+
+TEST_F(FallbackDeviceSwitch, ReadSwitchesToBufferDeviceBeforeCopyAndRestoresAfter)
+{
+    Sequence s;
+    EXPECT_CALL(mhip, hipSetDevice(kBufferDevice)).InSequence(s);
+    EXPECT_CALL(mhip, hipMemcpy).InSequence(s);
+    EXPECT_CALL(mhip, hipSetDevice(kCallerDevice)).InSequence(s);
+
+    EXPECT_CALL(mcfg, fallback()).WillOnce(testing::Return(true));
+    EXPECT_CALL(msys, mmap).WillOnce(testing::Invoke(::mmap));
+    EXPECT_CALL(msys, pread).WillOnce(testing::Return(static_cast<ssize_t>(kIoSize)));
+    EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
+    EXPECT_CALL(mstats, addIo).Times(1);
+
+    ASSERT_EQ(kIoSize,
+              Fallback().io(IoType::Read, file, other_device_buffer, kIoSize, 0, 0, kIoSize));
+}
+
+TEST_F(FallbackDeviceSwitch, RestoresCallerDeviceWhenCopyThrows)
+{
+    Sequence s;
+    EXPECT_CALL(mhip, hipSetDevice(kBufferDevice)).InSequence(s);
+    EXPECT_CALL(mhip, hipMemcpy).InSequence(s).WillOnce(testing::Throw(Hip::RuntimeError(hipErrorUnknown)));
+    EXPECT_CALL(mhip, hipSetDevice(kCallerDevice)).InSequence(s);
+
+    EXPECT_CALL(mcfg, fallback()).WillOnce(testing::Return(true));
+    EXPECT_CALL(msys, mmap).WillOnce(testing::Invoke(::mmap));
+    EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
+    EXPECT_CALL(mstats, error).Times(1);
+
+    ASSERT_THROW(Fallback().io(IoType::Write, file, other_device_buffer, kIoSize, 0, 0, kIoSize),
+                 Hip::RuntimeError);
+}
+
+TEST_F(FallbackDeviceSwitch, DoesNotSwitchWhenBufferIsOnCallerDevice)
+{
+    // `buffer` (from FallbackIo) lives on device 0, the same as the caller's current device, so
+    // the guard must not call hipSetDevice at all. StrictMock<MHip> fails if it does.
+    EXPECT_CALL(mcfg, fallback()).WillOnce(testing::Return(true));
+    EXPECT_CALL(msys, mmap).WillOnce(testing::Invoke(::mmap));
+    EXPECT_CALL(mhip, hipMemcpy);
+    EXPECT_CALL(mhip, hipStreamSynchronize);
+    EXPECT_CALL(msys, pwrite).WillOnce(testing::Return(static_cast<ssize_t>(kIoSize)));
+    EXPECT_CALL(msys, fdatasync).Times(AnyNumber());
+    EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
+    EXPECT_CALL(mstats, addIo).Times(1);
+
+    ASSERT_EQ(kIoSize, Fallback().io(IoType::Write, file, buffer, kIoSize, 0, 0, kIoSize));
+}
+
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON
