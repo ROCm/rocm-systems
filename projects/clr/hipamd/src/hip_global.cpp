@@ -206,13 +206,8 @@ static hipError_t createVarMem(amd::Memory** mem_out, const std::string& name,
   void* device_ptr = nullptr;
   size_t size = 0;
   if (!dev_program->createGlobalVarObj(&mem, &device_ptr, &size, name.c_str())) {
-    // A registered __device__ global need not exist in the loaded code object:
-    // the compiler drops symbols the device code never references, while the
-    // host-side __hipRegisterVar for them remains (PyTorch's thrust policy
-    // globals are the common case). Every caller reaches here through
-    // IHIP_RETURN_ONFAIL, so report the miss instead of aborting the process.
     LogPrintfError("Cannot create GlobalVar Obj for symbol: %s", name.c_str());
-    return hipErrorNotFound;
+    return hipErrorInvalidSymbol;
   }
   // Handle size 0 symbols
   if (size != 0) {
