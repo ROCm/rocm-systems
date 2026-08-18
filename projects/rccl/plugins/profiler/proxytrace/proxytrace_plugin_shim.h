@@ -1,5 +1,6 @@
 /*************************************************************************
  * Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+ * Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  *
@@ -41,6 +42,11 @@ typedef enum {
 typedef void (*ncclDebugLogger_t)(ncclDebugLogLevel level, unsigned long flags, const char* file, int line,
                                   const char* fmt, ...);
 
+// In-tree builds get ncclResult_t from the generated nccl.h; standalone builds
+// have no nccl.h and need this fallback.
+#if __has_include("nccl.h")
+#include "nccl.h"
+#else
 typedef enum {
   ncclSuccess = 0,
   ncclUnhandledCudaError = 1,
@@ -50,5 +56,6 @@ typedef enum {
   ncclInvalidUsage = 5,
   ncclRemoteError = 6
 } ncclResult_t;
+#endif
 
 #endif
