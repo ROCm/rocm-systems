@@ -123,10 +123,12 @@ int hipFree(void*) { return 0; }
 int hipHostMalloc(void**, size_t, unsigned int) { return 0; }
 int hipMemsetAsync(void*, int, size_t, void*) { return 0; }
 int hipStreamCreateWithFlags(void**, unsigned int) { return 0; }
+int hipStreamCreateWithPriority(void**, unsigned int, int) { return 0; }
 int hipStreamDestroy(void*) { return 0; }
 int hipStreamSynchronize(void*) { return 0; }
 int hipThreadExchangeStreamCaptureMode(int*) { return 0; }
 int hipDeviceGetAttribute(int* v, int, int) { if (v) *v = 0; return 0; }
+int hipDeviceGetStreamPriorityRange(int* least, int* greatest) { if (least) *least = 0; if (greatest) *greatest = 0; return 0; }
 int hipExtMallocWithFlags(void**, size_t, unsigned int) { return 0; }
 int hipDeviceGet(int* d, int) { if (d) *d = 0; return 0; }
 }
