@@ -41,15 +41,15 @@ fit in one hardware pass, ``rocprofv3`` has three ways to collect them:
    * - Application replay (default for multiple ``--pmc`` groups)
      - Whole application, re-run once per group
      - None; each run is a fresh process
-     - ``O(N ×`` application runtime``)``
+     - ``O(N × application runtime)``
    * - **Kernel replay** (``--kernel-replay-beta-enabled``)
      - One dispatch, re-executed in place
      - Device memory snapshot and restore between passes
-     - ``O(N ×`` kernel time ``+ N ×`` snap/restore``)``
+     - ``O(N × kernel time + N × snap/restore)``
    * - Counter group rotation (``pmc_groups`` / ``pmc_group_interval``)
      - Amortized across successive dispatches
      - None; different dispatches sample different groups
-     - ``O(1 ×`` application runtime``)``, but not the same dispatch
+     - ``O(1 × application runtime)``, but not the same dispatch
 
 Kernel replay is **not** the same as :ref:`using-spm`. SPM streams counter samples over time from
 hardware ring buffers; kernel replay re-executes a dispatch so each pass can collect a different
