@@ -88,11 +88,34 @@ pub async fn run_cmd(a: RunArgs) -> anyhow::Result<ExitCode> {
     run.set_job_shape(a.nproc_per_node.unwrap_or(1));
     eprintln!("mirage: session {session}");
 
+    // Answer clients from the first instant, bring-up and teardown
+    // included.
+    //
+    // Owned here rather than inside `run_owned` so that it outlives it.
+    // Teardown is the second-longest thing a run does — a container
+    // removal per node and then a network — and while it ran there was
+    // nothing calling `accept`. The socket file was still there and the
+    // listener was still bound, so a `mirage exec` in another terminal
+    // connected, sat in the kernel backlog, and was told thirty seconds
+    // later that the run "is either still starting up, or shutting
+    // down". It was shutting down, and the session had known that since
+    // before the client dialled.
+    let serving = socket.serve(run.clone());
+    tokio::pin!(serving);
+
     // From here on every exit path must go through teardown, including
     // the error ones: a session whose bring-up half-succeeded still has
     // containers to remove.
-    let outcome = run_owned(&run, &a, &socket, &mut interrupts, &mut relays).await;
-    run.destroy().await;
+    let outcome = run_owned(&run, &a, &mut interrupts, &mut relays, &mut serving).await;
+
+    // Still answering. `Session::attach` refuses once `tearing_down` is
+    // set and `describe` refuses once the session is not healthy, so a
+    // borrower arriving now is told so in one round trip instead of
+    // waiting out `DESCRIBE_TIMEOUT` to be guessed at.
+    tokio::select! {
+        () = run.destroy() => {}
+        () = &mut serving => unreachable!("the control socket serves until dropped"),
+    }
     outcome
 }
 
@@ -145,21 +168,10 @@ fn check_run_args(a: &RunArgs, profile: &mirage_core::profile::ProfileDef) -> an
 async fn run_owned(
     run: &Arc<Run>,
     a: &RunArgs,
-    socket: &ControlSocket,
     interrupts: &mut Interrupts,
     relays: &mut Relays,
+    serving: &mut std::pin::Pin<&mut impl Future<Output = ()>>,
 ) -> anyhow::Result<ExitCode> {
-    // Answer clients from the first instant, bring-up included.
-    //
-    // The socket is bound before this function is called, so a connect
-    // succeeds immediately — and if nothing is accepting yet, the client
-    // sits in the backlog with no timeout and no output for however long
-    // an image pull takes. Serving from here turns that silent hang into
-    // `session … is not ready (pulling)`, because `Session::describe`
-    // refuses until the session is healthy.
-    let serving = socket.serve(run.clone());
-    tokio::pin!(serving);
-
     // Race bring-up against an interrupt. Pulling an image can take
     // minutes, and a user who changes their mind in the middle of it
     // should get their prompt back — with the half-built session removed
@@ -191,7 +203,7 @@ async fn run_owned(
         () = report_progress(run.watch_health()) => {
             unreachable!("progress reporting ends only with the session")
         }
-        () = &mut serving => unreachable!("the control socket serves until dropped"),
+        () = &mut *serving => unreachable!("the control socket serves until dropped"),
     };
     if !health.healthy {
         let state = health.state.as_deref().unwrap_or("unknown");
@@ -239,7 +251,7 @@ async fn run_owned(
         // either still starting up, or shutting down", which is neither.
         let (exec, output) = tokio::select! {
             started = run.exec(&def) => started?,
-            () = &mut serving => unreachable!("the control socket serves until dropped"),
+            () = &mut *serving => unreachable!("the control socket serves until dropped"),
         };
 
         // Keep serving for as long as the workload runs. `select!` rather
@@ -247,7 +259,7 @@ async fn run_owned(
         // without a second thing to cancel.
         tokio::select! {
             code = supervise_locally(exec, output, interrupts, relays) => code,
-            () = &mut serving => unreachable!("the control socket serves until dropped"),
+            () = &mut *serving => unreachable!("the control socket serves until dropped"),
         }
     }
     .await;
@@ -268,7 +280,7 @@ async fn run_owned(
     // five seconds needs to say why — and not unconditionally: the wait
     // is unbounded, because no timeout would be right for somebody else's
     // job, and an interrupt is how the user says they have waited enough.
-    wait_for_borrowers(run, interrupts, &mut serving).await;
+    wait_for_borrowers(run, interrupts, serving).await;
 
     outcome
 }
@@ -1094,16 +1106,27 @@ impl Interrupts {
 
 /// How long to wait for a run to answer.
 ///
-/// Bounded because connecting proves less than it looks like it does. A
+/// Bounded because connecting proves less than it looks like it does: a
 /// bound listener accepts into the kernel backlog whether or not anything
-/// is calling `accept`, and there are two windows where nothing is: a run
-/// binds its socket before bring-up and only serves once the session is
-/// healthy, and it stops serving the moment its workload ends — while
-/// `Run::destroy` removes containers and a network, which takes as long
-/// as it takes. Unbounded, `mirage exec` in the other terminal simply
-/// hangs there, silently, and then reports that the connection closed
-/// without answering. A deadline turns both into a message that names
-/// what happened.
+/// is calling `accept`, so a connection succeeding says only that the
+/// socket file belongs to a process that once bound it.
+///
+/// It used to be load-bearing rather than a backstop. A run served its
+/// socket only between "the session is healthy" and "the workload has
+/// ended", and the two windows outside that were long: an image pull on
+/// one side, and on the other `Run::destroy` removing a container per
+/// node and then a network. A `mirage exec` arriving in either sat in
+/// the backlog until this deadline and was then told the run was "either
+/// still starting up, or shutting down" — a guess, offered thirty
+/// seconds late, about something the run had known all along.
+///
+/// A run answers throughout its whole life now, so both windows give a
+/// real answer in one round trip: `session … is not ready (pulling)`
+/// during bring-up, and `session … is shutting down and cannot be
+/// attached to` during teardown. What is left for the deadline is the
+/// case it was always for — a run that is wedged, or a socket file left
+/// behind by one that was `SIGKILL`ed — where nothing is going to answer
+/// at all.
 ///
 /// It bounds the request and its answer only. An [`Attached`] lease is
 /// held for as long as the borrowed workload runs, which is unbounded by

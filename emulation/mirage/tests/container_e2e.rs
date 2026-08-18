@@ -91,6 +91,12 @@ impl Env {
         std::fs::read_to_string(&self.provider_log).unwrap_or_default()
     }
 
+    /// Make the mock take five seconds over each removal verb, so a
+    /// teardown lasts long enough for a test to dial into it.
+    fn arm_teardown_stall(&self) {
+        std::fs::write(self.base.root().join("stall-teardown"), "").unwrap();
+    }
+
     /// Names of the containers the mock engine currently holds.
     ///
     /// The mock creates one of these when a `run` client starts and
@@ -175,6 +181,16 @@ runtime_of() {
   if [ -f "$STATE/labels/$1" ]; then cat "$STATE/labels/$1"; else printf '<no value>'; fi
 }
 
+# A deliberate stall on the removal verbs, armed by a test dropping a
+# marker file. Teardown is the one long stretch of a run that this mock
+# can otherwise make instantaneous, and
+# `a_run_answers_its_socket_while_it_is_tearing_down` needs it to last
+# long enough to dial into.
+stall_teardown_if_asked() {
+  [ -f "$STATE/stall-teardown" ] && sleep 5
+  return 0
+}
+
 # Record `--label mirage.runtime=<dir>` from an argv, if it carries one.
 record_runtime() {
   name=$1; shift
@@ -229,6 +245,7 @@ case "$1" in
         record_runtime "$last" "$@"
         exit 0 ;;
       rm)
+        stall_teardown_if_asked
         rm -f "$STATE/networks/$3"
         rm -f "$STATE/labels/$3"
         exit 0 ;;
@@ -368,6 +385,7 @@ case "$1" in
     exec "$@" ;;
   rm)
     # `rm -f <name>`: teardown's belt to `--rm`'s braces.
+    stall_teardown_if_asked
     rm -f "$STATE/containers/$3" "$STATE/labels/$3"
     exit 0 ;;
   inspect)
@@ -1181,6 +1199,73 @@ fn a_failing_runs_own_command_still_waits_for_a_borrower() {
 
     let _ = borrower.kill();
     let _ = borrower.wait();
+    assert_no_leaks(&tag);
+}
+
+/// A run answers its socket while it is tearing down.
+///
+/// Teardown is the second-longest thing a run does — a container removal
+/// per node, then a network — and for the whole of it nothing was calling
+/// `accept`. The socket file was still on disk and the listener was still
+/// bound, so `mirage exec` from another terminal connected happily, sat
+/// in the kernel backlog, and thirty seconds later was told the run "is
+/// either still starting up, or shutting down". It was shutting down, and
+/// the session had known that since before the client dialled.
+///
+/// The property is about *latency*, not about the wording: every attempt
+/// has to be answered promptly, whatever the answer is. So the loop times
+/// each one and bounds it well under `DESCRIBE_TIMEOUT`, and separately
+/// insists that at least one attempt landed inside the teardown window —
+/// otherwise a test that never opened the window would pass by never
+/// having tried.
+#[test]
+fn a_run_answers_its_socket_while_it_is_tearing_down() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_containerized_profile("cp");
+    let tag = marker("teardown-answers");
+
+    let mut run = env.base.spawn_run(
+        &["--profile", "cp"],
+        &["/bin/sh", "-c", &tagged_sleep(&tag)],
+    );
+    let id = run.await_ready(READY);
+    wait_for("the workload to start", READY, || count_processes(&tag) > 0);
+
+    // Armed after bring-up, so only the removals are slowed.
+    env.arm_teardown_stall();
+    run.signal(Signal::SIGINT);
+
+    // `DESCRIBE_TIMEOUT` is thirty seconds; anything approaching it is
+    // the hang this test exists for. Ten is far above a real round trip
+    // and far below the bug.
+    const PROMPT: Duration = Duration::from_secs(10);
+    let mut saw_teardown = false;
+    let mut slowest = Duration::ZERO;
+    while run.is_running() {
+        let started = std::time::Instant::now();
+        let out = env.base.run(&["exec", "--session", &id, "--", "/bin/true"]);
+        let elapsed = started.elapsed();
+        slowest = slowest.max(elapsed);
+        let text = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(
+            elapsed < PROMPT,
+            "an exec against a run that is tearing down took {elapsed:?}; \
+             the run stopped answering its socket. It said: {text}"
+        );
+        if text.contains("shutting down") {
+            saw_teardown = true;
+        }
+    }
+    assert!(
+        saw_teardown,
+        "no attempt landed while the session was tearing down, so this \
+         proved nothing; slowest attempt was {slowest:?}"
+    );
+
+    run.wait(READY);
     assert_no_leaks(&tag);
 }
 
