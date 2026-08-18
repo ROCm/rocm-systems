@@ -50,8 +50,14 @@
 #define HRR_MAGIC   ((uint32_t)0x52524845u)  /* "HRRE" */
 /* v4: payload_length widened from uint16_t to uint32_t so kernel-launch events
  * larger than 65535 bytes (many args / long mangled names / large by-value
- * structs) are no longer dropped. */
-#define HRR_VERSION ((uint16_t)4u)
+ * structs) are no longer dropped.
+ * v5: hrr_api_id_t is assigned from HipDispatchTable member order instead of
+ * typedef declaration order, which renumbered 496 of the 552 IDs once. Every
+ * event stores its ID, so a pre-v5 archive names the wrong API when decoded
+ * against this table and needs an ID translation to be read back. From v5 on a
+ * new API takes the next free ID and no existing ID moves, so adding APIs no
+ * longer needs a version bump. */
+#define HRR_VERSION ((uint16_t)5u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
@@ -2242,16 +2248,6 @@ typedef struct {
     int32_t device;
 } hrr_args_hipMemAdvise;
 
-/* hipError_t hipMemAdvise_v2(const void* dev_ptr, size_t count, hipMemoryAdvise advice, hipMemLocation device) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint64_t dev_ptr;
-    uint64_t count;
-    int32_t advice;
-    uint64_t /* hipMemLocation */ device;
-} hrr_args_hipMemAdvise_v2;
-
 /* hipError_t hipMemAllocHost(void** ptr, size_t size) */
 typedef struct {
     hrr_event_header hdr;
@@ -2482,81 +2478,6 @@ typedef struct {
     int32_t device;
     uint64_t stream;
 } hrr_args_hipMemPrefetchAsync;
-
-/* hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t count, hipMemLocation location, unsigned int flags, hipStream_t stream) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint64_t dev_ptr;
-    uint64_t count;
-    uint64_t /* hipMemLocation */ location;
-    uint32_t flags;
-    uint64_t stream;
-} hrr_args_hipMemPrefetchAsync_v2;
-
-/* hipError_t hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count, hipMemLocation* prefetch_locs, size_t* prefetch_loc_idxs, size_t num_prefetch_locs, unsigned long long flags, hipStream_t stream) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint64_t dev_ptrs;
-    uint64_t sizes;
-    uint64_t count;
-    uint64_t prefetch_locs;
-    uint64_t prefetch_loc_idxs;
-    uint64_t num_prefetch_locs;
-    uint64_t flags;
-    uint64_t stream;
-} hrr_args_hipMemPrefetchBatchAsync;
-
-/* hipError_t hipMemDiscardBatchAsync(void** dev_ptrs, size_t* sizes, size_t count, unsigned long long flags, hipStream_t stream) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint64_t dev_ptrs;
-    uint64_t sizes;
-    uint64_t count;
-    uint64_t flags;
-    uint64_t stream;
-} hrr_args_hipMemDiscardBatchAsync;
-
-/* hipError_t hipDrvMemDiscardBatchAsync(hipDeviceptr_t* dptrs, size_t* sizes, size_t count, unsigned long long flags, hipStream_t stream) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint64_t dptrs;
-    uint64_t sizes;
-    uint64_t count;
-    uint64_t flags;
-    uint64_t stream;
-} hrr_args_hipDrvMemDiscardBatchAsync;
-
-/* hipError_t hipMemDiscardAndPrefetchBatchAsync(void** dptrs, size_t* sizes, size_t count, hipMemLocation* prefetchLocs, size_t* prefetchLocIdxs, size_t numPrefetchLocs, unsigned long long flags, hipStream_t stream) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint64_t dptrs;
-    uint64_t sizes;
-    uint64_t count;
-    uint64_t prefetchLocs;
-    uint64_t prefetchLocIdxs;
-    uint64_t numPrefetchLocs;
-    uint64_t flags;
-    uint64_t stream;
-} hrr_args_hipMemDiscardAndPrefetchBatchAsync;
-
-/* hipError_t hipDrvMemDiscardAndPrefetchBatchAsync(hipDeviceptr_t* dptrs, size_t* sizes, size_t count, hipMemLocation* prefetchLocs, size_t* prefetchLocIdxs, size_t numPrefetchLocs, unsigned long long flags, hipStream_t stream) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint64_t dptrs;
-    uint64_t sizes;
-    uint64_t count;
-    uint64_t prefetchLocs;
-    uint64_t prefetchLocIdxs;
-    uint64_t numPrefetchLocs;
-    uint64_t flags;
-    uint64_t stream;
-} hrr_args_hipDrvMemDiscardAndPrefetchBatchAsync;
 
 /* hipError_t hipMemPtrGetInfo(void* ptr, size_t* size) */
 typedef struct {
@@ -3137,14 +3058,6 @@ typedef struct {
     uint64_t kname;
 } hrr_args_hipModuleGetFunction;
 
-/* hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t module) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint64_t count;
-    uint64_t module;
-} hrr_args_hipModuleGetFunctionCount;
-
 /* hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t hmod, const char* name) */
 typedef struct {
     hrr_event_header hdr;
@@ -3242,58 +3155,6 @@ typedef struct {
     uint32_t module_id;  /* sequential module handle ID */
 } hrr_args_hipModuleLoadDataEx;
 
-/* hipError_t hipLinkAddData(hipLinkState_t state, hipJitInputType type, void* data, size_t size, const char* name, unsigned int numOptions, hipJitOption* options, void** optionValues) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint64_t /* hipLinkState_t */ state;
-    uint64_t /* hipJitInputType */ type;
-    uint64_t data;
-    uint64_t size;
-    uint64_t name;
-    uint32_t numOptions;
-    uint64_t options;
-    uint64_t optionValues;
-} hrr_args_hipLinkAddData;
-
-/* hipError_t hipLinkAddFile(hipLinkState_t state, hipJitInputType type, const char* path, unsigned int numOptions, hipJitOption* options, void** optionValues) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint64_t /* hipLinkState_t */ state;
-    uint64_t /* hipJitInputType */ type;
-    uint64_t path;
-    uint32_t numOptions;
-    uint64_t options;
-    uint64_t optionValues;
-} hrr_args_hipLinkAddFile;
-
-/* hipError_t hipLinkComplete(hipLinkState_t state, void** hipBinOut, size_t* sizeOut) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint64_t /* hipLinkState_t */ state;
-    uint64_t hipBinOut;
-    uint64_t sizeOut;
-} hrr_args_hipLinkComplete;
-
-/* hipError_t hipLinkCreate(unsigned int numOptions, hipJitOption* options, void** optionValues, hipLinkState_t* stateOut) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint32_t numOptions;
-    uint64_t options;
-    uint64_t optionValues;
-    uint64_t stateOut;
-} hrr_args_hipLinkCreate;
-
-/* hipError_t hipLinkDestroy(hipLinkState_t state) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint64_t /* hipLinkState_t */ state;
-} hrr_args_hipLinkDestroy;
-
 /* hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, hipFunction_t f, int blockSize, size_t dynSharedMemPerBlk) */
 typedef struct {
     hrr_event_header hdr;
@@ -3345,16 +3206,6 @@ typedef struct {
     uint64_t module;
 } hrr_args_hipModuleUnload;
 
-/* hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, const void* f, int numBlocks, int blockSize) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint64_t dynamicSmemSize;
-    uint64_t f;
-    int32_t numBlocks;
-    int32_t blockSize;
-} hrr_args_hipOccupancyAvailableDynamicSMemPerBlock;
-
 /* hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, const void* f, int blockSize, size_t dynSharedMemPerBlk) */
 typedef struct {
     hrr_event_header hdr;
@@ -3386,24 +3237,6 @@ typedef struct {
     uint64_t dynSharedMemPerBlk;
     int32_t blockSizeLimit;
 } hrr_args_hipOccupancyMaxPotentialBlockSize;
-
-/* hipError_t hipOccupancyMaxActiveClusters(int* numClusters, const void* f, const hipLaunchConfig_t* launchConfig) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint64_t numClusters;
-    uint64_t f;
-    uint64_t launchConfig;
-} hrr_args_hipOccupancyMaxActiveClusters;
-
-/* hipError_t hipOccupancyMaxPotentialClusterSize(int* clusterSize, const void* f, const hipLaunchConfig_t* config) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint64_t clusterSize;
-    uint64_t f;
-    uint64_t config;
-} hrr_args_hipOccupancyMaxPotentialClusterSize;
 
 /* hipError_t hipPeekAtLastError() */
 typedef struct {
@@ -3517,14 +3350,6 @@ typedef struct {
     int32_t mode;
 } hrr_args_hipStreamBeginCapture;
 
-/* hipError_t hipStreamCopyAttributes(hipStream_t dst, hipStream_t src) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint64_t dst;
-    uint64_t src;
-} hrr_args_hipStreamCopyAttributes;
-
 /* hipError_t hipStreamCreate(hipStream_t* stream) */
 typedef struct {
     hrr_event_header hdr;
@@ -3600,14 +3425,6 @@ typedef struct {
     uint64_t stream;
     uint64_t flags;
 } hrr_args_hipStreamGetFlags;
-
-/* hipError_t hipStreamGetId(hipStream_t stream, unsigned long long* streamId) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint64_t stream;
-    uint64_t streamId;
-} hrr_args_hipStreamGetId;
 
 /* hipError_t hipStreamGetPriority(hipStream_t stream, int* priority) */
 typedef struct {
@@ -3699,16 +3516,6 @@ typedef struct {
     uint64_t value;
     uint32_t flags;
 } hrr_args_hipStreamWriteValue64;
-
-/* hipError_t hipStreamBatchMemOp(hipStream_t stream, unsigned int count, hipStreamBatchMemOpParams* paramArray, unsigned int flags) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint64_t stream;
-    uint32_t count;
-    uint64_t paramArray;
-    uint32_t flags;
-} hrr_args_hipStreamBatchMemOp;
 
 /* hipError_t hipTexObjectCreate(hipTextureObject_t* pTexObject, const HIP_RESOURCE_DESC* pResDesc, const HIP_TEXTURE_DESC* pTexDesc, const HIP_RESOURCE_VIEW_DESC* pResViewDesc) */
 typedef struct {
@@ -3997,6 +3804,56 @@ typedef struct {
     uint32_t numExtSems;
     uint64_t stream;
 } hrr_args_hipWaitExternalSemaphoresAsync;
+
+/* hipChannelFormatDesc hipCreateChannelDesc(int x, int y, int z, int w, hipChannelFormatKind f) */
+typedef struct {
+    hrr_event_header hdr;
+    uint64_t /* hipChannelFormatDesc */ ret;
+    int32_t x;
+    int32_t y;
+    int32_t z;
+    int32_t w;
+    int32_t f;
+} hrr_args_hipCreateChannelDesc;
+
+/* hipError_t hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX, uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ, uint32_t localWorkSizeX, uint32_t localWorkSizeY, uint32_t localWorkSizeZ, size_t sharedMemBytes, hipStream_t hStream, void** kernelParams, void** extra, hipEvent_t startEvent, hipEvent_t stopEvent, uint32_t flags) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t f;
+    uint32_t globalWorkSizeX;
+    uint32_t globalWorkSizeY;
+    uint32_t globalWorkSizeZ;
+    uint32_t localWorkSizeX;
+    uint32_t localWorkSizeY;
+    uint32_t localWorkSizeZ;
+    uint64_t sharedMemBytes;
+    uint64_t hStream;
+    uint64_t kernelParams;
+    uint64_t extra;
+    uint64_t startEvent;
+    uint64_t stopEvent;
+    uint32_t flags;
+} hrr_args_hipExtModuleLaunchKernel;
+
+/* hipError_t hipHccModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX, uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ, uint32_t localWorkSizeX, uint32_t localWorkSizeY, uint32_t localWorkSizeZ, size_t sharedMemBytes, hipStream_t hStream, void** kernelParams, void** extra, hipEvent_t startEvent, hipEvent_t stopEvent) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t f;
+    uint32_t globalWorkSizeX;
+    uint32_t globalWorkSizeY;
+    uint32_t globalWorkSizeZ;
+    uint32_t localWorkSizeX;
+    uint32_t localWorkSizeY;
+    uint32_t localWorkSizeZ;
+    uint64_t sharedMemBytes;
+    uint64_t hStream;
+    uint64_t kernelParams;
+    uint64_t extra;
+    uint64_t startEvent;
+    uint64_t stopEvent;
+} hrr_args_hipHccModuleLaunchKernel;
 
 /* hipError_t hipMemcpy_spt(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind) */
 typedef struct {
@@ -4405,56 +4262,6 @@ typedef struct {
     uint64_t userData;
 } hrr_args_hipLaunchHostFunc_spt;
 
-/* hipChannelFormatDesc hipCreateChannelDesc(int x, int y, int z, int w, hipChannelFormatKind f) */
-typedef struct {
-    hrr_event_header hdr;
-    uint64_t /* hipChannelFormatDesc */ ret;
-    int32_t x;
-    int32_t y;
-    int32_t z;
-    int32_t w;
-    int32_t f;
-} hrr_args_hipCreateChannelDesc;
-
-/* hipError_t hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX, uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ, uint32_t localWorkSizeX, uint32_t localWorkSizeY, uint32_t localWorkSizeZ, size_t sharedMemBytes, hipStream_t hStream, void** kernelParams, void** extra, hipEvent_t startEvent, hipEvent_t stopEvent, uint32_t flags) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint64_t f;
-    uint32_t globalWorkSizeX;
-    uint32_t globalWorkSizeY;
-    uint32_t globalWorkSizeZ;
-    uint32_t localWorkSizeX;
-    uint32_t localWorkSizeY;
-    uint32_t localWorkSizeZ;
-    uint64_t sharedMemBytes;
-    uint64_t hStream;
-    uint64_t kernelParams;
-    uint64_t extra;
-    uint64_t startEvent;
-    uint64_t stopEvent;
-    uint32_t flags;
-} hrr_args_hipExtModuleLaunchKernel;
-
-/* hipError_t hipHccModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX, uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ, uint32_t localWorkSizeX, uint32_t localWorkSizeY, uint32_t localWorkSizeZ, size_t sharedMemBytes, hipStream_t hStream, void** kernelParams, void** extra, hipEvent_t startEvent, hipEvent_t stopEvent) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint64_t f;
-    uint32_t globalWorkSizeX;
-    uint32_t globalWorkSizeY;
-    uint32_t globalWorkSizeZ;
-    uint32_t localWorkSizeX;
-    uint32_t localWorkSizeY;
-    uint32_t localWorkSizeZ;
-    uint64_t sharedMemBytes;
-    uint64_t hStream;
-    uint64_t kernelParams;
-    uint64_t extra;
-    uint64_t startEvent;
-    uint64_t stopEvent;
-} hrr_args_hipHccModuleLaunchKernel;
-
 /* int hipGetStreamDeviceId(hipStream_t stream) */
 typedef struct {
     hrr_event_header hdr;
@@ -4619,37 +4426,6 @@ typedef struct {
     uint64_t symbolPtr;
 } hrr_args_hipGetFuncBySymbol;
 
-/* hipError_t hipDrvGraphAddMemFreeNode(hipGraphNode_t* phGraphNode, hipGraph_t hGraph, const hipGraphNode_t* dependencies, size_t numDependencies, hipDeviceptr_t dptr) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint64_t phGraphNode;
-    uint64_t hGraph;
-    uint64_t dependencies;
-    uint64_t numDependencies;
-    uint64_t dptr;
-} hrr_args_hipDrvGraphAddMemFreeNode;
-
-/* hipError_t hipDrvGraphExecMemcpyNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, const HIP_MEMCPY3D* copyParams, hipCtx_t ctx) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint64_t hGraphExec;
-    uint64_t hNode;
-    uint64_t copyParams;
-    uint64_t ctx;
-} hrr_args_hipDrvGraphExecMemcpyNodeSetParams;
-
-/* hipError_t hipDrvGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, const hipMemsetParams* memsetParams, hipCtx_t ctx) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint64_t hGraphExec;
-    uint64_t hNode;
-    uint64_t memsetParams;
-    uint64_t ctx;
-} hrr_args_hipDrvGraphExecMemsetNodeSetParams;
-
 /* hipError_t hipSetValidDevices(int* device_arr, int len) */
 typedef struct {
     hrr_event_header hdr;
@@ -4726,6 +4502,37 @@ typedef struct {
     int32_t kind;
 } hrr_args_hipMemcpy2DArrayToArray;
 
+/* hipError_t hipDrvGraphAddMemFreeNode(hipGraphNode_t* phGraphNode, hipGraph_t hGraph, const hipGraphNode_t* dependencies, size_t numDependencies, hipDeviceptr_t dptr) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t phGraphNode;
+    uint64_t hGraph;
+    uint64_t dependencies;
+    uint64_t numDependencies;
+    uint64_t dptr;
+} hrr_args_hipDrvGraphAddMemFreeNode;
+
+/* hipError_t hipDrvGraphExecMemcpyNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, const HIP_MEMCPY3D* copyParams, hipCtx_t ctx) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t hGraphExec;
+    uint64_t hNode;
+    uint64_t copyParams;
+    uint64_t ctx;
+} hrr_args_hipDrvGraphExecMemcpyNodeSetParams;
+
+/* hipError_t hipDrvGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, const hipMemsetParams* memsetParams, hipCtx_t ctx) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t hGraphExec;
+    uint64_t hNode;
+    uint64_t memsetParams;
+    uint64_t ctx;
+} hrr_args_hipDrvGraphExecMemsetNodeSetParams;
+
 /* hipError_t hipGraphExecGetFlags(hipGraphExec_t graphExec, unsigned long long* flags) */
 typedef struct {
     hrr_event_header hdr;
@@ -4794,6 +4601,16 @@ typedef struct {
     int32_t device;
 } hrr_args_hipDeviceGetTexture1DLinearMaxWidth;
 
+/* hipError_t hipStreamBatchMemOp(hipStream_t stream, unsigned int count, hipStreamBatchMemOpParams* paramArray, unsigned int flags) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t stream;
+    uint32_t count;
+    uint64_t paramArray;
+    uint32_t flags;
+} hrr_args_hipStreamBatchMemOp;
+
 /* hipError_t hipGraphAddBatchMemOpNode(hipGraphNode_t* phGraphNode, hipGraph_t hGraph, const hipGraphNode_t* dependencies, size_t numDependencies, const hipBatchMemOpNodeParams* nodeParams) */
 typedef struct {
     hrr_event_header hdr;
@@ -4829,6 +4646,58 @@ typedef struct {
     uint64_t hNode;
     uint64_t nodeParams;
 } hrr_args_hipGraphExecBatchMemOpNodeSetParams;
+
+/* hipError_t hipLinkAddData(hipLinkState_t state, hipJitInputType type, void* data, size_t size, const char* name, unsigned int numOptions, hipJitOption* options, void** optionValues) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t /* hipLinkState_t */ state;
+    uint64_t /* hipJitInputType */ type;
+    uint64_t data;
+    uint64_t size;
+    uint64_t name;
+    uint32_t numOptions;
+    uint64_t options;
+    uint64_t optionValues;
+} hrr_args_hipLinkAddData;
+
+/* hipError_t hipLinkAddFile(hipLinkState_t state, hipJitInputType type, const char* path, unsigned int numOptions, hipJitOption* options, void** optionValues) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t /* hipLinkState_t */ state;
+    uint64_t /* hipJitInputType */ type;
+    uint64_t path;
+    uint32_t numOptions;
+    uint64_t options;
+    uint64_t optionValues;
+} hrr_args_hipLinkAddFile;
+
+/* hipError_t hipLinkComplete(hipLinkState_t state, void** hipBinOut, size_t* sizeOut) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t /* hipLinkState_t */ state;
+    uint64_t hipBinOut;
+    uint64_t sizeOut;
+} hrr_args_hipLinkComplete;
+
+/* hipError_t hipLinkCreate(unsigned int numOptions, hipJitOption* options, void** optionValues, hipLinkState_t* stateOut) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint32_t numOptions;
+    uint64_t options;
+    uint64_t optionValues;
+    uint64_t stateOut;
+} hrr_args_hipLinkCreate;
+
+/* hipError_t hipLinkDestroy(hipLinkState_t state) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t /* hipLinkState_t */ state;
+} hrr_args_hipLinkDestroy;
 
 /* hipError_t hipEventRecordWithFlags(hipEvent_t event, hipStream_t stream, unsigned int flags) */
 typedef struct {
@@ -4868,6 +4737,14 @@ typedef struct {
     uint64_t /* hipMemRangeHandleType */ handleType;
     uint64_t flags;
 } hrr_args_hipMemGetHandleForAddressRange;
+
+/* hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t module) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t count;
+    uint64_t module;
+} hrr_args_hipModuleGetFunctionCount;
 
 /* hipError_t hipMemsetD2D8(hipDeviceptr_t dst, size_t dstPitch, unsigned char value, size_t width, size_t height) */
 typedef struct {
@@ -4938,6 +4815,15 @@ typedef struct {
     uint64_t stream;
 } hrr_args_hipMemsetD2D32Async;
 
+/* hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr, hipStreamAttrValue* value_out) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t stream;
+    uint64_t /* hipStreamAttrID */ attr;
+    uint64_t value_out;
+} hrr_args_hipStreamGetAttribute;
+
 /* hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr, const hipStreamAttrValue* value) */
 typedef struct {
     hrr_event_header hdr;
@@ -4950,15 +4836,6 @@ typedef struct {
 #ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
 static_assert(sizeof(hipStreamAttrValue) <= 64, "hrr_args_hipStreamSetAttribute::stream_attr_bytes[64] too small for hipStreamAttrValue");
 #endif
-
-/* hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr, hipStreamAttrValue* value_out) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint64_t stream;
-    uint64_t /* hipStreamAttrID */ attr;
-    uint64_t value_out;
-} hrr_args_hipStreamGetAttribute;
 
 /* hipError_t hipModuleLoadFatBinary(hipModule_t* module, const void* fatbin) */
 typedef struct {
@@ -5029,6 +4906,35 @@ typedef struct {
     uint64_t status;
 } hrr_args_hipGetDriverEntryPoint_spt;
 
+/* hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t count, hipMemLocation location, unsigned int flags, hipStream_t stream) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t dev_ptr;
+    uint64_t count;
+    uint64_t /* hipMemLocation */ location;
+    uint32_t flags;
+    uint64_t stream;
+} hrr_args_hipMemPrefetchAsync_v2;
+
+/* hipError_t hipMemAdvise_v2(const void* dev_ptr, size_t count, hipMemoryAdvise advice, hipMemLocation device) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t dev_ptr;
+    uint64_t count;
+    int32_t advice;
+    uint64_t /* hipMemLocation */ device;
+} hrr_args_hipMemAdvise_v2;
+
+/* hipError_t hipStreamGetId(hipStream_t stream, unsigned long long* streamId) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t stream;
+    uint64_t streamId;
+} hrr_args_hipStreamGetId;
+
 /* hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* code, hipJitOption* jitOptions, void** jitOptionsValues, unsigned int numJitOptions, hipLibraryOption* libraryOptions, void** libraryOptionValues, unsigned int numLibraryOptions) */
 typedef struct {
     hrr_event_header hdr;
@@ -5081,25 +4987,13 @@ typedef struct {
     uint64_t library;
 } hrr_args_hipLibraryGetKernelCount;
 
-/* hipError_t hipLibraryGetGlobal(void** dptr, size_t* bytes, hipLibrary_t library, const char* name) */
+/* hipError_t hipStreamCopyAttributes(hipStream_t dst, hipStream_t src) */
 typedef struct {
     hrr_event_header hdr;
     int32_t ret;
-    uint64_t dptr;
-    uint64_t bytes;
-    uint64_t library;
-    uint64_t name;
-} hrr_args_hipLibraryGetGlobal;
-
-/* hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library, const char* name) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint64_t dptr;
-    uint64_t bytes;
-    uint64_t library;
-    uint64_t name;
-} hrr_args_hipLibraryGetManaged;
+    uint64_t dst;
+    uint64_t src;
+} hrr_args_hipStreamCopyAttributes;
 
 /* hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels, hipLibrary_t library) */
 typedef struct {
@@ -5126,6 +5020,16 @@ typedef struct {
     uint64_t kernel;
 } hrr_args_hipKernelGetName;
 
+/* hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, const void* f, int numBlocks, int blockSize) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t dynamicSmemSize;
+    uint64_t f;
+    int32_t numBlocks;
+    int32_t blockSize;
+} hrr_args_hipOccupancyAvailableDynamicSMemPerBlock;
+
 /* hipError_t hipGetProcAddress_spt(const char* symbol, void** pfn, int hipVersion, uint64_t flags, hipDriverProcAddressQueryResult* symbolStatus) */
 typedef struct {
     hrr_event_header hdr;
@@ -5136,6 +5040,16 @@ typedef struct {
     uint64_t flags;
     uint64_t symbolStatus;
 } hrr_args_hipGetProcAddress_spt;
+
+/* hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* paramOffset, size_t* paramSize) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t kernel;
+    uint64_t paramIndex;
+    uint64_t paramOffset;
+    uint64_t paramSize;
+} hrr_args_hipKernelGetParamInfo;
 
 /* hipError_t hipExtDisableLogging() */
 typedef struct {
@@ -5157,6 +5071,33 @@ typedef struct {
     uint64_t log_size;
     uint64_t log_mask;
 } hrr_args_hipExtSetLoggingParams;
+
+/* hipError_t hipMemSetMemPool(hipMemLocation* location, hipMemAllocationType type, hipMemPool_t pool) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t location;
+    int32_t type;
+    uint64_t pool;
+} hrr_args_hipMemSetMemPool;
+
+/* hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location, hipMemAllocationType type) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t pool;
+    uint64_t location;
+    int32_t type;
+} hrr_args_hipMemGetMemPool;
+
+/* hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequirements, hipMipmappedArray_t mipmap, hipDevice_t device) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t memoryRequirements;
+    uint64_t mipmap;
+    uint64_t device;
+} hrr_args_hipMipmappedArrayGetMemoryRequirements;
 
 /* hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKernel_t kernel, hipDevice_t dev) */
 typedef struct {
@@ -5186,42 +5127,37 @@ typedef struct {
     uint64_t kernel;
 } hrr_args_hipKernelGetFunction;
 
-/* hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* paramOffset, size_t* paramSize) */
+/* hipError_t hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count, hipMemLocation* prefetch_locs, size_t* prefetch_loc_idxs, size_t num_prefetch_locs, unsigned long long flags, hipStream_t stream) */
 typedef struct {
     hrr_event_header hdr;
     int32_t ret;
-    uint64_t kernel;
-    uint64_t paramIndex;
-    uint64_t paramOffset;
-    uint64_t paramSize;
-} hrr_args_hipKernelGetParamInfo;
+    uint64_t dev_ptrs;
+    uint64_t sizes;
+    uint64_t count;
+    uint64_t prefetch_locs;
+    uint64_t prefetch_loc_idxs;
+    uint64_t num_prefetch_locs;
+    uint64_t flags;
+    uint64_t stream;
+} hrr_args_hipMemPrefetchBatchAsync;
 
-/* hipError_t hipMemSetMemPool(hipMemLocation* location, hipMemAllocationType type, hipMemPool_t pool) */
+/* hipError_t hipOccupancyMaxPotentialClusterSize(int* clusterSize, const void* f, const hipLaunchConfig_t* config) */
 typedef struct {
     hrr_event_header hdr;
     int32_t ret;
-    uint64_t location;
-    int32_t type;
-    uint64_t pool;
-} hrr_args_hipMemSetMemPool;
+    uint64_t clusterSize;
+    uint64_t f;
+    uint64_t config;
+} hrr_args_hipOccupancyMaxPotentialClusterSize;
 
-/* hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location, hipMemAllocationType type) */
+/* hipError_t hipOccupancyMaxActiveClusters(int* numClusters, const void* f, const hipLaunchConfig_t* launchConfig) */
 typedef struct {
     hrr_event_header hdr;
     int32_t ret;
-    uint64_t pool;
-    uint64_t location;
-    int32_t type;
-} hrr_args_hipMemGetMemPool;
-
-/* hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequirements, hipMipmappedArray_t mipmap, hipDevice_t device) */
-typedef struct {
-    hrr_event_header hdr;
-    int32_t ret;
-    uint64_t memoryRequirements;
-    uint64_t mipmap;
-    uint64_t device;
-} hrr_args_hipMipmappedArrayGetMemoryRequirements;
+    uint64_t numClusters;
+    uint64_t f;
+    uint64_t launchConfig;
+} hrr_args_hipOccupancyMaxActiveClusters;
 
 /* hipError_t hipGreenCtxCreate(hipExecutionCtx_t* ctx, hipDevResourceDesc_t desc, int device, unsigned int flags) */
 typedef struct {
@@ -5356,6 +5292,94 @@ typedef struct {
     uint64_t ctx;
     uint64_t event;
 } hrr_args_hipExecutionCtxWaitEvent;
+
+/* hipError_t hipLibraryGetGlobal(void** dptr, size_t* bytes, hipLibrary_t library, const char* name) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t dptr;
+    uint64_t bytes;
+    uint64_t library;
+    uint64_t name;
+} hrr_args_hipLibraryGetGlobal;
+
+/* hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library, const char* name) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t dptr;
+    uint64_t bytes;
+    uint64_t library;
+    uint64_t name;
+} hrr_args_hipLibraryGetManaged;
+
+/* hipError_t hipMemDiscardBatchAsync(void** dev_ptrs, size_t* sizes, size_t count, unsigned long long flags, hipStream_t stream) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t dev_ptrs;
+    uint64_t sizes;
+    uint64_t count;
+    uint64_t flags;
+    uint64_t stream;
+} hrr_args_hipMemDiscardBatchAsync;
+
+/* hipError_t hipDrvMemDiscardBatchAsync(hipDeviceptr_t* dptrs, size_t* sizes, size_t count, unsigned long long flags, hipStream_t stream) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t dptrs;
+    uint64_t sizes;
+    uint64_t count;
+    uint64_t flags;
+    uint64_t stream;
+} hrr_args_hipDrvMemDiscardBatchAsync;
+
+/* hipError_t hipMemDiscardAndPrefetchBatchAsync(void** dptrs, size_t* sizes, size_t count, hipMemLocation* prefetchLocs, size_t* prefetchLocIdxs, size_t numPrefetchLocs, unsigned long long flags, hipStream_t stream) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t dptrs;
+    uint64_t sizes;
+    uint64_t count;
+    uint64_t prefetchLocs;
+    uint64_t prefetchLocIdxs;
+    uint64_t numPrefetchLocs;
+    uint64_t flags;
+    uint64_t stream;
+} hrr_args_hipMemDiscardAndPrefetchBatchAsync;
+
+/* hipError_t hipDrvMemDiscardAndPrefetchBatchAsync(hipDeviceptr_t* dptrs, size_t* sizes, size_t count, hipMemLocation* prefetchLocs, size_t* prefetchLocIdxs, size_t numPrefetchLocs, unsigned long long flags, hipStream_t stream) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t dptrs;
+    uint64_t sizes;
+    uint64_t count;
+    uint64_t prefetchLocs;
+    uint64_t prefetchLocIdxs;
+    uint64_t numPrefetchLocs;
+    uint64_t flags;
+    uint64_t stream;
+} hrr_args_hipDrvMemDiscardAndPrefetchBatchAsync;
+
+/* hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location, hipMemAllocationType type) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t memPool;
+    uint64_t location;
+    int32_t type;
+} hrr_args_hipMemGetDefaultMemPool;
+
+/* hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask, hipDevice_t device) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t luid;
+    uint64_t deviceNodeMask;
+    uint64_t device;
+} hrr_args_hipDeviceGetLuid;
 
 /* ---- API id enumeration ---- */
 typedef enum hrr_api_id {
@@ -5596,320 +5620,322 @@ typedef enum hrr_api_id {
     HRR_API_HIPMEMADDRESSFREE = 234,
     HRR_API_HIPMEMADDRESSRESERVE = 235,
     HRR_API_HIPMEMADVISE = 236,
-    HRR_API_HIPMEMADVISE_V2 = 237,
-    HRR_API_HIPMEMALLOCHOST = 238,
-    HRR_API_HIPMEMALLOCPITCH = 239,
-    HRR_API_HIPMEMCREATE = 240,
-    HRR_API_HIPMEMEXPORTTOSHAREABLEHANDLE = 241,
-    HRR_API_HIPMEMGETACCESS = 242,
-    HRR_API_HIPMEMGETADDRESSRANGE = 243,
-    HRR_API_HIPMEMGETALLOCATIONGRANULARITY = 244,
-    HRR_API_HIPMEMGETALLOCATIONPROPERTIESFROMHANDLE = 245,
-    HRR_API_HIPMEMGETINFO = 246,
-    HRR_API_HIPMEMIMPORTFROMSHAREABLEHANDLE = 247,
-    HRR_API_HIPMEMMAP = 248,
-    HRR_API_HIPMEMMAPARRAYASYNC = 249,
-    HRR_API_HIPMEMPOOLCREATE = 250,
-    HRR_API_HIPMEMPOOLDESTROY = 251,
-    HRR_API_HIPMEMPOOLEXPORTPOINTER = 252,
-    HRR_API_HIPMEMPOOLEXPORTTOSHAREABLEHANDLE = 253,
-    HRR_API_HIPMEMPOOLGETACCESS = 254,
-    HRR_API_HIPMEMPOOLGETATTRIBUTE = 255,
-    HRR_API_HIPMEMPOOLIMPORTFROMSHAREABLEHANDLE = 256,
-    HRR_API_HIPMEMPOOLIMPORTPOINTER = 257,
-    HRR_API_HIPMEMPOOLSETACCESS = 258,
-    HRR_API_HIPMEMPOOLSETATTRIBUTE = 259,
-    HRR_API_HIPMEMPOOLTRIMTO = 260,
-    HRR_API_HIPMEMPREFETCHASYNC = 261,
-    HRR_API_HIPMEMPREFETCHASYNC_V2 = 262,
-    HRR_API_HIPMEMPREFETCHBATCHASYNC = 263,
-    HRR_API_HIPMEMDISCARDBATCHASYNC = 264,
-    HRR_API_HIPDRVMEMDISCARDBATCHASYNC = 265,
-    HRR_API_HIPMEMDISCARDANDPREFETCHBATCHASYNC = 266,
-    HRR_API_HIPDRVMEMDISCARDANDPREFETCHBATCHASYNC = 267,
-    HRR_API_HIPMEMPTRGETINFO = 268,
-    HRR_API_HIPMEMRANGEGETATTRIBUTE = 269,
-    HRR_API_HIPMEMRANGEGETATTRIBUTES = 270,
-    HRR_API_HIPMEMRELEASE = 271,
-    HRR_API_HIPMEMRETAINALLOCATIONHANDLE = 272,
-    HRR_API_HIPMEMSETACCESS = 273,
-    HRR_API_HIPMEMUNMAP = 274,
-    HRR_API_HIPMEMCPY = 275,
-    HRR_API_HIPMEMCPY2D = 276,
-    HRR_API_HIPMEMCPY2DASYNC = 277,
-    HRR_API_HIPMEMCPY2DFROMARRAY = 278,
-    HRR_API_HIPMEMCPY2DFROMARRAYASYNC = 279,
-    HRR_API_HIPMEMCPY2DTOARRAY = 280,
-    HRR_API_HIPMEMCPY2DTOARRAYASYNC = 281,
-    HRR_API_HIPMEMCPY3D = 282,
-    HRR_API_HIPMEMCPY3DASYNC = 283,
-    HRR_API_HIPMEMCPYASYNC = 284,
-    HRR_API_HIPMEMCPYATOH = 285,
-    HRR_API_HIPMEMCPYDTOD = 286,
-    HRR_API_HIPMEMCPYDTODASYNC = 287,
-    HRR_API_HIPMEMCPYDTOH = 288,
-    HRR_API_HIPMEMCPYDTOHASYNC = 289,
-    HRR_API_HIPMEMCPYFROMARRAY = 290,
-    HRR_API_HIPMEMCPYFROMSYMBOL = 291,
-    HRR_API_HIPMEMCPYFROMSYMBOLASYNC = 292,
-    HRR_API_HIPMEMCPYHTOA = 293,
-    HRR_API_HIPMEMCPYHTOD = 294,
-    HRR_API_HIPMEMCPYHTODASYNC = 295,
-    HRR_API_HIPMEMCPYPARAM2D = 296,
-    HRR_API_HIPMEMCPYPARAM2DASYNC = 297,
-    HRR_API_HIPMEMCPYPEER = 298,
-    HRR_API_HIPMEMCPYPEERASYNC = 299,
-    HRR_API_HIPMEMCPYTOARRAY = 300,
-    HRR_API_HIPMEMCPYTOSYMBOL = 301,
-    HRR_API_HIPMEMCPYTOSYMBOLASYNC = 302,
-    HRR_API_HIPMEMCPYWITHSTREAM = 303,
-    HRR_API_HIPMEMSET = 304,
-    HRR_API_HIPMEMSET2D = 305,
-    HRR_API_HIPMEMSET2DASYNC = 306,
-    HRR_API_HIPMEMSET3D = 307,
-    HRR_API_HIPMEMSET3DASYNC = 308,
-    HRR_API_HIPMEMSETASYNC = 309,
-    HRR_API_HIPMEMSETD16 = 310,
-    HRR_API_HIPMEMSETD16ASYNC = 311,
-    HRR_API_HIPMEMSETD32 = 312,
-    HRR_API_HIPMEMSETD32ASYNC = 313,
-    HRR_API_HIPMEMSETD8 = 314,
-    HRR_API_HIPMEMSETD8ASYNC = 315,
-    HRR_API_HIPMIPMAPPEDARRAYCREATE = 316,
-    HRR_API_HIPMIPMAPPEDARRAYDESTROY = 317,
-    HRR_API_HIPMIPMAPPEDARRAYGETLEVEL = 318,
-    HRR_API_HIPMODULEGETFUNCTION = 319,
-    HRR_API_HIPMODULEGETFUNCTIONCOUNT = 320,
-    HRR_API_HIPMODULEGETGLOBAL = 321,
-    HRR_API_HIPMODULEGETTEXREF = 322,
-    HRR_API_HIPMODULELAUNCHCOOPERATIVEKERNEL = 323,
-    HRR_API_HIPMODULELAUNCHCOOPERATIVEKERNELMULTIDEVICE = 324,
-    HRR_API_HIPMODULELAUNCHKERNEL = 325,
-    HRR_API_HIPMODULELOAD = 326,
-    HRR_API_HIPMODULELOADDATA = 327,
-    HRR_API_HIPMODULELOADDATAEX = 328,
-    HRR_API_HIPLINKADDDATA = 329,
-    HRR_API_HIPLINKADDFILE = 330,
-    HRR_API_HIPLINKCOMPLETE = 331,
-    HRR_API_HIPLINKCREATE = 332,
-    HRR_API_HIPLINKDESTROY = 333,
-    HRR_API_HIPMODULEOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR = 334,
-    HRR_API_HIPMODULEOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSORWITHFLAGS = 335,
-    HRR_API_HIPMODULEOCCUPANCYMAXPOTENTIALBLOCKSIZE = 336,
-    HRR_API_HIPMODULEOCCUPANCYMAXPOTENTIALBLOCKSIZEWITHFLAGS = 337,
-    HRR_API_HIPMODULEUNLOAD = 338,
-    HRR_API_HIPOCCUPANCYAVAILABLEDYNAMICSMEMPERBLOCK = 339,
-    HRR_API_HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR = 340,
-    HRR_API_HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSORWITHFLAGS = 341,
-    HRR_API_HIPOCCUPANCYMAXPOTENTIALBLOCKSIZE = 342,
-    HRR_API_HIPOCCUPANCYMAXACTIVECLUSTERS = 343,
-    HRR_API_HIPOCCUPANCYMAXPOTENTIALCLUSTERSIZE = 344,
-    HRR_API_HIPPEEKATLASTERROR = 345,
-    HRR_API_HIPPOINTERGETATTRIBUTE = 346,
-    HRR_API_HIPPOINTERGETATTRIBUTES = 347,
-    HRR_API_HIPPOINTERSETATTRIBUTE = 348,
-    HRR_API_HIPPROFILERSTART = 349,
-    HRR_API_HIPPROFILERSTOP = 350,
-    HRR_API_HIPRUNTIMEGETVERSION = 351,
-    HRR_API_HIPSETDEVICE = 352,
-    HRR_API_HIPSETDEVICEFLAGS = 353,
-    HRR_API_HIPSETUPARGUMENT = 354,
-    HRR_API_HIPSIGNALEXTERNALSEMAPHORESASYNC = 355,
-    HRR_API_HIPSTREAMADDCALLBACK = 356,
-    HRR_API_HIPSTREAMATTACHMEMASYNC = 357,
-    HRR_API_HIPSTREAMBEGINCAPTURE = 358,
-    HRR_API_HIPSTREAMCOPYATTRIBUTES = 359,
-    HRR_API_HIPSTREAMCREATE = 360,
-    HRR_API_HIPSTREAMCREATEWITHFLAGS = 361,
-    HRR_API_HIPSTREAMCREATEWITHPRIORITY = 362,
-    HRR_API_HIPSTREAMDESTROY = 363,
-    HRR_API_HIPSTREAMENDCAPTURE = 364,
-    HRR_API_HIPSTREAMGETCAPTUREINFO = 365,
-    HRR_API_HIPSTREAMGETCAPTUREINFO_V2 = 366,
-    HRR_API_HIPSTREAMGETDEVICE = 367,
-    HRR_API_HIPSTREAMGETFLAGS = 368,
-    HRR_API_HIPSTREAMGETID = 369,
-    HRR_API_HIPSTREAMGETPRIORITY = 370,
-    HRR_API_HIPSTREAMISCAPTURING = 371,
-    HRR_API_HIPSTREAMQUERY = 372,
-    HRR_API_HIPSTREAMSYNCHRONIZE = 373,
-    HRR_API_HIPSTREAMUPDATECAPTUREDEPENDENCIES = 374,
-    HRR_API_HIPSTREAMWAITEVENT = 375,
-    HRR_API_HIPSTREAMWAITVALUE32 = 376,
-    HRR_API_HIPSTREAMWAITVALUE64 = 377,
-    HRR_API_HIPSTREAMWRITEVALUE32 = 378,
-    HRR_API_HIPSTREAMWRITEVALUE64 = 379,
-    HRR_API_HIPSTREAMBATCHMEMOP = 380,
-    HRR_API_HIPTEXOBJECTCREATE = 381,
-    HRR_API_HIPTEXOBJECTDESTROY = 382,
-    HRR_API_HIPTEXOBJECTGETRESOURCEDESC = 383,
-    HRR_API_HIPTEXOBJECTGETRESOURCEVIEWDESC = 384,
-    HRR_API_HIPTEXOBJECTGETTEXTUREDESC = 385,
-    HRR_API_HIPTEXREFGETADDRESS = 386,
-    HRR_API_HIPTEXREFGETADDRESSMODE = 387,
-    HRR_API_HIPTEXREFGETFILTERMODE = 388,
-    HRR_API_HIPTEXREFGETFLAGS = 389,
-    HRR_API_HIPTEXREFGETFORMAT = 390,
-    HRR_API_HIPTEXREFGETMAXANISOTROPY = 391,
-    HRR_API_HIPTEXREFGETMIPMAPPEDARRAY = 392,
-    HRR_API_HIPTEXREFGETMIPMAPFILTERMODE = 393,
-    HRR_API_HIPTEXREFGETMIPMAPLEVELBIAS = 394,
-    HRR_API_HIPTEXREFGETMIPMAPLEVELCLAMP = 395,
-    HRR_API_HIPTEXREFSETADDRESS = 396,
-    HRR_API_HIPTEXREFSETADDRESS2D = 397,
-    HRR_API_HIPTEXREFSETADDRESSMODE = 398,
-    HRR_API_HIPTEXREFSETARRAY = 399,
-    HRR_API_HIPTEXREFSETBORDERCOLOR = 400,
-    HRR_API_HIPTEXREFSETFILTERMODE = 401,
-    HRR_API_HIPTEXREFSETFLAGS = 402,
-    HRR_API_HIPTEXREFSETFORMAT = 403,
-    HRR_API_HIPTEXREFSETMAXANISOTROPY = 404,
-    HRR_API_HIPTEXREFSETMIPMAPFILTERMODE = 405,
-    HRR_API_HIPTEXREFSETMIPMAPLEVELBIAS = 406,
-    HRR_API_HIPTEXREFSETMIPMAPLEVELCLAMP = 407,
-    HRR_API_HIPTEXREFSETMIPMAPPEDARRAY = 408,
-    HRR_API_HIPTHREADEXCHANGESTREAMCAPTUREMODE = 409,
-    HRR_API_HIPUNBINDTEXTURE = 410,
-    HRR_API_HIPUSEROBJECTCREATE = 411,
-    HRR_API_HIPUSEROBJECTRELEASE = 412,
-    HRR_API_HIPUSEROBJECTRETAIN = 413,
-    HRR_API_HIPWAITEXTERNALSEMAPHORESASYNC = 414,
-    HRR_API_HIPMEMCPY_SPT = 415,
-    HRR_API_HIPMEMCPYTOSYMBOL_SPT = 416,
-    HRR_API_HIPMEMCPYFROMSYMBOL_SPT = 417,
-    HRR_API_HIPMEMCPY2D_SPT = 418,
-    HRR_API_HIPMEMCPY2DFROMARRAY_SPT = 419,
-    HRR_API_HIPMEMCPY3D_SPT = 420,
-    HRR_API_HIPMEMSET_SPT = 421,
-    HRR_API_HIPMEMSETASYNC_SPT = 422,
-    HRR_API_HIPMEMSET2D_SPT = 423,
-    HRR_API_HIPMEMSET2DASYNC_SPT = 424,
-    HRR_API_HIPMEMSET3DASYNC_SPT = 425,
-    HRR_API_HIPMEMSET3D_SPT = 426,
-    HRR_API_HIPMEMCPYASYNC_SPT = 427,
-    HRR_API_HIPMEMCPY3DASYNC_SPT = 428,
-    HRR_API_HIPMEMCPY2DASYNC_SPT = 429,
-    HRR_API_HIPMEMCPYFROMSYMBOLASYNC_SPT = 430,
-    HRR_API_HIPMEMCPYTOSYMBOLASYNC_SPT = 431,
-    HRR_API_HIPMEMCPYFROMARRAY_SPT = 432,
-    HRR_API_HIPMEMCPY2DTOARRAY_SPT = 433,
-    HRR_API_HIPMEMCPY2DFROMARRAYASYNC_SPT = 434,
-    HRR_API_HIPMEMCPY2DTOARRAYASYNC_SPT = 435,
-    HRR_API_HIPSTREAMQUERY_SPT = 436,
-    HRR_API_HIPSTREAMSYNCHRONIZE_SPT = 437,
-    HRR_API_HIPSTREAMGETPRIORITY_SPT = 438,
-    HRR_API_HIPSTREAMWAITEVENT_SPT = 439,
-    HRR_API_HIPSTREAMGETFLAGS_SPT = 440,
-    HRR_API_HIPSTREAMADDCALLBACK_SPT = 441,
-    HRR_API_HIPEVENTRECORD_SPT = 442,
-    HRR_API_HIPLAUNCHCOOPERATIVEKERNEL_SPT = 443,
-    HRR_API_HIPLAUNCHKERNEL_SPT = 444,
-    HRR_API_HIPGRAPHLAUNCH_SPT = 445,
-    HRR_API_HIPSTREAMBEGINCAPTURE_SPT = 446,
-    HRR_API_HIPSTREAMENDCAPTURE_SPT = 447,
-    HRR_API_HIPSTREAMISCAPTURING_SPT = 448,
-    HRR_API_HIPSTREAMGETCAPTUREINFO_SPT = 449,
-    HRR_API_HIPSTREAMGETCAPTUREINFO_V2_SPT = 450,
-    HRR_API_HIPLAUNCHHOSTFUNC_SPT = 451,
-    HRR_API_HIPCREATECHANNELDESC = 452,
-    HRR_API_HIPEXTMODULELAUNCHKERNEL = 453,
-    HRR_API_HIPHCCMODULELAUNCHKERNEL = 454,
-    HRR_API_HIPGETSTREAMDEVICEID = 455,
-    HRR_API_HIPDRVGRAPHADDMEMSETNODE = 456,
-    HRR_API_HIPGRAPHADDEXTERNALSEMAPHORESWAITNODE = 457,
-    HRR_API_HIPGRAPHADDEXTERNALSEMAPHORESSIGNALNODE = 458,
-    HRR_API_HIPGRAPHEXTERNALSEMAPHORESSIGNALNODESETPARAMS = 459,
-    HRR_API_HIPGRAPHEXTERNALSEMAPHORESWAITNODESETPARAMS = 460,
-    HRR_API_HIPGRAPHEXTERNALSEMAPHORESSIGNALNODEGETPARAMS = 461,
-    HRR_API_HIPGRAPHEXTERNALSEMAPHORESWAITNODEGETPARAMS = 462,
-    HRR_API_HIPGRAPHEXECEXTERNALSEMAPHORESSIGNALNODESETPARAMS = 463,
-    HRR_API_HIPGRAPHEXECEXTERNALSEMAPHORESWAITNODESETPARAMS = 464,
-    HRR_API_HIPGRAPHADDNODE = 465,
-    HRR_API_HIPGRAPHINSTANTIATEWITHPARAMS = 466,
-    HRR_API_HIPEXTGETLASTERROR = 467,
-    HRR_API_HIPTEXREFGETBORDERCOLOR = 468,
-    HRR_API_HIPTEXREFGETARRAY = 469,
-    HRR_API_HIPGETPROCADDRESS = 470,
-    HRR_API_HIPSTREAMBEGINCAPTURETOGRAPH = 471,
-    HRR_API_HIPGETFUNCBYSYMBOL = 472,
-    HRR_API_HIPDRVGRAPHADDMEMFREENODE = 473,
-    HRR_API_HIPDRVGRAPHEXECMEMCPYNODESETPARAMS = 474,
-    HRR_API_HIPDRVGRAPHEXECMEMSETNODESETPARAMS = 475,
-    HRR_API_HIPSETVALIDDEVICES = 476,
-    HRR_API_HIPMEMCPYATOD = 477,
-    HRR_API_HIPMEMCPYDTOA = 478,
-    HRR_API_HIPMEMCPYATOA = 479,
-    HRR_API_HIPMEMCPYATOHASYNC = 480,
-    HRR_API_HIPMEMCPYHTOAASYNC = 481,
-    HRR_API_HIPMEMCPY2DARRAYTOARRAY = 482,
-    HRR_API_HIPGRAPHEXECGETFLAGS = 483,
-    HRR_API_HIPGRAPHNODESETPARAMS = 484,
-    HRR_API_HIPGRAPHEXECNODESETPARAMS = 485,
-    HRR_API_HIPEXTERNALMEMORYGETMAPPEDMIPMAPPEDARRAY = 486,
-    HRR_API_HIPDRVGRAPHMEMCPYNODEGETPARAMS = 487,
-    HRR_API_HIPDRVGRAPHMEMCPYNODESETPARAMS = 488,
-    HRR_API_HIPEXTHOSTALLOC = 489,
-    HRR_API_HIPDEVICEGETTEXTURE1DLINEARMAXWIDTH = 490,
-    HRR_API_HIPGRAPHADDBATCHMEMOPNODE = 491,
-    HRR_API_HIPGRAPHBATCHMEMOPNODEGETPARAMS = 492,
-    HRR_API_HIPGRAPHBATCHMEMOPNODESETPARAMS = 493,
-    HRR_API_HIPGRAPHEXECBATCHMEMOPNODESETPARAMS = 494,
-    HRR_API_HIPEVENTRECORDWITHFLAGS = 495,
-    HRR_API_HIPLAUNCHKERNELEXC = 496,
-    HRR_API_HIPDRVLAUNCHKERNELEX = 497,
-    HRR_API_HIPMEMGETHANDLEFORADDRESSRANGE = 498,
-    HRR_API_HIPMEMSETD2D8 = 499,
-    HRR_API_HIPMEMSETD2D8ASYNC = 500,
-    HRR_API_HIPMEMSETD2D16 = 501,
-    HRR_API_HIPMEMSETD2D16ASYNC = 502,
-    HRR_API_HIPMEMSETD2D32 = 503,
-    HRR_API_HIPMEMSETD2D32ASYNC = 504,
-    HRR_API_HIPSTREAMSETATTRIBUTE = 505,
-    HRR_API_HIPSTREAMGETATTRIBUTE = 506,
-    HRR_API_HIPMODULELOADFATBINARY = 507,
-    HRR_API_HIPMEMCPYBATCHASYNC = 508,
-    HRR_API_HIPMEMCPY3DBATCHASYNC = 509,
-    HRR_API_HIPMEMCPY3DPEER = 510,
-    HRR_API_HIPMEMCPY3DPEERASYNC = 511,
-    HRR_API_HIPGETDRIVERENTRYPOINT = 512,
-    HRR_API_HIPGETDRIVERENTRYPOINT_SPT = 513,
-    HRR_API_HIPLIBRARYLOADDATA = 514,
-    HRR_API_HIPLIBRARYLOADFROMFILE = 515,
-    HRR_API_HIPLIBRARYUNLOAD = 516,
-    HRR_API_HIPLIBRARYGETKERNEL = 517,
-    HRR_API_HIPLIBRARYGETKERNELCOUNT = 518,
-    HRR_API_HIPLIBRARYGETGLOBAL = 519,
-    HRR_API_HIPLIBRARYGETMANAGED = 520,
-    HRR_API_HIPLIBRARYENUMERATEKERNELS = 521,
-    HRR_API_HIPKERNELGETLIBRARY = 522,
-    HRR_API_HIPKERNELGETNAME = 523,
-    HRR_API_HIPGETPROCADDRESS_SPT = 524,
-    HRR_API_HIPEXTDISABLELOGGING = 525,
-    HRR_API_HIPEXTENABLELOGGING = 526,
-    HRR_API_HIPEXTSETLOGGINGPARAMS = 527,
-    HRR_API_HIPKERNELGETATTRIBUTE = 528,
-    HRR_API_HIPKERNELSETATTRIBUTE = 529,
-    HRR_API_HIPKERNELGETFUNCTION = 530,
-    HRR_API_HIPKERNELGETPARAMINFO = 531,
-    HRR_API_HIPMEMSETMEMPOOL = 532,
-    HRR_API_HIPMEMGETMEMPOOL = 533,
-    HRR_API_HIPMIPMAPPEDARRAYGETMEMORYREQUIREMENTS = 534,
-    HRR_API_HIPGREENCTXCREATE = 535,
-    HRR_API_HIPEXECUTIONCTXDESTROY = 536,
-    HRR_API_HIPEXECUTIONCTXSTREAMCREATE = 537,
-    HRR_API_HIPDEVICEGETDEVRESOURCE = 538,
-    HRR_API_HIPDEVSMRESOURCESPLITBYCOUNT = 539,
-    HRR_API_HIPDEVSMRESOURCESPLIT = 540,
-    HRR_API_HIPDEVRESOURCEGENERATEDESC = 541,
-    HRR_API_HIPDEVICEGETEXECUTIONCTX = 542,
-    HRR_API_HIPEXECUTIONCTXGETDEVRESOURCE = 543,
-    HRR_API_HIPEXECUTIONCTXGETDEVICE = 544,
-    HRR_API_HIPEXECUTIONCTXGETID = 545,
-    HRR_API_HIPSTREAMGETDEVRESOURCE = 546,
-    HRR_API_HIPEXECUTIONCTXRECORDEVENT = 547,
-    HRR_API_HIPEXECUTIONCTXSYNCHRONIZE = 548,
-    HRR_API_HIPEXECUTIONCTXWAITEVENT = 549,
-    HRR_API_COUNT = 550
+    HRR_API_HIPMEMALLOCHOST = 237,
+    HRR_API_HIPMEMALLOCPITCH = 238,
+    HRR_API_HIPMEMCREATE = 239,
+    HRR_API_HIPMEMEXPORTTOSHAREABLEHANDLE = 240,
+    HRR_API_HIPMEMGETACCESS = 241,
+    HRR_API_HIPMEMGETADDRESSRANGE = 242,
+    HRR_API_HIPMEMGETALLOCATIONGRANULARITY = 243,
+    HRR_API_HIPMEMGETALLOCATIONPROPERTIESFROMHANDLE = 244,
+    HRR_API_HIPMEMGETINFO = 245,
+    HRR_API_HIPMEMIMPORTFROMSHAREABLEHANDLE = 246,
+    HRR_API_HIPMEMMAP = 247,
+    HRR_API_HIPMEMMAPARRAYASYNC = 248,
+    HRR_API_HIPMEMPOOLCREATE = 249,
+    HRR_API_HIPMEMPOOLDESTROY = 250,
+    HRR_API_HIPMEMPOOLEXPORTPOINTER = 251,
+    HRR_API_HIPMEMPOOLEXPORTTOSHAREABLEHANDLE = 252,
+    HRR_API_HIPMEMPOOLGETACCESS = 253,
+    HRR_API_HIPMEMPOOLGETATTRIBUTE = 254,
+    HRR_API_HIPMEMPOOLIMPORTFROMSHAREABLEHANDLE = 255,
+    HRR_API_HIPMEMPOOLIMPORTPOINTER = 256,
+    HRR_API_HIPMEMPOOLSETACCESS = 257,
+    HRR_API_HIPMEMPOOLSETATTRIBUTE = 258,
+    HRR_API_HIPMEMPOOLTRIMTO = 259,
+    HRR_API_HIPMEMPREFETCHASYNC = 260,
+    HRR_API_HIPMEMPTRGETINFO = 261,
+    HRR_API_HIPMEMRANGEGETATTRIBUTE = 262,
+    HRR_API_HIPMEMRANGEGETATTRIBUTES = 263,
+    HRR_API_HIPMEMRELEASE = 264,
+    HRR_API_HIPMEMRETAINALLOCATIONHANDLE = 265,
+    HRR_API_HIPMEMSETACCESS = 266,
+    HRR_API_HIPMEMUNMAP = 267,
+    HRR_API_HIPMEMCPY = 268,
+    HRR_API_HIPMEMCPY2D = 269,
+    HRR_API_HIPMEMCPY2DASYNC = 270,
+    HRR_API_HIPMEMCPY2DFROMARRAY = 271,
+    HRR_API_HIPMEMCPY2DFROMARRAYASYNC = 272,
+    HRR_API_HIPMEMCPY2DTOARRAY = 273,
+    HRR_API_HIPMEMCPY2DTOARRAYASYNC = 274,
+    HRR_API_HIPMEMCPY3D = 275,
+    HRR_API_HIPMEMCPY3DASYNC = 276,
+    HRR_API_HIPMEMCPYASYNC = 277,
+    HRR_API_HIPMEMCPYATOH = 278,
+    HRR_API_HIPMEMCPYDTOD = 279,
+    HRR_API_HIPMEMCPYDTODASYNC = 280,
+    HRR_API_HIPMEMCPYDTOH = 281,
+    HRR_API_HIPMEMCPYDTOHASYNC = 282,
+    HRR_API_HIPMEMCPYFROMARRAY = 283,
+    HRR_API_HIPMEMCPYFROMSYMBOL = 284,
+    HRR_API_HIPMEMCPYFROMSYMBOLASYNC = 285,
+    HRR_API_HIPMEMCPYHTOA = 286,
+    HRR_API_HIPMEMCPYHTOD = 287,
+    HRR_API_HIPMEMCPYHTODASYNC = 288,
+    HRR_API_HIPMEMCPYPARAM2D = 289,
+    HRR_API_HIPMEMCPYPARAM2DASYNC = 290,
+    HRR_API_HIPMEMCPYPEER = 291,
+    HRR_API_HIPMEMCPYPEERASYNC = 292,
+    HRR_API_HIPMEMCPYTOARRAY = 293,
+    HRR_API_HIPMEMCPYTOSYMBOL = 294,
+    HRR_API_HIPMEMCPYTOSYMBOLASYNC = 295,
+    HRR_API_HIPMEMCPYWITHSTREAM = 296,
+    HRR_API_HIPMEMSET = 297,
+    HRR_API_HIPMEMSET2D = 298,
+    HRR_API_HIPMEMSET2DASYNC = 299,
+    HRR_API_HIPMEMSET3D = 300,
+    HRR_API_HIPMEMSET3DASYNC = 301,
+    HRR_API_HIPMEMSETASYNC = 302,
+    HRR_API_HIPMEMSETD16 = 303,
+    HRR_API_HIPMEMSETD16ASYNC = 304,
+    HRR_API_HIPMEMSETD32 = 305,
+    HRR_API_HIPMEMSETD32ASYNC = 306,
+    HRR_API_HIPMEMSETD8 = 307,
+    HRR_API_HIPMEMSETD8ASYNC = 308,
+    HRR_API_HIPMIPMAPPEDARRAYCREATE = 309,
+    HRR_API_HIPMIPMAPPEDARRAYDESTROY = 310,
+    HRR_API_HIPMIPMAPPEDARRAYGETLEVEL = 311,
+    HRR_API_HIPMODULEGETFUNCTION = 312,
+    HRR_API_HIPMODULEGETGLOBAL = 313,
+    HRR_API_HIPMODULEGETTEXREF = 314,
+    HRR_API_HIPMODULELAUNCHCOOPERATIVEKERNEL = 315,
+    HRR_API_HIPMODULELAUNCHCOOPERATIVEKERNELMULTIDEVICE = 316,
+    HRR_API_HIPMODULELAUNCHKERNEL = 317,
+    HRR_API_HIPMODULELOAD = 318,
+    HRR_API_HIPMODULELOADDATA = 319,
+    HRR_API_HIPMODULELOADDATAEX = 320,
+    HRR_API_HIPMODULEOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR = 321,
+    HRR_API_HIPMODULEOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSORWITHFLAGS = 322,
+    HRR_API_HIPMODULEOCCUPANCYMAXPOTENTIALBLOCKSIZE = 323,
+    HRR_API_HIPMODULEOCCUPANCYMAXPOTENTIALBLOCKSIZEWITHFLAGS = 324,
+    HRR_API_HIPMODULEUNLOAD = 325,
+    HRR_API_HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR = 326,
+    HRR_API_HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSORWITHFLAGS = 327,
+    HRR_API_HIPOCCUPANCYMAXPOTENTIALBLOCKSIZE = 328,
+    HRR_API_HIPPEEKATLASTERROR = 329,
+    HRR_API_HIPPOINTERGETATTRIBUTE = 330,
+    HRR_API_HIPPOINTERGETATTRIBUTES = 331,
+    HRR_API_HIPPOINTERSETATTRIBUTE = 332,
+    HRR_API_HIPPROFILERSTART = 333,
+    HRR_API_HIPPROFILERSTOP = 334,
+    HRR_API_HIPRUNTIMEGETVERSION = 335,
+    HRR_API_HIPSETDEVICE = 336,
+    HRR_API_HIPSETDEVICEFLAGS = 337,
+    HRR_API_HIPSETUPARGUMENT = 338,
+    HRR_API_HIPSIGNALEXTERNALSEMAPHORESASYNC = 339,
+    HRR_API_HIPSTREAMADDCALLBACK = 340,
+    HRR_API_HIPSTREAMATTACHMEMASYNC = 341,
+    HRR_API_HIPSTREAMBEGINCAPTURE = 342,
+    HRR_API_HIPSTREAMCREATE = 343,
+    HRR_API_HIPSTREAMCREATEWITHFLAGS = 344,
+    HRR_API_HIPSTREAMCREATEWITHPRIORITY = 345,
+    HRR_API_HIPSTREAMDESTROY = 346,
+    HRR_API_HIPSTREAMENDCAPTURE = 347,
+    HRR_API_HIPSTREAMGETCAPTUREINFO = 348,
+    HRR_API_HIPSTREAMGETCAPTUREINFO_V2 = 349,
+    HRR_API_HIPSTREAMGETDEVICE = 350,
+    HRR_API_HIPSTREAMGETFLAGS = 351,
+    HRR_API_HIPSTREAMGETPRIORITY = 352,
+    HRR_API_HIPSTREAMISCAPTURING = 353,
+    HRR_API_HIPSTREAMQUERY = 354,
+    HRR_API_HIPSTREAMSYNCHRONIZE = 355,
+    HRR_API_HIPSTREAMUPDATECAPTUREDEPENDENCIES = 356,
+    HRR_API_HIPSTREAMWAITEVENT = 357,
+    HRR_API_HIPSTREAMWAITVALUE32 = 358,
+    HRR_API_HIPSTREAMWAITVALUE64 = 359,
+    HRR_API_HIPSTREAMWRITEVALUE32 = 360,
+    HRR_API_HIPSTREAMWRITEVALUE64 = 361,
+    HRR_API_HIPTEXOBJECTCREATE = 362,
+    HRR_API_HIPTEXOBJECTDESTROY = 363,
+    HRR_API_HIPTEXOBJECTGETRESOURCEDESC = 364,
+    HRR_API_HIPTEXOBJECTGETRESOURCEVIEWDESC = 365,
+    HRR_API_HIPTEXOBJECTGETTEXTUREDESC = 366,
+    HRR_API_HIPTEXREFGETADDRESS = 367,
+    HRR_API_HIPTEXREFGETADDRESSMODE = 368,
+    HRR_API_HIPTEXREFGETFILTERMODE = 369,
+    HRR_API_HIPTEXREFGETFLAGS = 370,
+    HRR_API_HIPTEXREFGETFORMAT = 371,
+    HRR_API_HIPTEXREFGETMAXANISOTROPY = 372,
+    HRR_API_HIPTEXREFGETMIPMAPPEDARRAY = 373,
+    HRR_API_HIPTEXREFGETMIPMAPFILTERMODE = 374,
+    HRR_API_HIPTEXREFGETMIPMAPLEVELBIAS = 375,
+    HRR_API_HIPTEXREFGETMIPMAPLEVELCLAMP = 376,
+    HRR_API_HIPTEXREFSETADDRESS = 377,
+    HRR_API_HIPTEXREFSETADDRESS2D = 378,
+    HRR_API_HIPTEXREFSETADDRESSMODE = 379,
+    HRR_API_HIPTEXREFSETARRAY = 380,
+    HRR_API_HIPTEXREFSETBORDERCOLOR = 381,
+    HRR_API_HIPTEXREFSETFILTERMODE = 382,
+    HRR_API_HIPTEXREFSETFLAGS = 383,
+    HRR_API_HIPTEXREFSETFORMAT = 384,
+    HRR_API_HIPTEXREFSETMAXANISOTROPY = 385,
+    HRR_API_HIPTEXREFSETMIPMAPFILTERMODE = 386,
+    HRR_API_HIPTEXREFSETMIPMAPLEVELBIAS = 387,
+    HRR_API_HIPTEXREFSETMIPMAPLEVELCLAMP = 388,
+    HRR_API_HIPTEXREFSETMIPMAPPEDARRAY = 389,
+    HRR_API_HIPTHREADEXCHANGESTREAMCAPTUREMODE = 390,
+    HRR_API_HIPUNBINDTEXTURE = 391,
+    HRR_API_HIPUSEROBJECTCREATE = 392,
+    HRR_API_HIPUSEROBJECTRELEASE = 393,
+    HRR_API_HIPUSEROBJECTRETAIN = 394,
+    HRR_API_HIPWAITEXTERNALSEMAPHORESASYNC = 395,
+    HRR_API_HIPCREATECHANNELDESC = 396,
+    HRR_API_HIPEXTMODULELAUNCHKERNEL = 397,
+    HRR_API_HIPHCCMODULELAUNCHKERNEL = 398,
+    HRR_API_HIPMEMCPY_SPT = 399,
+    HRR_API_HIPMEMCPYTOSYMBOL_SPT = 400,
+    HRR_API_HIPMEMCPYFROMSYMBOL_SPT = 401,
+    HRR_API_HIPMEMCPY2D_SPT = 402,
+    HRR_API_HIPMEMCPY2DFROMARRAY_SPT = 403,
+    HRR_API_HIPMEMCPY3D_SPT = 404,
+    HRR_API_HIPMEMSET_SPT = 405,
+    HRR_API_HIPMEMSETASYNC_SPT = 406,
+    HRR_API_HIPMEMSET2D_SPT = 407,
+    HRR_API_HIPMEMSET2DASYNC_SPT = 408,
+    HRR_API_HIPMEMSET3DASYNC_SPT = 409,
+    HRR_API_HIPMEMSET3D_SPT = 410,
+    HRR_API_HIPMEMCPYASYNC_SPT = 411,
+    HRR_API_HIPMEMCPY3DASYNC_SPT = 412,
+    HRR_API_HIPMEMCPY2DASYNC_SPT = 413,
+    HRR_API_HIPMEMCPYFROMSYMBOLASYNC_SPT = 414,
+    HRR_API_HIPMEMCPYTOSYMBOLASYNC_SPT = 415,
+    HRR_API_HIPMEMCPYFROMARRAY_SPT = 416,
+    HRR_API_HIPMEMCPY2DTOARRAY_SPT = 417,
+    HRR_API_HIPMEMCPY2DFROMARRAYASYNC_SPT = 418,
+    HRR_API_HIPMEMCPY2DTOARRAYASYNC_SPT = 419,
+    HRR_API_HIPSTREAMQUERY_SPT = 420,
+    HRR_API_HIPSTREAMSYNCHRONIZE_SPT = 421,
+    HRR_API_HIPSTREAMGETPRIORITY_SPT = 422,
+    HRR_API_HIPSTREAMWAITEVENT_SPT = 423,
+    HRR_API_HIPSTREAMGETFLAGS_SPT = 424,
+    HRR_API_HIPSTREAMADDCALLBACK_SPT = 425,
+    HRR_API_HIPEVENTRECORD_SPT = 426,
+    HRR_API_HIPLAUNCHCOOPERATIVEKERNEL_SPT = 427,
+    HRR_API_HIPLAUNCHKERNEL_SPT = 428,
+    HRR_API_HIPGRAPHLAUNCH_SPT = 429,
+    HRR_API_HIPSTREAMBEGINCAPTURE_SPT = 430,
+    HRR_API_HIPSTREAMENDCAPTURE_SPT = 431,
+    HRR_API_HIPSTREAMISCAPTURING_SPT = 432,
+    HRR_API_HIPSTREAMGETCAPTUREINFO_SPT = 433,
+    HRR_API_HIPSTREAMGETCAPTUREINFO_V2_SPT = 434,
+    HRR_API_HIPLAUNCHHOSTFUNC_SPT = 435,
+    HRR_API_HIPGETSTREAMDEVICEID = 436,
+    HRR_API_HIPDRVGRAPHADDMEMSETNODE = 437,
+    HRR_API_HIPGRAPHADDEXTERNALSEMAPHORESWAITNODE = 438,
+    HRR_API_HIPGRAPHADDEXTERNALSEMAPHORESSIGNALNODE = 439,
+    HRR_API_HIPGRAPHEXTERNALSEMAPHORESSIGNALNODESETPARAMS = 440,
+    HRR_API_HIPGRAPHEXTERNALSEMAPHORESWAITNODESETPARAMS = 441,
+    HRR_API_HIPGRAPHEXTERNALSEMAPHORESSIGNALNODEGETPARAMS = 442,
+    HRR_API_HIPGRAPHEXTERNALSEMAPHORESWAITNODEGETPARAMS = 443,
+    HRR_API_HIPGRAPHEXECEXTERNALSEMAPHORESSIGNALNODESETPARAMS = 444,
+    HRR_API_HIPGRAPHEXECEXTERNALSEMAPHORESWAITNODESETPARAMS = 445,
+    HRR_API_HIPGRAPHADDNODE = 446,
+    HRR_API_HIPGRAPHINSTANTIATEWITHPARAMS = 447,
+    HRR_API_HIPEXTGETLASTERROR = 448,
+    HRR_API_HIPTEXREFGETBORDERCOLOR = 449,
+    HRR_API_HIPTEXREFGETARRAY = 450,
+    HRR_API_HIPGETPROCADDRESS = 451,
+    HRR_API_HIPSTREAMBEGINCAPTURETOGRAPH = 452,
+    HRR_API_HIPGETFUNCBYSYMBOL = 453,
+    HRR_API_HIPSETVALIDDEVICES = 454,
+    HRR_API_HIPMEMCPYATOD = 455,
+    HRR_API_HIPMEMCPYDTOA = 456,
+    HRR_API_HIPMEMCPYATOA = 457,
+    HRR_API_HIPMEMCPYATOHASYNC = 458,
+    HRR_API_HIPMEMCPYHTOAASYNC = 459,
+    HRR_API_HIPMEMCPY2DARRAYTOARRAY = 460,
+    HRR_API_HIPDRVGRAPHADDMEMFREENODE = 461,
+    HRR_API_HIPDRVGRAPHEXECMEMCPYNODESETPARAMS = 462,
+    HRR_API_HIPDRVGRAPHEXECMEMSETNODESETPARAMS = 463,
+    HRR_API_HIPGRAPHEXECGETFLAGS = 464,
+    HRR_API_HIPGRAPHNODESETPARAMS = 465,
+    HRR_API_HIPGRAPHEXECNODESETPARAMS = 466,
+    HRR_API_HIPEXTERNALMEMORYGETMAPPEDMIPMAPPEDARRAY = 467,
+    HRR_API_HIPDRVGRAPHMEMCPYNODEGETPARAMS = 468,
+    HRR_API_HIPDRVGRAPHMEMCPYNODESETPARAMS = 469,
+    HRR_API_HIPEXTHOSTALLOC = 470,
+    HRR_API_HIPDEVICEGETTEXTURE1DLINEARMAXWIDTH = 471,
+    HRR_API_HIPSTREAMBATCHMEMOP = 472,
+    HRR_API_HIPGRAPHADDBATCHMEMOPNODE = 473,
+    HRR_API_HIPGRAPHBATCHMEMOPNODEGETPARAMS = 474,
+    HRR_API_HIPGRAPHBATCHMEMOPNODESETPARAMS = 475,
+    HRR_API_HIPGRAPHEXECBATCHMEMOPNODESETPARAMS = 476,
+    HRR_API_HIPLINKADDDATA = 477,
+    HRR_API_HIPLINKADDFILE = 478,
+    HRR_API_HIPLINKCOMPLETE = 479,
+    HRR_API_HIPLINKCREATE = 480,
+    HRR_API_HIPLINKDESTROY = 481,
+    HRR_API_HIPEVENTRECORDWITHFLAGS = 482,
+    HRR_API_HIPLAUNCHKERNELEXC = 483,
+    HRR_API_HIPDRVLAUNCHKERNELEX = 484,
+    HRR_API_HIPMEMGETHANDLEFORADDRESSRANGE = 485,
+    HRR_API_HIPMODULEGETFUNCTIONCOUNT = 486,
+    HRR_API_HIPMEMSETD2D8 = 487,
+    HRR_API_HIPMEMSETD2D8ASYNC = 488,
+    HRR_API_HIPMEMSETD2D16 = 489,
+    HRR_API_HIPMEMSETD2D16ASYNC = 490,
+    HRR_API_HIPMEMSETD2D32 = 491,
+    HRR_API_HIPMEMSETD2D32ASYNC = 492,
+    HRR_API_HIPSTREAMGETATTRIBUTE = 493,
+    HRR_API_HIPSTREAMSETATTRIBUTE = 494,
+    HRR_API_HIPMODULELOADFATBINARY = 495,
+    HRR_API_HIPMEMCPYBATCHASYNC = 496,
+    HRR_API_HIPMEMCPY3DBATCHASYNC = 497,
+    HRR_API_HIPMEMCPY3DPEER = 498,
+    HRR_API_HIPMEMCPY3DPEERASYNC = 499,
+    HRR_API_HIPGETDRIVERENTRYPOINT = 500,
+    HRR_API_HIPGETDRIVERENTRYPOINT_SPT = 501,
+    HRR_API_HIPMEMPREFETCHASYNC_V2 = 502,
+    HRR_API_HIPMEMADVISE_V2 = 503,
+    HRR_API_HIPSTREAMGETID = 504,
+    HRR_API_HIPLIBRARYLOADDATA = 505,
+    HRR_API_HIPLIBRARYLOADFROMFILE = 506,
+    HRR_API_HIPLIBRARYUNLOAD = 507,
+    HRR_API_HIPLIBRARYGETKERNEL = 508,
+    HRR_API_HIPLIBRARYGETKERNELCOUNT = 509,
+    HRR_API_HIPSTREAMCOPYATTRIBUTES = 510,
+    HRR_API_HIPLIBRARYENUMERATEKERNELS = 511,
+    HRR_API_HIPKERNELGETLIBRARY = 512,
+    HRR_API_HIPKERNELGETNAME = 513,
+    HRR_API_HIPOCCUPANCYAVAILABLEDYNAMICSMEMPERBLOCK = 514,
+    HRR_API_HIPGETPROCADDRESS_SPT = 515,
+    HRR_API_HIPKERNELGETPARAMINFO = 516,
+    HRR_API_HIPEXTDISABLELOGGING = 517,
+    HRR_API_HIPEXTENABLELOGGING = 518,
+    HRR_API_HIPEXTSETLOGGINGPARAMS = 519,
+    HRR_API_HIPMEMSETMEMPOOL = 520,
+    HRR_API_HIPMEMGETMEMPOOL = 521,
+    HRR_API_HIPMIPMAPPEDARRAYGETMEMORYREQUIREMENTS = 522,
+    HRR_API_HIPKERNELGETATTRIBUTE = 523,
+    HRR_API_HIPKERNELSETATTRIBUTE = 524,
+    HRR_API_HIPKERNELGETFUNCTION = 525,
+    HRR_API_HIPMEMPREFETCHBATCHASYNC = 526,
+    HRR_API_HIPOCCUPANCYMAXPOTENTIALCLUSTERSIZE = 527,
+    HRR_API_HIPOCCUPANCYMAXACTIVECLUSTERS = 528,
+    HRR_API_HIPGREENCTXCREATE = 529,
+    HRR_API_HIPEXECUTIONCTXDESTROY = 530,
+    HRR_API_HIPEXECUTIONCTXSTREAMCREATE = 531,
+    HRR_API_HIPDEVICEGETDEVRESOURCE = 532,
+    HRR_API_HIPDEVSMRESOURCESPLITBYCOUNT = 533,
+    HRR_API_HIPDEVSMRESOURCESPLIT = 534,
+    HRR_API_HIPDEVRESOURCEGENERATEDESC = 535,
+    HRR_API_HIPDEVICEGETEXECUTIONCTX = 536,
+    HRR_API_HIPEXECUTIONCTXGETDEVRESOURCE = 537,
+    HRR_API_HIPEXECUTIONCTXGETDEVICE = 538,
+    HRR_API_HIPEXECUTIONCTXGETID = 539,
+    HRR_API_HIPSTREAMGETDEVRESOURCE = 540,
+    HRR_API_HIPEXECUTIONCTXRECORDEVENT = 541,
+    HRR_API_HIPEXECUTIONCTXSYNCHRONIZE = 542,
+    HRR_API_HIPEXECUTIONCTXWAITEVENT = 543,
+    HRR_API_HIPLIBRARYGETGLOBAL = 544,
+    HRR_API_HIPLIBRARYGETMANAGED = 545,
+    HRR_API_HIPMEMDISCARDBATCHASYNC = 546,
+    HRR_API_HIPDRVMEMDISCARDBATCHASYNC = 547,
+    HRR_API_HIPMEMDISCARDANDPREFETCHBATCHASYNC = 548,
+    HRR_API_HIPDRVMEMDISCARDANDPREFETCHBATCHASYNC = 549,
+    HRR_API_HIPMEMGETDEFAULTMEMPOOL = 550,
+    HRR_API_HIPDEVICEGETLUID = 551,
+    HRR_API_COUNT = 552
 } hrr_api_id_t;
 
 /* Array of API names indexed by hrr_api_id_t */
@@ -6152,7 +6178,6 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipMemAddressFree",
     "hipMemAddressReserve",
     "hipMemAdvise",
-    "hipMemAdvise_v2",
     "hipMemAllocHost",
     "hipMemAllocPitch",
     "hipMemCreate",
@@ -6177,12 +6202,6 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipMemPoolSetAttribute",
     "hipMemPoolTrimTo",
     "hipMemPrefetchAsync",
-    "hipMemPrefetchAsync_v2",
-    "hipMemPrefetchBatchAsync",
-    "hipMemDiscardBatchAsync",
-    "hipDrvMemDiscardBatchAsync",
-    "hipMemDiscardAndPrefetchBatchAsync",
-    "hipDrvMemDiscardAndPrefetchBatchAsync",
     "hipMemPtrGetInfo",
     "hipMemRangeGetAttribute",
     "hipMemRangeGetAttributes",
@@ -6235,7 +6254,6 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipMipmappedArrayDestroy",
     "hipMipmappedArrayGetLevel",
     "hipModuleGetFunction",
-    "hipModuleGetFunctionCount",
     "hipModuleGetGlobal",
     "hipModuleGetTexRef",
     "hipModuleLaunchCooperativeKernel",
@@ -6244,22 +6262,14 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipModuleLoad",
     "hipModuleLoadData",
     "hipModuleLoadDataEx",
-    "hipLinkAddData",
-    "hipLinkAddFile",
-    "hipLinkComplete",
-    "hipLinkCreate",
-    "hipLinkDestroy",
     "hipModuleOccupancyMaxActiveBlocksPerMultiprocessor",
     "hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags",
     "hipModuleOccupancyMaxPotentialBlockSize",
     "hipModuleOccupancyMaxPotentialBlockSizeWithFlags",
     "hipModuleUnload",
-    "hipOccupancyAvailableDynamicSMemPerBlock",
     "hipOccupancyMaxActiveBlocksPerMultiprocessor",
     "hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags",
     "hipOccupancyMaxPotentialBlockSize",
-    "hipOccupancyMaxActiveClusters",
-    "hipOccupancyMaxPotentialClusterSize",
     "hipPeekAtLastError",
     "hipPointerGetAttribute",
     "hipPointerGetAttributes",
@@ -6274,7 +6284,6 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipStreamAddCallback",
     "hipStreamAttachMemAsync",
     "hipStreamBeginCapture",
-    "hipStreamCopyAttributes",
     "hipStreamCreate",
     "hipStreamCreateWithFlags",
     "hipStreamCreateWithPriority",
@@ -6284,7 +6293,6 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipStreamGetCaptureInfo_v2",
     "hipStreamGetDevice",
     "hipStreamGetFlags",
-    "hipStreamGetId",
     "hipStreamGetPriority",
     "hipStreamIsCapturing",
     "hipStreamQuery",
@@ -6295,7 +6303,6 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipStreamWaitValue64",
     "hipStreamWriteValue32",
     "hipStreamWriteValue64",
-    "hipStreamBatchMemOp",
     "hipTexObjectCreate",
     "hipTexObjectDestroy",
     "hipTexObjectGetResourceDesc",
@@ -6330,6 +6337,9 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipUserObjectRelease",
     "hipUserObjectRetain",
     "hipWaitExternalSemaphoresAsync",
+    "hipCreateChannelDesc",
+    "hipExtModuleLaunchKernel",
+    "hipHccModuleLaunchKernel",
     "hipMemcpy_spt",
     "hipMemcpyToSymbol_spt",
     "hipMemcpyFromSymbol_spt",
@@ -6367,9 +6377,6 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipStreamGetCaptureInfo_spt",
     "hipStreamGetCaptureInfo_v2_spt",
     "hipLaunchHostFunc_spt",
-    "hipCreateChannelDesc",
-    "hipExtModuleLaunchKernel",
-    "hipHccModuleLaunchKernel",
     "hipGetStreamDeviceId",
     "hipDrvGraphAddMemsetNode",
     "hipGraphAddExternalSemaphoresWaitNode",
@@ -6388,9 +6395,6 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipGetProcAddress",
     "hipStreamBeginCaptureToGraph",
     "hipGetFuncBySymbol",
-    "hipDrvGraphAddMemFreeNode",
-    "hipDrvGraphExecMemcpyNodeSetParams",
-    "hipDrvGraphExecMemsetNodeSetParams",
     "hipSetValidDevices",
     "hipMemcpyAtoD",
     "hipMemcpyDtoA",
@@ -6398,6 +6402,9 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipMemcpyAtoHAsync",
     "hipMemcpyHtoAAsync",
     "hipMemcpy2DArrayToArray",
+    "hipDrvGraphAddMemFreeNode",
+    "hipDrvGraphExecMemcpyNodeSetParams",
+    "hipDrvGraphExecMemsetNodeSetParams",
     "hipGraphExecGetFlags",
     "hipGraphNodeSetParams",
     "hipGraphExecNodeSetParams",
@@ -6406,22 +6413,29 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipDrvGraphMemcpyNodeSetParams",
     "hipExtHostAlloc",
     "hipDeviceGetTexture1DLinearMaxWidth",
+    "hipStreamBatchMemOp",
     "hipGraphAddBatchMemOpNode",
     "hipGraphBatchMemOpNodeGetParams",
     "hipGraphBatchMemOpNodeSetParams",
     "hipGraphExecBatchMemOpNodeSetParams",
+    "hipLinkAddData",
+    "hipLinkAddFile",
+    "hipLinkComplete",
+    "hipLinkCreate",
+    "hipLinkDestroy",
     "hipEventRecordWithFlags",
     "hipLaunchKernelExC",
     "hipDrvLaunchKernelEx",
     "hipMemGetHandleForAddressRange",
+    "hipModuleGetFunctionCount",
     "hipMemsetD2D8",
     "hipMemsetD2D8Async",
     "hipMemsetD2D16",
     "hipMemsetD2D16Async",
     "hipMemsetD2D32",
     "hipMemsetD2D32Async",
-    "hipStreamSetAttribute",
     "hipStreamGetAttribute",
+    "hipStreamSetAttribute",
     "hipModuleLoadFatBinary",
     "hipMemcpyBatchAsync",
     "hipMemcpy3DBatchAsync",
@@ -6429,27 +6443,33 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipMemcpy3DPeerAsync",
     "hipGetDriverEntryPoint",
     "hipGetDriverEntryPoint_spt",
+    "hipMemPrefetchAsync_v2",
+    "hipMemAdvise_v2",
+    "hipStreamGetId",
     "hipLibraryLoadData",
     "hipLibraryLoadFromFile",
     "hipLibraryUnload",
     "hipLibraryGetKernel",
     "hipLibraryGetKernelCount",
-    "hipLibraryGetGlobal",
-    "hipLibraryGetManaged",
+    "hipStreamCopyAttributes",
     "hipLibraryEnumerateKernels",
     "hipKernelGetLibrary",
     "hipKernelGetName",
+    "hipOccupancyAvailableDynamicSMemPerBlock",
     "hipGetProcAddress_spt",
+    "hipKernelGetParamInfo",
     "hipExtDisableLogging",
     "hipExtEnableLogging",
     "hipExtSetLoggingParams",
-    "hipKernelGetAttribute",
-    "hipKernelSetAttribute",
-    "hipKernelGetFunction",
-    "hipKernelGetParamInfo",
     "hipMemSetMemPool",
     "hipMemGetMemPool",
     "hipMipmappedArrayGetMemoryRequirements",
+    "hipKernelGetAttribute",
+    "hipKernelSetAttribute",
+    "hipKernelGetFunction",
+    "hipMemPrefetchBatchAsync",
+    "hipOccupancyMaxPotentialClusterSize",
+    "hipOccupancyMaxActiveClusters",
     "hipGreenCtxCreate",
     "hipExecutionCtxDestroy",
     "hipExecutionCtxStreamCreate",
@@ -6465,6 +6485,14 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipExecutionCtxRecordEvent",
     "hipExecutionCtxSynchronize",
     "hipExecutionCtxWaitEvent",
+    "hipLibraryGetGlobal",
+    "hipLibraryGetManaged",
+    "hipMemDiscardBatchAsync",
+    "hipDrvMemDiscardBatchAsync",
+    "hipMemDiscardAndPrefetchBatchAsync",
+    "hipDrvMemDiscardAndPrefetchBatchAsync",
+    "hipMemGetDefaultMemPool",
+    "hipDeviceGetLuid",
 };
 #else
 extern const char* const hrr_api_names[HRR_API_COUNT];

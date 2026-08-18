@@ -1115,48 +1115,75 @@ _COMPILER_APIS = [
 ]
 
 
+def _dispatch_table_order(text: str, struct_name: str) -> List[str]:
+    """Function names in dispatch-table member declaration order.
+
+    hip_api_trace.hpp mandates that new members are appended to the end of a
+    dispatch table and that existing ones are never re-ordered or removed (a
+    retired slot becomes a nulled void*), because anything else breaks the ABI.
+    That makes member order append-only, which is what hrr_api_id_t needs: the
+    IDs are written into every captured event, so an ID that shifts silently
+    re-interprets existing archives. Typedef declaration order carries no such
+    guarantee — it is maintained roughly alphabetically, so a new API lands in
+    the middle and pushes every later ID up by one.
+
+    A member may span two lines when the typedef name is long, so the type and
+    the member name are matched across whitespace rather than within one line.
+    """
+    m = re.search(r'struct\s+' + struct_name + r'\s*\{(.*?)\n\}\s*;', text, re.S)
+    if not m:
+        print(f"WARNING: {struct_name} not found in hip_api_trace.hpp", file=sys.stderr)
+        return []
+    return re.findall(r'^\s*t_(\w+)\s+\w+;', m.group(1), re.M)
+
+
 def parse_hip_api_trace(path: Path) -> List[ApiEntry]:
     text = path.read_text(encoding='utf-8')
     text = _strip_comments(text)
 
     entries: List[ApiEntry] = []
 
-    # ---- Compiler stubs (fixed list, specific typedef name) ----
-    for func_name in _COMPILER_APIS:
+    def add_entry(func_name: str, table: str) -> bool:
         typedef_name = "t_" + func_name   # e.g. t___hipRegisterFatBinary
         full = find_typedef_for(text, typedef_name)
         if not full:
             print(f"WARNING: typedef not found for {func_name}", file=sys.stderr)
-            continue
-        # For parsing, strip the leading underscores from func_name for the needle match
+            return False
         entry = _parse_typedef_text(full, func_name)
         if not entry:
             print(f"WARNING: failed to parse typedef for {func_name}", file=sys.stderr)
-            continue
-        entry.table = "compiler"
+            return False
+        entry.table = table
         entries.append(entry)
+        return True
 
-    # ---- Runtime APIs — find all t_hipXxx typedefs ----
-    # Locate every  (*t_hipXxx)  occurrence, then extract the full typedef
-    runtime_name_pattern = re.compile(r'\(\s*\*\s*t_(hip\w+)\s*\)')
+    # ---- Compiler stubs ----
+    compiler_order = _dispatch_table_order(text, "HipCompilerDispatchTable")
+    if not compiler_order:
+        compiler_order = _COMPILER_APIS
+    for func_name in compiler_order:
+        add_entry(func_name, "compiler")
+
+    # ---- Runtime APIs ----
+    runtime_order = _dispatch_table_order(text, "HipDispatchTable")
+    for func_name in runtime_order:
+        add_entry(func_name, "runtime")
+
+    # A t_hipXxx typedef with no member in HipDispatchTable has no append-only
+    # position to take an ID from. None exist today; if one appears, it is still
+    # captured rather than dropped, and it goes last so the table-ordered IDs
+    # ahead of it keep their values.
+    in_table = set(compiler_order) | set(runtime_order)
+    stray_pattern = re.compile(r'\(\s*\*\s*t_(hip\w+)\s*\)')
     seen = set()
-    for m in runtime_name_pattern.finditer(text):
-        func_name = m.group(1)  # e.g. "hipMalloc"
-        if func_name in seen:
+    for m in stray_pattern.finditer(text):
+        func_name = m.group(1)
+        if func_name in in_table or func_name in seen:
             continue
         seen.add(func_name)
-
-        typedef_name = "t_" + func_name
-        full = find_typedef_for(text, typedef_name)
-        if not full:
-            print(f"WARNING: typedef not found for {func_name}", file=sys.stderr)
-            continue
-        entry = _parse_typedef_text(full, func_name)
-        if not entry:
-            print(f"WARNING: failed to parse typedef for {func_name}", file=sys.stderr)
-            continue
-        entry.table = "runtime"
-        entries.append(entry)
+        print(f"WARNING: {func_name} has no HipDispatchTable member; "
+              f"appending it after the table-ordered APIs", file=sys.stderr)
+        add_entry(func_name, "runtime")
 
     return entries
 
@@ -1218,8 +1245,14 @@ _HEADER_PREAMBLE = """\
 #define HRR_MAGIC   ((uint32_t)0x52524845u)  /* "HRRE" */
 /* v4: payload_length widened from uint16_t to uint32_t so kernel-launch events
  * larger than 65535 bytes (many args / long mangled names / large by-value
- * structs) are no longer dropped. */
-#define HRR_VERSION ((uint16_t)4u)
+ * structs) are no longer dropped.
+ * v5: hrr_api_id_t is assigned from HipDispatchTable member order instead of
+ * typedef declaration order, which renumbered 496 of the 552 IDs once. Every
+ * event stores its ID, so a pre-v5 archive names the wrong API when decoded
+ * against this table and needs an ID translation to be read back. From v5 on a
+ * new API takes the next free ID and no existing ID moves, so adding APIs no
+ * longer needs a version bump. */
+#define HRR_VERSION ((uint16_t)5u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
