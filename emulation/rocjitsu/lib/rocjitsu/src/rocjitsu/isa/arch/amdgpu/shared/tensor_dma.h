@@ -296,7 +296,11 @@ inline void copy_dense_tensor(const TensorDmaDescriptor &desc, Wavefront &wf, bo
         const uint32_t tile_dim = desc.tile_dims[dim];
         const uint32_t coord = static_cast<uint32_t>(remaining % tile_dim);
         remaining /= tile_dim;
-        if (desc.tensor_dims[dim] != 0 && coord >= desc.tensor_dims[dim])
+        // A zero tensor extent inside the rank means the tensor is empty in that
+        // dimension, not that the dimension is unbounded: every coordinate is then
+        // out of bounds. parse_descriptor() reads a real field for every dim below
+        // rank(), so there is no unset extent to exclude here.
+        if (coord >= desc.tensor_dims[dim])
           in_bounds = false;
         global_element += coord * (dim == 0 ? 1 : desc.global_strides[dim - 1]);
         lds_element += coord * lds_stride;

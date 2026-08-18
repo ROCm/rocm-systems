@@ -744,6 +744,63 @@ TEST(Gfx1250ExecutionTest, TensorDmaDenseDescriptorCopiesDenseRows) {
   }
 }
 
+// The last prefetch of a pipelined loop advances the descriptor's base past the
+// end of the tensor and leaves nothing behind it, so the tile is entirely out of
+// bounds and the remaining extent is zero. A zero extent inside the rank has to
+// mean "empty", not "unbounded": reading the tile anyway walks off the end of the
+// allocation.
+TEST(Gfx1250ExecutionTest, TensorDmaEmptyTensorExtentReadsNothing) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_lds_base(cu->allocate_lds(512));
+
+  constexpr uint64_t kLoadGlobal = 0x170000;
+  constexpr uint64_t kStoreGlobal = 0x180000;
+  constexpr uint32_t kCols = 4;
+  constexpr uint32_t kTileDim1RowCount = 3;
+  constexpr uint32_t kSentinel = 0xABCDABCDu;
+  constexpr uint32_t kLdsSentinel = 0xDEADBEEFu;
+
+  write_tensor_dma_d0(*cu, *wf, 0, kLoadGlobal);
+  write_tensor_dma_d0(*cu, *wf, 8, kStoreGlobal);
+  write_wave_sgpr(*cu, *wf, 12, 2u << 16);    // i32 elements.
+  write_wave_sgpr(*cu, *wf, 13, kCols << 16); // Tensor dim0.
+  write_wave_sgpr(*cu, *wf, 14, 0);           // Tensor dim1: nothing left to copy.
+  write_wave_sgpr(*cu, *wf, 15, kCols << 16); // Tile dim0.
+  write_wave_sgpr(*cu, *wf, 16, kTileDim1RowCount);
+  write_wave_sgpr(*cu, *wf, 17, kCols); // Tensor dim0 stride.
+  for (uint32_t reg = 18; reg < 28; ++reg)
+    write_wave_sgpr(*cu, *wf, reg, 0);
+
+  for (uint32_t i = 0; i < kTileDim1RowCount * kCols; ++i) {
+    write_global_u32(*sim.memory, kLoadGlobal + i * 4, 0x66000000u + i);
+    write_global_u32(*sim.memory, kStoreGlobal + i * 4, kSentinel);
+    cu->lds().write32(wf->lds_base() + i * 4, kLdsSentinel);
+  }
+
+  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x18140c00u};
+  cdna5::TensorLoadToLdsVimage load_inst(load_words.data());
+  load_inst.execute_impl(*wf);
+
+  // Out-of-bounds elements land in LDS as zeros rather than as whatever followed
+  // the tensor in memory.
+  for (uint32_t i = 0; i < kTileDim1RowCount * kCols; ++i)
+    EXPECT_EQ(cu->lds().read32(wf->lds_base() + i * 4), 0u) << "lds element " << i;
+
+  for (uint32_t i = 0; i < kTileDim1RowCount * kCols; ++i)
+    cu->lds().write32(wf->lds_base() + i * 4, 0x77000000u + i);
+
+  const std::array<uint32_t, 3> store_words = {0xd0714001u, 0x7c000000u, 0x18140c08u};
+  cdna5::TensorStoreFromLdsVimage store_inst(store_words.data());
+  store_inst.execute_impl(*wf);
+
+  for (uint32_t i = 0; i < kTileDim1RowCount * kCols; ++i)
+    EXPECT_EQ(read_global_u32(*sim.memory, kStoreGlobal + i * 4), kSentinel)
+        << "store element " << i;
+}
+
 TEST(Gfx1250ExecutionTest, TensorDmaGatherSupportsI32Indices) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();
