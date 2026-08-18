@@ -215,11 +215,13 @@ struct ROCPROFSYS_INTERNAL_API indirect
      * @param _dllib The path to the dllib.
      * @param _lib_paths The lib search paths.
      */
-    ROCPROFSYS_INLINE indirect(const std::string& _omnilib, const std::string& _userlib,
-                               const std::string& _dllib, const std::string& _lib_paths)
+    ROCPROFSYS_INLINE indirect(const std::string& _omnilib,
+                               const std::string& _causal_lib, const std::string& _dllib,
+                               const std::string& _lib_paths)
     : m_omnilib{ path::find_library(_omnilib, _rocprofsys_dl_verbose, _lib_paths) }
     , m_dllib{ path::find_library(_dllib, _rocprofsys_dl_verbose, _lib_paths) }
-    , m_causal_api_lib{ path::find_library(_userlib, _rocprofsys_dl_verbose, _lib_paths) }
+    , m_causal_api_lib{ path::find_library(_causal_lib, _rocprofsys_dl_verbose,
+                                           _lib_paths) }
     {
         if(_rocprofsys_dl_verbose >= 1)
         {
