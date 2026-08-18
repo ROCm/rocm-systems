@@ -4,10 +4,13 @@
 # Modifications Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # See LICENSE.txt for license information
+#
+# Sources stay byte-identical to upstream and are hipified at build time.
 
 # Compiler settings
-CXX ?= g++
-NVCC ?= nvcc
+ROCM_PATH ?= /opt/rocm
+CXX ?= $(ROCM_PATH)/bin/amdclang++
+HIPIFY_PL_EXE ?= $(ROCM_PATH)/bin/hipify-perl
 
 # Build options
 DEBUG ?= 0
@@ -15,34 +18,18 @@ ASAN ?= 0
 UBSAN ?= 0
 NCCL_INSPECTOR_ENABLE_WARN ?= 0
 
-# CUDA paths - default to /usr/local/cuda or require explicit CUDA_HOME
-CUDA_HOME ?= $(shell \
-  if [ -d /usr/local/cuda ]; then echo /usr/local/cuda; \
-  else echo "ERROR: CUDA installation not found. Please set CUDA_HOME." >&2; exit 1; fi)
-CUDA_INC ?= $(CUDA_HOME)/include
-CUDA_LIB ?= $(CUDA_HOME)/lib64
-
-# Detect CUDA version
-NVCC := $(CUDA_HOME)/bin/nvcc
-CUDA_VERSION = $(strip $(shell which $(NVCC) >/dev/null && $(NVCC) --version | grep release | sed 's/.*release //' | sed 's/\,.*//'))
-CUDA_MAJOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 1)
-
-# CUDA 13.0 requires c++17
-ifeq ($(shell test "0$(CUDA_MAJOR)" -ge 13; echo $$?),0)
-  CXXSTD ?= -std=c++17
-else
-  CXXSTD ?= -std=c++14
-endif
+CXXSTD ?= -std=c++17
 
 # Build directories
 OBJDIR := obj
 SRCDIR := .
+HIPIFY_DIR := hipify-inspector
 
 # Compiler flags
-CXXFLAGS := $(CXXSTD) -fPIC -Wall -Wextra -O2 -DNCCL_INSPECTOR_ENABLE_WARN=$(NCCL_INSPECTOR_ENABLE_WARN)
-INCLUDES := -I$(CUDA_INC) -I$(SRCDIR) -I$(SRCDIR)/nccl
-LDFLAGS := -shared -L$(CUDA_LIB)
-LIBS := -lcudart -ldl -lpthread
+CXXFLAGS := $(CXXSTD) -fPIC -Wall -Wextra -O2 -D__HIP_PLATFORM_AMD__ -DNCCL_INSPECTOR_ENABLE_WARN=$(NCCL_INSPECTOR_ENABLE_WARN)
+INCLUDES := -I$(HIPIFY_DIR) -I$(HIPIFY_DIR)/nccl -I$(ROCM_PATH)/include
+LDFLAGS := -shared
+LIBS := -ldl -lpthread
 
 # Debug flags
 ifneq ($(DEBUG), 0)
@@ -52,12 +39,12 @@ endif
 # Sanitizer flags
 ifneq ($(ASAN), 0)
 CXXFLAGS += -fsanitize=address
-LDFLAGS += -fsanitize=address -static-libasan
+LDFLAGS += -fsanitize=address -shared-libasan
 endif
 
 ifneq ($(UBSAN), 0)
 CXXFLAGS += -fsanitize=undefined
-LDFLAGS += -fsanitize=undefined -static-libubsan
+LDFLAGS += -fsanitize=undefined
 endif
 
 # Source files
@@ -77,71 +64,56 @@ OBJS := $(SRCS:%.cc=$(OBJDIR)/%.o)
 TARGET := librccl-profiler-inspector.so
 
 # Build rules
-.PHONY: all clean help check-cuda
+.PHONY: all clean help
 
-all: check-cuda $(TARGET)
+# Without this make treats the hipified copies as intermediates and re-does them each build.
+.SECONDARY: $(addprefix $(HIPIFY_DIR)/,$(SRCS))
 
-# Check that CUDA installation exists
-check-cuda:
-	@if [ ! -d "$(CUDA_HOME)" ]; then \
-		echo "ERROR: CUDA installation not found at $(CUDA_HOME)"; \
-		echo "Please install CUDA or set CUDA_HOME to the correct path"; \
-		echo "Example: make CUDA_HOME=/path/to/cuda"; \
-		exit 1; \
-	fi
-	@if [ ! -f "$(CUDA_INC)/cuda.h" ]; then \
-		echo "ERROR: cuda.h not found at $(CUDA_INC)/cuda.h"; \
-		echo "Please check your CUDA installation"; \
-		exit 1; \
-	fi
-	@if [ ! -d "$(CUDA_LIB)" ]; then \
-		echo "ERROR: CUDA library directory not found at $(CUDA_LIB)"; \
-		echo "Please check your CUDA installation"; \
-		exit 1; \
-	fi
-	@if ! ls $(CUDA_LIB)/libcudart.so* >/dev/null 2>&1; then \
-		echo "ERROR: libcudart.so not found in $(CUDA_LIB)"; \
-		echo "Please check your CUDA installation"; \
-		exit 1; \
-	fi
-	@echo "Using CUDA installation at: $(CUDA_HOME)"
+all: $(TARGET)
 
 $(TARGET): $(OBJDIR) $(OBJS)
 	$(CXX) $(LDFLAGS) -o $@ $(OBJS) $(LIBS)
-	@echo "Built standalone NCCL Inspector: $@"
+	@echo "Built standalone RCCL Inspector: $@"
 
-$(OBJDIR)/%.o: %.cc
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+# Fix what hipify cannot reach: INSPECTOR_CUPFN pastes pfn_##sym, and the dlopen'd
+# library is a string literal.
+$(HIPIFY_DIR)/%.cc: %.cc
+	@mkdir -p $(HIPIFY_DIR)/nccl
+	@cp $(SRCDIR)/*.cc $(SRCDIR)/*.h $(HIPIFY_DIR)/
+	@cp $(SRCDIR)/nccl/*.h $(HIPIFY_DIR)/nccl/
+	@$(HIPIFY_PL_EXE) -inplace -quiet-warnings $(HIPIFY_DIR)/*.cc $(HIPIFY_DIR)/*.h $(HIPIFY_DIR)/nccl/*.h
+	@sed -i 's/\bpfn_cu/pfn_hip/g; s/\bPFN_cu/PFN_hip/g' $(HIPIFY_DIR)/*.cc $(HIPIFY_DIR)/*.h
+	@sed -i 's/"libcuda\.so\.1"/"libamdhip64.so.6"/g; s/"libcuda\.so"/"libamdhip64.so"/g' $(HIPIFY_DIR)/*.cc
 
-$(OBJDIR)/version.o: version.cc
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
-
-version.cc:
-	@echo "// Auto-generated version info" > version.cc
-	@echo "#ifdef __cplusplus" >> version.cc
-	@echo "extern \"C\" {" >> version.cc
-	@echo "#endif" >> version.cc
-	@echo "const char* get_git_version_info() {" >> version.cc
+$(HIPIFY_DIR)/version.cc:
+	@mkdir -p $(HIPIFY_DIR)
+	@echo "// Auto-generated version info" > $@
+	@echo "#ifdef __cplusplus" >> $@
+	@echo "extern \"C\" {" >> $@
+	@echo "#endif" >> $@
+	@echo "const char* get_git_version_info() {" >> $@
 	@if command -v git >/dev/null 2>&1; then \
-		echo "  return \"$(shell git describe --always --dirty 2>/dev/null || echo 'unknown')\"; " >> version.cc; \
+		echo "  return \"$(shell git describe --always --dirty 2>/dev/null || echo 'unknown')\"; " >> $@; \
 	else \
-		echo "  return \"standalone-build\"; " >> version.cc; \
+		echo "  return \"standalone-build\"; " >> $@; \
 	fi
-	@echo "}" >> version.cc
-	@echo "#ifdef __cplusplus" >> version.cc
-	@echo "}" >> version.cc
-	@echo "#endif" >> version.cc
+	@echo "}" >> $@
+	@echo "#ifdef __cplusplus" >> $@
+	@echo "}" >> $@
+	@echo "#endif" >> $@
+
+$(OBJDIR)/%.o: $(HIPIFY_DIR)/%.cc
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 $(OBJDIR):
 	mkdir -p $(OBJDIR)
 
-
 clean:
-	rm -rf $(OBJDIR) $(TARGET) version.cc
+	rm -rf $(OBJDIR) $(TARGET) $(HIPIFY_DIR)
 
 # Help target
 help:
-	@echo "Standalone NCCL Inspector Build System"
+	@echo "Standalone RCCL Inspector Build System"
 	@echo ""
 	@echo "Targets:"
 	@echo "  all     - Build the inspector library (default)"
@@ -155,9 +127,9 @@ help:
 	@echo "  NCCL_INSPECTOR_ENABLE_WARN=1 - Emit inspector messages at WARN level (default: INFO)"
 	@echo ""
 	@echo "Environment Variables:"
-	@echo "  CUDA_HOME - Path to CUDA installation (default: /usr/local/cuda)"
-	@echo "  CXX       - C++ compiler (default: g++)"
+	@echo "  ROCM_PATH - Path to ROCm installation (default: /opt/rocm)"
+	@echo "  CXX       - C++ compiler (default: \$$(ROCM_PATH)/bin/amdclang++)"
 	@echo ""
 	@echo "Usage Examples:"
 	@echo "  make DEBUG=1"
-	@echo "  make CUDA_HOME=/path/to/cuda"
+	@echo "  make ROCM_PATH=/opt/rocm"
