@@ -4,6 +4,7 @@
 #pragma once
 
 #include "common/delimit.hpp"
+#include "common/version.hpp"
 #include "logger/debug.hpp"
 
 #include <cctype>
@@ -26,33 +27,6 @@
 
 namespace rocprofsys::rocprofiler_sdk
 {
-
-struct version_info
-{
-    std::uint32_t major = 0;
-    std::uint32_t minor = 0;
-    std::uint32_t patch = 0;
-
-    [[nodiscard]] auto formatted() const
-    {
-        constexpr auto major_multiplier = 10000U;
-        constexpr auto minor_multiplier = 100U;
-        return (major * major_multiplier) + (minor * minor_multiplier) + patch;
-    }
-
-    [[nodiscard]] static constexpr version_info from_formatted(std::uint32_t formatted)
-    {
-        constexpr auto major_multiplier          = 10000u;
-        constexpr auto minor_multiplier          = 100u;
-        constexpr auto version_component_modulus = 100u;  // keep 2 digits
-        return version_info{ .major = formatted / major_multiplier,
-                             .minor = (formatted / minor_multiplier) %
-                                      version_component_modulus,
-                             .patch = formatted % version_component_modulus };
-    }
-
-    constexpr auto operator<=>(const version_info&) const = default;
-};
 
 namespace concepts
 {
@@ -115,7 +89,7 @@ public:
         std::vector<std::string>    operation_choices;
     };
 
-    static version_info get_version();
+    static common::version get_version();
 
     static std::vector<std::string>            domain_choices();
     static std::string                         domain_defaults();
@@ -174,8 +148,8 @@ private:
                               std::vector<typename SdkBackend::buffer_tracing_kind_t>>
     get_buffered_domain_map();
 
-    static constexpr version_info s_compile_time_sdk_version =
-        version_info::from_formatted(SdkBackend::compile_time_version);
+    static constexpr common::version s_compile_time_sdk_version =
+        common::version::from_formatted(SdkBackend::compile_time_version);
 
     const static std::unordered_set<std::string_view>
         s_domains_to_skip_for_operation_options;
@@ -189,10 +163,10 @@ namespace rocprofsys::rocprofiler_sdk
 /// @brief Return the version of the rocprofiler-sdk
 template <typename SdkBackend, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
-version_info
+common::version
 sdk_tracing_config<SdkBackend, Externals>::get_version()
 {
-    auto version = version_info{};
+    auto version = common::version{};
     SdkBackend::get_version(&version.major, &version.minor, &version.patch);
     return version;
 }
@@ -232,7 +206,7 @@ sdk_tracing_config<SdkBackend, Externals>::domain_choices()
     add_domain_f("roctx");
 
     if constexpr(s_compile_time_sdk_version >=
-                 version_info{ .major = 1, .minor = 2, .patch = 2 })
+                 common::version{ .major = 1, .minor = 2, .patch = 2 })
     {
         add_domain_f("kfd_events");
     }
@@ -256,7 +230,7 @@ sdk_tracing_config<SdkBackend, Externals>::domain_defaults()
                                  "memory_copy,scratch_memory" };
 
     if constexpr(s_compile_time_sdk_version <
-                 version_info{ .major = 1, .minor = 0, .patch = 0 })
+                 common::version{ .major = 1, .minor = 0, .patch = 0 })
     {
         defaults.append(",page_migration");
     }
@@ -306,7 +280,7 @@ sdk_tracing_config<SdkBackend, Externals>::get_callback_domains()
     using kind_t = typename SdkBackend::callback_tracing_kind_t;
 
     const auto sdk_runtime_version = get_version();
-    if(sdk_runtime_version == version_info{})
+    if(sdk_runtime_version == common::version{})
     {
         LOG_WARNING("rocprofiler-sdk version not initialized");
     }
@@ -316,7 +290,7 @@ sdk_tracing_config<SdkBackend, Externals>::get_callback_domains()
         rocprofsys::delimit(Externals::get_rocm_domains(), " ,;:\t\n");
 
     if constexpr(s_compile_time_sdk_version >=
-                 version_info{ .major = 0, .minor = 6, .patch = 0 })
+                 common::version{ .major = 0, .minor = 6, .patch = 0 })
     {
         if(Externals::get_use_rcclp())
         {
@@ -397,7 +371,7 @@ sdk_tracing_config<SdkBackend, Externals>::get_buffered_domains()
     }
 
     if constexpr(s_compile_time_sdk_version >=
-                 version_info{ .major = 1, .minor = 2, .patch = 2 })
+                 common::version{ .major = 1, .minor = 2, .patch = 2 })
     {
         // Automatically enable KFD domains when unified memory profiling is enabled
         if(Externals::get_use_unified_memory_profiling())
@@ -677,25 +651,25 @@ sdk_tracing_config<SdkBackend, Externals>::get_supported_callback_domains()
     };
 
     if constexpr(s_compile_time_sdk_version >=
-                 version_info{ .major = 0, .minor = 6, .patch = 0 })
+                 common::version{ .major = 0, .minor = 6, .patch = 0 })
     {
         supported.insert({ SdkBackend::CALLBACK_TRACING_RCCL_API,
                            SdkBackend::CALLBACK_TRACING_OMPT,
                            SdkBackend::CALLBACK_TRACING_ROCDECODE_API });
     }
     if constexpr(s_compile_time_sdk_version >=
-                 version_info{ .major = 0, .minor = 7, .patch = 0 })
+                 common::version{ .major = 0, .minor = 7, .patch = 0 })
     {
         supported.emplace(SdkBackend::CALLBACK_TRACING_ROCJPEG_API);
     }
 
     if constexpr(s_compile_time_sdk_version >=
-                 version_info{ .major = 1, .minor = 3, .patch = 4 })
+                 common::version{ .major = 1, .minor = 3, .patch = 4 })
     {
         supported.emplace(SdkBackend::CALLBACK_TRACING_ROCSHMEM_API);
     }
     if constexpr(s_compile_time_sdk_version >=
-                 version_info{ .major = 1, .minor = 3, .patch = 5 })
+                 common::version{ .major = 1, .minor = 3, .patch = 5 })
     {
         supported.emplace(SdkBackend::CALLBACK_TRACING_HIPFILE_API);
     }
@@ -714,13 +688,13 @@ sdk_tracing_config<SdkBackend, Externals>::get_supported_buffer_domains()
     };
 
     if constexpr(s_compile_time_sdk_version >=
-                 version_info{ .major = 0, .minor = 6, .patch = 0 })
+                 common::version{ .major = 0, .minor = 6, .patch = 0 })
     {
         supported.emplace(SdkBackend::BUFFER_TRACING_MEMORY_ALLOCATION);
     }
 
     if constexpr(s_compile_time_sdk_version <
-                 version_info{ .major = 1, .minor = 0, .patch = 0 })
+                 common::version{ .major = 1, .minor = 0, .patch = 0 })
     {
         supported.emplace(SdkBackend::BUFFER_TRACING_PAGE_MIGRATION);
     }
@@ -729,7 +703,7 @@ sdk_tracing_config<SdkBackend, Externals>::get_supported_buffer_domains()
     // node IDs (0xFFFFFFFF), so the KFD domains are gated on the bugfix
     // version rather than the version that first declared the enums (1.0.0).
     if constexpr(s_compile_time_sdk_version >=
-                 version_info{ .major = 1, .minor = 2, .patch = 2 })
+                 common::version{ .major = 1, .minor = 2, .patch = 2 })
     {
         supported.emplace(SdkBackend::BUFFER_TRACING_KFD_PAGE_FAULT);
         supported.emplace(SdkBackend::BUFFER_TRACING_KFD_PAGE_MIGRATE);
@@ -841,7 +815,7 @@ sdk_tracing_config<SdkBackend, Externals>::get_buffered_domain_map()
     };
 
     if constexpr(s_compile_time_sdk_version >=
-                 version_info{ .major = 0, .minor = 6, .patch = 0 })
+                 common::version{ .major = 0, .minor = 6, .patch = 0 })
     {
         domain_map.emplace(
             "memory_allocation",
@@ -849,7 +823,7 @@ sdk_tracing_config<SdkBackend, Externals>::get_buffered_domain_map()
     }
 
     if constexpr(s_compile_time_sdk_version >=
-                 version_info{ .major = 1, .minor = 2, .patch = 2 })
+                 common::version{ .major = 1, .minor = 2, .patch = 2 })
     {
         domain_map.insert({
             { "kfd_events",
