@@ -21,9 +21,11 @@ from utils.mem_chart_common import (
     build_legend,
     colored,
     format_edge,
+    format_scientific,
     format_value,
     make_arrows,
     mem_chart_cli_main,
+    metric_line,
     pad_to,
     render_chart_to_string,
     stack_metrics,
@@ -209,7 +211,6 @@ def _extract_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
 # Arrow lengths
 _KERNEL_ARROW_LEN = 16  # wider arrows from Kernel to L1 (long edge labels)
 _STD_ARROW_LEN = 12  # standard inter-cache edge arrows
-_FABRIC_ARROW_LEN = 8  # shorter arrows inside Data Fabric panel
 
 # Panel heights (L1 sub-panels stack to _TOTAL_H)
 _VL1D_H = 16  # 14 content lines + 2 padding
@@ -403,27 +404,21 @@ def _build_fabric_content(metrics: dict[str, Any]) -> str:
     """Build Rich markup for the Data Fabric panel (gfx908–gfx942)."""
     color_read = COLORS["read"]
     color_write = COLORS["write"]
-    arrows = make_arrows(_FABRIC_ARROW_LEN)
-    read_edge = format_edge("Read", metrics["hbm_rd"])
-    write_edge = format_edge("Write", metrics["hbm_wr"])
-    hbm_rd_pct = format_value(metrics["hbm_read_traffic"], "%")
-    hbm_wr_pct = format_value(metrics["hbm_wr_at_traffic"], "%")
-    remote_rd_pct = format_value(metrics["remote_read_traffic"], "%")
-    remote_wr_pct = format_value(metrics["remote_wr_at_traffic"], "%")
-    arrow_section = "\n".join([
-        "[white]To/From HBM[/white]",
-        colored(read_edge, color_read),
-        colored(arrows["left"], color_read),
-        colored(write_edge, color_write),
-        colored(arrows["right"], color_write),
+    hbm_section = "\n".join([
+        "[white]To/From HBM (Req)[/white]",
+        f"  Read {colored(format_scientific(metrics['hbm_rd']), color_read)}",
+        f"  Write {colored(format_scientific(metrics['hbm_wr']), color_write)}",
     ])
     traffic_section = "\n".join([
-        f"[white]HBM   Rd {hbm_rd_pct}[/white]",
-        f"[white]      Wr {hbm_wr_pct}[/white]",
-        f"[white]Remote Rd {remote_rd_pct}[/white]",
-        f"[white]       Wr {remote_wr_pct}[/white]",
+        "[white]HBM Traffic[/white]",
+        f"  {metric_line('Read', metrics['hbm_read_traffic'], '%', color_read)}",
+        f"  {metric_line('Write', metrics['hbm_wr_at_traffic'], '%', color_write)}",
+        "",
+        "[white]Remote Traffic[/white]",
+        f"  {metric_line('Read', metrics['remote_read_traffic'], '%', color_read)}",
+        f"  {metric_line('Write', metrics['remote_wr_at_traffic'], '%', color_write)}",
     ])
-    return stack_metrics(arrow_section, traffic_section)
+    return stack_metrics(hbm_section, traffic_section)
 
 
 def _build_hbm_content(
