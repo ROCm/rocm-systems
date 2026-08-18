@@ -8,8 +8,8 @@
 ///
 /// Each case runs identical pre-seeded VGPR state through the forced-scalar
 /// path then the SIMD path and asserts the full dst window matches word for
-/// word. Inputs are rounding-free (see mma_exact_test_support.h) so fused
-/// (SIMD) and non-fused (scalar) accumulation cannot legitimately differ.
+/// word. Inputs are rounding-free (see mma_exact_test_support.h) so the two
+/// paths cannot legitimately differ even where a K-sum would otherwise round.
 
 #include "mma_exact_test_support.h"
 

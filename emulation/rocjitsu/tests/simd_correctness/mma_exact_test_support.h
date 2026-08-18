@@ -4,8 +4,8 @@
 /// @file mma_exact_test_support.h
 /// @brief Shared fixture for MFMA/WMMA SIMD-vs-scalar bit-exact tests.
 ///
-/// The fused-FMA SIMD path and the non-fused scalar path can only round apart
-/// when an intermediate K-sum actually rounds, so the random generators seed
+/// Both paths issue fused MACs, so they can only round apart when an
+/// intermediate K-sum actually rounds; the random generators therefore seed
 /// integer-valued elements that stay exact through every product and partial
 /// sum (max |prod| 64, max K-sum 8192 < 2^24); boundary modes drive the
 /// rounding-free corners directly (NaN, +/-Inf, +/-0, denormals, max-finite

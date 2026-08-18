@@ -929,10 +929,10 @@ template <typename Run> bool dispatch_matrix_fmt_pair(uint32_t a_fmt, uint32_t b
 /// Cbuf[row*stride+col] += sum_k Abuf[row*K+k] * Bbuf[k*stride+col], run as
 /// native-width rows over the col (N) dimension with a scalar tail. A/B/C must
 /// already be hoisted into dense buffers (lane permutation, per-element scale,
-/// and 2:4 sparsity gather folded in by the caller). Float uses fused FMA
-/// (matching the hardware's single-rounding MACs; the scalar reference is
-/// non-fused, so f32 agrees to a few ULP and packed f16/bf16 rounds identically);
-/// integer MAC is exact, so the SIMD and scalar paths are bit-identical.
+/// and 2:4 sparsity gather folded in by the caller). Float uses fused FMA,
+/// matching the hardware's single-rounding MACs; the scalar references in this
+/// file are fused for the same reason, so the two paths are bit-identical.
+/// Integer MAC is exact and already agreed.
 /// Templated so the `if constexpr (has_stdx_simd)` callers never instantiate it
 /// on a platform without <experimental/simd>.
 ///
@@ -1238,7 +1238,8 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
   results.reserve(M * N * B);
 
   // Scalar reference: D[i][j] = C[i][j] + sum_k A[i][k] * B[k][j], accumulated
-  // per output in K order (non-fused multiply-add).
+  // per output in K order as fused multiply-adds, matching both the hardware's
+  // single-rounding MACs and the SIMD path below.
   auto run_scalar = [&]() {
     for (uint32_t b = 0; b < B; ++b) {
       for (uint32_t row = 0; row < M; ++row) {
@@ -1260,7 +1261,7 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
               bl.lane = permute_b_lane(bl.lane, blgp);
             float a_val = ea(cu, s0, physicalize_loc(al, wf));
             float b_val = eb(cu, s1, physicalize_loc(bl, wf));
-            acc += a_val * b_val;
+            acc = std::fma(a_val, b_val, acc);
           }
           results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
         }
@@ -1273,9 +1274,9 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
   // row-major (k,col), and C into (row,col) dense f32 buffers (lane
   // permutation folded in during the hoist), then run the dense MxNxK matmul
   // as native-width FMA rows over the N (column) dimension. Uses fused FMA,
-  // matching the GFX9 MFMA hardware's single-rounding MACs (the scalar path
-  // above is non-fused; results agree to a few ULP). N columns that don't
-  // fill a full SIMD lane group fall to a scalar (fused) tail.
+  // matching the GFX9 MFMA hardware's single-rounding MACs and the scalar path
+  // above bit for bit. N columns that don't fill a full SIMD lane group fall to
+  // a scalar (fused) tail.
   if constexpr (util::has_stdx_simd) {
     // Pad the column (N) leading dimension up to a SIMD-width multiple so
     // every matmul row starts W-aligned: the inner loop then uses aligned
@@ -1429,7 +1430,7 @@ void exec_packed16_gfx9(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B
         for (uint32_t k = 0; k < K; ++k) {
           auto al = physicalize_loc(input_loc(M, K, B, row, k, b, in_bits), wf);
           auto bl = physicalize_loc(input_loc(N, K, B, col, k, b, in_bits), wf);
-          acc += ea(cu, s0, al) * eb(cu, s1, bl);
+          acc = std::fma(ea(cu, s0, al), eb(cu, s1, bl), acc);
         }
         results.push_back({out.reg, out.lane, out.sub_element, pack_result(acc)});
       }
@@ -1588,7 +1589,7 @@ void exec_wmma_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t 
         for (uint32_t k = 0; k < K; ++k) {
           auto al = gfx12_wmma_a_input_loc(wave_size, M, K, row, k, a_bits, b_bits);
           auto bl = gfx12_wmma_b_input_loc(wave_size, N, K, col, k, a_bits, b_bits);
-          acc += ea(cu, s0, al) * eb(cu, s1, bl);
+          acc = std::fma(ea(cu, s0, al), eb(cu, s1, bl), acc);
         }
         results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
       }
@@ -1665,7 +1666,7 @@ void exec_gfx11_wmma_f32_mixed(auto &cu, uint32_t wave_size, uint32_t M, uint32_
       for (uint32_t k = 0; k < K; ++k) {
         auto al = gfx11_wmma_input_loc(M, K, row, k, a_bits, lane_group);
         auto bl = gfx11_wmma_input_loc(N, K, col, k, b_bits, lane_group);
-        acc += ea(cu, s0, al) * eb(cu, s1, bl);
+        acc = std::fma(ea(cu, s0, al), eb(cu, s1, bl), acc);
       }
       results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
     }
@@ -1709,7 +1710,7 @@ void exec_gfx11_wmma_packed16(auto &cu, uint32_t wave_size, uint32_t M, uint32_t
       for (uint32_t k = 0; k < K; ++k) {
         auto al = gfx11_wmma_input_loc(M, K, row, k, in_bits, lane_group);
         auto bl = gfx11_wmma_input_loc(N, K, col, k, in_bits, lane_group);
-        acc += ea(cu, s0, al) * eb(cu, s1, bl);
+        acc = std::fma(ea(cu, s0, al), eb(cu, s1, bl), acc);
       }
       results.push_back({out.reg, out.lane, out.sub_element, pack_result(acc)});
     }
@@ -1814,9 +1815,9 @@ void exec_wmma_f32_scaled_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, ui
           auto bl = wmma_b_input_loc(N, K, col, k, a_bits, b_bits);
           const uint32_t a_scale_byte = wmma_f8f6f4_scale_byte(k, a_bits, mixed_pair, scale16);
           const uint32_t b_scale_byte = wmma_f8f6f4_scale_byte(k, b_bits, mixed_pair, scale16);
-          acc += ea(cu, s0, al) * eb(cu, s1, bl) *
-                 scale_for(a_scale_word, a_scale_byte, matrix_a_scale_fmt) *
-                 scale_for(b_scale_word, b_scale_byte, matrix_b_scale_fmt);
+          acc = std::fma(ea(cu, s0, al) * scale_for(a_scale_word, a_scale_byte, matrix_a_scale_fmt),
+                         eb(cu, s1, bl) * scale_for(b_scale_word, b_scale_byte, matrix_b_scale_fmt),
+                         acc);
         }
         results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
       }
@@ -2282,7 +2283,7 @@ void exec_swmmac_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_
         for (uint32_t ck = 0; ck < compressed_k; ++ck) {
           auto al = swmmac_a_input_loc(wave_size, M, K, row, ck, a_bits);
           auto bl = swmmac_b_input_loc(wave_size, N, K, col, dense_k_for(row, ck), b_bits);
-          acc += ea(cu, s0, al) * eb(cu, s1, bl);
+          acc = std::fma(ea(cu, s0, al), eb(cu, s1, bl), acc);
         }
         results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
       }
@@ -2367,7 +2368,7 @@ void exec_wmma_packed16(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t i
         for (uint32_t k = 0; k < K; ++k) {
           auto al = gfx12_wmma_input_loc(wave_size, M, K, row, k, in_bits);
           auto bl = gfx12_wmma_input_loc(wave_size, N, K, col, k, in_bits);
-          acc += ea(cu, s0, al) * eb(cu, s1, bl);
+          acc = std::fma(ea(cu, s0, al), eb(cu, s1, bl), acc);
         }
         results.push_back({out.reg, out.lane, out.sub_element, pack_result(acc)});
       }
@@ -2464,7 +2465,7 @@ inline void exec_wmma_bf16f32_16x16x32_bf16(auto &cu, uint32_t dst, uint32_t s0,
       for (uint32_t k = 0; k < K; ++k) {
         auto al = wmma_input_loc(M, K, row, k, in_bits);
         auto bl = wmma_input_loc(N, K, col, k, in_bits);
-        acc += extract_bf16(cu, s0, al) * extract_bf16(cu, s1, bl);
+        acc = std::fma(extract_bf16(cu, s0, al), extract_bf16(cu, s1, bl), acc);
       }
       auto out = wmma_output_loc_16(M, N, row, col);
       results.push_back({out.reg, out.lane, out.sub_element, util::f32_to_bf16(acc)});
@@ -2531,7 +2532,7 @@ void exec_swmmac_packed16(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t
         for (uint32_t ck = 0; ck < compressed_k; ++ck) {
           auto al = swmmac_a_input_loc(wave_size, M, K, row, ck, in_bits);
           auto bl = swmmac_b_input_loc(wave_size, N, K, col, dense_k_for(row, ck), in_bits);
-          acc += ea(cu, s0, al) * eb(cu, s1, bl);
+          acc = std::fma(ea(cu, s0, al), eb(cu, s1, bl), acc);
         }
         results.push_back({out.reg, out.lane, out.sub_element, pack_result(acc)});
       }
@@ -3024,8 +3025,8 @@ void exec_f32_scaled(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, u
                 al.lane = permute_a_lane(al.lane, cbsz, abid);
               if (blgp != 0)
                 bl.lane = permute_b_lane(bl.lane, blgp);
-              block_sum +=
-                  ea(cu, s0, physicalize_loc(al, wf)) * eb(cu, s1, physicalize_loc(bl, wf));
+              block_sum = std::fma(ea(cu, s0, physicalize_loc(al, wf)),
+                                   eb(cu, s1, physicalize_loc(bl, wf)), block_sum);
             }
             acc += std::ldexp(block_sum, scale_exp_for(row, col, b, blk));
           }
@@ -3155,7 +3156,8 @@ void exec_f32_scaled_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_
           for (uint32_t k = k_start; k < k_end; ++k) {
             auto al = input_loc(M, K, B, row, k, b, a_bits);
             auto bl = input_loc(N, K, B, col, k, b, b_bits);
-            block_sum += ea(cu, s0, physicalize_loc(al, wf)) * eb(cu, s1, physicalize_loc(bl, wf));
+            block_sum = std::fma(ea(cu, s0, physicalize_loc(al, wf)),
+                                 eb(cu, s1, physicalize_loc(bl, wf)), block_sum);
           }
           uint32_t sa_raw = RegisterAccess(cu).read_vgpr(scale_a_base, M * blk + row);
           uint32_t sb_raw = RegisterAccess(cu).read_vgpr(scale_b_base, N * blk + col);
@@ -3625,8 +3627,8 @@ inline void exec_f64(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, u
           for (uint32_t k = 0; k < K; ++k) {
             auto al = input_loc(M, K, B, row, k, b, 64);
             auto bl = input_loc(N, K, B, col, k, b, 64);
-            acc +=
-                apply_neg(extract_f64(cu, s0, al), 0x1u) * apply_neg(extract_f64(cu, s1, bl), 0x2u);
+            acc = std::fma(apply_neg(extract_f64(cu, s0, al), 0x1u),
+                           apply_neg(extract_f64(cu, s1, bl), 0x2u), acc);
           }
           uint64_t bits = std::bit_cast<uint64_t>(acc);
           results.push_back(
@@ -3816,7 +3818,7 @@ void exec_smfmac_f32_16x16x32_f16(auto &cu, uint32_t dst, uint32_t s0, uint32_t 
         int p0 = field & 3, p1 = (field >> 2) & 3;
         for (int s = 0; s < 2; ++s) {
           float av = ex(cu, s0, (2 * q + s) % 4, laneA);
-          acc += av * Bcol[4 * q + (s == 0 ? p0 : p1)];
+          acc = std::fma(av, Bcol[4 * q + (s == 0 ? p0 : p1)], acc);
         }
       }
       results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
@@ -3854,7 +3856,7 @@ void exec_smfmac_f32_32x32x16_f16(auto &cu, uint32_t dst, uint32_t s0, uint32_t 
         int p0 = field & 3, p1 = (field >> 2) & 3;
         for (int s = 0; s < 2; ++s) {
           float av = ex(cu, s0, (2 * q + s) % 4, laneA);
-          acc += av * Bcol[4 * q + (s == 0 ? p0 : p1)];
+          acc = std::fma(av, Bcol[4 * q + (s == 0 ? p0 : p1)], acc);
         }
       }
       results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
@@ -3891,7 +3893,7 @@ void exec_smfmac_f32_16x16x64_f16(auto &cu, uint32_t dst, uint32_t s0, uint32_t 
         int p0 = field & 3, p1 = (field >> 2) & 3;
         for (int s = 0; s < 2; ++s) {
           float av = ex(cu, s0, (2 * q + s) % 8, laneA);
-          acc += av * Bcol[4 * q + (s == 0 ? p0 : p1)];
+          acc = std::fma(av, Bcol[4 * q + (s == 0 ? p0 : p1)], acc);
         }
       }
       results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
@@ -3931,7 +3933,7 @@ void exec_smfmac_f32_32x32x32_f16(auto &cu, uint32_t dst, uint32_t s0, uint32_t 
         int p0 = field & 3, p1 = (field >> 2) & 3;
         for (int s = 0; s < 2; ++s) {
           float av = ex(cu, s0, (2 * q + s) % 8, laneA);
-          acc += av * Bcol[4 * q + (s == 0 ? p0 : p1)];
+          acc = std::fma(av, Bcol[4 * q + (s == 0 ? p0 : p1)], acc);
         }
       }
       results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
@@ -3973,7 +3975,7 @@ void exec_smfmac_f32_16x16x64_fp8(auto &cu, uint32_t dst, uint32_t s0, uint32_t 
           int cc = 2 * q + s;
           int byte = 4 * (cc / 16) + (cc % 16) % 4;
           float av = ea(cu, s0, byte, laneA);
-          acc += av * Bcol[4 * q + (s == 0 ? p0 : p1)];
+          acc = std::fma(av, Bcol[4 * q + (s == 0 ? p0 : p1)], acc);
         }
       }
       results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
@@ -4017,7 +4019,7 @@ void exec_smfmac_f32_32x32x32_fp8(auto &cu, uint32_t dst, uint32_t s0, uint32_t 
           int cc = 2 * q + s;
           int byte = 4 * (cc / 8) + (cc % 8) % 4;
           float av = ea(cu, s0, byte, laneA);
-          acc += av * Bcol[4 * q + (s == 0 ? p0 : p1)];
+          acc = std::fma(av, Bcol[4 * q + (s == 0 ? p0 : p1)], acc);
         }
       }
       results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
@@ -4059,7 +4061,7 @@ void exec_smfmac_f32_16x16x128_fp8(auto &cu, uint32_t dst, uint32_t s0, uint32_t
           int hb = 2 * ((cc >> 2) & 1) + ((cc >> 4) & 1);
           int byte = 4 * hb + (cc & 3);
           float av = ea(cu, s0, byte, ga * 16 + row);
-          acc += av * Bcol[4 * q + (s == 0 ? p0 : p1)];
+          acc = std::fma(av, Bcol[4 * q + (s == 0 ? p0 : p1)], acc);
         }
       }
       results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
@@ -4103,7 +4105,7 @@ void exec_smfmac_f32_32x32x64_fp8(auto &cu, uint32_t dst, uint32_t s0, uint32_t 
           int hb = 2 * ((cc >> 2) & 1) + ((cc >> 3) & 1);
           int byte = 4 * hb + (cc & 3);
           float av = ea(cu, s0, byte, ga * 32 + row);
-          acc += av * Bcol[4 * q + (s == 0 ? p0 : p1)];
+          acc = std::fma(av, Bcol[4 * q + (s == 0 ? p0 : p1)], acc);
         }
       }
       results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
