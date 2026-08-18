@@ -198,16 +198,17 @@ Examples:
             help="Number of test entries to run concurrently within a suite (default: 1 = "
                  "serial, behavior unchanged). >1 dispatches entries through a bounded thread "
                  "pool (each thread = one test process), overlapping their per-process init. "
-                 "PROTOTYPE: immediate --rerun-failed is disabled in parallel mode."
+                 "Note: --rerun-failed is not supported with --jobs>1 (run reruns serially)."
         )
         self.parser.add_argument(
-            '--max-parallel-ranks',
+            '--max-parallel-gpus',
             type=int,
             default=8,
-            help="Under --jobs>1, only entries needing at most this many ranks are "
-                 "co-tenanted; entries needing more ranks run serially (bounds GPU "
-                 "oversubscription on a single node). Entries flagged serial_only always "
-                 "run serially regardless of rank. Default: 8."
+            help="Under --jobs>1, the aggregate per-node GPU budget shared by concurrent "
+                 "entries: co-tenants run only while their combined GPU demand fits this "
+                 "budget, so the total never oversubscribes the node (default 8 = a full "
+                 "8-GPU node). An entry whose own demand exceeds the budget, or one flagged "
+                 "serial_only, always runs serially. Default: 8."
         )
 
     def parse_arguments(self):
