@@ -108,6 +108,7 @@ if(TARGET rocprofiler-sdk::rocprofiler-sdk-build-flags
                 rocprofiler-sdk::rocprofiler-sdk-headers
                 rocprofiler-sdk::rocprofiler-sdk-build-flags
                 rocprofiler-sdk::rocprofiler-sdk-common-library
+                rocprofiler-sdk::tests-common-library
                 ${CMAKE_DL_LIBS})
     add_dependencies(
         rocattach-symbol-lookup-test

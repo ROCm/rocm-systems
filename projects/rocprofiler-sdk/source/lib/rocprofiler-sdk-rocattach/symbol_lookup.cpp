@@ -22,6 +22,7 @@
 
 #include "symbol_lookup.hpp"
 
+#include "lib/common/filesystem.hpp"
 #include "lib/common/hasher.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
@@ -44,7 +45,6 @@
 #include <cstdint>
 #include <cstring>
 #include <exception>
-#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <optional>
@@ -61,6 +61,8 @@ namespace rocattach
 {
 namespace
 {
+namespace fs = common::filesystem;
+
 // Keep limits generous enough for debug builds, but bounded so malformed target
 // ELFs cannot force unbounded memory use or symbol/hash traversal.
 constexpr auto MAX_TARGET_ELF_SIZE      = uint64_t{512} * 1024 * 1024;
@@ -518,9 +520,9 @@ open_target_elf(pid_t pid, const mapped_object& object, bool pathname_only)
     auto target_path = strip_deleted_suffix(object.path);
     if(!target_path.empty() && target_path.front() == '/')
     {
-        auto root_path = (std::filesystem::path{fmt::format("/proc/{}/root", pid)} /
-                          std::filesystem::path{target_path}.relative_path())
-                             .string();
+        auto root_path =
+            (fs::path{fmt::format("/proc/{}/root", pid)} / fs::path{target_path}.relative_path())
+                .string();
         if(auto elf = read_mapped_file(root_path, object, /*require_identity_match=*/false))
         {
             ROCP_TRACE << "[rocprofiler-sdk-rocattach] Opened target ELF via " << root_path;

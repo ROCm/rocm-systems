@@ -22,6 +22,8 @@
 
 #include "symbol_lookup.hpp"
 
+#include "common/filesystem.hpp"
+
 #include "lib/common/scope_destructor.hpp"
 
 #include <dlfcn.h>
@@ -38,7 +40,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <optional>
@@ -70,7 +71,7 @@ cleanup_loaded_library(loaded_library& library)
     if(library.remove_on_cleanup && !library.path.empty())
     {
         std::error_code ec;
-        std::filesystem::remove(library.path, ec);
+        common::fs::remove(library.path, ec);
     }
 }
 
@@ -164,7 +165,7 @@ loaded_library
 create_and_load_sectionless_copy(const loaded_library& source, std::string_view label)
 {
     auto path =
-        std::filesystem::temp_directory_path() /
+        common::fs::temp_directory_path() /
         ("librocprofiler-register.so.rocattach-sectionless-" + std::string{label} + "-XXXXXX");
     auto path_buffer = path.string();
     auto fd          = mkstemp(path_buffer.data());
@@ -211,8 +212,8 @@ create_and_load_sectionless_copy(const loaded_library& source, std::string_view 
 void
 expect_malformed_mapped_elf_fails()
 {
-    auto path = std::filesystem::temp_directory_path() /
-                "librocprofiler-register.so.rocattach-malformed-XXXXXX";
+    auto path =
+        common::fs::temp_directory_path() / "librocprofiler-register.so.rocattach-malformed-XXXXXX";
     auto path_buffer = path.string();
     auto fd          = mkstemp(path_buffer.data());
     if(fd < 0)
@@ -245,12 +246,12 @@ expect_malformed_mapped_elf_fails()
         std::cerr << "find_symbol unexpectedly resolved malformed mapped ELF " << path_buffer
                   << " to " << resolved << '\n';
         munmap(mapping, contents.size());
-        std::filesystem::remove(path_buffer);
+        common::fs::remove(path_buffer);
         std::exit(1);
     }
 
     munmap(mapping, contents.size());
-    std::filesystem::remove(path_buffer);
+    common::fs::remove(path_buffer);
 }
 
 std::optional<size_t>
@@ -327,8 +328,8 @@ bool
 expect_pathname_lookup_validates_build_id(const loaded_library& source,
                                           const loaded_library& no_build_id)
 {
-    auto path = std::filesystem::temp_directory_path() /
-                "librocprofiler-register.so.rocattach-replaced-XXXXXX";
+    auto path =
+        common::fs::temp_directory_path() / "librocprofiler-register.so.rocattach-replaced-XXXXXX";
     auto path_buffer = path.string();
     auto fd          = mkstemp(path_buffer.data());
     if(fd < 0)
@@ -338,8 +339,7 @@ expect_pathname_lookup_validates_build_id(const loaded_library& source,
     }
     close(fd);
 
-    std::filesystem::copy_file(
-        source.path, path_buffer, std::filesystem::copy_options::overwrite_existing);
+    common::fs::copy_file(source.path, path_buffer, common::fs::copy_options::overwrite_existing);
 
     auto mapped = load_library(path_buffer.c_str());
     auto unload_mapped =
@@ -392,9 +392,9 @@ expect_pathname_lookup_validates_build_id(const loaded_library& source,
             std::cerr << "cross-process Build ID child did not exit cleanly\n";
         }
         std::error_code ec;
-        std::filesystem::remove(path_buffer, ec);
-        std::filesystem::remove(path_buffer + ".replacement", ec);
-        std::filesystem::remove(path_buffer + ".flipped", ec);
+        common::fs::remove(path_buffer, ec);
+        common::fs::remove(path_buffer + ".replacement", ec);
+        common::fs::remove(path_buffer + ".flipped", ec);
     }};
 
     // Repoint the pathname at a different inode while the child keeps the
@@ -402,9 +402,8 @@ expect_pathname_lookup_validates_build_id(const loaded_library& source,
     // otherwise the Build ID comparison would never be reached.
     auto install_at_pathname = [&](const std::string& file) {
         auto replacement = path_buffer + ".replacement";
-        std::filesystem::copy_file(
-            file, replacement, std::filesystem::copy_options::overwrite_existing);
-        std::filesystem::rename(replacement, path_buffer);
+        common::fs::copy_file(file, replacement, common::fs::copy_options::overwrite_existing);
+        common::fs::rename(replacement, path_buffer);
 
         struct stat installed
         {};
