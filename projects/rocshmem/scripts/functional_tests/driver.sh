@@ -834,9 +834,6 @@ TestColl() {
   ExecTest  "fcollect"         3       1            64        32768
   ExecTest  "fcollect"         5       1            64        32768
 
-  # NOTE: teamreduction at rank counts > 2 currently fails a data validation
-  # check in the ring all-reduce path; this is a pre-existing bug unrelated to
-  # work/sync pool alignment, so it is only run at 2 ranks here.
   ExecTest  "teamreduction"    2       1            64        32768
   ExecTest  "teamreduction"    3       1            64        32768
   ExecTest  "teamreduction"    4       1            64        32768
