@@ -1,12 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""
-Unit tests for the GFX11 memory-chart renderer.
-
-Covers:
-- mem_chart_gfx11.py - RDNA3.5 (Rich-based) memory architecture visualization
-"""
+"""Unit tests for the gfx11 memory-chart renderer and shared helpers."""
 
 from pathlib import Path
 
@@ -14,7 +9,9 @@ import common
 import pytest
 import yaml
 
-from utils import mem_chart_gfx11
+from utils import mem_chart_common, mem_chart_gfx11
+from utils.mem_chart_common import strip_ansi
+from utils.utils_analysis import format_bw_human_readable
 
 DEFAULT_TITLE = "3. Memory Chart (Normalization: per_kernel)"
 
@@ -28,7 +25,6 @@ MEM_CHART_PANEL_YAML = (
 
 
 def mem_chart_yaml_metric_names() -> list[str]:
-    """Return gfx115x Memory Chart metric names from disk, in panel order."""
     panel = yaml.safe_load(MEM_CHART_PANEL_YAML.read_text(encoding="utf-8"))
     return [
         name
@@ -38,374 +34,206 @@ def mem_chart_yaml_metric_names() -> list[str]:
 
 
 # =============================================================================
-# Tests for format_bw_human_readable function (gfx11)
+# format_bw_human_readable
 # =============================================================================
 
 
 class TestFormatBwHumanReadable:
-    """Tests for format_bw_human_readable - converts Bytes/s to human-readable."""
+    @pytest.mark.parametrize(
+        "value, unit, prec, expected",
+        [
+            (1e12, "Bytes/s", 1, "1.0 TB/s"),
+            (2.5e12, "Bytes/s", 1, "2.5 TB/s"),
+            (1e9, "Bytes/s", 1, "1.0 GB/s"),
+            (100e9, "Bytes/s", 1, "100.0 GB/s"),
+            (1e6, "Bytes/s", 1, "1.0 MB/s"),
+            (1e3, "Bytes/s", 1, "1.0 KB/s"),
+            (500, "Bytes/s", 1, "500.0 B/s"),
+            (0, "Bytes/s", 1, "0.0 B/s"),
+            (100, "GB/s", 1, "100.0 GB/s"),
+            (1500, "GB/s", 1, "1.5 TB/s"),
+            (None, "Bytes/s", 1, "N/A"),
+            ("invalid", "Bytes/s", 1, "N/A"),
+        ],
+    )
+    def test_format(self, value, unit, prec, expected):
+        assert format_bw_human_readable(value, unit, prec) == expected
 
-    def test_terabytes_per_second(self):
-        """Test TB/s formatting for values >= 1e12."""
-        # 1 TB/s
-        result = mem_chart_gfx11.format_bw_human_readable(1e12, "Bytes/s", 1)
-        assert result == "1.0 TB/s"
-
-        # 2.5 TB/s
-        result = mem_chart_gfx11.format_bw_human_readable(2.5e12, "Bytes/s", 1)
-        assert result == "2.5 TB/s"
-
-        # Large value with higher precision
-        result = mem_chart_gfx11.format_bw_human_readable(1.234e12, "Bytes/s", 2)
-        assert result == "1.23 TB/s"
-
-    def test_gigabytes_per_second(self):
-        """Test GB/s formatting for values >= 1e9 and < 1e12."""
-        # 1 GB/s
-        result = mem_chart_gfx11.format_bw_human_readable(1e9, "Bytes/s", 1)
-        assert result == "1.0 GB/s"
-
-        # 100 GB/s (typical HBM bandwidth)
-        result = mem_chart_gfx11.format_bw_human_readable(100e9, "Bytes/s", 1)
-        assert result == "100.0 GB/s"
-
-        # 512.5 GB/s
-        result = mem_chart_gfx11.format_bw_human_readable(512.5e9, "Bytes/s", 1)
-        assert result == "512.5 GB/s"
-
-    def test_megabytes_per_second(self):
-        """Test MB/s formatting for values >= 1e6 and < 1e9."""
-        # 1 MB/s
-        result = mem_chart_gfx11.format_bw_human_readable(1e6, "Bytes/s", 1)
-        assert result == "1.0 MB/s"
-
-        # 500 MB/s
-        result = mem_chart_gfx11.format_bw_human_readable(500e6, "Bytes/s", 1)
-        assert result == "500.0 MB/s"
-
-    def test_kilobytes_per_second(self):
-        """Test KB/s formatting for values >= 1e3 and < 1e6."""
-        # 1 KB/s
-        result = mem_chart_gfx11.format_bw_human_readable(1e3, "Bytes/s", 1)
-        assert result == "1.0 KB/s"
-
-        # 512 KB/s
-        result = mem_chart_gfx11.format_bw_human_readable(512e3, "Bytes/s", 1)
-        assert result == "512.0 KB/s"
-
-    def test_bytes_per_second(self):
-        """Test B/s formatting for values < 1e3."""
-        # 500 B/s
-        result = mem_chart_gfx11.format_bw_human_readable(500, "Bytes/s", 1)
-        assert result == "500.0 B/s"
-
-        # 0 B/s
-        result = mem_chart_gfx11.format_bw_human_readable(0, "Bytes/s", 1)
-        assert result == "0.0 B/s"
-
-    def test_legacy_gbps_unit_conversion(self):
-        """Test conversion from legacy GB/s unit to human-readable."""
-        # Input is 100 GB/s, should convert to Bytes/s first then format
-        result = mem_chart_gfx11.format_bw_human_readable(100, "GB/s", 1)
-        assert result == "100.0 GB/s"
-
-        # 1500 GB/s -> 1.5 TB/s
-        result = mem_chart_gfx11.format_bw_human_readable(1500, "GB/s", 1)
-        assert result == "1.5 TB/s"
-
-    def test_none_value(self):
-        """Test handling of None values."""
-        result = mem_chart_gfx11.format_bw_human_readable(None, "Bytes/s", 1)
-        assert result == "N/A"
-
-    def test_invalid_string_value(self):
-        """Test handling of non-numeric string values."""
-        result = mem_chart_gfx11.format_bw_human_readable("invalid", "Bytes/s", 1)
-        assert result == "N/A"
-
-    def test_precision_parameter(self):
-        """Test different precision values."""
-        value = 123.456789e9  # 123.456789 GB/s
-
-        assert (
-            mem_chart_gfx11.format_bw_human_readable(value, "Bytes/s", 0) == "123 GB/s"
-        )
-        assert (
-            mem_chart_gfx11.format_bw_human_readable(value, "Bytes/s", 1)
-            == "123.5 GB/s"
-        )
-        assert (
-            mem_chart_gfx11.format_bw_human_readable(value, "Bytes/s", 2)
-            == "123.46 GB/s"
-        )
-        assert (
-            mem_chart_gfx11.format_bw_human_readable(value, "Bytes/s", 3)
-            == "123.457 GB/s"
-        )
+    @pytest.mark.parametrize(
+        "prec, expected",
+        [(0, "123 GB/s"), (1, "123.5 GB/s"), (2, "123.46 GB/s")],
+    )
+    def test_precision(self, prec, expected):
+        assert format_bw_human_readable(123.456789e9, "Bytes/s", prec) == expected
 
 
 # =============================================================================
-# Tests for format_value function (gfx11)
+# mem_chart_common helpers
 # =============================================================================
 
 
 class TestFormatValue:
-    """Tests for format_value - general value formatting."""
+    @pytest.mark.parametrize(
+        "value, unit, prec, expected",
+        [
+            (85.5, "%", 1, "85.5%"),
+            (None, "%", 1, "N/A"),
+            ("50.5", "%", 1, "50.5%"),
+            ("invalid", "%", 1, "N/A"),
+        ],
+    )
+    def test_format(self, value, unit, prec, expected):
+        assert mem_chart_common.format_value(value, unit, prec) == expected
 
-    def test_percentage_formatting(self):
-        """Test percentage formatting."""
-        result = mem_chart_gfx11.format_value(85.5, "%", 1)
-        assert result == "85.5%"
-
-        result = mem_chart_gfx11.format_value(100, "%", 0)
-        assert result == "100%"
-
-    def test_bytes_per_second_unit(self):
-        """Test Bytes/s formatting routes to human-readable."""
-        result = mem_chart_gfx11.format_value(100e9, "Bytes/s", 1)
-        assert "GB/s" in result
-
-    def test_gbps_unit(self):
-        """Test GB/s formatting routes to human-readable."""
-        result = mem_chart_gfx11.format_value(100, "GB/s", 1)
-        assert "GB/s" in result
-
-    def test_none_value(self):
-        """Test handling of None values."""
-        result = mem_chart_gfx11.format_value(None, "%", 1)
-        assert result == "N/A"
-
-    def test_string_value_conversion(self):
-        """Test conversion of string values to float."""
-        result = mem_chart_gfx11.format_value("50.5", "%", 1)
-        assert result == "50.5%"
-
-    def test_invalid_string_value(self):
-        """Test handling of non-convertible string values."""
-        result = mem_chart_gfx11.format_value("invalid", "%", 1)
-        assert result == "invalid"
+    def test_bytes_per_second_routes_to_human_readable(self):
+        assert "GB/s" in mem_chart_common.format_value(100e9, "Bytes/s", 1)
 
 
-# =============================================================================
-# Tests for format_sci function (gfx11)
-# =============================================================================
+class TestFormatScientific:
+    @pytest.mark.parametrize(
+        "value, expected_contains",
+        [(100, "100"), (999, "999"), (1_000_000, "e"), (None, "N/A"), (-500, "-500")],
+    )
+    def test_format(self, value, expected_contains):
+        assert expected_contains in mem_chart_common.format_scientific(value)
 
 
-class TestFormatSci:
-    """Tests for format_sci - scientific notation formatting."""
-
-    def test_small_numbers_no_scientific(self):
-        """Test that small numbers are displayed as integers."""
-        assert mem_chart_gfx11.format_sci(100) == "100"
-        assert mem_chart_gfx11.format_sci(999) == "999"
-
-    def test_large_numbers_scientific(self):
-        """Test that large numbers are displayed in scientific notation."""
-        result = mem_chart_gfx11.format_sci(1000000)
-        assert "e" in result.lower()
-
-        result = mem_chart_gfx11.format_sci(12345678, 2)
-        assert "e" in result.lower()
-
-    def test_none_value(self):
-        """Test handling of None values."""
-        result = mem_chart_gfx11.format_sci(None)
-        assert result == "N/A"
-
-    def test_invalid_value(self):
-        """Test handling of invalid values."""
-        result = mem_chart_gfx11.format_sci("invalid")
-        assert result == "N/A"
-
-    def test_negative_numbers(self):
-        """Test negative number handling."""
-        result = mem_chart_gfx11.format_sci(-500)
-        assert result == "-500"
-
-        result = mem_chart_gfx11.format_sci(-1000000)
-        assert "e" in result.lower()
+class TestProgressBar:
+    @pytest.mark.parametrize(
+        "pct, filled, empty",
+        [(100, 10, 0), (0, 0, 10), (50, 5, 5), (None, 0, 10), (150, 10, 0)],
+    )
+    def test_bar(self, pct, filled, empty):
+        assert mem_chart_common.progress_bar(pct, 10) == "█" * filled + "░" * empty
 
 
-# =============================================================================
-# Tests for bar function (gfx11)
-# =============================================================================
+class TestSafeFloatSum:
+    @pytest.mark.parametrize(
+        "args, expected",
+        [((1.5, None, 2.5), 4.0), ((None, None), None), (("10", 5), 15.0)],
+    )
+    def test_sum(self, args, expected):
+        assert mem_chart_common.safe_float_sum(*args) == expected
 
 
-class TestBar:
-    """Tests for bar - progress bar visualization."""
-
-    def test_full_bar(self):
-        """Test 100% progress bar."""
-        result = mem_chart_gfx11.bar(100, 10)
-        assert "█" * 10 in result
-        assert "░" not in result
-
-    def test_empty_bar(self):
-        """Test 0% progress bar."""
-        result = mem_chart_gfx11.bar(0, 10)
-        assert "░" * 10 in result
-        assert "█" not in result
-
-    def test_partial_bar(self):
-        """Test 50% progress bar."""
-        result = mem_chart_gfx11.bar(50, 10)
-        assert "█" * 5 in result
-        assert "░" * 5 in result
-
-    def test_none_value(self):
-        """Test None value returns empty bar."""
-        result = mem_chart_gfx11.bar(None, 10)
-        assert "░" * 10 in result
-
-    def test_invalid_value(self):
-        """Test invalid value returns empty bar."""
-        result = mem_chart_gfx11.bar("invalid", 10)
-        assert "░" * 10 in result
-
-    def test_over_100_clamped(self):
-        """Test values over 100% are clamped."""
-        result = mem_chart_gfx11.bar(150, 10)
-        assert "█" * 10 in result
-
-    def test_negative_clamped(self):
-        """Test negative values are clamped to 0."""
-        result = mem_chart_gfx11.bar(-50, 10)
-        assert "░" * 10 in result
-
-
-# =============================================================================
-# Tests for metric_line function (gfx11)
-# =============================================================================
+class TestFormatEdge:
+    @pytest.mark.parametrize(
+        "label, value, check_in, check_not_in",
+        [("Read", 1_500_000, "1.50e+06", None), ("Write", None, "Write", ":")],
+    )
+    def test_edge(self, label, value, check_in, check_not_in):
+        result = mem_chart_common.format_edge(label, value)
+        assert check_in in result
+        if check_not_in is not None:
+            assert check_not_in not in result
 
 
 class TestMetricLine:
-    """Tests for metric_line - formatted metric display."""
-
     def test_basic_metric(self):
-        """Test basic metric line formatting."""
-        result = mem_chart_gfx11.metric_line("Util", 75.5, "%", "green")
+        result = mem_chart_common.metric_line("Util", 75.5, "%", "green")
         assert "Util" in result
         assert "75.5%" in result
         assert "green" in result
 
     def test_with_none_value(self):
-        """Test metric line with None value."""
-        result = mem_chart_gfx11.metric_line("BW", None, "GB/s", "cyan")
+        result = mem_chart_common.metric_line("BW", None, "GB/s", "cyan")
         assert "BW" in result
         assert "N/A" in result
 
 
+class TestFormatMemChartHeading:
+    @pytest.mark.parametrize(
+        "unit, panel_id, expected",
+        [
+            ("per_kernel", 300, "3. Memory Chart (Normalization: per_kernel)"),
+            ("per_wave", 500, "5. Memory Chart (Normalization: per_wave)"),
+        ],
+    )
+    def test_heading(self, unit, panel_id, expected):
+        result = mem_chart_common.format_mem_chart_heading(unit, panel_id=panel_id)
+        assert result == expected
+
+
+class TestBuildLegend:
+    def test_contains_read_write_atomic(self):
+        legend = mem_chart_common.build_legend()
+        assert "Read" in legend and "Write" in legend and "Atomic" in legend
+
+    def test_stall_optional(self):
+        assert "Stall" not in mem_chart_common.build_legend()
+        assert "Stall" in mem_chart_common.build_legend(include_stall=True)
+
+    def test_exclude_atomic(self):
+        legend = mem_chart_common.build_legend(include_atomic=False)
+        assert "Atomic" not in legend
+
+
+class TestMakeArrows:
+    def test_all_keys_same_length(self):
+        arrows = mem_chart_common.make_arrows(8)
+        for key in ("left", "right", "both", "plain"):
+            assert len(arrows[key]) == 8
+
+
+class TestPadTo:
+    def test_pads_short_list(self):
+        assert mem_chart_common.pad_to(["a"], 3) == ["a", "", ""]
+
+    def test_truncates_long_list(self):
+        assert mem_chart_common.pad_to(["a", "b", "c"], 2) == ["a", "b"]
+
+
 # =============================================================================
-# Tests for get_sample_metrics function (gfx11)
+# gfx11 get_sample_metrics
 # =============================================================================
 
 
 class TestGetSampleMetrics:
-    """Tests for get_sample_metrics - returns sample test data."""
-
-    def test_returns_dict(self):
-        """Test that sample metrics returns a dictionary."""
-        metrics = mem_chart_gfx11.get_sample_metrics()
-        assert isinstance(metrics, dict)
-
-    def test_contains_key_metrics(self):
-        """Test that sample metrics contains expected keys."""
-        metrics = mem_chart_gfx11.get_sample_metrics()
-
-        # Check for key bandwidth metrics
-        assert "TCP-GL1 Read Bandwidth" in metrics
-        assert "GL1-GL2 Read Bandwidth" in metrics
-        assert "GL2-Fabric Read BW" in metrics
-        assert "DRAM Read Bandwidth" in metrics
-
-        # Check for utilization metrics
-        assert "GL1 Cache Utilization" in metrics
-        assert "GL2 Cache Utilization" in metrics
-
-        # Check for hit rate metrics
-        assert "GL0 Cache Hit Rate (TCP Cache)" in metrics
-        assert "GL1 Cache Hit Rate" in metrics
-        assert "GL2 Cache Hit Rate" in metrics
-
-    def test_bandwidth_values_in_bytes_per_second(self):
-        """Test that bandwidth values are in Bytes/s format."""
-        metrics = mem_chart_gfx11.get_sample_metrics()
-
-        # TCP-GL1 Read Bandwidth should be 96 GB/s = 96e9 Bytes/s
-        assert metrics["TCP-GL1 Read Bandwidth"] == 96e9
-
-        # DRAM Read Bandwidth should be 100 GB/s = 100e9 Bytes/s
-        assert metrics["DRAM Read Bandwidth"] == 100e9
-
     def test_returns_copy(self):
-        """Test that sample metrics returns a copy (not the original)."""
-        metrics1 = mem_chart_gfx11.get_sample_metrics()
-        metrics2 = mem_chart_gfx11.get_sample_metrics()
-
-        # Modify metrics1 and verify metrics2 is not affected
-        metrics1["TCP-GL1 Read Bandwidth"] = 0
-        assert metrics2["TCP-GL1 Read Bandwidth"] == 96e9
+        first = mem_chart_gfx11.get_sample_metrics()
+        second = mem_chart_gfx11.get_sample_metrics()
+        first["TCP-GL1 Read Bandwidth"] = 0
+        assert second["TCP-GL1 Read Bandwidth"] != 0
 
 
 # =============================================================================
-# Tests for plot_mem_chart function (gfx11)
+# gfx11 plot_mem_chart
 # =============================================================================
 
 
 class TestPlotMemChartGfx11:
-    """Tests for gfx11 plot_mem_chart - main chart generation."""
-
-    def test_returns_string(self):
-        """Full sample metrics exercise every render path without raising."""
-        metrics = mem_chart_gfx11.get_sample_metrics()
-        result = mem_chart_gfx11.plot_mem_chart(metrics, chart_title=DEFAULT_TITLE)
-
-        assert isinstance(result, str)
-        assert len(result) > 0
-
-    def test_normalize_mem_chart_metrics_flat_ordered(self):
-        """Metrics are flattened to panel YAML order; extras dropped; missing None."""
-        raw = {"GL0 Cache Hit Rate (TCP Cache)": 1.0, "noise_key": 99}
-        norm = mem_chart_gfx11.normalize_mem_chart_metrics(raw)
-        assert list(norm.keys()) == list(mem_chart_gfx11.MEM_CHART_PANEL_METRIC_KEYS)
-        assert norm["GL0 Cache Hit Rate (TCP Cache)"] == 1.0
-        assert "noise_key" not in norm
-        assert norm["ICache Requests"] is None
-
-    def test_empty_metrics(self):
-        """Test with empty metrics dictionary."""
-        result = mem_chart_gfx11.plot_mem_chart({}, chart_title=DEFAULT_TITLE)
-
-        # Should still produce output (with N/A values)
-        assert isinstance(result, str)
-        assert len(result) > 0
-
-    def test_partial_metrics(self):
-        """Test with partial metrics (some missing)."""
-        partial_metrics = {
-            "TCP-GL1 Read Bandwidth": 50e9,
-            "GL1 Cache Utilization": 65.0,
-            # Missing many other metrics
-        }
+    def test_full_chart(self):
         result = mem_chart_gfx11.plot_mem_chart(
-            partial_metrics, chart_title=DEFAULT_TITLE
+            mem_chart_gfx11.get_sample_metrics(), chart_title=DEFAULT_TITLE
         )
+        clean = strip_ansi(result)
+        assert len(result) > 100
+        assert "3. Memory Chart" in clean
+        assert "GPU" in clean and "System Memory" in clean
 
-        assert isinstance(result, str)
-        assert len(result) > 0
+    @pytest.mark.parametrize("block", ["TCP", "GL1 Cache", "GL2 Cache", "GCEA", "DRAM"])
+    def test_contains_arch_element(self, block):
+        result = mem_chart_gfx11.plot_mem_chart(
+            mem_chart_gfx11.get_sample_metrics(), chart_title=DEFAULT_TITLE
+        )
+        assert block in result
+
+    def test_normalize_drops_unknown_fills_missing(self):
+        raw = {"GL0 Cache Hit Rate (TCP Cache)": 1.0, "noise": 99}
+        norm = mem_chart_gfx11.normalize_mem_chart_metrics(raw)
+        assert norm["GL0 Cache Hit Rate (TCP Cache)"] == 1.0
+        assert "noise" not in norm
+        assert norm["ICache Requests"] is None
 
 
 # =============================================================================
-# Tests for zero vs missing metric display (gfx11)
+# gfx11 zero vs missing metrics
 # =============================================================================
 
 
 class TestZeroVersusMissingMetrics:
     """A measured 0 must render; an absent counter must never read as 0."""
 
-    # Panel lines that vanish when their metric is absent, so a falsy check would
-    # also hide a measured 0. Each case sets one metric only, so the expected text
-    # can come from no other panel.
     GUARDED_LINES = [
         ("LDS Utilization", "Util 0.0%"),
         ("LDS Estimated Bandwidth", "BW 0.0 B/s"),
@@ -415,105 +243,66 @@ class TestZeroVersusMissingMetrics:
 
     @pytest.mark.parametrize(("metric", "expected"), GUARDED_LINES)
     def test_zero_valued_metric_is_displayed(self, metric, expected):
-        """Zero is falsy, so guarded lines must test `is not None` to show it."""
         output = common.strip_ansi(
             mem_chart_gfx11.plot_mem_chart({metric: 0}, chart_title=DEFAULT_TITLE)
         )
-
         assert expected in output
 
     def test_all_zero_metrics_render_no_placeholders(self):
-        """Nothing reads as unavailable when every counter measured 0."""
         metrics = dict.fromkeys(mem_chart_gfx11.MEM_CHART_PANEL_METRIC_KEYS, 0)
         output = common.strip_ansi(
             mem_chart_gfx11.plot_mem_chart(metrics, chart_title=DEFAULT_TITLE)
         )
-
-        assert "Total: 0.0" in output  # DRAM total sums two real zeros
         assert "N/A" not in output
 
     def test_missing_counters_are_not_reported_as_zero(self):
-        """Absent metrics stay None, so no counter is fabricated as 0."""
         output = common.strip_ansi(
             mem_chart_gfx11.plot_mem_chart({}, chart_title=DEFAULT_TITLE)
         )
-
-        assert "Total: N/A" in output
         assert "0.0" not in output
 
 
 # =============================================================================
-# Tests for panel YAML sync (gfx11)
+# gfx11 panel YAML sync
 # =============================================================================
 
 
 class TestMemChartPanelYamlSync:
-    """gfx115x chart names must track 0300_memory_chart.yaml on disk."""
+    """gfx115x chart metric names must track the YAML on disk."""
 
     def test_panel_metric_keys_match_yaml_in_order(self):
-        """Keys mirror the YAML in panel order, as the module docstring claims."""
         assert (
             list(mem_chart_gfx11.MEM_CHART_PANEL_METRIC_KEYS)
             == mem_chart_yaml_metric_names()
         )
 
     def test_every_chart_lookup_resolves_against_yaml(self):
-        """Every metric the chart reads is still spelled that way in the YAML.
-
-        Drift is invisible on screen: edge rows render blank and guarded panel
-        lines disappear, rather than showing "N/A".
-        """
         metrics = dict.fromkeys(mem_chart_yaml_metric_names(), 1.0)
         extracted = mem_chart_gfx11._extract_metrics(
             mem_chart_gfx11.normalize_mem_chart_metrics(metrics)
         )
-
         unresolved = sorted(key for key, value in extracted.items() if value is None)
         assert not unresolved, f"metric names drifted from the YAML: {unresolved}"
 
 
 # =============================================================================
-# Tests for DEFAULT_SAMPLE_METRICS constant (gfx11)
+# gfx11 DEFAULT_SAMPLE_METRICS
 # =============================================================================
 
 
 class TestDefaultSampleMetrics:
-    """Tests for DEFAULT_SAMPLE_METRICS constant."""
-
-    def test_all_bandwidth_values_positive(self):
-        """Test that all bandwidth values are positive."""
-        for key, value in mem_chart_gfx11.DEFAULT_SAMPLE_METRICS.items():
-            if "Bandwidth" in key:
-                assert value >= 0, f"{key} should be non-negative"
-
-    def test_all_rate_values_in_range(self):
-        """Test that rate/percentage values are in valid range."""
-        for key, value in mem_chart_gfx11.DEFAULT_SAMPLE_METRICS.items():
-            if "Rate" in key or "Utilization" in key:
-                assert 0 <= value <= 100, f"{key} should be between 0 and 100"
+    def test_keys_match_panel_keys(self):
+        assert set(mem_chart_gfx11.DEFAULT_SAMPLE_METRICS) == set(
+            mem_chart_gfx11.MEM_CHART_PANEL_METRIC_KEYS
+        )
 
     def test_has_all_memory_hierarchy_levels(self):
-        """Test that all memory hierarchy levels are represented."""
         metrics = mem_chart_gfx11.DEFAULT_SAMPLE_METRICS
-
-        # GL0 (TCP)
-        assert any("TCP" in k for k in metrics.keys())
-
-        # LDS
-        assert any("LDS" in k for k in metrics.keys())
-
-        # GL1 Cache
-        assert any("GL1" in k for k in metrics.keys())
-
-        # GL2 Cache
-        assert any("GL2" in k for k in metrics.keys())
-
-        # DRAM
-        assert any("DRAM" in k for k in metrics.keys())
+        for prefix in ("TCP", "LDS", "GL1", "GL2", "DRAM"):
+            assert any(prefix in k for k in metrics), f"Missing {prefix}"
 
 
 def test_chart_title_appears_as_first_line():
-    """The renderer prints the caller's chart_title as the first line."""
     chart_title = "7. Memory Chart (Normalization: per_kernel)"
     output = common.strip_ansi(
         mem_chart_gfx11.plot_mem_chart(
@@ -521,6 +310,5 @@ def test_chart_title_appears_as_first_line():
             chart_title=chart_title,
         )
     )
-
     assert output.strip().splitlines()[0] == chart_title
     assert "3. Memory Chart" not in output

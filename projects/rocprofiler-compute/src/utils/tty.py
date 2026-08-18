@@ -17,6 +17,7 @@ from utils.kernel_name_shortener import (
     kernel_name_shortener,
 )
 from utils.logger import console_error, console_log, console_warning
+from utils.mem_chart_common import format_mem_chart_heading, strip_ansi
 from utils.metrics.aggregation import calc_pct_of_peak
 from utils.utils_analysis import (
     NS_TO_MS,
@@ -724,12 +725,6 @@ def process_table_data(
     return result_df
 
 
-def _mem_chart_heading(panel_id: int, normal_unit: str) -> str:
-    """Section number from ``panel id // 100`` (panel 300 → ``3. Memory Chart``)."""
-    section = max(0, int(panel_id)) // 100
-    return f"{section}. Memory Chart (Normalization: {normal_unit})"
-
-
 def _panel_is_mem_chart_only(panel: dict[str, Any]) -> bool:
     """True when every table uses ``cli_style: mem_chart`` (one merged chart)."""
     sources = panel.get("data source") or []
@@ -821,30 +816,29 @@ def format_table_output(
                 .to_dict()["Value"]
             )
 
-        if is_gfx9(gpu_arch):
-            content += (
-                mem_chart_gfx9.plot_mem_chart(
-                    mem_data,
-                    chart_title=_mem_chart_heading(
-                        int(table_config["id"]),
-                        args.normal_unit,
-                    ),
-                )
-                + "\n"
-            )
-        elif is_gfx115x(gpu_arch):
+        if is_gfx115x(gpu_arch):
             content += (
                 mem_chart_gfx11.plot_mem_chart(
                     mem_data,
-                    chart_title=_mem_chart_heading(
-                        int(table_config["id"]),
+                    chart_title=format_mem_chart_heading(
                         args.normal_unit,
+                        panel_id=int(table_config["id"]),
                     ),
                 )
                 + "\n"
             )
-        else:
-            pass
+        elif is_gfx9(gpu_arch):
+            content += (
+                mem_chart_gfx9.plot_mem_chart(
+                    mem_data,
+                    chart_title=format_mem_chart_heading(
+                        args.normal_unit,
+                        panel_id=int(table_config["id"]),
+                    ),
+                    gpu_arch=gpu_arch,
+                )
+                + "\n"
+            )
     else:
         content += (
             get_table_string(df, transpose=transpose, decimal=args.decimal) + "\n"
@@ -997,8 +991,8 @@ def show_all(
 
                 # For mem_chart panels, collect all tables and merge
                 # into a single chart; skip individual table output.
-                # Gate to architectures with a renderer; unsupported arches fall back to
-                # normal table output.
+                # Gate to architectures with a renderer; unsupported arches
+                # fall back to normal table output.
                 is_mem_chart = (
                     table_config.get("cli_style") == "mem_chart"
                     and not _tty_view_is_table(args)
@@ -1027,11 +1021,11 @@ def show_all(
                     gpu_arch,
                 )
 
-        # Emit merged mem_chart for the panel (all architectures)
+        # Emit merged mem_chart for the panel
         if mem_chart_data and not _tty_view_is_table(args):
-            heading = _mem_chart_heading(
-                int((panel or {}).get("id", 300)),
+            heading = format_mem_chart_heading(
                 args.normal_unit,
+                panel_id=int((panel or {}).get("id", 300)),
             )
             if is_gfx115x(gpu_arch):
                 panel_content += (
@@ -1043,17 +1037,21 @@ def show_all(
                 )
             elif is_gfx9(gpu_arch):
                 panel_content += (
-                    mem_chart_gfx9.plot_mem_chart(mem_chart_data, chart_title=heading)
+                    mem_chart_gfx9.plot_mem_chart(
+                        mem_chart_data,
+                        chart_title=heading,
+                        gpu_arch=gpu_arch,
+                    )
                     + "\n"
                 )
-            else:
-                pass
 
         # Roofline printing is handled separately above in is_roofline_shown.
         # With --view table, roofline tables (401/402) render as normal tables.
         if panel_content and (
             table_config["id"] not in [401, 402] or _tty_view_is_table(args)
         ):
+            if not hasattr(output, "isatty") or not output.isatty():
+                panel_content = strip_ansi(panel_content)
             if _panel_is_mem_chart_only(panel) and not _tty_view_is_table(args):
                 print(panel_content, file=output)
             else:

@@ -15,6 +15,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from textual.widgets import Static
 
+from utils.mem_chart_common import format_mem_chart_heading
 from utils.mem_chart_gfx9 import plot_mem_chart as plot_mem_chart_gfx9
 from utils.mem_chart_gfx11 import plot_mem_chart as plot_mem_chart_gfx11
 from utils.utils_common import is_gfx9, is_gfx115x
@@ -329,7 +330,13 @@ class MemoryChart(Static):
             try:
                 with StringIO() as string_buffer:
                     sys.stdout = string_buffer
-                    result = plot_func("per_kernel", metric_dict)
+                    heading = format_mem_chart_heading("per_kernel")
+                    if is_gfx115x(gpu_arch):
+                        result = plot_func(metric_dict, chart_title=heading)
+                    else:
+                        result = plot_func(
+                            metric_dict, chart_title=heading, gpu_arch=gpu_arch
+                        )
                     stdout_output = string_buffer.getvalue()
             finally:
                 sys.stdout = original_stdout
