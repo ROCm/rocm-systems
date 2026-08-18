@@ -203,8 +203,11 @@ struct ComgrEntryPoints {
 
 class Comgr : public amd::AllStatic {
  public:
-  // Loads comgr at most once and reports whether all required entry points are ready.
-  static bool EnsureLoaded();
+  static std::once_flag initialized;
+
+  static bool LoadLib();
+
+  static bool IsReady() { return is_ready_; }
 
   static void get_version(size_t* major, size_t* minor) {
     COMGR_DYN(amd_comgr_get_version)(major, minor);
@@ -423,10 +426,6 @@ class Comgr : public amd::AllStatic {
   }
 
  private:
-  static bool LoadLib();
-  static bool IsReady() { return is_ready_; }
-
-  static std::once_flag initialized;
   static ComgrEntryPoints cep_;
   static bool is_ready_;
 };

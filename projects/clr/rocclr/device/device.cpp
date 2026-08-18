@@ -43,8 +43,6 @@ extern void PalDeviceUnload();
 #include <cstdio>
 #include <sstream>
 #include <fstream>
-#include <map>
-#include <mutex>
 #include <set>
 #include <algorithm>
 #include <numeric>
@@ -952,7 +950,10 @@ Device::~Device() {
   delete[] info_.extensions_;
 }
 
-bool Device::ValidateComgr() { return amd::Comgr::EnsureLoaded(); }
+bool Device::ValidateComgr() {
+  std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib);
+  return amd::Comgr::IsReady();
+}
 
 size_t GetMaxStackSize(const std::string& procName) {
   if (procName.find("gfx9") != std::string::npos || procName.find("gfx8") != std::string::npos) {
