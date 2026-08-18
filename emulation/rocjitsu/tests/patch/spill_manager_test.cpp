@@ -109,6 +109,8 @@ enum class IntegOpcode : uint32_t {
 
 class IntegDecoder : public Decoder {
 public:
+  std::size_t max_instruction_words() const override { return 1; }
+
   Instruction *decode(const rj_code_binary_inst_t *inst) override {
     auto op = static_cast<IntegOpcode>(*inst);
     switch (op) {
