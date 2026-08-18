@@ -268,6 +268,7 @@ class _MaskResultKind(Enum):
     COMPARE = auto()
     EXEC = auto()
     SECONDARY = auto()
+    IMPLICIT_VCC = auto()
 
 
 @dataclass(frozen=True)
@@ -4964,6 +4965,8 @@ class CodeGenerator:
             op.is_output and op.name == 'sdst' for op in inst.operands
         ):
             return _MaskResultKind.SECONDARY
+        if sem.semantic_class == 'vector_add_co' and enc_name.upper() == 'ENC_VOP2':
+            return _MaskResultKind.IMPLICIT_VCC
         return None
 
     def _gen_execute_body(
@@ -9925,6 +9928,9 @@ class CodeGenerator:
                         _uses_secondary_result_writer = (
                             _mask_result_kind is _MaskResultKind.SECONDARY
                         )
+                        _uses_implicit_vcc_result_writer = (
+                            _mask_result_kind is _MaskResultKind.IMPLICIT_VCC
+                        )
                         _dpp_observation_restore = ''
                         if _has_dpp_encoding:
                             # DPP/SDWA permute the field-bearing vector sources
@@ -10085,7 +10091,18 @@ class CodeGenerator:
                                     '  }\n'
                                 )
                             elif not _is_compare:
-                                if _modern_dpp_sources:
+                                if (
+                                    _uses_implicit_vcc_result_writer
+                                    and _supports_dpp_encoding
+                                ):
+                                    _dpp_preamble += (
+                                        '  uint64_t dpp_old_exec_ = wf.exec();\n'
+                                        '  uint64_t dpp_old_vcc_ = wf.vcc();\n'
+                                        '  uint64_t dpp_source_write_mask_ = ~0ULL;\n'
+                                        '  if (inst_.src0 == amdgpu::SRC_DPP)\n'
+                                        '    dpp_source_write_mask_ = dpp_plan_.source_write_mask;\n'
+                                    )
+                                elif _modern_dpp_sources:
                                     _dpp_preamble += '  [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();\n'
                                 if _secondary_mask_dst_name and _modern_dpp_sources:
                                     _dpp_preamble += (
@@ -10265,6 +10282,23 @@ class CodeGenerator:
                                 '  };\n'
                             )
                             _result_shared_arg = ', commit_result'
+                        elif _uses_implicit_vcc_result_writer:
+                            _implicit_vcc_final_result = ''
+                            if _supports_dpp_encoding:
+                                _implicit_vcc_final_result = (
+                                    '    if (inst_.src0 == amdgpu::SRC_DPP)\n'
+                                    '      final_result = amdgpu::dpp::dpp_source_suppressed_result(\n'
+                                    '          raw_result, dpp_old_vcc_, dpp_old_exec_,\n'
+                                    '          dpp_source_write_mask_);\n'
+                                )
+                            _result_commit_setup = (
+                                '  auto commit_result = [&](uint64_t raw_result) {\n'
+                                '    uint64_t final_result = raw_result;\n'
+                                f'{_implicit_vcc_final_result}'
+                                '    wf.set_vcc(final_result);\n'
+                                '  };\n'
+                            )
+                            _result_shared_arg = ', commit_result'
                         _ordinary_result_commit_setup = ''
                         if _uses_compare_result_writer:
                             _ordinary_result_commit_setup = (
@@ -10282,6 +10316,12 @@ class CodeGenerator:
                             _ordinary_result_commit_setup = (
                                 '  auto commit_result = [&](uint64_t raw_result) {\n'
                                 f'    amdgpu::write_wave_mask_scalar({_secondary_mask_dst_name}, wf, raw_result);\n'
+                                '  };\n'
+                            )
+                        elif _uses_implicit_vcc_result_writer:
+                            _ordinary_result_commit_setup = (
+                                '  auto commit_result = [&](uint64_t raw_result) {\n'
+                                '    wf.set_vcc(raw_result);\n'
                                 '  };\n'
                             )
                         # SDWA postamble: apply dst_sel merge and float clamp after ALU.

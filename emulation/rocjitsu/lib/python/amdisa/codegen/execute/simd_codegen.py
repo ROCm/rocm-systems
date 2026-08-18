@@ -825,12 +825,16 @@ SIMD_VOP2_CARRY: dict[str, str] = {
         ' auto t2 = t1 - cin; auto bw2 = t1 < cin;'
         ' return make_simd_carry(t2, bw1 | bw2); }'
     ),
-    # NOTE: the RDNA VOP2 carry-in aliases (v_add_co_ci / sub_co_ci /
-    # subrev_co_ci _vop2) are intentionally NOT wired here. On RDNA their decoded
-    # form shares routing with the VOP3 add_co_ci path, and a VOP2-carry probe
-    # (carry-in from VCC) diverges from the VOP3 src2 carry-in the kernels feed;
-    # the _vop3 forms in SIMD_VOP3_CARRY_CIN cover these ops correctly.
 }
+# RDNA spells the carry-in forms *_CO_CI. Their VOP2 encoding reads carry-in
+# from VCC, exactly like addc/subb/subbrev, so they use the same fast path.
+SIMD_VOP2_CARRY.update(
+    {
+        'v_add_co_ci_u32_vop2': SIMD_VOP2_CARRY['v_addc_co_u32_vop2'],
+        'v_sub_co_ci_u32_vop2': SIMD_VOP2_CARRY['v_subb_co_u32_vop2'],
+        'v_subrev_co_ci_u32_vop2': SIMD_VOP2_CARRY['v_subbrev_co_u32_vop2'],
+    }
+)
 
 
 # template_name -> (cpp_type, k_literal_expr, cpp_fma_op_functor)
@@ -2538,7 +2542,14 @@ SIMD_MAD_WIDE64: dict[str, str] = {
 # whether the form has a carry-in (and thus a src2 member): the carry-OUT forms
 # (add_co/sub_co/subrev_co) have no src2 and route through the _co glue; the
 # carry-IN forms (addc/subb/subbrev) read src2 and route through the _cin glue.
-_VOP3_CARRY_CIN_NAMES = {'v_addc_co_u32', 'v_subb_co_u32', 'v_subbrev_co_u32'}
+_VOP3_CARRY_CIN_NAMES = {
+    'v_addc_co_u32',
+    'v_subb_co_u32',
+    'v_subbrev_co_u32',
+    'v_add_co_ci_u32',
+    'v_sub_co_ci_u32',
+    'v_subrev_co_ci_u32',
+}
 SIMD_VOP3_CARRY_CO: dict[str, str] = {
     name.replace('_vop2', '_vop3'): functor
     for name, functor in SIMD_VOP2_CARRY.items()
@@ -2549,16 +2560,6 @@ SIMD_VOP3_CARRY_CIN: dict[str, str] = {
     for name, functor in SIMD_VOP2_CARRY.items()
     if name.replace('_vop2', '') in _VOP3_CARRY_CIN_NAMES
 }
-# RDNA-only carry-in aliases (add_co_ci / sub_co_ci / subrev_co_ci): same
-# per-lane add/sub-with-carry functor as the CDNA addc / subb / subbrev forms;
-# the decoder binds src2/sdst to VCC, but the body is uniform.
-SIMD_VOP3_CARRY_CIN.update(
-    {
-        'v_add_co_ci_u32_vop3': SIMD_VOP2_CARRY['v_addc_co_u32_vop2'],
-        'v_sub_co_ci_u32_vop3': SIMD_VOP2_CARRY['v_subb_co_u32_vop2'],
-        'v_subrev_co_ci_u32_vop3': SIMD_VOP2_CARRY['v_subbrev_co_u32_vop2'],
-    }
-)
 
 
 def _indent_probe(probe: str) -> str:
@@ -2614,7 +2615,9 @@ def simd_probe_line(
         return probe
     specc = SIMD_VOP2_CARRY.get(template_name)
     if specc is not None:
-        return f'  ROCJITSU_TRY_SIMD_VOP2_CARRY({specc});'
+        writer_arg = f'{result_writer}, ' if result_writer is not None else ''
+        suffix = '_RESULT' if result_writer is not None else ''
+        return f'  ROCJITSU_TRY_SIMD_VOP2_CARRY{suffix}({writer_arg}{specc});'
     fma_f16_macro = SIMD_VOP2_FMA_F16.get(template_name)
     if fma_f16_macro is not None:
         if template_name == 'v_fmac_f16_vop2':

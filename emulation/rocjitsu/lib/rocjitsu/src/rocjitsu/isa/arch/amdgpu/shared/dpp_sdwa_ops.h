@@ -355,6 +355,15 @@ inline uint64_t dpp_compare_result(uint64_t new_result, uint64_t old_exec, uint6
   return new_result & old_exec & row_bank_mask & source_write_mask;
 }
 
+/// Preserve an active scalar side-result lane when BOUND_CTRL suppresses its
+/// DPP source write. Row/bank masks are intentionally absent: they select the
+/// vector destination only, not VCC or another scalar side result.
+inline uint64_t dpp_source_suppressed_result(uint64_t new_result, uint64_t old_result,
+                                             uint64_t old_exec, uint64_t source_write_mask) {
+  const uint64_t preserve_mask = old_exec & ~source_write_mask;
+  return (new_result & ~preserve_mask) | (old_result & preserve_mask);
+}
+
 /// SIMD executes every active lane; architectural destination filtering occurs at commit.
 template <typename Inst>
 inline uint64_t execution_lane_mask(const Inst &, const amdgpu::Wavefront &wf) {
@@ -366,10 +375,10 @@ inline uint64_t execution_lane_mask(const Inst &, const amdgpu::Wavefront &wf) {
 /// @details bind() intersects the requested lanes with the wavefront's current
 /// write mask, so independently created scopes nest correctly. restore() puts
 /// back the mask that was active at bind time and is idempotent; destruction
-/// also restores it for exception-safe execution. Generated DPP code restores
-/// explicitly before committing scalar side results, because row/bank and
-/// invalid-source suppression apply to the VGPR destination, not those scalar
-/// results.
+/// also restores it for exception-safe execution. Generated DPP code may commit
+/// scalar side results while this scope is bound: scalar writes do not consult
+/// vgpr_write_mask, whose row/bank and invalid-source filtering applies only to
+/// the vector destination.
 class ScopedVgprWriteMask {
 public:
   ScopedVgprWriteMask() = default;
@@ -458,16 +467,15 @@ inline void stage_dpp_operand(const Operand &source, const DppPlan &plan,
 ///
 /// Reads all src0 VGPR lanes, applies the DPP permutation, creates a
 /// StagedOperand with the permuted data, and returns it through storage.
-/// Called from VOP1/VOP2 execute_impl() when src0 == 250.
+/// Called by generated VOP1, VOP2, VOPC, VOP3, and VOP3P modifier paths when
+/// src0 uses SRC_DPP.
 ///
-/// @param source Source operand to stage; the pointer is not retained or replaced.
-/// @param dpp_ctrl 9-bit DPP control value.
-/// @param row_mask 4-bit row mask.
-/// @param bank_mask 4-bit bank mask.
-/// @param bound_ctrl Bound control (1 = zero OOB, 0 = preserve).
-/// @param fi Fetch-inactive control (1 = read inactive source lanes, 0 = zero).
+/// @param source Source operand to stage; the reference is not retained or replaced.
+/// @param plan Precomputed source-lane and destination-write decisions.
+/// @param read_destinations Destination lanes whose permuted sources must be read.
 /// @param[out] storage Instruction-local staged operand storage.
 /// @param wf Wavefront providing register state.
+/// @param source_byte_mask Optional byte mask for a true16 source selection.
 inline void apply_dpp(const Operand &source, const DppPlan &plan, uint64_t read_destinations,
                       std::optional<StagedOperand> &storage, amdgpu::Wavefront &wf,
                       uint8_t source_byte_mask = 0) {

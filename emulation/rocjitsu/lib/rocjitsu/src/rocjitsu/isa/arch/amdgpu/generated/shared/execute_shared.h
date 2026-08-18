@@ -2863,9 +2863,17 @@ inline void execute_v_add3_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   }
 }
 
-template <typename Inst>
+template <typename Inst, typename CommitResult>
 inline void execute_v_add_co_ci_u32_vop2([[maybe_unused]] Inst &inst,
-                                         [[maybe_unused]] Wavefront &wf) {
+                                         [[maybe_unused]] Wavefront &wf,
+                                         [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(commit_result, [](auto a, auto b, auto cin) {
+    auto t1 = a + b;
+    auto c1 = t1 < a;
+    auto t2 = t1 + cin;
+    auto c2 = t2 < t1;
+    return make_simd_carry(t2, c1 | c2);
+  });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -2882,7 +2890,7 @@ inline void execute_v_add_co_ci_u32_vop2([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(w);
     }());
   }
-  wf.set_vcc_mask(vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst, typename CommitResult>
@@ -2916,9 +2924,10 @@ inline void execute_v_add_co_ci_u32_vop3([[maybe_unused]] Inst &inst,
   commit_result(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_add_co_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_CARRY([](auto a, auto b, auto) {
+template <typename Inst, typename CommitResult>
+inline void execute_v_add_co_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(commit_result, [](auto a, auto b, auto) {
     auto s = a + b;
     return make_simd_carry(s, s < a);
   });
@@ -2937,7 +2946,7 @@ inline void execute_v_add_co_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unuse
       return static_cast<uint32_t>(w);
     }());
   }
-  wf.set_vcc_mask(vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst, typename CommitResult>
@@ -3310,10 +3319,10 @@ inline void execute_v_add_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   }
 }
 
-template <typename Inst>
-inline void execute_v_addc_co_u32_vop2([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_CARRY([](auto a, auto b, auto cin) {
+template <typename Inst, typename CommitResult>
+inline void execute_v_addc_co_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(commit_result, [](auto a, auto b, auto cin) {
     auto t1 = a + b;
     auto c1 = t1 < a;
     auto t2 = t1 + cin;
@@ -3336,7 +3345,7 @@ inline void execute_v_addc_co_u32_vop2([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(w);
     }());
   }
-  wf.set_vcc_mask(vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst, typename CommitResult>
@@ -18952,9 +18961,17 @@ inline void execute_v_sqrt_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
   }
 }
 
-template <typename Inst>
+template <typename Inst, typename CommitResult>
 inline void execute_v_sub_co_ci_u32_vop2([[maybe_unused]] Inst &inst,
-                                         [[maybe_unused]] Wavefront &wf) {
+                                         [[maybe_unused]] Wavefront &wf,
+                                         [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(commit_result, [](auto a, auto b, auto cin) {
+    auto t1 = a - b;
+    auto bw1 = a < b;
+    auto t2 = t1 - cin;
+    auto bw2 = t1 < cin;
+    return make_simd_carry(t2, bw1 | bw2);
+  });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -18971,7 +18988,7 @@ inline void execute_v_sub_co_ci_u32_vop2([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(a - b - c);
     }());
   }
-  wf.set_vcc_mask(vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst, typename CommitResult>
@@ -19005,9 +19022,11 @@ inline void execute_v_sub_co_ci_u32_vop3([[maybe_unused]] Inst &inst,
   commit_result(vcc);
 }
 
-template <typename Inst>
-inline void execute_v_sub_co_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_CARRY([](auto a, auto b, auto) { return make_simd_carry(a - b, a < b); });
+template <typename Inst, typename CommitResult>
+inline void execute_v_sub_co_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                      [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(
+      commit_result, [](auto a, auto b, auto) { return make_simd_carry(a - b, a < b); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -19023,7 +19042,7 @@ inline void execute_v_sub_co_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unuse
       return a - b;
     }());
   }
-  wf.set_vcc_mask(vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst, typename CommitResult>
@@ -19316,10 +19335,10 @@ inline void execute_v_sub_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   }
 }
 
-template <typename Inst>
-inline void execute_v_subb_co_u32_vop2([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_CARRY([](auto a, auto b, auto cin) {
+template <typename Inst, typename CommitResult>
+inline void execute_v_subb_co_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf,
+                                       [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(commit_result, [](auto a, auto b, auto cin) {
     auto t1 = a - b;
     auto bw1 = a < b;
     auto t2 = t1 - cin;
@@ -19342,7 +19361,7 @@ inline void execute_v_subb_co_u32_vop2([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(a - b - c);
     }());
   }
-  wf.set_vcc_mask(vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst, typename CommitResult>
@@ -19375,10 +19394,11 @@ inline void execute_v_subb_co_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unus
   commit_result(vcc);
 }
 
-template <typename Inst>
+template <typename Inst, typename CommitResult>
 inline void execute_v_subbrev_co_u32_vop2([[maybe_unused]] Inst &inst,
-                                          [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_CARRY([](auto a, auto b, auto cin) {
+                                          [[maybe_unused]] Wavefront &wf,
+                                          [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(commit_result, [](auto a, auto b, auto cin) {
     auto t1 = b - a;
     auto bw1 = b < a;
     auto t2 = t1 - cin;
@@ -19401,7 +19421,7 @@ inline void execute_v_subbrev_co_u32_vop2([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(a - b - c);
     }());
   }
-  wf.set_vcc_mask(vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst, typename CommitResult>
@@ -19435,9 +19455,17 @@ inline void execute_v_subbrev_co_u32_vop3([[maybe_unused]] Inst &inst,
   commit_result(vcc);
 }
 
-template <typename Inst>
+template <typename Inst, typename CommitResult>
 inline void execute_v_subrev_co_ci_u32_vop2([[maybe_unused]] Inst &inst,
-                                            [[maybe_unused]] Wavefront &wf) {
+                                            [[maybe_unused]] Wavefront &wf,
+                                            [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(commit_result, [](auto a, auto b, auto cin) {
+    auto t1 = b - a;
+    auto bw1 = b < a;
+    auto t2 = t1 - cin;
+    auto bw2 = t1 < cin;
+    return make_simd_carry(t2, bw1 | bw2);
+  });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -19454,7 +19482,7 @@ inline void execute_v_subrev_co_ci_u32_vop2([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(a - b - c);
     }());
   }
-  wf.set_vcc_mask(vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst, typename CommitResult>
@@ -19488,10 +19516,12 @@ inline void execute_v_subrev_co_ci_u32_vop3([[maybe_unused]] Inst &inst,
   commit_result(vcc);
 }
 
-template <typename Inst>
+template <typename Inst, typename CommitResult>
 inline void execute_v_subrev_co_u32_vop2([[maybe_unused]] Inst &inst,
-                                         [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP2_CARRY([](auto a, auto b, auto) { return make_simd_carry(b - a, b < a); });
+                                         [[maybe_unused]] Wavefront &wf,
+                                         [[maybe_unused]] CommitResult commit_result) {
+  ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(
+      commit_result, [](auto a, auto b, auto) { return make_simd_carry(b - a, b < a); });
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint64_t vcc = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -19507,7 +19537,7 @@ inline void execute_v_subrev_co_u32_vop2([[maybe_unused]] Inst &inst,
       return a - b;
     }());
   }
-  wf.set_vcc_mask(vcc);
+  commit_result(vcc);
 }
 
 template <typename Inst, typename CommitResult>

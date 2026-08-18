@@ -1552,6 +1552,24 @@ def test_vop3_compare_simd_probe_can_commit_raw_result():
     assert 'ROCJITSU_TRY_SIMD_VOPC_VOP3_INT_RESULT(commit_result,' in commit_probe
 
 
+@pytest.mark.parametrize(
+    'template_name',
+    (
+        'v_add_co_ci_u32_vop2',
+        'v_sub_co_ci_u32_vop2',
+        'v_subrev_co_ci_u32_vop2',
+    ),
+)
+def test_vop2_carry_simd_probe_can_commit_raw_result(template_name: str):
+    default_probe = simd_probe_line(template_name)
+    commit_probe = simd_probe_line(template_name, result_writer='commit_result')
+
+    assert default_probe is not None
+    assert commit_probe is not None
+    assert 'ROCJITSU_TRY_SIMD_VOP2_CARRY(' in default_probe
+    assert 'ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(commit_result,' in commit_probe
+
+
 def test_true16_vop3_cmp_uses_selected_source_halves():
     body = gen_vector_cmp(['vdst'], ['src0', 'src1'], 'lt', 'i16', is_vop3=True)
 
@@ -3949,6 +3967,104 @@ def test_shared_vop3_secondary_result_writer_keeps_simd_enabled(
     assert 'ROCJITSU_TRY_SIMD_VOP3_CIN_RESULT(commit_result,' in body
     assert 'commit_result(vcc);' in body
     assert 'write_wave_mask_scalar' not in body
+
+
+@pytest.mark.parametrize(
+    'template_name',
+    (
+        'v_add_co_ci_u32_vop2',
+        'v_sub_co_ci_u32_vop2',
+        'v_subrev_co_ci_u32_vop2',
+    ),
+)
+def test_shared_vop2_carry_result_writer_keeps_simd_enabled(
+    execute_shared_path: Path,
+    template_name: str,
+):
+    shared = execute_shared_path.read_text()
+    body = _generated_function_body(shared, f'inline void execute_{template_name}')
+    assert 'CommitResult commit_result' in body
+    assert 'ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(commit_result,' in body
+    assert 'commit_result(vcc);' in body
+    assert 'wf.set_vcc(vcc);' not in body
+
+
+@pytest.mark.parametrize(
+    ('arch', 'class_names'),
+    [
+        *(
+            (
+                arch,
+                (
+                    'VAddCoU32Vop2',
+                    'VSubCoU32Vop2',
+                    'VSubrevCoU32Vop2',
+                    'VAddcCoU32Vop2',
+                    'VSubbCoU32Vop2',
+                    'VSubbrevCoU32Vop2',
+                ),
+            )
+            for arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4')
+        ),
+        *(
+            (
+                arch,
+                (
+                    'VAddCoCiU32Vop2',
+                    'VSubCoCiU32Vop2',
+                    'VSubrevCoCiU32Vop2',
+                ),
+            )
+            for arch in (
+                'gfx1250',
+                'rdna1',
+                'rdna2',
+                'rdna3',
+                'rdna3_5',
+                'rdna4',
+            )
+        ),
+    ],
+)
+def test_generated_vop2_carry_dpp_preserves_only_source_suppressed_vcc(
+    amdgpu_generated_root: Path,
+    arch: str,
+    class_names: tuple[str, ...],
+):
+    arch_root = amdgpu_generated_root / _generated_dir_name(arch)
+    source = _execution_source_path(
+        arch_root / 'vop2.cpp', _profile_for_arch(arch)
+    ).read_text()
+    classified = set()
+    for class_name in re.findall(
+        r'^RJ_NOINLINE void (\w+)::execute_modifier_impl', source, re.MULTILINE
+    ):
+        body = _generated_function_body(
+            source, f'RJ_NOINLINE void {class_name}::execute_modifier_impl'
+        )
+        if 'amdgpu::dpp::dpp_source_suppressed_result(' in body:
+            classified.add(class_name)
+    assert classified == set(class_names)
+
+    for class_name in class_names:
+        ordinary_body = _generated_function_body(
+            source, f'void {class_name}::execute_impl'
+        )
+        body = _generated_function_body(
+            source, f'RJ_NOINLINE void {class_name}::execute_modifier_impl'
+        )
+
+        assert 'auto commit_result = [&](uint64_t raw_result)' in ordinary_body
+        assert 'uint64_t dpp_old_exec_ = wf.exec();' in body
+        assert 'uint64_t dpp_old_vcc_ = wf.vcc();' in body
+        assert 'dpp_source_write_mask_ = dpp_plan_.source_write_mask;' in body
+        merge_start = body.index('amdgpu::dpp::dpp_source_suppressed_result(')
+        merge_end = body.index('wf.set_vcc(final_result);', merge_start)
+        merge = body[merge_start:merge_end]
+        assert 'dpp_old_vcc_, dpp_old_exec_, dpp_source_write_mask_' in merge
+        assert 'row_bank' not in merge
+        assert 'ScopedVgprWriteMask' in body
+        assert 'commit_result' in body
 
 
 def test_generated_rdna4_rejects_opcode_illegal_dpp(

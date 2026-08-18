@@ -807,12 +807,13 @@ SimdCarry<Value, Mask> make_simd_carry(Value value, Mask carry) {
 ///     -> SimdCarry<native<uint32_t>, mask>
 /// where `cin` carries the incoming VCC bit (0/1 per lane); ops without a
 /// carry-in ignore it. The result is masked-stored to vdst and the carry mask
-/// is merged into VCC at the chunk's bit offset for active EXEC lanes only —
-/// inactive-lane VCC bits are zeroed, matching the scalar bodies.
-template <typename Inst, typename CarryOp>
+/// is returned through `write_result`, which owns the architectural VCC commit
+/// after any DPP source-validity merge. Inactive-lane bits remain zero.
+template <typename Inst, typename CarryOp, typename WriteResult>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_binary_vop2_carry_simd(Inst &inst, Wavefront &wf,
-                                                             CarryOp carry_op) {
+                                                             CarryOp carry_op,
+                                                             WriteResult write_result) {
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.vsrc1.simd_capable() || !inst.vdst.simd_capable())
     return false;
@@ -850,14 +851,21 @@ template <typename Inst, typename CarryOp>
         carry_bits |= (1ULL << i);
     vcc_out = (vcc_out & ~(chunk << base)) | ((carry_bits & chunk) << base);
   }
-  wf.set_vcc_mask(vcc_out);
+  write_result(vcc_out);
   return true;
 }
 
 /// Unconstrained fallback for the carry path; see the binary-path note above.
-template <typename Inst, typename CarryOp>
-[[nodiscard]] bool try_execute_binary_vop2_carry_simd(Inst &, Wavefront &, CarryOp) {
+template <typename Inst, typename CarryOp, typename WriteResult>
+[[nodiscard]] bool try_execute_binary_vop2_carry_simd(Inst &, Wavefront &, CarryOp, WriteResult) {
   return false;
+}
+
+template <typename Inst, typename CarryOp>
+[[nodiscard]] inline bool try_execute_binary_vop2_carry_simd(Inst &inst, Wavefront &wf,
+                                                             CarryOp carry_op) {
+  return try_execute_binary_vop2_carry_simd(inst, wf, carry_op,
+                                            [&](uint64_t result) { wf.set_vcc_mask(result); });
 }
 
 /// VOP2 ternary (fused multiply-add) SIMD fast path for literal-addend and
@@ -4391,6 +4399,12 @@ template <bool Vop3, typename Inst>
 /// through as one token sequence.
 #define ROCJITSU_TRY_SIMD_VOP2_CARRY(...)                                                          \
   if (::rocjitsu::amdgpu::try_execute_binary_vop2_carry_simd(inst, wf, __VA_ARGS__))               \
+  return
+
+/// Result-writer variant used when the wrapper must merge DPP-suppressed VCC
+/// lanes before the architectural commit.
+#define ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(WRITE_RESULT, ...)                                     \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop2_carry_simd(inst, wf, __VA_ARGS__, WRITE_RESULT)) \
   return
 
 /// Literal FMA/MAD VOP2 counterpart. `KEXPR` is the inline-literal bits
