@@ -189,6 +189,19 @@ bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Defaul
 
 int getFirmwareVersion();
 bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, char const* archName);
+
+// Decide the host-side value of comm->cheapPostSendFenceOff.
+// Returns 1 if the cheap post-send fence must be OFF (kernel uses the full
+// __threadfence_system()), or 0 if the cheap post-send fence can be ON.
+//   cudaArch             : numeric device arch (comm->cudaArch = 100*major +
+//                          10*minor, i.e. gfx942 = 940, gfx950 = 950,
+//                          gfx1250 = 1250).
+//   param                : RCCL_CHEAP_POST_SEND_FENCE_OFF value
+//                          (0 = arch-tuned auto, 1 = force off, 2 = force on).
+//   uncachedMemSupported : whether cache-bypassing load/store builtins are
+//                          available (HIP_UNCACHED_MEMORY); cheap fence is only
+//                          safe when true.
+int rcclComputeCheapPostSendFenceOff(int cudaArch, int64_t param, bool uncachedMemSupported);
 #ifdef ENABLE_WARP_SPEED
 RCCL_PARAM_DECLARE(WarpSpeedARThreshold);
 RCCL_PARAM_DECLARE(WarpSpeedAutoMode);

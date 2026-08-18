@@ -221,6 +221,7 @@ if(BUILD_TESTS)
     ScatterTests.cpp
     P2pChannelScalingTests.cpp
     VersionGateTests.cpp
+    CheapPostSendFenceTests.cpp
     SendRecvTests.cpp
     StandaloneTests.cpp
     DdaIpcTests.cpp

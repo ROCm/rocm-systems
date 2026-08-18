@@ -199,6 +199,19 @@ std::unordered_map<ncclComm_t, rocshmem::rocshmem_team_t> ncclCommToRshmemTeam;
 //   1 = force cheap fence off (__threadfence_system), 2 = force cheap fence on (override auto, e.g. re-enable on gfx950)
 RCCL_PARAM(CheapPostSendFenceOff, "CHEAP_POST_SEND_FENCE_OFF", 0);
 
+int rcclComputeCheapPostSendFenceOff(int cudaArch, int64_t param, bool uncachedMemSupported) {
+  // Cheap fence is only safe when cache-bypassing load/store builtins are available.
+  if (!uncachedMemSupported) return 1;
+  // Force cheap fence on regardless of arch (override auto, e.g. re-enable on gfx950).
+  if (param == 2) return 0;
+  // Any other non-zero value forces the full __threadfence_system().
+  if (param != 0) return 1;
+  // Arch-tuned auto: cheap fence on for gfx942 (940) and gfx1250 (1250);
+  // off for gfx950 (950) and everything else.
+  if (cudaArch == 940 || cudaArch == 1250) return 0;
+  return 1;
+}
+
 /**
  * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes.
  */
@@ -1800,22 +1813,14 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx90a"))
     allGather3Data[rank].nc = std::max(allGather3Data[rank].nc, 4 / ringGraph->nChannels);
   if (ringGraph->nChannels > MAXCHANNELS / 2) allGather3Data[rank].nc = 1;
-  comm->cheapPostSendFenceOff = 1;
 #ifdef HIP_UNCACHED_MEMORY
   // cheap fence is only safe with cache bypassing load/store availability in kernel.
-  // Param: 0 = arch-tuned auto (cheap fence on for gfx942/gfx1250, off for gfx950),
-  //        1 = force cheap fence off, 2 = force cheap fence on (override auto).
-  int64_t cheapFenceParam = rcclParamCheapPostSendFenceOff();
-  if (cheapFenceParam == 2) {
-    // Force cheap fence on regardless of arch (e.g. re-enable on gfx950).
-    comm->cheapPostSendFenceOff = 0;
-  } else if (cheapFenceParam == 0) {
-    // Auto: gfx950 defaults to cheap fence off; gfx942/gfx1250 keep it on.
-    if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942") ||
-        IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250"))
-      comm->cheapPostSendFenceOff = 0;
-  }
+  const bool uncachedMemSupported = true;
+#else
+  const bool uncachedMemSupported = false;
 #endif
+  comm->cheapPostSendFenceOff = rcclComputeCheapPostSendFenceOff(
+      comm->cudaArch, rcclParamCheapPostSendFenceOff(), uncachedMemSupported);
   INFO(NCCL_INIT, "Cheap post-send fence is %s", comm->cheapPostSendFenceOff ? "OFF" : "ON");
   // RCCL: Only use one slice per primitive on some single node gfx9xx systems, only currently enabled for AllReduce, ReduceScatter, and AllGather
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942") ||
