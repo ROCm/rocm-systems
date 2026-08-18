@@ -3773,8 +3773,12 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
   // Initialize per-XCC structures
   pcs_data->num_xcc = properties_.NumXcc;
 
-  // Detect if we need PM4 fallback (non-large-BAR systems cannot use CPU atomics on VRAM)
-  pcs_data->use_pm4_fallback = !LargeBarEnabled();
+  // Always drain on the GPU, never with a CPU memcpy. The buf_written_val handshake does not
+  // order the trap handler's GL2 payload writes against the count it publishes as seen through
+  // the large-BAR aperture, so a CPU reader can observe the count while the payload behind it is
+  // still in flight and copy a torn record. PM4 issues the copy on the same queue as the
+  // handshake, which does order the two.
+  pcs_data->use_pm4_fallback = true;
 
   // Allocate cache-line aligned per-XCC data array
   // Each per_xcc_pcs_data_t is 64-byte aligned to prevent false sharing between XCCs
