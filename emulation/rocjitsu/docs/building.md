@@ -21,7 +21,11 @@ cmake --build build
 
 | Option | Default | Description |
 |---|---|---|
-| `RJ_SANITIZER` | *(empty)* | Enable a sanitizer: `asan`, `ubsan`, `tsan`, or `msan` |
+| `RJ_ENABLE_ASAN` | `OFF` | Enable AddressSanitizer |
+| `RJ_ENABLE_UBSAN` | `OFF` | Enable UndefinedBehaviorSanitizer |
+| `RJ_ENABLE_TSAN` | `OFF` | Enable ThreadSanitizer |
+| `RJ_ENABLE_MSAN` | `OFF` | Enable MemorySanitizer |
+| `RJ_SANITIZER_RUNTIME` | `AUTO` | Select `AUTO`, `SHARED`, or `STATIC` sanitizer runtime linkage |
 | `RJ_CLANG_TIDY` | `OFF` | Enable clang-tidy static analysis |
 | `LTO` | `OFF` | Enable link-time optimization for Release/RelWithDebInfo |
 
@@ -29,14 +33,24 @@ cmake --build build
 
 ```bash
 # AddressSanitizer
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DRJ_SANITIZER=asan
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DRJ_ENABLE_ASAN=1
+
+# AddressSanitizer + UndefinedBehaviorSanitizer
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DRJ_ENABLE_ASAN=1 -DRJ_ENABLE_UBSAN=1
 
 # ThreadSanitizer
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DRJ_SANITIZER=tsan
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DRJ_ENABLE_TSAN=1
+
+# MemorySanitizer
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DRJ_ENABLE_MSAN=1
 
 # UndefinedBehaviorSanitizer
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DRJ_SANITIZER=ubsan
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DRJ_ENABLE_UBSAN=1
 ```
+
+`AUTO` uses shared runtimes for ASan, UBSan, and TSan, and the only
+supported static runtime for MSan. `SHARED` rejects MSan explicitly because
+Clang does not provide a shared MSan runtime.
 
 ### Static analysis
 
@@ -70,6 +84,6 @@ docker run -it --name rocjitsu-dev \
 cd /workspace
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
-rocjitsu --daemon --config configs/amdgpu_cdna4_kmd.json -- \
+rocjitsu --daemon --config configs/gfx950_cdna4_kmd.json -- \
   python3 -c "import torch; print(torch.randn(4,4,device='cuda'))"
 ```

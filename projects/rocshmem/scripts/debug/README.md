@@ -172,6 +172,7 @@ After sourcing the script, the `rocshmem-deadlock-analyze` command is available:
 | `--cull` | Cull groups stuck in GPU barriers / gridsync using the built-in default pattern list |
 | `--cull=p1,p2,...` | Cull groups whose backtrace contains any of the comma-separated substrings |
 | `--check-lanes` | Enable lane-level parameter mismatch detection for `_wg` and `_wave` collective calls (slow; see below) |
+| `--stats` | Append a `=== rocSHMEM Stats ===` section with non-zero API call counters (requires `-DPROFILE=ON` build) |
 | `output_file` | Write report to this file instead of stdout |
 
 #### Cull option
@@ -280,6 +281,39 @@ must call with matching parameters). Different wavefronts — even in the same W
 may independently call any `_wave` function with different parameters; that is valid.
 Lane-level divergence within a wavefront is not visible from wavefront-level
 backtraces and requires `--check-lanes` to detect.
+
+#### Backend statistics (`--stats`)
+
+When `--stats` is given, the script reads the rocSHMEM API call counters
+directly from the stopped process's host memory without calling any function
+in the inferior.  The counters live in `Backend::globalStats` (device-side,
+written by GPU `atomicAdd`) and `Backend::globalHostStats` (host-side,
+written by `std::atomic`).  Both arrays are in `hipHostMalloc`-pinned
+memory, accessible to gdb without any cache flush.
+
+Only non-zero counters are printed, grouped by device and host:
+
+```
+=== rocSHMEM Stats ===
+  PE 1
+  (counters reflect activity since process start)
+  Device:
+    put           8192
+    quiet           64
+    barrier_all_wg   4
+  Host:
+    (all zero)
+```
+
+> **Requires `-DPROFILE=ON`** at CMake build time.  Without that flag
+> `ROCStats` and `ROCHostStats` are empty `NullStats<N>` structs (no
+> storage; all counters read as zero).  The section will note when this
+> is the case.
+
+The counters count operations since process start, not since the deadlock.
+They show what the application was doing before it got stuck — e.g. a high
+`barrier_all_wg` count with a non-zero `put` count suggests the collective
+stalled after a put-heavy phase.
 
 #### Lane-level parameter mismatch (`--check-lanes`)
 

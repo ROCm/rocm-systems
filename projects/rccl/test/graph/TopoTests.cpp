@@ -58,22 +58,21 @@ protected:
     system->hostHashes[systemId] = hostHash;
   }
 
-  // Create a GPU node whose id is namespaced by systemId, mirroring how the
-  // topology builder stores GPUs.
+  // v2.30 attaches XGMI links to the DEV node ncclTopoAddXGMI() looks up at
+  // NCCL_TOPO_ID(systemId, busId), so build DEV nodes (and set dev.gcn) directly.
   struct ncclTopoNode* addGpu(int systemId, const char* busId, const char* gcn,
-                              int rank, int dev) {
+                              int /*rank*/, int dev) {
     int64_t bus = 0;
     EXPECT_EQ(busIdToInt64(busId, &bus), ncclSuccess);
-    struct ncclTopoNode* gpu = nullptr;
-    EXPECT_EQ(ncclTopoCreateNode(system, &gpu, GPU, NCCL_TOPO_ID(systemId, bus)),
+    struct ncclTopoNode* devNode = nullptr;
+    EXPECT_EQ(ncclTopoCreateNode(system, &devNode, DEV, NCCL_TOPO_ID(systemId, bus)),
               ncclSuccess);
-    if (gpu) {
-      strncpy(gpu->gpu.gcn, gcn, GCN_ARCH_NAME_LEN - 1);
-      gpu->gpu.gcn[GCN_ARCH_NAME_LEN - 1] = '\0';
-      gpu->gpu.rank = rank;
-      gpu->gpu.dev = dev;
+    if (devNode) {
+      strncpy(devNode->dev.gcn, gcn, GCN_ARCH_NAME_LEN - 1);
+      devNode->dev.gcn[GCN_ARCH_NAME_LEN - 1] = '\0';
+      devNode->dev.dev = dev;
     }
-    return gpu;
+    return devNode;
   }
 
   // <cpu host_hash="0x..."> — resolves to a systemId during traversal.
@@ -337,19 +336,81 @@ TEST_F(TopoTest, GetSystemFromXml_SingleSystem_BuildsLinks) {
   ASSERT_EQ(busIdToInt64("0000:01:00.0", &bus0), ncclSuccess);
   ASSERT_EQ(busIdToInt64("0000:02:00.0", &bus1), ncclSuccess);
 
-  struct ncclTopoNode* g0 = nullptr;
-  struct ncclTopoNode* g1 = nullptr;
-  ASSERT_EQ(ncclTopoGetNode(built, &g0, GPU, NCCL_TOPO_ID(0, bus0)), ncclSuccess);
-  ASSERT_EQ(ncclTopoGetNode(built, &g1, GPU, NCCL_TOPO_ID(0, bus1)), ncclSuccess);
-  ASSERT_NE(g0, nullptr);
-  ASSERT_NE(g1, nullptr);
+  // XGMI links attach to DEV nodes (stored at NCCL_TOPO_ID(systemId, busId));
+  // GPU rank nodes live at a separate NCCL_TOPO_GPU_LOCAL_ID.
+  struct ncclTopoNode* d0 = nullptr;
+  struct ncclTopoNode* d1 = nullptr;
+  ASSERT_EQ(ncclTopoGetNode(built, &d0, DEV, NCCL_TOPO_ID(0, bus0)), ncclSuccess);
+  ASSERT_EQ(ncclTopoGetNode(built, &d1, DEV, NCCL_TOPO_ID(0, bus1)), ncclSuccess);
+  ASSERT_NE(d0, nullptr);
+  ASSERT_NE(d1, nullptr);
 
-  struct ncclTopoLink* l01 = findLink(g0, g1);
-  struct ncclTopoLink* l10 = findLink(g1, g0);
+  struct ncclTopoLink* l01 = findLink(d0, d1);
+  struct ncclTopoLink* l10 = findLink(d1, d0);
   ASSERT_NE(l01, nullptr);
   ASSERT_NE(l10, nullptr);
   EXPECT_FLOAT_EQ(l01->bw, 8 * ncclTopoXGMISpeed("gfx942"));
   EXPECT_FLOAT_EQ(l10->bw, 8 * ncclTopoXGMISpeed("gfx942"));
+
+  ncclTopoFree(built);
+}
+
+// Under the 2.30 DEV model a direct XGMI GPU->GPU path is the 3-hop
+// GPU-DEV-DEV-GPU route, typed PATH_NVL — the predicate the matching fixes use.
+TEST_F(TopoTest, DevModel_DirectXgmiPath_IsThreeHopNvl) {
+  const uint64_t host = 0x55;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  struct ncclXmlNode* pci0 = addGpuPci(cpu, "0000:01:00.0", "gfx942", 0, 0);
+  struct ncclXmlNode* pci1 = addGpuPci(cpu, "0000:02:00.0", "gfx942", 1, 1);
+  addGpuLink(pci0, "0000:02:00.0", 8);
+  addGpuLink(pci1, "0000:01:00.0", 8);
+
+  struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+  ASSERT_EQ(built->nodes[GPU].count, 2);
+
+  // paths[GPU] is indexed by GPU node index; GPU 0 -> GPU 1 is direct.
+  struct ncclTopoLinkList* p01 = built->nodes[GPU].nodes[0].paths[GPU] + 1;
+  EXPECT_EQ(p01->type, PATH_NVL);
+  EXPECT_EQ(p01->count, 3);
+
+  ncclTopoFree(built);
+}
+
+// An indirect XGMI route (through a middle GPU's DEV) is the 4-hop path and must
+// not be mistaken for a direct link; the count<=3 filters depend on this.
+TEST_F(TopoTest, DevModel_IndirectXgmiPath_IsFourHops) {
+  const uint64_t host = 0x56;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  struct ncclXmlNode* pci0 = addGpuPci(cpu, "0000:01:00.0", "gfx942", 0, 0);
+  struct ncclXmlNode* pci1 = addGpuPci(cpu, "0000:02:00.0", "gfx942", 1, 1);
+  struct ncclXmlNode* pci2 = addGpuPci(cpu, "0000:03:00.0", "gfx942", 2, 2);
+  // Chain 0<->1 and 1<->2 are direct XGMI; 0 and 2 are not directly linked.
+  addGpuLink(pci0, "0000:02:00.0", 8);
+  addGpuLink(pci1, "0000:01:00.0", 8);
+  addGpuLink(pci1, "0000:03:00.0", 8);
+  addGpuLink(pci2, "0000:02:00.0", 8);
+
+  struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+  ASSERT_EQ(built->nodes[GPU].count, 3);
+
+  auto idxByRank = [&](int rank) -> int {
+    for (int i = 0; i < built->nodes[GPU].count; i++)
+      if (built->nodes[GPU].nodes[i].gpu.rank == rank) return i;
+    return -1;
+  };
+  int i0 = idxByRank(0), i2 = idxByRank(2);
+  ASSERT_GE(i0, 0);
+  ASSERT_GE(i2, 0);
+
+  struct ncclTopoLinkList* p02 = built->nodes[GPU].nodes[i0].paths[GPU] + i2;
+  EXPECT_EQ(p02->count, 4);
+  EXPECT_GT(p02->count, 3); // excluded by the direct-XGMI filter
 
   ncclTopoFree(built);
 }

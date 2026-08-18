@@ -42,7 +42,8 @@ rocprofiler_add_integration_execute_test(
     DISABLED ${IS_DISABLED}
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${attachment-env}"
-    FAIL_REGULAR_EXPRESSION "ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FAIL_REGULAR_EXPRESSION
+        "ERROR|FATAL|Skipping output generation|${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     SKIP_REGULAR_EXPRESSION "This test is skipped."
     FIXTURES_SETUP rocprofv3-test-attachment-attach-twice)
 

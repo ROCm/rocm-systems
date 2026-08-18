@@ -34,10 +34,12 @@ roctx_enabled=true
 run_tests=false
 run_tests_all=false
 time_trace=false
+use_ninja=false
 force_reduce_pipeline=false
 generate_sym_kernels=true
 device_linker=true
 warp_speed_enabled=true # note that this flag will be overridden to false for non MI350/MI300 platforms
+kernarg_preload=true
 quiet_warnings=false
 build_rocshmem_support=false
 rocshmem_mono_hash="0e2998b11f99e8302c72f1ac2ce9f2b8c1816587"
@@ -60,6 +62,7 @@ function display_help()
     echo "       --disable-roctx         Build without ROCTX logging"
     echo "       --disable-sym-kernels   Disable symmetric memory kernels"
     echo "       --disable-warp-speed    Disable WARP_SPEED kernel optimizations"
+    echo "       --disable-kernarg-preload  Disable -mllvm --amdgpu-kernarg-preload-count=16 compile/link flag"
     echo "       --dump-asm              Disassemble code and dump assembly with inline code"
     echo "    -c|--enable-code-coverage  Enable code coverage"
     echo "       --enable_backtrace      Build with custom backtrace support"
@@ -84,10 +87,11 @@ function display_help()
     echo "       --static                Build RCCL as a static library instead of shared library"
     echo "    -t|--tests_build           Build rccl unit tests, but do not run"
     echo "       --time-trace            Plot the build time of RCCL (requires \`ninja-build\` package installed on the system)"
+    echo "       --ninja                 Use the Ninja generator instead of Make (requires \`ninja-build\`; recommended for multi-arch builds)"
     echo "       --verbose               Show compile commands"
     echo ""
     echo "  Available RCCL-specific CMake options for --cmake-options:"
-    echo "    -DBUILD_EXT_EXAMPLES=ON               Build ext-{net,tuner,profiler} example plugins (default: OFF)"
+    echo "    -DBUILD_PLUGIN_EXAMPLES=ON             Build plugin example libraries: net, tuner, profiler, env (default: OFF)"
     echo "    -DDWORDX4_INTRINSICS=OFF              Disable dwordx4 intrinsics (default: ON)"
     echo "    -DENABLE_COMPRESS=OFF                 Disable GPU code compression (default: ON)"
     echo "    -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)"
@@ -114,7 +118,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,no_clean,no-device-linker,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -139,6 +143,7 @@ while true; do
          --disable-roctx)            roctx_enabled=false;                                                                              shift ;;
          --disable-sym-kernels)      generate_sym_kernels=false;                                                                       shift ;;
          --disable-warp-speed)       warp_speed_enabled=false;                                                                         shift ;;
+         --disable-kernarg-preload)  kernarg_preload=false;                                                                            shift ;;
          --dump-asm)                 dump_asm=true;                                                                                    shift ;;
     -c | --enable-code-coverage)     enable_code_coverage=true;                                                                        shift ;;
          --enable_backtrace)         build_bfd=true;                                                                                   shift ;;
@@ -151,6 +156,7 @@ while true; do
          --kernel-resource-use)      kernel_resource_use=true;                                                                         shift ;;
     -l | --local_gpu_only)           build_local_gpu_only=true;                                                                        shift ;;
          --log-trace)                log_trace=true;                                                                                   shift ;;
+         --ninja)                    use_ninja=true;                                                                                   shift ;;
          --no_clean)                 clean_build=false;                                                                                shift ;;
          --no-device-linker)         device_linker=false;                                                                              shift ;;
          --openmp-test-enable)       openmp_test_enabled=true;                                                                         shift ;;
@@ -403,6 +409,11 @@ if [[ "${warp_speed_enabled}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DENABLE_WARP_SPEED=ON"
 fi
 
+# Disable amdgpu-kernarg-preload-count compile/link flag
+if [[ "${kernarg_preload}" == false ]]; then
+    cmake_common_options="${cmake_common_options} -DDISABLE_KERNARG_PRELOAD=ON"
+fi
+
 # Suppress Warnings
 if [[ "${quiet_warnings}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DQUIET_WARNINGS=ON"
@@ -423,17 +434,30 @@ fi
 
 check_exit_code "$?"
 
-# Build system selection.  Ninja is used only when explicitly requested via
-# --time-trace (which requires it).  Default is Make for broadest compatibility
+# Build system selection.  Default is Make for broadest compatibility
 # (Jenkins CI runs `make package` directly in the build directory).
-if [[ "${time_trace}" == true ]]; then
+# Ninja is enabled when explicitly requested via --ninja or --time-trace
+# (the latter requires it).  Ninja parallelizes the multi-arch device
+# pipeline considerably better than Make, so it's the recommended generator
+# for builds that target many GPU architectures at once.
+if [[ "${time_trace}" == true || "${use_ninja}" == true ]]; then
     if ! hash ninja &>/dev/null ; then
-        echo "ninja could not be found (required for --time-trace)"
-        echo "Use \"${time_trace_ninja_msg}\" to install ninja"
-        exit 1
+        if [[ "${time_trace}" == true ]]; then
+            # Ninja is mandatory for --time-trace (the trace post-processing
+            # consumes Ninja's .ninja_log), so this is a hard error.
+            echo "ninja could not be found (required for --time-trace)"
+            echo "Use \"${time_trace_ninja_msg}\" to install ninja"
+            exit 1
+        fi
+        # --ninja is only a build-speed opt-in, so degrade gracefully to Make
+        # rather than aborting when ninja is unavailable.
+        echo "WARNING: ninja could not be found; falling back to the Make generator for --ninja"
+        echo "         Use \"${time_trace_ninja_msg}\" to install ninja"
+        build_system="make"
+    else
+        build_system="ninja"
+        enable_ninja="-GNinja"
     fi
-    build_system="ninja"
-    enable_ninja="-GNinja"
 else
     build_system="make"
 fi
@@ -460,9 +484,13 @@ fi
 ${cmake_executable} ${cmake_common_options} -DONLY_FUNCS="${ONLY_FUNCS}" ../../.
 check_exit_code "$?"
 
-# Enable verbose output from Makefile
+# Enable verbose output from the build system
 if [[ "${build_verbose}" == true ]]; then
-    build_system="${build_system} VERBOSE=1"
+    if [[ "${build_system}" == "ninja" ]]; then
+        build_system="${build_system} -v"
+    else
+        build_system="${build_system} VERBOSE=1"
+    fi
 fi
 
 # Initiate RCCL build (and install)
@@ -473,9 +501,13 @@ else
 fi
 check_exit_code "$?"
 
-# Initiate package build with `make package`, if enabled
+# Initiate package build (`make package` or `ninja package`), if enabled
 if [[ "${build_package}" == true ]]; then
-    make package
+    if [[ "${build_system}" == "ninja"* ]]; then
+        ninja package
+    else
+        make package
+    fi
     check_exit_code "$?"
 fi
 

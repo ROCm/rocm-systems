@@ -1,9 +1,10 @@
 ## Copyright (c) Advanced Micro Devices, Inc.
 ## SPDX-License-Identifier:  MIT
 ##
-## Builds the roctx_recordfn pybind11 extension used by --torch-trace.
-## Configured either as a subdirectory of the parent project (test
-## fixture) or standalone by the runtime loader.
+## Builds roctx_recordfn-<tag>.so for --torch-trace.
+##   A. parent add_subdirectory() under ENABLE_TESTS (CI fixture).
+##   B. standalone (runtime cmake-tier from
+##      utils/inject_roctx/_backends/torch_cpp_loader.py).
 set(_rcfn_standalone OFF)
 if(NOT PROJECT_NAME)
     cmake_minimum_required(VERSION 3.16)
@@ -104,7 +105,7 @@ execute_process(
         "${TORCH_TRACE_PYTHON}" -c
         "import sys, pathlib; \
 sys.path.insert(0, str(pathlib.Path('${CMAKE_CURRENT_SOURCE_DIR}/../..').resolve())); \
-from utils.inject_roctx_loader import _source_fingerprint; \
+from utils.inject_roctx._backends.torch_cpp_loader import _source_fingerprint; \
 print(_source_fingerprint())"
     OUTPUT_VARIABLE _src_fingerprint
     OUTPUT_STRIP_TRAILING_WHITESPACE
@@ -154,6 +155,28 @@ find_path(
     REQUIRED
 )
 
+# Lowest standard the torch headers accept. Applies to this directory and tests/.
+include(CheckCXXSourceCompiles)
+set(CMAKE_REQUIRED_INCLUDES ${_torch_includes})
+# Compile only; the header pulls in inline code referencing unlinked torch symbols.
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+foreach(_std IN ITEMS 17 20)
+    set(CMAKE_REQUIRED_FLAGS "-std=c++${_std}")
+    check_cxx_source_compiles(
+        "#include <ATen/record_function.h>
+         int main() { return 0; }"
+        _rcfn_torch_cxx${_std}
+    )
+    if(_rcfn_torch_cxx${_std})
+        set(CMAKE_CXX_STANDARD ${_std})
+        set(CMAKE_CXX_STANDARD_REQUIRED ON)
+        break()
+    endif()
+endforeach()
+unset(CMAKE_TRY_COMPILE_TARGET_TYPE)
+unset(CMAKE_REQUIRED_INCLUDES)
+unset(CMAKE_REQUIRED_FLAGS)
+
 add_library(${_so_name} MODULE roctx_recordfn.cpp)
 
 # The "lib" prefix is omitted; the loader resolves the module by tag.
@@ -162,8 +185,6 @@ set_target_properties(
     PROPERTIES
         PREFIX ""
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
-        CXX_STANDARD 17
-        CXX_STANDARD_REQUIRED ON
         POSITION_INDEPENDENT_CODE ON
 )
 
@@ -221,7 +242,7 @@ set(_rcfn_saved_required_libs ${CMAKE_REQUIRED_LIBRARIES})
 set(_rcfn_saved_required_includes ${CMAKE_REQUIRED_INCLUDES})
 get_target_property(_rcfn_inc_dirs ${_so_name} INCLUDE_DIRECTORIES)
 set(CMAKE_REQUIRED_INCLUDES ${_rcfn_inc_dirs})
-set(CMAKE_REQUIRED_FLAGS "-std=c++17")
+set(CMAKE_REQUIRED_FLAGS "-std=c++${CMAKE_CXX_STANDARD}")
 check_cxx_source_compiles(
     "#include <c10/util/ThreadLocalDebugInfo.h>
      #include <string_view>

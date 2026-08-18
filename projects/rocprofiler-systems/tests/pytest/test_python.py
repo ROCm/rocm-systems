@@ -6,6 +6,9 @@ Python tests.
 """
 
 from __future__ import annotations
+import os
+import subprocess
+import sys
 import pytest
 from conftest import RocprofsysTest
 from pathlib import Path
@@ -35,6 +38,14 @@ def python_builtin_rocpd_rules(validation_rules_dir: Path) -> list[Path]:
     rules_dir = validation_rules_dir / "python"
     return [
         rules_dir / "python-builtin-rules.json",
+    ]
+
+
+@pytest.fixture
+def python_builtin_annotated_rocpd_rules(validation_rules_dir: Path) -> list[Path]:
+    rules_dir = validation_rules_dir / "python"
+    return [
+        rules_dir / "python-builtin-annotated-rules.json",
     ]
 
 
@@ -117,6 +128,17 @@ class TestPython(RocprofsysTest):
         "depths": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1],
     }
 
+    # Per-function debug annotations that -a/--annotate-trace attaches to every
+    # profiled python region (see libpyrocprofsys.cpp's config::annotations).
+    PYTHON_ANNOTATE_DEBUG_KEYS = [
+        "file",
+        "line",
+        "lasti",
+        "argcount",
+        "nlocals",
+        "stacksize",
+    ]
+
     @pytest.mark.timeout(120)
     @pytest.mark.parametrize(
         "annotated, exclude",
@@ -165,11 +187,18 @@ class TestPython(RocprofsysTest):
         "annotated",
         [
             pytest.param(False, marks=pytest.mark.rocpd("python_rocpd_env")),
-            pytest.param(True, id="annotated"),
+            pytest.param(
+                True, id="annotated", marks=pytest.mark.rocpd("python_rocpd_env")
+            ),
         ],
     )
     def test_builtin(
-        self, python_version, annotated, python_rocpd_env, python_builtin_rocpd_rules
+        self,
+        python_version,
+        annotated,
+        python_rocpd_env,
+        python_builtin_rocpd_rules,
+        python_builtin_annotated_rocpd_rules,
     ):
         result = self.run_test(
             "python",
@@ -204,6 +233,29 @@ class TestPython(RocprofsysTest):
             self.assert_rocpd(
                 result,
                 rules_files=python_builtin_rocpd_rules,
+            )
+            # regression: without -a, no per-function debug annotations should
+            # reach the trace (see test below for the annotated=True counterpart)
+            self.assert_perfetto(
+                result,
+                key_names=self.PYTHON_ANNOTATE_DEBUG_KEYS,
+                key_counts=[0] * len(self.PYTHON_ANNOTATE_DEBUG_KEYS),
+            )
+        else:
+            # regression: -a/--annotate-trace annotations were dropped by
+            # trace-cache replay (only debug.begin_ns/debug.corr_id ever reached
+            # the perfetto trace, identical with or without -a). Every profiled
+            # python region carries all six annotation fields, so each key's
+            # count must equal the total number of profiled slices.
+            total_slices = sum(self.PYTHON_BUILTIN_GENERAL["counts"])
+            self.assert_perfetto(
+                result,
+                key_names=self.PYTHON_ANNOTATE_DEBUG_KEYS,
+                key_counts=[total_slices] * len(self.PYTHON_ANNOTATE_DEBUG_KEYS),
+            )
+            self.assert_rocpd(
+                result,
+                rules_files=python_builtin_annotated_rocpd_rules,
             )
 
     @pytest.mark.timeout(120)
@@ -261,3 +313,94 @@ class TestPython(RocprofsysTest):
             result,
             rules_files=python_source_rocpd_rules,
         )
+
+
+# =============================================================================
+# Frontend regressions
+# =============================================================================
+
+
+class TestPythonFrontend:
+    """CLI-level regressions in the rocprof-sys-python wrapper and package."""
+
+    TIMEOUT_SEC = 120
+
+    def _python_executable(self, rocprof_config) -> str:
+        """Interpreter the bindings were built for.
+
+        The wrapper otherwise falls back to whatever `python3` resolves to, which
+        on some distributions is a system Python with no libpyrocprofsys module.
+        """
+        executables = rocprof_config.capabilities.supported_python_executables
+        return str(executables[0]) if executables else sys.executable
+
+    def _run_wrapper(
+        self,
+        rocprof_config,
+        args: list[str],
+        extra_env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [str(rocprof_config.rocprofsys_python), *args],
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "PYTHON_EXECUTABLE": self._python_executable(rocprof_config),
+                **(extra_env or {}),
+            },
+            timeout=self.TIMEOUT_SEC,
+        )
+
+    def _run_probe(
+        self, rocprof_config, source: str, extra_env: dict[str, str] | None = None
+    ) -> str:
+        result = subprocess.run(
+            [self._python_executable(rocprof_config), "-c", source],
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "PYTHONPATH": str(rocprof_config.rocprofsys_site_packages),
+                **(extra_env or {}),
+            },
+            timeout=self.TIMEOUT_SEC,
+        )
+        lines = result.stdout.splitlines()
+        assert lines, f"probe produced no stdout; stderr:\n{result.stderr}"
+        return lines[-1]
+
+    @pytest.mark.parametrize("log_level", ["debug", "trace"])
+    def test_help_survives_verbose_logging(self, rocprof_config, log_level: str) -> None:
+        result = self._run_wrapper(
+            rocprof_config, ["--help"], {"ROCPROFSYS_LOG_LEVEL": log_level}
+        )
+        assert result.returncode == 0, result.stderr
+
+    def test_import_does_not_load_profiling_runtime(self, rocprof_config) -> None:
+        loaded = self._run_probe(
+            rocprof_config,
+            "import rocprofsys\n"
+            "with open('/proc/self/maps') as maps:\n"
+            "    print(sum('librocprof-sys.so' in line for line in maps))\n",
+            {"ROCPROFSYS_LOG_LEVEL": "debug"},
+        )
+        assert loaded == "0", "importing rocprofsys loaded the profiling runtime"
+
+    def test_missing_script_is_reported(self, rocprof_config) -> None:
+        result = self._run_wrapper(rocprof_config, ["--"])
+        assert result.returncode != 0
+        assert "Could not determine input script" in result.stderr
+
+    def test_banner_names_the_project(self, rocprof_config) -> None:
+        result = self._run_wrapper(rocprof_config, ["--help"])
+        assert result.returncode == 0, result.stderr
+        assert "rocprofiler-systems :: executing" in result.stdout
+
+    def test_library_path_points_at_the_runtime(self, rocprof_config) -> None:
+        library_path = self._run_probe(
+            rocprof_config,
+            "import os, rocprofsys\nprint(os.environ.get('ROCPROFSYS_PATH', ''))\n",
+        )
+        assert library_path, "rocprofsys did not export ROCPROFSYS_PATH"
+        assert (Path(library_path) / "librocprof-sys-dl.so").exists()

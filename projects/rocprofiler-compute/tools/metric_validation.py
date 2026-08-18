@@ -93,11 +93,8 @@ class Analyzer(OmniAnalyze_Base):
             # create 'mega dataframe'
             raw_pmc = file_io.create_df_pmc(
                 path_info[0],
-                args.nodes,
-                args.spatial_multiplexing,
                 args.kernel_verbose,
                 args.verbose,
-                self._profiling_config,
             )
 
             path_suffix_base = "_".join(Path(path_info[0]).parts[-2:])

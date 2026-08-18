@@ -402,6 +402,11 @@ hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device) {
   return hip::GetHipDispatchTable()->hipDeviceGetUuid_fn(uuid, device);
   CATCH;
 }
+hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask, hipDevice_t device) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipDeviceGetLuid_fn(luid, deviceNodeMask, device);
+  CATCH;
+}
 hipError_t hipDeviceGraphMemTrim(int device) {
   TRY;
   return hip::GetHipDispatchTable()->hipDeviceGraphMemTrim_fn(device);
@@ -3345,5 +3350,11 @@ hipError_t hipExecutionCtxSynchronize(hipExecutionCtx_t ctx) {
 hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event) {
   TRY;
   return hip::GetHipDispatchTable()->hipExecutionCtxWaitEvent_fn(ctx, event);
+  CATCH;
+}
+hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location,
+                                   hipMemAllocationType type) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipMemGetDefaultMemPool_fn(memPool, location, type);
   CATCH;
 }

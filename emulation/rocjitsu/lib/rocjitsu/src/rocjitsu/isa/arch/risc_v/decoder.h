@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/instruction.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 
@@ -16,7 +17,11 @@ using DecodeFn = std::unique_ptr<Instruction> (*)(uint32_t);
 
 class Decoder {
 public:
+  static constexpr std::size_t kMaxInstructionWords = 1;
   static std::unique_ptr<Instruction> decode(uint32_t instr);
+  static std::unique_ptr<Instruction> decode(const uint32_t *instr) {
+    return instr == nullptr ? nullptr : decode(*instr);
+  }
 
 private:
   // =========================================================================

@@ -559,15 +559,19 @@ static const std::unordered_map<uint64_t, const char*> telemetry_id_map = {
     {IFOE_TELEM_ID_NETPORT_FEC_CW_SYMBOL_ERRS_15, "NETPORT_FEC_CW_SYMBOL_ERRS_15"},
     {IFOE_TELEM_ID_NETPORT_FEC_CW_SYMBOL_ERRS_UNCORRECTABLE,
      "NETPORT_FEC_CW_SYMBOL_ERRS_UNCORRECTABLE"},
-
 };
 
-const char* amdsmi_fabric_telem_id_to_string(uint64_t telem_id) {
+amdsmi_status_t amdsmi_fabric_telem_id_to_string(uint64_t telem_id, const char** telem_name) {
+  if (telem_name == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
   auto it = telemetry_id_map.find(telem_id);
   if (it != telemetry_id_map.end()) {
-    return it->second;
+    *telem_name = it->second;
+    return AMDSMI_STATUS_SUCCESS;
   }
-  return "UNKNOWN";
+  *telem_name = "UNKNOWN";
+  return AMDSMI_STATUS_NOT_FOUND;
 }
 
 // Note: AMDSMI and UALoE telemetry structures are now designed to be binary compatible
@@ -612,6 +616,12 @@ amdsmi_status_t amdsmi_alloc_fabric_telemetry(amdsmi_processor_handle processor_
   amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &device);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
+#ifdef ENABLE_WSL_BACKEND
+  if (auto* backend = device->backend()) {
+    return backend->AllocFabricTelemetry(category_mask, telemetry);
+  }
+#endif
+
   // Acquire device mutex for UALoE API protection
   SMIGPUDEVICE_MUTEX(device->get_mutex());
 
@@ -648,6 +658,12 @@ amdsmi_status_t amdsmi_get_fabric_telemetry_data(amdsmi_processor_handle process
   amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &device);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
 
+#ifdef ENABLE_WSL_BACKEND
+  if (auto* backend = device->backend()) {
+    return backend->GetFabricTelemetryData(telemetry);
+  }
+#endif
+
   // Acquire device mutex for UALoE API protection
   SMIGPUDEVICE_MUTEX(device->get_mutex());
 
@@ -680,6 +696,12 @@ amdsmi_status_t amdsmi_free_fabric_telemetry(amdsmi_processor_handle processor_h
   amd::smi::AMDSmiGPUDevice* device = nullptr;
   amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &device);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
+
+#ifdef ENABLE_WSL_BACKEND
+  if (auto* backend = device->backend()) {
+    return backend->FreeFabricTelemetry(telemetry);
+  }
+#endif
 
   // Acquire device mutex for UALoE API protection
   SMIGPUDEVICE_MUTEX(device->get_mutex());
@@ -726,6 +748,12 @@ amdsmi_status_t amdsmi_get_gpu_fabric_info(amdsmi_processor_handle processor_han
 
   outstream << __PRETTY_FUNCTION__ << " | get_gpu_device_from_handle(): " << device;
   LOG_DEBUG(outstream);
+
+#ifdef ENABLE_WSL_BACKEND
+  if (auto* backend = device->backend()) {
+    return backend->GetGpuFabricInfo(info);
+  }
+#endif
 
   // Serialize with other per-GPU UALoE/fabric paths; fabric info is 'sysfs-only'
   // and does not require a successful ualoe_open() netlink session (telemetry does)

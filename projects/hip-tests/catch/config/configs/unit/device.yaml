@@ -90,6 +90,9 @@ device:
   Unit_hipGetDeviceAttribute_hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported:
     <<: *level_2
     tags: [query]
+  Unit_hipGetDeviceAttribute_hipDeviceAttributeHostAllocDmaBufSupported:
+    <<: *level_2
+    tags: [query]
   Unit_hipGetDeviceCount_NegTst:
     <<: *level_2
     tags: [query]
@@ -161,6 +164,15 @@ device:
   Unit_hipDeviceGetUuid_VerifyUuidFrm_hipGetDeviceProperties:
     <<: *level_2
     tags: [query]
+  Unit_hipDeviceGetLuid_Positive:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceGetLuid_Negative:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceGetLuid_VerifyLuidFrm_hipGetDeviceProperties:
+    <<: *level_2
+    tags: [query]
   Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
@@ -170,7 +182,7 @@ device:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows, amd_wsl]
-    tags: [query]
+    tags: [query, multigpu]
   Unit_hipDeviceAPUCheck:
     <<: *level_2
     tags: [query]

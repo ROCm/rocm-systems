@@ -1,6 +1,7 @@
 import os
 import re
 import select
+import socket
 import sys
 import tempfile
 import unittest.mock
@@ -299,6 +300,55 @@ def test_save_code_objects(*, name, args, **_):
         return True
 
 
+def test_save_code_objects_dir_tokens(*, name, args, **_):
+    """--save-code-objects honors %-format tokens in the directory path.
+
+    Only tokens whose expansion the test process shares with the debugged
+    child (%u, %g, %h) plus the literal %% are used here: the agent validates
+    the directory with stat(), so it must already exist, which means the test
+    has to be able to predict the expanded path.
+    """
+    if not shutil.which("readelf"):
+        logger().info("Tool readelf not found, skipping %s", name)
+        unsupported_tests.add(test_save_code_objects_dir_tokens)
+        return True
+
+    _log = logger()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        template = "co-u%u-g%g-h%h-%%"
+        expanded = f"co-u{os.getuid()}-g{os.getgid()}-h{socket.gethostname()}-%"
+
+        save_dir = os.path.join(tmpdir, expanded)
+        os.mkdir(save_dir)
+
+        run_and_communicate(
+            test_name=name,
+            args=args,
+            debug_agent_options=(
+                f"--save-code-objects={tmpdir}/{template} --load-all-code-objects"
+            ),
+        )
+
+        produced = [
+            p
+            for p in (os.path.join(save_dir, f) for f in os.listdir(save_dir))
+            if os.path.isfile(p)
+        ]
+        with_symbol = [
+            p for p in produced if _has_symbol_with_readelf(p, "saved_test_kernel")
+        ]
+        if len(with_symbol) != 2:
+            _log.info(
+                "Expected 2 code objects with symbol in expanded dir %s, found %d",
+                save_dir,
+                len(with_symbol),
+            )
+            _log.info("Directory contents:\n\t%s", "\n\t".join(produced))
+            return False
+
+        return True
+
+
 def test_output_redirection(*, name, args, patterns=(), **_):
     check_list = [re.compile(s) for s in patterns]
 
@@ -332,6 +382,57 @@ def test_output_redirection(*, name, args, patterns=(), **_):
             return all_output_string_found
 
 
+def test_output_filename_tokens(*, name, args, patterns=(), **_):
+    """Verify that %-format tokens in the -o filename are expanded.
+
+    Exercises every supported token at once.  The numeric tokens (%p, %t, %u,
+    %g) must expand to digits, %e to the (possibly truncated) executable comm
+    name, and %% to a single literal '%'.  No raw token may survive, and the
+    expanded file must contain the wave dump.
+    """
+    check_list = [re.compile(s) for s in patterns]
+    _log = logger()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        name_template = "dump-%e-pid%p-t%t-u%u-g%g-%%.txt"
+        options = f"-o {tmpdir}/{name_template}"
+
+        run_and_communicate(
+            test_name=name,
+            args=args,
+            debug_agent_options=options,
+        )
+
+        produced = os.listdir(tmpdir)
+        if len(produced) != 1:
+            _log.info("expected exactly one output file, found: %s", produced)
+            return False
+
+        produced_name = produced[0]
+
+        # The numeric tokens become digits and %% becomes a literal '%'.
+        name_re = re.compile(r"^dump-.+-pid\d+-t\d+-u\d+-g\d+-%\.txt$")
+        if not name_re.match(produced_name):
+            _log.info("filename not expanded as expected: %s", produced_name)
+            return False
+
+        for raw in ("%e", "%p", "%t", "%u", "%g"):
+            if raw in produced_name:
+                _log.info("unexpanded token %s left in name: %s", raw, produced_name)
+                return False
+
+        with open(os.path.join(tmpdir, produced_name), "r") as f:
+            log_contents = f.read()
+
+        for check_str in check_list:
+            if not check_str.search(log_contents):
+                _log.info('"%s" not found in %s', check_str.pattern, produced_name)
+                _log.info("Full output log contents:\n%s", log_contents)
+                return False
+
+        return True
+
+
 def test_sigquit(*, args, patterns=(), **_):
     check_list = [re.compile(s) for s in patterns]
 
@@ -343,29 +444,59 @@ def test_sigquit(*, args, patterns=(), **_):
     wave_seen = False
     timeout_seen = False
 
+    class LineReader:
+        def __init__(self, streams):
+            self._pending_bufs = {s: b"" for s in streams}
+            self._extend_grace_period = 0
+
+        def extend_timeout(self, addend):
+            self._extend_grace_period = self._extend_grace_period + addend
+
+        def readlines(self, timeout):
+            """
+            Read one line from one of the streams.  Throw TimeoutError if a
+            line could not be read in TIMEOUT seconds.
+            """
+            self._extend_grace_period = 0
+            end = time.monotonic() + timeout
+            while time.monotonic() < end + self._extend_grace_period:
+                if not self._pending_bufs:
+                    return
+                # Check if the pending buffers contain a list we could return
+                for st, buf in self._pending_bufs.items():
+                    remaining = buf
+                    while b"\n" in remaining:
+                        l, _, remaining = remaining.partition(b"\n")
+                        self._pending_bufs[st] = remaining
+                        yield (l, st)
+
+                rlist, _, _ = select.select(self._pending_bufs.keys(), [], [], 1)
+                if not rlist:
+                    continue
+
+                # Read up to 4k bytes from the first available stream.
+                buf = os.read(rlist[0].fileno(), 4096)
+                if buf:
+                    # We read some things, append it to the buffer for this
+                    # stream.  Next iteration will try to see if a line can be
+                    # extracted from it.
+                    self._pending_bufs[rlist[0]] += buf
+                else:
+                    # We reached EOF, whatever was in the pending buffer for
+                    # this stream is the last line.
+                    r = (self._pending_bufs[rlist[0]], rlist[0])
+                    # The stream is done, remove it from the list of streams
+                    del self._pending_bufs[rlist[0]]
+                    yield r
+
     consumed_out = []
     consumed_err = []
 
-    deadline = time.monotonic() + LOOP_TIMEOUT
-    streams_to_read = [p.stdout, p.stderr]
-
-    while time.monotonic() < deadline and streams_to_read:
-
-        rlist, _, _ = select.select(streams_to_read, [], [], 1)
-        if not rlist:
-            continue
-
-        for r in rlist:
-            line = r.readline()
-
-            if line == b"":
-                # Reading "" means that we reached EOF on this stream.
-                # Remove it from the streams of interest so every stream
-                # can be fully flushed before we exit the loop.
-                del streams_to_read[streams_to_read.index(r)]
-                continue
-
+    try:
+        reader = LineReader([p.stdout, p.stderr])
+        for line, r in reader.readlines(LOOP_TIMEOUT):
             s = line.decode("utf-8")
+
             if r is p.stdout:
                 consumed_out.append(s)
             else:
@@ -374,23 +505,22 @@ def test_sigquit(*, args, patterns=(), **_):
             if not kernel_started and "Kernel started" in s:
                 kernel_started = True
                 os.kill(p.pid, signal.SIGQUIT)
-                # We give our program LOOP_TIMEOUT secs to start the kernel.
-                # Once we know that the kernel is running, we give it
-                # an extra LOOP_TIMEOUT seconds to process SIGQUIT.
-                deadline = deadline + LOOP_TIMEOUT
 
             if kernel_started:
-                if s.lstrip().startswith(
-                    "Disassembly for function sigquit_kern(int*):"
-                ):
+                if s.lstrip().startswith("Disassembly for function sigquit_kern(int*):"):
                     wave_seen = True
-                    break
+                    reader.extend_timeout(LOOP_TIMEOUT)
+
             if "Timeout reached. Exiting." in s:
                 timeout_seen = True
-        if wave_seen or timeout_seen:
-            break
 
-    p.terminate()
+            if wave_seen or timeout_seen:
+                # We saw everything we need, we do not need to consume anything
+                # more.
+                break
+    finally:
+        p.terminate()
+
     try:
         output, err = p.communicate(timeout=3)
     except TimeoutExpired:
@@ -575,10 +705,28 @@ TEST_DEFINITIONS = [
         'function': test_save_code_objects,
     },
     {
+        'name': 'test_save_code_objects_dir_tokens',
+        'description': '--save-code-objects expands %-format tokens in the directory path',
+        'args': '4',
+        'function': test_save_code_objects_dir_tokens,
+    },
+    {
         'name': 'test_output_redirection',
         'description': '-o redirects the wave dump to a file instead of stderr',
         'args': '1',
         'function': test_output_redirection,
+        'patterns': [
+            r"s0:",
+            r"v0:",
+            r"0x0000: 22222222 11111111",
+            r"Disassembly for function vector_add_assert_trap\(int\*, int\*, int\*\)",
+        ],
+    },
+    {
+        'name': 'test_output_filename_tokens',
+        'description': '-o expands %-format tokens (%e %p %t %u %g %%) in the filename',
+        'args': '1',
+        'function': test_output_filename_tokens,
         'patterns': [
             r"s0:",
             r"v0:",

@@ -41,3 +41,15 @@ ais_add_libraries(
     LIBINCL  ${HIPFILE_INCLUDE_PATH}
     SYSINCLS ${HIPFILE_AMD_SOURCE_PATH}
 )
+
+if(HIPFILE_ROCPROFILER_REGISTER)
+    target_compile_definitions(
+        hipfile
+        PRIVATE
+            HIPFILE_ROCPROFILER_REGISTER=1
+            HIPFILE_ROCP_REG_VERSION_MAJOR=${AIS_LIBRARY_MAJOR}
+            HIPFILE_ROCP_REG_VERSION_MINOR=${AIS_LIBRARY_MINOR}
+            HIPFILE_ROCP_REG_VERSION_PATCH=${AIS_LIBRARY_PATCH})
+    target_link_libraries(hipfile PRIVATE rocprofiler-register::rocprofiler-register)
+    set_target_properties(hipfile PROPERTIES INSTALL_RPATH "\$ORIGIN")
+endif()

@@ -52,8 +52,8 @@ TEST_F(SdkPmcDeviceTest, DeviceProperties)
         counter_metadata{ 10, "SQ_WAVES", "", "", "", false, false, {} },
     };
 
-    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
-                            std::move(meta));
+    const device<MockBackend> dev(mock_backend, test_context, test_agent,
+                                  test_profile_config, std::move(meta));
 
     EXPECT_EQ(dev.get_index(), 0U);
     EXPECT_EQ(dev.get_name(), "GPU 0");
@@ -63,8 +63,8 @@ TEST_F(SdkPmcDeviceTest, DeviceProperties)
 
 TEST_F(SdkPmcDeviceTest, EmptyDeviceNotSupported)
 {
-    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
-                            {});
+    const device<MockBackend> dev(mock_backend, test_context, test_agent,
+                                  test_profile_config, {});
 
     EXPECT_FALSE(dev.is_supported());
 }
@@ -77,7 +77,8 @@ TEST_F(SdkPmcDeviceTest, DeviceWithIndex3)
     agent3->product_name      = "GPU 3";
     agent3->vendor_name       = "AMD";
 
-    device<MockBackend> dev(mock_backend, test_context, agent3, test_profile_config, {});
+    const device<MockBackend> dev(mock_backend, test_context, agent3, test_profile_config,
+                                  {});
 
     EXPECT_EQ(dev.get_index(), 3U);
     EXPECT_EQ(dev.get_name(), "GPU 3");
@@ -125,8 +126,8 @@ TEST_F(SdkPmcDeviceTest, SampleWithScalarCounters)
                 return MockBackend::status_success;
             });
 
-    enabled_metrics enabled{ {} };
-    auto            result = dev.get_gpu_perf_counter_metrics(enabled, 1000000);
+    const enabled_metrics enabled{ {} };
+    auto                  result = dev.sample_metrics(enabled, 1000000);
 
     ASSERT_EQ(result.size(), 2U);
     EXPECT_EQ(result[0].counter_id, 10U);
@@ -203,8 +204,8 @@ TEST_F(SdkPmcDeviceTest, SampleWithMultiDimCounters)
                 return MockBackend::status_success;
             });
 
-    enabled_metrics enabled{ {} };
-    auto            result = dev.get_gpu_perf_counter_metrics(enabled, 1000000);
+    const enabled_metrics enabled{ {} };
+    auto                  result = dev.sample_metrics(enabled, 1000000);
 
     ASSERT_EQ(result.size(), 4U);
     EXPECT_EQ(result[0].counter_id, 100U);
@@ -254,15 +255,15 @@ TEST_F(SdkPmcDeviceTest, CounterIdDecodedFromInstanceId)
             return MockBackend::status_success;
         });
 
-    enabled_metrics enabled{ {} };
-    auto            result = dev.get_gpu_perf_counter_metrics(enabled, 1000000);
+    const enabled_metrics enabled{ {} };
+    auto                  result = dev.sample_metrics(enabled, 1000000);
 
     ASSERT_EQ(result.size(), 1U);
     EXPECT_EQ(result[0].counter_id, plain_counter_handle);
     EXPECT_DOUBLE_EQ(result[0].value, 99.0);
 }
 
-// Verify that calling get_gpu_perf_counter_metrics repeatedly does not grow
+// Verify that calling sample_metrics repeatedly does not grow
 // heap unboundedly — the same m_result_cache vector is reused across samples.
 TEST_F(SdkPmcDeviceTest, ResultCacheReusedAcrossSamples)
 {
@@ -299,13 +300,13 @@ TEST_F(SdkPmcDeviceTest, ResultCacheReusedAcrossSamples)
                 return MockBackend::status_success;
             });
 
-    enabled_metrics enabled{ {} };
+    const enabled_metrics enabled{ {} };
 
-    auto result1 = dev.get_gpu_perf_counter_metrics(enabled, 1000000);
+    auto result1 = dev.sample_metrics(enabled, 1000000);
     ASSERT_EQ(result1.size(), 1U);
     EXPECT_EQ(result1[0].counter_id, 5U);
 
-    auto result2 = dev.get_gpu_perf_counter_metrics(enabled, 2000000);
+    auto result2 = dev.sample_metrics(enabled, 2000000);
     ASSERT_EQ(result2.size(), 1U);
     EXPECT_EQ(result2[0].counter_id, 5U);
 }
@@ -321,8 +322,8 @@ TEST_F(SdkPmcDeviceTest, SampleFailureReturnsEmpty)
     EXPECT_CALL(*mock_backend, sample_device_counting_service(_, _, _, _, _))
         .WillOnce(Return(MockBackend::status_error));
 
-    enabled_metrics enabled{ {} };
-    auto            result = dev.get_gpu_perf_counter_metrics(enabled, 1000000);
+    const enabled_metrics enabled{ {} };
+    auto                  result = dev.sample_metrics(enabled, 1000000);
 
     EXPECT_TRUE(result.empty());
 }
@@ -343,8 +344,8 @@ TEST_F(SdkPmcDeviceTest, SampleWithZeroRecords)
             return MockBackend::status_success;
         });
 
-    enabled_metrics enabled{ {} };
-    auto            result = dev.get_gpu_perf_counter_metrics(enabled, 1000000);
+    const enabled_metrics enabled{ {} };
+    auto                  result = dev.sample_metrics(enabled, 1000000);
 
     EXPECT_TRUE(result.empty());
 }

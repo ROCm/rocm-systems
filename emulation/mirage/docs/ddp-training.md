@@ -98,7 +98,7 @@ python3 -m venv .venv-mi350
 source .venv-mi350/bin/activate
 pip install --index-url https://rocm.nightlies.amd.com/v2/gfx950-dcgpu/ \
   "rocm[libraries,devel]" torch numpy
-rocm-sdk init      # unpacks librocjitsu_kmd.so + configs into the venv
+rocm-sdk init      # unpacks librocjitsu.so + configs into the venv
 ```
 
 `rocm-sdk init` is required: the `devel` package ships its contents

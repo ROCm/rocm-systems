@@ -16,6 +16,24 @@
 #include "hip_platform.hpp"
 #include "hip_comgr_helper.hpp"
 
+#if defined(_MSC_VER) && !defined(__clang__)
+#include <intsafe.h>
+#endif
+
+// returns true if there is overflow
+static bool multiplyOverflow(__hip_uint32_t operand,
+                             __hip_uint32_t multiplier,
+                             __hip_uint32_t& result)
+{
+#if defined(__GNUC__)
+  // gcc, clang and clang-cl
+  return __builtin_mul_overflow(operand, multiplier, &result);
+#else
+  // cl.exe
+  return UIntMult(operand, multiplier, &result);
+#endif
+}
+
 namespace hip {
 
 hipError_t ihipModuleLoadData(hipModule_t* module, const void* mmap_ptr, size_t mmap_size);
@@ -1369,6 +1387,27 @@ hipError_t hipLaunchKernelExC(const hipLaunchConfig_t* config, const void* fPtr,
     }
   }
 
+  const auto& deviceInfo = hip::getCurrentDevice()->devices()[0]->info();
+  __hip_uint32_t requestedClusterSize;
+
+  if (multiplyOverflow(clusterDims.x,
+                       clusterDims.y,
+                       requestedClusterSize)) {
+    HIP_RETURN(hipErrorInvalidClusterSize);
+  }
+
+  if (multiplyOverflow(requestedClusterSize,
+                       clusterDims.z,
+                       requestedClusterSize)) {
+    HIP_RETURN(hipErrorInvalidClusterSize);
+  }
+
+  // Check cluster size against device maximum
+  if (deviceInfo.clusterMaxSize_ > 0 &&
+      requestedClusterSize > deviceInfo.clusterMaxSize_) {
+    HIP_RETURN(hipErrorInvalidClusterSize);
+  }
+
   HIP_RETURN_DURATION(hipLaunchKernel_common(fPtr, config->gridDim, config->blockDim, args,
     config->dynamicSmemBytes, config->stream, clusterDims,
     dynDataPrefetchConfig.isEnabled() ? &dynDataPrefetchConfig : nullptr));
@@ -1404,7 +1443,7 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
   }
 
   if (config->numAttrs == 0) {
-    HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, hStream, kernelParams, nullptr,
+    HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, hStream, kernelParams, extra,
                                       nullptr, nullptr, 0));
   }
 
@@ -1417,7 +1456,7 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
       case hipLaunchAttributeCooperative: {
         if (attr.value.cooperative != 0) {
           HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, hStream, kernelParams,
-                                            nullptr, nullptr, nullptr, 0,
+                                            extra, nullptr, nullptr, 0,
                                             amd::NDRangeKernelCommand::CooperativeGroups));
         }
         break;

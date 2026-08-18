@@ -85,7 +85,7 @@ namespace {
 const std::array<std::function<hsa_status_t(std::unique_ptr<core::Driver>&)>,
 #if _WIN32
                  1
-#elif __linux__
+#elif defined(__linux__) || defined(__FreeBSD__)
                  static_cast<size_t>(core::DriverType::NUM_DRIVER_TYPES)
 #endif
                  >
@@ -187,23 +187,22 @@ GpuAgent* DiscoverGpu(HSAuint32 node_id, HsaNodeProperties& node_prop, bool xnac
     }
   } catch (const hsa_exception& e) {
     const hsa_status_t err = e.error_code();
-    const bool unsupported_isa = (err == HSA_STATUS_ERROR_INVALID_ISA);
-    if (unsupported_isa) {
-      // Ignore unsupported GPUs and proceed with supported ones. Warn so users
-      // know why a device is missing (e.g. older generations no longer supported).
+    // A deprecated or unrecognized GPU throws HSA_STATUS_ERROR_INVALID_ISA;
+    // skip just that device so one unsupported GPU cannot abort init for all
+    // of them. Any other status is a genuine failure and is rethrown below.
+    const bool unsupported_device = (err == HSA_STATUS_ERROR_INVALID_ISA);
+    if (unsupported_device) {
       std::string desc = GpuNodeDescription(node_id, node_prop);
-      ifdebug {
-        fprintf(stderr,
-              "ROCm/HSA: Skipping unsupported GPU: %s.\n"
-              "  Reason: %s\n"
-              "  Use ROCR_VISIBLE_DEVICES to limit to supported GPU(s) if needed.\n",
-              desc.c_str(),
-              (e.what() == nullptr || strIsEmpty(e.what())) ? "unsupported or deprecated device"
-                                                            : e.what());
-      }
+      fprintf(stderr,
+            "ROCm/HSA: Skipping unsupported GPU: %s.\n"
+            "  Reason: %s\n"
+            "  Use ROCR_VISIBLE_DEVICES to limit to supported GPU(s) if needed.\n",
+            desc.c_str(),
+            (e.what() == nullptr || strIsEmpty(e.what())) ? "unsupported or deprecated device"
+                                                          : e.what());
       return nullptr;
     }
-    // Rethrow remaining exceptions.
+    // Rethrow remaining exceptions (e.g. out of memory, internal errors).
     throw;
   }
   if (enabled) gpu->Enable();
@@ -318,11 +317,10 @@ void SurfaceGpuList(std::vector<int32_t>& gpu_list, bool xnack_mode, bool enable
         core::g_use_interrupt_wait = false;
 
       if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
-        core::Runtime::runtime_singleton_->flag().disable_image(true);
-#if defined(_WIN32)
-        core::Runtime::runtime_singleton_->flag().disable_image(false);
+        bool disable_image = core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg();
+        core::Runtime::runtime_singleton_->flag().disable_image(disable_image);
+
         if (node_prop.Capability2.ui32.AqlEmulationPm4_)
-#endif
         {
           core::g_use_interrupt_wait = false;
           core::Runtime::runtime_singleton_->flag().disable_scratch();

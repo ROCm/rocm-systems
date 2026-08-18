@@ -62,6 +62,7 @@ typedef enum {
 typedef enum {
   RCCL_DIRECT_ALLGATHER = NCCL_NUM_ALGORITHMS, // Direct AllGather
   RCCL_HIERARCHICAL_ALLGATHER, // Hierarchical AllGather
+  RCCL_HIERARCHICAL_REDUCESCATTER, // Hierarchical ReduceScatter
 #ifdef ENABLE_WARP_SPEED
   RCCL_WARP_SPEED,
 #endif
@@ -74,25 +75,26 @@ typedef enum {
 #else
 #define RCCL_STATIC_EXPOSE_CHECK() \
   do { \
-    WARN("Attempting to use internal logic while required static functions are not exposed. Rebuild with RCCL_EXPOSE_STATIC enabled"); \
+    WARN("Attempting to use internal logic while required static functions are not exposed. Rebuild with " \
+         "RCCL_EXPOSE_STATIC enabled"); \
     return ncclInvalidUsage; \
   } while (0)
 #endif
 
 inline rcclTunableIndex_t rcclGetTunableIndex(ncclFunc_t const& func) {
   switch (func) {
-    case ncclFuncReduceScatter:
-      return RCCL_RS_TUNABLE;
-    case ncclFuncAllGather:
-      return RCCL_AG_TUNABLE;
-    case ncclFuncAllReduce:
-      return RCCL_AR_TUNABLE;
-    case ncclFuncReduce:
-      return RCCL_RE_TUNABLE;
-    case ncclFuncBroadcast:
-      return RCCL_BR_TUNABLE;
-    default:
-      return RCCL_UNSUPPORTED_TUNABLE; // Invalid or unsupported function
+  case ncclFuncReduceScatter:
+    return RCCL_RS_TUNABLE;
+  case ncclFuncAllGather:
+    return RCCL_AG_TUNABLE;
+  case ncclFuncAllReduce:
+    return RCCL_AR_TUNABLE;
+  case ncclFuncReduce:
+    return RCCL_RE_TUNABLE;
+  case ncclFuncBroadcast:
+    return RCCL_BR_TUNABLE;
+  default:
+    return RCCL_UNSUPPORTED_TUNABLE; // Invalid or unsupported function
   }
 }
 
@@ -101,43 +103,90 @@ inline size_t rcclGetSizePerRank(ncclFunc_t const& func, size_t const& nBytes, i
   // For AG, this is the send size per rank
   // For RS, this is the recv size per rank
   // For AR, this is the send/recv size per rank
-  return (func == ncclFuncReduceScatter || func == ncclFuncAllGather || func == ncclFuncBroadcast || func == ncclFuncReduce) ? nBytes / nRanks : nBytes;
+  return (func == ncclFuncReduceScatter || func == ncclFuncAllGather || func == ncclFuncBroadcast ||
+          func == ncclFuncReduce) ?
+           nBytes / nRanks :
+           nBytes;
 }
 ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t nBytes, int& nc);
 void rcclRestrictMaxChannels(struct ncclComm* comm, int& nc);
-ncclResult_t rcclGetAlgoProtoIndex(const char *envStr, const char* algoProtoString[], int nEntries, int& result);
-ncclResult_t rcclOverrideProtocol(const char* ncclProtoStr[], float table[][NCCL_NUM_PROTOCOLS], struct ncclTaskColl* info);
-ncclResult_t rcclOverrideAlgorithm(const char* ncclAlgoStr[], float table[][NCCL_NUM_PROTOCOLS], struct ncclTaskColl* info);
+ncclResult_t rcclGetAlgoProtoIndex(const char* envStr, const char* algoProtoString[], int nEntries, int& result);
+ncclResult_t rcclOverrideProtocol(const char* ncclProtoStr[], float table[][NCCL_NUM_PROTOCOLS],
+                                  struct ncclTaskColl* info);
+ncclResult_t rcclOverrideAlgorithm(const char* ncclAlgoStr[], float table[][NCCL_NUM_PROTOCOLS],
+                                   struct ncclTaskColl* info);
 void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info);
-void rcclUpdateThreadThreshold(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info, int& threadThreshold);
+void rcclUpdateThreadThreshold(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info,
+                               int& threadThreshold);
 void rcclSetPipelining(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info);
 void rcclGetMaxNthreads(struct ncclComm* comm, int maxNthreads[]);
 void rcclOptThreadBlockSize(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes, int& nThreads);
 void rcclSetDefaultBuffSizes(struct ncclComm* comm, int defaultBuffSizes[]);
-NCCL_API(ncclResult_t, rcclGetAlgoInfo, struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType, int collNetSupport, int nvlsSupport, int numPipeOps, int* algo, int* protocol, int* maxChannels);
-NCCL_API(ncclResult_t, rcclSymKGetInfo, struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType, ncclRedOp_t op, int* algo, int* protocol, int* maxChannels);
+NCCL_API(ncclResult_t, rcclGetAlgoInfo, struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
+         int collNetSupport, int nvlsSupport, int numPipeOps, int* algo, int* protocol, int* maxChannels);
+NCCL_API(ncclResult_t, rcclSymKGetInfo, struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
+         ncclRedOp_t op, int* algo, int* protocol, int* maxChannels);
 NCCL_API(ncclResult_t, rcclGetAlgoName, int algo, const char** algoName);
 NCCL_API(ncclResult_t, rcclGetProtocolName, int protocol, const char** algoName);
 bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize);
 bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize);
 bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize);
+bool rcclUseHierarchicalReduceScatter(struct ncclComm* comm, size_t msgSize);
+size_t rcclHierarchicalTempBufferSize(int nNodes, bool allGather, bool reduceScatter);
+// Fills in algo/protocol/channels for a hierarchical AllGather or ReduceScatter.
+ncclResult_t rcclHierarchicalAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
+                                      int* algo, int* protocol, int* maxChannels);
 bool rcclUseAlltoAllGda(struct ncclComm* comm);
-void rcclSetPxn(struct ncclComm* comm,  int& rcclPxnDisable);
-void rcclSetP2pNetChunkSize(struct ncclComm* comm,  int& rcclP2pNetChunkSize);
+// Returns true when the CE AllReduce path should be used instead of the standard ring/tree kernels.
+// Does NOT check ceARTmpBuf initialization; the caller is responsible.
+bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op);
+// Updates the CE AllReduce graph latch from this call's capture state.
+// Invoke once per collective (any type) at each CE AR decision point.
+void rcclCeAllReduceGraphLatchTick(struct ncclComm* comm, bool ceCapturing);
+// Pure query: is CE AllReduce currently allowed on this comm?
+bool rcclCeAllReduceAllowed(struct ncclComm* comm);
+// Decides whether ncclAllReduce_impl takes the DDA path for this call. Mirrors the guard in
+// collectives.cc exactly: DDA runs when the buffers are not symmetric-kernel eligible, CE AllReduce
+// will not service the call per the caller-computed `ceAllReduceAllowed` (non-gfx1250 only; gfx1250
+// always keeps the DDA fabric path), and DDA is enabled for this arch/size. Host-side and GPU-free so
+// the dispatch decision can be unit tested.
+bool rcclAllReduceShouldTakeDdaPath(const struct ncclComm* comm, size_t count, ncclDataType_t datatype,
+                                    bool symEligible, bool ceAllReduceAllowed);
+void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable);
+void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize);
 ncclResult_t rcclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count, size_t& maxCount);
 ncclResult_t commSetUnrollFactor(struct ncclComm* comm);
 ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm* comm);
-bool validHsaScratchEnvSetting(const char*hsaScratchEnv, int hipRuntimeVersion, int firmwareVersion, const char* archName);
+bool validHsaScratchEnvSetting(const char* hsaScratchEnv, int hipRuntimeVersion, int firmwareVersion,
+                               const char* archName);
 
 // Direct ReduceScatter Limit
 RCCL_PARAM_DECLARE(DirectReduceScatterThreshold);
 // Hierarchical AllGather enabled
 RCCL_PARAM_DECLARE(HierarchicalAllGather);
-// DDA threashold
+// Hierarchical ReduceScatter enabled
+RCCL_PARAM_DECLARE(HierarchicalReduceScatter);
+#define HIERARCHICAL_TEMP_BUFFER_SIZE (128 * 1024 * 1024) // 128MB
+
+// DDA threshold
 RCCL_PARAM_DECLARE(DdaThreshold);
+RCCL_PARAM_DECLARE(DdaLL);
+RCCL_PARAM_DECLARE(DdaLLThreshold);
+RCCL_PARAM_DECLARE(DdaLL128);
+RCCL_PARAM_DECLARE(DdaLL128Threshold);
 RCCL_PARAM_DECLARE(DdaEnable);
 
-#define HIERARCHICAL_AG_TEMP_BUFFER_SIZE (128 * 1024 * 1024) // 128MB
+// Per-collective DDA AlltoAll thresholds (4 MiB for all supported archs).
+constexpr size_t kDdaAlltoAllGfx942ThresholdBytes = 4194304;
+constexpr size_t kDdaAlltoAllGfx950ThresholdBytes = 4194304;
+constexpr size_t kDdaAlltoAllGfx1250ThresholdBytes = 4194304;
+
+// Returns true when the DDA fast path should be attempted for a collective.
+// Per-arch defaults cap the threshold; when 0, gfx950/gfx1250 fall back to
+// the user-configurable RCCL_DDA_THRESHOLD env var.
+bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default,
+                    size_t gfx950Default = 0, size_t gfx1250Default = 0);
+
 int getFirmwareVersion();
 bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, char const* archName);
 #ifdef ENABLE_WARP_SPEED
@@ -148,5 +197,8 @@ bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan);
 ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes);
 int rcclGetMaxWarpsPerBlock(struct ncclComm* comm);
 bool rcclCanUseWarpSpeedAuto(struct ncclComm* comm, int nNodes);
+int rcclWarpSpeedComputeNChannels(struct ncclComm* comm, int nc, int channelMultiplier, int maxChannels,
+                                  int adjustedMaxNchannels, bool userUpdatedMaxChannels);
+int rcclWarpSpeedAdjustChannels(struct ncclComm* comm, struct ncclTaskColl* info, int nc);
 #endif
 #endif

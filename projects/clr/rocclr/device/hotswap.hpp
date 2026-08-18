@@ -20,22 +20,30 @@
 
 #pragma once
 
+#include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <string>
 
 namespace amd {
 namespace hotswap {
 
-// On when this tool is loaded via HSA_TOOLS_LIB (name must match ROCR LoadTools).
-inline constexpr const char* kHotswapToolLib = "libamd_comgr_hotswap_tool.so";
-
 inline bool Enabled() {
-  const char* tools_lib = std::getenv("HSA_TOOLS_LIB");
-  return tools_lib != nullptr &&
-         std::string(tools_lib).find(kHotswapToolLib) != std::string::npos;
+  const char* disable = std::getenv("HSA_HOTSWAP_DISABLE");
+  if (disable == nullptr || disable[0] == '\0') {
+    return true;
+  }
+
+  std::string value(disable);
+  std::transform(value.begin(), value.end(), value.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+  return value == "0" || value == "off" || value == "false" ||
+         value == "no" || value == "n" || value == "f";
 }
 
-// Allowlist of (source -> device) gfx pairs the tool handles; only these are forwarded.
+// Allowlist of (source -> device) gfx pairs native HotSwap handles; only these
+// are forwarded. gfx1250 -> gfx1250 selects the B0 gfx1250 bundle; ROCR leaves
+// it on the normal loader path for B0-on-B0 and rewrites it only for B0-to-A0.
 struct SourceTargetPair {
   const char* source;  // gfx processor, e.g. "gfx1250"
   const char* target;  // gfx processor, e.g. "gfx950"
@@ -43,8 +51,6 @@ struct SourceTargetPair {
 
 inline constexpr SourceTargetPair kSupportedPairs[] = {
     {"gfx1250", "gfx1250"},
-    {"gfx1250", "gfx950"},
-    {"gfx1250", "gfx942"},
 };
 
 // True if (source_gfx -> target_gfx) is a supported pair.

@@ -21,6 +21,19 @@
 import importlib
 from pathlib import Path
 
+BENCHMARKING_SUPPORTED = [
+    "gfx90a",
+    "gfx940",
+    "gfx941",
+    "gfx942",
+    "gfx950",
+    "gfx1150",
+    "gfx1151",
+    "gfx1152",
+    "gfx1153",
+    "gfx1250",
+]
+
 
 def run_roofline_benchmark(
     device_id: int, roofline_csv: Path, cache_sizes: dict

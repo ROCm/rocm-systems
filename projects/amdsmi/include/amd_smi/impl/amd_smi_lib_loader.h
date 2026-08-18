@@ -27,15 +27,25 @@
 #include <cstring>
 #include <iostream>
 #include <mutex>  //  NOLINT(build/c++11)
+#include <vector>
 
 #include "amd_smi/amdsmi.h"
 
 namespace amd::smi {
+
+// Ordered libdrm_amdgpu soname candidates, so tarball / TheRock installs that
+// rename the soname still resolve.
+std::vector<const char*> libdrm_amdgpu_sonames();
+
 class AMDSmiLibraryLoader {
  public:
   AMDSmiLibraryLoader();
 
   amdsmi_status_t load(const char* filename);
+
+  // Tries each candidate in order, returning success on the first that opens.
+  // Only logs once all candidates fail.
+  amdsmi_status_t load(const std::vector<const char*>& filenames);
 
   template <typename T>
   amdsmi_status_t load_symbol(T* func_handler, const char* func_name);

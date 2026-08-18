@@ -205,7 +205,7 @@ class ThunkLoader {
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMapMemoryToGPUNodes))(void* MemoryAddress, \
                                       HSAuint64 MemorySizeInBytes, \
                                       HSAuint64* AlternateVAGPU, \
-                                      HsaMemMapFlags MemMapFlags, \
+                                      HsaMemFlags MemFlags, \
                                       HSAuint64 NumberOfNodes, \
                                       HSAuint32* NodeArray);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtUnmapMemoryToGPU))(void* MemoryAddress);
@@ -275,6 +275,8 @@ class ThunkLoader {
                                       void* UserData);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetQueueInfo))(HSA_QUEUEID QueueId, \
                                       HsaQueueInfo *QueueInfo);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetKernelQueueId))(HSA_QUEUEID QueueId, \
+                                      HSAuint32 *KernelInternalQueueId);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtAllocQueueGWS))(HSA_QUEUEID QueueId, \
                                       HSAuint32 nGWS, \
                                       HSAuint32 *firstGWS);
@@ -283,6 +285,8 @@ class ThunkLoader {
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtRuntimeDisable))(void);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtCheckRuntimeDebugSupport))(void);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetRuntimeCapabilities))(HSAuint32 *caps_mask);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetCoreRuntimeInfo))(struct kfd_runtime_info *runtime_info);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetCoreDeviceInfo))(HSAuint32 gpu_id, struct kfd_dbg_device_info_entry *device_info);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtDebugTrapIoctl))(struct kfd_ioctl_dbg_trap_args *arg, \
                                       HSA_QUEUEID *Queues, \
                                       HSAuint64 *DebugReturn);
@@ -360,6 +364,12 @@ class ThunkLoader {
                                       HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE Type, \
                                       HSA_EXTERNAL_SEMAPHORE_HANDLE* OutHandle);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtDestroyExternalSemaphore))(HSA_EXTERNAL_SEMAPHORE_HANDLE Handle);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtQueueSignalExternalSemaphore))(HSA_QUEUEID QueueId, \
+                                      HSA_EXTERNAL_SEMAPHORE_HANDLE Handle, \
+                                      HSAuint64 Value);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtQueueWaitExternalSemaphore))(HSA_QUEUEID QueueId, \
+                                      HSA_EXTERNAL_SEMAPHORE_HANDLE Handle, \
+                                      HSAuint64 Value);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtHandleExport))(const HsaHandleExportDesc* desc, \
                                       HsaMemoryExportResult* res, \
                                       HsaHandleExportFlags* flags);
@@ -435,7 +445,9 @@ class ThunkLoader {
     bool CreateThunkInstance();
     bool DestroyThunkInstance();
     bool CheckThunkAbi();
-    bool IsDXG() const { return is_dxg_; }
+    bool IsDXG() const { return is_win_dxg_ || is_wsl_dxg_; }
+    bool IsWinDxg() const { return is_win_dxg_; }
+    bool IsWslDxg() const { return is_wsl_dxg_; }
     bool IsDTIF() const { return is_dtif_; }
     bool IsSharedLibraryLoaded() const { return is_loaded_; }
     void* ThunkHandle() const { return thunk_handle; }
@@ -506,11 +518,14 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtQueryPointerInfo)* HSAKMT_PFN(hsaKmtQueryPointerInfo);
     HSAKMT_DEF(hsaKmtSetMemoryUserData)* HSAKMT_PFN(hsaKmtSetMemoryUserData);
     HSAKMT_DEF(hsaKmtGetQueueInfo)* HSAKMT_PFN(hsaKmtGetQueueInfo);
+    HSAKMT_DEF(hsaKmtGetKernelQueueId)* HSAKMT_PFN(hsaKmtGetKernelQueueId);
     HSAKMT_DEF(hsaKmtAllocQueueGWS)* HSAKMT_PFN(hsaKmtAllocQueueGWS);
     HSAKMT_DEF(hsaKmtRuntimeEnable)* HSAKMT_PFN(hsaKmtRuntimeEnable);
     HSAKMT_DEF(hsaKmtRuntimeDisable)* HSAKMT_PFN(hsaKmtRuntimeDisable);
     HSAKMT_DEF(hsaKmtCheckRuntimeDebugSupport)* HSAKMT_PFN(hsaKmtCheckRuntimeDebugSupport);
     HSAKMT_DEF(hsaKmtGetRuntimeCapabilities)* HSAKMT_PFN(hsaKmtGetRuntimeCapabilities);
+    HSAKMT_DEF(hsaKmtGetCoreRuntimeInfo)* HSAKMT_PFN(hsaKmtGetCoreRuntimeInfo);
+    HSAKMT_DEF(hsaKmtGetCoreDeviceInfo)* HSAKMT_PFN(hsaKmtGetCoreDeviceInfo);
     HSAKMT_DEF(hsaKmtDebugTrapIoctl)* HSAKMT_PFN(hsaKmtDebugTrapIoctl);
     HSAKMT_DEF(hsaKmtSPMAcquire)* HSAKMT_PFN(hsaKmtSPMAcquire);
     HSAKMT_DEF(hsaKmtSPMRelease)* HSAKMT_PFN(hsaKmtSPMRelease);
@@ -541,6 +556,8 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtHandleImport)* HSAKMT_PFN(hsaKmtHandleImport);
     HSAKMT_DEF(hsaKmtImportExternalSemaphore)* HSAKMT_PFN(hsaKmtImportExternalSemaphore);
     HSAKMT_DEF(hsaKmtDestroyExternalSemaphore)* HSAKMT_PFN(hsaKmtDestroyExternalSemaphore);
+    HSAKMT_DEF(hsaKmtQueueSignalExternalSemaphore)* HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore);
+    HSAKMT_DEF(hsaKmtQueueWaitExternalSemaphore)* HSAKMT_PFN(hsaKmtQueueWaitExternalSemaphore);
     HSAKMT_DEF(hsaKmtHandleExport)* HSAKMT_PFN(hsaKmtHandleExport);
     HSAKMT_DEF(hsaKmtMemoryVaMap)* HSAKMT_PFN(hsaKmtMemoryVaMap);
     HSAKMT_DEF(hsaKmtMemoryVaUnmap)* HSAKMT_PFN(hsaKmtMemoryVaUnmap);
@@ -567,7 +584,8 @@ class ThunkLoader {
     std::string whoami();
     void *thunk_handle;
     std::string library_name;
-    bool is_dxg_;
+    bool is_win_dxg_;
+    bool is_wsl_dxg_;
     bool is_dtif_;
     bool is_loaded_;
 };

@@ -26,7 +26,7 @@
 #include "log.hpp"
 #include "hip_allocator_vmm_common.hpp"
 
-#if HIP_VERSION >= 70000000
+#if HIP_VERSION >= 70200000
 
 #include <cstring>
 #include <cerrno>
@@ -34,6 +34,24 @@
 #include <sys/syscall.h>
 #include <sys/prctl.h>
 #include <sys/utsname.h>
+
+// Syscall numbers for pidfd_open (Linux 5.3+) and pidfd_getfd (Linux 5.6+).
+// Older kernel headers may not define these; provide the x86-64 values as a
+// fallback so the code compiles — the runtime kernel check will gate their use.
+#ifndef __NR_pidfd_open
+#  if defined(__x86_64__)
+#    define __NR_pidfd_open 434
+#  elif defined(__aarch64__)
+#    define __NR_pidfd_open 434
+#  endif
+#endif
+#ifndef __NR_pidfd_getfd
+#  if defined(__x86_64__)
+#    define __NR_pidfd_getfd 438
+#  elif defined(__aarch64__)
+#    define __NR_pidfd_getfd 438
+#  endif
+#endif
 
 namespace rocshmem {
 
@@ -136,9 +154,33 @@ HIPAllocatorVMMPosixFd::HIPAllocatorVMMPosixFd() : HIPAllocator(VMMAlloc, VMMFre
 
   if (!vmm_supported) {
     LOG_ERROR_ABORT("Virtual Memory Management (VMM) is not supported on device %d. "
-                    "The USE_HEAP_DEVICE_VMM_POSIX allocator requires a GPU with VMM support. "
+                    "The vmm_posix allocator requires a GPU with VMM support. "
                     "Please use a different memory allocator.", device_id);
   }
+
+  // Cache the VMM allocation granularity for this allocator.
+  size_t granularity = VMMQueryGranularity(hipMemHandleTypePosixFileDescriptor);
+  mem_granularity_ = (granularity != 0) ? granularity : 1;
+}
+
+hipError_t HIPAllocatorVMMPosixFd::ExportToPosixHandle(
+    hipMemGenericAllocationHandle_t generic_handle, size_t size, void *handle,
+    int *out_fd)
+{
+  int fd;
+  hipError_t err = hipMemExportToShareableHandle(
+      &fd, generic_handle, hipMemHandleTypePosixFileDescriptor, 0);
+  if (err != hipSuccess) {
+    return err;
+  }
+
+  HIPIpcMemHandlePosix_t* posix_handle = reinterpret_cast<HIPIpcMemHandlePosix_t*>(handle);
+  posix_handle->fd = static_cast<uint64_t>(fd);
+  posix_handle->pid = static_cast<uint32_t>(getpid());
+  posix_handle->size = size;
+  *out_fd = fd;
+
+  return hipSuccess;
 }
 
 hipError_t HIPAllocatorVMMPosixFd::GetIpcHandle(void *dev_ptr, void *handle)
@@ -153,29 +195,25 @@ hipError_t HIPAllocatorVMMPosixFd::GetIpcHandle(void *dev_ptr, void *handle)
     return hipErrorInvalidValue;
   }
 
-  HIPIpcMemHandlePosix_t* posix_handle = reinterpret_cast<HIPIpcMemHandlePosix_t*>(handle);
-  hipError_t err;
-
-  // Check if we already exported this allocation
-  int fd;
+  // Reuse a previously exported fd if available; the underlying handle does
+  // not change for the lifetime of this allocation.
   if (it->second.exported_fd != -1) {
-    // Reuse existing fd
-    fd = it->second.exported_fd;
-  } else {
-    // Export the VMM handle to a shareable file descriptor
-    err = hipMemExportToShareableHandle(&fd, it->second.handle,
-                                        hipMemHandleTypePosixFileDescriptor, 0);
-    if (err != hipSuccess) {
-      return err;
-    }
-    // Store the fd so we can close it later
-    it->second.exported_fd = fd;
+    HIPIpcMemHandlePosix_t* posix_handle = reinterpret_cast<HIPIpcMemHandlePosix_t*>(handle);
+    posix_handle->fd = static_cast<uint64_t>(it->second.exported_fd);
+    posix_handle->pid = static_cast<uint32_t>(getpid());
+    posix_handle->size = it->second.size;
+    return hipSuccess;
   }
 
-  // Get current process ID and fill handle
-  posix_handle->fd = static_cast<uint64_t>(fd);
-  posix_handle->pid = static_cast<uint32_t>(getpid());
-  posix_handle->size = it->second.size;
+  // First export for this allocation: export and cache the fd so we can close
+  // it later in Deallocate().
+  int fd;
+  hipError_t err = ExportToPosixHandle(it->second.handle, it->second.size,
+                                       handle, &fd);
+  if (err != hipSuccess) {
+    return err;
+  }
+  it->second.exported_fd = fd;
 
   return hipSuccess;
 }
@@ -330,6 +368,53 @@ hipError_t HIPAllocatorVMMPosixFd::CloseIpcHandle(void *dev_ptr)
   return hipSuccess;
 }
 
+hipError_t HIPAllocatorVMMPosixFd::GetIpcHandleFromPtr(void *dev_ptr, size_t length, void *handle)
+{
+  if (dev_ptr == nullptr || handle == nullptr || length == 0) {
+    return hipErrorInvalidValue;
+  }
+
+  // Retain the generic allocation handle backing this VMM pointer. This only
+  // succeeds for VMM allocations (the caller is expected to have validated
+  // this), and gives us a handle we can export without relying on this
+  // allocator's internal allocation tracking.
+  hipMemGenericAllocationHandle_t generic_handle;
+  hipError_t err = hipMemRetainAllocationHandle(&generic_handle, dev_ptr);
+  if (err != hipSuccess) {
+    return err;
+  }
+
+  // length is already granularity-aligned (validated at registration).
+  int fd;
+  err = ExportToPosixHandle(generic_handle, length, handle, &fd);
+
+  // Drop our retained reference regardless of the export outcome. On success
+  // the exported fd keeps the underlying memory alive for importers; a release
+  // failure only leaks a reference, so warn rather than fail.
+  hipError_t rel_err = hipMemRelease(generic_handle);
+  if (rel_err != hipSuccess) {
+    LOG_WARN("hipMemRelease failed in GetIpcHandleFromPtr: %s",
+             hipGetErrorString(rel_err));
+  }
+
+  return err;
+}
+
+hipError_t HIPAllocatorVMMPosixFd::CloseExportedHandle(void *handle)
+{
+  if (handle == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  HIPIpcMemHandlePosix_t* posix_handle = reinterpret_cast<HIPIpcMemHandlePosix_t*>(handle);
+  int fd = static_cast<int>(posix_handle->fd);
+  if (fd != -1) {
+    close(fd);
+    posix_handle->fd = static_cast<uint64_t>(-1);
+  }
+  return hipSuccess;
+}
+
 size_t HIPAllocatorVMMPosixFd::GetIpcHandleSize()
 {
   return sizeof(HIPIpcMemHandlePosix_t);
@@ -361,4 +446,4 @@ hipError_t HIPAllocatorVMMPosixFd::GetDmabufHandle(void *dev_ptr, size_t size, i
 
 }  // namespace rocshmem
 
-#endif  // HIP_VERSION >= 70000000
+#endif  // HIP_VERSION >= 70200000

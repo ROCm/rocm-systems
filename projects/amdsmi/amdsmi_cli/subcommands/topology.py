@@ -247,9 +247,7 @@ class TopologyCommands:
                     gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(gpu_dest)
                     CPU_Affinity = amdsmi_interface.amdsmi_get_gpu_topo_cpu_affinity(gpu_dest)
                     numa_node = amdsmi_interface.amdsmi_get_gpu_topo_numa_affinity(gpu_dest)
-                    switch_bdf = amdsmi_interface.amdsmi_get_root_switch(
-                        amdsmi_interface.amdsmi_get_gpu_device_bdf_bdf(gpu_dest)
-                    )
+                    switch_bdf = amdsmi_interface.amdsmi_get_root_switch(gpu_bdf)
 
                     # Add GPU row to the table
                     if self.logger.is_human_readable_format():
@@ -280,9 +278,7 @@ class TopologyCommands:
                         nic_bdf = nic_info["bdf"]
                     CPU_Affinity = amdsmi_interface.amdsmi_get_nic_topo_cpu_affinity(nic_dest)
                     numa_node = amdsmi_interface.amdsmi_get_nic_topo_numa_affinity(nic_dest)
-                    switch_bdf = amdsmi_interface.amdsmi_get_root_switch(
-                        amdsmi_interface.amdsmi_get_nic_device_bdf_bdf(nic_dest)
-                    )
+                    switch_bdf = amdsmi_interface.amdsmi_get_root_switch(nic_bdf)
 
                     # Add NIC row to the table
                     if self.logger.is_human_readable_format():

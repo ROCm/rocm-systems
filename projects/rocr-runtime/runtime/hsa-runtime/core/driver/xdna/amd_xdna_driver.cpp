@@ -63,6 +63,7 @@
 #include "core/inc/runtime.h"
 #include "core/inc/signal.h"
 #include "core/util/memory.h"
+#include "core/util/os.h"
 #include "core/util/utils.h"
 #include "uapi/amdxdna_accel.h"
 
@@ -490,6 +491,32 @@ static hsa_status_t WaitCommand(int fd, ert_start_kernel_cmd* cmd, uint32_t hw_c
   return HSA_STATUS_SUCCESS;
 }
 
+/**
+ * @brief Resolves a virtual address to the BO handle, along with its allocation base and size.
+ *
+ * @param[in] mem virtual address to resolve
+ * @param[in] agent agent that owns the memory pool associated with the virtual address
+ * @param[out] bo_handle pointer to store the BO handle associated with the allocation
+ * @param[out] base pointer to store the base address of the allocation (optional)
+ * @param[out] size pointer to store the size of the allocation (optional)
+ *
+ * @return @c HSA_STATUS_SUCCESS on success, or an error status if the address does not belong to
+ * an allocation accessible to the agent
+ */
+static hsa_status_t ResolveBOHandle(void* mem, const core::Agent& agent, uint32_t* bo_handle,
+                                    void** base, size_t* size) {
+  void* local_base = nullptr;
+  core::DriverMemoryHandle handle{};
+  if (core::Runtime::runtime_singleton_->FindDriverMemoryHandle(mem, &agent, &local_base,
+                                                                &handle) != HSA_STATUS_SUCCESS) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
+  if (base != nullptr) *base = local_base;
+  if (size != nullptr) *size = handle.size;
+  *bo_handle = static_cast<uint32_t>(handle.handle);
+  return HSA_STATUS_SUCCESS;
+}
+
 
 XdnaDriver::XdnaDriver(std::string devnode_name)
     : core::Driver(core::DriverType::XDNA, std::move(devnode_name)) {}
@@ -659,10 +686,9 @@ hsa_status_t XdnaDriver::GetCacheProperties(uint32_t node_id, uint32_t processor
   return HSA_STATUS_ERROR_INVALID_CACHE;
 }
 
-hsa_status_t
-XdnaDriver::AllocateMemory(const core::MemoryRegion &mem_region,
-                           core::MemoryRegion::AllocateFlags alloc_flags,
-                           void **mem, size_t size, uint32_t node_id) {
+hsa_status_t XdnaDriver::AllocateMemory(const core::MemoryRegion& mem_region,
+                                        core::MemoryRegion::AllocateFlags alloc_flags, size_t size,
+                                        uint32_t node_id, core::DriverMemoryHandle* handle) {
   const MemoryRegion& m_region = static_cast<const MemoryRegion&>(mem_region);
 
   if (!m_region.IsSystem()) {
@@ -706,50 +732,45 @@ XdnaDriver::AllocateMemory(const core::MemoryRegion &mem_region,
 
   if (use_bo_share) {
     if (alloc_flags & core::MemoryRegion::AllocateMemoryOnly) {
-      /// TODO: We create an anonymous mapping to get a unique virtual address since the memory
-      /// handle mapping, i.e., Runtime::memory_handle_map_, is indexed using DriverHandle which is
-      /// driver-agnostic and just a pointer to the virtual address space. We waste a page, but it
-      /// ensures uniqueness across drivers.
-      bo_handle.vaddr =
-          mmap(nullptr, MemoryRegion::GetPageSize(), PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-      if (bo_handle.vaddr == MAP_FAILED) {
-        return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-      }
+      bo_handle.vaddr = nullptr;
     } else {
       bo_handle.vaddr =
           mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, get_bo_info_args.map_offset);
       if (bo_handle.vaddr == MAP_FAILED) {
+        // bo_guard must not try to unmap MAP_FAILED.
+        bo_handle.vaddr = nullptr;
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
       }
     }
-    bo_handle.unmap_vaddr = true;
   } else {
     /// This is dev heap and is already mapped. See InitDeviceHeap().
     bo_handle.vaddr = reinterpret_cast<void*>(get_bo_info_args.vaddr);
-    bo_handle.unmap_vaddr = false;
   }
-
-  // We keep a mapping from VA memory addresses to BO handles because some operations, e.g.,
-  // FreeMemory, pass only the memory address and not a BO handle.
-  vmem_addr_mappings.emplace(bo_handle.vaddr, bo_handle);
 
   bo_guard.Dismiss();
 
-  *mem = bo_handle.vaddr;
+  // The handle word is the driver-native BO id. vaddr is the allocation's real VA (the VA for dev
+  // heap BOs, the mmap'd VA for share BOs). It is nullptr only for AllocateMemoryOnly SHARE BOs.
+  // FreeMemory decides whether to unmap by the VA itself (dev heap range vs. an owned mmap), so no
+  // ownership flag is carried. Export-only fields stay at defaults.
+  handle->handle = bo_handle.handle;
+  handle->vaddr = bo_handle.vaddr;
+  handle->size = size;
 
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t XdnaDriver::FreeMemory(void* mem, size_t size) {
-  auto it = vmem_addr_mappings.find(mem);
-  if (it == vmem_addr_mappings.end()) {
+hsa_status_t XdnaDriver::FreeMemory(const core::DriverMemoryHandle& handle) {
+  if (handle.handle == AMDXDNA_INVALID_BO_HANDLE) {
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
-  auto& bo_handle = it->second;
-  hsa_status_t err = DestroyBOHandle(bo_handle);
-  vmem_addr_mappings.erase(it);
-  return err;
+  BOHandle bo_handle;
+  bo_handle.handle = static_cast<uint32_t>(handle.handle);
+  bo_handle.size = handle.size;
+  bo_handle.vaddr = handle.vaddr;
+
+  return DestroyBOHandle(bo_handle);
 }
 
 hsa_status_t XdnaDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
@@ -816,18 +837,15 @@ hsa_status_t XdnaDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
   return HSA_STATUS_ERROR_INVALID_QUEUE;
 }
 
-hsa_status_t XdnaDriver::ExportMemoryHandle(const core::Agent& agent, const core::DriverMemoryHandle& handle,
-                                            core::ShareType type, uint32_t flags, void* export_handle,
-                                            uint64_t* export_offset) {
+hsa_status_t XdnaDriver::ExportMemoryHandle(const core::Agent& agent,
+                                            const core::DriverMemoryHandle& handle,
+                                            core::ShareType type, void* export_handle) {
   (void)agent;
-  (void)flags;
-  (void)export_offset;
   if (export_handle == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   switch (type) {
   case core::ShareType::DMABUF_FD: {
-    // handle.handle is the kernel BO handle populated by CreateShareableHandle.
-    if (!handle.IsValid()) {
+    if (handle.handle == AMDXDNA_INVALID_BO_HANDLE) {
       return HSA_STATUS_ERROR_INVALID_ALLOCATION;
     }
 
@@ -860,7 +878,7 @@ hsa_status_t XdnaDriver::ImportMemoryHandle(const core::Agent& agent, core::Driv
 
   switch (type) {
   case core::ShareType::DMABUF_FD: {
-    const int dmabuf_fd = *static_cast<int*>(import_handle);
+    const int dmabuf_fd = static_cast<const core::DriverMemoryHandle*>(import_handle)->dmabuf_fd;
 
     drm_prime_handle import_params = {};
     import_params.handle = AMDXDNA_INVALID_BO_HANDLE;
@@ -879,11 +897,6 @@ hsa_status_t XdnaDriver::ImportMemoryHandle(const core::Agent& agent, core::Driv
   default:
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
-}
-
-hsa_status_t XdnaDriver::DestroyImportedMemoryHandle(core::DriverMemoryHandle* handle) {
-  // Nothing to do for XDNA since we have a single, non-ref counted handle.
-  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t XdnaDriver::Map(const core::DriverMemoryHandle& handle, void *mem,
@@ -920,21 +933,20 @@ hsa_status_t XdnaDriver::Unmap(const core::DriverMemoryHandle& handle, void *mem
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t XdnaDriver::CreateShareableHandle(void* va, void* mem, size_t size,
-                                               const core::Agent& agent,
-                                               core::DriverMemoryHandle* handle, uint64_t* offset) {
-  (void)va;
+hsa_status_t XdnaDriver::CreateShareableHandle(core::DriverMemoryHandle* handle,
+                                               const core::Agent& agent, uint64_t* offset) {
   (void)agent;
 
-  // Find BO handle; mem is the BO handle; see AllocateMemory.
-  auto bo_handle = FindBOHandle(mem);
-  if (!bo_handle.IsValid()) {
+  // On input, handle is the allocation handle whose native id is the BO handle (see
+  // AllocateMemory).
+  const auto bo_handle = static_cast<uint32_t>(handle->handle);
+  if (bo_handle == AMDXDNA_INVALID_BO_HANDLE) {
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
   // Get offset.
   amdxdna_drm_get_bo_info get_bo_info_args = {};
-  get_bo_info_args.handle = bo_handle.handle;
+  get_bo_info_args.handle = bo_handle;
   hsa_status_t err = xdna_ioctl(fd_, DRM_IOCTL_AMDXDNA_GET_BO_INFO, &get_bo_info_args);
   if (err != HSA_STATUS_SUCCESS) {
     return err;
@@ -942,7 +954,7 @@ hsa_status_t XdnaDriver::CreateShareableHandle(void* va, void* mem, size_t size,
 
   // Get fd associated with the handle.
   drm_prime_handle params = {};
-  params.handle = bo_handle.handle;
+  params.handle = bo_handle;
   params.flags = DRM_RDWR;
   params.fd = -1;
   err = xdna_ioctl(fd_, DRM_IOCTL_PRIME_HANDLE_TO_FD, &params);
@@ -950,10 +962,10 @@ hsa_status_t XdnaDriver::CreateShareableHandle(void* va, void* mem, size_t size,
     return err;
   }
 
-  handle->handle = bo_handle.handle;
+  // handle->handle and handle->size carry over from allocation
   handle->dmabuf_fd = params.fd;
   handle->mmap_offset = get_bo_info_args.map_offset;
-  handle->size = size;
+
   *offset = 0;
 
   return HSA_STATUS_SUCCESS;
@@ -972,7 +984,6 @@ hsa_status_t XdnaDriver::DestroyMemoryHandle(core::DriverMemoryHandle* handle) {
   if (err != HSA_STATUS_SUCCESS) {
     return err;
   }
-
   *handle = {};
 
   return HSA_STATUS_SUCCESS;
@@ -1002,49 +1013,65 @@ hsa_status_t XdnaDriver::InitDeviceHeap() {
   if (err != HSA_STATUS_SUCCESS) {
     return err;
   }
+  dev_heap_bo = create_bo_args.handle;
 
-  dev_heap_handle.handle = create_bo_args.handle;
-
-  // Unmap memory and close the BO in case of error.
-  MAKE_NAMED_SCOPE_GUARD(dev_heap_handle_guard, [&] { DestroyBOHandle(dev_heap_handle); });
+  // Unmap memory and close the dev heap BO in case of error.
+  MAKE_NAMED_SCOPE_GUARD(dev_heap_guard, [&] { FreeDeviceHeap(); });
 
   amdxdna_drm_get_bo_info get_bo_info_args = {};
-  get_bo_info_args.handle = dev_heap_handle.handle;
+  get_bo_info_args.handle = dev_heap_bo;
   err = xdna_ioctl(fd_, DRM_IOCTL_AMDXDNA_GET_BO_INFO, &get_bo_info_args);
   if (err != HSA_STATUS_SUCCESS) {
     return err;
   }
 
-  const size_t size = dev_heap_align * 2 - 1;
-  dev_heap_handle.vaddr =
-      mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  if (dev_heap_handle.vaddr == MAP_FAILED) {
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  }
-  dev_heap_handle.unmap_vaddr = true;
-  dev_heap_handle.size = size;
-
-  void* addr_aligned = reinterpret_cast<void*>(
-      AlignUp(reinterpret_cast<uintptr_t>(dev_heap_handle.vaddr), dev_heap_align));
-
-  dev_heap_aligned =
-      mmap(addr_aligned, dev_heap_size, PROT_READ | PROT_WRITE,
-           MAP_SHARED | MAP_FIXED, fd_, get_bo_info_args.map_offset);
-  if (dev_heap_aligned == MAP_FAILED) {
-    dev_heap_aligned = nullptr;
+  // ReserveMemory over-allocates, aligns, and trims the slack, leaving exactly one
+  // dev_heap_size mapping to own.
+  void* heap = os::ReserveMemory(nullptr, dev_heap_size, dev_heap_alignment, os::MEM_PROT_NONE);
+  if (heap == nullptr) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
-  dev_heap_handle_guard.Dismiss();
+  if (!os::MapMemory(heap, dev_heap_size, os::MEM_PROT_RW, fd_, get_bo_info_args.map_offset)) {
+    os::ReleaseMemory(heap, dev_heap_size);
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+  dev_heap_vaddr = heap;
+
+  dev_heap_guard.Dismiss();
 
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t XdnaDriver::FreeDeviceHeap() {
-  hsa_status_t err = DestroyBOHandle(dev_heap_handle);
-  assert(err == HSA_STATUS_SUCCESS && "Failed to destroy device heap BO handle.");
-  dev_heap_aligned = nullptr;
-  return err;
+  if (dev_heap_bo == AMDXDNA_INVALID_BO_HANDLE) {
+    return HSA_STATUS_SUCCESS;
+  }
+
+  // Unmap dev heap.
+  hsa_status_t munmap_err = HSA_STATUS_SUCCESS;
+  if (dev_heap_vaddr != nullptr && !os::ReleaseMemory(dev_heap_vaddr, dev_heap_size)) {
+    munmap_err = HSA_STATUS_ERROR;
+    assert(false && "Failed to unmap device heap BO.");
+  }
+
+  // dev_heap_vaddr is deliberately left set: DestroyBOHandle uses IsDevHeapVA() to
+  // recognize dev heap allocations that carve their VA out of the heap and must not be
+  // unmapped. Clearing it here would make a dev heap freed after teardown munmap a VA
+  // range that has since been recycled. InitDeviceHeap() overwrites it on re-init.
+
+  // Close the BO.
+  drm_gem_close close_bo_args = {};
+  close_bo_args.handle = dev_heap_bo;
+  hsa_status_t ioctl_err = xdna_ioctl(fd_, DRM_IOCTL_GEM_CLOSE, &close_bo_args);
+  assert(ioctl_err == HSA_STATUS_SUCCESS && "Failed to destroy device heap BO handle.");
+  if (ioctl_err != HSA_STATUS_SUCCESS) {
+    return ioctl_err;
+  }
+
+  dev_heap_bo = AMDXDNA_INVALID_BO_HANDLE;
+
+  return munmap_err;
 }
 
 hsa_status_t XdnaDriver::CreateCmdBO(uint32_t size, BOHandle& cmd_bo_handle) const {
@@ -1076,7 +1103,6 @@ hsa_status_t XdnaDriver::CreateCmdBO(uint32_t size, BOHandle& cmd_bo_handle) con
     return HSA_STATUS_ERROR;
   }
   tmp_cmd_bo_handle.vaddr = mem;
-  tmp_cmd_bo_handle.unmap_vaddr = true;
 
   tmp_cmd_bo_handle_guard.Dismiss();
 
@@ -1085,9 +1111,16 @@ hsa_status_t XdnaDriver::CreateCmdBO(uint32_t size, BOHandle& cmd_bo_handle) con
   return HSA_STATUS_SUCCESS;
 }
 
+bool XdnaDriver::IsDevHeapVA(const void* vaddr) const {
+  if (dev_heap_vaddr == nullptr) return false;
+  const auto addr = reinterpret_cast<uintptr_t>(vaddr);
+  const auto base = reinterpret_cast<uintptr_t>(dev_heap_vaddr);
+  return (addr >= base) && ((addr - base) < dev_heap_size);
+}
+
 hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
                                         uint64_t first_pkt_idx, uint64_t num_pkts,
-                                        uint32_t num_core_tiles) {
+                                        uint32_t num_core_tiles, const core::Agent& agent) {
   auto kmq_metadata = static_cast<KmqMetadata*>(queue_metadata);
 
   // Instruction and arguments BOs (performance hint: up to 3 argument BOs per packet).
@@ -1116,14 +1149,17 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
 
     // Determine if the PDI is cached, if not it will be added to the PDI cache and the hardware
     // context will be reconfigured.
-    auto pdi_bo_handle = FindBOHandle(pkt->pdi_addr);
-    if (!pdi_bo_handle.IsValid()) {
-      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    void* pdi_base = nullptr;
+    size_t pdi_size = 0;
+    uint32_t pdi_handle = AMDXDNA_INVALID_BO_HANDLE;
+    hsa_status_t err = ResolveBOHandle(pkt->pdi_addr, agent, &pdi_handle, &pdi_base, &pdi_size);
+    if (err != HSA_STATUS_SUCCESS) {
+      return err;
     }
-    auto cached_pdi_index = kmq_metadata->pdi_cache.GetIndex(pdi_bo_handle.handle);
+    auto cached_pdi_index = kmq_metadata->pdi_cache.GetIndex(pdi_handle);
     if (cached_pdi_index == PDICache::NotFound) {
-      FlushCpuCache(pdi_bo_handle.vaddr, 0, pdi_bo_handle.size);
-      hsa_status_t err = kmq_metadata->pdi_cache.SetNext(pdi_bo_handle.handle, cached_pdi_index);
+      FlushCpuCache(pdi_base, 0, pdi_size);
+      err = kmq_metadata->pdi_cache.SetNext(pdi_handle, cached_pdi_index);
       if (err != HSA_STATUS_SUCCESS) {
         assert(false && "Failed to set PDI in cache.");
         return err;
@@ -1134,24 +1170,26 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
     // Add the instruction sequence BO handle to bo_handles and flush cache.
     void* insts_addr =
         reinterpret_cast<void*>(Concat<uint64_t>(pkt->insts_addr_high, pkt->insts_addr_low));
-    auto instr_bo_handle = FindBOHandle(insts_addr);
-    if (!instr_bo_handle.IsValid()) {
+    uint32_t instr_handle = AMDXDNA_INVALID_BO_HANDLE;
+    err = ResolveBOHandle(insts_addr, agent, &instr_handle, nullptr, nullptr);
+    if (err != HSA_STATUS_SUCCESS) {
       assert(false && "Failed to find instruction sequence BO for command packet.");
-      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+      return err;
     }
-    bo_handles.push_back(instr_bo_handle.handle);
+    bo_handles.push_back(instr_handle);
     FlushCpuCache(insts_addr, 0, pkt->insts_size);
 
     // Add the argument BO handles to bo_handles.
     auto* kernarg_address = static_cast<uint64_t*>(pkt->kernarg_address);
     for (uint32_t kernarg_idx = 0; kernarg_idx < pkt->num_kernargs; ++kernarg_idx) {
       void* ptr = reinterpret_cast<void*>(kernarg_address[kernarg_idx]);
-      auto bo_handle = FindBOHandle(ptr);
-      if (!bo_handle.IsValid()) {
+      uint32_t arg_handle = AMDXDNA_INVALID_BO_HANDLE;
+      err = ResolveBOHandle(ptr, agent, &arg_handle, nullptr, nullptr);
+      if (err != HSA_STATUS_SUCCESS) {
         assert(false && "Failed to find argument BO for command packet.");
-        return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+        return err;
       }
-      bo_handles.push_back(bo_handle.handle);
+      bo_handles.push_back(arg_handle);
     }
 
     // Create command for the kernel.
@@ -1162,7 +1200,7 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
     const uint32_t cmd_data_bytesize = cmd_dwords * sizeof(uint32_t);
     const uint32_t cmd_bytesize = sizeof(ert_start_kernel_cmd) + cmd_data_bytesize;
     BOHandle cmd_bo_handle;
-    hsa_status_t err = CreateCmdBO(cmd_bytesize, cmd_bo_handle);
+    err = CreateCmdBO(cmd_bytesize, cmd_bo_handle);
     if (err != HSA_STATUS_SUCCESS) {
       assert(false && "Failed to create command BO.");
       return err;
@@ -1331,58 +1369,29 @@ hsa_status_t XdnaDriver::DestroyBOHandle(BOHandle& bo_handle) const {
 
   hsa_status_t unmap_err = HSA_STATUS_SUCCESS;
 
-  // Unmap the memory.
-  if (bo_handle.unmap_vaddr) {
+  // Unmap only non-null BO_SHAREs, which own an independent mmap. Dev heap allocations carve
+  // their VA out of the shared device heap and must leave that mapping intact; they
+  // are recognized by the VA falling inside the device-heap range.
+  if ((bo_handle.vaddr != nullptr) && !IsDevHeapVA(bo_handle.vaddr)) {
     if (munmap(bo_handle.vaddr, bo_handle.size) != 0) {
       unmap_err = HSA_STATUS_ERROR;
       assert(false && "Failed to unmap BO memory.");
     } else {
-      bo_handle.unmap_vaddr = false;
       bo_handle.vaddr = nullptr;
       bo_handle.size = 0;
     }
   }
 
-  // Close the BO handle.
+  // Close the BO.
   drm_gem_close close_bo_args = {};
   close_bo_args.handle = bo_handle.handle;
   hsa_status_t ioctl_err = xdna_ioctl(fd_, DRM_IOCTL_GEM_CLOSE, &close_bo_args);
-  bo_handle.handle = AMDXDNA_INVALID_BO_HANDLE;
-
   if (ioctl_err != HSA_STATUS_SUCCESS) {
     return ioctl_err;
   }
+  bo_handle.handle = AMDXDNA_INVALID_BO_HANDLE;
+
   return unmap_err;
-}
-
-XdnaDriver::BOHandle XdnaDriver::FindBOHandle(void* mem) const {
-  auto it = vmem_addr_mappings.lower_bound(mem);
-  if (it == vmem_addr_mappings.cend()) {
-    // Exact address not found or is larger than the largest address.
-    return BOHandle{};
-  }
-
-  if (it->first == mem) {
-    // Exact address found.
-    return it->second;
-  }
-
-  if (it == vmem_addr_mappings.cbegin()) {
-    // Address is smaller than the smallest registered address.
-    return BOHandle{};
-  }
-
-  // Go back one element, since lower_bound returns an iterator to the element that is equal or
-  // greater.
-  --it;
-
-  assert(it->first < mem);
-  if (mem >= (static_cast<char*>(it->first) + it->second.size)) {
-    // Address is not from this allocation.
-    return BOHandle{};
-  }
-
-  return it->second;
 }
 
 hsa_status_t XdnaDriver::SetTrapHandler(uint32_t node_id, const void* base, uint64_t base_size,
@@ -1427,7 +1436,7 @@ hsa_status_t XdnaDriver::RegisterMemory(void* ptr, uint64_t size, HsaMemFlags me
 hsa_status_t XdnaDriver::DeregisterMemory(void* ptr) const { return HSA_STATUS_ERROR; }
 
 hsa_status_t XdnaDriver::MakeMemoryResident(const void* mem, size_t size, uint64_t* alternate_va,
-                                            const HsaMemMapFlags* mem_flags, uint32_t num_nodes,
+                                            const HsaMemFlags* mem_flags, uint32_t num_nodes,
                                             const uint32_t* nodes) const {
   return HSA_STATUS_ERROR;
 }
@@ -1437,6 +1446,12 @@ hsa_status_t XdnaDriver::GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** addre
 }
 
 hsa_status_t XdnaDriver::MakeMemoryUnresident(const void* mem) const { return HSA_STATUS_ERROR; }
+
+hsa_status_t XdnaDriver::CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const {
+  (void)agent;
+  (void)ready;
+  return HSA_STATUS_ERROR;
+}
 
 }  // namespace AMD
 }  // namespace rocr

@@ -3,6 +3,107 @@
 Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
 
 
+## ROCm Compute Profiler 3.9.0 for ROCm 10.1.0
+
+### Added
+
+* Added GPU benchmarking and roofline profiling/analysis support for gfx1153 hardware.
+
+* Added per-kernel PC sampling analysis.
+  * `rocprof-compute analyze --output-format csv` writes each kernel's disassembly under `per_kernel_pc_sampling/`, with the sample and stall counts on every instruction and the source it was compiled from.
+  * The analysis database records the same per-instruction data, so `--output-format db` can be queried for it.
+
+* Added multi-process PC sampling across profile and analyze modes.
+  * Profile mode writes one PID-prefixed `<pid>_ps_file_results.json` per process.
+  * Analyze mode reports every process in a single run, with a `pid` column
+    identifying each one.
+
+* Redesigned the standalone roofline HTML to improve user experience and interactivity.
+
+* Added a profile-mode warning reporting the active compute and memory partition
+  modes on partition-capable accelerators, noting that analysis derives logical
+  XCD, L2 channel, and HBM channel counts from them.
+
+### Changed
+
+* Renamed the PC sampling analysis output: `pc_sampling.csv` is now `pc_sampling_summary.csv`, and the `compute_pc_sampling_view` view is now `compute_pc_sampling_summary_view`.
+
+* ML API tracing options (--torch-trace/--triton-trace/--ml-api-trace) are no longer allowed with PC-sampling-only profiling; the run now fails with an error telling the user to drop the ML API tracing flag or add a counter block, since without counters there is nothing to correlate the markers against.
+
+### Removed
+
+* Removed the CSV profile output backend and the `--format-rocprof-output` profile mode option. Profiling now always uses the `rocpd` output format, which was already the default.
+  * Removed the `--join-type` profile mode option, which only affected the CSV output format.
+
+* Removed analyze support for workloads produced by the CSV profile backend. Such workloads are now rejected with an error telling you to re-profile with a current release.
+
+### Optimized
+
+* Reduced profile-mode peak memory when writing counter data on large workloads.
+
+* Profile mode now gzip-compresses large counter CSV artifacts to reduce workload directory size.
+
+### Resolved issues
+
+* Corrected the VGPR allocation label from `RVGPRseq` to `VGPRs` in gfx9 memory charts
+
+### Upcoming changes
+
+### Known issues
+
+## ROCm Compute Profiler 3.8.0 for ROCm 10.0.0
+
+### Added
+
+* Added ``--pc-sampling-rows`` analyze option to cap the PC sampling table at the top N rows (default 10); set ``0`` to show all. Must be non-negative.
+
+* Added ``--overwrite`` profile mode option to explicitly allow replacing existing workload output.
+
+* Improved GPU Benchmarking and Roofline profiling/analysis support for gfx1150/gfx1151/gfx1152 architectures.
+  * gfx11 supports Wave Matrix Multiply Accumulate (WMMA), replacing MFMA operations.
+
+* Added experimental Triton support to ML API tracing. Profile with `--experimental --triton-trace` to emit a ROCTX marker per Triton/Inductor kernel launch attributed to the user call site, and analyze with `--experimental --list-triton-operators` or `--experimental --triton-operator <pattern>` to list or filter Triton operators independently of Torch.
+
+* Added support for GPU metrics on gfx1153 hardware.
+
+### Changed
+
+* Split Python version requirements by mode. Profile mode now runs on Python 3.8+ (standard library only). Analyze mode requires Python 3.9+ and exits with a clear message on older interpreters instead of failing with an import error.
+
+* `--pc-sampling-sorting-type` now defaults to `count` (was `offset`), so the PC sampling table shows the most-sampled instructions first.
+
+* Renamed the `Pct of Peak` / `PoP` analysis column to `Percent of Peak` in analysis output.
+
+* `--torch-trace` now wraps the tensor methods `to`, `cpu`, `cuda`, and `contiguous` by default. Previously these wraps were enabled by setting `ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=1`. Set `ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=0` (or `false`, `no`, `off`) to disable them.
+
+* Renamed the torch-trace output files and directory from `torch_trace_*` to `ml_api_trace_*`.
+
+* Profile mode now errors when the target workload directory is non-empty unless `--overwrite` is passed. `--bench-only` likewise requires `--overwrite` before replacing an existing `roofline.csv`.
+
+* Renamed `num_hbm_channels` to `num_memory_channels` in machine specifications to unify memory channel reporting across GPU families.
+
+### Removed
+
+* Removed the multi-node analysis options ``--nodes``, ``--list-nodes`` (analyze mode) and the experimental ``--spatial-multiplexing`` option (profile and analyze modes). These features did not work as expected and will be redesigned in a future release.
+
+### Optimized
+
+### Resolved issues
+
+* The Dual VALU (VOPD) instruction mix metric is now reported for gfx115x in the WGP panel.
+
+* Fixed multi-user roofline benchmarking on shared systems: the per-GPU lock file under `/tmp/rocprof-compute-benchmark/` is now created world-readable/writable (0666) so any user can acquire it, regardless of which user created it first or the active umask. Stale unreadable lock files left by older versions in a sticky `/tmp` cannot be repaired automatically and must be removed manually by their owner or an administrator.
+
+* Fixed CDNA memory chart CLI output to show the numbered `3. Memory Chart` header without repeating the default per-kernel normalization label.
+
+### Upcoming changes
+
+### Known issues
+
+* Workloads profiled with earlier versions must be re-profiled before analysis. The sysinfo schema changed and older workload directories are not compatible.
+
+* CLI mode block 4 Roofline plot's legend will not appear if there are too many kernels to list, in relation to the user's terminal size. Same per-kernel roofline rate metrics and AI plot point details can be read in block 4's preceding tables.
+
 ## ROCm Compute Profiler 3.7.0 for ROCm 7.14.0
 
 ### Added
@@ -68,13 +169,13 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Kernels with missing counter data after iteration multiplexing imputation are now excluded from metrics calculations. A warning at analysis time lists the affected kernels. Their execution times remain visible in Top Stats.
 
-* Fixed empirical roofline benchmark to correctly produce double the Matrix BF16 Gflop/s on gfx90a (MI 200 series) GPUs
+* Fixed empirical roofline benchmark to correctly produce double the Matrix BF16 Gflop/s on gfx90a (AMD Instinct MI200 Series) GPUs.
 
-* PC sampling collection now runs when requested via the `pc_sampling` block alias (`--block pc_sampling`), instead of being silently skipped
+* PC sampling collection now runs when requested via the `pc_sampling` block alias (`--block pc_sampling`), instead of being silently skipped.
 
 ### Upcoming changes
 
-* Roofline support for RDNA 3.5 gfx1151 devices
+* Roofline support for gfx1153 devices.
 
 ### Known issues
 

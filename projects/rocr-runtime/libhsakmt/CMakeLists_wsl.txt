@@ -110,6 +110,7 @@ set ( ROCDXG_SRC "src/dxg/debug.cpp"
                  "src/dxg/perfctr.cpp"
                  "src/dxg/queues.cpp"
                  "src/dxg/rocrstub.cpp"
+                 "src/dxg/rocdxg_smi.cpp"
                  "src/dxg/time.cpp"
                  "src/dxg/topology.cpp"
                  "src/dxg/topology_lnx.cpp"
@@ -144,7 +145,6 @@ target_include_directories( ${ROCDXG_TARGET}
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   PRIVATE
-  ${WIN_SDK}
   ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi
   ${CMAKE_CURRENT_SOURCE_DIR}/../runtime
@@ -152,12 +152,15 @@ target_include_directories( ${ROCDXG_TARGET}
   ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/hsa-runtime
   ${CMAKE_CURRENT_SOURCE_DIR}/include/hsakmt/drm)
 
+target_include_directories( ${ROCDXG_TARGET} SYSTEM PRIVATE ${WIN_SDK} )
+
 add_compile_definitions(LINUX __AMD64__ LITTLEENDIAN_CPU HSA_LARGE_MODEL)
 
 # Ensure version macro is defined for this target
 target_compile_definitions(${ROCDXG_TARGET} PRIVATE ROCDXG_VERSION="${ROCDXG_VERSION}")
 
-target_link_directories(${ROCDXG_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi/lnx/lib)
+target_link_directories(${ROCDXG_TARGET} PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi/lnx/lib)
 target_link_libraries(${ROCDXG_TARGET} PRIVATE wkmi)
 
 set_property(TARGET ${ROCDXG_TARGET} PROPERTY LINK_FLAGS ${ROCDXG_LINK_FLAGS})
@@ -192,9 +195,10 @@ install ( TARGETS ${ROCDXG_TARGET} EXPORT ${ROCDXG_TARGET}Targets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary )
 
-# Install public headers
-#install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/${ROCDXG_TARGET} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-#  COMPONENT dev PATTERN "*drm*" EXCLUDE )
+# Public headers (hsakmt.h, hsakmttypes.h, rocdxg_smi.h) are already installed
+# by libhsakmt/core-runtime. librocdxg.pc reuses libhsakmt's includedir so no
+# separate header installation is needed here (and duplicating it breaks
+# TheRock artifact uniqueness checks — see ROCm/TheRock#7005).
 
 # Record our usage data for clients find_package calls.
 install ( EXPORT ${ROCDXG_TARGET}Targets

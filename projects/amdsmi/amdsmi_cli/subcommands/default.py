@@ -153,13 +153,19 @@ class DefaultCommands:
                 gfx_util = gpu_metrics["average_gfx_activity"]
                 if gpu_metrics["current_socket_power"] != "N/A":
                     current_power = gpu_metrics["current_socket_power"]
-                else:
+                elif gpu_metrics["average_socket_power"] != "N/A":
                     current_power = gpu_metrics["average_socket_power"]
+                elif gpu_metrics.get("apu_metrics.average_socket_power", "N/A") != "N/A":
+                    current_power = gpu_metrics["apu_metrics.average_socket_power"]
+                else:
+                    current_power = "N/A"
                 # If the hotspot temperature is not available use the edge temp (applicable to APUs)
                 if gpu_metrics["temperature_hotspot"] != "N/A":
                     temperature = gpu_metrics["temperature_hotspot"]
                 elif gpu_metrics["temperature_edge"] != "N/A":
                     temperature = gpu_metrics["temperature_edge"]
+                elif gpu_metrics.get("apu_metrics.temperature_gfx", "N/A") != "N/A":
+                    temperature = round(gpu_metrics["apu_metrics.temperature_gfx"])
                 else:
                     temperature = "N/A"
             else:
@@ -178,9 +184,12 @@ class DefaultCommands:
                 socket_power_limit = self.helpers.convert_SI_unit(
                     socket_power_limit, AMDSMIHelpers.SI_Unit.MICRO
                 )
-                power_usage = {"current_power": current_power, "power_limit": socket_power_limit}
             except amdsmi_exception.AmdSmiLibraryException:
+                socket_power_limit = "N/A"
+            if current_power == "N/A" and socket_power_limit == "N/A":
                 power_usage = "N/A"
+            else:
+                power_usage = {"current_power": current_power, "power_limit": socket_power_limit}
             gpu_info_dict.update({"power_usage": power_usage})
 
             # memory usage - Use APU-aware memory selection

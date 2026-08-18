@@ -2,7 +2,7 @@
  * Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
  * Adapted from NVIDIA NCCL ir/nccl_device_wrapper.h (v2.29.2-1).
  *
- * See LICENSE.txt for license information
+ * See LICENSE.txt for more license information
  ************************************************************************/
 #ifndef _NCCL_DEVICE_WRAPPER_H_
 #define _NCCL_DEVICE_WRAPPER_H_
@@ -20,14 +20,36 @@
  * Sectioning of this header (mirrored in __impl.h):
  *   [A] Always-on    — APIs whose RCCL prerequisites already exist.
  *   [B] Always-on    — APIs that take ncclCoopAny by value.
- *   [C] Stubbed-out  — APIs whose underlying RCCL primitives (ncclGin*,
- *                      composite ncclBarrierSession, ncclGinFenceLevel)
- *                      do not yet exist in RCCL. Wrapped in `#if 0` and
- *                      ready to enable once those land via a future sync
- *                      with NCCL.
+ *   [C] Always-on    — GIN + composite barrier APIs (ncclGin*,
+ *                      ncclGinBarrierSession, composite ncclBarrierSession,
+ *                      ncclGinFenceLevel). Enabled now that the NCCL
+ *                      v2.29.x GIN sync landed these primitives in RCCL.
  */
 
-#include "nccl_device.h"
+/*
+ * Declaration/type-only view of the NCCL Device API for LLVM IR users.
+ *
+ * This header intentionally excludes nccl_device/impl/xxx__funcs.h so user IR
+ * bitcode can resolve NCCL Device API implementations from libnccl_device.bc.
+ */
+#include "nccl_device/coop.h"
+#include "nccl_device/core.h"
+#include "nccl_device/ll_a2a.h"
+#include "nccl_device/lsa_barrier.h"
+#include "nccl_device/gin_barrier.h"
+#include "nccl_device/barrier.h"
+#include "nccl_device/ptr.h"
+#include "nccl_device/reduce_copy.h"
+
+#include "nccl_device/impl/core__types.h"
+#include "nccl_device/impl/comm__types.h"
+#include "nccl_device/impl/ll_a2a__types.h"
+#include "nccl_device/impl/lsa_barrier__types.h"
+#include "nccl_device/impl/gin__types.h"
+#include "nccl_device/impl/gin_barrier__types.h"
+#include "nccl_device/impl/barrier__types.h"
+#include "nccl_device/impl/ptr__types.h"
+#include "nccl_device/impl/reduce_copy__types.h"
 
 /* ------------------------------------------------------------------------
  * NCCL_IR_EXPORT: full attribute set for an exported C-ABI thunk in the
@@ -89,6 +111,32 @@
  *     (src/include/nccl_device/impl/core__funcs.h)
  * ======================================================================*/
 
+/* Session struct size getters
+ *
+ * Used by the Python device API to allocate session storage with the correct
+ * size via llvm.alloca, without duplicating the C++ struct layout in Python.
+ */
+NCCL_IR_EXTERN_C __device__ size_t ncclLsaBarrierSession_C_size();
+NCCL_IR_EXTERN_C __device__ size_t ncclGinBarrierSession_C_size();
+NCCL_IR_EXTERN_C __device__ size_t ncclBarrierSession_C_size();
+
+/* ncclDevComm field accessors
+ *
+ * ncclDevComm is a public C struct, but its full layout (~200 bytes with
+ * embedded arrays and structs) is not mirrored in Python. The Python device
+ * layer reads its public fields through these accessor functions.
+ */
+NCCL_IR_EXTERN_C __device__ int                  ncclDevComm_Rank(ncclDevComm const* comm);
+NCCL_IR_EXTERN_C __device__ int                  ncclDevComm_NRanks(ncclDevComm const* comm);
+NCCL_IR_EXTERN_C __device__ int                  ncclDevComm_LsaRank(ncclDevComm const* comm);
+NCCL_IR_EXTERN_C __device__ int                  ncclDevComm_LsaSize(ncclDevComm const* comm);
+NCCL_IR_EXTERN_C __device__ ncclLsaBarrierHandle ncclDevComm_LsaBarrier(ncclDevComm const* comm);
+NCCL_IR_EXTERN_C __device__ ncclGinBarrierHandle ncclDevComm_RailGinBarrier(ncclDevComm const* comm);
+NCCL_IR_EXTERN_C __device__ ncclLsaBarrierHandle ncclDevComm_HybridLsaBarrier(ncclDevComm const* comm);
+NCCL_IR_EXTERN_C __device__ ncclGinBarrierHandle ncclDevComm_HybridRailGinBarrier(ncclDevComm const* comm);
+NCCL_IR_EXTERN_C __device__ ncclGinBarrierHandle ncclDevComm_WorldGinBarrier(ncclDevComm const* comm);
+NCCL_IR_EXTERN_C __device__ ncclMultimemHandle   ncclDevComm_LsaMultimem(ncclDevComm const* comm);
+
 /* Peer pointer API */
 NCCL_IR_EXPORT void* ncclGetPeerPointerTeam(
     ncclWindow_t w, size_t offset, ncclTeam tm, int peer);
@@ -114,7 +162,7 @@ struct ncclLsaBarrierSession_C {
 NCCL_IR_EXPORT void ncclCoopAnyInitThread(ncclCoopAny* coop);
 NCCL_IR_EXPORT void ncclCoopAnyInitWarp(ncclCoopAny* coop);
 NCCL_IR_EXPORT void ncclCoopAnyInitLanes(ncclCoopAny* coop, ncclCoopMask_t lane_mask);
-NCCL_IR_EXPORT void ncclCoopAnyInitWarpSpan(ncclCoopAny* coop, int warp0, int nWarps, int id);
+NCCL_IR_EXPORT void ncclCoopAnyInitWarpSpan(ncclCoopAny* coop, int warp0, int nWarps, int id, void* barrierLds);
 NCCL_IR_EXPORT void ncclCoopAnyInitCta(ncclCoopAny* coop);
 
 NCCL_IR_EXPORT int  ncclCoopThreadRank(const ncclCoopAny* coop);
@@ -148,19 +196,20 @@ void ncclLsaBarrierSessionSync(ncclLsaBarrierSession_C* session,
 
 
 /* ========================================================================
- * [C] APIs whose RCCL prerequisites do not exist yet
+ * [C] GIN + composite Barrier Session APIs
  *
- * Required but missing in RCCL:
- *   - ncclGin_C, ncclGinBarrierSession<Coop>, ncclGinBarrierHandle,
- *     ncclGinFenceLevel  (no GPU-Initiated Networking in RCCL today)
- *   - ncclBarrierSession<Coop>  (composite inner-LSA + outer-GIN barrier)
+ * Underlying RCCL primitives (present since the NCCL v2.29.x GIN sync):
+ *   - ncclGin / ncclGin_C, ncclGinBarrierSession<Coop>, ncclGinBarrierHandle,
+ *     ncclGinFenceLevel         (nccl_device/gin.h, gin_barrier.h)
+ *   - ncclBarrierSession<Coop>   (composite inner-LSA + outer-GIN barrier;
+ *                                 nccl_device/barrier.h)
  *
- * Kept here verbatim from NCCL v2.29.2-1 so that a future sync that
- * imports the GIN / composite-barrier infrastructure into RCCL only has
- * to remove the `#if 0` guard (these all need ncclCoopAny, which is
- * unconditionally available).
+ * All of these take ncclCoopAny, which is unconditionally available. The
+ * shared device headers gate these templates on the upstream __CUDACC__,
+ * which hipify rewrites to __HIPCC__ in the staged copy this bitcode build
+ * consumes (true under clang -x hip), so no shared-header change is needed
+ * to enable them here.
  * ======================================================================*/
-#if 0  /* TODO(rccl-ir): enable once RCCL grows ncclGin* / composite Barrier APIs */
 
 /* Struct definitions */
 struct ncclGinBarrierSession_C {
@@ -184,7 +233,7 @@ NCCL_IR_EXPORT void ncclGinBarrierSessionSync(
     ncclGinBarrierSession_C* session,
     ncclCoopAny coop,
     cuda::memory_order order,
-    ncclGinFenceLevel fence);
+    ncclGinFenceLevel fence = ncclGinFenceLevel::Put | ncclGinFenceLevel::Get);
 
 /* Composite (LSA + GIN) Barrier Session APIs */
 NCCL_IR_EXPORT void ncclBarrierSessionInit(
@@ -203,8 +252,6 @@ NCCL_IR_EXPORT void ncclBarrierSessionSync(
     ncclBarrierSession_C* session,
     ncclCoopAny coop,
     cuda::memory_order order,
-    ncclGinFenceLevel fence);
-
-#endif  /* 0 — GIN / composite Barrier wrappers */
+    ncclGinFenceLevel fence = ncclGinFenceLevel::Put | ncclGinFenceLevel::Get);
 
 #endif  /* _NCCL_DEVICE_WRAPPER_H_ */

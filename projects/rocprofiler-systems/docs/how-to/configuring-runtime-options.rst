@@ -42,7 +42,14 @@ and tweak the default sampling values.
    # ...
    ROCPROFSYS_SAMPLING_FREQ        = 50
    ROCPROFSYS_SAMPLING_CPUS        = all
-   ROCPROFSYS_SAMPLING_GPUS        = $env:HIP_VISIBLE_DEVICES
+   ROCPROFSYS_SAMPLING_GPUS        = all
+
+.. note::
+
+   * ``ROCPROFSYS_SAMPLING_GPUS`` is further restricted to the GPUs that the ROCm runtime
+     exposes, as controlled by ``ROCR_VISIBLE_DEVICES`` and ``HIP_VISIBLE_DEVICES``.
+   * ``ROCPROFSYS_SAMPLING_GPUS`` accepts only ``all`` or numeric indices and ranges, not
+     GPU UUIDs.
 
 Use the configuration file
 -----------------------------------
@@ -282,7 +289,13 @@ For example, the following is a valid configuration:
 
    ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,vcn_activity,mem_usage
 
-Supported values for ``ROCPROFSYS_AMD_SMI_METRICS`` are: ``busy``, ``temp``, ``power``, ``vcn_activity``, ``mem_usage``, ``jpeg_activity``, ``xgmi``, ``pcie``.
+Supported values for ``ROCPROFSYS_AMD_SMI_METRICS`` are: ``all`` (or empty), ``none``, ``busy``,
+``gfx_clock``, ``jpeg_activity``, ``mem_clock``, ``mem_usage``, ``pcie``, ``power``,
+``sdma_usage``, ``temp``, ``vcn_activity``, ``xgmi``.
+
+.. note::
+
+   The ``sdma_usage`` metric requires AMD GPU driver 31.40 or higher and an Instinct-family GPU.
 
 API tracing is configured with the ``ROCPROFSYS_ROCM_DOMAINS`` setting. The domains are used to filter the events that are captured during profiling.
 Supported values for this setting are those supported by ROCprofiler-SDK, which are returned by the API ``get_callback_tracing_names()`` and ``get_buffer_tracing_names()``. See the `ROCprofiler-SDK developer API documentation <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/_doxygen/rocprofiler-sdk/html/>`_ to learn more about ROCprofiler-SDK APIs.
@@ -302,13 +315,19 @@ Use the following command to view the available domains:
      ``kfd_page_fault``, ``kfd_page_migrate``, ``kfd_queue``,
      ``kfd_event_queue``, ``kfd_event_unmap_from_gpu``, and
      ``kfd_event_dropped_events``. Requires ``HSA_XNACK=1``, an XNACK-capable
-     GPU, and ROCm 7.13 or later (ROCProfiler-SDK version 1.2.2 or above).
+     GPU, and ROCm 7.13 or later. For standalone `ROCprofiler-SDK <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html>`_ installations, requires ROCprofiler-SDK 1.2.2 or later.
 
 For example, the following is a valid configuration:
 
 .. code-block:: shell
 
    ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,rocdecode_api,rocjpeg_api
+
+Add ``hipfile_api`` to trace the hipFILE (GPU-direct storage) API:
+
+.. code-block:: shell
+
+   ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,hipfile_api
 
 
 For KFD event tracing, first check whether your GPU supports XNACK by running
@@ -355,8 +374,7 @@ unified-memory view is expected to be fault-only: page-fault totals and trigger
 breakdowns can populate, migration counters remain zero, and the Perfetto
 migration-throughput track is not shown.
 
-Requires an XNACK-capable AMD GPU with ``HSA_XNACK=1`` and ROCm 7.13 or later
-(ROCProfiler-SDK 1.2.2 or above). The KFD tracing domains
+Requires an XNACK-capable AMD GPU with ``HSA_XNACK=1`` and ROCm 7.13 or later. For standalone `ROCprofiler-SDK <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html>`_ installations, requires ROCprofiler-SDK 1.2.2 or later. The KFD tracing domains
 (``kfd_page_fault``, ``kfd_page_migrate``) are enabled automatically when this
 setting is on -- you do not need to add ``kfd_events`` to
 ``ROCPROFSYS_ROCM_DOMAINS`` separately.
@@ -419,10 +437,9 @@ Example: trace only activity inside a region named ``Compute``:
 
 .. code-block:: shell
 
-   rocprof-sys-run \
-       -e ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch \
-       -e ROCPROFSYS_SELECTED_REGIONS=Compute \
-       -- ./my_app
+   ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch \
+   ROCPROFSYS_SELECTED_REGIONS=Compute \
+   rocprof-sys-run -- ./my_app
 
 rocprof-sys-avail examples
 -----------------------------------
@@ -1475,7 +1492,7 @@ but do not override an existing value for the environment variable.
    ROCPROFSYS_SAMPLING_FREQ         = 50
    ROCPROFSYS_SAMPLING_DELAY        = 0.1
    ROCPROFSYS_SAMPLING_CPUS         = 0-3
-   ROCPROFSYS_SAMPLING_GPUS         = $env:HIP_VISIBLE_DEVICES
+   ROCPROFSYS_SAMPLING_GPUS         = all
 
    # misc env variables (see metadata JSON file after run)
    $env:ROCPROFSYS_SAMPLING_KEEP_DYNINST_SUFFIX  = OFF

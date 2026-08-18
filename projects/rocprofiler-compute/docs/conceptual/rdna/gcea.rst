@@ -4,11 +4,11 @@
 
 .. _rdna-gcea:
 
-====
-GCEA
-====
+=========================================
+Graphics Core Efficiency Arbiter (GCEA)
+=========================================
 
-**GCEA** names the stage where traffic leaves the on-chip cache hierarchy toward **DRAM**, covering memory-channel interfaces, the system arbiter (SARB), and return paths.
+Graphics Core Efficiency Arbiter (GCEA) names the stage where traffic leaves the on-chip cache hierarchy towards the DRAM, covering memory-channel interfaces, the system arbiter (SARB), and return paths.
 Use these panels when analyzing bandwidth limits or memory-controller behavior after GL2.
 
 The sections below list RDNA3.5 (gfx115x) GCEA / DRAM interface metric descriptions.
@@ -24,7 +24,7 @@ DRAM read interface
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx115x)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
       .. jinja:: rdna115x-dram-read-interface-gfx115x
@@ -35,18 +35,18 @@ DRAM write interface
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx115x)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
       .. jinja:: rdna115x-dram-write-interface-gfx115x
          :file: _templates/metrics_table.j2
 
-System Arbiter (SARB)
+System arbiter (SARB)
 ---------------------
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx115x)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
       .. jinja:: rdna115x-system-arbiter-sarb-gfx115x
@@ -57,7 +57,7 @@ Return interface
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx115x)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
       .. jinja:: rdna115x-return-interface-gfx115x
@@ -66,15 +66,15 @@ Return interface
 Memory chart: GCEA to system memory
 ===================================
 
-The following Memory Chart table aligns with the on-screen flow from GCEA out
-to system memory.
+The following memory chart table aligns with the on-screen flow from GCEA out
+to the system memory.
 
 Memory chart - GCEA to system memory
 ------------------------------------
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx115x)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
       .. jinja:: rdna115x-memory-chart-gcea-to-system-memory-gfx115x

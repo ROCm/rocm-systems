@@ -215,7 +215,7 @@ class FabricCommands:
                     | amdsmi_interface.amdsmi_wrapper.AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_UALOE
                     | amdsmi_interface.amdsmi_wrapper.AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_DERIVED_NETPORT
                 )
-                fabric_telemetry = amdsmi_interface.amdsmi_get_fabric_telemetry(
+                fabric_telemetry = amdsmi_interface.amdsmi_get_fabric_telemetry_data(
                     gpu_handle, category_mask
                 )
             except amdsmi_exception.AmdSmiLibraryException as e:

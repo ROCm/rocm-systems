@@ -125,6 +125,36 @@ TEST(RaceDetector, LdsCrossWave_WithBarrier) {
   EXPECT_FALSE(b.hasRace());
 }
 
+TEST(RaceDetector, LdsCrossWave_WarMissingBarrier) {
+  // WAR: wave 0 reads LDS[0], waitcnt, then wave 1 writes to LDS[0]
+  // without barrier → RACE on the write.
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8);
+  b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/0);
+  b.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/0);
+  // Missing barrier!
+  b.checkLdsWrite(/*wave=*/1, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  EXPECT_TRUE(b.hasLdsRace(0));
+}
+
+TEST(RaceDetector, LdsCrossWave_WarWithBarrier) {
+  // WAR: wave 0 reads LDS[0], waitcnt, barrier, then wave 1 writes → safe.
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8);
+  b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/0);
+  b.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/0);
+  b.barrier();
+  b.checkLdsWrite(/*wave=*/1, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, LdsCrossWave_WarNoOverlap) {
+  // WAR: wave 0 reads LDS[0..4), wave 1 writes LDS[4..8) → safe (no overlap).
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8);
+  b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/0);
+  b.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/0);
+  b.checkLdsWrite(/*wave=*/1, /*lane=*/0, /*addr=*/4, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
+}
+
 // ---- LDS same-wave races ----
 
 TEST(RaceDetector, LdsSameWave_WriteWriteOk) {
@@ -217,6 +247,84 @@ TEST(RaceDetector, SameWave_WaitcntBarrierOk) {
   b.barrier();
   b.checkVgprRead(/*wave=*/0, /*reg=*/2, /*lane=*/0);
   EXPECT_FALSE(b.hasRace());
+}
+
+// ---- VGPR write-after-write races ----
+
+TEST(RaceDetector, VgprWaw_GlobalLoadThenInstructionWrite) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.globalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1);
+  b.checkVgprWrite(/*wave=*/0, /*reg=*/2, /*lane=*/0);
+
+  ASSERT_EQ(b.raceCount(), 1);
+  const auto &violation = b.violations().front();
+  EXPECT_EQ(violation.space, RaceViolation::Space::VGPR);
+  EXPECT_EQ(violation.index, 2);
+  EXPECT_EQ(violation.lane, 0);
+  EXPECT_TRUE(violation.isWrite);
+  EXPECT_EQ(violation.conflictingEvent, EventId{0});
+}
+
+TEST(RaceDetector, VgprWaw_LdsReadThenInstructionWrite) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/2);
+  b.checkVgprWrite(/*wave=*/0, /*reg=*/2, /*lane=*/0);
+  EXPECT_TRUE(b.hasVgprRace(2));
+}
+
+TEST(RaceDetector, VgprWaw_WaitcntClearsPendingLoad) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.globalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1);
+  b.waitcnt(/*wave=*/0, /*vmcnt=*/0);
+  b.checkVgprWrite(/*wave=*/0, /*reg=*/2, /*lane=*/0);
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, VgprWaw_CleanRegisterNoRace) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.globalLoad(/*wave=*/0, /*vgprBase=*/1, /*numRegs=*/1);
+  b.checkVgprWrite(/*wave=*/0, /*reg=*/2, /*lane=*/0);
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, VgprWaw_WriteLaneMaskHonorsPendingLoadLanes) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8, /*waveSize=*/32);
+  b.globalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1, /*exec=*/1ULL << 5);
+
+  b.checkVgprWriteLanes(/*wave=*/0, /*reg=*/2, /*laneMask=*/1ULL << 3);
+  EXPECT_FALSE(b.hasRace());
+  b.checkVgprWriteLanes(/*wave=*/0, /*reg=*/2,
+                        /*laneMask=*/(1ULL << 3) | (1ULL << 5));
+
+  ASSERT_EQ(b.raceCount(), 1);
+  EXPECT_EQ(b.violations().front().lane, 5);
+}
+
+TEST(RaceDetector, VgprWaw_SubDwordDisjointBytesNoRace) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/2, /*vgprDst=*/2,
+            /*byteMask=*/0b0011);
+  b.checkVgprWrite(/*wave=*/0, /*reg=*/2, /*lane=*/0, /*byteMask=*/0b1100);
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, VgprWaw_SubDwordOverlappingBytesRace) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/2, /*vgprDst=*/2,
+            /*byteMask=*/0b0011);
+  b.checkVgprWrite(/*wave=*/0, /*reg=*/2, /*lane=*/0, /*byteMask=*/0b0011);
+  EXPECT_TRUE(b.hasVgprRace(2));
+}
+
+TEST(RaceDetector, VgprWaw_PreservesExactConflictForMultiplePendingLoads) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.globalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1);
+  b.globalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1);
+  b.checkVgprWrite(/*wave=*/0, /*reg=*/2, /*lane=*/0);
+
+  ASSERT_EQ(b.raceCount(), 2);
+  EXPECT_EQ(b.violations()[0].conflictingEvent, EventId{0});
+  EXPECT_EQ(b.violations()[1].conflictingEvent, EventId{1});
 }
 
 // ---- Deep event stack ----
@@ -407,6 +515,18 @@ TEST(RaceDetector, LdsCrossWave_GlobalLoadToLdsWriteMissingVmcnt) {
   b.checkVgprRead(/*wave=*/0, /*reg=*/1,
                   /*lane=*/0); // simulates ds_write reading v1
   EXPECT_TRUE(b.hasVgprRace(1));
+}
+
+TEST(RaceDetector, GlobalToLdsHonorsLaneMask) {
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8, /*waveSize=*/4);
+  b.globalToLds(/*wave=*/0, /*ldsAddrs=*/{0, 4, 8, 12}, /*bytesPerLane=*/4,
+                /*exec=*/0x1);
+
+  b.checkLdsRead(/*wave=*/1, /*lane=*/0, /*addr=*/4, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
+
+  b.checkLdsRead(/*wave=*/1, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  EXPECT_TRUE(b.hasLdsRace(0));
 }
 
 TEST(RaceDetector, LdsSameWave_MultiLaneReadOk) {
@@ -784,6 +904,18 @@ TEST(RaceDetector, CheckVgprReadAllLanes) {
   b3.checkVgprRead(/*wave=*/0, /*reg=*/1, /*lane=*/0);
   // Lane 0 was not in the exec mask of the load, so it should NOT race.
   EXPECT_FALSE(b3.hasRace());
+}
+
+TEST(RaceDetector, CheckVgprReadLanesReportsMaskedLane) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.globalLoad(/*wave=*/0, /*vgprBase=*/1, /*numRegs=*/1, /*exec=*/1ULL << 5);
+  b.checkVgprReadLanes(/*wave=*/0, /*reg=*/1, /*laneMask=*/(1ULL << 0) | (1ULL << 5));
+
+  ASSERT_EQ(b.raceCount(), 1);
+  const auto &v = b.violations()[0];
+  EXPECT_EQ(v.space, RaceViolation::Space::VGPR);
+  EXPECT_EQ(v.index, 1);
+  EXPECT_EQ(v.lane, 5);
 }
 
 // ---- Mixed counter types ----

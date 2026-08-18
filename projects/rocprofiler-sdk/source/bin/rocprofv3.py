@@ -2,7 +2,7 @@
 
 # MIT License
 #
-# Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -41,6 +41,17 @@ CONST_VERSION_INFO = {
     "compiler_version": "@CMAKE_CXX_COMPILER_VERSION@",
     "rocm_version": "@rocm_version_FULL_VERSION@",
 }
+
+# Perfetto's TraceConfig BufferConfig.size_kb field is a uint32_t, and the
+# tracing service allocates size_kb * 1024 bytes and rejects the config when
+# that byte count does not fit in a uint32_t. So although the option is named
+# in "KB", the value is treated as KiB (multiplied by 1024). The usable range
+# is 1 KiB up to floor((2^32 - 1) / 1024) = 4,194,303 KiB. These bounds mirror
+# the C++ limits (defaults::perfetto_buffer_size_{min,max}_kb in
+# source/lib/output/output_config.hpp) so both validation paths agree.
+PERFETTO_BUFFER_SIZE_KB_MIN = 1
+PERFETTO_BUFFER_SIZE_KB_MAX = ((1 << 32) - 1) // 1024
+DEPRECATED_DIRECT_OUTPUT_FORMATS = ("csv", "pftrace", "otf2")
 
 
 class dotdict(dict):
@@ -90,6 +101,30 @@ def warning(msg, *args):
     sys.stderr.flush()
 
 
+def warn_deprecated_output_formats(output_formats):
+    requested_formats = {
+        str(itr).strip().lower() for itr in (output_formats or []) if str(itr).strip()
+    }
+    deprecated_formats = [
+        itr for itr in DEPRECATED_DIRECT_OUTPUT_FORMATS if itr in requested_formats
+    ]
+
+    if deprecated_formats:
+        display_names = {
+            "csv": "CSV",
+            "pftrace": "PFTrace (Perfetto)",
+            "otf2": "OTF2",
+        }
+        warning(
+            "The following direct rocprofv3 output format(s) are deprecated: "
+            f"{', '.join(display_names[itr] for itr in deprecated_formats)}. "
+            "Some tracing features, including hipFILE and rocSHMEM tracing, might not "
+            "produce output in these formats. Use `--output-format rocpd` (the default), "
+            "then run `rocpd convert -i <database>.db --output-format csv` when CSV "
+            "output is needed."
+        )
+
+
 def format_help(formatter, w=120, h=40):
     """Return a wider HelpFormatter, if possible."""
     try:
@@ -122,6 +157,24 @@ def strtobool(val):
     else:
         val_type = type(val).__name__
         raise ValueError(f"invalid truth value {val} (type={val_type})")
+
+
+def perfetto_buffer_size_kb(val):
+    if isinstance(val, bool) or not isinstance(val, (int, str)):
+        raise argparse.ArgumentTypeError(f"invalid integer value: {val}")
+
+    try:
+        value = int(val)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError(f"invalid integer value: {val}")
+
+    if not PERFETTO_BUFFER_SIZE_KB_MIN <= value <= PERFETTO_BUFFER_SIZE_KB_MAX:
+        raise argparse.ArgumentTypeError(
+            f"must be between {PERFETTO_BUFFER_SIZE_KB_MIN} and "
+            f"{PERFETTO_BUFFER_SIZE_KB_MAX} KB"
+        )
+
+    return value
 
 
 def get_mpi_rank_and_size(custom_rank_env=None, custom_size_env=None):
@@ -332,6 +385,81 @@ class booleanArgAction(argparse.Action):
         setattr(args, self.dest, strtobool(value))
 
 
+# Categories recognized by --ompt-trace
+OMPT_TRACE_CATEGORIES = (
+    "all",
+    "thread",
+    "parallel",
+    "task",
+    "sync",
+    "mutex",
+    "target",
+    "device",
+    "error",
+)
+
+
+class omptTraceArgAction(argparse.Action):
+    def __call__(self, parser, args, values, option_string=None):
+        # nargs="*" with no value -> values is an empty list -> bare bool
+        if not values:
+            setattr(args, self.dest, True)
+            setattr(args, f"{self.dest}_operations", "")
+            return
+
+        tokens = [str(v).strip().lower() for v in values if str(v).strip()]
+
+        # Reject comma-containing tokens with an explicit migration hint, so users
+        # who tried 'parallel,task,target' (a natural-looking but inconsistent
+        # spelling) get an actionable error instead of "unknown category".
+        bad_commas = [t for t in tokens if "," in t]
+        if bad_commas:
+            parser.error(
+                "--ompt-trace: tokens must be space-separated, not comma-separated; "
+                "use e.g. '--ompt-trace parallel task target' (got {bad!r})".format(
+                    bad=" ".join(bad_commas),
+                )
+            )
+
+        # Single bool-like token preserves the historical --ompt-trace=true/false contract
+        if len(tokens) == 1:
+            try:
+                bool_val = strtobool(tokens[0])
+                setattr(args, self.dest, bool_val)
+                setattr(args, f"{self.dest}_operations", "")
+                return
+            except (ValueError, AttributeError):
+                pass
+
+        unknown = [t for t in tokens if t not in OMPT_TRACE_CATEGORIES]
+        if unknown:
+            parser.error(
+                "--ompt-trace: unknown categor{plural} {bad!r}; "
+                "valid categories: {good}".format(
+                    plural="ies" if len(unknown) > 1 else "y",
+                    bad=" ".join(unknown),
+                    good=" ".join(OMPT_TRACE_CATEGORIES),
+                )
+            )
+
+        # "all" is the natural superset and is equivalent to no filter
+        if "all" in tokens:
+            extra = [t for t in tokens if t != "all"]
+            if extra:
+                warning(
+                    "--ompt-trace: 'all' already selects every category; ignoring "
+                    "additional categor{plural} {extra}".format(
+                        plural="ies" if len(extra) > 1 else "y",
+                        extra=" ".join(extra),
+                    )
+                )
+            tokens = []
+        setattr(args, self.dest, True)
+        # The tool-side env var still uses comma separation (env vars are single
+        # strings; the rest of the SDK uses comma for list-valued env vars).
+        setattr(args, f"{self.dest}_operations", ",".join(tokens))
+
+
 def parse_arguments(args=None):
 
     usage_examples = """
@@ -412,7 +540,7 @@ For attachment profiling of running processes:
     io_options.add_argument(
         "-f",
         "--output-format",
-        help="For adding output format (supported formats: csv, json, pftrace, otf2, rocpd)",
+        help="For adding output format (supported formats: csv, json, pftrace, otf2, rocpd). Direct csv, pftrace, and otf2 output is deprecated; use rocpd and rocpd convert",
         nargs="+",
         default=None,
         choices=("csv", "json", "pftrace", "otf2", "rocpd"),
@@ -444,13 +572,13 @@ For attachment profiling of running processes:
         aggregate_tracing_options,
         "-r",
         "--runtime-trace",
-        help="Collect tracing data for HIP runtime API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, Memory operations (copies, scratch, and allocation), and Kernel dispatches. Similar to --sys-trace but without tracing HIP compiler API and the underlying HSA API.",
+        help="Collect tracing data for HIP runtime API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, rocSHMEM API, hipFILE API, Memory operations (copies, scratch, and allocation), and Kernel dispatches. Similar to --sys-trace but without tracing HIP compiler API and the underlying HSA API.",
     )
     add_parser_bool_argument(
         aggregate_tracing_options,
         "-s",
         "--sys-trace",
-        help="Collect tracing data for HIP API, HSA API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, Memory operations (copies, scratch, and allocations), and Kernel dispatches.",
+        help="Collect tracing data for HIP API, HSA API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, rocSHMEM API, hipFILE API, Memory operations (copies, scratch, and allocations), and Kernel dispatches.",
     )
 
     basic_tracing_options = parser.add_argument_group("Basic tracing options")
@@ -470,6 +598,11 @@ For attachment profiling of running processes:
         basic_tracing_options,
         "--kernel-trace",
         help="For collecting Kernel Dispatch Traces",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--hip-graph-trace",
+        help="For collecting one record per hipGraphLaunch invocation. Emits graph launch records to JSON and rocpd with the graph_exec_id and kernel_dispatch_count for each launch. Independent of --kernel-trace; kernel-dispatch records are emitted by --kernel-trace. Automatically enabled by --hip-trace and --hip-runtime-trace.",
     )
     add_parser_bool_argument(
         basic_tracing_options,
@@ -501,6 +634,21 @@ For attachment profiling of running processes:
         "--rccl-trace",
         help="For collecting RCCL(ROCm Communication Collectives Library. Also pronounced as 'Rickle' ) Traces",
     )
+    basic_tracing_options.add_argument(
+        "--ompt-trace",
+        action=omptTraceArgAction,
+        nargs="*",
+        type=str,
+        required=False,
+        default=None,
+        metavar="CATEGORY",
+        help=(
+            "For collecting OMPT (OpenMP Tools) Traces. With no value (or "
+            "'true'/'all') collects every OMPT operation. Pass a space-separated "
+            "list of categories to filter, e.g. '--ompt-trace parallel task "
+            "target'. Categories: " + " ".join(OMPT_TRACE_CATEGORIES)
+        ),
+    )
     add_parser_bool_argument(
         basic_tracing_options,
         "--kokkos-trace",
@@ -515,6 +663,16 @@ For attachment profiling of running processes:
         basic_tracing_options,
         "--rocjpeg-trace",
         help="For collecting rocJPEG Traces",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--rocshmem-trace",
+        help="For collecting rocSHMEM (ROCm SHared MEMory) host-stream API Traces",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--hipfile-trace",
+        help="For collecting hipFILE Traces",
     )
 
     extended_tracing_options = parser.add_argument_group("Granular tracing options")
@@ -803,9 +961,9 @@ For attachment profiling of running processes:
     )
     perfetto_options.add_argument(
         "--perfetto-buffer-size",
-        help="Size of buffer for perfetto output in KB. default: 1 GB",
+        help=f"Size of buffer for perfetto output in KB ({PERFETTO_BUFFER_SIZE_KB_MIN}-{PERFETTO_BUFFER_SIZE_KB_MAX}). default: 1 GB",
         default=None,
-        type=int,
+        type=perfetto_buffer_size_kb,
         metavar="KB",
     )
     perfetto_options.add_argument(
@@ -999,6 +1157,12 @@ For attachment profiling of running processes:
         help="Enables thread trace",
     )
 
+    add_parser_bool_argument(
+        att_options,
+        "--att-no-intercept",
+        help="Enables ATT quick-scan mode without kernel-dispatch interception.",
+    )
+
     att_options.add_argument(
         "--att-library-path",
         help="Search path to decoder library.",
@@ -1028,7 +1192,7 @@ For attachment profiling of running processes:
 
     att_options.add_argument(
         "--att-buffer-size",
-        help="Thread trace buffer size. Default 256MB",
+        help="Thread trace buffer size. Default 384MB",
         default=None,
         type=str,
     )
@@ -1080,6 +1244,12 @@ For attachment profiling of running processes:
         "--att-serialize-all",
         default=False,
         help="Serialize all kernels, not just the traced ones.",
+    )
+
+    add_parser_bool_argument(
+        att_options,
+        "--att-no-detail",
+        help="Collect occupancy data without instruction-level detail.",
     )
 
     return (parser.parse_args(rocp_args), app_args)
@@ -1212,6 +1382,12 @@ def has_set_attr(obj, key):
 
 def patch_args(data):
     """Used to handle certain fields which might be specified as a string instead of an array or vice-versa"""
+
+    if hasattr(data, "perfetto_buffer_size") and data.perfetto_buffer_size is not None:
+        try:
+            data.perfetto_buffer_size = perfetto_buffer_size_kb(data.perfetto_buffer_size)
+        except argparse.ArgumentTypeError as err:
+            fatal_error(f"Invalid perfetto_buffer_size: {err}")
 
     if hasattr(data, "kernel_iteration_range") and isinstance(
         data.kernel_iteration_range, str
@@ -1549,9 +1725,12 @@ def run(app_args, args, **kwargs):
     if not args.output_format:
         args.output_format = ["rocpd"]
 
-    update_env(
-        "ROCPROF_OUTPUT_FORMAT", ",".join(args.output_format), append=True, join_char=","
+    effective_output_formats = list(args.output_format)
+    effective_output_formats.extend(
+        re.split(r"[\s,;:]+", app_env.get("ROCPROF_OUTPUT_FORMAT", ""))
     )
+    if args.hipfile_trace or args.rocshmem_trace:
+        warn_deprecated_output_formats(effective_output_formats)
 
     if args.kokkos_trace:
         update_env("KOKKOS_TOOLS_LIBS", ROCPROF_KOKKOSP_LIBRARY, append=True)
@@ -1572,8 +1751,11 @@ def run(app_args, args, **kwargs):
             "memory_allocation_trace",
             "scratch_memory_trace",
             "rccl_trace",
+            "ompt_trace",
             "rocdecode_trace",
             "rocjpeg_trace",
+            "rocshmem_trace",
+            "hipfile_trace",
         ):
             setattrifnone(args, itr, True)
 
@@ -1587,14 +1769,25 @@ def run(app_args, args, **kwargs):
             "memory_allocation_trace",
             "scratch_memory_trace",
             "rccl_trace",
+            "ompt_trace",
             "rocdecode_trace",
             "rocjpeg_trace",
+            "rocshmem_trace",
+            "hipfile_trace",
         ):
             setattrifnone(args, itr, True)
+
+    update_env(
+        "ROCPROF_OUTPUT_FORMAT", ",".join(args.output_format), append=True, join_char=","
+    )
 
     if args.hip_trace:
         for itr in ("compiler", "runtime"):
             setattrifnone(args, f"hip_{itr}_trace", True)
+
+    if args.hip_runtime_trace:
+        # HIP graphs are part of the HIP runtime
+        setattrifnone(args, "hip_graph_trace", True)
 
     if args.hsa_trace:
         for itr in ("core", "amd", "image", "finalizer"):
@@ -1603,6 +1796,9 @@ def run(app_args, args, **kwargs):
     if args.kfd_trace:
         for itr in ("page_migration", "page_mapping", "queue", "dropped_events"):
             setattrifnone(args, f"kfd_{itr}_trace", True)
+
+    if args.att_no_intercept:
+        args.advanced_thread_trace = True
 
     trace_count = 0
     trace_opts = ["--hip-trace", "--hsa-trace", "--kfd-trace"]
@@ -1616,9 +1812,13 @@ def run(app_args, args, **kwargs):
             ["hsa_finalizer_trace", "HSA_FINALIZER_EXT_API_TRACE"],
             ["marker_trace", "MARKER_API_TRACE"],
             ["rccl_trace", "RCCL_API_TRACE"],
+            ["ompt_trace", "OMPT_TRACE"],
             ["rocdecode_trace", "ROCDECODE_API_TRACE"],
             ["rocjpeg_trace", "ROCJPEG_API_TRACE"],
+            ["rocshmem_trace", "ROCSHMEM_API_TRACE"],
+            ["hipfile_trace", "HIPFILE_API_TRACE"],
             ["kernel_trace", "KERNEL_TRACE"],
+            ["hip_graph_trace", "HIP_GRAPH_TRACE"],
             ["memory_copy_trace", "MEMORY_COPY_TRACE"],
             ["memory_allocation_trace", "MEMORY_ALLOCATION_TRACE"],
             ["kfd_page_migration_trace", "KFD_PAGE_MIGRATION_TRACE"],
@@ -1648,6 +1848,14 @@ def run(app_args, args, **kwargs):
     # to override the roctx symbols of an app linked to the old roctracer roctx
     if args.marker_trace and not args.suppress_marker_preload:
         update_env("LD_PRELOAD", ROCPROF_ROCTX_LIBRARY, append=True)
+
+    # Propagate the optional OMPT category filter (set by omptTraceArgAction)
+    if getattr(args, "ompt_trace_operations", ""):
+        update_env(
+            "ROCPROF_OMPT_TRACE_OPERATIONS",
+            args.ompt_trace_operations,
+            overwrite_if_true=True,
+        )
 
     if trace_count == 0 and len(app_args) != 0:
         warning("No tracing options were enabled.")
@@ -2065,6 +2273,7 @@ def run(app_args, args, **kwargs):
     if args.advanced_thread_trace:
 
         update_env("ROCPROF_ADVANCED_THREAD_TRACE", True, overwrite=True)
+        update_env("ROCPROF_ATT_NO_INTERCEPT", args.att_no_intercept, overwrite=True)
 
         if args.att_target_cu is not None:
             update_env(
@@ -2103,6 +2312,12 @@ def run(app_args, args, **kwargs):
                 args.att_serialize_all,
                 overwrite=True,
             )
+        if args.att_no_detail:
+            update_env(
+                "ROCPROF_ATT_PARAM_NO_DETAIL",
+                args.att_no_detail,
+                overwrite=True,
+            )
         if args.att_gpu_index:
             update_env(
                 "ROCPROF_ATT_PARAM_GPU_INDEX",
@@ -2115,7 +2330,7 @@ def run(app_args, args, **kwargs):
                 args.att_library_path,
                 overwrite=True,
             )
-        else:
+        elif not args.att_no_intercept:
             fatal_error(
                 f"rocprof-trace-decoder library path not found in {get_att_paths(args)}"
             )
@@ -2235,6 +2450,14 @@ def main(argv=None):
 
     def validate_selected_regions_conflicts(_args):
         if getattr(_args, "selected_regions", False) and getattr(
+            _args, "att_no_intercept", False
+        ):
+            warning(
+                "--selected-regions does not control --att-no-intercept captures; "
+                "ATT no-intercept will quick-scan after each selected GPU agent's "
+                "first code-object upload"
+            )
+        elif getattr(_args, "selected_regions", False) and getattr(
             _args, "att_consecutive_kernels", None
         ):
             fatal_error(
@@ -2274,17 +2497,52 @@ def main(argv=None):
             if args.collection_period:
                 fatal_error("--collection-period is not compatible with attach mode")
 
+            # SECURITY: this cache file lives at a predictable path in a world-writable
+            # directory (/tmp) and is deserialized with pickle, which would execute
+            # arbitrary code if another user on a shared system planted a malicious
+            # payload. To prevent this, the file is created exclusively (O_EXCL) with
+            # 0600 permissions and is only ever read back if it is owned by the current
+            # user; O_NOFOLLOW prevents symlink redirection attacks. As a result, we only
+            # ever unpickle a file that we created ourselves.
             fname = f"/tmp/rocprofv3_attach_{args.pid}.pkl"
-            if not os.path.exists(fname):
-                # if this is the first attachment, write the temp configuration file for future attachments
-                with open(fname, "wb") as ofs:
+            try:
+                # if this is the first attachment, exclusively create the temp
+                # configuration file for future attachments
+                fd = os.open(
+                    fname, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600
+                )
+            except FileExistsError:
+                fd = None
+
+            if fd is not None:
+                with os.fdopen(fd, "wb") as ofs:
                     if args.log_level in ("config", "info", "trace"):
                         print(f"Saving attach configuration to {fname}...")
                     pickle.dump(args, ofs)
             else:
                 # if this is not the first attachment
-                # load the configuration from the previous attachment
-                with open(fname, "rb") as ifs:
+                # load the configuration from the previous attachment.
+                # O_NOFOLLOW rejects symlinks; a stale file owned by another user (from a
+                # crashed session that reused this PID) surfaces here as PermissionError
+                # (0600) or via the ownership check below. Translate any such failure into a
+                # clear, actionable message instead of an unhandled traceback.
+                try:
+                    rfd = os.open(fname, os.O_RDONLY | os.O_NOFOLLOW)
+                except OSError as _e:
+                    fatal_error(
+                        f"Could not open attach configuration file {fname}: {_e}. "
+                        "It may be stale or owned by another user; remove it and retry "
+                        "(or wait for the target PID's previous session to clean it up)."
+                    )
+                with os.fdopen(rfd, "rb") as ifs:
+                    # refuse to unpickle a configuration file that is not owned by the
+                    # current user (e.g. planted by another user on a shared system)
+                    if os.fstat(rfd).st_uid != os.getuid():
+                        fatal_error(
+                            f"Refusing to load attach configuration from {fname}: "
+                            f"file is not owned by the current user (uid={os.getuid()}). "
+                            "It may be stale or owned by another user; remove it and retry."
+                        )
                     if args.log_level in ("config", "info", "trace"):
                         print(f"Loading attach configuration from {fname}...")
                     prev_args = pickle.load(ifs)

@@ -73,7 +73,7 @@ rocjitsu **fakes both** so the app runs unmodified.
 ```mermaid
 flowchart TB
     APP["ROCm app + HIP + ROCr runtime"]
-    APP -->|"open('/dev/kfd'), ioctl, mmap"| KMD["librocjitsu_kmd.so<br/>(LD_PRELOAD interposer)"]
+    APP -->|"open('/dev/kfd'), ioctl, mmap"| KMD["librocjitsu.so<br/>(LD_PRELOAD interposer)"]
     KMD -->|"intercepts syscalls"| VM["rj_vm — emulated GPU VM"]
     VM --> TOPO["synthetic /sys topology<br/>(agents, caches, VRAM)"]
     VM --> EXEC["functional ISA exec<br/>(decode + run code objects)"]
@@ -218,12 +218,12 @@ $ mirage run --profile cdna4 --emulator rocjitsu-dbt -- ./app
 
 # Inside rocjitsu: the KMD interposer
 
-`librocjitsu_kmd.so` is `LD_PRELOAD`-ed into the workload and hooks libc.
+`librocjitsu.so` is `LD_PRELOAD`-ed into the workload and hooks libc.
 
 ```mermaid
 sequenceDiagram
     participant App as ROCm App
-    participant Sh as librocjitsu_kmd.so
+    participant Sh as librocjitsu.so
     participant VM as rj_vm
     App->>Sh: open("/dev/kfd")
     Sh->>VM: create / attach VM
@@ -650,7 +650,7 @@ $ mirage run --profile cdna4 --daemon -- sh -c \
 DAEMON_SOCKET_PRESENT
 
 $ mirage run --profile cdna4 --daemon -- env | grep -E 'LD_PRELOAD|ROCJITSU'
-LD_PRELOAD=/.../_rocm_sdk_devel/lib/librocjitsu_kmd.so
+LD_PRELOAD=/.../_rocm_sdk_devel/lib/librocjitsu.so
 ROCJITSU_RUNTIME_DIR=/run/user/1000/mirage/session/s-.../rocjitsu
 ```
 

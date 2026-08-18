@@ -57,6 +57,15 @@
 #include "gtest/gtest.h"
 #include "hsa/hsa.h"
 
+#ifdef ROCRTST_ASAN
+// ASAN defers the real free via its quarantine; drain it so freed VRAM is
+// returned before we query available memory.
+extern "C" void __sanitizer_purge_allocator(void);
+static inline void DrainAsanQuarantine() { __sanitizer_purge_allocator(); }
+#else
+static inline void DrainAsanQuarantine() {}
+#endif
+
 static const uint32_t kNumBufferElements = 256;
 
 #define RET_IF_HSA_ERR(err) { \
@@ -530,6 +539,8 @@ void MemoryTest::MemAvailableTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {
 
   err = hsa_amd_memory_pool_free(memPtr2);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  DrainAsanQuarantine();
 
   err = hsa_agent_get_info(ag, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_AVAIL,
                             &ag_avail_memory_after);

@@ -412,6 +412,45 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
+### amdsmi_get_gpu_device_cuid
+
+Description: Returns the CUID of the device
+
+Input parameters:
+
+* `processor_handle` device for which to query
+
+Output: CUID string unique to the device
+
+Exceptions that can be thrown by `amdsmi_get_gpu_device_cuid` function:
+
+* `AmdSmiParameterException`
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_INSUFFICIENT_SIZE` - Buffer provided is not of large enough size
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            print("Device CUID: ", amdsmi.amdsmi_get_gpu_device_cuid(device))
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
 ### amdsmi_get_gpu_device_uuid
 
 Description: Returns the UUID of the device
@@ -1129,6 +1168,56 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
+### amdsmi_get_vcn_busy_percent
+
+Description: Returns the VCN (Video Core Next) engine busy percentage for the given GPU.
+Only supported on bare-metal Linux.
+
+```{note}
+**MI-series vs. Navi/RDNA devices:** On MI-series GPUs (CDNA 3 and later, such as MI300X),
+per-partition VCN utilization is also available via the `xcp_stats.vcn_busy` field returned
+by `amdsmi_get_gpu_metrics()`. Navi/RDNA GPUs do not support partitioning, so
+`amdsmi_get_vcn_busy_percent` provides a single device-wide value and
+`xcp_stats.vcn_busy` is not applicable. See the
+[GPU partitioning](/conceptual/partition.md) guide for background on the partition model.
+```
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Integer representing VCN busy percentage (0 - 100)
+
+Exceptions that can be thrown by `amdsmi_get_vcn_busy_percent` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_UNEXPECTED_DATA` - Data read from sysfs is not in the expected format or is empty
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            vcn_busy = amdsmi.amdsmi_get_vcn_busy_percent(device)
+            print(vcn_busy)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
 ### amdsmi_get_power_info
 
 Description: Returns the current power and voltage for the given GPU.
@@ -1659,6 +1748,50 @@ try:
             else:
                 for process in processes:
                     print(process)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_process_list_by_pid
+
+Description: Returns the list of processes running across one or more GPUs, grouped by PID. Each entry aggregates the per-GPU usage for every GPU the process is active on; the calling process is omitted. Requires root level access to display root process names; otherwise the name is reported as "N/A".
+
+Input parameters:
+
+* `processor_handles` list of device handles to query
+
+Output: List of Dictionaries with the corresponding fields; empty list if no running process are detected
+
+Field | Description
+---|---
+`pid` | Process ID
+`name` | Name of process. If user does not have permission this will be "N/A"
+`container_name` | Container name, when the process runs inside a container
+`gpus` | <table><thead><tr><th>Subfield</th><th>Description</th></tr></thead><tbody><tr><td>`gpu_index`</td><td>GPU index the entry refers to</td></tr><tr><td>`mem`</td><td>Total memory usage on this GPU in Bytes</td></tr><tr><td>`engine_usage`</td><td>`gfx` and `enc` engine usage in ns</td></tr><tr><td>`memory_usage`</td><td>`gtt_mem`, `cpu_mem`, and `vram_mem` usage in Bytes</td></tr><tr><td>`cu_occupancy`</td><td>Number of Compute Units utilized</td></tr><tr><td>`sdma_usage`</td><td>SDMA usage in microseconds</td></tr><tr><td>`evicted_time`</td><td>Time queues are evicted on this GPU in milliseconds</td></tr></tbody></table>
+
+Exceptions that can be thrown by `amdsmi_get_gpu_process_list_by_pid` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        processes = amdsmi.amdsmi_get_gpu_process_list_by_pid(devices)
+        if len(processes) == 0:
+            print("No processes running on these GPUs")
+        else:
+            for process in processes:
+                print(process)
 except amdsmi.AmdSmiException as e:
     print(e)
 finally:
@@ -2217,51 +2350,6 @@ try:
         for device in devices:
             profile = amdsmi.AmdSmiPowerProfilePresetMasks.BOOTUP_DEFAULT
             amdsmi.amdsmi_set_gpu_power_profile(device, 0, profile)
-except amdsmi.AmdSmiException as e:
-    print(e)
-finally:
-    amdsmi.amdsmi_shut_down()
-```
-
-### amdsmi_set_gpu_clk_range
-
-Description: This function sets the clock range information.
-It is not supported on virtual machine guest
-
-Input parameters:
-
-* `processor_handle` handle for the given device
-* `min_clk_value` minimum clock value for desired clock range
-* `max_clk_value` maximum clock value for desired clock range
-* `clk_type` SYS | MEM range type
-
-Output: None
-
-Exceptions that can be thrown by `amdsmi_set_gpu_clk_range` function:
-
-* `AmdSmiLibraryException`
-* `AmdSmiParameterException`
-
-#### Possible Library Exceptions
-
-- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
-- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
-- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
-- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
-- `AMDSMI_STATUS_INVAL` - Invalid parameters
-
-Example:
-
-```python
-import amdsmi
-try:
-    amdsmi.amdsmi_init()
-    devices = amdsmi.amdsmi_get_processor_handles()
-    if len(devices) == 0:
-        print("No GPUs on machine")
-    else:
-        for device in devices:
-            amdsmi.amdsmi_set_gpu_clk_range(device, 0, 1000, amdsmi.AmdSmiClkType.SYS)
 except amdsmi.AmdSmiException as e:
     print(e)
 finally:
@@ -3626,6 +3714,9 @@ Output: Dictionary with fields
 `pcie_nak_sent_count_acc` | PCIe NAC sent count accumulated |
 `pcie_nak_rcvd_count_acc` | PCIe NAC received count accumulated |
 `jpeg_activity` | List of JPEG engine activity | %
+`is_apu` | `True` when the device exposes APU metrics (the `apu_metrics.*` fields below are populated) | bool
+
+On APU devices (for example gfx1151 / Strix), the returned dictionary additionally contains `apu_metrics.*` fields — for example `apu_metrics.temperature_gfx`, `apu_metrics.average_socket_power`, `apu_metrics.average_gfxclk_frequency`, and the `apu_metrics.throttle_residency_*` group. Temperatures are in C, power in W, clocks in MHz, voltages in mV, currents in mA, and activities in %. These fields are populated only when `is_apu` is `True`; otherwise they report `N/A`. See the **Added APU metrics support** entry in the [CHANGELOG](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/CHANGELOG.md) for the complete field list.
 
 Exceptions that can be thrown by `amdsmi_get_gpu_metrics_info` function:
 
@@ -4478,7 +4569,7 @@ Field | Description
 ---|---
 `num_supported` | The number of supported policies
 `current_id` | The current policy index
-`policies` | List of policies. (`plpds` marked for deprecation in next major release)
+`policies` | List of policies.
 
 Exceptions that can be thrown by `amdsmi_get_xgmi_plpd` function:
 
@@ -5054,48 +5145,6 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
-### amdsmi_get_gpu_vram_vendor
-
-Description: **Deprecated** (slated for removal in a future ROCm release; use `amdsmi_get_gpu_vram_info()` instead). Get the vram vendor string of a gpu device.
-
-Input parameters:
-
-* `processor_handle` device which to query
-
-Output: vram vendor
-
-Exceptions that can be thrown by `amdsmi_get_gpu_vram_vendor` function:
-
-* `AmdSmiLibraryException`
-* `AmdSmiParameterException`
-
-#### Possible Library Exceptions
-
-- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
-- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
-- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
-- `AMDSMI_STATUS_INVAL` - Invalid parameters
-- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
-
-Example:
-
-```python
-import amdsmi
-try:
-    amdsmi.amdsmi_init()
-    devices = amdsmi.amdsmi_get_processor_handles()
-    if len(devices) == 0:
-        print("No GPUs on machine")
-    else:
-        for device in devices:
-            vram_vendor = amdsmi.amdsmi_get_gpu_vram_vendor(device)
-            print(vram_vendor)
-except amdsmi.AmdSmiException as e:
-    print(e)
-finally:
-    amdsmi.amdsmi_shut_down()
-```
-
 ### amdsmi_get_gpu_subsystem_id
 
 Description: Get the subsystem device id associated with the device with provided device handle.
@@ -5593,7 +5642,7 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
-### amdsmi_get_gpu_compute_partition_mem_alloc_mode
+### amdsmi_get_gpu_accelerator_partition_mem_alloc_mode
 
 Description: Get the compute partition memory allocation mode from the given GPU. Controls how HBM capacity is distributed across XCPs within each memory partition.
 
@@ -5603,7 +5652,7 @@ Input parameters:
 
 Output: String of the memory allocation mode (`"CAPPING"` or `"ALL"`)
 
-Exceptions that can be thrown by `amdsmi_get_gpu_compute_partition_mem_alloc_mode` function:
+Exceptions that can be thrown by `amdsmi_get_gpu_accelerator_partition_mem_alloc_mode` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
@@ -5627,7 +5676,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            mode = amdsmi.amdsmi_get_gpu_compute_partition_mem_alloc_mode(device)
+            mode = amdsmi.amdsmi_get_gpu_accelerator_partition_mem_alloc_mode(device)
             print(mode)
 except amdsmi.AmdSmiException as e:
     print(e)
@@ -5635,7 +5684,7 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
-### amdsmi_set_gpu_compute_partition_mem_alloc_mode
+### amdsmi_set_gpu_accelerator_partition_mem_alloc_mode
 
 Description: Set the compute partition memory allocation mode for the given GPU. Requires elevated privileges (sudo). Controls whether each XCP is capped to an even share of memory (`CAPPING`) or may use the full partition memory (`ALL`).
 
@@ -5646,7 +5695,7 @@ Input parameters:
 
 Output: None
 
-Exceptions that can be thrown by `amdsmi_set_gpu_compute_partition_mem_alloc_mode` function:
+Exceptions that can be thrown by `amdsmi_set_gpu_accelerator_partition_mem_alloc_mode` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
@@ -5670,7 +5719,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi.amdsmi_set_gpu_compute_partition_mem_alloc_mode(
+            amdsmi.amdsmi_set_gpu_accelerator_partition_mem_alloc_mode(
                 device, amdsmi.AmdSmiComputePartitionMemAllocModeType.CAPPING
             )
 except amdsmi.AmdSmiException as e:
@@ -5757,48 +5806,6 @@ try:
         for device in devices:
             memory_partition_type = amdsmi.amdsmi_get_gpu_memory_partition(device)
             print(memory_partition_type)
-except amdsmi.AmdSmiException as e:
-    print(e)
-finally:
-    amdsmi.amdsmi_shut_down()
-```
-
-### amdsmi_set_gpu_memory_partition
-
-Description: Set the memory partition to the given GPU. This function does not allow any concurrent operations. Devices must be idle and have no workloads when performing set partition operations.
-
-Input parameters:
-
-* `processor_handle` the device handle
-* `memory_partition` the type of memory_partition to set
-
-Output: `None`
-
-Exceptions that can be thrown by `amdsmi_set_gpu_memory_partition` function:
-
-* `AmdSmiLibraryException`
-* `AmdSmiParameterException`
-
-#### Possible Library Exceptions
-
-- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
-- `AMDSMI_STATUS_INVAL` - Invalid parameters
-- `AMDSMI_STATUS_NO_PERM` - Permission Denied
-- `AMDSMI_STATUS_BUSY` - Device is busy, could not acquire resource or mutex
-
-Example:
-
-```python
-import amdsmi
-try:
-    amdsmi.amdsmi_init()
-    memory_partition = amdsmi.AmdSmiMemoryPartitionType.NPS1
-    devices = amdsmi.amdsmi_get_processor_handles()
-    if len(devices) == 0:
-        print("No GPUs on machine")
-    else:
-        for device in devices:
-            amdsmi.amdsmi_set_gpu_memory_partition(device, memory_partition)
 except amdsmi.AmdSmiException as e:
     print(e)
 finally:
@@ -6530,6 +6537,97 @@ try:
         for device in devices:
             bitmask = amdsmi.amdsmi_get_cpu_affinity_with_scope(device, scope)
             print(bitmask['size'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_fabric_info
+
+Description: Returns IFoE/UALoE fabric device configuration for the target GPU, read from sysfs. Fields whose sysfs source is unavailable keep their sentinel/default values. Available only on platforms with IFoE/UALoE fabric hardware; other devices return not supported.
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Dictionary with the corresponding fields
+
+Field | Description
+---|---
+`bdf` | BDF of the fabric device
+`version` | Fabric info structure version
+`accelerator_id` | Accelerator identifier (range 0 to 1023)
+`fabric_type` | Fabric type: `UALOE`, `UALLINK`, or `UNKNOWN`
+`bandwidth` | Station bandwidth share in Mb/s
+`latency` | Latency in nanoseconds
+`ppod_id` | Physical PoD identifier as a list of 16 bytes
+`ppod_size` | Physical PoD size
+`vpod_id` | Virtual PoD identifier
+`vpod_size` | Virtual PoD size
+`local_accelerators` | List of local accelerator IDs
+`vpod_active_accelerators` | Active-accelerator bitmap as a list of 32-bit words (bit N set = accelerator ID N is active)
+`addr_mode` | NPA address mode: `SOURCE_ALIASING`, `SOURCE_IDENTIFICATION`, or `UNKNOWN`
+`accel_state` | Accelerator vPoD state: `UNCONFIGURED`, `CONFIGURED`, `READY`, `ACTIVE`, `ERROR`, or `UNKNOWN`
+
+Exceptions that can be thrown by `amdsmi_get_gpu_fabric_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+* `AmdSmiRetryException`
+* `AmdSmiTimeoutException`
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    for device in devices:
+        info = amdsmi.amdsmi_get_gpu_fabric_info(device)
+        print(info)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_fabric_telemetry_data
+
+Description: Returns IFoE/UALoE fabric telemetry for the target GPU. The `category_mask` selects which telemetry categories to retrieve and is built from the `AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_*` bit values. Available only on platforms with IFoE/UALoE fabric hardware; other devices return not supported.
+
+Input parameters:
+
+* `processor_handle` device which to query
+* `category_mask` integer bitmask of the telemetry categories to retrieve
+
+Output: List of Dictionaries, one per populated category
+
+Field | Description
+---|---
+`category` | Category name: `UALOE`, `SWITCH`, `CRYPTO`, `PFC`, `NETPORT`, `DERIVED_UALOE`, or `DERIVED_NETPORT`
+`generation_count` | Sequence number incremented each time the telemetry is written
+`timestamp` | Dictionary with `tv_sec` and `tv_nsec`
+`instances` | <table><thead><tr><th>Subfield</th><th>Description</th></tr></thead><tbody><tr><td>`name`</td><td>Instance name</td></tr><tr><td>`logical_idx`</td><td>Logical index of the instance</td></tr><tr><td>`items`</td><td>List of `{id, name, value}` telemetry items</td></tr></tbody></table>
+
+Exceptions that can be thrown by `amdsmi_get_fabric_telemetry_data` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+import amdsmi
+from amdsmi import amdsmi_interface
+try:
+    amdsmi.amdsmi_init()
+    category_mask = amdsmi_interface.amdsmi_wrapper.AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_ALL_KNOWN
+    devices = amdsmi.amdsmi_get_processor_handles()
+    for device in devices:
+        for category in amdsmi.amdsmi_get_fabric_telemetry_data(device, category_mask):
+            print(category)
 except amdsmi.AmdSmiException as e:
     print(e)
 finally:

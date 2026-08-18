@@ -49,6 +49,7 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     } else if (arg == "-s") {
       i++;
       max_msg_size = atoll(argv[i]);
+      max_msg_size_set = true;
     } else if (arg == "-a") {
       i++;
       std::string a_arg = argv[i];
@@ -193,6 +194,22 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
       max_msg_size = 8;
       break;
     case PingPongTestType:
+    case SdmaPingPongTestType:
+      if (op_type == 2) {
+        min_msg_size = 1;
+      } else {
+        min_msg_size = 4;
+        max_msg_size = 4;
+      }
+      break;
+    case QpPingPongTestType:
+      if (op_type == 2) {
+        min_msg_size = 1;
+      } else {
+        min_msg_size = 4;
+        max_msg_size = 4;
+      }
+      break;
     case PingAllTestType:
     case ShmemPtrTestType:
       min_msg_size = 4;
@@ -204,9 +221,13 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
       min_msg_size = 4;
       break;
     case TeamFCollectTestType:
+    case FcollectWaveTestType:
     case TeamAllToAllTestType:
     case TeamAllToAllvTestType:
     case TeamBroadcastTestType:
+    case BroadcastWaveTestType:
+    case AllToAllWaveTestType:
+    case ReduceWaveTestType:
       min_msg_size = 8;
       break;
     case TeamCtxInfraTestType:
@@ -283,8 +304,14 @@ void TesterArguments::get_arguments() {
     case TeamWGSyncTestType:
     case TeamAllToAllTestType:
     case TeamAllToAllvTestType:
+    case AllToAllWaveTestType:
+    case BroadcastWaveTestType:
     case TeamFCollectTestType:
+    case FcollectWaveTestType:
     case TeamReductionTestType:
+    case TeamReduceScatterTestType:
+    case ReduceWaveTestType:
+    case TeamReduceScatterWaveTestType:
     case TeamBroadcastTestType:
     case PingAllTestType:
     case TeamBarrierTestType:
@@ -326,6 +353,9 @@ void TesterArguments::get_arguments() {
     case TileAllgatherTestType:
     case TileAllgatherWaveTestType:
     case TileAllgatherWGTestType:
+    case TileReduceTestType:
+    case TileReduceWaveTestType:
+    case TileReduceWGTestType:
       requires_two_pes = false;
       break;
     default:

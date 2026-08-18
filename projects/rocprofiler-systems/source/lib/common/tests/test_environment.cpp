@@ -617,6 +617,14 @@ TEST(ToEnvStringTest, ConstCharPtrPassthrough)
     EXPECT_EQ(to_env_string("world"), std::string{ "world" });
 }
 
+// ── get_default_lib_search_paths ──────────────────────────────────────────────
+
+TEST(GetDefaultLibSearchPathsTest, ReturnsNonEmpty)
+{
+    auto paths = get_default_lib_search_paths();
+    EXPECT_FALSE(paths.empty());
+}
+
 // ── consolidate_env_entries: no-'=' entry ─────────────────────────────────────
 
 TEST_F(DuplicatedEnvironmentEntriesTest, SkipsEntryWithoutEqualsSign)
