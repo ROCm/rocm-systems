@@ -1577,6 +1577,37 @@
             "NCCL_MIN_CTAS": "0",
             "NCCL_MAX_CTAS": "0"
           }
+        },
+        {
+          "name": "CommMPITests_GraphStreamOrdering_ConfigOverride",
+          "description": "ncclConfig_t graphStreamOrdering stored on comm when NCCL_GRAPH_STREAM_ORDERING is unset",
+          "test_filter": "GraphStreamOrderingConfigMPITest.ConfigOverrideAppliesGraphStreamOrdering"
+        },
+        {
+          "name": "CommMPITests_GraphStreamOrdering_IncompatibleMixingFallback",
+          "description": "graphStreamOrdering=0 with graphUsageMode=2 falls back to ordering=1",
+          "test_filter": "GraphStreamOrderingConfigMPITest.IncompatibleMixingFallsBackToEnabledOrdering"
+        },
+        {
+          "name": "CommMPITests_GraphStreamOrdering_EnvOverride_Zero",
+          "description": "NCCL_GRAPH_STREAM_ORDERING=0 overrides ncclConfig_t at init",
+          "test_filter": "GraphStreamOrderingConfigMPITest.EnvOverrideAppliesGraphStreamOrdering",
+          "env_variables": {
+            "NCCL_GRAPH_STREAM_ORDERING": "0"
+          }
+        },
+        {
+          "name": "CommMPITests_GraphStreamOrdering_EnvOverride_One",
+          "description": "NCCL_GRAPH_STREAM_ORDERING=1 overrides ncclConfig_t at init",
+          "test_filter": "GraphStreamOrderingConfigMPITest.EnvOverrideAppliesGraphStreamOrdering",
+          "env_variables": {
+            "NCCL_GRAPH_STREAM_ORDERING": "1"
+          }
+        },
+        {
+          "name": "CommMPITests_GraphStreamOrdering_DisabledOrderingGraphCaptureSmoke",
+          "description": "graphStreamOrdering=0 with graphUsageMode=1 captures and replays AllReduce",
+          "test_filter": "GraphStreamOrderingConfigMPITest.DisabledOrderingGraphCaptureSmoke"
         }
       ]
     },
@@ -2181,6 +2212,11 @@
           "name": "SymWin_WindowLifecycle_Repeated",
           "description": "Repeated register/deregister cycles",
           "test_filter": "SymWin_WindowLifecycle.RepeatedRegisterDeregister"
+        },
+        {
+          "name": "SymWin_GraphCapture_SymmetricAllReduce",
+          "description": "Symmetric window registration during HIP graph capture with captured AllReduce replay",
+          "test_filter": "GraphCapture_WindowRegister.SymmetricAllReduce"
         }
       ]
     },
