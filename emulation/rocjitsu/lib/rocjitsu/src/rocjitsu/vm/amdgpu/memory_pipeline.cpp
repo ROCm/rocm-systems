@@ -70,6 +70,8 @@ void write_lds_dst_load_direct(const VectorMemState &d, Lds &lds, uint32_t per_l
     }
     uint32_t lds_addr =
         d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * per_lane_bytes;
+    if (lds_addr == kInvalidLdsAddress)
+      continue;
     lds.write(lds_addr, &d.response_data[data_offset], per_lane_bytes);
   }
 }
@@ -101,6 +103,10 @@ MemoryAccessCompletion complete_lds_dst_load(VectorMemState &d, Wavefront &wf, C
         std::memcpy(&v, &d.response_data[ln * per_lane_bytes], 4);
       uint32_t lds_addr =
           d.lds_per_lane_addr ? d.per_lane_lds_addr[ln] : d.lds_base + ln * per_lane_bytes;
+      if (lds_addr == kInvalidLdsAddress) {
+        os << std::format(" L{}:@{:#x}->lds[dropped]", ln, d.per_lane_addr[ln]);
+        continue;
+      }
       os << std::format(" L{}:@{:#x}->lds[{:#x}]={:#x}", ln, d.per_lane_addr[ln], lds_addr, v);
     }
   });

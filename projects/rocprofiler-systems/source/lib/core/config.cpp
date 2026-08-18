@@ -3,6 +3,7 @@
 
 #include "config.hpp"
 #include "amd_smi.hpp"
+#include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "common/defines.h"
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
@@ -15,7 +16,8 @@
 #include "mproc.hpp"
 #include "perf.hpp"
 #include "perfetto.hpp"
-#include "rocprofiler-sdk.hpp"
+#include "sdk-tracing-config-deps.hpp"
+#include "sdk-tracing-config.hpp"
 #include "utility.hpp"
 
 #include <timemory/backends/capability.hpp>
@@ -53,6 +55,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <linux/capability.h>
@@ -983,7 +986,9 @@ configure_settings(bool _init)
         std::string{ "perf::PERF_COUNT_HW_CACHE_REFERENCES" }, "sampling",
         "hardware_counters");
 
-    rocprofiler_sdk::config_settings(_config);
+    rocprofiler_sdk::sdk_tracing_config<
+        rocprofiler_sdk::wrapper,
+        rocprofiler_sdk::default_sdk_externals>::config_settings(_config);
     amd_smi::config_settings(_config);
 
     ROCPROFSYS_CONFIG_SETTING(size_t, env_vars::PERFETTO_SHMEM_SIZE_HINT_KB,
@@ -1392,10 +1397,10 @@ configure_settings(bool _init)
     }
     if(!_found_sep && _cmd.size() > 1) _cmd.insert(_cmd.begin() + 1, "--");
 
-    auto _pid       = getpid();
-    auto _ppid      = getppid();
-    auto _proc      = mproc::get_concurrent_processes(_ppid);
-    bool _main_proc = (_proc.size() < 2 || *_proc.begin() == _pid);
+    auto       _pid       = getpid();
+    auto       _ppid      = getppid();
+    auto       _proc      = mproc::get_concurrent_processes(_ppid);
+    const bool _main_proc = (_proc.size() < 2 || *_proc.begin() == _pid);
 
     for(auto&& filename : rocprofsys::delimit(
             _config->get<std::string>(std::string{ env_vars::CONFIG_FILE }), ";:"))
@@ -1407,7 +1412,8 @@ configure_settings(bool _init)
         // Prevent Timemory's read() silently dropping JSON config files without proper
         // root. Non-existing JSONs should not throw: default ROCPROFSYS_CONFIG_FILE
         // includes '~/.rocprofiler-systems.json' that can be missing
-        if(expanded_filename.ends_with(".json") && filepath::exists(expanded_filename) &&
+        if(expanded_filename.ends_with(".json") &&
+           path::is_regular_file(expanded_filename) &&
            !json_has_project_name_root(expanded_filename))
         {
             throw std::runtime_error(
@@ -1550,7 +1556,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         }
         else
         {
-            bool _changed = get_setting_value<bool>(_name).value_or(!_v) != _v;
+            const bool _changed = get_setting_value<bool>(_name).value_or(!_v) != _v;
             if(_changed)
             {
                 LOG_WARNING("[configure_mode_settings] Overriding {} to {} in {} mode...",
@@ -1848,7 +1854,7 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
 
     // exclude some timemory settings which are not relevant to rocprof-sys
     //  exact matches, e.g. ROCPROFSYS_BANNER
-    std::string _hidden_exact_re =
+    const std::string _hidden_exact_re =
         "^ROCPROFSYS_(BANNER|DESTRUCTOR_REPORT|COMPONENTS|(GLOBAL|MPIP|NCCLP|OMPT|"
         "PROFILER|TRACE|KOKKOS)_COMPONENTS|PYTHON_EXE|PAPI_ATTACH|PLOT_OUTPUT|SEPARATOR_"
         "FREQ|STACK_CLEARING|TARGET_PID|THROTTLE_(COUNT|VALUE)|(AUTO|FLAMEGRAPH)_OUTPUT|"
@@ -1856,7 +1862,7 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
         "ROOFLINE|ADD_SECONDARY|MAX_THREAD_BOOKMARKS)$";
 
     //  leading matches, e.g. ROCPROFSYS_MPI_[A-Z_]+
-    std::string _hidden_begin_re =
+    const std::string _hidden_begin_re =
         "^ROCPROFSYS_(ERT|DART|MPI|UPCXX|ROOFLINE|CUDA|NVTX|CUPTI)_[A-Z_]+$";
 
     auto _hidden_exact = std::set<std::string>{};
@@ -1989,8 +1995,9 @@ print_settings(
 
     std::stringstream _os{};
 
-    bool _print_desc = get_debug() || rocprofsys::get_env(env_vars::SETTINGS_DESC, false);
-    bool _md         = rocprofsys::get_env<bool>(env_vars::SETTINGS_DESC_MARKDOWN, false);
+    const bool _print_desc =
+        get_debug() || rocprofsys::get_env(env_vars::SETTINGS_DESC, false);
+    const bool _md = rocprofsys::get_env<bool>(env_vars::SETTINGS_DESC_MARKDOWN, false);
 
     constexpr size_t nfields = 3;
     using str_array_t        = std::array<std::string, nfields>;
@@ -2008,9 +2015,9 @@ print_settings(
                                             _disp.at("description") });
             for(size_t i = 0; i < nfields; ++i)
             {
-                size_t _wextra = (_md && i < 2) ? 2 : 0;
-                _widths.at(i)  = std::max<size_t>(_widths.at(i),
-                                                  _data.back().at(i).length() + _wextra);
+                const size_t _wextra = (_md && i < 2) ? 2 : 0;
+                _widths.at(i)        = std::max<size_t>(_widths.at(i),
+                                                        _data.back().at(i).length() + _wextra);
             }
         }
     }
@@ -2059,7 +2066,7 @@ print_settings(
             {
                 std::stringstream _ss{};
                 _ss.setf(_os.flags());
-                std::string _extra = (i < 2) ? "`" : "";
+                const std::string _extra = (i < 2) ? "`" : "";
                 _ss << _extra << itr.at(i) << _extra;
                 _os << std::setw(_widths.at(i)) << _ss.str() << " | ";
                 if(!_print_desc && i == 1) break;
@@ -2228,7 +2235,7 @@ get_debug()
 bool
 get_debug_sampling()
 {
-    static bool _v = rocprofsys::get_env<bool>(
+    static const bool _v = rocprofsys::get_env<bool>(
         env_vars::DEBUG_SAMPLING,
         (settings_are_configured() ? get_debug() : get_debug_env()));
     return _v;
@@ -2381,8 +2388,9 @@ get_use_vaapi_tracing()
     {
         return false;  // Setting not found
     }
-    std::string domains = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
-    auto        domain_list = rocprofsys::delimit(domains, " ,;:\t\n");
+    const std::string domains =
+        static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+    auto domain_list = rocprofsys::delimit(domains, " ,;:\t\n");
     return std::find(domain_list.begin(), domain_list.end(), "rocdecode_api") !=
                domain_list.end() ||
            std::find(domain_list.begin(), domain_list.end(), "rocjpeg_api") !=
@@ -2579,7 +2587,7 @@ get_perfetto_annotations()
 std::uint64_t
 get_thread_pool_size()
 {
-    static std::uint64_t _v =
+    static const std::uint64_t _v =
         get_config()->get<std::uint64_t>(std::string{ env_vars::THREAD_POOL_SIZE });
     return _v;
 }
@@ -2855,7 +2863,7 @@ get_debug_tid()
     static auto _vlist =
         parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(
             rocprofsys::get_env<std::string>(env_vars::DEBUG_TIDS, ""), "debug tids", 1L);
-    static thread_local bool _v =
+    static thread_local const bool _v =
         _vlist.empty() || _vlist.count(tim::threading::get_id()) > 0;
     return _v;
 }
@@ -2866,8 +2874,8 @@ get_debug_pid()
     static auto _vlist =
         parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(
             rocprofsys::get_env<std::string>(env_vars::DEBUG_PIDS, ""), "debug pids", 1L);
-    static bool _v = _vlist.empty() || _vlist.count(tim::process::get_id()) > 0 ||
-                     _vlist.count(dmp::rank()) > 0;
+    static const bool _v = _vlist.empty() || _vlist.count(tim::process::get_id()) > 0 ||
+                           _vlist.count(dmp::rank()) > 0;
     return _v;
 }
 
@@ -2906,7 +2914,7 @@ int         s_db_path_session_id = 0;
 std::string
 get_database_absolute_path(std::string_view database_name, std::string_view suffix)
 {
-    std::unique_lock<std::mutex> lk{ s_db_path_mutex };
+    const std::unique_lock<std::mutex> lk{ s_db_path_mutex };
 
     auto cfg = settings::compose_filename_config{
         settings::use_output_suffix(),
@@ -2935,7 +2943,7 @@ get_database_absolute_path(std::string_view database_name, std::string_view suff
 void
 reset_database_path_memo()
 {
-    std::unique_lock<std::mutex> lk{ s_db_path_mutex };
+    const std::unique_lock<std::mutex> lk{ s_db_path_mutex };
     s_db_path_memo.clear();
 }
 
@@ -3029,10 +3037,17 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
 std::string
 get_ump_absolute_path()
 {
-    auto ensure_dir = [](std::string path) {
-        if(!path.empty() && !path::is_directory(path))
+    auto try_create_directory = [](std::string path) {
+        if(!path.empty())
         {
-            tim::filepath::makedir(path);
+            try
+            {
+                std::filesystem::create_directories(path);
+            } catch(const std::filesystem::filesystem_error& e)
+            {
+                LOG_WARNING("Failed to create unified memory output directory '{}': {}",
+                            path, e.code().message());
+            }
         }
         return path;
     };
@@ -3067,14 +3082,14 @@ get_ump_absolute_path()
         auto explicit_path = get_setting_value<std::string>(
             std::string{ env_vars::UNIFIED_MEMORY_OUTPUT_PATH });
         if(explicit_path && !explicit_path->empty())
-            return ensure_dir(make_absolute(*explicit_path));
+            return try_create_directory(make_absolute(*explicit_path));
     }
 
     if(!settings_are_configured())
     {
         auto env_path =
             rocprofsys::get_env<std::string>(env_vars::UNIFIED_MEMORY_OUTPUT_PATH, "");
-        if(!env_path.empty()) return ensure_dir(make_absolute(env_path));
+        if(!env_path.empty()) return try_create_directory(make_absolute(env_path));
         return settings::output_path();
     }
 
@@ -3337,7 +3352,7 @@ tmp_file::~tmp_file()
 void
 tmp_file::touch() const
 {
-    if(!filepath::exists(filename))
+    if(!path::is_regular_file(filename))
     {
         // if the filepath does not exist, open in out mode to create it
         auto _ofs = std::ofstream{};
@@ -3462,7 +3477,7 @@ tmp_file::remove()
     if(m_pid != getpid()) return false;
 
     close();
-    if(filepath::exists(filename))
+    if(path::is_regular_file(filename))
     {
         LOG_DEBUG("Removing temporary file '{}'...", filename);
         auto _ret = ::remove(filename.c_str());
@@ -3486,8 +3501,8 @@ get_tmp_file(std::string _basename, std::string _ext)
 
     static auto _existing_files =
         std::unordered_map<std::string, std::shared_ptr<tmp_file>>{};
-    static std::mutex            _mutex{};
-    std::unique_lock<std::mutex> _lk{ _mutex };
+    static std::mutex                  _mutex{};
+    const std::unique_lock<std::mutex> _lk{ _mutex };
 
     cfg_fini_callbacks.emplace_back([]() {
         for(auto itr : _existing_files)

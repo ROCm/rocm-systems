@@ -555,6 +555,7 @@ typedef enum hipDeviceAttribute_t {
                                                        ///< (requires DMA-Buf and HIP virtual memory
                                                        ///< management)
   hipDeviceAttributeHandleTypeFabricSupported,   ///< Device supports exporting memory to a fabric handle
+  hipDeviceAttributeHostAllocDmaBufSupported,  ///< Device supports host-allocated DMABuf buffer sharing
 
   hipDeviceAttributeCudaCompatibleEnd = 9999,
   hipDeviceAttributeAmdSpecificBegin = 10000,
@@ -2303,6 +2304,20 @@ hipError_t hipDeviceGetName(char* name, int len, hipDevice_t device);
  * #hipErrorDeinitialized
  */
 hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device);
+/**
+ * @brief Returns an LUID and device node mask for the device.
+ * @param [out] luid Returned 8-byte locally unique identifier for the device
+ * @param [out] deviceNodeMask Returned device node mask
+ * @param [in] device Device ordinal
+ *
+ * Returns identifying information (@p luid and @p deviceNodeMask) that allows the device to be
+ * matched with graphics APIs. The LUID is only valid on Windows; on other platforms this function
+ * returns #hipErrorNotSupported and does not modify @p luid or @p deviceNodeMask.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidValue, #hipErrorNotInitialized,
+ * #hipErrorDeinitialized, #hipErrorNotSupported
+ */
+hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask, hipDevice_t device);
 /**
  * @brief Returns a value for attribute of link between two devices
  * @param [out] value Pointer of the value for the attrubute

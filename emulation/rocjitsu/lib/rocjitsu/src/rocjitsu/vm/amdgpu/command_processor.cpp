@@ -1197,7 +1197,7 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     for (uint32_t w = 0; w < entry.wfs_per_workgroup; ++w) {
       Wavefront *wf = wg_wavefronts[w];
       wf->set_lds_base(lds_base);
-      wf->set_lds_size(util::align_up(entry.group_segment_fixed_size, 256u));
+      wf->set_lds_size(aligned_lds_bytes_per_workgroup(entry));
       wf->set_lds(placement.lds);
       wf->set_dispatch_id(entry.dispatch_id);
       wf->set_aql_packet_id(entry.aql_packet_id);

@@ -22,9 +22,9 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vop1.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/execution_backend.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/gfx1250/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
@@ -37,6 +37,7 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/soc.h"
 #include "scoped_temp.h"
@@ -1400,7 +1401,7 @@ TEST(ExecutionPluginTest, Gfx1250Simd64BitWriteReportsBothDestinationRegisters) 
 
 TEST(ExecutionPluginTest, DppTrue16SourceReportsSelectedHalf) {
   ForceScalarOverride force_scalar(true);
-  ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
+  ScopedIsaExecutionBackend execution_backend_scope{&cdna5::execution_backend()};
   Wave32PluginFixture f;
   auto *plugin = f.attach_ordering_plugin();
   auto *wf = f.cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -1413,7 +1414,7 @@ TEST(ExecutionPluginTest, DppTrue16SourceReportsSelectedHalf) {
   f.cu->write_vgpr(vb + kSrc, 0, 0xAABB00FFu);
   f.cu->write_vgpr(vb + kDst, 0, 0xAAAA5555u);
 
-  gfx1250::Vop1VopDpp16MachineInst raw{};
+  cdna5::Vop1VopDpp16MachineInst raw{};
   raw.src0 = amdgpu::SRC_DPP;
   raw.vsrc0 = kSrc;
   raw.vdst = kDst;
@@ -1422,7 +1423,7 @@ TEST(ExecutionPluginTest, DppTrue16SourceReportsSelectedHalf) {
   raw.bound_ctrl = 1;
   raw.bank_mask = 0xF;
   raw.row_mask = 0xF;
-  gfx1250::VNotB16Vop1 inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  cdna5::VNotB16Vop1 inst(reinterpret_cast<const cdna5::MachineInst *>(&raw));
 
   plugin->events.clear();
   inst.execute_impl(*wf);
@@ -2847,6 +2848,53 @@ TEST(RaceDetectorPluginOutputTest, DispatchLineUsesReadableNameAndExactSymbol) {
   EXPECT_NE(sink.str().find("[rocjitsu] Kernel dispatch: \"racy_kernel\" "
                             "symbol=\"_Z11racy_kernelPKfPf\"\n"),
             std::string::npos);
+}
+
+TEST(RaceDetectorPluginTest, DroppedAsyncLdsLaneDoesNotCreateLowAddressRace) {
+  PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"gfx1250", /*wavefront_size=*/32);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *cu = f.cu();
+  auto *writer = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  auto *reader = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(writer, nullptr);
+  ASSERT_NE(reader, nullptr);
+  writer->set_exec(0x1u);
+  reader->set_exec(0x1u);
+  std::array<amdgpu::Wavefront *, 2> waves{writer, reader};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/0,
+                                               /*physical_vgpr_count=*/512, /*sgpr_count=*/208,
+                                               waves);
+
+  auto dropped = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  dropped->elem_size = 4;
+  dropped->num_elems = 1;
+  dropped->is_load = true;
+  dropped->lds_dst = true;
+  dropped->lds_per_lane_addr = true;
+  dropped->wf_size = writer->wf_size();
+  dropped->lane_mask = 0x1u;
+  dropped->per_lane_lds_addr[0] = amdgpu::kInvalidLdsAddress;
+  TestMemoryInstruction dropped_inst(std::move(dropped));
+  f.plugin_group_->onAmdgpuRouteMemoryInstruction(dropped_inst, *writer);
+
+  auto read = std::make_unique<VectorMemState>(LOCAL_MEM);
+  read->elem_size = 4;
+  read->num_elems = 1;
+  read->is_load = true;
+  read->wf_size = reader->wf_size();
+  read->lane_mask = 0x1u;
+  read->per_lane_addr[0] = 0;
+  read->dst_reg_base = reader->vgpr_alloc().base;
+  TestMemoryInstruction read_inst(std::move(read));
+  f.plugin_group_->onAmdgpuRouteMemoryInstruction(read_inst, *reader);
+
+  EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
 }
 
 TEST(ExecutionPluginGroupTest, OwnsConfiguredSinkForRetainedGroupLifetime) {

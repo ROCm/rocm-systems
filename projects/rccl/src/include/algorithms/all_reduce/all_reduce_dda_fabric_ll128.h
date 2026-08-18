@@ -30,13 +30,6 @@
 
 namespace meta::comms {
 
-// Reach cap for the LL128 all-reduce (max message this path will accept). The
-// per-call slot stride is derived from the actual message size (see the host
-// launcher), NOT from this cap, so small messages keep a compact scratch layout
-// with good L2/TLB locality while large ones still fit. Actual eligibility is
-// bounded by both this cap and the runtime scratch capacity (ddaScratchBytes).
-constexpr size_t kDdaLL128ArMaxBytes = 1073741824;                   // 1 GiB
-
 // LL128 flat all-reduce kernel. 1D grid over 128B lines; within a block the
 // threads split into 16-lane groups, each owning one line at a time.
 //
