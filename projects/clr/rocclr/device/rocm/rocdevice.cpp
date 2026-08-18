@@ -3025,7 +3025,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     if (cuMask.size() != 0) {
       // add queues with custom CU mask into their special pool to keep track
       // of mapping of these queues to their associated queueInfo (i.e., hostcall buffers)
-      auto result = queueWithCUMaskPool_[qIndex].emplace(std::make_pair(queue, QueueInfo()));
+      auto result = queueWithCUMaskPool_[qIndex].try_emplace(queue);
       assert(result.second && "QueueInfo already exists");
       auto& qInfo = result.first->second;
       qInfo.refCount = 1;
@@ -3039,7 +3039,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     // per device.
     return queue;
   }
-  auto result = queuePool_[qIndex].emplace(std::make_pair(queue, QueueInfo()));
+  auto result = queuePool_[qIndex].try_emplace(queue);
   assert(result.second && "QueueInfo already exists");
   auto& qInfo = result.first->second;
   qInfo.refCount = 1;
@@ -3049,6 +3049,24 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     num_normal_queues_++;
   }
   return queue;
+}
+
+// ================================================================================================
+AqlOrderedPublishState* Device::GetAqlOrderedPublishState(hsa_queue_t* queue) {
+  if (!settings().isOrderedDoorbell_) {
+    return nullptr;
+  }
+  // Only the queues in this pool can be shared by several VirtualGPUs, so they are the only ones
+  // whose doorbells need ordering. CU masked queues live in their own pool and cooperative queues
+  // are never pooled, so both are absent here and ring as soon as their packet is written.
+  amd::ScopedLock lock(active_queue_access_);
+  for (auto& pool : queuePool_) {
+    auto qIter = pool.find(queue);
+    if (qIter != pool.end()) {
+      return &qIter->second.aqlPublishState_;
+    }
+  }
+  return nullptr;
 }
 
 // ================================================================================================

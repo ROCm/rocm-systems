@@ -50,7 +50,8 @@ class Settings : public device::Settings {
       uint barrier_value_packet_ : 1;  //!< Barrier value packet functionality
       uint dynamic_queues_ : 1;        //!< Dynamic queues management
       uint blocking_blit_ : 1;         //!< Blit ops can be blocking on CPU
-      uint reserved_ : 21;
+      uint isOrderedDoorbell_ : 1;     //!< Ring shared AQL ring doorbells in slot order
+      uint reserved_ : 20;
     };
     uint value_;
   };

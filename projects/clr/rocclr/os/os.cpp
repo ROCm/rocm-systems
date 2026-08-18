@@ -128,6 +128,24 @@ void Os::spinPause() {
 #endif
 }
 
+bool Os::isIntelCpu() {
+#if defined(ATI_ARCH_X86)
+  static const bool is_intel = [] {
+    // CPUID leaf 0 returns "GenuineIntel" in EBX, EDX, ECX.
+    constexpr int kGenuineIntelEbx = 0x756e6547;
+    constexpr int kGenuineIntelEdx = 0x49656e69;
+    constexpr int kGenuineIntelEcx = 0x6c65746e;
+    int registers[4] = {};
+    Os::cpuid(registers, 0);
+    return registers[1] == kGenuineIntelEbx && registers[3] == kGenuineIntelEdx &&
+           registers[2] == kGenuineIntelEcx;
+  }();
+  return is_intel;
+#else
+  return false;
+#endif  // ATI_ARCH_X86
+}
+
 void Os::sleep(long n) {
 // FIXME_lmoriche: Should be nano-seconds not seconds.
 #ifdef _WIN32

@@ -70,6 +70,35 @@ class Resource;
 class VirtualDevice;
 class PrintfDbg;
 
+//! Doorbell order for one AQL ring shared by several streams.
+//!
+//! Slots are still reserved through the ring's own write index, so producers own disjoint slots
+//! and keep writing their packets in parallel. Only the doorbell is held back: a producer waits
+//! until the doorbell has been rung for every slot below its own, so the doorbell that sends CPF
+//! into the ring never fires while an earlier packet is still being written.
+//!
+//! Order is tracked in the ring's slot numbering, which is what the reservation already hands out,
+//! so there is no second counter to keep in step with it.
+struct alignas(64) AqlOrderedPublishState {
+  //! First slot whose doorbell has not been rung. A producer may ring once this reaches its own
+  //! first slot.
+  uint64_t DoorbellSlot() const { return doorbell_slot_.load(std::memory_order_acquire); }
+
+  //! Report every slot below |next_slot| written and rung. Never moves backwards: a write index
+  //! rewound from outside CLR must not leave a reservation waiting behind a slot that is gone.
+  void AdvanceDoorbell(uint64_t next_slot) {
+    uint64_t doorbell_slot = doorbell_slot_.load(std::memory_order_relaxed);
+    while (doorbell_slot < next_slot &&
+           !doorbell_slot_.compare_exchange_weak(doorbell_slot, next_slot,
+                                                 std::memory_order_release,
+                                                 std::memory_order_relaxed)) {
+    }
+  }
+
+ private:
+  alignas(64) std::atomic<uint64_t> doorbell_slot_{0};
+};
+
 class ProfilingSignal : public amd::ReferenceCountedObject {
  public:
   hsa_signal_t signal_;   //!< HSA signal to track profiling information
@@ -565,6 +594,11 @@ class Device : public NullDevice {
   hsa_queue_t* AcquireActiveNormalQueue();
   bool ReleaseActiveNormalQueue(hsa_queue_t* queue);
 
+  //! Doorbell order shared by every VirtualGPU using this physical queue. It is owned by the
+  //! queue pool, which outlives every VirtualGPU bound to the queue. Null when doorbell ordering
+  //! is disabled, which rings the doorbell as soon as the packet is written.
+  AqlOrderedPublishState* GetAqlOrderedPublishState(hsa_queue_t* queue);
+
   //! For the given HSA queue, return an existing hostcall buffer or create a
   //! new one. queuePool_ keeps a mapping from HSA queue to hostcall buffer.
   void* getOrCreateHostcallBuffer(hsa_queue_t* queue, bool coop_queue = false,
@@ -676,6 +710,8 @@ class Device : public NullDevice {
   struct QueueInfo {
     int refCount;           //! Reference counter. Shows how many time the queue was shared
     void* hostcallBuffer_;  //! Host call buffer for the HSA queue
+    //! Doorbell order shared by every VirtualGPU using this physical queue.
+    AqlOrderedPublishState aqlPublishState_;
   };
 
   struct QueueCompare {
