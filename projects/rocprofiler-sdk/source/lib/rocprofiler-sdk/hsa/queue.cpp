@@ -403,26 +403,27 @@ BarrierAsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
                                      bdata.operation,
                                      bdata.callback_record);
 
-        if(bdata.operation == ROCPROFILER_HIP_EVENT_RECORD)
+        if(bdata.operation == ROCPROFILER_HIP_EVENT_RECORD && bdata.coalesce_group)
         {
-            auto group = hip::event::lookup_coalesce_group(bdata.callback_record.hip_event_handle);
-            if(group)
+            auto pending_entries =
+                common::container::small_vector<hip::event::coalesce_pending_t, 4>{};
+
+            bdata.coalesce_group->wlock([&](auto& g) {
+                g.barrier_time  = barrier_time;
+                g.completed     = true;
+                pending_entries = std::move(g.pending);
+                g.pending.clear();
+            });
+
+            for(auto& p : pending_entries)
             {
-                group->wlock([&](auto& g) {
-                    g.barrier_time = barrier_time;
-                    g.completed    = true;
-                    for(auto& p : g.pending)
-                    {
-                        hip::event::barrier_complete(p.tracing_data,
-                                                     p.tid,
-                                                     p.internal_corr_id,
-                                                     p.ancestor_corr_id,
-                                                     barrier_time,
-                                                     ROCPROFILER_HIP_EVENT_RECORD,
-                                                     p.callback_record);
-                    }
-                    g.pending.clear();
-                });
+                hip::event::barrier_complete(p.tracing_data,
+                                             p.tid,
+                                             p.internal_corr_id,
+                                             p.ancestor_corr_id,
+                                             barrier_time,
+                                             ROCPROFILER_HIP_EVENT_RECORD,
+                                             p.callback_record);
             }
         }
 
@@ -711,7 +712,8 @@ WriteInterceptor(const void* packets,
 
                 auto* event_ctx = hip::event::get_active_event_context();
 
-                if(is_barrier && event_ctx && !hip_event_tracing_data_v.empty())
+                if(is_barrier && event_ctx && !event_ctx->barrier_captured &&
+                   !hip_event_tracing_data_v.empty())
                 {
                     corr_id->add_ref_count();
                     corr_id->add_kern_count();
@@ -806,6 +808,7 @@ WriteInterceptor(const void* packets,
                         auto group =
                             std::make_shared<common::Synchronized<hip::event::coalesce_group_t>>();
                         hip::event::store_coalesce_group(event_ctx->hip_event_handle, group);
+                        _barrier_data.coalesce_group = group;
                     }
 
                     auto barrier_session_data = barrier_info_session_t::barrier_data_array_t{};

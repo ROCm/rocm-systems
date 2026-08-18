@@ -1790,6 +1790,7 @@ write_rocpd(
                                   node_id,
                                   this_pid,
                                   &get_thread_id,
+                                  &get_queue_id,
                                   &get_stream_id](const auto& _gen) {
         auto   _sqlgenperf_rocpd = get_simple_timer("rocpd_hip_event");
         auto   _deferred         = sql::deferred_transaction{db.conn};
@@ -1831,10 +1832,10 @@ write_rocpd(
                         insert_value("end", itr.end_timestamp),
                         insert_value("name_id", string_entries.at(name)),
                         insert_value("agent_id", agent_node_id),
-                        insert_value("queue_id", itr.queue_id.handle),
+                        insert_value("queue_id", get_queue_id(itr.queue_id)),
                         insert_value("stream_id", get_stream_id(itr.stream_id)),
                         insert_value("hip_event_handle", itr.hip_event_handle),
-                        insert_value("source_queue_id", itr.source_queue_id.handle),
+                        insert_value("source_queue_id", get_queue_id(itr.source_queue_id)),
                         insert_value("event_id", evt_id),
                     });
             }

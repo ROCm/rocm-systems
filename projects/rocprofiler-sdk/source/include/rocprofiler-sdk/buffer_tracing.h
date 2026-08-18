@@ -449,8 +449,7 @@ typedef struct rocprofiler_buffer_tracing_hip_event_record_t
     /// @var kind
     /// @brief ::ROCPROFILER_BUFFER_TRACING_HIP_EVENT
     /// @var operation
-    /// @brief HIP event buffer records are emitted after the barrier completes on the GPU.
-    /// Enqueue is already captured by HIP API buffer tracing.
+    /// @brief @see ::rocprofiler_hip_event_operation_t
 } rocprofiler_buffer_tracing_hip_event_record_t;
 
 /**

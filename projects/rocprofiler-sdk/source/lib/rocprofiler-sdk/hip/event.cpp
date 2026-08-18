@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/hip/event.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -245,22 +246,31 @@ check_coalesced_record(uint64_t hip_event_handle)
     pending.internal_corr_id = corr_id->internal;
     pending.ancestor_corr_id = corr_id->ancestor;
 
+    auto already_completed = false;
+    auto completed_time    = profiling_time{};
+
     group->wlock([&](auto& g) {
         if(g.completed)
         {
-            barrier_complete(pending.tracing_data,
-                             pending.tid,
-                             pending.internal_corr_id,
-                             pending.ancestor_corr_id,
-                             g.barrier_time,
-                             ROCPROFILER_HIP_EVENT_RECORD,
-                             pending.callback_record);
+            already_completed = true;
+            completed_time    = g.barrier_time;
         }
         else
         {
             g.pending.emplace_back(std::move(pending));
         }
     });
+
+    if(already_completed)
+    {
+        barrier_complete(pending.tracing_data,
+                         pending.tid,
+                         pending.internal_corr_id,
+                         pending.ancestor_corr_id,
+                         completed_time,
+                         ROCPROFILER_HIP_EVENT_RECORD,
+                         pending.callback_record);
+    }
 }
 
 template <typename ApiTag, typename RetT>
@@ -270,9 +280,9 @@ auto event_record_wrapper(RetT (*next)(hipEvent_t, hipStream_t))
     return +[](hipEvent_t event, hipStream_t stream) -> RetT {
         g_active_event_ctx = {
             ROCPROFILER_HIP_EVENT_RECORD, reinterpret_cast<uint64_t>(event), false};
-        auto ret = next_func(event, stream);
+        auto _cleanup = common::scope_destructor{[]() { g_active_event_ctx = {}; }};
+        auto ret      = next_func(event, stream);
         check_coalesced_record(reinterpret_cast<uint64_t>(event));
-        g_active_event_ctx = {};
         return ret;
     };
 }
@@ -284,9 +294,9 @@ auto event_record_with_flags_wrapper(RetT (*next)(hipEvent_t, hipStream_t, unsig
     return +[](hipEvent_t event, hipStream_t stream, unsigned int flags) -> RetT {
         g_active_event_ctx = {
             ROCPROFILER_HIP_EVENT_RECORD, reinterpret_cast<uint64_t>(event), false};
-        auto ret = next_func(event, stream, flags);
+        auto _cleanup = common::scope_destructor{[]() { g_active_event_ctx = {}; }};
+        auto ret      = next_func(event, stream, flags);
         check_coalesced_record(reinterpret_cast<uint64_t>(event));
-        g_active_event_ctx = {};
         return ret;
     };
 }
@@ -297,8 +307,8 @@ auto stream_wait_event_wrapper(RetT (*next)(hipStream_t, hipEvent_t, unsigned in
     static auto next_func = next;
     return +[](hipStream_t stream, hipEvent_t event, unsigned int flags) -> RetT {
         g_active_event_ctx = {ROCPROFILER_HIP_EVENT_WAIT, reinterpret_cast<uint64_t>(event), false};
+        auto _cleanup      = common::scope_destructor{[]() { g_active_event_ctx = {}; }};
         auto ret           = next_func(stream, event, flags);
-        g_active_event_ctx = {};
         return ret;
     };
 }

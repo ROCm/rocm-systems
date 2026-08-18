@@ -25,6 +25,7 @@
 #include "lib/common/container/pool_object.hpp"
 #include "lib/common/container/small_vector.hpp"
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/hip/event.hpp"
 #include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
 #include "lib/rocprofiler-sdk/hsa/signal.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
@@ -79,16 +80,19 @@ struct queue_info_session_t
     context::correlation_id* correlation_id = nullptr;
     packet_data_array_t      packet_data    = {};
 };
+
 struct barrier_data_t
 {
-    using callback_record_t = rocprofiler_callback_tracing_hip_event_data_t;
-    using pooled_signal_t   = common::container::pool_object<signal_t>;
+    using callback_record_t    = rocprofiler_callback_tracing_hip_event_data_t;
+    using pooled_signal_t      = common::container::pool_object<signal_t>;
+    using coalesce_group_ptr_t = hip::event::coalesce_group_ptr_t;
 
     tracing::tracing_data             tracing_data      = {};
     hsa_signal_t                      completion_signal = {.handle = 0};
     callback_record_t                 callback_record   = {};
     pooled_signal_t*                  pooled_signal     = nullptr;
     rocprofiler_hip_event_operation_t operation         = ROCPROFILER_HIP_EVENT_NONE;
+    coalesce_group_ptr_t              coalesce_group    = {};
 };
 
 struct barrier_info_session_t

@@ -256,7 +256,8 @@ config::get_attach_invariants() const
                            benchmark_mode,
                            spm_counter_collection,
                            rocshmem_api_trace,
-                           hipfile_api_trace);
+                           hipfile_api_trace,
+                           hip_event_trace);
 }
 
 inline bool
@@ -312,6 +313,7 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(ompt_trace_operations);
     CFG_SERIALIZE_MEMBER(rocshmem_api_trace);
     CFG_SERIALIZE_MEMBER(hipfile_api_trace);
+    CFG_SERIALIZE_MEMBER(hip_event_trace);
 
     CFG_SERIALIZE_MEMBER(mpi_rank);
     CFG_SERIALIZE_MEMBER(mpi_size);

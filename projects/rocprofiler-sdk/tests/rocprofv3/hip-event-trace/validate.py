@@ -39,11 +39,11 @@ HIP_EVENT_WAIT = 2
 
 BUFFER_TRACING_HIP_EVENT = 38
 
-# rocprofiler_hip_runtime_api_id_t values. These are positional in the enum
-# defined in source/include/rocprofiler-sdk/hip/runtime_api_id.h and will
-# shift if entries are inserted before them.
-HIP_EVENT_RECORD_API_ID = 81
-HIP_STREAM_WAIT_EVENT_API_ID = 348
+HIP_EVENT_API_NAMES = {
+    "hipEventRecord",
+    "hipEventRecordWithFlags",
+    "hipStreamWaitEvent",
+}
 
 
 def test_hip_event_json_structure(json_data):
@@ -155,13 +155,17 @@ def test_hip_event_correlation(json_data):
     data = json_data["rocprofiler-sdk-tool"]
     hip_event_records = data["buffer_records"]["hip_event"]
     hip_api_records = data["buffer_records"]["hip_api"]
+    string_table = data["strings"]["buffer_records"]
+
+    def get_operation_name(kind_id, op_id):
+        return string_table[kind_id]["operations"][op_id]
 
     event_corr_ids = set(r.correlation_id.internal for r in hip_event_records)
 
     hip_event_api_corr_ids = set(
         r.correlation_id.internal
         for r in hip_api_records
-        if r.operation in (HIP_EVENT_RECORD_API_ID, HIP_STREAM_WAIT_EVENT_API_ID)
+        if get_operation_name(r.kind, r.operation) in HIP_EVENT_API_NAMES
     )
 
     matched = event_corr_ids & hip_event_api_corr_ids
@@ -176,14 +180,7 @@ def test_hip_event_coalescing(json_data):
     event each produce a completion record, even when CLR coalesces barriers."""
     data = json_data["rocprofiler-sdk-tool"]
     hip_event_records = data["buffer_records"]["hip_event"]
-    hip_api_records = data["buffer_records"]["hip_api"]
 
-    # Find the coalesce_event handle: it's the event created with
-    # hipEventCreateWithFlags (API ID for hipEventCreateWithFlags is distinct
-    # from hipEventCreate). We identify it as the event handle that appears
-    # in exactly 3 consecutive hipEventRecord API calls at the end.
-    # Simpler approach: find RECORD buffer records grouped by hip_event_handle,
-    # and check that one handle has >= 3 records.
     record_records = [r for r in hip_event_records if r.operation == HIP_EVENT_RECORD]
 
     handle_counts = {}

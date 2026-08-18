@@ -572,7 +572,7 @@ FROM
     `rocpd_hip_event` H
     INNER JOIN `rocpd_string` S ON S.id = H.name_id
     AND S.guid = H.guid
-    INNER JOIN `rocpd_info_agent` agent ON agent.id = H.agent_id
+    LEFT JOIN `rocpd_info_agent` agent ON agent.id = H.agent_id
     AND agent.guid = H.guid
     LEFT JOIN `rocpd_info_queue` Q ON Q.id = H.queue_id
     AND Q.guid = H.guid

@@ -3831,10 +3831,10 @@ generate_output(tool::buffered_output<Tp, DomainT>& output_v,
     // function can warn if data was left unflushed, but nothing is written.
     if(skip_output) return;
 
-    // OMPT, rocSHMEM, hipFILE do not produce direct CSV/stats output. OMPT is rocpd-only (not
-    // emitted to JSON either), while rocSHMEM is emitted directly only to JSON and rocpd;
-    // both rely on `rocpd convert` for CSV/Perfetto/OTF2. The record count above is still
-    // tallied so that rocpd/JSON output is produced even when one of these is the only
+    // OMPT, rocSHMEM, hipFILE, and HIP_EVENT do not produce direct CSV/stats output. OMPT is
+    // rocpd-only (not emitted to JSON either), while rocSHMEM is emitted directly only to JSON
+    // and rocpd; all rely on `rocpd convert` for CSV/Perfetto/OTF2. The record count above is
+    // still tallied so that rocpd/JSON output is produced even when one of these is the only
     // active trace domain.
     if constexpr(DomainT != domain_type::OMPT && DomainT != domain_type::ROCSHMEM &&
                  DomainT != domain_type::HIPFILE && DomainT != domain_type::HIP_EVENT)
