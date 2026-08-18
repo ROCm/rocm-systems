@@ -24,7 +24,7 @@ class AMDSmiProcessor {
 
  private:
   amdsmi_processor_type_t processor_type_;
-  // Unset reads as "-1" under %d, which narrows to an out-of-range socket.
+  // Out-of-range sentinel so the CPU and Core APIs can reject an unset index.
   uint32_t pindex_{UINT32_MAX};
   std::string processor_identifier_;
 };
