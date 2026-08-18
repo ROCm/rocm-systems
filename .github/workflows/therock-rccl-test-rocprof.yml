@@ -103,8 +103,9 @@ jobs:
         env:
           THEROCK_BIN_DIR: ${{ env.THEROCK_BIN_DIR }}
           NOTIFY_EMAIL: ${{ inputs.notify_email }}
-          # Falls back to repo secret for scheduled runs (no input webhook).
-          # Empty on forked PRs (secrets unavailable) — script skips gracefully.
+          # Falls back to repo secret when no webhook input is provided.
+          # Empty on forked PRs (secrets unavailable) — only the notification
+          # is skipped; tests always run regardless.
           NOTIFY_WEBHOOK: ${{ inputs.notify_webhook || secrets.RCCL_CI_TEAMS_WEBHOOK }}
         run: |
           NOTIFY_ARGS=()

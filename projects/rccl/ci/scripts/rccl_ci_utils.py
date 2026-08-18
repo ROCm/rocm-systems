@@ -292,13 +292,13 @@ def reconcile_soname_versions(lib_dirs: list[Path]) -> None:
             dir_versions = bases.get(base, {})
             if not dir_versions:
                 continue
-            target_ver = next(iter(dir_versions))
+            target_ver = max(dir_versions)
             target_name = f"{base}.{target_ver}"
             for ver in versions:
                 if ver in dir_versions:
                     continue
                 symlink = d / f"{base}.{ver}"
-                if symlink.exists():
+                if symlink.exists() or symlink.is_symlink():
                     continue
                 symlink.symlink_to(target_name)
                 log.info("Symlink: %s.%s -> %s (in %s)", base, ver, target_name, d)
