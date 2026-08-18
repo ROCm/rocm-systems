@@ -84,7 +84,7 @@ TEST(DdaFabricScratchSizingTest, LLFloorDominatesAtHighRankCount)
     constexpr int nRanks = 72;
     constexpr int64_t smallSimpleCap = 8 * 1024 * 1024;  // 8 MiB
     const size_t sizing = nccl_dda_detail::ddaFabricScratchSizing(nRanks, -1, 1, smallSimpleCap, 1, 0);
-    constexpr size_t llFloor = 2 * nRanks * nccl_dda_detail::kDdaLLSlotStridePkts * 16;
+    constexpr size_t llFloor = 2 * nRanks * meta::comms::kDdaLLMaxBytes;
     EXPECT_EQ(sizing, llFloor);
     EXPECT_GT(sizing, (size_t)smallSimpleCap);
 }

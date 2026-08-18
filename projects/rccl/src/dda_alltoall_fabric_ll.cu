@@ -120,7 +120,8 @@ bool ncclAllToAllDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void*
   if (perChunkBytes % 16 != 0) {
     return false;
   }
-  if (perChunkBytes > kDdaLLMaxBytes) {
+  // expand from 8B to 16B
+  if (perChunkBytes * 2 > kDdaLLMaxBytes) {
     return false;
   }
   if (ddaLLA2AScratchSize(comm->nRanks) > comm->ddaScratchBytes) {

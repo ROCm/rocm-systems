@@ -215,14 +215,12 @@ inline std::pair<dim3, dim3> getGridAndBlockDims(size_t count, int typeSize, siz
   return std::make_pair(blocks, threads);
 }
 
-// Per-rank scratch slot capacity and hard per-rank cap (enforced in the
-// eligibility check); fixes the slot stride at compile time so the double-buffered
-// layout is identical on every rank and call. The effective size gate is the total
-// collected size, so the actual per-rank payload is under the cap.
-// Footprint = 2 banks * nRanks * (kDdaLLMaxBytes * 2) for the 8B->16B
-// expansion; 128 MiB at 8 MiB for 4 ranks
-// TODO: instead of making it fixed, use the size based on scratch size
-constexpr size_t kDdaLLMaxBytes = (size_t)(8) * 1024 * 1024;      // 8M
+// Per-rank staging slot size in scratch bytes, fixed at compile time so the
+// double-buffered layout is identical on every rank and call. The eligibility
+// checks derive their per-message caps from it.
+// Footprint = 2 banks * nRanks * (kDdaLLMaxBytes)
+// example: 128 MiB at 16 MiB for 4 ranks
+constexpr size_t kDdaLLMaxBytes = (size_t)(16) * 1024 * 1024;      // 16M
 
 // 16-byte LL line: two (4B data, 4B flag) pairs carrying 8B of payload.
 union LLPacket16 {

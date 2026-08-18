@@ -32,7 +32,7 @@
 namespace meta::comms {
 
 // LL is for small-message, so the full payload is well under the staging cap.
-constexpr size_t kDdaLLRsSlotStridePkts = kDdaLLMaxBytes / 8;
+constexpr size_t kDdaLLRsSlotStridePkts = kDdaLLMaxBytes / sizeof(LLPacket16);
 
 // LL reduce-scatter kernel. 1D grid over packets (8B payload each) of the
 // per-rank shard (recvcount elements).

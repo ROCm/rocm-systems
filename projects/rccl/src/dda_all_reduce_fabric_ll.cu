@@ -217,7 +217,8 @@ static bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* r
   if (bytes % 16 != 0) {
     return false;
   }
-  if (bytes > kDdaLLMaxBytes) {
+  // expand from 8B to 16B
+  if (bytes * 2 > kDdaLLMaxBytes) {
     return false;
   }
   if (ddaLLArScratchSize(comm->nRanks) > comm->ddaScratchBytes) {
@@ -272,8 +273,8 @@ static bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* r
     return false;
   }
 
-  // two copy phases
-  if (bytesPerRank * 2 > kDdaLLMaxBytes) {
+  // expand from 8B to 16B and two copy phases
+  if (bytesPerRank * 2 * 2 > kDdaLLMaxBytes) {
     return false;
   }
 

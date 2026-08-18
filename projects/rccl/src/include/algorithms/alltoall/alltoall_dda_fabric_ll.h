@@ -31,7 +31,7 @@
 namespace meta::comms {
 
 // LL is for small-message, so the full payload is well under the staging cap.
-constexpr size_t kDdaLLA2ASlotStridePkts = kDdaLLMaxBytes / 8;
+constexpr size_t kDdaLLA2ASlotStridePkts = kDdaLLMaxBytes / sizeof(LLPacket16);
 
 // LL all-to-all kernel. 2D grid: grid.x == nRanks selects the peer (column b
 // owns peer b); grid.y == blocksPerPeer splits that peer's packets into gridDim.y
