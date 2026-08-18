@@ -138,37 +138,9 @@ __device__ __forceinline__ void storeWire(
 }
 
 // (3) Poll until every line this lane reads has landed, then read the payload
-// once.
-//
-// Unlike the recvReduceSendCopy RECV block, this spins on flag words alone rather
-// than speculatively reloading the whole slice per attempt. Two things to keep:
-// the kPairs flag loads are all issued before anything waits, so an attempt costs
-// one round-trip rather than kPairs; and the per-lane exit is sound because pair g
-// of lane wid lies inside the line whose flag it just saw and lines commit
-// atomically, so no __any() is needed.
-__device__ __forceinline__ void pollWire(
-    const uint64_t* wire, uint64_t (&vr)[kWordsPerThread], uint64_t flag, int wid) {
-  const int flagOff = flagWordOffset(wid);
-  bool pending;
-  do {
-    uint64_t f[kPairs];
-#pragma unroll
-    for (int g = 0; g < kPairs; g++)  // all issued, then one wait
-      f[g] = loadWord(wire + 2 * g * kWarp + flagOff);
-    pending = false;
-#pragma unroll
-    for (int g = 0; g < kPairs; g++)
-      pending |= (f[g] != flag);
-  } while (pending);
-#pragma unroll
-  for (int u = 0; u < kWordsPerThread; u += 2)
-    load128(wire + u * kWarp, vr[u], vr[u + 1]);
-}
-
-// (3) Poll until every line this lane reads has landed, then read the payload
 // once. NCCL's recvReduceSendCopy RECV block: reload the whole slice each
 // attempt, flag lanes test their high word, and the warp retries as a unit.
-/*__device__ __forceinline__ void pollWire(
+__device__ __forceinline__ void pollWire(
   const uint64_t* wire, uint64_t (&vr)[kWordsPerThread], uint64_t flag, int wid) {
 const bool flagLane = isFlagLane(wid);
 bool needReload;
@@ -183,7 +155,7 @@ do {
 #pragma unroll
 for (int u = 0; u < kWordsPerThread; u += 2)
   load128(wire + u * kWarp, vr[u], vr[u + 1]);
-}*/
+}
 
 // (4) Flag-lane un-shuffle then dense store of registers into `dst`
 // (== storeRegs, shmem-free: out-of-range chunks are simply skipped).
