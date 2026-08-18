@@ -73,6 +73,7 @@ set(COMP_TYPE "main")
 # version control info
 execute_process(
     COMMAND git log --pretty=format:%h -n 1
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     OUTPUT_VARIABLE ROCPROFCOMPUTE_GIT_REV
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
