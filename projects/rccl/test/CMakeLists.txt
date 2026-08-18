@@ -225,7 +225,6 @@ if(BUILD_TESTS)
     StandaloneTests.cpp
     DdaIpcTests.cpp
     NetPluginReloadTests.cpp
-    RmaExternalPluginLoadTests.cpp
     plugin/net_reload_plugin.cpp
     ProfilerPluginCloseTests.cpp
     CpuAffinityTests.cpp

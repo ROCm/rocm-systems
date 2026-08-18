@@ -193,29 +193,27 @@ extern "C" __exported const ncclNet_v12_t ncclNetPlugin_v12 = {
 // One-sided RMA plugin (ncclGinPlugin_v13 / ncclRmaPlugin_v13)
 // ---------------------------------------------------------------------------
 //
-namespace rma_stub {
+static char kRmaPluginName[] = "RmaReloadStub";
 
-char kRmaPluginName[] = "RmaReloadStub";
-
-struct StubMr {
+struct RmaStubMr {
   void* base;
   size_t size;
 };
 
-struct StubComm {
+struct RmaStubComm {
   int rank;
   int nranks;
 };
 
-struct StubCtx {
-  StubComm* comm;
+struct RmaStubCtx {
+  RmaStubComm* comm;
 };
 
-int gRequestSentinel = 0;
+static int gRmaRequestSentinel = 0;
 
 __hidden ncclResult_t stubInit(void** ctx, uint64_t /*commId*/, ncclDebugLogger_t /*logFunction*/) {
   recordLine("RCCL_RMA_RELOAD_INIT_FILE");
-  if (ctx) *ctx = new StubComm{0, 1};
+  if (ctx) *ctx = new RmaStubComm{0, 1};
   return ncclSuccess;
 }
 
@@ -252,26 +250,26 @@ __hidden ncclResult_t stubGetProperties(int dev, ncclNetProperties_v12_t* props)
 
 __hidden ncclResult_t stubListen(void* /*ctx*/, int /*dev*/, void* handle, void** listenComm) {
   if (handle) memset(handle, 0, NCCL_NET_HANDLE_MAXSIZE);
-  if (listenComm) *listenComm = new StubComm{0, 1};
+  if (listenComm) *listenComm = new RmaStubComm{0, 1};
   return ncclSuccess;
 }
 
 __hidden ncclResult_t stubConnect(void* /*ctx*/, void* /*handles*/[], int nranks, int rank, void* /*listenComm*/,
                                   void** collComm) {
-  if (collComm) *collComm = new StubComm{rank, nranks};
+  if (collComm) *collComm = new RmaStubComm{rank, nranks};
   return ncclSuccess;
 }
 
 __hidden ncclResult_t stubCreateContext(void* collComm, ncclGinConfig_v13_t* /*config*/, void** ginCtx,
                                         ncclNetDeviceHandle_v11_t** devHandle) {
-  if (ginCtx) *ginCtx = new StubCtx{static_cast<StubComm*>(collComm)};
+  if (ginCtx) *ginCtx = new RmaStubCtx{static_cast<RmaStubComm*>(collComm)};
   if (devHandle) *devHandle = nullptr;
   return ncclSuccess;
 }
 
 __hidden ncclResult_t stubRegMrSym(void* /*collComm*/, void* data, size_t size, int /*type*/, uint64_t /*mrFlags*/,
                                    void** mhandle, void** ginHandle) {
-  StubMr* mr = new StubMr{data, size};
+  RmaStubMr* mr = new RmaStubMr{data, size};
   if (mhandle) *mhandle = mr;
   if (ginHandle) *ginHandle = mr;
   return ncclSuccess;
@@ -283,22 +281,22 @@ __hidden ncclResult_t stubRegMrSymDmaBuf(void* collComm, void* data, size_t size
 }
 
 __hidden ncclResult_t stubDeregMrSym(void* /*collComm*/, void* mhandle) {
-  delete static_cast<StubMr*>(mhandle);
+  delete static_cast<RmaStubMr*>(mhandle);
   return ncclSuccess;
 }
 
 __hidden ncclResult_t stubDestroyContext(void* ginCtx) {
-  delete static_cast<StubCtx*>(ginCtx);
+  delete static_cast<RmaStubCtx*>(ginCtx);
   return ncclSuccess;
 }
 
 __hidden ncclResult_t stubCloseColl(void* collComm) {
-  delete static_cast<StubComm*>(collComm);
+  delete static_cast<RmaStubComm*>(collComm);
   return ncclSuccess;
 }
 
 __hidden ncclResult_t stubCloseListen(void* listenComm) {
-  delete static_cast<StubComm*>(listenComm);
+  delete static_cast<RmaStubComm*>(listenComm);
   return ncclSuccess;
 }
 
@@ -307,7 +305,7 @@ __hidden ncclResult_t stubIput(void* /*ginCtx*/, int /*context*/, uint64_t /*src
                                size_t /*size*/, uint64_t /*dstOff*/, void* /*dstMhandle*/, uint32_t /*rank*/,
                                void** request) {
   recordLine("RCCL_RMA_RELOAD_COUNTER_FILE");
-  if (request) *request = &gRequestSentinel;
+  if (request) *request = &gRmaRequestSentinel;
   return ncclSuccess;
 }
 
@@ -317,7 +315,7 @@ __hidden ncclResult_t stubIputSignal(void* /*ginCtx*/, int /*context*/, uint64_t
                                      uint32_t /*signalOp*/, void** request) {
   recordLine("RCCL_RMA_RELOAD_COUNTER_FILE");
   recordLine("RCCL_RMA_SIGNAL_COUNTER_FILE");
-  if (request) *request = &gRequestSentinel;
+  if (request) *request = &gRmaRequestSentinel;
   return ncclSuccess;
 }
 
@@ -325,13 +323,13 @@ __hidden ncclResult_t stubIget(void* /*ginCtx*/, int /*context*/, uint64_t /*rem
                                size_t /*size*/, uint64_t /*localOff*/, void* /*localMhandle*/, uint32_t /*rank*/,
                                void** request) {
   recordLine("RCCL_RMA_RELOAD_COUNTER_FILE");
-  if (request) *request = &gRequestSentinel;
+  if (request) *request = &gRmaRequestSentinel;
   return ncclSuccess;
 }
 
 __hidden ncclResult_t stubIflush(void* /*ginCtx*/, int /*context*/, void* /*mhandle*/, uint32_t /*rank*/,
                                  void** request) {
-  if (request) *request = &gRequestSentinel;
+  if (request) *request = &gRmaRequestSentinel;
   return ncclSuccess;
 }
 
@@ -349,35 +347,32 @@ __hidden ncclResult_t stubQueryLastError(void* /*ginCtx*/, bool* hasError) {
 }
 
 __hidden ncclResult_t stubFinalize(void* ctx) {
-  delete static_cast<StubComm*>(ctx);
+  delete static_cast<RmaStubComm*>(ctx);
   return ncclSuccess;
 }
 
-const ncclGin_v13_t kStubVtable = {
-  kRmaPluginName,
-  stubInit,
-  stubDevices,
-  stubGetProperties,
-  stubListen,
-  stubConnect,
-  stubCreateContext,
-  stubRegMrSym,
-  stubRegMrSymDmaBuf,
-  stubDeregMrSym,
-  stubDestroyContext,
-  stubCloseColl,
-  stubCloseListen,
-  stubIput,
-  stubIputSignal,
-  stubIget,
-  stubIflush,
-  stubTest,
-  stubGinProgress,
-  stubQueryLastError,
-  stubFinalize,
-};
+#define RMA_RELOAD_STUB_VTABLE_FIELDS \
+  kRmaPluginName, \
+  stubInit, \
+  stubDevices, \
+  stubGetProperties, \
+  stubListen, \
+  stubConnect, \
+  stubCreateContext, \
+  stubRegMrSym, \
+  stubRegMrSymDmaBuf, \
+  stubDeregMrSym, \
+  stubDestroyContext, \
+  stubCloseColl, \
+  stubCloseListen, \
+  stubIput, \
+  stubIputSignal, \
+  stubIget, \
+  stubIflush, \
+  stubTest, \
+  stubGinProgress, \
+  stubQueryLastError, \
+  stubFinalize
 
-} // namespace rma_stub
-
-extern "C" __exported const ncclGin_v13_t ncclGinPlugin_v13 = rma_stub::kStubVtable;
-extern "C" __exported const ncclGin_v13_t ncclRmaPlugin_v13 = rma_stub::kStubVtable;
+extern "C" __exported const ncclGin_v13_t ncclGinPlugin_v13 = { RMA_RELOAD_STUB_VTABLE_FIELDS };
+extern "C" __exported const ncclGin_v13_t ncclRmaPlugin_v13 = { RMA_RELOAD_STUB_VTABLE_FIELDS };

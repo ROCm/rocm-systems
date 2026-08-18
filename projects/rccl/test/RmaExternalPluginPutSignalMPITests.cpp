@@ -27,8 +27,10 @@
  *
  * Requirements to actually exercise the plugin (supplied by the test-runner
  * entry, see tools/scripts/test_runner/configs/mi300x_mellanox_ib.json):
- *   - NCCL_GIN_ENABLE=1, NCCL_GIN_PLUGIN=STATIC_PLUGIN so the in-binary
- *     ncclRmaPlugin_v13 is discovered/loaded/assigned.
+ *   - NCCL_GIN_ENABLE=1, NCCL_GIN_PLUGIN=STATIC_PLUGIN, and
+ *     NCCL_RMA_PLUGIN=STATIC_PLUGIN so the in-binary ncclRmaPlugin_v13
+ *     is discovered/loaded/assigned (GIN and RMA have separate plugin
+ *     loaders since the v14 GIN/RMA split).
  *   - RCCL_RMA_RELOAD_COUNTER_FILE=<per-node path> so invocations are recorded.
  *   - A cross-LSA-team peer (e.g. 2 nodes x 1 GPU) so the RMA proxy path -- and
  *     therefore the plugin's iput/iputSignal -- is taken rather than the local
@@ -138,8 +140,8 @@ TEST_F(RmaExternalPluginPutSignalTest, IssuesPutSignalToStub)
     if (counterPath == nullptr)
     {
         GTEST_SKIP() << "RCCL_RMA_RELOAD_COUNTER_FILE not set: external RMA stub "
-                        "plugin not configured (set NCCL_GIN_PLUGIN=STATIC_PLUGIN "
-                        "and this env var to run).";
+                        "plugin not configured (set NCCL_GIN_PLUGIN=STATIC_PLUGIN, "
+                        "NCCL_RMA_PLUGIN=STATIC_PLUGIN, and this env var to run).";
     }
 
     if (!validateTestPrerequisites(/*min=*/2, /*max=*/2))

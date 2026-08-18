@@ -940,6 +940,7 @@
       "env_variables": {
         "NCCL_GIN_ENABLE": "1",
         "NCCL_GIN_PLUGIN": "STATIC_PLUGIN",
+        "NCCL_RMA_PLUGIN": "STATIC_PLUGIN",
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_WIN_ENABLE": "1",
         "NCCL_DMABUF_ENABLE": "1",
