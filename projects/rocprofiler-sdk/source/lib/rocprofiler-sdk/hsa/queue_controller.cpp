@@ -519,33 +519,35 @@ QueueController::serializer(const Queue* queue)
     CHECK(queue);
     const auto agent_id = queue->get_agent().get_rocp_agent()->id;
 
-    // Read the refcount before taking the serializer lock: update_serialization() acquires
-    // them in that order, and reversing it here would deadlock. A concurrent enable/disable
-    // for this agent can therefore race with the creation below, exactly as the previous
-    // _serialized_enabled load could, and is resolved the same way -- the next transition
-    // through update_serialization() reaches the entry once it is in the map.
-    const bool should_serialize = is_serialization_enabled(agent_id);
-
     common::Synchronized<hsa::profiler_serializer>* ret = nullptr;
-    _profiler_serializer.ulock(
-        [&](const auto& m) {
-            if(auto ptr = m.find(agent_id); ptr != m.end())
-            {
-                ret = ptr->second.get();
+    // Hold the refcount read lock across the lookup/insertion so that a concurrent
+    // update_serialization() cannot run between reading the refcount and inserting the
+    // entry: if it did, it would find no serializer to transition and the new entry would
+    // be created in the wrong state.  update_serialization() holds the refcount write lock
+    // then the serializer write lock, so taking them in the same order here is deadlock-free.
+    _serialization_refcount.rlock([&](const auto& state) {
+        const bool should_serialize = state.enabled(agent_id);
+        _profiler_serializer.ulock(
+            [&](const auto& m) {
+                if(auto ptr = m.find(agent_id); ptr != m.end())
+                {
+                    ret = ptr->second.get();
+                    return true;
+                }
+                return false;
+            },
+            [&](auto& m) {
+                ret =
+                    m.emplace(agent_id,
+                              std::make_shared<common::Synchronized<hsa::profiler_serializer>>())
+                        .first->second.get();
+                if(should_serialize)
+                {
+                    ret->wlock([&](auto& serializer) { serializer.enable({}); });
+                }
                 return true;
-            }
-            return false;
-        },
-        [&](auto& m) {
-            ret = m.emplace(agent_id,
-                            std::make_shared<common::Synchronized<hsa::profiler_serializer>>())
-                      .first->second.get();
-            if(should_serialize)
-            {
-                ret->wlock([&](auto& serializer) { serializer.enable({}); });
-            }
-            return true;
-        });
+            });
+    });
     return *ret;
 }
 

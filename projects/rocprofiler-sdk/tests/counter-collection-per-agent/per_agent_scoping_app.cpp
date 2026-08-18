@@ -84,7 +84,22 @@ rocprofiler_context_id_t ctx_scoped_gpu1 = {.handle = 0};
 rocprofiler_context_id_t ctx_all         = {.handle = 0};
 rocprofiler_context_id_t ctx_all_second  = {.handle = 0};
 
+// gpu_agents[i] is the rocprofiler agent for HIP device i. Populated in tool_init by
+// matching each HIP device's PCI domain/BDF to the rocprofiler agent with the same
+// coordinates so that the contexts and assertions both refer to the same physical device
+// regardless of the order rocprofiler enumerates agents or how visible-device variables
+// reorder HIP ordinals.
 std::vector<rocprofiler_agent_id_t> gpu_agents = {};
+
+// Intermediate storage used to build the HIP-to-rocprofiler mapping: keeps the
+// location_id (BDF) and PCI domain alongside the agent id until the mapping is done.
+struct agent_info_t
+{
+    rocprofiler_agent_id_t id;
+    uint32_t               location_id;  // (bus<<8)|(device<<3)|function
+    uint32_t               domain;
+};
+std::vector<agent_info_t> all_gpu_agent_info = {};
 
 std::mutex                 observed_mutex     = {};
 std::map<uint64_t, size_t> dispatch_per_agent = {};
@@ -196,17 +211,6 @@ dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
     *config = profile;
 }
 
-rocprofiler_status_t
-collect_gpu_agents(rocprofiler_agent_version_t, const void** agents, size_t num_agents, void*)
-{
-    for(size_t i = 0; i < num_agents; ++i)
-    {
-        const auto* agent = static_cast<const rocprofiler_agent_v0_t*>(agents[i]);
-        if(agent->type == ROCPROFILER_AGENT_TYPE_GPU) gpu_agents.push_back(agent->id);
-    }
-    return ROCPROFILER_STATUS_SUCCESS;
-}
-
 void
 configure_cc(rocprofiler_context_id_t* ctx, const rocprofiler_agent_id_t* agent)
 {
@@ -217,6 +221,18 @@ configure_cc(rocprofiler_context_id_t* ctx, const rocprofiler_agent_id_t* agent)
     if(agent)
         ROCPROFILER_CALL(rocprofiler_dispatch_counting_service_set_agents(*ctx, agent, 1),
                          "restrict counting service to agent");
+}
+
+rocprofiler_status_t
+collect_gpu_agents(rocprofiler_agent_version_t, const void** agents, size_t num_agents, void*)
+{
+    for(size_t i = 0; i < num_agents; ++i)
+    {
+        const auto* agent = static_cast<const rocprofiler_agent_v0_t*>(agents[i]);
+        if(agent->type == ROCPROFILER_AGENT_TYPE_GPU)
+            all_gpu_agent_info.push_back({agent->id, agent->location_id, agent->domain});
+    }
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 
 int
@@ -230,6 +246,32 @@ tool_init(rocprofiler_client_finalize_t, void*)
 
     // Nothing to configure when the machine cannot express the scenario; main() reports the
     // skip so the reason is visible in the test output.
+    if(all_gpu_agent_info.size() < 2) return 0;
+
+    // Map each HIP device ordinal to its rocprofiler agent using PCI domain/BDF so that
+    // gpu_agents[i] is the agent for HIP device i, regardless of the order rocprofiler
+    // enumerates agents or how ROCR_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES reorders ordinals.
+    int device_count = 0;
+    if(hipGetDeviceCount(&device_count) != hipSuccess || device_count < 2) return 0;
+
+    for(int dev = 0; dev < device_count; ++dev)
+    {
+        hipDeviceProp_t prop{};
+        if(hipGetDeviceProperties(&prop, dev) != hipSuccess) return 0;
+        const auto bus = static_cast<uint32_t>(prop.pciBusID);
+        const auto did = static_cast<uint32_t>(prop.pciDeviceID);
+        const auto dom = static_cast<uint32_t>(prop.pciDomainID);
+        for(const auto& info : all_gpu_agent_info)
+        {
+            if(info.domain == dom && (info.location_id >> 8) == bus &&
+               ((info.location_id >> 3) & 0x1Fu) == did)
+            {
+                gpu_agents.push_back(info.id);
+                break;
+            }
+        }
+    }
+
     if(gpu_agents.size() < 2) return 0;
 
     configure_cc(&ctx_scoped_gpu0, &gpu_agents[0]);
@@ -352,9 +394,9 @@ main()
     reset_observations();
     ROCPROFILER_CALL(rocprofiler_start_context(ctx_scoped_gpu1), "start scoped context");
     time_concurrent_workload(1);
-    const size_t scoped_records_gpu1 = records_on(agent_1);
-    const double scoped_ms           = time_concurrent_workload(0);
+    const double scoped_ms = time_concurrent_workload(0);
     ROCPROFILER_CALL(rocprofiler_stop_context(ctx_scoped_gpu1), "stop scoped context");
+    const size_t scoped_records_gpu1    = records_on(agent_1);
     const size_t scoped_dispatches_gpu0 = dispatches_on(agent_0);
     const size_t scoped_records_gpu0    = records_on(agent_0);
 

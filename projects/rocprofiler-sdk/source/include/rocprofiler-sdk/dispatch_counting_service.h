@@ -110,20 +110,6 @@ typedef void (*rocprofiler_dispatch_counting_record_cb_t)(
  *        one dispatch (denoted by correlation id). Will trigger the
  *        callback based on the parameters setup in buffer_id_t.
  *
- *        NOTE: Interface is up for comment as to whether restrictions
- *        on agent should be made here (limiting the CB based on agent)
- *        or if the restriction should be performed by the tool in
- *        ::rocprofiler_dispatch_counting_service_cb_t (i.e.
- *        tool code checking the agent param to see if they want to profile
- *        it).
- *
- *        Interface is up for comment as to whether restrictions
- *        on agent should be made here (limiting the CB based on agent)
- *        or if the restriction should be performed by the tool in
- *        ::rocprofiler_dispatch_counting_service_cb_t (i.e.
- *        tool code checking the agent param to see if they want to profile
- *        it).
- *
  * @param [in] context_id context id
  * @param [in] buffer_id id of the buffer to use for the counting service
  * @param [in] callback callback to perform when dispatch is enqueued

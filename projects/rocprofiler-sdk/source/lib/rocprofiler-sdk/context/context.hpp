@@ -42,6 +42,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <unordered_map>
 #include <unordered_set>
@@ -261,6 +262,11 @@ deactivate_client_contexts(rocprofiler_client_id_t id);
 // should only be called if the client failed to initialize
 void
 deregister_client_contexts(rocprofiler_client_id_t id);
+
+// The mutex that serialises start_context / stop_context and any mutation that must be
+// atomic with activation state (e.g. setting the agent restriction on a context).
+std::mutex&
+get_contexts_mutex();
 
 inline bool
 default_context_filter(const context* val)

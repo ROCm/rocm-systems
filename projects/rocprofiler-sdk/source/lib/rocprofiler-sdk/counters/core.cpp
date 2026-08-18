@@ -220,7 +220,12 @@ set_dispatch_agents(rocprofiler_context_id_t      context_id,
     if(!ctx_p->dispatch_counter_collection) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 
     // The agent set is read without a lock on the dispatch path and is what scopes
-    // serialization at start, so it may only change while the context is stopped.
+    // serialization at start, so it may only change while the context is stopped. Hold the
+    // contexts mutex so this check and the assignment are atomic with start_context: a
+    // concurrent start could otherwise activate the context after the scan (using the old
+    // set for serialization) and then race with the unordered-set assignment below while
+    // dispatch hooks read it.
+    auto _lk = std::unique_lock<std::mutex>{context::get_contexts_mutex()};
     for(const auto* itr : context::get_active_contexts())
     {
         if(itr && itr->context_idx == ctx_p->context_idx)
