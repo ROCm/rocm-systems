@@ -58,8 +58,11 @@ namespace {
     float ExpectedFp8ReduceScatterSum(int rank, int nRanks, size_t count, size_t i) {
         const size_t globalIdx = static_cast<size_t>(rank) * count + i;
         const int base = static_cast<int>(globalIdx % 61) - 30;
-        const double sumRanks = static_cast<double>(nRanks) * (nRanks - 1) / 2.0;
-        return static_cast<float>(Fp8T(static_cast<float>(nRanks * base + sumRanks)));
+        float acc = 0.0f;
+        for (int r = 0; r < nRanks; r++) {
+            acc += static_cast<float>(Fp8T(static_cast<float>(base + r)));
+        }
+        return static_cast<float>(Fp8T(acc));
     }
 
     template <typename Fp8T>
@@ -74,8 +77,11 @@ namespace {
     template <typename Fp8T>
     float ExpectedFp8AllReduceSum(int nRanks, size_t i) {
         const int base = static_cast<int>(i % 61) - 30;
-        const double sumRanks = static_cast<double>(nRanks) * (nRanks - 1) / 2.0;
-        return static_cast<float>(Fp8T(static_cast<float>(nRanks * base + sumRanks)));
+        float acc = 0.0f;
+        for (int r = 0; r < nRanks; r++) {
+            acc += static_cast<float>(Fp8T(static_cast<float>(base + r)));
+        }
+        return static_cast<float>(Fp8T(acc));
     }
 }
 
