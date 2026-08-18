@@ -35,6 +35,13 @@ if(BUILD_TESTS)
             "${PROJECT_SOURCE_DIR}/src/device/ce_reduce/test_generate_ce_reduce.py"
   )
 
+  # The kernel-count leak guards (src/device/test_generate_kernel_counts.py and
+  # src/device/symmetric/test_generate_symmetric.py) are intentionally NOT
+  # registered as ctest cases here: nothing in RCCL CI runs `ctest`, so an
+  # add_test() would never gate. They run in CI via the CPU-only host-test
+  # pipeline instead -- see test/host/run_host_tests.sh (the `guards` phase,
+  # folded into `run`).
+
   if (ENABLE_CODE_COVERAGE)
     add_compile_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
     add_link_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
@@ -662,6 +669,7 @@ if(BUILD_TESTS)
       SymmetricWindowMPITests.cpp
       DeviceApiMPITests.cpp
       CommNetMismatchMPITests.cpp
+      test_sparse_send_recv.cpp
     )
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
