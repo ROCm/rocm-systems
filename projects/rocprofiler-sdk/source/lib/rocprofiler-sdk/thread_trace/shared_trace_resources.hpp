@@ -48,9 +48,12 @@ namespace thread_trace
 {
 struct trace_resource_requirements_t
 {
-    uint64_t output_buffer_size   = 0;
-    uint64_t staging_buffer_size  = 0;
-    uint64_t staging_buffer_count = 0;
+    // Size of each GPU output slot. A context occupies one slot per requested buffer, so
+    // the slot count is the largest request on the agent and each entry is sized to the
+    // largest context that reaches that slot.
+    std::vector<uint64_t> output_slot_sizes    = {};
+    uint64_t              staging_buffer_size  = 0;
+    uint64_t              staging_buffer_count = 0;
 };
 
 // Owns every heavyweight ATT resource shared by contexts targeting one agent.

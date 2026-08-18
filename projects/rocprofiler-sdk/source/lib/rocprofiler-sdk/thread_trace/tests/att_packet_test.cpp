@@ -45,6 +45,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
@@ -153,6 +154,15 @@ TEST(thread_trace, resource_creation)
     thread_trace::free_shared_trace_resources();
 }
 
+std::vector<size_t> recorded_output_allocations = {};
+
+hsa_status_t
+recording_pool_allocate(hsa_amd_memory_pool_t pool, size_t size, uint32_t flags, void** ptr)
+{
+    recorded_output_allocations.push_back(size);
+    return get_ext_table().hsa_amd_memory_pool_allocate_fn(pool, size, flags, ptr);
+}
+
 // Shared buffers are reused across contexts (same slot -> same pointer) and
 // distinct per ring slot.
 TEST(thread_trace, shared_buffer_reuse)
@@ -174,7 +184,7 @@ TEST(thread_trace, shared_buffer_reuse)
     // Build a TraceMemoryPool the same way ThreadTraceAQLPacketFactory does.
     auto make_pool = [&agent](const thread_trace::agent_trace_resources_ptr_t& resources) {
         hsa::TraceMemoryPool pool{};
-        pool.allocate_fn     = get_ext_table().hsa_amd_memory_pool_allocate_fn;
+        pool.allocate_fn     = recording_pool_allocate;
         pool.allow_access_fn = get_ext_table().hsa_amd_agents_allow_access_fn;
         pool.free_fn         = get_ext_table().hsa_amd_memory_pool_free_fn;
         pool.gpu_agent       = agent.get_hsa_agent();
@@ -183,11 +193,14 @@ TEST(thread_trace, shared_buffer_reuse)
         return pool;
     };
 
-    // Two contexts with different sizes; shared buffer is sized to the max.
+    // A large single-buffer context alongside a smaller multi-buffer one. Slot 0 must grow
+    // to the larger size, but the extra slots stay at the size that actually reaches them.
+    constexpr uint64_t kLarge = 0x2000000;
+    constexpr uint64_t kSmall = 0x1000000;
     thread_trace::register_shared_trace_requirements(
-        agent.get_rocp_agent()->id, agent.get_hsa_agent(), 0x1000000, 1);
+        agent.get_rocp_agent()->id, agent.get_hsa_agent(), kLarge, 1);
     thread_trace::register_shared_trace_requirements(
-        agent.get_rocp_agent()->id, agent.get_hsa_agent(), 0x2000000, 1);
+        agent.get_rocp_agent()->id, agent.get_hsa_agent(), kSmall, 3);
     auto resources      = thread_trace::acquire_shared_trace_resources(agent);
     auto same_resources = thread_trace::acquire_shared_trace_resources(agent);
     EXPECT_EQ(resources.get(), same_resources.get());
@@ -195,19 +208,25 @@ TEST(thread_trace, shared_buffer_reuse)
     auto pool_a = make_pool(resources);
     auto pool_b = make_pool(resources);
 
-    constexpr uint64_t kSize = 0x2000000;
+    recorded_output_allocations.clear();
 
-    // First context requests two ring slots (e.g. triple buffering).
-    void* a0 = pool_a.allocate_output(kSize);
-    void* a1 = pool_a.allocate_output(kSize);
+    void* a0 = pool_a.allocate_output(kLarge);
+    void* a1 = pool_a.allocate_output(kSmall);
     ASSERT_NE(a0, nullptr);
     ASSERT_NE(a1, nullptr);
     EXPECT_NE(a0, a1) << "distinct ring slots must be distinct buffers";
 
-    void* b0 = pool_b.allocate_output(kSize);
-    void* b1 = pool_b.allocate_output(kSize);
+    void* b0 = pool_b.allocate_output(kLarge);
+    void* b1 = pool_b.allocate_output(kSmall);
     EXPECT_EQ(a0, b0) << "same ring slot must be shared across contexts";
     EXPECT_EQ(a1, b1) << "same ring slot must be shared across contexts";
+
+    ASSERT_EQ(recorded_output_allocations.size(), 2u)
+        << "a second context must reuse the slots rather than allocate again";
+    EXPECT_GE(recorded_output_allocations.at(0), kLarge);
+    EXPECT_GE(recorded_output_allocations.at(1), kSmall);
+    EXPECT_LT(recorded_output_allocations.at(1), kLarge)
+        << "a slot only the smaller context reaches must not be sized to the agent maximum";
 
     EXPECT_TRUE(resources->owns_output_buffer(a0));
     EXPECT_TRUE(resources->owns_output_buffer(a1));

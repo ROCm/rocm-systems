@@ -64,6 +64,7 @@ public:
                                uint64_t               buffer_size,
                                uint64_t               num_buffers)
     {
+        const uint64_t slot_count    = std::max<uint64_t>(num_buffers, 1);
         const uint64_t staging_size  = num_buffers > 1 ? buffer_size : 0;
         const uint64_t staging_count = num_buffers > 1 ? num_buffers : 0;
 
@@ -75,19 +76,26 @@ public:
 
         entry.hsa_agent = hsa_agent;
 
+        auto& slot_sizes = entry.requirements.output_slot_sizes;
+
         if(entry.resources)
         {
             const auto& registered = entry.requirements;
-            ROCP_FATAL_IF(buffer_size > registered.output_buffer_size ||
-                          staging_size > registered.staging_buffer_size ||
-                          staging_count > registered.staging_buffer_count)
-                << "ATT requirements grew after resources were acquired for agent "
-                << agent_id.handle;
+            bool        fits       = slot_count <= slot_sizes.size() &&
+                        staging_size <= registered.staging_buffer_size &&
+                        staging_count <= registered.staging_buffer_count;
+            for(uint64_t slot = 0; fits && slot < slot_count; ++slot)
+                fits = buffer_size <= slot_sizes.at(slot);
+
+            ROCP_FATAL_IF(!fits) << "ATT requirements grew after resources were acquired for agent "
+                                 << agent_id.handle;
             return;
         }
 
-        entry.requirements.output_buffer_size =
-            std::max(entry.requirements.output_buffer_size, buffer_size);
+        if(slot_sizes.size() < slot_count) slot_sizes.resize(slot_count, 0);
+        for(uint64_t slot = 0; slot < slot_count; ++slot)
+            slot_sizes[slot] = std::max(slot_sizes[slot], buffer_size);
+
         entry.requirements.staging_buffer_size =
             std::max(entry.requirements.staging_buffer_size, staging_size);
         entry.requirements.staging_buffer_count =
@@ -108,7 +116,7 @@ public:
         ROCP_FATAL_IF(!entry.hsa_agent || entry.hsa_agent->handle != agent.get_hsa_agent().handle)
             << "ATT HSA agent does not match registered requirements for agent "
             << rocp_agent->id.handle;
-        ROCP_FATAL_IF(entry.requirements.output_buffer_size == 0)
+        ROCP_FATAL_IF(entry.requirements.output_slot_sizes.empty())
             << "ATT output buffer size was not registered for agent " << rocp_agent->id.handle;
 
         if(!entry.resources)
@@ -139,12 +147,18 @@ get_manager()
     static auto* manager = common::static_object<SharedTraceResourceManager>::construct();
     return *CHECK_NOTNULL(manager);
 }
+
+SharedTraceResourceManager*
+peek_manager()
+{
+    return common::static_object<SharedTraceResourceManager>::get();
+}
 }  // namespace
 
 AgentTraceResources::AgentTraceResources(const hsa::AgentCache&        agent,
                                          trace_resource_requirements_t requirements)
 : m_agent_id(CHECK_NOTNULL(agent.get_rocp_agent())->id)
-, m_requirements(requirements)
+, m_requirements(std::move(requirements))
 , m_queue(att_queue_create(agent,
                            m_requirements.staging_buffer_size,
                            m_requirements.staging_buffer_count))
@@ -172,9 +186,14 @@ AgentTraceResources::acquire_output_buffer(const hsa::TraceMemoryPool& pool,
                                            uint64_t                    requested_size)
 {
     auto lk = std::lock_guard{m_mutex};
-    ROCP_FATAL_IF(requested_size > m_requirements.output_buffer_size)
+    ROCP_FATAL_IF(slot >= m_requirements.output_slot_sizes.size())
+        << "ATT output slot " << slot << " exceeds the " << m_requirements.output_slot_sizes.size()
+        << " slot(s) registered for agent " << m_agent_id.handle;
+
+    const uint64_t slot_size = m_requirements.output_slot_sizes.at(slot);
+    ROCP_FATAL_IF(requested_size > slot_size)
         << "ATT output request of " << requested_size << " bytes exceeds registered maximum "
-        << m_requirements.output_buffer_size << " for agent " << m_agent_id.handle;
+        << slot_size << " for agent " << m_agent_id.handle;
 
     if(m_output_buffers.size() <= slot) m_output_buffers.resize(slot + 1);
 
@@ -184,12 +203,13 @@ AgentTraceResources::acquire_output_buffer(const hsa::TraceMemoryPool& pool,
 
     void* raw    = nullptr;
     auto  status = pool.allocate_fn(pool.gpu_pool_,
-                                   m_requirements.output_buffer_size + PAGE_ALIGN_PADDING,
+                                   slot_size + PAGE_ALIGN_PADDING,
                                    hsa::hsa_amd_memory_pool_executable_flag,
                                    &raw);
     if(status != HSA_STATUS_SUCCESS || raw == nullptr)
     {
-        ROCP_ERROR << "Failed to allocate shared thread trace buffer: " << status;
+        ROCP_ERROR << "Failed to allocate " << slot_size << " byte thread trace buffer (slot "
+                   << slot << ") for agent " << m_agent_id.handle << ": " << status;
         return nullptr;
     }
 
@@ -259,7 +279,9 @@ acquire_shared_trace_resources(const hsa::AgentCache& agent)
 void
 free_shared_trace_resources()
 {
-    get_manager().shutdown();
+    // Finalization runs for every process, including those that never configured ATT.
+    // Skip it entirely rather than constructing the manager just to clear nothing.
+    if(auto* manager = peek_manager()) manager->shutdown();
 }
 
 }  // namespace thread_trace
