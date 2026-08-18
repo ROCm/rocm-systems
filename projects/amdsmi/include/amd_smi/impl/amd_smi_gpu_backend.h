@@ -90,13 +90,13 @@ class IGPUBackend {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
   virtual amdsmi_status_t get_vcn_busy_percent(uint32_t*) { return AMDSMI_STATUS_NOT_SUPPORTED; }
-  virtual amdsmi_status_t AllocFabricTelemetry(uint32_t, amdsmi_fabric_telemetry_t**) {
+  virtual amdsmi_status_t alloc_fabric_telemetry(uint32_t, amdsmi_fabric_telemetry_t**) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
   virtual amdsmi_status_t get_fabric_telemetry_data(amdsmi_fabric_telemetry_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
-  virtual amdsmi_status_t FreeFabricTelemetry(amdsmi_fabric_telemetry_t*) {
+  virtual amdsmi_status_t free_fabric_telemetry(amdsmi_fabric_telemetry_t*) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
   virtual amdsmi_status_t get_gpu_fabric_info(amdsmi_fabric_info_t*) {

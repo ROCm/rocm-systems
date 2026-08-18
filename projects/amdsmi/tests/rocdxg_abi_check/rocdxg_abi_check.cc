@@ -21,16 +21,9 @@
  */
 
 // Guards amd-smi's vendored view of the librocdxg ABI against upstream drift.
-//
-// amd-smi mirrors these types in impl/wsl/rocdxg_abi.h so the normal build has
-// no path into rocr-runtime's source tree. librocdxg writes into structs that
-// amd-smi allocates, so a silent layout change upstream would corrupt memory
-// rather than fail to compile. This target includes both the vendored header
-// and the upstream one and static_asserts that they agree.
-//
-// Not part of any default build. Enable with:
-//   cmake -DENABLE_WSL_BACKEND=ON -DVERIFY_ROCDXG_ABI=ON
-// pointing ROCDXG_UPSTREAM_INCLUDE_DIR at a libhsakmt include tree.
+// librocdxg writes into structs amd-smi allocates, so a silent layout change
+// would corrupt memory rather than fail to compile. Every check below is a
+// static_assert, so compiling this target is the test.
 
 #include <cstddef>
 

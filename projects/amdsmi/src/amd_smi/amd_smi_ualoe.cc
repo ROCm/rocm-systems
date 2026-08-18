@@ -618,7 +618,7 @@ amdsmi_status_t amdsmi_alloc_fabric_telemetry(amdsmi_processor_handle processor_
 
 #ifdef ENABLE_WSL_BACKEND
   if (auto* backend = device->backend()) {
-    return backend->AllocFabricTelemetry(category_mask, telemetry);
+    return backend->alloc_fabric_telemetry(category_mask, telemetry);
   }
 #endif
 
@@ -699,7 +699,7 @@ amdsmi_status_t amdsmi_free_fabric_telemetry(amdsmi_processor_handle processor_h
 
 #ifdef ENABLE_WSL_BACKEND
   if (auto* backend = device->backend()) {
-    return backend->FreeFabricTelemetry(telemetry);
+    return backend->free_fabric_telemetry(telemetry);
   }
 #endif
 

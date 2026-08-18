@@ -20,18 +20,11 @@
  * THE SOFTWARE.
  */
 
-// amd-smi's private view of the librocdxg ABI.
-//
-// librocdxg is loaded with dlopen at runtime, so amd-smi needs the layout of
-// the types it exchanges with that library but never links against it. Mirroring
-// the ABI here keeps the build free of any path into another project's source
-// tree; the upstream definitions live in rocr-runtime's
-// libhsakmt/include/hsakmt/{rocdxg_smi.h,hsakmttypes.h}.
-//
-// Same approach rccl uses for its dlopen'd libmlx5 (src/include/mlx5/).
-//
-// Only the subset amd-smi actually exchanges is mirrored. Layout must match
-// upstream exactly: librocdxg writes into caller-allocated structs.
+// amd-smi's private view of the librocdxg ABI, which is dlopen'd and never
+// linked. Mirroring it here keeps the build free of any path into another
+// project's source tree; layout must match rocr-runtime's
+// libhsakmt/include/hsakmt/{rocdxg_smi.h,hsakmttypes.h} exactly, because
+// librocdxg writes into structs allocated here. VERIFY_ROCDXG_ABI checks that.
 
 #ifndef AMD_SMI_INCLUDE_IMPL_WSL_ROCDXG_ABI_H_
 #define AMD_SMI_INCLUDE_IMPL_WSL_ROCDXG_ABI_H_
@@ -45,9 +38,6 @@ extern "C" {
 // ---------------------------------------------------------------------------
 // hsakmt core types (mirrors hsakmttypes.h)
 // ---------------------------------------------------------------------------
-
-// Empty on Linux; upstream only defines __stdcall for Windows builds.
-#define ROCDXG_ABI_CALL
 
 typedef uint32_t HSAuint32;
 

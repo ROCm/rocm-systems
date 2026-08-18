@@ -16,5 +16,5 @@ endif()
 
 add_executable(rocdxg_abi_check rocdxg_abi_check.cc)
 target_include_directories(rocdxg_abi_check PRIVATE ${PROJECT_SOURCE_DIR}/include ${ROCDXG_UPSTREAM_INCLUDE_DIR})
-# Compiling is the test: every check is a static_assert.
-add_test(NAME rocdxg_abi_check COMMAND rocdxg_abi_check)
+# Not registered with ctest: every check is a static_assert, so building the
+# target is what runs them.

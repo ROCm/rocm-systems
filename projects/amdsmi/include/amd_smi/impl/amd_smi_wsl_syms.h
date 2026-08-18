@@ -43,7 +43,7 @@ struct WslSyms {
   HSAKMT_STATUS (*hsaKmtAcquireSystemProperties)(HsaSystemProperties*) = nullptr;
   HSAKMT_STATUS (*hsaKmtReleaseSystemProperties)() = nullptr;
 
-  // rocdxg_smi — enumeration
+  // rocdxg_smi: enumeration
   HSAKMT_STATUS (*rocdxg_smi_get_device_count)(uint32_t*) = nullptr;
   // rocdxg_smi — aggregate static device info (cached per device)
   HSAKMT_STATUS (*rocdxg_smi_get_device_info)(uint32_t, rocdxg_smi_device_info_t*) = nullptr;

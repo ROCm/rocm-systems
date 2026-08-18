@@ -70,7 +70,7 @@ static constexpr const char* kDxgDevPath = "/dev/dxg";
 static constexpr const char* kRocdxgSoV = "librocdxg.so.1";
 static constexpr const char* kRocdxgSo = "librocdxg.so";
 
-// librocdxg handle — owned by try_populate, valid for the process lifetime.
+// librocdxg handle, owned by try_populate for the process lifetime.
 static void* g_rocdxg_handle = nullptr;
 
 // Helper: resolve one dlsym symbol; print and return false on failure.
@@ -166,7 +166,7 @@ static AMDSmiDrm g_wsl_drm;
 // Definition of the global WSL symbol table (declared extern in amd_smi_wsl_syms.h).
 WslSyms g_wsl_syms;
 
-// True iff try_populate succeeded — tracks whether hsaKmtCloseKFD is needed.
+// True iff try_populate succeeded, which is what makes hsaKmtCloseKFD necessary.
 static bool g_wsl_active = false;
 
 // -----------------------------------------------------------------------------

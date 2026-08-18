@@ -182,6 +182,6 @@ typedef struct rocdxg_smi_device_info {
 HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_device_info(uint32_t node_id,
                                                    rocdxg_smi_device_info_t* info);
 #ifdef __cplusplus
-}
+}  // extern "C"
 #endif
 #endif  // ROCDXG_SMI_H_

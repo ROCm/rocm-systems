@@ -98,8 +98,6 @@ class WSLGPUBackend : public IGPUBackend {
 
   // Aggregate static device info, fetched once during enumeration.
   rocdxg_smi_device_info_t device_info_ = {};
-
-  amdsmi_status_t load_device_info() const;
 };
 
 }  // namespace amd::smi
