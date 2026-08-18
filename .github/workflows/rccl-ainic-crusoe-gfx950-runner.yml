@@ -101,6 +101,8 @@ permissions:
 env:
   # Shared CI root on the Crusoe cluster. /it-shared is read-only; artifacts go to /shared_nfs.
   RCCL_CI_ROOT: /shared_nfs/rccl-ci
+  # SPUR (not Slurm): without this the client talks to localhost:6817.
+  SPUR_CONTROLLER_ADDR: http://crs-m2m-cpu-spur-005.crusoe.amd.com:6817
   TEST_RUNNER_DIR: projects/rccl/tools/scripts/test_runner
   DEFAULT_WORKDIR: /shared_nfs/rccl-ci/rocm-systems
   DEFAULT_MPI_PATH: /opt/openmpi
@@ -185,7 +187,9 @@ jobs:
           # can't tear down the allocation. Inside the job
           # SLURM_JOB_ID/SLURM_NODELIST are set, test_runner calls
           # `scontrol show hostnames`, and mpirun lands ranks on real GPUs.
-          # --exclusive gives full CPUs per node so `--bind-to numa` has room.
+          # Crusoe's scheduler is SPUR (sbatch is a spur alias, not Slurm). Request
+          # GPUs with --gpus-per-node, not --gres=gpu:mi355x:N: that GRES type
+          # does not pack the same way (cluster jobs that run use gpu:8/node).
           # GITHUB_WORKSPACE and RUNNER_TEMP live under NFS /home (shared with the
           # compute nodes), so the fresh build and the run log are visible here.
           RESV_ARG=""
@@ -283,9 +287,9 @@ jobs:
             ${RESV_ARG} \
             ${EXCLUDE_ARG} \
             --nodes="${SALLOC_NODES}" \
-            --ntasks-per-node=8 \
-            --gres=gpu:mi355x:8 \
-            --exclusive \
+            --ntasks="${SALLOC_NODES}" \
+            --cpus-per-task=8 \
+            --gpus-per-node=8 \
             --time="${SALLOC_TIME}" \
             "${BATCH_SCRIPT}")
           echo "Submitted SLURM job ${JOBID}"
