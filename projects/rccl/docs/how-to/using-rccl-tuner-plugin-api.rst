@@ -117,19 +117,19 @@ To use the external plugin, implement the desired algorithm and protocol selecti
 As a reference, the `following example <https://github.com/ROCm/rocm-systems/blob/develop/projects/rccl/plugins/tuner/example/plugin.c>`_ is based on the
 MI300 tuning table by default.
 
-Building and using the example libnccl-tuner.so file
+Building and using the example librccl-tuner.so file
 -----------------------------------------------------
 
-#. Build the ``libnccl-tuner.so`` file following `the example Makefile <https://github.com/ROCm/rocm-systems/blob/develop/projects/rccl/plugins/tuner/example/Makefile>`_.
+#. Build the ``librccl-tuner.so`` file following `the example Makefile <https://github.com/ROCm/rocm-systems/blob/develop/projects/rccl/plugins/tuner/example/Makefile>`_.
 
    .. code-block:: shell
 
       cd $RCCL_HOME/plugins/tuner/example/
       make
 
-#. Tell RCCL to use the custom ``libnccl-tuner.so`` file by setting the following environment variable
+#. Tell RCCL to use the custom ``librccl-tuner.so`` file by setting the following environment variable
    to the file path:
 
    .. code-block:: shell
 
-      export NCCL_TUNER_PLUGIN=$RCCL_HOME/plugins/tuner/example/libnccl-tuner.so
+      export NCCL_TUNER_PLUGIN=$RCCL_HOME/plugins/tuner/example/librccl-tuner.so
