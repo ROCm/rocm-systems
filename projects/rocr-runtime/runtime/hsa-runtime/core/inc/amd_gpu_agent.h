@@ -1023,9 +1023,6 @@ class GpuAgent : public GpuAgentInt {
     /* Per-XCC data array - cache-line aligned AoS for optimal cache behavior */
     per_xcc_pcs_data_t* xcc_data;  // Array of per-XCC structs (size = num_xcc)
 
-    /* PM4 fallback flag (resources are per-XCC in per_xcc_pcs_data_t) */
-    bool use_pm4_fallback;           // true if large-BAR not available
-
     /* Consumer thread for aggregated callback delivery */
     std::thread consumer_thread;            // Aggregates data and delivers callbacks
     std::mutex consumer_mutex;              // Protects consumer_cv, pending_flush_count, consumer_exit (for notify)
@@ -1052,12 +1049,7 @@ class GpuAgent : public GpuAgentInt {
   void PcSamplingDeliverAggregatedSamples(pcs_data_t& pcs_data,
                                           pcs::PcsRuntime::PcSamplingSession& session);
 
-  // @brief Flush device buffers for per-XCC PC sampling architecture (CPU atomic path)
-  hsa_status_t PcSamplingFlushDeviceBuffersPerXCC(pcs_data_t* pcs_data,
-                                                  pcs::PcsRuntime::PcSamplingSession& session,
-                                                  uint32_t xcc_id);
-
-  // @brief Flush device buffers using PM4 commands (fallback for non-large-BAR systems)
+  // @brief Flush device buffers for per-XCC PC sampling architecture using PM4 commands
   hsa_status_t PcSamplingFlushDeviceBuffersPerXCC_PM4(pcs_data_t* pcs_data,
                                                       pcs::PcsRuntime::PcSamplingSession& session,
                                                       uint32_t xcc_id);

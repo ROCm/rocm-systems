@@ -3773,13 +3773,6 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
   // Initialize per-XCC structures
   pcs_data->num_xcc = properties_.NumXcc;
 
-  // Always drain on the GPU, never with a CPU memcpy. The buf_written_val handshake does not
-  // order the trap handler's GL2 payload writes against the count it publishes as seen through
-  // the large-BAR aperture, so a CPU reader can observe the count while the payload behind it is
-  // still in flight and copy a torn record. PM4 issues the copy on the same queue as the
-  // handshake, which does order the two.
-  pcs_data->use_pm4_fallback = true;
-
   // Allocate cache-line aligned per-XCC data array
   // Each per_xcc_pcs_data_t is 64-byte aligned to prevent false sharing between XCCs
   pcs_data->xcc_data = new per_xcc_pcs_data_t[pcs_data->num_xcc]();
@@ -3841,8 +3834,8 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
     }
   });
 
-  // PM4 fallback requires PCSampling queue and per-XCC resources
-  if (pcs_data->use_pm4_fallback) {
+  // The PM4 drain requires the PCSampling queue and per-XCC resources
+  {
     // Force creating of PC Sampling queue to trigger exception early in case we exceed max
     // available CP queues on this agent
     queues_[QueuePCSampling].touch();
@@ -4548,140 +4541,10 @@ hsa_status_t GpuAgent::PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& sessio
   return (retKmt == HSAKMT_STATUS_SUCCESS) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
 }
 
-hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC(
-    pcs_data_t* pcs_data, pcs::PcsRuntime::PcSamplingSession& session, uint32_t xcc_id) {
-  // pcs_data is passed directly - no method dispatch needed (eliminates branch in hot path)
-
-  if (!pcs_data->xcc_data[xcc_id].device_data) {
-    return HSA_STATUS_SUCCESS;
-  }
-
-  uint32_t next_buffer;
-  uint64_t reset_write_val;
-  uint32_t to_copy = 0;
-  uint8_t* buffer[2];
-
-  // Get references to this XCC's buffers and state (using cached values)
-  uint32_t& which_buffer = pcs_data->xcc_data[xcc_id].which_buffer;
-  const size_t per_xcc_host_buffer_size = pcs_data->per_xcc_host_buffer_size;
-  uint8_t* host_buffer_begin = pcs_data->xcc_data[xcc_id].host_buffer_begin;
-  const size_t samples_per_trap_buffer = pcs_data->samples_per_trap_buffer;
-
-  // Double buffers start after the metadata structure
-  buffer[0] = reinterpret_cast<uint8_t*>(pcs_data->xcc_data[xcc_id].device_data) + sizeof(pcs_sampling_data_t);
-  buffer[1] = buffer[0] + samples_per_trap_buffer * session.sample_size();
-
-  /*
-   * Double-buffer atomic swap mechanism:
-   * We use a double-buffer mechanism so that trap handler calls are writing to one buffer while
-   * rocr is copying data from the other buffer.
-   *
-   * 1. Atomically swap buffers on the device. Future trap handler calls will put their data into
-   *    next_buffer.
-   * 2. Return a 64-bit packed value to ROCr; the upper bit is the old buffer and can be ignored.
-   *    The lower 63 bits are how many trap handler entrances happened before the atomic swap
-   *    i.e., what value to wait for in buf_written_val to know all previous trap entries were
-   *    done.
-   *
-   * CPU atomic exchange on fine-grained memory bypasses per-XCC GL2 cache.
-   */
-  next_buffer = (which_buffer + 1) % 2;
-  reset_write_val = (uint64_t)next_buffer << 63;
-
-  uint64_t sample_count = rocr::atomic::Exchange(
-      reinterpret_cast<uint64_t*>(&pcs_data->xcc_data[xcc_id].device_data->buf_write_val), reset_write_val,
-      std::memory_order_acq_rel);
-
-  // Mask off upper bit to get sample count from old value
-  sample_count &= (ULLONG_MAX >> 1);
-
-  // Clamp to buffer capacity if overflow occurred (samples were lost)
-  if (sample_count > samples_per_trap_buffer) {
-    pcs_data->xcc_data[xcc_id].lost_sample_count.fetch_add(
-        sample_count - samples_per_trap_buffer, std::memory_order_relaxed);
-    sample_count = samples_per_trap_buffer;
-  }
-
-  to_copy = sample_count * session.sample_size();
-
-  // Calculate write position in this XCC's circular host buffer region
-  uint64_t write_offset = pcs_data->xcc_data[xcc_id].host_write_offset;
-
-  uint64_t buffer_offset = write_offset % per_xcc_host_buffer_size;
-  uint8_t* host_write_ptr = host_buffer_begin + buffer_offset;
-  size_t contiguous_space = per_xcc_host_buffer_size - buffer_offset;
-  size_t bytes_copied = 0;
-
-  if (to_copy > 0) {
-    // Use atomics for synchronization with GPU - rocr::atomic provides
-    // cross-platform atomic operations with proper memory ordering.
-    uint32_t* bwv_written = (which_buffer == 0)
-        ? &pcs_data->xcc_data[xcc_id].device_data->buf_written_val0
-        : &pcs_data->xcc_data[xcc_id].device_data->buf_written_val1;
-
-    // Wait for GPU to finish writing samples (per-XCC isolation eliminates contention)
-    // Check session.isActive() to avoid spinning forever if session is stopping.
-    uint32_t expected_written = (uint32_t)sample_count;
-
-    while (rocr::atomic::Load(bwv_written, std::memory_order_acquire) < expected_written) {
-      // Exit early if session is being stopped - prevents infinite spin during shutdown
-      if (!session.isActive()) {
-        uint32_t actual_written = rocr::atomic::Load(bwv_written, std::memory_order_acquire);
-        if (actual_written < expected_written) {
-          pcs_data->xcc_data[xcc_id].lost_sample_count.fetch_add(
-              expected_written - actual_written, std::memory_order_relaxed);
-        }
-        sample_count = actual_written;
-        to_copy = sample_count * session.sample_size();
-        break;
-      }
-#if defined(_MSC_VER)
-      _mm_pause();
-#elif defined(__x86_64__) || defined(__i386__)
-      __builtin_ia32_pause();
-#endif
-    }
-
-    // NOTE: Caller (PcSamplingFlush or PcSamplingThreadPerXCC) must hold host_buffer_mutex.
-    // Lock protects host_read_offset and prevents TOCTOU race with consumer thread.
-
-    // Guard against host buffer overflow: ensure write doesn't lap the reader
-    uint64_t read_offset = pcs_data->xcc_data[xcc_id].host_read_offset;
-    bytes_copied = to_copy;
-
-    if ((write_offset + bytes_copied) - read_offset > per_xcc_host_buffer_size) {
-      // Host buffer overflow: would overwrite unread data. Drop samples to prevent corruption.
-      size_t overflow_bytes = (write_offset + bytes_copied) - read_offset - per_xcc_host_buffer_size;
-      pcs_data->xcc_data[xcc_id].lost_sample_count.fetch_add(
-          overflow_bytes / session.sample_size(), std::memory_order_relaxed);
-      debug_print("PC Sampling XCC %u: host buffer overflow, dropped %zu bytes\n",
-                  xcc_id, overflow_bytes);
-      // Clamp bytes_copied to available space
-      bytes_copied = per_xcc_host_buffer_size - (write_offset - read_offset);
-    }
-
-    // Copy samples to host buffer, handling wrap-around if needed
-    if (bytes_copied > 0) {
-      size_t first_copy = std::min(bytes_copied, contiguous_space);
-      size_t second_copy = bytes_copied - first_copy;
-      memcpy(host_write_ptr, buffer[which_buffer], first_copy);
-      if (second_copy > 0) {
-        memcpy(host_buffer_begin, buffer[which_buffer] + first_copy, second_copy);
-      }
-      pcs_data->xcc_data[xcc_id].host_write_offset = write_offset + bytes_copied;
-    }
-
-    // Reset written counter so trap handler can reuse this buffer
-    rocr::atomic::Store(bwv_written, 0U, std::memory_order_release);
-  }
-
-  which_buffer = next_buffer;
-  return HSA_STATUS_SUCCESS;
-}
-
 hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
     pcs_data_t* pcs_data, pcs::PcsRuntime::PcSamplingSession& session, uint32_t xcc_id) {
-  // PM4 fallback for non-large-BAR systems where CPU cannot directly access VRAM.
+  // Drains the trap buffers on the GPU rather than with a CPU memcpy, so that the copy is
+  // ordered against the trap handler's payload writes by the queue rather than by the aperture.
   // Uses ATOMIC_MEM for buffer swap, WAIT_REG_MEM + DMA_DATA for copy, WRITE_DATA for reset.
 
   if (!pcs_data->xcc_data[xcc_id].device_data) {
@@ -5005,9 +4868,8 @@ void GpuAgent::PcSamplingThreadPerXCC(pcs_data_t& pcs_data, uint32_t xcc_id,
       {
         std::lock_guard<std::mutex> lock(xcc.host_buffer_mutex);
 
-        hsa_status_t flush_status = pcs_data.use_pm4_fallback
-            ? PcSamplingFlushDeviceBuffersPerXCC_PM4(&pcs_data, session, xcc_id)
-            : PcSamplingFlushDeviceBuffersPerXCC(&pcs_data, session, xcc_id);
+        hsa_status_t flush_status =
+            PcSamplingFlushDeviceBuffersPerXCC_PM4(&pcs_data, session, xcc_id);
 
         if (flush_status != HSA_STATUS_SUCCESS) {
           debug_print("%s (XCC %u)::Flush failed with status %d\n", thread_name, xcc_id, flush_status);
@@ -5176,9 +5038,7 @@ hsa_status_t GpuAgent::PcSamplingFlush(pcs::PcsRuntime::PcSamplingSession& sessi
     per_xcc_pcs_data_t& xcc = pcs_data->xcc_data[xcc_id];
     std::lock_guard<std::mutex> lock(xcc.host_buffer_mutex);
 
-    hsa_status_t flush_status = pcs_data->use_pm4_fallback
-        ? PcSamplingFlushDeviceBuffersPerXCC_PM4(pcs_data, session, xcc_id)
-        : PcSamplingFlushDeviceBuffersPerXCC(pcs_data, session, xcc_id);
+    hsa_status_t flush_status = PcSamplingFlushDeviceBuffersPerXCC_PM4(pcs_data, session, xcc_id);
 
     if (flush_status != HSA_STATUS_SUCCESS) {
       if (first_error == HSA_STATUS_SUCCESS) first_error = flush_status;
