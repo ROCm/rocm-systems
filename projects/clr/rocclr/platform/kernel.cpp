@@ -16,14 +16,20 @@ namespace amd {
 Kernel::Kernel(Program& program, const Symbol& symbol, const std::string& name)
     : program_(program), symbol_(symbol), name_(name) {
   parameters_ = new (signature()) KernelParameters(const_cast<KernelSignature&>(signature()));
-  fixme_guarantee(parameters_ != NULL, "out of memory");
+  if (parameters_ == NULL) {
+    LogPrintfError("out of memory");
+    // Cannot return from constructor, object will be in invalid state
+  }
   name_ += '\0';
 }
 
 Kernel::Kernel(const Kernel& rhs)
     : program_(rhs.program_()), symbol_(rhs.symbol_), name_(rhs.name_) {
   parameters_ = new (signature()) KernelParameters(*rhs.parameters_);
-  fixme_guarantee(parameters_ != NULL, "out of memory");
+  if (parameters_ == NULL) {
+    LogPrintfError("out of memory");
+    // Cannot return from constructor, object will be in invalid state
+  }
 }
 
 Kernel::~Kernel() {

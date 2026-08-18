@@ -75,11 +75,15 @@ static void handlePayload(MessageHandler& messages, uint32_t service, uint64_t* 
       if (!messages.handlePayload(service, payload)) {
         ClPrint(amd::LOG_ERROR, amd::LOG_ALWAYS, "Hostcall: invalid request for service \"%d\".",
                 service);
-        guarantee(false, "Hostcall: invalid service request %d \n", service);
+        LogPrintfError("Hostcall: invalid service request %d \n", service);
+        return;
       }
       return;
     case SERVICE_DEVMEM: {
-      guarantee(payload[0] != 0 || payload[1] != 0, "Both payloads cannot be 0 \n");
+      if (payload[0] == 0 && payload[1] == 0) {
+        LogPrintfError("Both payloads cannot be 0 \n");
+        return;
+      }
       if (payload[0]) {
         amd::Memory* mem = amd::MemObjMap::FindMemObj(reinterpret_cast<void*>(payload[0]));
         if (mem) {
@@ -122,7 +126,7 @@ static void handlePayload(MessageHandler& messages, uint32_t service, uint64_t* 
       return;
     }
     default:
-      guarantee(false, "Hostcall: no handler found for service ID %d \n", service);
+      LogPrintfError("Hostcall: no handler found for service ID %d \n", service);
       return;
   }
 }

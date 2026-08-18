@@ -230,7 +230,10 @@ template <class T> class SysmemPool {
     }
   }
   void* Alloc(size_t size) {
-    guarantee(size <= sizeof(T), "Bigger size than pool allows!");
+    if (size > sizeof(T)) {
+      LogPrintfError("Bigger size than pool allows!");
+      return nullptr;
+    }
     size_t current = current_alloc_++;
     auto idx = current / kAllocChunkSize;
     while (idx >= max_chunk_idx_) {

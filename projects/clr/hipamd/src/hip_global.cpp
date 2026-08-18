@@ -61,16 +61,25 @@ Function::~Function() {
 amd::Kernel* Function::BuildKernel(hipModule_t hmod) const {
   amd::Program* program = as_amd(reinterpret_cast<cl_program>(hmod));
   const amd::Symbol* symbol = program->findSymbol(name_.c_str());
-  guarantee(symbol != nullptr, "Cannot find Symbol with name: %s", name_.c_str());
+  if (symbol == nullptr) {
+    LogPrintfError("Cannot find Symbol with name: %s", name_.c_str());
+    return nullptr;
+  }
   return new amd::Kernel(*program, *symbol, name_);
 }
 
 // ================================================================================================
 hipError_t Function::GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod) {
-  guarantee((dFunc_.size() == g_devices.size()), "dFunc Size mismatch");
+  if (dFunc_.size() != g_devices.size()) {
+    LogPrintfError("dFunc Size mismatch");
+    return hipErrorInvalidValue;
+  }
   int dev = ihipGetDevice();
   if (dFunc_[dev] == nullptr) {
     dFunc_[dev] = BuildKernel(hmod);
+    if (dFunc_[dev] == nullptr) {
+      return hipErrorInvalidSymbol;
+    }
   }
   *hfunc = asHipFunction(dFunc_[dev]);
   return hipSuccess;
@@ -100,6 +109,9 @@ hipError_t Function::GetStatFunc(hipFunction_t* hfunc, int deviceId) {
   IHIP_RETURN_ONFAIL((*modules_)->BuildProgram(deviceId));
   IHIP_RETURN_ONFAIL((*modules_)->GetModule(deviceId, &hmod));
   dFunc_[deviceId] = BuildKernel(hmod);
+  if (dFunc_[deviceId] == nullptr) {
+    return hipErrorInvalidSymbol;
+  }
   *hfunc = asHipFunction(dFunc_[deviceId]);
   return hipSuccess;
 }
@@ -187,10 +199,18 @@ Var::~Var() {
 
 // ================================================================================================
 hipError_t Var::GetDeviceVarPtr(amd::Memory** mem, int deviceId) {
-  guarantee((deviceId >= 0), "Invalid DeviceId, less than zero");
-  guarantee((static_cast<size_t>(deviceId) < g_devices.size()),
-            "Invalid DeviceId, greater than no of code objects");
-  guarantee((dMem_.size() == g_devices.size()), "Device Var not initialized to size");
+  if (deviceId < 0) {
+    LogPrintfError("Invalid DeviceId, less than zero");
+    return hipErrorInvalidDevice;
+  }
+  if (static_cast<size_t>(deviceId) >= g_devices.size()) {
+    LogPrintfError("Invalid DeviceId, greater than no of code objects");
+    return hipErrorInvalidDevice;
+  }
+  if (dMem_.size() != g_devices.size()) {
+    LogPrintfError("Device Var not initialized to size");
+    return hipErrorInvalidValue;
+  }
   *mem = dMem_[deviceId];
   return hipSuccess;
 }
@@ -200,19 +220,23 @@ static hipError_t createVarMem(amd::Memory** mem_out, const std::string& name,
                                hipModule_t hmod, int deviceId) {
   amd::Program* program = as_amd(reinterpret_cast<cl_program>(hmod));
   device::Program* dev_program = program->getDeviceProgram(*g_devices.at(deviceId)->devices()[0]);
-  guarantee(dev_program != nullptr, "Cannot get Device Program for module: 0x%x", hmod);
+  if (dev_program == nullptr) {
+    LogPrintfError("Cannot get Device Program for module: 0x%x", hmod);
+    return hipErrorInvalidDeviceFunction;
+  }
 
   amd::Memory* mem = nullptr;
   void* device_ptr = nullptr;
   size_t size = 0;
   if (!dev_program->createGlobalVarObj(&mem, &device_ptr, &size, name.c_str())) {
-    guarantee(false, "Cannot create GlobalVar Obj for symbol: %s", name.c_str());
+    LogPrintfError("Cannot create GlobalVar Obj for symbol: %s", name.c_str());
+    return hipErrorInvalidSymbol;
   }
   // Handle size 0 symbols
   if (size != 0) {
     if (mem == nullptr || device_ptr == nullptr) {
       LogPrintfError("Cannot get memory for creating device Var: %s", name.c_str());
-      guarantee(false, "Cannot get memory for creating device var");
+      return hipErrorInvalidValue;
     }
     amd::MemObjMap::AddMemObj(device_ptr, mem);
   }
@@ -222,10 +246,18 @@ static hipError_t createVarMem(amd::Memory** mem_out, const std::string& name,
 
 // ================================================================================================
 hipError_t Var::GetDeviceVar(amd::Memory** mem, int deviceId, hipModule_t hmod) {
-  guarantee((deviceId >= 0), "Invalid DeviceId, less than zero");
-  guarantee((static_cast<size_t>(deviceId) < g_devices.size()),
-            "Invalid DeviceId, greater than no of code objects");
-  guarantee((dMem_.size() == g_devices.size()), "Device Var not initialized to size");
+  if (deviceId < 0) {
+    LogPrintfError("Invalid DeviceId, less than zero");
+    return hipErrorInvalidDevice;
+  }
+  if (static_cast<size_t>(deviceId) >= g_devices.size()) {
+    LogPrintfError("Invalid DeviceId, greater than no of code objects");
+    return hipErrorInvalidDevice;
+  }
+  if (dMem_.size() != g_devices.size()) {
+    LogPrintfError("Device Var not initialized to size");
+    return hipErrorInvalidValue;
+  }
 
   if (dMem_[deviceId] == nullptr) {
     IHIP_RETURN_ONFAIL(createVarMem(&dMem_[deviceId], name_, hmod, deviceId));
@@ -237,9 +269,14 @@ hipError_t Var::GetDeviceVar(amd::Memory** mem, int deviceId, hipModule_t hmod) 
 
 // ================================================================================================
 hipError_t Var::GetStatDeviceVar(amd::Memory** mem, int deviceId) {
-  guarantee((deviceId >= 0), "Invalid DeviceId, less than zero");
-  guarantee((static_cast<size_t>(deviceId) < g_devices.size()),
-            "Invalid DeviceId, greater than no of code objects");
+  if (deviceId < 0) {
+    LogPrintfError("Invalid DeviceId, less than zero");
+    return hipErrorInvalidDevice;
+  }
+  if (static_cast<size_t>(deviceId) >= g_devices.size()) {
+    LogPrintfError("Invalid DeviceId, greater than no of code objects");
+    return hipErrorInvalidDevice;
+  }
   if (dMem_[deviceId] == nullptr) {
     hipModule_t hmod = nullptr;
     IHIP_RETURN_ONFAIL((*modules_)->BuildProgram(deviceId));
