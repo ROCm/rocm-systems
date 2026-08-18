@@ -195,7 +195,8 @@ RCCL_PARAM(RocshmemEnabled, "ROCSHMEM_ENABLE", 1);
 std::unordered_map<ncclComm_t, rocshmem::rocshmem_team_t> ncclCommToRshmemTeam;
 #endif
 
-// RCCL_CHEAP_POST_SEND_FENCE_OFF: 0 = arch-tuned (default), non-zero = force cheap fence off (__threadfence_system)
+// RCCL_CHEAP_POST_SEND_FENCE_OFF: 0 = arch-tuned auto (default; cheap fence on for gfx942/gfx1250, off for gfx950),
+//   1 = force cheap fence off (__threadfence_system), 2 = force cheap fence on (override auto, e.g. re-enable on gfx950)
 RCCL_PARAM(CheapPostSendFenceOff, "CHEAP_POST_SEND_FENCE_OFF", 0);
 
 /**
@@ -1801,11 +1802,16 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   if (ringGraph->nChannels > MAXCHANNELS / 2) allGather3Data[rank].nc = 1;
   comm->cheapPostSendFenceOff = 1;
 #ifdef HIP_UNCACHED_MEMORY
-  // cheap fence is only safe with cache bypassing load/store availability in kernel
-  // only enabled on gfx942, gfx950 and gfx1250
-  if (!rcclParamCheapPostSendFenceOff()) {
+  // cheap fence is only safe with cache bypassing load/store availability in kernel.
+  // Param: 0 = arch-tuned auto (cheap fence on for gfx942/gfx1250, off for gfx950),
+  //        1 = force cheap fence off, 2 = force cheap fence on (override auto).
+  int64_t cheapFenceParam = rcclParamCheapPostSendFenceOff();
+  if (cheapFenceParam == 2) {
+    // Force cheap fence on regardless of arch (e.g. re-enable on gfx950).
+    comm->cheapPostSendFenceOff = 0;
+  } else if (cheapFenceParam == 0) {
+    // Auto: gfx950 defaults to cheap fence off; gfx942/gfx1250 keep it on.
     if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942") ||
-        IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx950") ||
         IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250"))
       comm->cheapPostSendFenceOff = 0;
   }
