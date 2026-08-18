@@ -1553,10 +1553,19 @@ configure_settings(bool _init)
 
     if(_config->get_papi_events().empty())
     {
-        trait::runtime_enabled<comp::papi_config>::set(false);
-        trait::runtime_enabled<comp::papi_common<void>>::set(false);
-        trait::runtime_enabled<comp::papi_array_t>::set(false);
-        trait::runtime_enabled<comp::papi_vector>::set(false);
+        // If SAMPLING_NICS is configured, PAPI net::: events will be injected in
+        // pmc::setup() once the AMD SMI provider is available for AI NIC
+        // classification. Keep PAPI enabled so those deferred events take effect.
+        auto        _nics_it  = _config->find(std::string{ env_vars::SAMPLING_NICS });
+        const auto& _nics_val = static_cast<tim::tsettings<std::string>&>(
+            *_nics_it->second).get();
+        if(_nics_val.empty() || _nics_val == "none")
+        {
+            trait::runtime_enabled<comp::papi_config>::set(false);
+            trait::runtime_enabled<comp::papi_common<void>>::set(false);
+            trait::runtime_enabled<comp::papi_array_t>::set(false);
+            trait::runtime_enabled<comp::papi_vector>::set(false);
+        }
     }
 
     configure_mode_settings(_config);
@@ -2354,6 +2363,13 @@ get_sampling_ainics()
 #else
     return std::string{};
 #endif
+}
+
+std::string
+get_sampling_nics()
+{
+    static auto _v = get_config()->find(std::string{ env_vars::SAMPLING_NICS });
+    return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 
 bool

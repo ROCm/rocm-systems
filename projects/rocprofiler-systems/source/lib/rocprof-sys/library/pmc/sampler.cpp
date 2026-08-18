@@ -24,6 +24,8 @@
 #    include "library/pmc/collectors/nic/perfetto_policy.hpp"
 #endif
 
+#include "core/config.hpp"
+#include "library/pmc/collectors/nic/nic_utils.hpp"
 #include "library/pmc/collectors/cpu/cache_policy.hpp"
 #include "library/pmc/collectors/cpu/collector.hpp"
 #include "library/pmc/collectors/cpu/perfetto_policy.hpp"
@@ -45,6 +47,8 @@
 #include "library/pmc/sampler.hpp"
 
 #include "logger/debug.hpp"
+
+#include <spdlog/fmt/ranges.h>
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/timing/backends.hpp>
@@ -150,6 +154,87 @@ std::unique_ptr<cpu_collector_t> g_cpu_collector;
 std::vector<collectors::collector_slice> g_collector_slices;
 
 std::atomic<bool> g_reinit_pending{ false };
+
+// Classify interfaces from SAMPLING_NICS and wire up the PAPI (conventional NICs)
+// and AMD SMI (AI NICs) backends. Must be called from setup() after g_device_provider
+// is created. Provider may be nullptr if AMD SMI is disabled.
+void
+configure_nic_profiling(const std::shared_ptr<provider_t>& provider)
+{
+    using namespace collectors::nic;
+
+    const auto _nics_val = config::get_sampling_nics();
+    if(_nics_val.empty() || _nics_val == "none") return;
+
+    // Collect AI NIC names from the AMD SMI provider (empty when not available)
+#if defined(ROCPROFSYS_BUILD_AINIC)
+    const auto ai_names = (provider) ? get_ai_nic_names<nic_device_t>(provider)
+                                     : std::set<std::string>{};
+#else
+    const std::set<std::string> ai_names;
+    (void) provider;
+#endif
+
+    // Enumerate all conventional interfaces from /proc/net/dev
+    const auto available = enumerate_proc_net_dev();
+
+    // Split requested interfaces into conventional (PAPI) and AI (AMD SMI) categories
+    const auto [conventional, ai_nics] = classify_nics(_nics_val, ai_names, available);
+
+    // Inject PAPI net::: events for conventional NICs, unless PAPI_EVENTS already set
+    // by the user (explicit ROCPROFSYS_PAPI_EVENTS takes precedence).
+    // get_config() is internal to config.cpp; read PAPI_EVENTS directly from env.
+    if(!conventional.empty())
+    {
+        const auto current_papi = rocprofsys::get_env<std::string>(
+            env_vars::PAPI_EVENTS, std::string{});
+        if(current_papi.empty())
+        {
+            const auto events_str = build_papi_net_events(conventional);
+            config::set_setting_value(std::string{ env_vars::PAPI_EVENTS }, events_str);
+            LOG_INFO("SAMPLING_NICS: registered {} conventional NIC(s) for PAPI net "
+                     "sampling: {}",
+                     conventional.size(), fmt::join(conventional, ", "));
+            // Re-assert that PAPI traits are enabled (config skips disabling them when
+            // SAMPLING_NICS is set, but be explicit here for clarity).
+            trait::runtime_enabled<comp::papi_config>::set(true);
+            trait::runtime_enabled<comp::papi_common<void>>::set(true);
+            trait::runtime_enabled<comp::papi_array_t>::set(true);
+            trait::runtime_enabled<comp::papi_vector>::set(true);
+        }
+        else
+        {
+            LOG_DEBUG("SAMPLING_NICS: ROCPROFSYS_PAPI_EVENTS already set, "
+                      "skipping auto-construction of net::: events");
+        }
+    }
+    else
+    {
+        LOG_DEBUG("SAMPLING_NICS: no conventional NICs found for PAPI net sampling "
+                  "(requested: {})", _nics_val);
+    }
+
+    // Route AI NICs to AMD SMI by updating SAMPLING_AINICS (unless already set).
+#if defined(ROCPROFSYS_BUILD_AINIC)
+    if(!ai_nics.empty())
+    {
+        const auto current_ainics = config::get_sampling_ainics();
+        if(current_ainics.empty() || current_ainics == "none")
+        {
+            const auto ainics_str = fmt::format("{}", fmt::join(ai_nics, ","));
+            config::set_setting_value(std::string{ env_vars::SAMPLING_AINICS },
+                                      ainics_str);
+            LOG_INFO("SAMPLING_NICS: routed {} AI NIC(s) to AMD SMI backend: {}",
+                     ai_nics.size(), fmt::join(ai_nics, ", "));
+        }
+        else
+        {
+            LOG_DEBUG("SAMPLING_NICS: ROCPROFSYS_SAMPLING_AINICS already set to "
+                      "'{}', not overriding", current_ainics);
+        }
+    }
+#endif
+}
 
 // Tears down the AMD SMI collector slices and marks the sampler uninitialized.
 // This is the only teardown performed on the post-fork reinit path: that reinit
@@ -290,6 +375,10 @@ setup()
             g_collector_slices.emplace_back(*g_nic_collector);
 #endif
         }
+
+        // Classify SAMPLING_NICS into conventional (PAPI) and AI (AMD SMI) backends.
+        // Runs after g_device_provider creation; provider is nullptr if AMD SMI is off.
+        configure_nic_profiling(g_device_provider);
 
         for(auto& slice : g_collector_slices)
         {
