@@ -98,9 +98,9 @@ static hipError_t DefaultHipGetDeviceProperties(hipDeviceProp_t* prop, int)
 {
     if (prop) {
         *prop = hipDeviceProp_t{};
-        const char* arch = "gfx942:sramecc+:xnack-";
-        std::strncpy(prop->gcnArchName, arch, sizeof(prop->gcnArchName) - 1);
-        prop->gcnArchName[sizeof(prop->gcnArchName) - 1] = '\0';
+        // snprintf null-terminates within the field's fixed size (no manual
+        // strncpy + terminator, no heap alloc as fmt::format would incur).
+        std::snprintf(prop->gcnArchName, sizeof(prop->gcnArchName), "gfx942:sramecc+:xnack-");
         prop->totalGlobalMem = static_cast<size_t>(64) << 30;
         prop->warpSize = 64;
     }
@@ -428,8 +428,8 @@ hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device)
 hipError_t hipDriverGetVersion(int* v) { if (v) *v = 70002000; return hipSuccess; }
 hipError_t hipStreamWaitEvent(hipStream_t, hipEvent_t, unsigned int) { return hipErrorInvalidValue; }
 hipError_t hipStreamCreate(hipStream_t*) { return hipErrorInvalidValue; }
-hipError_t hipStreamCreateWithPriority(hipStream_t* stream, unsigned int, int) { if (stream) *stream = nullptr; return hipErrorInvalidValue; }
-hipError_t hipDeviceGetStreamPriorityRange(int* least, int* greatest) { if (least) *least = 0; if (greatest) *greatest = 0; return hipSuccess; }
+// hipStreamCreateWithPriority / hipDeviceGetStreamPriorityRange are defined
+// above (seam-routed) -- the develop merge added plainer duplicates here.
 hipError_t hipPointerGetAttributes(hipPointerAttribute_t*, const void*) { return hipErrorInvalidValue; }
 hipError_t hipHostGetDevicePointer(void**, void*, unsigned int) { return hipErrorInvalidValue; }
 hipError_t hipIpcGetEventHandle(hipIpcEventHandle_t*, hipEvent_t) { return hipErrorInvalidValue; }
