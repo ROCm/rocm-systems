@@ -210,6 +210,9 @@ jobs:
           dnf install -y pkgconf-pkg-config python3.11 python3.11-pip
           alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 2
           alternatives --set python3 /usr/bin/python3.11
+          # cmake was pip-installed in the image for python3.9; its /usr/local/bin/ctest
+          # shebang now resolves to python3.11, so reinstall for the new interpreter.
+          python3.11 -m pip install cmake
           echo "✅ ROCm Dependencies Installed!"
 
       - name: Install Latest Nightly ROCm
