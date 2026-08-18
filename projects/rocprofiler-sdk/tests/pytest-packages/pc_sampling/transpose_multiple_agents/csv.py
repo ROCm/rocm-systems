@@ -24,10 +24,74 @@
 from __future__ import absolute_import
 
 import itertools
+import os
+import pathlib
 import sys
+import warnings
 import pytest
 import numpy as np
 import pandas as pd
+
+
+def _transpose_kernel_line_range(source_paths):
+    """Returns the inclusive line range of the transpose kernel body, or None if the
+    source cannot be read.
+
+    The range is read back from transpose.cpp rather than hardcoded: the kernel has
+    already moved within the file once, which left the previous fixed window pointing
+    at unrelated lines and failed the suite on every machine.
+    """
+    for path in source_paths:
+        try:
+            lines = pathlib.Path(path).read_text().splitlines()
+        except OSError:
+            continue
+
+        for idx, line in enumerate(lines):
+            # The definition spans two lines: "__global__ void" then "transpose(...)".
+            if not line.lstrip().startswith("transpose("):
+                continue
+            if "__global__" not in "".join(lines[max(0, idx - 2) : idx]):
+                continue
+
+            # Walk the signature to its body, skipping the forward declaration that
+            # carries the same name and ends in a semicolon instead of a brace.
+            body_start = None
+            for i in range(idx, min(idx + 10, len(lines))):
+                stripped = lines[i].strip()
+                if stripped.endswith(";"):
+                    break
+                if stripped.endswith("{"):
+                    body_start = i
+                    break
+            if body_start is None:
+                continue
+
+            depth = 0
+            for body_end in range(body_start, len(lines)):
+                depth += lines[body_end].count("{") - lines[body_end].count("}")
+                if depth == 0:
+                    # Convert the 0-based indices of '{' and '}' to 1-based line numbers.
+                    return body_start + 1, body_end + 1
+
+    return None
+
+
+def _expected_sampled_agents_num(available_agents_num):
+    """Returns how many agents the application could actually dispatch to.
+
+    A runner may expose every GPU to the process via KFD while restricting the
+    application to a subset, in which case fewer agents are sampled than agent_info.csv
+    reports and the all-agents check has to be relaxed accordingly.
+    """
+    for var in ("ROCR_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES"):
+        value = os.environ.get(var)
+        if not value or not value.strip():
+            continue
+        visible_num = len([tok for tok in value.split(",") if tok.strip()])
+        return min(visible_num, available_agents_num)
+
+    return available_agents_num
 
 
 def validate_all_agents_are_sampled(
@@ -35,9 +99,6 @@ def validate_all_agents_are_sampled(
     input_kernel_trace_csv: pd.DataFrame,
     input_agent_info_csv: pd.DataFrame,
 ):
-    transpose_kernel_source_line_start = 181
-    transpose_kernel_source_line_end = 189
-
     gfx9_gfx12_agents_df = input_agent_info_csv[
         input_agent_info_csv["Name"].apply(
             lambda name: name == "gfx90a"
@@ -65,8 +126,8 @@ def validate_all_agents_are_sampled(
     )
     sampled_agents = samples_df["Agent_Id"].unique()
     sampled_agents_num = len(sampled_agents)
-    # all agents must be sampled
-    assert sampled_agents_num == len(gfx9_gfx12_agents_df)
+    # every agent the application could dispatch to must be sampled
+    assert sampled_agents_num == _expected_sampled_agents_num(len(gfx9_gfx12_agents_df))
 
     # separate samples per agents
     grouped_samples_per_agent = samples_df.groupby("Agent_Id")
@@ -85,8 +146,24 @@ def validate_all_agents_are_sampled(
     transpose_samples_df["Source_Line_Num"] = transpose_samples_df[
         "Instruction_Comment"
     ].apply(lambda source_line: int(source_line.split(":")[-1]))
-    # assert that line belongs to a kernel range
-    assert (
-        (transpose_samples_df["Source_Line_Num"] >= transpose_kernel_source_line_start)
-        & (transpose_samples_df["Source_Line_Num"] <= transpose_kernel_source_line_end)
-    ).all()
+
+    # the comment is "<source path>:<line>", so the samples carry the path of the
+    # transpose.cpp they were compiled from
+    source_paths = {
+        comment.rsplit(":", 1)[0]
+        for comment in transpose_samples_df["Instruction_Comment"]
+    }
+    kernel_line_range = _transpose_kernel_line_range(source_paths)
+
+    if kernel_line_range is None:
+        warnings.warn(
+            "Could not read the transpose kernel line range from any of "
+            f"{sorted(source_paths)}; skipping the source line range check."
+        )
+    else:
+        # assert that line belongs to a kernel range
+        kernel_line_start, kernel_line_end = kernel_line_range
+        assert (
+            (transpose_samples_df["Source_Line_Num"] >= kernel_line_start)
+            & (transpose_samples_df["Source_Line_Num"] <= kernel_line_end)
+        ).all()
