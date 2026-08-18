@@ -314,6 +314,7 @@ if(BUILD_TESTS)
       device/GinDeviceTests.cpp
       device/GinAnvilIpcDevice_test.cpp
       device/HierarchicalShuffleTests.cpp
+      device/SymkProfilerInfraTests.cpp
       DeviceApiTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
@@ -461,6 +462,7 @@ if(BUILD_TESTS)
       CeAlltoAllvEligibilityTests.cpp
       EnqueueTests.cpp
       LL128RegVariantKernel_test.cpp
+      SymkProfilerKernelListTests.cpp
       IpcsocketTests.cpp
       TopoEnvPolicyTests.cpp
       TopoNicFusionTests.cpp
