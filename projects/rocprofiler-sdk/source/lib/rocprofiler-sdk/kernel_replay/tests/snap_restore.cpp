@@ -29,6 +29,7 @@
 
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/utils.hpp"
@@ -433,6 +434,64 @@ TEST(kernel_replay_snapshot, pool_filter_excludes_kernarg_and_cpu)
 
     EXPECT_EQ(hipHostFree(host), hipSuccess);
     ASSERT_EQ(hipFree(dev), hipSuccess);
+}
+
+// Snapshots must exclude allocations carrying HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG (HIP kernarg
+// pools and profiler buffers). Assert the exclusion directly via the intercepted HSA table so the
+// check does not depend on replay-window serialization.
+TEST(kernel_replay_snapshot, executable_flag_excluded_from_inventory)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    const auto agent = gpu_agent();
+    ASSERT_NE(agent.handle, 0U) << "no GPU agent found";
+
+    auto* ext = hsa::get_amd_ext_table();
+    ASSERT_NE(ext, nullptr);
+    ASSERT_NE(ext->hsa_amd_memory_pool_allocate_fn, nullptr);
+    ASSERT_NE(ext->hsa_amd_memory_pool_free_fn, nullptr);
+
+    struct pool_pick_t
+    {
+        hsa_amd_memory_pool_t pool{};
+        bool                  found = false;
+    } pick{};
+
+    (void) hsa_amd_agent_iterate_memory_pools(
+        agent,
+        [](hsa_amd_memory_pool_t p, void* data) -> hsa_status_t {
+            auto* out = static_cast<pool_pick_t*>(data);
+            hsa_amd_segment_t segment{};
+            if(hsa_amd_memory_pool_get_info(p, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment) !=
+               HSA_STATUS_SUCCESS)
+                return HSA_STATUS_SUCCESS;
+            if(segment != HSA_AMD_SEGMENT_GLOBAL) return HSA_STATUS_SUCCESS;
+            uint32_t flags = 0;
+            if(hsa_amd_memory_pool_get_info(p, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &flags) !=
+               HSA_STATUS_SUCCESS)
+                return HSA_STATUS_SUCCESS;
+            constexpr uint32_t kFine    = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED;
+            constexpr uint32_t kKernarg = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT;
+            if((flags & kFine) != 0 || (flags & kKernarg) != 0) return HSA_STATUS_SUCCESS;
+            out->pool  = p;
+            out->found = true;
+            return HSA_STATUS_INFO_BREAK;
+        },
+        &pick);
+
+    if(!pick.found) GTEST_SKIP() << "no coarse global memory pool on agent";
+
+    constexpr uint32_t kExecutableFlag = (1U << 2);  // HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG
+    void*              ptr             = nullptr;
+    // Allocate through the intercepted table so the tracker wrapper sees the flag.
+    ASSERT_EQ(ext->hsa_amd_memory_pool_allocate_fn(pick.pool, 4096, kExecutableFlag, &ptr),
+              HSA_STATUS_SUCCESS);
+    ASSERT_NE(ptr, nullptr);
+
+    EXPECT_FALSE(inventory_contains(ptr, agent))
+        << "executable-flag allocation must not enter the snapshot inventory";
+
+    ASSERT_EQ(ext->hsa_amd_memory_pool_free_fn(ptr), HSA_STATUS_SUCCESS);
 }
 
 // A __device__ module global mutated by a kernel must be reverted by restore(). It is not a
