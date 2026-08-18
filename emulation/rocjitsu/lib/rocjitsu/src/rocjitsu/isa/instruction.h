@@ -339,21 +339,22 @@ public:
   /// @returns Reference to the disassembly string.
   const std::string &disassemble() const {
     if (disassembly_.empty()) {
-      disassembly_ = mnemonic_;
+      disassembly_ += mnemonic_;
       bool first = true;
       // TODO: Include explicit fieldless operands (and/or implicit ones too).
-      for (uint8_t i = 0; i < num_dst_; ++i) {
-        if (dst_operands_[i]->is_fieldless())
+      for (uint8_t operand_index = 0; operand_index < num_dst_; ++operand_index) {
+        if (dst_operands_[operand_index]->is_fieldless())
           continue;
         disassembly_ += (first ? " " : ", ");
-        disassembly_ += dst_operands_[i]->name();
+        disassembly_ += dst_operands_[operand_index]->name();
         first = false;
       }
-      for (uint8_t i = 0; i < num_src_; ++i) {
-        if (src_operands_[i]->size_bits() == 0 || src_operands_[i]->is_fieldless())
+      for (uint8_t operand_index = 0; operand_index < num_src_; ++operand_index) {
+        if (src_operands_[operand_index]->size_bits() == 0 ||
+            src_operands_[operand_index]->is_fieldless())
           continue;
         disassembly_ += (first ? " " : ", ");
-        disassembly_ += src_operands_[i]->name();
+        append_src_operand(disassembly_, operand_index);
         first = false;
       }
       build_modifiers(disassembly_);
@@ -379,6 +380,10 @@ protected:
   /// Overridden by memory encoding bases that have flag bits to display.
   /// Default: no modifiers. Called lazily by disassemble().
   virtual void build_modifiers(std::string & /*out*/) const {}
+  /// @brief Append one source operand to textual disassembly.
+  virtual void append_src_operand(std::string &out, uint8_t operand_index) const {
+    out += src_operands_[operand_index]->name();
+  }
   /// @brief Cached disassembly string.
   mutable std::string disassembly_;
   /// @brief Instruction property flags bitmask.

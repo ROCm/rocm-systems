@@ -3321,6 +3321,159 @@ void cdna4_vop1_sdwa_availability_is_instruction_specific() {
                util::InvalidInst);
 }
 
+TEST(SdwaTest, Cdna4DisassemblesDestinationAndSourceAttributes) {
+  cdna4::Vop1VopSdwaMachineInst raw{};
+  raw.src0 = amdgpu::SRC_SDWA;
+  raw.op = cdna4::kVFloorF32Vop1;
+  raw.vdst = 0;
+  raw.encoding = cdna4::encoding::kVop1 >> 2;
+  raw.vsrc0 = 92;
+  raw.dst_sel = amdgpu::sdwa::BYTE_0;
+  raw.dst_unused = amdgpu::sdwa::UNUSED_PAD;
+  raw.clamp = 1;
+  raw.omod = 3;
+  raw.src0_sel = amdgpu::sdwa::BYTE_0;
+
+  const auto words = std::bit_cast<std::array<uint32_t, 2>>(raw);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->disassemble(), "v_floor_f32_sdwa v0, v92 clamp div:2 dst_sel:BYTE_0 "
+                                 "dst_unused:UNUSED_PAD src0_sel:BYTE_0");
+}
+
+TEST(SdwaTest, Cdna4DisassemblesCompareDestinationAndSourceModifiers) {
+  cdna4::VopcVopSdwaSdstEncMachineInst raw{};
+  raw.src0 = amdgpu::SRC_SDWA;
+  raw.vsrc1 = 1;
+  raw.op = cdna4::kVCmpEqF32Vopc;
+  raw.encoding = cdna4::encoding::kVopc >> 2;
+  raw.vsrc0 = 0;
+  raw.sdst = 4;
+  raw.sd = 1;
+  raw.src0_sel = amdgpu::sdwa::BYTE_0;
+  raw.src0_neg = 1;
+  raw.src0_abs = 1;
+  raw.src1_sel = amdgpu::sdwa::DWORD;
+  raw.src1_neg = 1;
+
+  const auto words = std::bit_cast<std::array<uint32_t, 2>>(raw);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->disassemble(),
+            "v_cmp_eq_f32_sdwa s[4:5], -|v0|, -v1 src0_sel:BYTE_0 src1_sel:DWORD");
+  ASSERT_EQ(inst->num_dst_operands(), 1);
+  EXPECT_EQ(inst->dst_operand(0)->to_register_ref(), (RegisterRef{RegClass::SGPR, 4, 2}));
+}
+
+TEST(SdwaTest, Cdna4DisassemblesImplicitCompareDestination) {
+  cdna4::VopcVopSdwaSdstEncMachineInst raw{};
+  raw.src0 = amdgpu::SRC_SDWA;
+  raw.vsrc1 = 1;
+  raw.op = cdna4::kVCmpEqF32Vopc;
+  raw.encoding = cdna4::encoding::kVopc >> 2;
+  raw.vsrc0 = 0;
+  raw.sd = 0;
+  raw.src0_sel = amdgpu::sdwa::DWORD;
+  raw.src1_sel = amdgpu::sdwa::DWORD;
+
+  const auto words = std::bit_cast<std::array<uint32_t, 2>>(raw);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->disassemble(), "v_cmp_eq_f32_sdwa vcc, v0, v1 src0_sel:DWORD src1_sel:DWORD");
+}
+
+TEST(SdwaTest, Cdna4DisassemblesBothVop2Sources) {
+  cdna4::Vop2VopSdwaMachineInst raw{};
+  raw.src0 = amdgpu::SRC_SDWA;
+  raw.vsrc1 = 3;
+  raw.vdst = 5;
+  raw.op = cdna4::kVAddF32Vop2;
+  raw.encoding = cdna4::encoding::kVop2;
+  raw.vsrc0 = 2;
+  raw.dst_sel = amdgpu::sdwa::DWORD;
+  raw.dst_unused = amdgpu::sdwa::UNUSED_PAD;
+  raw.src0_sel = amdgpu::sdwa::DWORD;
+  raw.src0_neg = 1;
+  raw.src0_abs = 1;
+  raw.src1_sel = amdgpu::sdwa::BYTE_2;
+  raw.src1_neg = 1;
+
+  const auto words = std::bit_cast<std::array<uint32_t, 2>>(raw);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->disassemble(),
+            "v_add_f32_sdwa v5, -|v2|, -v3 dst_sel:DWORD dst_unused:UNUSED_PAD "
+            "src0_sel:DWORD src1_sel:BYTE_2");
+}
+
+TEST(SdwaTest, InvalidAttributeValuesAreExplicit) {
+  EXPECT_EQ(amdgpu::sdwa::selection_name(7), "invalid(7)");
+  EXPECT_EQ(amdgpu::sdwa::destination_unused_name(3), "invalid(3)");
+}
+
+TEST(DecodeSizeTest, Cdna4UsesOpcodeOperandCapabilitiesForLiteralSelectors) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  cdna4::SopcMachineInst set_gpr_idx{};
+  set_gpr_idx.ssrc0 = 0;
+  set_gpr_idx.ssrc1 = 255;
+  set_gpr_idx.op = cdna4::kSSetGprIdxOnSopc;
+  set_gpr_idx.encoding = cdna4::encoding::kSopc;
+  const auto set_gpr_idx_words = std::bit_cast<std::array<uint32_t, 1>>(set_gpr_idx);
+  std::unique_ptr<Instruction> set_gpr_idx_inst(decoder->decode(set_gpr_idx_words.data()));
+  ASSERT_NE(set_gpr_idx_inst, nullptr);
+  EXPECT_EQ(set_gpr_idx_inst->size(), sizeof(uint32_t));
+
+  cdna4::Sop1MachineInst get_pc{};
+  get_pc.ssrc0 = 255;
+  get_pc.op = cdna4::kSGetPcB64Sop1;
+  get_pc.sdst = 0;
+  get_pc.encoding = cdna4::encoding::kSop1;
+  const auto get_pc_words = std::bit_cast<std::array<uint32_t, 1>>(get_pc);
+  std::unique_ptr<Instruction> get_pc_inst(decoder->decode(get_pc_words.data()));
+  ASSERT_NE(get_pc_inst, nullptr);
+  EXPECT_EQ(get_pc_inst->size(), sizeof(uint32_t));
+
+  cdna4::Sop2MachineInst fork{};
+  fork.ssrc0 = 255;
+  fork.ssrc1 = 255;
+  fork.op = cdna4::kSCbranchGForkSop2;
+  fork.encoding = cdna4::encoding::kSop2 >> 7;
+  const auto fork_words = std::bit_cast<std::array<uint32_t, 1>>(fork);
+  EXPECT_THROW(
+      { std::unique_ptr<Instruction> fork_inst(decoder->decode(fork_words.data())); },
+      util::InvalidInst);
+
+  cdna4::Vop1MachineInst v_nop{};
+  v_nop.src0 = 255;
+  v_nop.op = cdna4::kVNopVop1;
+  v_nop.encoding = cdna4::encoding::kVop1 >> 2;
+  const auto v_nop_words = std::bit_cast<std::array<uint32_t, 1>>(v_nop);
+  std::unique_ptr<Instruction> v_nop_inst(decoder->decode(v_nop_words.data()));
+  ASSERT_NE(v_nop_inst, nullptr);
+  EXPECT_EQ(v_nop_inst->size(), sizeof(uint32_t));
+
+  cdna4::Sop1MachineInst scalar_literal{};
+  scalar_literal.ssrc0 = 255;
+  scalar_literal.op = cdna4::kSNotB32Sop1;
+  scalar_literal.sdst = 0;
+  scalar_literal.encoding = cdna4::encoding::kSop1;
+  const std::array<uint32_t, 2> scalar_literal_words = {std::bit_cast<uint32_t>(scalar_literal),
+                                                        0x12345678u};
+  std::unique_ptr<Instruction> scalar_literal_inst(decoder->decode(scalar_literal_words.data()));
+  ASSERT_NE(scalar_literal_inst, nullptr);
+  EXPECT_EQ(scalar_literal_inst->size(), sizeof(scalar_literal_words));
+}
+
 void cdna4_unsupported_sdwa_decode_halts_wave() {
   cdna4::Vop1VopSdwaMachineInst raw{};
   raw.src0 = amdgpu::SRC_SDWA;
