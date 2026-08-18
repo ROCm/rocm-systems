@@ -1614,37 +1614,20 @@ class Isa {
   /// @returns This Isa's stepping version.
   uint32_t versionStepping() const { return versionStepping_; }
 
-  /// @returns This Isa's work-items processed per SIMD, derived from ISA version
-  /// (gfx9 and earlier: 16, gfx10+: 32).
-  uint32_t simdWidth() const { return (versionMajor_ <= 9) ? 16 : 32; }
+  /// @returns This Isa's
+  uint32_t simdWidth() const { return simdWidth_; }
 
   /// @returns This Isa's number of instructions processed per SIMD.
-  uint32_t simdInstructionWidth() const { return 1; }
+  uint32_t simdInstructionWidth() const { return simdInstructionWidth_; }
 
   /// @returns This Isa's memory channel bank width.
-  uint32_t memChannelBankWidth() const { return 256; }
+  uint32_t memChannelBankWidth() const { return memChannelBankWidth_; }
 
-  /// @returns This Isa's number of local-memory banks. Derived from the ISA version.
-  uint32_t localMemBanks() const {
-    // gfx950 (gfx9.5) and gfx1250 (gfx12.5) double the bank count.
-    if ((versionMajor_ == 9 && versionMinor_ == 5) ||
-        (versionMajor_ == 12 && versionMinor_ == 5)) {
-      return 64;
-    }
-    return 32;
-  }
+  /// @returns This Isa's number of banks of local memory.
+  uint32_t localMemBanks() const { return localMemBanks_; }
 
-  /// @returns This Isa's LDS alignment. Derived from the ISA version.
-  uint32_t ldsAlignment() const {
-    if (versionMajor_ >= 10) {
-      return 1024;
-    }
-    // gfx950 (gfx9, minor version 5) uses a wider LDS alignment.
-    if (versionMajor_ == 9 && versionMinor_ == 5) {
-      return 1280;
-    }
-    return 512;
-  }
+  /// @returns This Isa's LDS alignment
+  uint32_t ldsAlignment() const { return ldsAlignment_; }
 
   /// @returns True if @p codeObjectIsa and @p agentIsa are compatible,
   /// false otherwise.
@@ -1666,7 +1649,9 @@ class Isa {
  private:
   constexpr Isa(const char* targetId, bool runtimeRocSupported, bool runtimePalSupported,
                 uint32_t versionMajor, uint32_t versionMinor, uint32_t versionStepping,
-                Feature sramecc, Feature xnack)
+                Feature sramecc, Feature xnack, uint32_t simdWidth,
+                uint32_t simdInstructionWidth, uint32_t memChannelBankWidth,
+                uint32_t localMemBanks, uint32_t ldsAlignment)
       : targetId_(targetId),
         runtimeRocSupported_(runtimeRocSupported),
         runtimePalSupported_(runtimePalSupported),
@@ -1674,7 +1659,12 @@ class Isa {
         versionMinor_(versionMinor),
         versionStepping_(versionStepping),
         sramecc_(sramecc),
-        xnack_(xnack) {}
+        xnack_(xnack),
+        simdWidth_(simdWidth),
+        simdInstructionWidth_(simdInstructionWidth),
+        memChannelBankWidth_(memChannelBankWidth),
+        localMemBanks_(localMemBanks),
+        ldsAlignment_(ldsAlignment) {}
 
   // @brief Returns the begin and end iterators for the suppported ISAs.
   static std::pair<const Isa*, const Isa*> supportedIsas();
@@ -1690,6 +1680,11 @@ class Isa {
   uint32_t versionStepping_;       //!< Isa's stepping version.
   Feature sramecc_;                //!< SRAMECC feature.
   Feature xnack_;                  //!< XNACK feature.
+  uint32_t simdWidth_;             //!< Number of workitems processed per SIMD.
+  uint32_t simdInstructionWidth_;  //!< Number of instructions processed per SIMD.
+  uint32_t memChannelBankWidth_;   //!< Memory channel bank width.
+  uint32_t localMemBanks_;         //!< Number of banks of local memory.
+  uint32_t ldsAlignment_;          //!< LDS alignment.
 };  // class Isa
 
 /*! \addtogroup Runtime
