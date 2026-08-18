@@ -570,10 +570,9 @@ QueueController::update_serialization(const agent_handle_set_t& agents, bool ena
         auto pd_map = per_dev_map(_queues_v);
 
         // Agents whose effective refcount crossed zero in this call; only those get their
-        // serializer toggled. Collected under the refcount lock, applied under the serializer
-        // lock.
-        auto transitioned = std::vector<rocprofiler_agent_id_t>{};
-        bool any_enabled  = false;
+        // serializer toggled. Both refcount mutation and serializer transitions happen
+        // together inside the refcount lock to prevent concurrent calls from interleaving.
+        bool any_enabled = false;
 
         _serialization_refcount.wlock([&](auto& state) {
             // An agent can be covered by `all` and by an explicit entry at the same time, so
@@ -604,12 +603,25 @@ QueueController::update_serialization(const agent_handle_set_t& agents, bool ena
                 }
             }
 
-            _profiler_serializer.rlock([&](const auto& serializers) {
+            _profiler_serializer.wlock([&](auto& serializers) {
                 for(const auto& [agent_id, _] : serializers)
                 {
                     auto itr = was_enabled.find(agent_id);
                     if(itr == was_enabled.end()) continue;
-                    if(itr->second != state.enabled(agent_id)) transitioned.emplace_back(agent_id);
+                    if(itr->second == state.enabled(agent_id)) continue;
+
+                    auto queues = hsa_barrier::queue_map_ptr_t{};
+                    if(auto it = pd_map.find(agent_id); it != pd_map.end())
+                        queues = it->second;
+
+                    auto ser_itr = serializers.find(agent_id);
+                    if(ser_itr == serializers.end() || !ser_itr->second) continue;
+                    ser_itr->second->wlock([&](auto& serializer) {
+                        if(enable)
+                            serializer.enable(queues);
+                        else
+                            serializer.disable(queues);
+                    });
                 }
             });
 
@@ -617,26 +629,6 @@ QueueController::update_serialization(const agent_handle_set_t& agents, bool ena
         });
 
         _serialized_enabled.store(any_enabled);
-
-        if(transitioned.empty()) return;
-
-        _profiler_serializer.wlock([&](auto& m) {
-            for(const auto& agent_id : transitioned)
-            {
-                auto itr = m.find(agent_id);
-                if(itr == m.end() || !itr->second) continue;
-
-                auto queues = hsa_barrier::queue_map_ptr_t{};
-                if(auto it = pd_map.find(agent_id); it != pd_map.end()) queues = it->second;
-
-                itr->second->wlock([&](auto& serializer) {
-                    if(enable)
-                        serializer.enable(queues);
-                    else
-                        serializer.disable(queues);
-                });
-            }
-        });
     });
 }
 
