@@ -85,6 +85,11 @@ pool_allocate_wrapper(hsa_amd_memory_pool_t pool, size_t size, uint32_t flags, v
     // state, not application data; snapshotting them means restore() clobbers the in-flight
     // kernargs of a concurrent dispatch. We already have the flag here, so skip before
     // query_alloc's hsa_amd_pointer_info query rather than re-deriving it.
+    //
+    // Trade-off (beta): a direct-HSA application that puts ordinary writable device data behind
+    // the same flag also has those buffers omitted. Declining replay whenever any executable-flag
+    // allocation is live is not viable -- HIP's own pools look trackable+executable under
+    // query_alloc -- so this is documented as an unsupported allocation class instead.
     const bool is_executable = (flags & memory_pool_executable_flag) != 0;
     if(tracking_flag().load(std::memory_order_relaxed) && st == HSA_STATUS_SUCCESS && ptr && *ptr &&
        !is_executable)

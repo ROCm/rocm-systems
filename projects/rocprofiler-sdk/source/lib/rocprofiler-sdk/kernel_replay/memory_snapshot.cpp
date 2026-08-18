@@ -245,10 +245,10 @@ snap(hsa_agent_t agent)
     return out;
 }
 
-size_t
+bool
 restore(const device_snapshot_t& snapshot)
 {
-    size_t ok = 0;
+    size_t restored = 0;
     for(const auto& blk : snapshot.blocks)
     {
         hsa_status_t status = HSA_STATUS_SUCCESS;
@@ -258,7 +258,7 @@ restore(const device_snapshot_t& snapshot)
             // Re-check liveness and copy under the read lock so a concurrent free cannot race the
             // check and the write (see with_inventory_check). A nullopt result means the region is
             // no longer a live allocation of at least its size. It was freed or reallocated after
-            // snap, so skip it.
+            // snap, so skip it (benign -- not a restore failure).
             const auto st = with_inventory_check(blk.gpu_addr, blk.host_copy.size(), [&] {
                 return dma_copy(blk.gpu_addr, blk.host_copy.data(), blk.host_copy.size());
             });
@@ -281,18 +281,24 @@ restore(const device_snapshot_t& snapshot)
 
         if(status != HSA_STATUS_SUCCESS)
         {
-            ROCP_WARNING << fmt::format(
-                "kernel-replay restore: host->device copy failed for region {} ({}B)",
+            // A live region failed to copy. Further passes would observe mutated state, and the
+            // final pass (which deliberately skips restore) would leave that corruption visible to
+            // the application. Abort: a partial restore cannot be undone.
+            ROCP_ERROR << fmt::format(
+                "kernel-replay restore: host->device copy failed for region {} ({}B); aborting "
+                "restore after {}/{} regions",
                 blk.gpu_addr,
-                blk.host_copy.size());
-            continue;
+                blk.host_copy.size(),
+                restored,
+                snapshot.blocks.size());
+            return false;
         }
-        ++ok;
+        ++restored;
     }
 
     ROCP_INFO << fmt::format(
-        "kernel-replay restore: restored {}/{} regions", ok, snapshot.blocks.size());
-    return ok;
+        "kernel-replay restore: restored {}/{} regions", restored, snapshot.blocks.size());
+    return true;
 }
 }  // namespace memory_snapshot
 }  // namespace kernel_replay

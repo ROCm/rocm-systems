@@ -61,6 +61,21 @@ ROCPROFILER_EXTERN_C_INIT
  * @ref ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED. @c user_data written during a PASS
  * callback is not retained -- only the value set during CONFIG @ref
  * ROCPROFILER_CALLBACK_PHASE_ENTER is threaded through the sequence.
+ *
+ * @warning Beta. A dispatch is replayed only when its submission is a single packet containing a
+ * single dispatch. HIP graph launches are not replayed, and a multi-packet submission runs once
+ * without replay; each case warns once. Repeatability rests on a snapshot covering coarse-grained
+ * device allocations owned by the agent plus module-scope @c __device__ / @c __constant__
+ * variables. Unified or managed memory, @c hipMallocAsync and other virtual-memory-mapped
+ * allocations, and host, fine-grained and kernarg memory are not captured, so a kernel writing to
+ * them observes values accumulated across passes rather than identical inputs. Allocations carrying
+ * @c HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG are also excluded (HIP kernarg pools / profiler buffers);
+ * a direct-HSA application that puts ordinary writable device data behind that flag sees the same
+ * omission and is an unsupported allocation class for beta replay.
+ *
+ * @see `docs/how-to/using-kernel-replay.rst` for the full limitation list and
+ * `docs/conceptual/kernel_replay/kernel_replay_memory_snapshot.md` for what the snapshot covers
+ * and why.
  */
 typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
 {
@@ -117,10 +132,19 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     /// replay loop. Semantics:
     ///  - Only valid to call during PASS @ref ROCPROFILER_CALLBACK_PHASE_ENTER.
     ///  - Sticky across passes: a context stopped in one pass stays stopped until it
-    ///    is started again within the same replay loop (and vice versa). This avoids
-    ///    redundant work such as reprogramming PC sampling hardware on every pass.
+    ///    is started again within the same replay loop (and vice versa). A tool therefore
+    ///    positions a context once rather than re-issuing the same toggles every pass.
     ///  - Scoped to the replay loop: each context's pre-replay active/inactive state
     ///    is restored once the loop completes. Global context state is never modified.
+    ///  - A local start only undoes a prior local stop; it cannot promote a context that is
+    ///    globally inactive (its service/callback thread may already be stopped).
+    ///  - Coverage varies by service. Kernel dispatch tracing and dispatch thread trace
+    ///    observe a local stop only: they skip a dispatch whose context is forced off, and
+    ///    have no means to add a context that is not already collecting. Dispatch counter
+    ///    collection and SPM consult the override on every dispatch (and likewise refuse to
+    ///    promote a globally stopped context). PC sampling is agent-wide and device counting
+    ///    is not dispatch-scoped, so neither consults the override at all -- a call naming
+    ///    such a context reports success but has no effect.
 } rocprofiler_callback_tracing_kernel_replay_data_t;
 
 /** @} */
