@@ -10,7 +10,6 @@ import pytest
 import yaml
 
 from utils import mem_chart_common, mem_chart_gfx11
-from utils.mem_chart_common import strip_ansi
 from utils.utils_analysis import format_bw_human_readable
 
 DEFAULT_TITLE = "3. Memory Chart (Normalization: per_kernel)"
@@ -206,7 +205,7 @@ class TestPlotMemChartGfx11:
         result = mem_chart_gfx11.plot_mem_chart(
             mem_chart_gfx11.get_sample_metrics(), chart_title=DEFAULT_TITLE
         )
-        clean = strip_ansi(result)
+        clean = common.strip_ansi(result)
         assert len(result) > 100
         assert "3. Memory Chart" in clean
         assert "GPU" in clean and "System Memory" in clean
