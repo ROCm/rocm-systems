@@ -381,35 +381,36 @@ struct DxcoreHandle
 bool
 is_available()
 {
-    const bool avail = probe_libdxcore();
-
-    // On WSL the dxg/libhsakmt path only honors the vendor-specific PM4 IB
-    // packets that aqlprofile emits for hardware counter collection when
-    // WSLKMT_VENDOR_PACKET is set; otherwise the embedded PM4 IB is silently
-    // dropped and every Counter_Value reads back zero. Opt in by default on WSL
-    // so counters work out of the box, using overwrite=0 so an explicit user
-    // setting always wins. This must run before the HSA runtime / libhsakmt
-    // initializes its dxg runtime (which reads the variable once per process);
-    // is_available() is called during agent discovery at rocprofiler init, well
-    // before any profiling queue is created. The function-local static ensures
-    // the setenv happens at most once. NOTE: setenv mutates the global environ
-    // and is not itself thread-safe; this is safe here only because it runs on
-    // the single-threaded rocprofiler init path before any worker threads exist.
-    if(avail)
-    {
-        static const bool _vendor_packet_enabled = []() {
-            ::setenv("WSLKMT_VENDOR_PACKET", "1", /*overwrite=*/0);
-            return true;
-        }();
-        (void) _vendor_packet_enabled;
-    }
-
-    return avail;
+    return probe_libdxcore();
 }
 
 std::vector<unique_agent_t>
 enumerate()
 {
+    // On WSL the dxg/libhsakmt path only honors the vendor-specific PM4 IB
+    // packets that aqlprofile emits for hardware counter collection when
+    // WSLKMT_VENDOR_PACKET is set; otherwise the embedded PM4 IB is silently
+    // dropped and every Counter_Value reads back zero. Opt in by default on WSL
+    // so counters work out of the box, using overwrite=0 so an explicit user
+    // setting always wins.
+    //
+    // Here rather than in is_available(), because select_platform() does not always ask
+    // that question: ROCPROFILER_FORCE_PLATFORM=wsl returns before the probe, and on bare
+    // metal gnulinux::is_available() answers first. enumerate() runs exactly when this
+    // platform was selected, by either route.
+    //
+    // This must run before the HSA runtime / libhsakmt initializes its dxg runtime (which
+    // reads the variable once per process); agent discovery happens at rocprofiler init,
+    // well before any profiling queue is created. The function-local static ensures the
+    // setenv happens at most once. NOTE: setenv mutates the global environ and is not
+    // itself thread-safe; this is safe here only because it runs on the single-threaded
+    // rocprofiler init path before any worker threads exist.
+    static const bool _vendor_packet_enabled = []() {
+        ::setenv("WSLKMT_VENDOR_PACKET", "1", /*overwrite=*/0);
+        return true;
+    }();
+    (void) _vendor_packet_enabled;
+
     std::vector<unique_agent_t> out;
 
     DxcoreHandle dxc;
