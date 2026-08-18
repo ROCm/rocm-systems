@@ -26,11 +26,14 @@ Telemetry is off by default and has no effect unless `RCCL_TELEMETRY_ENABLE=1`.
 One file per rank, named:
 
 ```
-<RCCL_TELEMETRY_OUTPUT_DIR>/rccl_telemetry_<hostname>_<pid>.json
+<RCCL_TELEMETRY_OUTPUT_DIR>/rccl_telemetry_<hostname>_<uid>_<pid>.json
 ```
 
 The file is written once, at process exit (via an `atexit` handler). A 2-node
-run of 8 ranks each therefore produces 16 files.
+run of 8 ranks each therefore produces 16 files. The `uid` keeps a shared
+default directory such as `/tmp` per-user, so two users never collide on one
+path; if a path is not writable the write fails gracefully and only that rank's
+telemetry is dropped.
 
 ## When telemetry itself fails
 
@@ -113,19 +116,9 @@ counters. The completion hook finds its histogram bucket by a multiply, not a
 Every counter above is an increment. The completion **latency** is not: two
 `clock_gettime` calls per WQE (at post and at completion), a bucket computation
 and two CAS loops for `min`/`max`. That family is the bulk of the per-WQE cost,
-so `RCCL_TELEMETRY_LATENCY_SAMPLE=N` measures only one posted WQE in `N`.
-
-The choice is made on the post path (where the first timestamp would be read)
-and carried to the completion path in the post timestamp itself, via a sentinel:
-
-| post timestamp | meaning |
-|---|---|
-| `0` | the completion matched no tracked posting |
-| `1` | it matched one, but this WQE was not sampled |
-| `> 1` | it matched one and was sampled; a real `CLOCK_MONOTONIC` reading |
-
-A WQE the interval skips therefore reads the clock **zero** times, on both
-sides, and still lands in `num_wqe_completed`.
+so `RCCL_TELEMETRY_LATENCY_SAMPLE=N` measures only one posted WQE in `N`; a WQE
+the interval skips reads the clock zero times and still lands in
+`num_wqe_completed`.
 
 ### What sampling does and does not change
 

@@ -939,9 +939,11 @@ int rcclTelemetryFlush(void) {
     hostname[sizeof(hostname) - 1] = '\0';
   }
 
+  /* The uid keeps a shared default dir (e.g. /tmp) per-user: two users never
+   * target the same path, so one can never hit the other's file permissions. */
   char filepath[RCCL_TEL_PATH_MAX];
-  snprintf(filepath, sizeof(filepath), "%s/rccl_telemetry_%s_%d.json",
-           rcclTelemetryCfg.output_dir, hostname, (int)getpid());
+  snprintf(filepath, sizeof(filepath), "%s/rccl_telemetry_%s_%u_%d.json",
+           rcclTelemetryCfg.output_dir, hostname, (unsigned)getuid(), (int)getpid());
 
   FILE* fp = fopen(filepath, "w");
   if (fp == NULL) {

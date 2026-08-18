@@ -47,7 +47,7 @@ if(BUILD_TESTS)
   # no librccl) and runs under CTest, returning non-zero on any failed CHECK.
   find_package(Threads REQUIRED)
   add_executable(rccl-UnitTestsNetTelemetry
-    ${PROJECT_SOURCE_DIR}/src/transport/net_telemetry_test.cpp
+    ${PROJECT_SOURCE_DIR}/test/net_telemetry_test.cpp
     ${PROJECT_SOURCE_DIR}/src/transport/net_telemetry.cc
   )
   target_include_directories(rccl-UnitTestsNetTelemetry PRIVATE
