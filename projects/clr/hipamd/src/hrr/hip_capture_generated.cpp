@@ -775,20 +775,6 @@ static hipError_t capture_hipDeviceGetLimit(size_t* pValue, enum hipLimit_t limi
 }
 
 // Generated shim
-static hipError_t capture_hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask, hipDevice_t device) {
-  hipError_t r = g_real_table.hipDeviceGetLuid_fn(luid, deviceNodeMask, device);
-  if (r == hipSuccess) {
-    hrr_args_hipDeviceGetLuid a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.luid = reinterpret_cast<uint64_t>(luid);
-    a.deviceNodeMask = reinterpret_cast<uint64_t>(deviceNodeMask);
-    a.device = static_cast<uint64_t>(static_cast<int>(device));
-    hrr_cap::writer::write_event_raw(HRR_API_HIPDEVICEGETLUID, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
 static hipError_t capture_hipDeviceGetMemPool(hipMemPool_t* mem_pool, int device) {
   hipError_t r = g_real_table.hipDeviceGetMemPool_fn(mem_pool, device);
   if (r == hipSuccess) {
@@ -3332,21 +3318,6 @@ static hipError_t capture_hipMemAdvise(const void* dev_ptr, size_t count, hipMem
 }
 
 // Generated shim
-static hipError_t capture_hipMemAdvise_v2(const void* dev_ptr, size_t count, hipMemoryAdvise advice, hipMemLocation device) {
-  hipError_t r = g_real_table.hipMemAdvise_v2_fn(dev_ptr, count, advice, device);
-  if (r == hipSuccess) {
-    hrr_args_hipMemAdvise_v2 a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.dev_ptr = reinterpret_cast<uint64_t>(dev_ptr);
-    a.count = static_cast<decltype(a.count)>(count);
-    a.advice = static_cast<decltype(a.advice)>(advice);
-    std::memcpy(a.device_bytes, &device, sizeof(device));
-    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMADVISE_V2, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
 static hipError_t capture_hipMemAllocHost(void** ptr, size_t size) {
   hipError_t r = g_real_table.hipMemAllocHost_fn(ptr, size);
   if (r == hipSuccess) {
@@ -3644,111 +3615,6 @@ static hipError_t capture_hipMemPrefetchAsync(const void* dev_ptr, size_t count,
     a.device = static_cast<decltype(a.device)>(device);
     a.stream = reinterpret_cast<uint64_t>(stream);
     hrr_cap::writer::write_event_raw(HRR_API_HIPMEMPREFETCHASYNC, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
-static hipError_t capture_hipMemPrefetchAsync_v2(const void* dev_ptr, size_t count, hipMemLocation location, unsigned int flags, hipStream_t stream) {
-  hipError_t r = g_real_table.hipMemPrefetchAsync_v2_fn(dev_ptr, count, location, flags, stream);
-  if (r == hipSuccess) {
-    hrr_args_hipMemPrefetchAsync_v2 a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.dev_ptr = reinterpret_cast<uint64_t>(dev_ptr);
-    a.count = static_cast<decltype(a.count)>(count);
-    std::memcpy(a.location_bytes, &location, sizeof(location));
-    a.flags = static_cast<decltype(a.flags)>(flags);
-    a.stream = reinterpret_cast<uint64_t>(stream);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMPREFETCHASYNC_V2, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
-static hipError_t capture_hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count, hipMemLocation* prefetch_locs, size_t* prefetch_loc_idxs, size_t num_prefetch_locs, unsigned long long flags, hipStream_t stream) {
-  hipError_t r = g_real_table.hipMemPrefetchBatchAsync_fn(dev_ptrs, sizes, count, prefetch_locs, prefetch_loc_idxs, num_prefetch_locs, flags, stream);
-  if (r == hipSuccess) {
-    hrr_args_hipMemPrefetchBatchAsync a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.sizes = reinterpret_cast<uint64_t>(sizes);
-    a.count = static_cast<decltype(a.count)>(count);
-    a.prefetch_locs = reinterpret_cast<uint64_t>(prefetch_locs);
-    a.prefetch_loc_idxs = reinterpret_cast<uint64_t>(prefetch_loc_idxs);
-    a.num_prefetch_locs = static_cast<decltype(a.num_prefetch_locs)>(num_prefetch_locs);
-    a.flags = static_cast<decltype(a.flags)>(flags);
-    a.stream = reinterpret_cast<uint64_t>(stream);
-    if (dev_ptrs) a.dev_ptrs = reinterpret_cast<uint64_t>(*dev_ptrs);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMPREFETCHBATCHASYNC, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
-static hipError_t capture_hipMemDiscardBatchAsync(void** dev_ptrs, size_t* sizes, size_t count, unsigned long long flags, hipStream_t stream) {
-  hipError_t r = g_real_table.hipMemDiscardBatchAsync_fn(dev_ptrs, sizes, count, flags, stream);
-  if (r == hipSuccess) {
-    hrr_args_hipMemDiscardBatchAsync a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.sizes = reinterpret_cast<uint64_t>(sizes);
-    a.count = static_cast<decltype(a.count)>(count);
-    a.flags = static_cast<decltype(a.flags)>(flags);
-    a.stream = reinterpret_cast<uint64_t>(stream);
-    if (dev_ptrs) a.dev_ptrs = reinterpret_cast<uint64_t>(*dev_ptrs);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMDISCARDBATCHASYNC, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
-static hipError_t capture_hipDrvMemDiscardBatchAsync(hipDeviceptr_t* dptrs, size_t* sizes, size_t count, unsigned long long flags, hipStream_t stream) {
-  hipError_t r = g_real_table.hipDrvMemDiscardBatchAsync_fn(dptrs, sizes, count, flags, stream);
-  if (r == hipSuccess) {
-    hrr_args_hipDrvMemDiscardBatchAsync a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.dptrs = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(dptrs));
-    a.sizes = reinterpret_cast<uint64_t>(sizes);
-    a.count = static_cast<decltype(a.count)>(count);
-    a.flags = static_cast<decltype(a.flags)>(flags);
-    a.stream = reinterpret_cast<uint64_t>(stream);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPDRVMEMDISCARDBATCHASYNC, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
-static hipError_t capture_hipMemDiscardAndPrefetchBatchAsync(void** dptrs, size_t* sizes, size_t count, hipMemLocation* prefetchLocs, size_t* prefetchLocIdxs, size_t numPrefetchLocs, unsigned long long flags, hipStream_t stream) {
-  hipError_t r = g_real_table.hipMemDiscardAndPrefetchBatchAsync_fn(dptrs, sizes, count, prefetchLocs, prefetchLocIdxs, numPrefetchLocs, flags, stream);
-  if (r == hipSuccess) {
-    hrr_args_hipMemDiscardAndPrefetchBatchAsync a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.sizes = reinterpret_cast<uint64_t>(sizes);
-    a.count = static_cast<decltype(a.count)>(count);
-    a.prefetchLocs = reinterpret_cast<uint64_t>(prefetchLocs);
-    a.prefetchLocIdxs = reinterpret_cast<uint64_t>(prefetchLocIdxs);
-    a.numPrefetchLocs = static_cast<decltype(a.numPrefetchLocs)>(numPrefetchLocs);
-    a.flags = static_cast<decltype(a.flags)>(flags);
-    a.stream = reinterpret_cast<uint64_t>(stream);
-    if (dptrs) a.dptrs = reinterpret_cast<uint64_t>(*dptrs);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMDISCARDANDPREFETCHBATCHASYNC, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
-static hipError_t capture_hipDrvMemDiscardAndPrefetchBatchAsync(hipDeviceptr_t* dptrs, size_t* sizes, size_t count, hipMemLocation* prefetchLocs, size_t* prefetchLocIdxs, size_t numPrefetchLocs, unsigned long long flags, hipStream_t stream) {
-  hipError_t r = g_real_table.hipDrvMemDiscardAndPrefetchBatchAsync_fn(dptrs, sizes, count, prefetchLocs, prefetchLocIdxs, numPrefetchLocs, flags, stream);
-  if (r == hipSuccess) {
-    hrr_args_hipDrvMemDiscardAndPrefetchBatchAsync a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.dptrs = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(dptrs));
-    a.sizes = reinterpret_cast<uint64_t>(sizes);
-    a.count = static_cast<decltype(a.count)>(count);
-    a.prefetchLocs = reinterpret_cast<uint64_t>(prefetchLocs);
-    a.prefetchLocIdxs = reinterpret_cast<uint64_t>(prefetchLocIdxs);
-    a.numPrefetchLocs = static_cast<decltype(a.numPrefetchLocs)>(numPrefetchLocs);
-    a.flags = static_cast<decltype(a.flags)>(flags);
-    a.stream = reinterpret_cast<uint64_t>(stream);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPDRVMEMDISCARDANDPREFETCHBATCHASYNC, &a.hdr, sizeof(a));
   }
   return r;
 }
@@ -4346,19 +4212,6 @@ static hipError_t capture_hipModuleGetFunction(hipFunction_t* function, hipModul
 }
 
 // Generated shim
-static hipError_t capture_hipModuleGetFunctionCount(unsigned int* count, hipModule_t module) {
-  hipError_t r = g_real_table.hipModuleGetFunctionCount_fn(count, module);
-  if (r == hipSuccess) {
-    hrr_args_hipModuleGetFunctionCount a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.count = reinterpret_cast<uint64_t>(count);
-    a.module = reinterpret_cast<uint64_t>(module);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPMODULEGETFUNCTIONCOUNT, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
 static hipError_t capture_hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t hmod, const char* name) {
   hipError_t r = g_real_table.hipModuleGetGlobal_fn(dptr, bytes, hmod, name);
   if (r == hipSuccess) {
@@ -4405,149 +4258,6 @@ static hipError_t capture_hipModuleLaunchCooperativeKernelMultiDevice(hipFunctio
 
 
 
-
-
-// Generated shim
-static hipError_t capture_hipLinkAddFile(hipLinkState_t state, hipJitInputType type, const char* path, unsigned int numOptions, hipJitOption* options, void** optionValues) {
-  hipError_t r = g_real_table.hipLinkAddFile_fn(state, type, path, numOptions, options, optionValues);
-  if (r == hipSuccess) {
-    hrr_args_hipLinkAddFile a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.state = reinterpret_cast<uint64_t>(state);
-    a.type = static_cast<decltype(a.type)>(type);
-    a.path = reinterpret_cast<uint64_t>(path);
-    a.numOptions = static_cast<decltype(a.numOptions)>(numOptions);
-    a.options = reinterpret_cast<uint64_t>(options);
-    if (optionValues) a.optionValues = reinterpret_cast<uint64_t>(*optionValues);
-    if (path) {
-      size_t _n = std::strlen(path);
-      if (_n > 255u) {
-        static bool warned_path = false;
-        if (!warned_path) {
-          warned_path = true;
-          fprintf(stderr,
-                  "[HRR] hipLinkAddFile: path is %zu characters; "
-                  "recording the first 255 only.\n", _n);
-        }
-        _n = 255u;
-      }
-      std::memcpy(a.path_bytes, path, _n);
-      a.path_bytes[_n] = 0;
-      a.path_present = 1;
-    }
-    if (options && numOptions > 0) {
-      uint32_t _n = static_cast<uint32_t>(numOptions);
-      if (_n > 32u) {
-        static bool warned_options = false;
-        if (!warned_options) {
-          warned_options = true;
-          fprintf(stderr,
-                  "[HRR] hipLinkAddFile: recording only the first 32 "
-                  "of %u options entries; replay of this call will be "
-                  "incomplete.\n", _n);
-        }
-        _n = 32u;
-      }
-      std::memcpy(a.options_bytes, options, static_cast<size_t>(_n) * sizeof(hipJitOption));
-      a.options_n   = _n;
-      a.options_present = 1;
-    }
-    if (optionValues && numOptions > 0) {
-      uint32_t _n = static_cast<uint32_t>(numOptions);
-      if (_n > 32u) {
-        static bool warned_optionValues = false;
-        if (!warned_optionValues) {
-          warned_optionValues = true;
-          fprintf(stderr,
-                  "[HRR] hipLinkAddFile: recording only the first 32 "
-                  "of %u optionValues entries; replay of this call will be "
-                  "incomplete.\n", _n);
-        }
-        _n = 32u;
-      }
-      std::memcpy(a.optionValues_bytes, optionValues, static_cast<size_t>(_n) * sizeof(void*));
-      a.optionValues_n   = _n;
-      a.optionValues_present = 1;
-    }
-    hrr_cap::writer::write_event_raw(HRR_API_HIPLINKADDFILE, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
-static hipError_t capture_hipLinkComplete(hipLinkState_t state, void** hipBinOut, size_t* sizeOut) {
-  hipError_t r = g_real_table.hipLinkComplete_fn(state, hipBinOut, sizeOut);
-  if (r == hipSuccess) {
-    hrr_args_hipLinkComplete a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.state = reinterpret_cast<uint64_t>(state);
-    a.sizeOut = reinterpret_cast<uint64_t>(sizeOut);
-    if (hipBinOut) a.hipBinOut = reinterpret_cast<uint64_t>(*hipBinOut);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPLINKCOMPLETE, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
-static hipError_t capture_hipLinkCreate(unsigned int numOptions, hipJitOption* options, void** optionValues, hipLinkState_t* stateOut) {
-  hipError_t r = g_real_table.hipLinkCreate_fn(numOptions, options, optionValues, stateOut);
-  if (r == hipSuccess) {
-    hrr_args_hipLinkCreate a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.numOptions = static_cast<decltype(a.numOptions)>(numOptions);
-    a.options = reinterpret_cast<uint64_t>(options);
-    if (optionValues) a.optionValues = reinterpret_cast<uint64_t>(*optionValues);
-    if (stateOut) a.stateOut = reinterpret_cast<uint64_t>(*stateOut);
-    if (options && numOptions > 0) {
-      uint32_t _n = static_cast<uint32_t>(numOptions);
-      if (_n > 32u) {
-        static bool warned_options = false;
-        if (!warned_options) {
-          warned_options = true;
-          fprintf(stderr,
-                  "[HRR] hipLinkCreate: recording only the first 32 "
-                  "of %u options entries; replay of this call will be "
-                  "incomplete.\n", _n);
-        }
-        _n = 32u;
-      }
-      std::memcpy(a.options_bytes, options, static_cast<size_t>(_n) * sizeof(hipJitOption));
-      a.options_n   = _n;
-      a.options_present = 1;
-    }
-    if (optionValues && numOptions > 0) {
-      uint32_t _n = static_cast<uint32_t>(numOptions);
-      if (_n > 32u) {
-        static bool warned_optionValues = false;
-        if (!warned_optionValues) {
-          warned_optionValues = true;
-          fprintf(stderr,
-                  "[HRR] hipLinkCreate: recording only the first 32 "
-                  "of %u optionValues entries; replay of this call will be "
-                  "incomplete.\n", _n);
-        }
-        _n = 32u;
-      }
-      std::memcpy(a.optionValues_bytes, optionValues, static_cast<size_t>(_n) * sizeof(void*));
-      a.optionValues_n   = _n;
-      a.optionValues_present = 1;
-    }
-    hrr_cap::writer::write_event_raw(HRR_API_HIPLINKCREATE, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
-static hipError_t capture_hipLinkDestroy(hipLinkState_t state) {
-  hipError_t r = g_real_table.hipLinkDestroy_fn(state);
-  if (r == hipSuccess) {
-    hrr_args_hipLinkDestroy a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.state = reinterpret_cast<uint64_t>(state);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPLINKDESTROY, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
 // Generated shim
 static hipError_t capture_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, hipFunction_t f, int blockSize, size_t dynSharedMemPerBlk) {
@@ -4626,21 +4336,6 @@ static hipError_t capture_hipModuleUnload(hipModule_t module) {
 }
 
 // Generated shim
-static hipError_t capture_hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, const void* f, int numBlocks, int blockSize) {
-  hipError_t r = g_real_table.hipOccupancyAvailableDynamicSMemPerBlock_fn(dynamicSmemSize, f, numBlocks, blockSize);
-  if (r == hipSuccess) {
-    hrr_args_hipOccupancyAvailableDynamicSMemPerBlock a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.dynamicSmemSize = reinterpret_cast<uint64_t>(dynamicSmemSize);
-    a.f = reinterpret_cast<uint64_t>(f);
-    a.numBlocks = static_cast<decltype(a.numBlocks)>(numBlocks);
-    a.blockSize = static_cast<decltype(a.blockSize)>(blockSize);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPOCCUPANCYAVAILABLEDYNAMICSMEMPERBLOCK, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
 static hipError_t capture_hipOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, const void* f, int blockSize, size_t dynSharedMemPerBlk) {
   hipError_t r = g_real_table.hipOccupancyMaxActiveBlocksPerMultiprocessor_fn(numBlocks, f, blockSize, dynSharedMemPerBlk);
   if (r == hipSuccess) {
@@ -4683,34 +4378,6 @@ static hipError_t capture_hipOccupancyMaxPotentialBlockSize(int* gridSize, int* 
     a.dynSharedMemPerBlk = static_cast<decltype(a.dynSharedMemPerBlk)>(dynSharedMemPerBlk);
     a.blockSizeLimit = static_cast<decltype(a.blockSizeLimit)>(blockSizeLimit);
     hrr_cap::writer::write_event_raw(HRR_API_HIPOCCUPANCYMAXPOTENTIALBLOCKSIZE, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
-static hipError_t capture_hipOccupancyMaxActiveClusters(int* numClusters, const void* f, const hipLaunchConfig_t* launchConfig) {
-  hipError_t r = g_real_table.hipOccupancyMaxActiveClusters_fn(numClusters, f, launchConfig);
-  if (r == hipSuccess) {
-    hrr_args_hipOccupancyMaxActiveClusters a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.numClusters = reinterpret_cast<uint64_t>(numClusters);
-    a.f = reinterpret_cast<uint64_t>(f);
-    a.launchConfig = reinterpret_cast<uint64_t>(launchConfig);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPOCCUPANCYMAXACTIVECLUSTERS, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
-static hipError_t capture_hipOccupancyMaxPotentialClusterSize(int* clusterSize, const void* f, const hipLaunchConfig_t* config) {
-  hipError_t r = g_real_table.hipOccupancyMaxPotentialClusterSize_fn(clusterSize, f, config);
-  if (r == hipSuccess) {
-    hrr_args_hipOccupancyMaxPotentialClusterSize a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.clusterSize = reinterpret_cast<uint64_t>(clusterSize);
-    a.f = reinterpret_cast<uint64_t>(f);
-    a.config = reinterpret_cast<uint64_t>(config);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPOCCUPANCYMAXPOTENTIALCLUSTERSIZE, &a.hdr, sizeof(a));
   }
   return r;
 }
@@ -4917,19 +4584,6 @@ static hipError_t capture_hipStreamBeginCapture(hipStream_t stream, hipStreamCap
 }
 
 // Generated shim
-static hipError_t capture_hipStreamCopyAttributes(hipStream_t dst, hipStream_t src) {
-  hipError_t r = g_real_table.hipStreamCopyAttributes_fn(dst, src);
-  if (r == hipSuccess) {
-    hrr_args_hipStreamCopyAttributes a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.dst = reinterpret_cast<uint64_t>(dst);
-    a.src = reinterpret_cast<uint64_t>(src);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPSTREAMCOPYATTRIBUTES, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
 static hipError_t capture_hipStreamCreate(hipStream_t* stream) {
   hipError_t r = g_real_table.hipStreamCreate_fn(stream);
   if (r == hipSuccess) {
@@ -5046,19 +4700,6 @@ static hipError_t capture_hipStreamGetFlags(hipStream_t stream, unsigned int* fl
     a.stream = reinterpret_cast<uint64_t>(stream);
     a.flags = reinterpret_cast<uint64_t>(flags);
     hrr_cap::writer::write_event_raw(HRR_API_HIPSTREAMGETFLAGS, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
-static hipError_t capture_hipStreamGetId(hipStream_t stream, unsigned long long* streamId) {
-  hipError_t r = g_real_table.hipStreamGetId_fn(stream, streamId);
-  if (r == hipSuccess) {
-    hrr_args_hipStreamGetId a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.stream = reinterpret_cast<uint64_t>(stream);
-    a.streamId = reinterpret_cast<uint64_t>(streamId);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPSTREAMGETID, &a.hdr, sizeof(a));
   }
   return r;
 }
@@ -5200,38 +4841,6 @@ static hipError_t capture_hipStreamWriteValue64(hipStream_t stream, void* ptr, u
     a.value = static_cast<decltype(a.value)>(value);
     a.flags = static_cast<decltype(a.flags)>(flags);
     hrr_cap::writer::write_event_raw(HRR_API_HIPSTREAMWRITEVALUE64, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
-static hipError_t capture_hipStreamBatchMemOp(hipStream_t stream, unsigned int count, hipStreamBatchMemOpParams* paramArray, unsigned int flags) {
-  hipError_t r = g_real_table.hipStreamBatchMemOp_fn(stream, count, paramArray, flags);
-  if (r == hipSuccess) {
-    hrr_args_hipStreamBatchMemOp a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.stream = reinterpret_cast<uint64_t>(stream);
-    a.count = static_cast<decltype(a.count)>(count);
-    a.paramArray = reinterpret_cast<uint64_t>(paramArray);
-    a.flags = static_cast<decltype(a.flags)>(flags);
-    if (paramArray && count > 0) {
-      uint32_t _n = static_cast<uint32_t>(count);
-      if (_n > 16u) {
-        static bool warned_paramArray = false;
-        if (!warned_paramArray) {
-          warned_paramArray = true;
-          fprintf(stderr,
-                  "[HRR] hipStreamBatchMemOp: recording only the first 16 "
-                  "of %u paramArray entries; replay of this call will be "
-                  "incomplete.\n", _n);
-        }
-        _n = 16u;
-      }
-      std::memcpy(a.paramArray_bytes, paramArray, static_cast<size_t>(_n) * sizeof(hipStreamBatchMemOpParams));
-      a.paramArray_n   = _n;
-      a.paramArray_present = 1;
-    }
-    hrr_cap::writer::write_event_raw(HRR_API_HIPSTREAMBATCHMEMOP, &a.hdr, sizeof(a));
   }
   return r;
 }
@@ -5693,6 +5302,36 @@ static hipError_t capture_hipWaitExternalSemaphoresAsync(const hipExternalSemaph
     a.numExtSems = static_cast<decltype(a.numExtSems)>(numExtSems);
     a.stream = reinterpret_cast<uint64_t>(stream);
     hrr_cap::writer::write_event_raw(HRR_API_HIPWAITEXTERNALSEMAPHORESASYNC, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipChannelFormatDesc capture_hipCreateChannelDesc(int x, int y, int z, int w, hipChannelFormatKind f) {
+  return g_real_table.hipCreateChannelDesc_fn(x, y, z, w, f);
+}
+
+
+// Generated shim
+static hipError_t capture_hipHccModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX, uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ, uint32_t localWorkSizeX, uint32_t localWorkSizeY, uint32_t localWorkSizeZ, size_t sharedMemBytes, hipStream_t hStream, void** kernelParams, void** extra, hipEvent_t startEvent, hipEvent_t stopEvent) {
+  hipError_t r = g_real_table.hipHccModuleLaunchKernel_fn(f, globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ, localWorkSizeX, localWorkSizeY, localWorkSizeZ, sharedMemBytes, hStream, kernelParams, extra, startEvent, stopEvent);
+  if (r == hipSuccess) {
+    hrr_args_hipHccModuleLaunchKernel a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.f = reinterpret_cast<uint64_t>(f);
+    a.globalWorkSizeX = static_cast<decltype(a.globalWorkSizeX)>(globalWorkSizeX);
+    a.globalWorkSizeY = static_cast<decltype(a.globalWorkSizeY)>(globalWorkSizeY);
+    a.globalWorkSizeZ = static_cast<decltype(a.globalWorkSizeZ)>(globalWorkSizeZ);
+    a.localWorkSizeX = static_cast<decltype(a.localWorkSizeX)>(localWorkSizeX);
+    a.localWorkSizeY = static_cast<decltype(a.localWorkSizeY)>(localWorkSizeY);
+    a.localWorkSizeZ = static_cast<decltype(a.localWorkSizeZ)>(localWorkSizeZ);
+    a.sharedMemBytes = static_cast<decltype(a.sharedMemBytes)>(sharedMemBytes);
+    a.hStream = reinterpret_cast<uint64_t>(hStream);
+    a.startEvent = reinterpret_cast<uint64_t>(startEvent);
+    a.stopEvent = reinterpret_cast<uint64_t>(stopEvent);
+    if (kernelParams) a.kernelParams = reinterpret_cast<uint64_t>(*kernelParams);
+    if (extra) a.extra = reinterpret_cast<uint64_t>(*extra);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPHCCMODULELAUNCHKERNEL, &a.hdr, sizeof(a));
   }
   return r;
 }
@@ -6215,36 +5854,6 @@ static hipError_t capture_hipLaunchHostFunc_spt(hipStream_t stream, hipHostFn_t 
 }
 
 // Generated shim
-static hipChannelFormatDesc capture_hipCreateChannelDesc(int x, int y, int z, int w, hipChannelFormatKind f) {
-  return g_real_table.hipCreateChannelDesc_fn(x, y, z, w, f);
-}
-
-
-// Generated shim
-static hipError_t capture_hipHccModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX, uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ, uint32_t localWorkSizeX, uint32_t localWorkSizeY, uint32_t localWorkSizeZ, size_t sharedMemBytes, hipStream_t hStream, void** kernelParams, void** extra, hipEvent_t startEvent, hipEvent_t stopEvent) {
-  hipError_t r = g_real_table.hipHccModuleLaunchKernel_fn(f, globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ, localWorkSizeX, localWorkSizeY, localWorkSizeZ, sharedMemBytes, hStream, kernelParams, extra, startEvent, stopEvent);
-  if (r == hipSuccess) {
-    hrr_args_hipHccModuleLaunchKernel a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.f = reinterpret_cast<uint64_t>(f);
-    a.globalWorkSizeX = static_cast<decltype(a.globalWorkSizeX)>(globalWorkSizeX);
-    a.globalWorkSizeY = static_cast<decltype(a.globalWorkSizeY)>(globalWorkSizeY);
-    a.globalWorkSizeZ = static_cast<decltype(a.globalWorkSizeZ)>(globalWorkSizeZ);
-    a.localWorkSizeX = static_cast<decltype(a.localWorkSizeX)>(localWorkSizeX);
-    a.localWorkSizeY = static_cast<decltype(a.localWorkSizeY)>(localWorkSizeY);
-    a.localWorkSizeZ = static_cast<decltype(a.localWorkSizeZ)>(localWorkSizeZ);
-    a.sharedMemBytes = static_cast<decltype(a.sharedMemBytes)>(sharedMemBytes);
-    a.hStream = reinterpret_cast<uint64_t>(hStream);
-    a.startEvent = reinterpret_cast<uint64_t>(startEvent);
-    a.stopEvent = reinterpret_cast<uint64_t>(stopEvent);
-    if (kernelParams) a.kernelParams = reinterpret_cast<uint64_t>(*kernelParams);
-    if (extra) a.extra = reinterpret_cast<uint64_t>(*extra);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPHCCMODULELAUNCHKERNEL, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
 static int capture_hipGetStreamDeviceId(hipStream_t stream) {
   return g_real_table.hipGetStreamDeviceId_fn(stream);
 }
@@ -6563,77 +6172,6 @@ static hipError_t capture_hipGetFuncBySymbol(hipFunction_t* functionPtr, const v
 }
 
 // Generated shim
-static hipError_t capture_hipDrvGraphAddMemFreeNode(hipGraphNode_t* phGraphNode, hipGraph_t hGraph, const hipGraphNode_t* dependencies, size_t numDependencies, hipDeviceptr_t dptr) {
-  hipError_t r = g_real_table.hipDrvGraphAddMemFreeNode_fn(phGraphNode, hGraph, dependencies, numDependencies, dptr);
-  if (r == hipSuccess) {
-    hrr_args_hipDrvGraphAddMemFreeNode a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.hGraph = reinterpret_cast<uint64_t>(hGraph);
-    a.dependencies = reinterpret_cast<uint64_t>(dependencies);
-    a.numDependencies = static_cast<decltype(a.numDependencies)>(numDependencies);
-    a.dptr = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(dptr));
-    if (phGraphNode) a.phGraphNode = reinterpret_cast<uint64_t>(*phGraphNode);
-    if (dependencies && numDependencies > 0) {
-      uint32_t _n = static_cast<uint32_t>(numDependencies);
-      if (_n > 16u) {
-        static bool warned_dependencies = false;
-        if (!warned_dependencies) {
-          warned_dependencies = true;
-          fprintf(stderr,
-                  "[HRR] hipDrvGraphAddMemFreeNode: recording only the first 16 "
-                  "of %u dependencies entries; replay of this call will be "
-                  "incomplete.\n", _n);
-        }
-        _n = 16u;
-      }
-      std::memcpy(a.dependencies_bytes, dependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
-      a.dependencies_n   = _n;
-      a.dependencies_present = 1;
-    }
-    hrr_cap::writer::write_event_raw(HRR_API_HIPDRVGRAPHADDMEMFREENODE, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
-static hipError_t capture_hipDrvGraphExecMemcpyNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, const HIP_MEMCPY3D* copyParams, hipCtx_t ctx) {
-  hipError_t r = g_real_table.hipDrvGraphExecMemcpyNodeSetParams_fn(hGraphExec, hNode, copyParams, ctx);
-  if (r == hipSuccess) {
-    hrr_args_hipDrvGraphExecMemcpyNodeSetParams a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.hGraphExec = reinterpret_cast<uint64_t>(hGraphExec);
-    a.hNode = reinterpret_cast<uint64_t>(hNode);
-    a.copyParams = reinterpret_cast<uint64_t>(copyParams);
-    a.ctx = reinterpret_cast<uint64_t>(ctx);
-    if (copyParams) {
-      std::memcpy(a.copyParams_bytes, copyParams, sizeof(HIP_MEMCPY3D));
-      a.copyParams_present = 1;
-    }
-    hrr_cap::writer::write_event_raw(HRR_API_HIPDRVGRAPHEXECMEMCPYNODESETPARAMS, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
-static hipError_t capture_hipDrvGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, const hipMemsetParams* memsetParams, hipCtx_t ctx) {
-  hipError_t r = g_real_table.hipDrvGraphExecMemsetNodeSetParams_fn(hGraphExec, hNode, memsetParams, ctx);
-  if (r == hipSuccess) {
-    hrr_args_hipDrvGraphExecMemsetNodeSetParams a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.hGraphExec = reinterpret_cast<uint64_t>(hGraphExec);
-    a.hNode = reinterpret_cast<uint64_t>(hNode);
-    a.memsetParams = reinterpret_cast<uint64_t>(memsetParams);
-    a.ctx = reinterpret_cast<uint64_t>(ctx);
-    if (memsetParams) {
-      std::memcpy(a.memsetParams_bytes, memsetParams, sizeof(hipMemsetParams));
-      a.memsetParams_present = 1;
-    }
-    hrr_cap::writer::write_event_raw(HRR_API_HIPDRVGRAPHEXECMEMSETNODESETPARAMS, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
 static hipError_t capture_hipSetValidDevices(int* device_arr, int len) {
   hipError_t r = g_real_table.hipSetValidDevices_fn(device_arr, len);
   if (r == hipSuccess) {
@@ -6740,6 +6278,77 @@ static hipError_t capture_hipMemcpy2DArrayToArray(hipArray_t dst, size_t wOffset
     a.height = static_cast<decltype(a.height)>(height);
     a.kind = static_cast<decltype(a.kind)>(kind);
     hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPY2DARRAYTOARRAY, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipDrvGraphAddMemFreeNode(hipGraphNode_t* phGraphNode, hipGraph_t hGraph, const hipGraphNode_t* dependencies, size_t numDependencies, hipDeviceptr_t dptr) {
+  hipError_t r = g_real_table.hipDrvGraphAddMemFreeNode_fn(phGraphNode, hGraph, dependencies, numDependencies, dptr);
+  if (r == hipSuccess) {
+    hrr_args_hipDrvGraphAddMemFreeNode a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.hGraph = reinterpret_cast<uint64_t>(hGraph);
+    a.dependencies = reinterpret_cast<uint64_t>(dependencies);
+    a.numDependencies = static_cast<decltype(a.numDependencies)>(numDependencies);
+    a.dptr = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(dptr));
+    if (phGraphNode) a.phGraphNode = reinterpret_cast<uint64_t>(*phGraphNode);
+    if (dependencies && numDependencies > 0) {
+      uint32_t _n = static_cast<uint32_t>(numDependencies);
+      if (_n > 16u) {
+        static bool warned_dependencies = false;
+        if (!warned_dependencies) {
+          warned_dependencies = true;
+          fprintf(stderr,
+                  "[HRR] hipDrvGraphAddMemFreeNode: recording only the first 16 "
+                  "of %u dependencies entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 16u;
+      }
+      std::memcpy(a.dependencies_bytes, dependencies, static_cast<size_t>(_n) * sizeof(hipGraphNode_t));
+      a.dependencies_n   = _n;
+      a.dependencies_present = 1;
+    }
+    hrr_cap::writer::write_event_raw(HRR_API_HIPDRVGRAPHADDMEMFREENODE, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipDrvGraphExecMemcpyNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, const HIP_MEMCPY3D* copyParams, hipCtx_t ctx) {
+  hipError_t r = g_real_table.hipDrvGraphExecMemcpyNodeSetParams_fn(hGraphExec, hNode, copyParams, ctx);
+  if (r == hipSuccess) {
+    hrr_args_hipDrvGraphExecMemcpyNodeSetParams a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.hGraphExec = reinterpret_cast<uint64_t>(hGraphExec);
+    a.hNode = reinterpret_cast<uint64_t>(hNode);
+    a.copyParams = reinterpret_cast<uint64_t>(copyParams);
+    a.ctx = reinterpret_cast<uint64_t>(ctx);
+    if (copyParams) {
+      std::memcpy(a.copyParams_bytes, copyParams, sizeof(HIP_MEMCPY3D));
+      a.copyParams_present = 1;
+    }
+    hrr_cap::writer::write_event_raw(HRR_API_HIPDRVGRAPHEXECMEMCPYNODESETPARAMS, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipDrvGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, const hipMemsetParams* memsetParams, hipCtx_t ctx) {
+  hipError_t r = g_real_table.hipDrvGraphExecMemsetNodeSetParams_fn(hGraphExec, hNode, memsetParams, ctx);
+  if (r == hipSuccess) {
+    hrr_args_hipDrvGraphExecMemsetNodeSetParams a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.hGraphExec = reinterpret_cast<uint64_t>(hGraphExec);
+    a.hNode = reinterpret_cast<uint64_t>(hNode);
+    a.memsetParams = reinterpret_cast<uint64_t>(memsetParams);
+    a.ctx = reinterpret_cast<uint64_t>(ctx);
+    if (memsetParams) {
+      std::memcpy(a.memsetParams_bytes, memsetParams, sizeof(hipMemsetParams));
+      a.memsetParams_present = 1;
+    }
+    hrr_cap::writer::write_event_raw(HRR_API_HIPDRVGRAPHEXECMEMSETNODESETPARAMS, &a.hdr, sizeof(a));
   }
   return r;
 }
@@ -6864,6 +6473,38 @@ static hipError_t capture_hipDeviceGetTexture1DLinearMaxWidth(size_t* maxWidthIn
   return r;
 }
 
+// Generated shim
+static hipError_t capture_hipStreamBatchMemOp(hipStream_t stream, unsigned int count, hipStreamBatchMemOpParams* paramArray, unsigned int flags) {
+  hipError_t r = g_real_table.hipStreamBatchMemOp_fn(stream, count, paramArray, flags);
+  if (r == hipSuccess) {
+    hrr_args_hipStreamBatchMemOp a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.stream = reinterpret_cast<uint64_t>(stream);
+    a.count = static_cast<decltype(a.count)>(count);
+    a.paramArray = reinterpret_cast<uint64_t>(paramArray);
+    a.flags = static_cast<decltype(a.flags)>(flags);
+    if (paramArray && count > 0) {
+      uint32_t _n = static_cast<uint32_t>(count);
+      if (_n > 16u) {
+        static bool warned_paramArray = false;
+        if (!warned_paramArray) {
+          warned_paramArray = true;
+          fprintf(stderr,
+                  "[HRR] hipStreamBatchMemOp: recording only the first 16 "
+                  "of %u paramArray entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 16u;
+      }
+      std::memcpy(a.paramArray_bytes, paramArray, static_cast<size_t>(_n) * sizeof(hipStreamBatchMemOpParams));
+      a.paramArray_n   = _n;
+      a.paramArray_present = 1;
+    }
+    hrr_cap::writer::write_event_raw(HRR_API_HIPSTREAMBATCHMEMOP, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
 
 // Generated shim
 static hipError_t capture_hipGraphBatchMemOpNodeGetParams(hipGraphNode_t hNode, hipBatchMemOpNodeParams* nodeParams_out) {
@@ -6879,6 +6520,149 @@ static hipError_t capture_hipGraphBatchMemOpNodeGetParams(hipGraphNode_t hNode, 
 }
 
 
+
+
+// Generated shim
+static hipError_t capture_hipLinkAddFile(hipLinkState_t state, hipJitInputType type, const char* path, unsigned int numOptions, hipJitOption* options, void** optionValues) {
+  hipError_t r = g_real_table.hipLinkAddFile_fn(state, type, path, numOptions, options, optionValues);
+  if (r == hipSuccess) {
+    hrr_args_hipLinkAddFile a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.state = reinterpret_cast<uint64_t>(state);
+    a.type = static_cast<decltype(a.type)>(type);
+    a.path = reinterpret_cast<uint64_t>(path);
+    a.numOptions = static_cast<decltype(a.numOptions)>(numOptions);
+    a.options = reinterpret_cast<uint64_t>(options);
+    if (optionValues) a.optionValues = reinterpret_cast<uint64_t>(*optionValues);
+    if (path) {
+      size_t _n = std::strlen(path);
+      if (_n > 255u) {
+        static bool warned_path = false;
+        if (!warned_path) {
+          warned_path = true;
+          fprintf(stderr,
+                  "[HRR] hipLinkAddFile: path is %zu characters; "
+                  "recording the first 255 only.\n", _n);
+        }
+        _n = 255u;
+      }
+      std::memcpy(a.path_bytes, path, _n);
+      a.path_bytes[_n] = 0;
+      a.path_present = 1;
+    }
+    if (options && numOptions > 0) {
+      uint32_t _n = static_cast<uint32_t>(numOptions);
+      if (_n > 32u) {
+        static bool warned_options = false;
+        if (!warned_options) {
+          warned_options = true;
+          fprintf(stderr,
+                  "[HRR] hipLinkAddFile: recording only the first 32 "
+                  "of %u options entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 32u;
+      }
+      std::memcpy(a.options_bytes, options, static_cast<size_t>(_n) * sizeof(hipJitOption));
+      a.options_n   = _n;
+      a.options_present = 1;
+    }
+    if (optionValues && numOptions > 0) {
+      uint32_t _n = static_cast<uint32_t>(numOptions);
+      if (_n > 32u) {
+        static bool warned_optionValues = false;
+        if (!warned_optionValues) {
+          warned_optionValues = true;
+          fprintf(stderr,
+                  "[HRR] hipLinkAddFile: recording only the first 32 "
+                  "of %u optionValues entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 32u;
+      }
+      std::memcpy(a.optionValues_bytes, optionValues, static_cast<size_t>(_n) * sizeof(void*));
+      a.optionValues_n   = _n;
+      a.optionValues_present = 1;
+    }
+    hrr_cap::writer::write_event_raw(HRR_API_HIPLINKADDFILE, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipLinkComplete(hipLinkState_t state, void** hipBinOut, size_t* sizeOut) {
+  hipError_t r = g_real_table.hipLinkComplete_fn(state, hipBinOut, sizeOut);
+  if (r == hipSuccess) {
+    hrr_args_hipLinkComplete a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.state = reinterpret_cast<uint64_t>(state);
+    a.sizeOut = reinterpret_cast<uint64_t>(sizeOut);
+    if (hipBinOut) a.hipBinOut = reinterpret_cast<uint64_t>(*hipBinOut);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPLINKCOMPLETE, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipLinkCreate(unsigned int numOptions, hipJitOption* options, void** optionValues, hipLinkState_t* stateOut) {
+  hipError_t r = g_real_table.hipLinkCreate_fn(numOptions, options, optionValues, stateOut);
+  if (r == hipSuccess) {
+    hrr_args_hipLinkCreate a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.numOptions = static_cast<decltype(a.numOptions)>(numOptions);
+    a.options = reinterpret_cast<uint64_t>(options);
+    if (optionValues) a.optionValues = reinterpret_cast<uint64_t>(*optionValues);
+    if (stateOut) a.stateOut = reinterpret_cast<uint64_t>(*stateOut);
+    if (options && numOptions > 0) {
+      uint32_t _n = static_cast<uint32_t>(numOptions);
+      if (_n > 32u) {
+        static bool warned_options = false;
+        if (!warned_options) {
+          warned_options = true;
+          fprintf(stderr,
+                  "[HRR] hipLinkCreate: recording only the first 32 "
+                  "of %u options entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 32u;
+      }
+      std::memcpy(a.options_bytes, options, static_cast<size_t>(_n) * sizeof(hipJitOption));
+      a.options_n   = _n;
+      a.options_present = 1;
+    }
+    if (optionValues && numOptions > 0) {
+      uint32_t _n = static_cast<uint32_t>(numOptions);
+      if (_n > 32u) {
+        static bool warned_optionValues = false;
+        if (!warned_optionValues) {
+          warned_optionValues = true;
+          fprintf(stderr,
+                  "[HRR] hipLinkCreate: recording only the first 32 "
+                  "of %u optionValues entries; replay of this call will be "
+                  "incomplete.\n", _n);
+        }
+        _n = 32u;
+      }
+      std::memcpy(a.optionValues_bytes, optionValues, static_cast<size_t>(_n) * sizeof(void*));
+      a.optionValues_n   = _n;
+      a.optionValues_present = 1;
+    }
+    hrr_cap::writer::write_event_raw(HRR_API_HIPLINKCREATE, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipLinkDestroy(hipLinkState_t state) {
+  hipError_t r = g_real_table.hipLinkDestroy_fn(state);
+  if (r == hipSuccess) {
+    hrr_args_hipLinkDestroy a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.state = reinterpret_cast<uint64_t>(state);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPLINKDESTROY, &a.hdr, sizeof(a));
+  }
+  return r;
+}
 
 // Generated shim
 static hipError_t capture_hipEventRecordWithFlags(hipEvent_t event, hipStream_t stream, unsigned int flags) {
@@ -6908,6 +6692,19 @@ static hipError_t capture_hipMemGetHandleForAddressRange(void* handle, hipDevice
     a.handleType = static_cast<decltype(a.handleType)>(handleType);
     a.flags = static_cast<decltype(a.flags)>(flags);
     hrr_cap::writer::write_event_raw(HRR_API_HIPMEMGETHANDLEFORADDRESSRANGE, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipModuleGetFunctionCount(unsigned int* count, hipModule_t module) {
+  hipError_t r = g_real_table.hipModuleGetFunctionCount_fn(count, module);
+  if (r == hipSuccess) {
+    hrr_args_hipModuleGetFunctionCount a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.count = reinterpret_cast<uint64_t>(count);
+    a.module = reinterpret_cast<uint64_t>(module);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPMODULEGETFUNCTIONCOUNT, &a.hdr, sizeof(a));
   }
   return r;
 }
@@ -7011,7 +6808,6 @@ static hipError_t capture_hipMemsetD2D32Async(hipDeviceptr_t dst, size_t dstPitc
   return r;
 }
 
-
 // Generated shim
 static hipError_t capture_hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr, hipStreamAttrValue* value_out) {
   hipError_t r = g_real_table.hipStreamGetAttribute_fn(stream, attr, value_out);
@@ -7025,6 +6821,7 @@ static hipError_t capture_hipStreamGetAttribute(hipStream_t stream, hipStreamAtt
   }
   return r;
 }
+
 
 // Generated shim
 static hipError_t capture_hipModuleLoadFatBinary(hipModule_t* module, const void* fatbin) {
@@ -7241,6 +7038,50 @@ static hipError_t capture_hipGetDriverEntryPoint_spt(const char* symbol, void** 
 }
 
 // Generated shim
+static hipError_t capture_hipMemPrefetchAsync_v2(const void* dev_ptr, size_t count, hipMemLocation location, unsigned int flags, hipStream_t stream) {
+  hipError_t r = g_real_table.hipMemPrefetchAsync_v2_fn(dev_ptr, count, location, flags, stream);
+  if (r == hipSuccess) {
+    hrr_args_hipMemPrefetchAsync_v2 a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.dev_ptr = reinterpret_cast<uint64_t>(dev_ptr);
+    a.count = static_cast<decltype(a.count)>(count);
+    std::memcpy(a.location_bytes, &location, sizeof(location));
+    a.flags = static_cast<decltype(a.flags)>(flags);
+    a.stream = reinterpret_cast<uint64_t>(stream);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMPREFETCHASYNC_V2, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipMemAdvise_v2(const void* dev_ptr, size_t count, hipMemoryAdvise advice, hipMemLocation device) {
+  hipError_t r = g_real_table.hipMemAdvise_v2_fn(dev_ptr, count, advice, device);
+  if (r == hipSuccess) {
+    hrr_args_hipMemAdvise_v2 a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.dev_ptr = reinterpret_cast<uint64_t>(dev_ptr);
+    a.count = static_cast<decltype(a.count)>(count);
+    a.advice = static_cast<decltype(a.advice)>(advice);
+    std::memcpy(a.device_bytes, &device, sizeof(device));
+    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMADVISE_V2, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipStreamGetId(hipStream_t stream, unsigned long long* streamId) {
+  hipError_t r = g_real_table.hipStreamGetId_fn(stream, streamId);
+  if (r == hipSuccess) {
+    hrr_args_hipStreamGetId a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.stream = reinterpret_cast<uint64_t>(stream);
+    a.streamId = reinterpret_cast<uint64_t>(streamId);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPSTREAMGETID, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
 static hipError_t capture_hipLibraryLoadData(hipLibrary_t* library, const void* code, hipJitOption* jitOptions, void** jitOptionsValues, unsigned int numJitOptions, hipLibraryOption* libraryOptions, void** libraryOptionValues, unsigned int numLibraryOptions) {
   hipError_t r = g_real_table.hipLibraryLoadData_fn(library, code, jitOptions, jitOptionsValues, numJitOptions, libraryOptions, libraryOptionValues, numLibraryOptions);
   if (r == hipSuccess) {
@@ -7318,31 +7159,14 @@ static hipError_t capture_hipLibraryGetKernelCount(unsigned int* count, hipLibra
 }
 
 // Generated shim
-static hipError_t capture_hipLibraryGetGlobal(void** dptr, size_t* bytes, hipLibrary_t library, const char* name) {
-  hipError_t r = g_real_table.hipLibraryGetGlobal_fn(dptr, bytes, library, name);
+static hipError_t capture_hipStreamCopyAttributes(hipStream_t dst, hipStream_t src) {
+  hipError_t r = g_real_table.hipStreamCopyAttributes_fn(dst, src);
   if (r == hipSuccess) {
-    hrr_args_hipLibraryGetGlobal a{};
+    hrr_args_hipStreamCopyAttributes a{};
     a.ret         = static_cast<int32_t>(r);
-    a.bytes = reinterpret_cast<uint64_t>(bytes);
-    a.library = reinterpret_cast<uint64_t>(library);
-    a.name = reinterpret_cast<uint64_t>(name);
-    if (dptr) a.dptr = reinterpret_cast<uint64_t>(*dptr);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPLIBRARYGETGLOBAL, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
-static hipError_t capture_hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library, const char* name) {
-  hipError_t r = g_real_table.hipLibraryGetManaged_fn(dptr, bytes, library, name);
-  if (r == hipSuccess) {
-    hrr_args_hipLibraryGetManaged a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.bytes = reinterpret_cast<uint64_t>(bytes);
-    a.library = reinterpret_cast<uint64_t>(library);
-    a.name = reinterpret_cast<uint64_t>(name);
-    if (dptr) a.dptr = reinterpret_cast<uint64_t>(*dptr);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPLIBRARYGETMANAGED, &a.hdr, sizeof(a));
+    a.dst = reinterpret_cast<uint64_t>(dst);
+    a.src = reinterpret_cast<uint64_t>(src);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPSTREAMCOPYATTRIBUTES, &a.hdr, sizeof(a));
   }
   return r;
 }
@@ -7388,6 +7212,21 @@ static hipError_t capture_hipKernelGetName(const char** name, hipKernel_t kernel
 }
 
 // Generated shim
+static hipError_t capture_hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, const void* f, int numBlocks, int blockSize) {
+  hipError_t r = g_real_table.hipOccupancyAvailableDynamicSMemPerBlock_fn(dynamicSmemSize, f, numBlocks, blockSize);
+  if (r == hipSuccess) {
+    hrr_args_hipOccupancyAvailableDynamicSMemPerBlock a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.dynamicSmemSize = reinterpret_cast<uint64_t>(dynamicSmemSize);
+    a.f = reinterpret_cast<uint64_t>(f);
+    a.numBlocks = static_cast<decltype(a.numBlocks)>(numBlocks);
+    a.blockSize = static_cast<decltype(a.blockSize)>(blockSize);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPOCCUPANCYAVAILABLEDYNAMICSMEMPERBLOCK, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
 static hipError_t capture_hipGetProcAddress_spt(const char* symbol, void** pfn, int hipVersion, uint64_t flags, hipDriverProcAddressQueryResult* symbolStatus) {
   hipError_t r = g_real_table.hipGetProcAddress_spt_fn(symbol, pfn, hipVersion, flags, symbolStatus);
   if (r == hipSuccess) {
@@ -7415,6 +7254,21 @@ static hipError_t capture_hipGetProcAddress_spt(const char* symbol, void** pfn, 
       a.symbol_present = 1;
     }
     hrr_cap::writer::write_event_raw(HRR_API_HIPGETPROCADDRESS_SPT, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* paramOffset, size_t* paramSize) {
+  hipError_t r = g_real_table.hipKernelGetParamInfo_fn(kernel, paramIndex, paramOffset, paramSize);
+  if (r == hipSuccess) {
+    hrr_args_hipKernelGetParamInfo a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.kernel = reinterpret_cast<uint64_t>(kernel);
+    a.paramIndex = static_cast<decltype(a.paramIndex)>(paramIndex);
+    a.paramOffset = reinterpret_cast<uint64_t>(paramOffset);
+    a.paramSize = reinterpret_cast<uint64_t>(paramSize);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPKERNELGETPARAMINFO, &a.hdr, sizeof(a));
   }
   return r;
 }
@@ -7451,64 +7305,6 @@ static hipError_t capture_hipExtSetLoggingParams(size_t log_level, size_t log_si
     a.log_size = static_cast<decltype(a.log_size)>(log_size);
     a.log_mask = static_cast<decltype(a.log_mask)>(log_mask);
     hrr_cap::writer::write_event_raw(HRR_API_HIPEXTSETLOGGINGPARAMS, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
-static hipError_t capture_hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKernel_t kernel, hipDevice_t dev) {
-  hipError_t r = g_real_table.hipKernelGetAttribute_fn(pi, attrib, kernel, dev);
-  if (r == hipSuccess) {
-    hrr_args_hipKernelGetAttribute a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.pi = reinterpret_cast<uint64_t>(pi);
-    a.attrib = static_cast<decltype(a.attrib)>(attrib);
-    a.kernel = reinterpret_cast<uint64_t>(kernel);
-    a.dev = static_cast<uint64_t>(static_cast<int>(dev));
-    hrr_cap::writer::write_event_raw(HRR_API_HIPKERNELGETATTRIBUTE, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
-static hipError_t capture_hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev) {
-  hipError_t r = g_real_table.hipKernelSetAttribute_fn(attrib, value, kernel, dev);
-  if (r == hipSuccess) {
-    hrr_args_hipKernelSetAttribute a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.attrib = static_cast<decltype(a.attrib)>(attrib);
-    a.value = static_cast<decltype(a.value)>(value);
-    a.kernel = reinterpret_cast<uint64_t>(kernel);
-    a.dev = static_cast<uint64_t>(static_cast<int>(dev));
-    hrr_cap::writer::write_event_raw(HRR_API_HIPKERNELSETATTRIBUTE, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
-static hipError_t capture_hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel) {
-  hipError_t r = g_real_table.hipKernelGetFunction_fn(pFunc, kernel);
-  if (r == hipSuccess) {
-    hrr_args_hipKernelGetFunction a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.kernel = reinterpret_cast<uint64_t>(kernel);
-    if (pFunc) a.pFunc = reinterpret_cast<uint64_t>(*pFunc);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPKERNELGETFUNCTION, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-// Generated shim
-static hipError_t capture_hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* paramOffset, size_t* paramSize) {
-  hipError_t r = g_real_table.hipKernelGetParamInfo_fn(kernel, paramIndex, paramOffset, paramSize);
-  if (r == hipSuccess) {
-    hrr_args_hipKernelGetParamInfo a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.kernel = reinterpret_cast<uint64_t>(kernel);
-    a.paramIndex = static_cast<decltype(a.paramIndex)>(paramIndex);
-    a.paramOffset = reinterpret_cast<uint64_t>(paramOffset);
-    a.paramSize = reinterpret_cast<uint64_t>(paramSize);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPKERNELGETPARAMINFO, &a.hdr, sizeof(a));
   }
   return r;
 }
@@ -7559,6 +7355,96 @@ static hipError_t capture_hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryR
     a.mipmap = reinterpret_cast<uint64_t>(mipmap);
     a.device = static_cast<uint64_t>(static_cast<int>(device));
     hrr_cap::writer::write_event_raw(HRR_API_HIPMIPMAPPEDARRAYGETMEMORYREQUIREMENTS, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKernel_t kernel, hipDevice_t dev) {
+  hipError_t r = g_real_table.hipKernelGetAttribute_fn(pi, attrib, kernel, dev);
+  if (r == hipSuccess) {
+    hrr_args_hipKernelGetAttribute a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.pi = reinterpret_cast<uint64_t>(pi);
+    a.attrib = static_cast<decltype(a.attrib)>(attrib);
+    a.kernel = reinterpret_cast<uint64_t>(kernel);
+    a.dev = static_cast<uint64_t>(static_cast<int>(dev));
+    hrr_cap::writer::write_event_raw(HRR_API_HIPKERNELGETATTRIBUTE, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev) {
+  hipError_t r = g_real_table.hipKernelSetAttribute_fn(attrib, value, kernel, dev);
+  if (r == hipSuccess) {
+    hrr_args_hipKernelSetAttribute a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.attrib = static_cast<decltype(a.attrib)>(attrib);
+    a.value = static_cast<decltype(a.value)>(value);
+    a.kernel = reinterpret_cast<uint64_t>(kernel);
+    a.dev = static_cast<uint64_t>(static_cast<int>(dev));
+    hrr_cap::writer::write_event_raw(HRR_API_HIPKERNELSETATTRIBUTE, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel) {
+  hipError_t r = g_real_table.hipKernelGetFunction_fn(pFunc, kernel);
+  if (r == hipSuccess) {
+    hrr_args_hipKernelGetFunction a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.kernel = reinterpret_cast<uint64_t>(kernel);
+    if (pFunc) a.pFunc = reinterpret_cast<uint64_t>(*pFunc);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPKERNELGETFUNCTION, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count, hipMemLocation* prefetch_locs, size_t* prefetch_loc_idxs, size_t num_prefetch_locs, unsigned long long flags, hipStream_t stream) {
+  hipError_t r = g_real_table.hipMemPrefetchBatchAsync_fn(dev_ptrs, sizes, count, prefetch_locs, prefetch_loc_idxs, num_prefetch_locs, flags, stream);
+  if (r == hipSuccess) {
+    hrr_args_hipMemPrefetchBatchAsync a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.sizes = reinterpret_cast<uint64_t>(sizes);
+    a.count = static_cast<decltype(a.count)>(count);
+    a.prefetch_locs = reinterpret_cast<uint64_t>(prefetch_locs);
+    a.prefetch_loc_idxs = reinterpret_cast<uint64_t>(prefetch_loc_idxs);
+    a.num_prefetch_locs = static_cast<decltype(a.num_prefetch_locs)>(num_prefetch_locs);
+    a.flags = static_cast<decltype(a.flags)>(flags);
+    a.stream = reinterpret_cast<uint64_t>(stream);
+    if (dev_ptrs) a.dev_ptrs = reinterpret_cast<uint64_t>(*dev_ptrs);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMPREFETCHBATCHASYNC, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipOccupancyMaxPotentialClusterSize(int* clusterSize, const void* f, const hipLaunchConfig_t* config) {
+  hipError_t r = g_real_table.hipOccupancyMaxPotentialClusterSize_fn(clusterSize, f, config);
+  if (r == hipSuccess) {
+    hrr_args_hipOccupancyMaxPotentialClusterSize a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.clusterSize = reinterpret_cast<uint64_t>(clusterSize);
+    a.f = reinterpret_cast<uint64_t>(f);
+    a.config = reinterpret_cast<uint64_t>(config);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPOCCUPANCYMAXPOTENTIALCLUSTERSIZE, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipOccupancyMaxActiveClusters(int* numClusters, const void* f, const hipLaunchConfig_t* launchConfig) {
+  hipError_t r = g_real_table.hipOccupancyMaxActiveClusters_fn(numClusters, f, launchConfig);
+  if (r == hipSuccess) {
+    hrr_args_hipOccupancyMaxActiveClusters a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.numClusters = reinterpret_cast<uint64_t>(numClusters);
+    a.f = reinterpret_cast<uint64_t>(f);
+    a.launchConfig = reinterpret_cast<uint64_t>(launchConfig);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPOCCUPANCYMAXACTIVECLUSTERS, &a.hdr, sizeof(a));
   }
   return r;
 }
@@ -7773,6 +7659,106 @@ static hipError_t capture_hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEve
 }
 
 // Generated shim
+static hipError_t capture_hipLibraryGetGlobal(void** dptr, size_t* bytes, hipLibrary_t library, const char* name) {
+  hipError_t r = g_real_table.hipLibraryGetGlobal_fn(dptr, bytes, library, name);
+  if (r == hipSuccess) {
+    hrr_args_hipLibraryGetGlobal a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.bytes = reinterpret_cast<uint64_t>(bytes);
+    a.library = reinterpret_cast<uint64_t>(library);
+    a.name = reinterpret_cast<uint64_t>(name);
+    if (dptr) a.dptr = reinterpret_cast<uint64_t>(*dptr);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPLIBRARYGETGLOBAL, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library, const char* name) {
+  hipError_t r = g_real_table.hipLibraryGetManaged_fn(dptr, bytes, library, name);
+  if (r == hipSuccess) {
+    hrr_args_hipLibraryGetManaged a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.bytes = reinterpret_cast<uint64_t>(bytes);
+    a.library = reinterpret_cast<uint64_t>(library);
+    a.name = reinterpret_cast<uint64_t>(name);
+    if (dptr) a.dptr = reinterpret_cast<uint64_t>(*dptr);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPLIBRARYGETMANAGED, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipMemDiscardBatchAsync(void** dev_ptrs, size_t* sizes, size_t count, unsigned long long flags, hipStream_t stream) {
+  hipError_t r = g_real_table.hipMemDiscardBatchAsync_fn(dev_ptrs, sizes, count, flags, stream);
+  if (r == hipSuccess) {
+    hrr_args_hipMemDiscardBatchAsync a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.sizes = reinterpret_cast<uint64_t>(sizes);
+    a.count = static_cast<decltype(a.count)>(count);
+    a.flags = static_cast<decltype(a.flags)>(flags);
+    a.stream = reinterpret_cast<uint64_t>(stream);
+    if (dev_ptrs) a.dev_ptrs = reinterpret_cast<uint64_t>(*dev_ptrs);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMDISCARDBATCHASYNC, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipDrvMemDiscardBatchAsync(hipDeviceptr_t* dptrs, size_t* sizes, size_t count, unsigned long long flags, hipStream_t stream) {
+  hipError_t r = g_real_table.hipDrvMemDiscardBatchAsync_fn(dptrs, sizes, count, flags, stream);
+  if (r == hipSuccess) {
+    hrr_args_hipDrvMemDiscardBatchAsync a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.dptrs = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(dptrs));
+    a.sizes = reinterpret_cast<uint64_t>(sizes);
+    a.count = static_cast<decltype(a.count)>(count);
+    a.flags = static_cast<decltype(a.flags)>(flags);
+    a.stream = reinterpret_cast<uint64_t>(stream);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPDRVMEMDISCARDBATCHASYNC, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipMemDiscardAndPrefetchBatchAsync(void** dptrs, size_t* sizes, size_t count, hipMemLocation* prefetchLocs, size_t* prefetchLocIdxs, size_t numPrefetchLocs, unsigned long long flags, hipStream_t stream) {
+  hipError_t r = g_real_table.hipMemDiscardAndPrefetchBatchAsync_fn(dptrs, sizes, count, prefetchLocs, prefetchLocIdxs, numPrefetchLocs, flags, stream);
+  if (r == hipSuccess) {
+    hrr_args_hipMemDiscardAndPrefetchBatchAsync a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.sizes = reinterpret_cast<uint64_t>(sizes);
+    a.count = static_cast<decltype(a.count)>(count);
+    a.prefetchLocs = reinterpret_cast<uint64_t>(prefetchLocs);
+    a.prefetchLocIdxs = reinterpret_cast<uint64_t>(prefetchLocIdxs);
+    a.numPrefetchLocs = static_cast<decltype(a.numPrefetchLocs)>(numPrefetchLocs);
+    a.flags = static_cast<decltype(a.flags)>(flags);
+    a.stream = reinterpret_cast<uint64_t>(stream);
+    if (dptrs) a.dptrs = reinterpret_cast<uint64_t>(*dptrs);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMDISCARDANDPREFETCHBATCHASYNC, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipDrvMemDiscardAndPrefetchBatchAsync(hipDeviceptr_t* dptrs, size_t* sizes, size_t count, hipMemLocation* prefetchLocs, size_t* prefetchLocIdxs, size_t numPrefetchLocs, unsigned long long flags, hipStream_t stream) {
+  hipError_t r = g_real_table.hipDrvMemDiscardAndPrefetchBatchAsync_fn(dptrs, sizes, count, prefetchLocs, prefetchLocIdxs, numPrefetchLocs, flags, stream);
+  if (r == hipSuccess) {
+    hrr_args_hipDrvMemDiscardAndPrefetchBatchAsync a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.dptrs = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(dptrs));
+    a.sizes = reinterpret_cast<uint64_t>(sizes);
+    a.count = static_cast<decltype(a.count)>(count);
+    a.prefetchLocs = reinterpret_cast<uint64_t>(prefetchLocs);
+    a.prefetchLocIdxs = reinterpret_cast<uint64_t>(prefetchLocIdxs);
+    a.numPrefetchLocs = static_cast<decltype(a.numPrefetchLocs)>(numPrefetchLocs);
+    a.flags = static_cast<decltype(a.flags)>(flags);
+    a.stream = reinterpret_cast<uint64_t>(stream);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPDRVMEMDISCARDANDPREFETCHBATCHASYNC, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
 static hipError_t capture_hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location, hipMemAllocationType type) {
   hipError_t r = g_real_table.hipMemGetDefaultMemPool_fn(memPool, location, type);
   if (r == hipSuccess) {
@@ -7782,6 +7768,20 @@ static hipError_t capture_hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemL
     a.type = static_cast<decltype(a.type)>(type);
     if (memPool) a.memPool = reinterpret_cast<uint64_t>(*memPool);
     hrr_cap::writer::write_event_raw(HRR_API_HIPMEMGETDEFAULTMEMPOOL, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask, hipDevice_t device) {
+  hipError_t r = g_real_table.hipDeviceGetLuid_fn(luid, deviceNodeMask, device);
+  if (r == hipSuccess) {
+    hrr_args_hipDeviceGetLuid a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.luid = reinterpret_cast<uint64_t>(luid);
+    a.deviceNodeMask = reinterpret_cast<uint64_t>(deviceNodeMask);
+    a.device = static_cast<uint64_t>(static_cast<int>(device));
+    hrr_cap::writer::write_event_raw(HRR_API_HIPDEVICEGETLUID, &a.hdr, sizeof(a));
   }
   return r;
 }
@@ -7831,15 +7831,15 @@ extern hipError_t capture_hipModuleLaunchKernel(hipFunction_t f, unsigned int gr
 extern hipError_t capture_hipModuleLoad(hipModule_t* module, const char* fname);
 extern hipError_t capture_hipModuleLoadData(hipModule_t* module, const void* image);
 extern hipError_t capture_hipModuleLoadDataEx(hipModule_t* module, const void* image, unsigned int numOptions, hipJitOption* options, void** optionValues);
-extern hipError_t capture_hipLinkAddData(hipLinkState_t state, hipJitInputType type, void* data, size_t size, const char* name, unsigned int numOptions, hipJitOption* options, void** optionValues);
+extern hipError_t capture_hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX, uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ, uint32_t localWorkSizeX, uint32_t localWorkSizeY, uint32_t localWorkSizeZ, size_t sharedMemBytes, hipStream_t hStream, void** kernelParams, void** extra, hipEvent_t startEvent, hipEvent_t stopEvent, uint32_t flags);
 extern hipError_t capture_hipMemcpy3D_spt(const struct hipMemcpy3DParms* p);
 extern hipError_t capture_hipMemcpy3DAsync_spt(const hipMemcpy3DParms* p, hipStream_t stream);
 extern hipError_t capture_hipLaunchCooperativeKernel_spt(const void* f, dim3 gridDim, dim3 blockDim, void** kernelParams, uint32_t sharedMemBytes, hipStream_t hStream);
 extern hipError_t capture_hipLaunchKernel_spt(const void* function_address, dim3 numBlocks, dim3 dimBlocks, void** args, size_t sharedMemBytes, hipStream_t stream);
-extern hipError_t capture_hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX, uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ, uint32_t localWorkSizeX, uint32_t localWorkSizeY, uint32_t localWorkSizeZ, size_t sharedMemBytes, hipStream_t hStream, void** kernelParams, void** extra, hipEvent_t startEvent, hipEvent_t stopEvent, uint32_t flags);
 extern hipError_t capture_hipGraphAddBatchMemOpNode(hipGraphNode_t* phGraphNode, hipGraph_t hGraph, const hipGraphNode_t* dependencies, size_t numDependencies, const hipBatchMemOpNodeParams* nodeParams);
 extern hipError_t capture_hipGraphBatchMemOpNodeSetParams(hipGraphNode_t hNode, hipBatchMemOpNodeParams* nodeParams);
 extern hipError_t capture_hipGraphExecBatchMemOpNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, const hipBatchMemOpNodeParams* nodeParams);
+extern hipError_t capture_hipLinkAddData(hipLinkState_t state, hipJitInputType type, void* data, size_t size, const char* name, unsigned int numOptions, hipJitOption* options, void** optionValues);
 extern hipError_t capture_hipLaunchKernelExC(const hipLaunchConfig_t* config, const void* fPtr, void** args);
 extern hipError_t capture_hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f, void** params, void** extra);
 extern hipError_t capture_hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr, const hipStreamAttrValue* value);
@@ -7903,7 +7903,6 @@ void hip_capture_build_table() {
   g_cap_table.hipDeviceGetDefaultMemPool_fn = capture_hipDeviceGetDefaultMemPool;
   g_cap_table.hipDeviceGetGraphMemAttribute_fn = capture_hipDeviceGetGraphMemAttribute;
   g_cap_table.hipDeviceGetLimit_fn = capture_hipDeviceGetLimit;
-  g_cap_table.hipDeviceGetLuid_fn = capture_hipDeviceGetLuid;
   g_cap_table.hipDeviceGetMemPool_fn = capture_hipDeviceGetMemPool;
   g_cap_table.hipDeviceGetName_fn = capture_hipDeviceGetName;
   g_cap_table.hipDeviceGetP2PAttribute_fn = capture_hipDeviceGetP2PAttribute;
@@ -8085,7 +8084,6 @@ void hip_capture_build_table() {
   g_cap_table.hipMemAddressFree_fn = capture_hipMemAddressFree;
   g_cap_table.hipMemAddressReserve_fn = capture_hipMemAddressReserve;
   g_cap_table.hipMemAdvise_fn = capture_hipMemAdvise;
-  g_cap_table.hipMemAdvise_v2_fn = capture_hipMemAdvise_v2;
   g_cap_table.hipMemAllocHost_fn = capture_hipMemAllocHost;
   g_cap_table.hipMemAllocPitch_fn = capture_hipMemAllocPitch;
   g_cap_table.hipMemCreate_fn = capture_hipMemCreate;
@@ -8110,12 +8108,6 @@ void hip_capture_build_table() {
   g_cap_table.hipMemPoolSetAttribute_fn = capture_hipMemPoolSetAttribute;
   g_cap_table.hipMemPoolTrimTo_fn = capture_hipMemPoolTrimTo;
   g_cap_table.hipMemPrefetchAsync_fn = capture_hipMemPrefetchAsync;
-  g_cap_table.hipMemPrefetchAsync_v2_fn = capture_hipMemPrefetchAsync_v2;
-  g_cap_table.hipMemPrefetchBatchAsync_fn = capture_hipMemPrefetchBatchAsync;
-  g_cap_table.hipMemDiscardBatchAsync_fn = capture_hipMemDiscardBatchAsync;
-  g_cap_table.hipDrvMemDiscardBatchAsync_fn = capture_hipDrvMemDiscardBatchAsync;
-  g_cap_table.hipMemDiscardAndPrefetchBatchAsync_fn = capture_hipMemDiscardAndPrefetchBatchAsync;
-  g_cap_table.hipDrvMemDiscardAndPrefetchBatchAsync_fn = capture_hipDrvMemDiscardAndPrefetchBatchAsync;
   g_cap_table.hipMemPtrGetInfo_fn = capture_hipMemPtrGetInfo;
   g_cap_table.hipMemRangeGetAttribute_fn = capture_hipMemRangeGetAttribute;
   g_cap_table.hipMemRangeGetAttributes_fn = capture_hipMemRangeGetAttributes;
@@ -8168,7 +8160,6 @@ void hip_capture_build_table() {
   g_cap_table.hipMipmappedArrayDestroy_fn = capture_hipMipmappedArrayDestroy;
   g_cap_table.hipMipmappedArrayGetLevel_fn = capture_hipMipmappedArrayGetLevel;
   g_cap_table.hipModuleGetFunction_fn = capture_hipModuleGetFunction;
-  g_cap_table.hipModuleGetFunctionCount_fn = capture_hipModuleGetFunctionCount;
   g_cap_table.hipModuleGetGlobal_fn = capture_hipModuleGetGlobal;
   g_cap_table.hipModuleGetTexRef_fn = capture_hipModuleGetTexRef;
   g_cap_table.hipModuleLaunchCooperativeKernel_fn = capture_hipModuleLaunchCooperativeKernel;
@@ -8177,22 +8168,14 @@ void hip_capture_build_table() {
   g_cap_table.hipModuleLoad_fn = capture_hipModuleLoad;
   g_cap_table.hipModuleLoadData_fn = capture_hipModuleLoadData;
   g_cap_table.hipModuleLoadDataEx_fn = capture_hipModuleLoadDataEx;
-  g_cap_table.hipLinkAddData_fn = capture_hipLinkAddData;
-  g_cap_table.hipLinkAddFile_fn = capture_hipLinkAddFile;
-  g_cap_table.hipLinkComplete_fn = capture_hipLinkComplete;
-  g_cap_table.hipLinkCreate_fn = capture_hipLinkCreate;
-  g_cap_table.hipLinkDestroy_fn = capture_hipLinkDestroy;
   g_cap_table.hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_fn = capture_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor;
   g_cap_table.hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_fn = capture_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags;
   g_cap_table.hipModuleOccupancyMaxPotentialBlockSize_fn = capture_hipModuleOccupancyMaxPotentialBlockSize;
   g_cap_table.hipModuleOccupancyMaxPotentialBlockSizeWithFlags_fn = capture_hipModuleOccupancyMaxPotentialBlockSizeWithFlags;
   g_cap_table.hipModuleUnload_fn = capture_hipModuleUnload;
-  g_cap_table.hipOccupancyAvailableDynamicSMemPerBlock_fn = capture_hipOccupancyAvailableDynamicSMemPerBlock;
   g_cap_table.hipOccupancyMaxActiveBlocksPerMultiprocessor_fn = capture_hipOccupancyMaxActiveBlocksPerMultiprocessor;
   g_cap_table.hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_fn = capture_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags;
   g_cap_table.hipOccupancyMaxPotentialBlockSize_fn = capture_hipOccupancyMaxPotentialBlockSize;
-  g_cap_table.hipOccupancyMaxActiveClusters_fn = capture_hipOccupancyMaxActiveClusters;
-  g_cap_table.hipOccupancyMaxPotentialClusterSize_fn = capture_hipOccupancyMaxPotentialClusterSize;
   g_cap_table.hipPeekAtLastError_fn = capture_hipPeekAtLastError;
   g_cap_table.hipPointerGetAttribute_fn = capture_hipPointerGetAttribute;
   g_cap_table.hipPointerGetAttributes_fn = capture_hipPointerGetAttributes;
@@ -8207,7 +8190,6 @@ void hip_capture_build_table() {
   g_cap_table.hipStreamAddCallback_fn = capture_hipStreamAddCallback;
   g_cap_table.hipStreamAttachMemAsync_fn = capture_hipStreamAttachMemAsync;
   g_cap_table.hipStreamBeginCapture_fn = capture_hipStreamBeginCapture;
-  g_cap_table.hipStreamCopyAttributes_fn = capture_hipStreamCopyAttributes;
   g_cap_table.hipStreamCreate_fn = capture_hipStreamCreate;
   g_cap_table.hipStreamCreateWithFlags_fn = capture_hipStreamCreateWithFlags;
   g_cap_table.hipStreamCreateWithPriority_fn = capture_hipStreamCreateWithPriority;
@@ -8217,7 +8199,6 @@ void hip_capture_build_table() {
   g_cap_table.hipStreamGetCaptureInfo_v2_fn = capture_hipStreamGetCaptureInfo_v2;
   g_cap_table.hipStreamGetDevice_fn = capture_hipStreamGetDevice;
   g_cap_table.hipStreamGetFlags_fn = capture_hipStreamGetFlags;
-  g_cap_table.hipStreamGetId_fn = capture_hipStreamGetId;
   g_cap_table.hipStreamGetPriority_fn = capture_hipStreamGetPriority;
   g_cap_table.hipStreamIsCapturing_fn = capture_hipStreamIsCapturing;
   g_cap_table.hipStreamQuery_fn = capture_hipStreamQuery;
@@ -8228,7 +8209,6 @@ void hip_capture_build_table() {
   g_cap_table.hipStreamWaitValue64_fn = capture_hipStreamWaitValue64;
   g_cap_table.hipStreamWriteValue32_fn = capture_hipStreamWriteValue32;
   g_cap_table.hipStreamWriteValue64_fn = capture_hipStreamWriteValue64;
-  g_cap_table.hipStreamBatchMemOp_fn = capture_hipStreamBatchMemOp;
   g_cap_table.hipTexObjectCreate_fn = capture_hipTexObjectCreate;
   g_cap_table.hipTexObjectDestroy_fn = capture_hipTexObjectDestroy;
   g_cap_table.hipTexObjectGetResourceDesc_fn = capture_hipTexObjectGetResourceDesc;
@@ -8263,6 +8243,9 @@ void hip_capture_build_table() {
   g_cap_table.hipUserObjectRelease_fn = capture_hipUserObjectRelease;
   g_cap_table.hipUserObjectRetain_fn = capture_hipUserObjectRetain;
   g_cap_table.hipWaitExternalSemaphoresAsync_fn = capture_hipWaitExternalSemaphoresAsync;
+  g_cap_table.hipCreateChannelDesc_fn = capture_hipCreateChannelDesc;
+  g_cap_table.hipExtModuleLaunchKernel_fn = capture_hipExtModuleLaunchKernel;
+  g_cap_table.hipHccModuleLaunchKernel_fn = capture_hipHccModuleLaunchKernel;
   g_cap_table.hipMemcpy_spt_fn = capture_hipMemcpy_spt;
   g_cap_table.hipMemcpyToSymbol_spt_fn = capture_hipMemcpyToSymbol_spt;
   g_cap_table.hipMemcpyFromSymbol_spt_fn = capture_hipMemcpyFromSymbol_spt;
@@ -8300,9 +8283,6 @@ void hip_capture_build_table() {
   g_cap_table.hipStreamGetCaptureInfo_spt_fn = capture_hipStreamGetCaptureInfo_spt;
   g_cap_table.hipStreamGetCaptureInfo_v2_spt_fn = capture_hipStreamGetCaptureInfo_v2_spt;
   g_cap_table.hipLaunchHostFunc_spt_fn = capture_hipLaunchHostFunc_spt;
-  g_cap_table.hipCreateChannelDesc_fn = capture_hipCreateChannelDesc;
-  g_cap_table.hipExtModuleLaunchKernel_fn = capture_hipExtModuleLaunchKernel;
-  g_cap_table.hipHccModuleLaunchKernel_fn = capture_hipHccModuleLaunchKernel;
   g_cap_table.hipGetStreamDeviceId_fn = capture_hipGetStreamDeviceId;
   g_cap_table.hipDrvGraphAddMemsetNode_fn = capture_hipDrvGraphAddMemsetNode;
   g_cap_table.hipGraphAddExternalSemaphoresWaitNode_fn = capture_hipGraphAddExternalSemaphoresWaitNode;
@@ -8321,9 +8301,6 @@ void hip_capture_build_table() {
   g_cap_table.hipGetProcAddress_fn = capture_hipGetProcAddress;
   g_cap_table.hipStreamBeginCaptureToGraph_fn = capture_hipStreamBeginCaptureToGraph;
   g_cap_table.hipGetFuncBySymbol_fn = capture_hipGetFuncBySymbol;
-  g_cap_table.hipDrvGraphAddMemFreeNode_fn = capture_hipDrvGraphAddMemFreeNode;
-  g_cap_table.hipDrvGraphExecMemcpyNodeSetParams_fn = capture_hipDrvGraphExecMemcpyNodeSetParams;
-  g_cap_table.hipDrvGraphExecMemsetNodeSetParams_fn = capture_hipDrvGraphExecMemsetNodeSetParams;
   g_cap_table.hipSetValidDevices_fn = capture_hipSetValidDevices;
   g_cap_table.hipMemcpyAtoD_fn = capture_hipMemcpyAtoD;
   g_cap_table.hipMemcpyDtoA_fn = capture_hipMemcpyDtoA;
@@ -8331,6 +8308,9 @@ void hip_capture_build_table() {
   g_cap_table.hipMemcpyAtoHAsync_fn = capture_hipMemcpyAtoHAsync;
   g_cap_table.hipMemcpyHtoAAsync_fn = capture_hipMemcpyHtoAAsync;
   g_cap_table.hipMemcpy2DArrayToArray_fn = capture_hipMemcpy2DArrayToArray;
+  g_cap_table.hipDrvGraphAddMemFreeNode_fn = capture_hipDrvGraphAddMemFreeNode;
+  g_cap_table.hipDrvGraphExecMemcpyNodeSetParams_fn = capture_hipDrvGraphExecMemcpyNodeSetParams;
+  g_cap_table.hipDrvGraphExecMemsetNodeSetParams_fn = capture_hipDrvGraphExecMemsetNodeSetParams;
   g_cap_table.hipGraphExecGetFlags_fn = capture_hipGraphExecGetFlags;
   g_cap_table.hipGraphNodeSetParams_fn = capture_hipGraphNodeSetParams;
   g_cap_table.hipGraphExecNodeSetParams_fn = capture_hipGraphExecNodeSetParams;
@@ -8339,22 +8319,29 @@ void hip_capture_build_table() {
   g_cap_table.hipDrvGraphMemcpyNodeSetParams_fn = capture_hipDrvGraphMemcpyNodeSetParams;
   g_cap_table.hipExtHostAlloc_fn = capture_hipExtHostAlloc;
   g_cap_table.hipDeviceGetTexture1DLinearMaxWidth_fn = capture_hipDeviceGetTexture1DLinearMaxWidth;
+  g_cap_table.hipStreamBatchMemOp_fn = capture_hipStreamBatchMemOp;
   g_cap_table.hipGraphAddBatchMemOpNode_fn = capture_hipGraphAddBatchMemOpNode;
   g_cap_table.hipGraphBatchMemOpNodeGetParams_fn = capture_hipGraphBatchMemOpNodeGetParams;
   g_cap_table.hipGraphBatchMemOpNodeSetParams_fn = capture_hipGraphBatchMemOpNodeSetParams;
   g_cap_table.hipGraphExecBatchMemOpNodeSetParams_fn = capture_hipGraphExecBatchMemOpNodeSetParams;
+  g_cap_table.hipLinkAddData_fn = capture_hipLinkAddData;
+  g_cap_table.hipLinkAddFile_fn = capture_hipLinkAddFile;
+  g_cap_table.hipLinkComplete_fn = capture_hipLinkComplete;
+  g_cap_table.hipLinkCreate_fn = capture_hipLinkCreate;
+  g_cap_table.hipLinkDestroy_fn = capture_hipLinkDestroy;
   g_cap_table.hipEventRecordWithFlags_fn = capture_hipEventRecordWithFlags;
   g_cap_table.hipLaunchKernelExC_fn = capture_hipLaunchKernelExC;
   g_cap_table.hipDrvLaunchKernelEx_fn = capture_hipDrvLaunchKernelEx;
   g_cap_table.hipMemGetHandleForAddressRange_fn = capture_hipMemGetHandleForAddressRange;
+  g_cap_table.hipModuleGetFunctionCount_fn = capture_hipModuleGetFunctionCount;
   g_cap_table.hipMemsetD2D8_fn = capture_hipMemsetD2D8;
   g_cap_table.hipMemsetD2D8Async_fn = capture_hipMemsetD2D8Async;
   g_cap_table.hipMemsetD2D16_fn = capture_hipMemsetD2D16;
   g_cap_table.hipMemsetD2D16Async_fn = capture_hipMemsetD2D16Async;
   g_cap_table.hipMemsetD2D32_fn = capture_hipMemsetD2D32;
   g_cap_table.hipMemsetD2D32Async_fn = capture_hipMemsetD2D32Async;
-  g_cap_table.hipStreamSetAttribute_fn = capture_hipStreamSetAttribute;
   g_cap_table.hipStreamGetAttribute_fn = capture_hipStreamGetAttribute;
+  g_cap_table.hipStreamSetAttribute_fn = capture_hipStreamSetAttribute;
   g_cap_table.hipModuleLoadFatBinary_fn = capture_hipModuleLoadFatBinary;
   g_cap_table.hipMemcpyBatchAsync_fn = capture_hipMemcpyBatchAsync;
   g_cap_table.hipMemcpy3DBatchAsync_fn = capture_hipMemcpy3DBatchAsync;
@@ -8362,27 +8349,33 @@ void hip_capture_build_table() {
   g_cap_table.hipMemcpy3DPeerAsync_fn = capture_hipMemcpy3DPeerAsync;
   g_cap_table.hipGetDriverEntryPoint_fn = capture_hipGetDriverEntryPoint;
   g_cap_table.hipGetDriverEntryPoint_spt_fn = capture_hipGetDriverEntryPoint_spt;
+  g_cap_table.hipMemPrefetchAsync_v2_fn = capture_hipMemPrefetchAsync_v2;
+  g_cap_table.hipMemAdvise_v2_fn = capture_hipMemAdvise_v2;
+  g_cap_table.hipStreamGetId_fn = capture_hipStreamGetId;
   g_cap_table.hipLibraryLoadData_fn = capture_hipLibraryLoadData;
   g_cap_table.hipLibraryLoadFromFile_fn = capture_hipLibraryLoadFromFile;
   g_cap_table.hipLibraryUnload_fn = capture_hipLibraryUnload;
   g_cap_table.hipLibraryGetKernel_fn = capture_hipLibraryGetKernel;
   g_cap_table.hipLibraryGetKernelCount_fn = capture_hipLibraryGetKernelCount;
-  g_cap_table.hipLibraryGetGlobal_fn = capture_hipLibraryGetGlobal;
-  g_cap_table.hipLibraryGetManaged_fn = capture_hipLibraryGetManaged;
+  g_cap_table.hipStreamCopyAttributes_fn = capture_hipStreamCopyAttributes;
   g_cap_table.hipLibraryEnumerateKernels_fn = capture_hipLibraryEnumerateKernels;
   g_cap_table.hipKernelGetLibrary_fn = capture_hipKernelGetLibrary;
   g_cap_table.hipKernelGetName_fn = capture_hipKernelGetName;
+  g_cap_table.hipOccupancyAvailableDynamicSMemPerBlock_fn = capture_hipOccupancyAvailableDynamicSMemPerBlock;
   g_cap_table.hipGetProcAddress_spt_fn = capture_hipGetProcAddress_spt;
+  g_cap_table.hipKernelGetParamInfo_fn = capture_hipKernelGetParamInfo;
   g_cap_table.hipExtDisableLogging_fn = capture_hipExtDisableLogging;
   g_cap_table.hipExtEnableLogging_fn = capture_hipExtEnableLogging;
   g_cap_table.hipExtSetLoggingParams_fn = capture_hipExtSetLoggingParams;
-  g_cap_table.hipKernelGetAttribute_fn = capture_hipKernelGetAttribute;
-  g_cap_table.hipKernelSetAttribute_fn = capture_hipKernelSetAttribute;
-  g_cap_table.hipKernelGetFunction_fn = capture_hipKernelGetFunction;
-  g_cap_table.hipKernelGetParamInfo_fn = capture_hipKernelGetParamInfo;
   g_cap_table.hipMemSetMemPool_fn = capture_hipMemSetMemPool;
   g_cap_table.hipMemGetMemPool_fn = capture_hipMemGetMemPool;
   g_cap_table.hipMipmappedArrayGetMemoryRequirements_fn = capture_hipMipmappedArrayGetMemoryRequirements;
+  g_cap_table.hipKernelGetAttribute_fn = capture_hipKernelGetAttribute;
+  g_cap_table.hipKernelSetAttribute_fn = capture_hipKernelSetAttribute;
+  g_cap_table.hipKernelGetFunction_fn = capture_hipKernelGetFunction;
+  g_cap_table.hipMemPrefetchBatchAsync_fn = capture_hipMemPrefetchBatchAsync;
+  g_cap_table.hipOccupancyMaxPotentialClusterSize_fn = capture_hipOccupancyMaxPotentialClusterSize;
+  g_cap_table.hipOccupancyMaxActiveClusters_fn = capture_hipOccupancyMaxActiveClusters;
   g_cap_table.hipGreenCtxCreate_fn = capture_hipGreenCtxCreate;
   g_cap_table.hipExecutionCtxDestroy_fn = capture_hipExecutionCtxDestroy;
   g_cap_table.hipExecutionCtxStreamCreate_fn = capture_hipExecutionCtxStreamCreate;
@@ -8398,7 +8391,14 @@ void hip_capture_build_table() {
   g_cap_table.hipExecutionCtxRecordEvent_fn = capture_hipExecutionCtxRecordEvent;
   g_cap_table.hipExecutionCtxSynchronize_fn = capture_hipExecutionCtxSynchronize;
   g_cap_table.hipExecutionCtxWaitEvent_fn = capture_hipExecutionCtxWaitEvent;
+  g_cap_table.hipLibraryGetGlobal_fn = capture_hipLibraryGetGlobal;
+  g_cap_table.hipLibraryGetManaged_fn = capture_hipLibraryGetManaged;
+  g_cap_table.hipMemDiscardBatchAsync_fn = capture_hipMemDiscardBatchAsync;
+  g_cap_table.hipDrvMemDiscardBatchAsync_fn = capture_hipDrvMemDiscardBatchAsync;
+  g_cap_table.hipMemDiscardAndPrefetchBatchAsync_fn = capture_hipMemDiscardAndPrefetchBatchAsync;
+  g_cap_table.hipDrvMemDiscardAndPrefetchBatchAsync_fn = capture_hipDrvMemDiscardAndPrefetchBatchAsync;
   g_cap_table.hipMemGetDefaultMemPool_fn = capture_hipMemGetDefaultMemPool;
+  g_cap_table.hipDeviceGetLuid_fn = capture_hipDeviceGetLuid;
 }
 
 void hip_capture_build_compiler_table() {
