@@ -1800,11 +1800,17 @@ bool Device::populateOCLDeviceConstants() {
 
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Gfx Major/Minor/Stepping: %d/%d/%d, Device ID: 0x%x",
           isa().versionMajor(), isa().versionMinor(), isa().versionStepping(), pciDeviceId_);
-  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Using dev kernel arg wa = %d", settings().kernel_arg_impl_);
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Device kernel args: %d, kernel arg readback wa: %d",
+          settings().kernel_arg_impl_ != Settings::HostKernelArgs,
+          settings().kernel_arg_impl_ == Settings::DeviceKernelArgsReadback);
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Global mem cacheline size: %u",
+          info_.globalMemCacheLineSize_);
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HMM support: %d, XNACK: %d, Direct host access: %d",
           info_.hmmSupported_, info_.hmmCpuMemoryAccessible_, info_.hmmDirectHostAccess_);
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Max SDMA Read Mask: 0x%x, Max SDMA Write Mask: 0x%x",
           maxSdmaReadMask_, maxSdmaWriteMask_);
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Ordered doorbell: %d, Max HW queues: %u",
+          settings().isOrderedDoorbell_, settings().max_hw_queues_);
 
   info_.globalCUMask_ = {};
 
@@ -3620,12 +3626,18 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
 
   // Add queue to the pool (including dedicated queues)
   amd::ScopedLock l(active_queue_access_);
-  auto result = queuePool_[qIndex].emplace(std::make_pair(queue, QueueInfo()));
+  auto result = queuePool_[qIndex].try_emplace(queue);
   assert(result.second && "QueueInfo already exists");
   auto& qInfo = result.first->second;
   qInfo.refCount = 1;
   qInfo.hasDedicatedQueue_ = dedicated_queue;
   populateExtras();
+  // Only the queues in this pool can be shared by several VirtualGPUs, so they are the only ones
+  // whose doorbells need ordering. CU masked queues live in their own pool and cooperative queues
+  // are never pooled, so both ring as soon as their packet is written.
+  if (settings().isOrderedDoorbell_) {
+    queue_extras_[queue].aqlPublishState = &qInfo.aqlPublishState_;
+  }
   ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "acquireQueue refCount: %p (%d) %s",
           result.first->first->base_address, result.first->second.refCount,
           dedicated_queue ? "(dedicated)" : "");

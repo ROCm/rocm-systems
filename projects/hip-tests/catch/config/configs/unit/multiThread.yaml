@@ -21,6 +21,19 @@ multiThread:
     # Note: Windows disabled
     disabled: [amd_windows, amd_wsl]
     tags: [device_mgmt, P1]
+  Unit_hipMultiThreadOrderedDoorbell_ChildWorkload:
+    <<: *level_2
+    # Internal helper, only invoked by the parent test via re-exec (by exact
+    # name, which still runs hidden cases). Disabled everywhere so it does not
+    # run as a standalone no-op in the regular suite.
+    disabled: [amd_linux, amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
+    tags: [stream]
+  Unit_hipMultiThreadOrderedDoorbell_LateProducerWaitsForReservation:
+    <<: *level_2
+    # Drives child processes with GPU_MAX_HW_QUEUES and DEBUG_CLR_ORDER_DOORBELL
+    # set, so it needs fork/exec and the AMD runtime.
+    disabled: [amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
+    tags: [stream]
   Unit_hipMultiThreadStreams1_AsyncSync:
     <<: *level_2
     tags: [stream, P0]
