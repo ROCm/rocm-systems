@@ -1050,7 +1050,10 @@ TEST(spm_queue_hooks, stop_context_in_flight_completion_routes_via_hook_path)
             rocprofiler_queue_id_t  qid = {.handle = 1};
             hsa::FakeQueue          fq(agent, qid);
             hsa::rocprofiler_packet pkt{};
-            context::correlation_id corr_id{.internal = 99};
+            // correlation_id declares constructors and holds private ref counters, so it is not an
+            // aggregate and cannot take a designated initializer.
+            context::correlation_id corr_id{};
+            corr_id.internal = 99;
 
             expected.queue_id    = qid;
             expected.agent_id    = agent.get_rocp_agent()->id;
