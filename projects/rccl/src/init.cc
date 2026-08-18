@@ -77,9 +77,9 @@
 
 #include "latency_profiler/CollTrace.h"
 #include "latency_profiler/CollTraceFunc.h"
-#include "dda_all_reduce.h"
-#include "ipc_init.h"
-#include "fabric_init.h"
+#include "algorithms/dda/all_reduce/dda_all_reduce.h"
+#include "algorithms/dda/ipc/ipc_init.h"
+#include "algorithms/dda/fabric/fabric_init.h"
 #include <cpuid.h>
 #include <stdio.h>
 #include <stdlib.h>
