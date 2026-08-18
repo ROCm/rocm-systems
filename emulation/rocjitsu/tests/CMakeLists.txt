@@ -457,6 +457,7 @@ add_executable(
     cdna3_predicate_mask_test.cpp
     scoped_temp_test.cpp
     decode_execute_benchmark.cpp
+    util_result_test.cpp
     util_unique_handle_test.cpp
     util_simd_test.cpp
     v_add_simd_benchmark.cpp
