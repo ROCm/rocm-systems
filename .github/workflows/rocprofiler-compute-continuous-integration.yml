@@ -207,9 +207,9 @@ jobs:
         if: matrix.system.distro == 'rhel'
         shell: bash
         run: |
-          dnf install -y pkgconf-pkg-config python3.10 python3.10-pip
-          alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 2
-          alternatives --set python3 /usr/bin/python3.10
+          dnf install -y pkgconf-pkg-config python3.11 python3.11-pip
+          alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 2
+          alternatives --set python3 /usr/bin/python3.11
           echo "✅ ROCm Dependencies Installed!"
 
       - name: Install Latest Nightly ROCm
