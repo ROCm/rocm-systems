@@ -201,27 +201,44 @@ async fn run_owned(
     }
 
     let session = run.id();
-    // `run` starts the whole job; `exec --node N` is how you reach one
-    // node of it, so the node is unset here.
-    let def = exec_def(
-        session.clone(),
-        &a.argv,
-        &a.envs,
-        a.workdir.clone(),
-        a.nproc_per_node,
-        None,
-        a.clear_env_vars,
-    )?;
 
-    let (exec, output) = run.exec(&def).await?;
+    // From here on the session is healthy, which means it is borrowable
+    // and may already have been borrowed: the socket has been answering
+    // since before bring-up finished. So every exit below has to go
+    // through the same borrower wait, not just the one that reaches the
+    // bottom of the function.
+    //
+    // The `?`s inside used to return straight past it. A run whose own
+    // command was fine waited for a borrower; a run whose own command had
+    // a bad `--workdir`, an unstartable program or a grid the session
+    // cannot fit returned immediately, and the caller's `Run::destroy`
+    // then tore the session down under a borrower that had done nothing
+    // wrong. Same session, same borrower, opposite treatment, decided by
+    // something the borrower has no part in.
+    let outcome: anyhow::Result<ExitCode> = async {
+        // `run` starts the whole job; `exec --node N` is how you reach
+        // one node of it, so the node is unset here.
+        let def = exec_def(
+            session.clone(),
+            &a.argv,
+            &a.envs,
+            a.workdir.clone(),
+            a.nproc_per_node,
+            None,
+            a.clear_env_vars,
+        )?;
 
-    // Keep serving for as long as the workload runs. `select!` rather
-    // than a spawned task so the server stops when the workload does,
-    // without a second thing to cancel.
-    let code = tokio::select! {
-        code = supervise_locally(exec, output, interrupts) => code,
-        () = &mut serving => unreachable!("the control socket serves until dropped"),
-    };
+        let (exec, output) = run.exec(&def).await?;
+
+        // Keep serving for as long as the workload runs. `select!` rather
+        // than a spawned task so the server stops when the workload does,
+        // without a second thing to cancel.
+        tokio::select! {
+            code = supervise_locally(exec, output, interrupts) => code,
+            () = &mut serving => unreachable!("the control socket serves until dropped"),
+        }
+    }
+    .await;
 
     // This run's own command is finished; the session it owns may not be.
     //
@@ -241,7 +258,7 @@ async fn run_owned(
     // job, and an interrupt is how the user says they have waited enough.
     wait_for_borrowers(run, interrupts, &mut serving).await;
 
-    code
+    outcome
 }
 
 /// Print each new bring-up phase to stderr as the session reports it.
