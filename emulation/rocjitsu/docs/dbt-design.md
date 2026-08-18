@@ -321,12 +321,23 @@ handwritten semantic EXPAND rule matched?
 emit replacement sequence     virtual-LDS lowering matched?
                                      | yes                 | no
                                      v                     v
-                              emit LDS replacement    legalization says EXPAND?
+                              emit LDS replacement    registered operand rewrite?
                                                            | yes        | no
                                                            v            v
-                                                          fail     generated
-                                                                   re-encoding
+                                                   emit replacement  legalization says EXPAND?
+                                                                        | yes        | no
+                                                                        v            v
+                                                                       fail     generated
+                                                                                re-encoding
 ```
+
+Opcode expansions and registered operand rewrites are selected by one
+`RewriteRegistry`. For audited profiles, each registry entry also provides a
+read-only residual predicate. When requested, the post-materialization verifier
+runs those predicates over the final executable stream and fails if a
+registry-owned rewrite remains actionable. This check does not certify
+independent pipeline augmentations, such as WMMA completion-wait insertion,
+which retain their own ownership and tests.
 
 Control-flow instructions take a related but separate path: DBT emits or
 reserves a relocation window and records a fixup instead of trusting the source

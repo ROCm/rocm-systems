@@ -12,6 +12,7 @@
 #include "rocjitsu/isa/execution_backend.h"
 #include "util/arena_alloc.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string_view>
@@ -39,6 +40,11 @@ public:
   /// @param[in] inst Pointer to the binary instruction encoding.
   /// @returns Decoded Instruction pointer (pool or heap allocated).
   virtual Instruction *decode(const rj_code_binary_inst_t *inst) = 0;
+
+  /// @brief Maximum encoded instruction width and decode lookahead, in 32-bit words.
+  /// @returns A nonzero bound covering both every raw-pointer read and the size of every
+  /// successfully decoded instruction.
+  virtual std::size_t max_instruction_words() const = 0;
 
   /// @brief Decode a binary instruction and record its source text offset.
   ///
@@ -100,6 +106,8 @@ public:
       validate_instruction_operands(*result);
     return result.release();
   }
+
+  std::size_t max_instruction_words() const override { return Isa::Decoder::kMaxInstructionWords; }
 
 private:
   const IsaExecutionBackend *execution_backend_;
