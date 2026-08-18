@@ -44,6 +44,7 @@ struct ClusterDispatchShape {
 struct DispatchEntry {
   uint32_t dispatch_id = 0;
   uint32_t queue_id = 0;
+  uint32_t queue_packet_id = 0;
   uint32_t process_id = 0;
 
   uint64_t kernel_entry_pc = 0;
@@ -66,6 +67,7 @@ struct DispatchEntry {
   uint32_t grid_wgs_x = 0;
   uint32_t grid_wgs_y = 1;
   uint32_t grid_wgs_z = 1;
+  bool grid_yz_valid = false;
   uint32_t cluster_count_x = 0;
   uint32_t cluster_count_y = 0;
   uint32_t cluster_count_z = 0;

@@ -71,11 +71,14 @@ static_assert(kMaxClusterWorkgroups <= 16,
 // and cluster identity sequences.
 constexpr uint32_t kGfx12Ttmp6 = 114;
 constexpr uint32_t kGfx12Ttmp7 = 115;
+constexpr uint32_t kGfx12Ttmp8 = 116;
 constexpr uint32_t kGfx12Ttmp9 = 117;
 
 // LLVM's gfx1250 architected-SGPR ABI maps TTMP6 as seven 4-bit fields:
 // cluster-local XYZ, cluster-max XYZ, and max-flat-ID from low to high bits.
-// TTMP7 holds 16-bit cluster-grid Y/Z IDs, while TTMP9 holds cluster-grid X.
+// TTMP7 holds 16-bit cluster-grid Y/Z IDs. TTMP8 holds queue-packet ID
+// [24:0], wave-in-workgroup [29:25], grid-Y/Z-valid [30], and debug-mark
+// [31]. TTMP9 holds cluster-grid X.
 constexpr uint32_t kGfx12Ttmp6ClusterLocalXShift = 0;
 constexpr uint32_t kGfx12Ttmp6ClusterLocalYShift = 4;
 constexpr uint32_t kGfx12Ttmp6ClusterLocalZShift = 8;
@@ -84,6 +87,9 @@ constexpr uint32_t kGfx12Ttmp6ClusterMaxYShift = 16;
 constexpr uint32_t kGfx12Ttmp6ClusterMaxZShift = 20;
 constexpr uint32_t kGfx12Ttmp6ClusterMaxFlatIdShift = 24;
 constexpr uint32_t kGfx12Ttmp7ClusterGridDimensionMask = 0xFFFFu;
+constexpr uint32_t kGfx12Ttmp8QueuePacketIdMask = 0x1FFFFFFu;
+constexpr uint32_t kGfx12Ttmp8WaveIdInGroupShift = 25;
+constexpr uint32_t kGfx12Ttmp8GridYzValidShift = 30;
 
 struct PlannedWorkgroup {
   uint32_t local_wg_id = 0;
@@ -397,6 +403,10 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
     uint32_t ttmp6 = 0;
     uint32_t ttmp7 = ((wg_id_z & kGfx12Ttmp7ClusterGridDimensionMask) << 16) |
                      (wg_id_y & kGfx12Ttmp7ClusterGridDimensionMask);
+    uint32_t ttmp8 = pkt.queue_packet_id & kGfx12Ttmp8QueuePacketIdMask;
+    ttmp8 |= wf_index_in_wg << kGfx12Ttmp8WaveIdInGroupShift;
+    if (pkt.grid_yz_valid)
+      ttmp8 |= 1u << kGfx12Ttmp8GridYzValidShift;
     uint32_t ttmp9 = grid_wg_id_x;
     if (properties.uses_cluster_ttmp_workgroup_ids) {
       const uint32_t cluster_size_x = nonzero_or_one(pkt.cluster_size_x);
@@ -424,6 +434,7 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
     }
     cu->write_sgpr(sbase + kGfx12Ttmp6, ttmp6);
     cu->write_sgpr(sbase + kGfx12Ttmp7, ttmp7);
+    cu->write_sgpr(sbase + kGfx12Ttmp8, ttmp8);
     cu->write_sgpr(sbase + kGfx12Ttmp9, ttmp9);
   }
 
@@ -1286,7 +1297,8 @@ static const uint8_t *find_elf_base(const uint8_t *ptr, const uint8_t *limit) {
 }
 
 void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt,
-                                          const HwQueue &queue, uint64_t pkt_addr, HwQueueState &qs,
+                                          const HwQueue &queue, uint64_t pkt_addr,
+                                          uint32_t queue_packet_id, HwQueueState &qs,
                                           ClusterDispatchShape cluster_shape) {
   bool host_accessible = queue.host_accessible;
   using namespace rocr::llvm::amdhsa;
@@ -1320,6 +1332,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dp.dispatch_id = next_dispatch_id_++;
   dp.profiling_start_timestamp = hsa_system_timestamp();
   dp.queue_id = queue.queue_id;
+  dp.queue_packet_id = queue_packet_id;
   dp.process_id = queue.process_id;
   dp.kernel_entry_pc = entry_pc;
   dp.total_wgs = total_wgs;
@@ -1386,6 +1399,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dp.grid_wgs_x = (num_dims <= 1) ? total_wgs : grid_wgs_x;
   dp.grid_wgs_y = (num_dims >= 2) ? grid_wgs_y : 1;
   dp.grid_wgs_z = (num_dims >= 3) ? grid_wgs_z : 1;
+  dp.grid_yz_valid = num_dims >= 2;
   dp.cluster_size_x = nonzero_or_one(cluster_shape.size_x);
   dp.cluster_size_y = nonzero_or_one(cluster_shape.size_y);
   dp.cluster_size_z = nonzero_or_one(cluster_shape.size_z);
@@ -1612,7 +1626,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
     }
 
     if (pkt_type == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
-      process_aql_packet(pkt, queue, pkt_addr, qs);
+      process_aql_packet(pkt, queue, pkt_addr, slot, qs);
     } else if (pkt_type == HSA_PACKET_TYPE_BARRIER_AND || pkt_type == HSA_PACKET_TYPE_BARRIER_OR) {
       constexpr uint32_t DEP_OFF = 8;
       constexpr uint32_t SIG_OFF = 56;
@@ -1772,7 +1786,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
         cluster_shape.size_x = ext.cluster_size_x;
         cluster_shape.size_y = ext.cluster_size_y;
         cluster_shape.size_z = ext.cluster_size_z;
-        process_aql_packet(dispatch, queue, pkt_addr, qs, cluster_shape);
+        process_aql_packet(dispatch, queue, pkt_addr, slot, qs, cluster_shape);
       } else if (ext.amd_format == kAmdAqlFormatPm4Ib) {
         constexpr uint32_t SIG_OFF = 56;
         const uint64_t sig = read_gpu_u64(pkt_addr + SIG_OFF, queue.process_id);

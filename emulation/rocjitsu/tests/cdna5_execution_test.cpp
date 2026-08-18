@@ -24,6 +24,120 @@ TEST(Gfx1250ExecutionTest, TargetProvidesImmutableExecutionBackend) {
   EXPECT_TRUE(cdna5::Operand::full_execution_backend_complete());
 }
 
+TEST(Gfx1250ExecutionTest, ScalarMovesTreatS102AndS103AsOrdinarySgprs) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint64_t kScratchBase = 0xabcde00012345000ull;
+  wf->set_scratch_base(kScratchBase);
+  write_wave_sgpr(*cu, *wf, 90, 0x11223344u);
+  write_wave_sgpr(*cu, *wf, 91, 0x55667788u);
+  write_wave_sgpr(*cu, *wf, 92, 0xaabbccddu);
+  write_wave_sgpr(*cu, *wf, 93, 0xeeff0011u);
+  write_wave_sgpr(*cu, *wf, 102, 0);
+  write_wave_sgpr(*cu, *wf, 103, 0);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  constexpr std::array<uint32_t, 3> kMove64 = {
+      0xbee6015au, // s_mov_b64 s[102:103], s[90:91]
+      0,
+      0,
+  };
+  std::unique_ptr<Instruction> move64(decoder->decode(kMove64.data()));
+  ASSERT_NE(move64, nullptr);
+  EXPECT_EQ(move64->mnemonic(), "s_mov_b64");
+  EXPECT_EQ(move64->size(), 4);
+  move64->execute(*move64, wf);
+  EXPECT_EQ(read_wave_sgpr(*cu, *wf, 102), 0x11223344u);
+  EXPECT_EQ(read_wave_sgpr(*cu, *wf, 103), 0x55667788u);
+  EXPECT_EQ(wf->scratch_base(), kScratchBase);
+
+  constexpr std::array<uint32_t, 3> kWriteS102 = {
+      0xbee6005cu, // s_mov_b32 s102, s92
+      0,
+      0,
+  };
+  constexpr std::array<uint32_t, 3> kWriteS103 = {
+      0xbee7005du, // s_mov_b32 s103, s93
+      0,
+      0,
+  };
+  for (const auto *words : {kWriteS102.data(), kWriteS103.data()}) {
+    std::unique_ptr<Instruction> move32(decoder->decode(words));
+    ASSERT_NE(move32, nullptr);
+    EXPECT_EQ(move32->mnemonic(), "s_mov_b32");
+    EXPECT_EQ(move32->size(), 4);
+    move32->execute(*move32, wf);
+  }
+  EXPECT_EQ(read_wave_sgpr(*cu, *wf, 102), 0xaabbccddu);
+  EXPECT_EQ(read_wave_sgpr(*cu, *wf, 103), 0xeeff0011u);
+
+  constexpr std::array<uint32_t, 3> kReadS102 = {
+      0xbed20066u, // s_mov_b32 s82, s102
+      0,
+      0,
+  };
+  constexpr std::array<uint32_t, 3> kReadS103 = {
+      0xbed30067u, // s_mov_b32 s83, s103
+      0,
+      0,
+  };
+  for (const auto *words : {kReadS102.data(), kReadS103.data()}) {
+    std::unique_ptr<Instruction> move32(decoder->decode(words));
+    ASSERT_NE(move32, nullptr);
+    EXPECT_EQ(move32->mnemonic(), "s_mov_b32");
+    EXPECT_EQ(move32->size(), 4);
+    move32->execute(*move32, wf);
+  }
+  EXPECT_EQ(read_wave_sgpr(*cu, *wf, 82), 0xaabbccddu);
+  EXPECT_EQ(read_wave_sgpr(*cu, *wf, 83), 0xeeff0011u);
+
+  constexpr std::array<uint32_t, 3> kReadS102S103 = {
+      0xbed00166u, // s_mov_b64 s[80:81], s[102:103]
+      0,
+      0,
+  };
+  std::unique_ptr<Instruction> read64(decoder->decode(kReadS102S103.data()));
+  ASSERT_NE(read64, nullptr);
+  EXPECT_EQ(read64->mnemonic(), "s_mov_b64");
+  EXPECT_EQ(read64->size(), 4);
+  read64->execute(*read64, wf);
+  EXPECT_EQ(read_wave_sgpr(*cu, *wf, 80), 0xaabbccddu);
+  EXPECT_EQ(read_wave_sgpr(*cu, *wf, 81), 0xeeff0011u);
+  EXPECT_EQ(wf->scratch_base(), kScratchBase);
+}
+
+TEST(Gfx1250ExecutionTest, Wave32VectorComparePreservesVccHiScratch) {
+  ForceScalarGuard force_scalar_guard;
+  for (const bool force_scalar : {false, true}) {
+    SCOPED_TRACE(force_scalar ? "scalar" : "simd");
+    util::set_force_scalar_for_testing(force_scalar);
+
+    Gfx1250Sim sim;
+    auto *cu = sim.cu();
+    auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(0x3u);
+    wf->set_vcc(0x000001c0ffffffffull);
+    write_wave_sgpr(*cu, *wf, 28, 7u);
+    const uint32_t vgpr_base = wf->vgpr_alloc().base;
+    cu->write_vgpr(vgpr_base + 18, 0, 6u);
+    cu->write_vgpr(vgpr_base + 18, 1, 8u);
+
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    ASSERT_NE(decoder, nullptr);
+    constexpr auto kCompare = cdna5::build_vopc(cdna5::kVCmpGtI32Vopc, {.src0 = 28, .vsrc1 = 18});
+    std::unique_ptr<Instruction> decoded(decoder->decode(kCompare.data()));
+    ASSERT_NE(decoded, nullptr);
+    EXPECT_EQ(decoded->mnemonic(), "v_cmp_gt_i32_e32");
+    decoded->execute(*decoded, wf);
+    EXPECT_EQ(wf->vcc(), 0x000001c000000001ull);
+  }
+}
+
 TEST(Gfx1250ExecutionTest, DivScaleWritesExplicitSdstMask) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();
