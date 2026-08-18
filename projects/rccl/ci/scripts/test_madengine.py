@@ -766,8 +766,13 @@ def parse_live_log_metrics(work_dir: Path) -> list[dict]:
 
                 hdr = _RUN_HEADER_RE.search(line)
                 if hdr:
-                    if current and current.get("iter"):
-                        current["completed"] = current["iter"] == current["total"]
+                    if current:
+                        current.setdefault("iter", 0)
+                        current.setdefault("total", 0)
+                        current["completed"] = (
+                            current["iter"] > 0
+                            and current["iter"] == current["total"]
+                        )
                         runs.append(current)
                     current = {
                         "model": hdr.group(1).strip(),
@@ -788,8 +793,13 @@ def parse_live_log_metrics(work_dir: Path) -> list[dict]:
                         "tokens_per_second_per_gpu": float(m.group("tps_avg")),
                     })
 
-        if current and current.get("iter"):
-            current["completed"] = current["iter"] == current["total"]
+        if current:
+            current.setdefault("iter", 0)
+            current.setdefault("total", 0)
+            current["completed"] = (
+                current["iter"] > 0
+                and current["iter"] == current["total"]
+            )
             runs.append(current)
 
     return runs
@@ -906,7 +916,7 @@ def generate_summary_report(
     regression_msg: str,
     rccl_commit: str,
     cluster: str,
-    live_log_runs: list[dict] | None = None,
+    precision_results: list[dict] | None = None,
 ) -> str:
     """Generate a plain-text summary report."""
     status = "PASSED" if exit_code == 0 else "FAILED"
@@ -923,14 +933,15 @@ def generate_summary_report(
         "",
     ]
 
-    if live_log_runs:
-        for r in live_log_runs:
+    if precision_results:
+        for r in precision_results:
             prec = r.get("precision", "?")
+            val = r.get("metric_value")
             tflops = r.get("tflops_avg")
-            tps = r.get("tokens_per_second_per_gpu")
-            tflops_s = f"{tflops:.1f}" if tflops else "N/A"
-            tps_s = f"{tps:.1f}" if tps else "N/A"
-            lines.append(f"{prec:>4}:       {tflops_s} TFLOP/s/GPU, {tps_s} tok/s/GPU")
+            val_s = f"{val:.1f}" if val else "N/A"
+            tflops_s = f"{tflops:.1f}" if tflops else ""
+            suffix = f" ({tflops_s} TFLOP/s/GPU)" if tflops_s else ""
+            lines.append(f"{prec:>4}:       {val_s} tok/s/GPU{suffix} [{r['status']}]")
     elif metric_value is not None:
         lines.append(f"Throughput: {metric_value:.1f} tok/s/GPU")
     else:
@@ -1115,61 +1126,87 @@ def main() -> None:
     except OSError as exc:
         log.warning("Could not save run artifacts to %s: %s", run_artifacts, exc)
 
-    # Extract metric from structured results (perf_entry_super has
-    # performance/metric in long-format: metric name is a value in the
-    # ``metric`` column, not a column name).
-    metric_value = None
-    if perf_results:
-        for row in perf_results:
-            perf_val = row.get("performance", "")
-            if perf_val:
-                try:
-                    metric_value = float(perf_val)
-                    log.info("Metric %s = %.1f (from structured results)",
-                             row.get("metric", "?"), metric_value)
-                except (ValueError, TypeError):
-                    pass
+    # Build per-precision results from structured output (primary) or
+    # live-log scraping (fallback).  Each entry carries precision, metric
+    # value, and a pass/fail status so downstream regression checks and
+    # datastore writes are driven from one list.
+    metric_key = workload_config["metric_key"]
+    precision_results: list[dict] = []
 
-    # Fall back to live log parsing when structured results have no metrics.
-    if metric_value is None and live_log_runs:
-        best_run = live_log_runs[-1]
-        metric_value = best_run.get("tokens_per_second_per_gpu") or best_run.get("tflops_avg")
-        if metric_value is not None:
-            log.info("Metric = %.1f (from live log fallback)", metric_value)
+    if perf_results:
+        # perf_entry_super.json rows are long-format: metric name is a
+        # value in the ``metric`` column, performance in ``performance``.
+        # Filter to the configured metric_key and key by precision.
+        for row in perf_results:
+            if row.get("metric") != metric_key:
+                continue
+            perf_val = row.get("performance", "")
+            precision = row.get("training_precision", "")
+            row_status = row.get("status", "")
+            if not perf_val:
+                continue
+            try:
+                val = float(perf_val)
+            except (ValueError, TypeError):
+                continue
+            precision_results.append({
+                "precision": precision,
+                "metric_value": val,
+                "status": "pass" if row_status in ("", "pass", "PASS") else "fail",
+                "source": "structured",
+            })
+            log.info("Structured result: %s %s = %.1f (status=%s)",
+                     precision, metric_key, val, row_status)
+
+    if not precision_results and live_log_runs:
+        for run in live_log_runs:
+            val = run.get("tokens_per_second_per_gpu")
+            if val is None:
+                continue
+            precision_results.append({
+                "precision": run.get("precision"),
+                "metric_value": val,
+                "tflops_avg": run.get("tflops_avg"),
+                "status": "pass" if run.get("completed", False) else "fail",
+                "source": "live_log",
+                "iter": run.get("iter", 0),
+                "total": run.get("total", 0),
+                "log_file": run.get("log_file"),
+            })
+            log.info("Live-log result: %s = %.1f (completed=%s)",
+                     run.get("precision"), val, run.get("completed"))
+
+    metric_value = precision_results[-1]["metric_value"] if precision_results else None
 
     # Override exit_code if training actually completed successfully.
     # madengine can report failure (exit code 3) when its perf collector
     # can't parse the output format, even though training ran to completion.
-    if exit_code != 0 and live_log_runs:
-        all_completed = all(r.get("completed", False) for r in live_log_runs)
-        if all_completed and metric_value is not None:
+    if exit_code != 0 and precision_results:
+        all_pass = all(r["status"] == "pass" for r in precision_results)
+        has_metric = all(r.get("metric_value") is not None for r in precision_results)
+        if all_pass and has_metric:
             log.info(
-                "Overriding madengine exit code %d → 0: all %d training run(s) "
-                "completed with metrics (live log verification)",
-                exit_code, len(live_log_runs),
+                "Overriding madengine exit code %d → 0: all %d precision run(s) "
+                "passed with metrics",
+                exit_code, len(precision_results),
             )
-            for r in live_log_runs:
-                log.info(
-                    "  %s: %d/%d iters, %.1f TFLOP/s, %.1f tokens/s/GPU",
-                    r.get("log_file", "?"), r.get("iter", 0), r.get("total", 0),
-                    r.get("tflops_avg", 0), r.get("tokens_per_second_per_gpu", 0),
-                )
+            for r in precision_results:
+                log.info("  %s: %.1f %s", r.get("precision", "?"),
+                         r["metric_value"], metric_key)
             exit_code = 0
 
-    # Step 7: Regression check (per-precision when live log data available)
+    # Step 7: Per-precision regression check
     regression_msg = "N/A"
     is_regression = False
-    if live_log_runs:
+    if precision_results:
         regression_msgs = []
-        for run in live_log_runs:
-            run_metric = run.get("tokens_per_second_per_gpu")
-            run_prec = run.get("precision")
-            if run_metric is not None:
+        for pr in precision_results:
+            if pr["metric_value"] is not None:
                 reg, msg = check_regression(
-                    results_dir, args.workload, scale, run_metric,
-                    workload_config["type"], precision=run_prec,
+                    results_dir, args.workload, scale, pr["metric_value"],
+                    workload_config["type"], precision=pr.get("precision"),
                 )
-                regression_msgs.append(f"[{run_prec}] {msg}")
+                regression_msgs.append(f"[{pr.get('precision', '?')}] {msg}")
                 if reg:
                     is_regression = True
                     log.warning(msg)
@@ -1178,50 +1215,40 @@ def main() -> None:
         regression_msg = "; ".join(regression_msgs) if regression_msgs else "N/A"
         if is_regression:
             exit_code = max(exit_code, 1)
-    elif metric_value is not None:
-        is_regression, regression_msg = check_regression(
-            results_dir, args.workload, scale, metric_value,
-            workload_config["type"],
-        )
-        if is_regression:
-            log.warning(regression_msg)
-            exit_code = max(exit_code, 1)
-        else:
-            log.info(regression_msg)
 
     # Step 8: Append result to datastore (one record per precision run)
-    status = "pass" if exit_code == 0 else "fail"
     extra = {"cluster": args.cluster, "overlay_image": overlay_image}
-    if live_log_runs:
-        for run in live_log_runs:
+    if precision_results:
+        for pr in precision_results:
             append_result(
                 results_dir,
                 args.workload,
                 scale,
-                run.get("tokens_per_second_per_gpu"),
-                "pass" if run.get("completed", False) else "fail",
+                pr["metric_value"],
+                pr["status"],
                 rccl_commit,
                 extra=extra,
-                precision=run.get("precision"),
-                tflops=run.get("tflops_avg"),
-                tokens_per_sec=run.get("tokens_per_second_per_gpu"),
+                precision=pr.get("precision"),
+                tflops=pr.get("tflops_avg"),
+                tokens_per_sec=pr["metric_value"],
             )
     else:
         append_result(
             results_dir,
             args.workload,
             scale,
-            metric_value,
-            status,
+            None,
+            "fail",
             rccl_commit,
             extra=extra,
         )
 
     # Step 9: Generate and distribute report
+    status = "pass" if exit_code == 0 else "fail"
     report = generate_summary_report(
         args.workload, scale, exit_code, metric_value,
         regression_msg, rccl_commit, args.cluster,
-        live_log_runs=live_log_runs if live_log_runs else None,
+        precision_results=precision_results if precision_results else None,
     )
     log.info("\n%s", report)
     write_github_summary(report)
