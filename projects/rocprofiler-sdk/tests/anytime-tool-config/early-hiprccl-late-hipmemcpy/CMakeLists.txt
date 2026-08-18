@@ -44,6 +44,8 @@ find_package(Python3 REQUIRED)
 set(IS_DISABLED OFF)
 if(NOT TARGET python-rccl)
     set(IS_DISABLED ON)
+elseif(ROCPROFILER_BUILD_CODECOV)
+    set(IS_DISABLED ON)
 endif()
 
 set(early-hiprccl-late-hipmemcpy-env
