@@ -2,6 +2,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
+# Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
 # See LICENSE.txt for more license information
 #
 .DEFAULT_GOAL: build
@@ -11,12 +13,12 @@ NCCLDIR  := $(BUILDDIR)
 
 SRC_FILES := $(wildcard *.c)
 
-build: ${BUILDDIR}/libnccl-gin-example.so
+build: ${BUILDDIR}/librccl-gin-example.so
 
-${BUILDDIR}/libnccl-gin-example.so: ${SRC_FILES}
+${BUILDDIR}/librccl-gin-example.so: ${SRC_FILES}
 	@printf "Compiling  %-35s > %s\n" $< $@
 	@mkdir -p ${BUILDDIR}
 	$(CC) -Inccl -fPIC -shared -o $@ $^
 
 clean:
-	rm -f ${BUILDDIR}/libnccl-gin-example.so
+	rm -f ${BUILDDIR}/librccl-gin-example.so

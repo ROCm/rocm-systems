@@ -2,6 +2,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
+# Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
 # See LICENSE.txt for more license information
 #
 
@@ -19,7 +21,7 @@ target_include_directories(nccl-gin-example PRIVATE
 
 # Set output name to match Makefile
 set_target_properties(nccl-gin-example PROPERTIES
-    OUTPUT_NAME "nccl-gin-example"
+    OUTPUT_NAME "rccl-gin-example"
     PREFIX "lib"
     POSITION_INDEPENDENT_CODE ON
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/test/unit/plugins
