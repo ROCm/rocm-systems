@@ -57,13 +57,6 @@ using active_context_vec_t = common::container::stable_vector<std::atomic<const 
 
 constexpr auto invalid_client_idx = std::numeric_limits<uint32_t>::max();
 
-auto&
-get_contexts_mutex()
-{
-    static auto _v = std::mutex{};
-    return _v;
-}
-
 uint64_t
 get_contexts_offset()
 {
@@ -105,6 +98,13 @@ get_active_contexts_impl()
     return *_v;
 }
 }  // namespace
+
+std::mutex&
+get_contexts_mutex()
+{
+    static auto _v = std::mutex{};
+    return _v;
+}
 
 bool
 dispatch_counter_collection_service::intersects(
