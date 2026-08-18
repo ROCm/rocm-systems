@@ -56,10 +56,12 @@ static_assert(KfdProcess::kPageSize == simdojo::SparseMemory::PAGE_SIZE,
 /// @brief AMDGPU VRAM memory with VMID-based per-process page table resolution.
 ///
 /// @details Mirrors the GFXHUB's VMID register file. Each process registers its
-/// page table via register_process(). Every memory access carries an explicit
-/// vmid parameter that selects the page table for VA-to-host translation,
-/// matching real hardware where the VMID travels with each request from the
-/// issuing wave through the memory hierarchy.
+/// page table via register_process(). A memory access's vmid parameter selects
+/// the page table for VA-to-host translation. VMID zero remains the intentional
+/// default for host, driver, and test callers. Wave-issued accesses must instead
+/// bind the issuing wave's process ID through a wave-scoped memory API, matching
+/// real hardware where the VMID travels with each request through the memory
+/// hierarchy.
 class GpuMemory : public simdojo::SparseMemory {
 public:
   explicit GpuMemory(std::string name)

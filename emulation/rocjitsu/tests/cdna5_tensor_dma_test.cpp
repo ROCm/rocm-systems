@@ -17,6 +17,74 @@ void write_tensor_dma_d0(amdgpu::ComputeUnitCore &cu, amdgpu::Wavefront &wf, uin
                   static_cast<uint32_t>((global_addr >> 32) & 0x01ffffffu) | 0x80000000u);
 }
 
+TEST(Gfx1250ExecutionTest, TensorDmaUsesWaveProcessPageTable) {
+  constexpr uint32_t kProcessId = 1250;
+  constexpr uint32_t kElements = 4;
+  constexpr uint64_t kLoadGlobal = 0x20000000;
+  constexpr uint64_t kStoreGlobal = kLoadGlobal + KfdProcess::kPageSize;
+  constexpr std::array<uint32_t, kElements> kLoadValues = {
+      0x11000000u,
+      0x22000000u,
+      0x33000000u,
+      0x44000000u,
+  };
+  constexpr std::array<uint32_t, kElements> kStoreValues = {
+      0x55000000u,
+      0x66000000u,
+      0x77000000u,
+      0x88000000u,
+  };
+
+  KfdProcess process(kProcessId);
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_process_id(kProcessId);
+  wf->set_lds_base(cu->allocate_lds(256));
+
+  std::array<uint32_t, kElements> load_storage = kLoadValues;
+  std::array<uint32_t, kElements> store_storage{};
+  process.map_pages(kLoadGlobal, load_storage.data(), sizeof(load_storage));
+  process.map_pages(kStoreGlobal, store_storage.data(), sizeof(store_storage));
+  sim.memory->register_process(kProcessId, &process.page_table_, &process.page_table_mutex_,
+                               process.page_table_generation());
+
+  // The same GPU VA intentionally resolves to different storage for VMID zero
+  // and for the dispatched process. Tensor DMA must use the wave's process ID.
+  EXPECT_EQ(sim.memory->read32(kLoadGlobal), 0u);
+  EXPECT_EQ(sim.memory->read32(kLoadGlobal, kProcessId), kLoadValues[0]);
+
+  write_tensor_dma_d0(*cu, *wf, 0, kLoadGlobal);
+  write_wave_sgpr(*cu, *wf, 12, 2u << 16);        // i32 elements.
+  write_wave_sgpr(*cu, *wf, 13, kElements << 16); // Tensor dim0.
+  write_wave_sgpr(*cu, *wf, 14, 0);
+  write_wave_sgpr(*cu, *wf, 15, kElements << 16); // Tile dim0.
+  write_wave_sgpr(*cu, *wf, 16, 0);
+  write_wave_sgpr(*cu, *wf, 17, 0);
+  write_wave_sgpr(*cu, *wf, 18, 0);
+  write_wave_sgpr(*cu, *wf, 19, 0);
+
+  const std::array<uint32_t, 3> load_words = {0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
+  auto load = decode_gfx1250(load_words, "tensor_load_to_lds");
+  ASSERT_NE(load, nullptr);
+  load->execute(*load, wf);
+  for (uint32_t i = 0; i < kElements; ++i)
+    EXPECT_EQ(cu->lds().read32(wf->lds_base() + i * sizeof(uint32_t)), kLoadValues[i]);
+
+  for (uint32_t i = 0; i < kElements; ++i)
+    cu->lds().write32(wf->lds_base() + i * sizeof(uint32_t), kStoreValues[i]);
+
+  write_tensor_dma_d0(*cu, *wf, 0, kStoreGlobal);
+  const std::array<uint32_t, 3> store_words = {0xd0714001u, 0x7c000000u, 0x7c7c0c00u};
+  auto store = decode_gfx1250(store_words, "tensor_store_from_lds");
+  ASSERT_NE(store, nullptr);
+  store->execute(*store, wf);
+  EXPECT_EQ(store_storage, kStoreValues);
+
+  sim.memory->unregister_process(kProcessId);
+}
+
 TEST(Gfx1250ExecutionTest, TensorDmaD2CopiesGlobalAndLds) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();

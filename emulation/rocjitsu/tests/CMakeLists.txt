@@ -458,6 +458,7 @@ add_executable(
     scoped_temp_test.cpp
     wave_debug_test.cpp
     decode_execute_benchmark.cpp
+    util_result_test.cpp
     util_unique_handle_test.cpp
     util_simd_test.cpp
     v_add_simd_benchmark.cpp

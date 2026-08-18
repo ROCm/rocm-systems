@@ -765,7 +765,6 @@ protected:
   bool functional_yield_requested_ = false;
 };
 
-inline GpuMemory *InstructionComputeUnitView::memory() const { return raw_cu().memory(); }
 inline L1ScalarCache &InstructionComputeUnitView::l1_scalar() { return raw_cu().l1_scalar(); }
 inline L1VectorCache &InstructionComputeUnitView::l1_vector() { return raw_cu().l1_vector(); }
 inline L2Cache *InstructionComputeUnitView::l2() const { return raw_cu().l2(); }
