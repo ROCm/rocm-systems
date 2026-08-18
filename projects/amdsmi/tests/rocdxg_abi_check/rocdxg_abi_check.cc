@@ -77,6 +77,7 @@ ABI_ASSERT_SIZE(rocdxg_smi_device_info_t);
 
 // Sub-struct offsets inside the aggregate: catches a field added to an earlier
 // member, which shifts everything after it without changing any single size.
+ABI_ASSERT_FIELD(rocdxg_smi_device_info_t, struct_size);
 ABI_ASSERT_FIELD(rocdxg_smi_device_info_t, bdf);
 ABI_ASSERT_FIELD(rocdxg_smi_device_info_t, asic);
 ABI_ASSERT_FIELD(rocdxg_smi_device_info_t, board);
@@ -85,6 +86,14 @@ ABI_ASSERT_FIELD(rocdxg_smi_device_info_t, driver);
 ABI_ASSERT_FIELD(rocdxg_smi_device_info_t, vbios);
 ABI_ASSERT_FIELD(rocdxg_smi_device_info_t, cache);
 ABI_ASSERT_FIELD(rocdxg_smi_device_info_t, fw);
+
+// struct_size only protects callers if it sits at offset 0, where a library
+// built from any layout can still read it.
+static_assert(offsetof(rocdxg_smi_device_info_t, struct_size) == 0,
+              "struct_size must be the first member of rocdxg_smi_device_info_t");
+
+ABI_ASSERT_FIELD(rocdxg_smi_asic_info_t, num_xcc);
+ABI_ASSERT_FIELD(rocdxg_smi_asic_info_t, target_graphics_version);
 
 // Status codes are exchanged by value; mismatched numbering would silently
 // remap errors.
@@ -103,5 +112,8 @@ static_assert(static_cast<int>(HSAKMT_STATUS_INVALID_NODE_UNIT) ==
 static_assert(static_cast<int>(HSAKMT_STATUS_KERNEL_ALREADY_OPENED) ==
                   static_cast<int>(upstream::HSAKMT_STATUS_KERNEL_ALREADY_OPENED),
               "HSAKMT_STATUS_KERNEL_ALREADY_OPENED differs from upstream");
+static_assert(static_cast<int>(HSAKMT_STATUS_BUFFER_TOO_SMALL) ==
+                  static_cast<int>(upstream::HSAKMT_STATUS_BUFFER_TOO_SMALL),
+              "HSAKMT_STATUS_BUFFER_TOO_SMALL differs from upstream");
 
 int main() { return 0; }

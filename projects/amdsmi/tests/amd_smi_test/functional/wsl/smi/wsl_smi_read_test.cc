@@ -161,6 +161,17 @@ TEST_F(WslFunctionalReadOnly, NullDeviceInfoReturnsInval) {
   EXPECT_EQ(syms_.rocdxg_smi_get_device_info(0, nullptr), HSAKMT_STATUS_INVALID_PARAMETER);
 }
 
+// A caller built against a different layout must be rejected, not written past.
+TEST_F(WslFunctionalReadOnly, DeviceInfoRejectsWrongStructSize) {
+  RequireLib();
+  rocdxg_smi_device_info_t info{};
+  info.struct_size = sizeof(info) - 1;
+  EXPECT_EQ(syms_.rocdxg_smi_get_device_info(0, &info), HSAKMT_STATUS_BUFFER_TOO_SMALL);
+
+  info.struct_size = 0;
+  EXPECT_EQ(syms_.rocdxg_smi_get_device_info(0, &info), HSAKMT_STATUS_BUFFER_TOO_SMALL);
+}
+
 TEST_F(WslFunctionalReadOnly, NullVramUsageReturnsInval) {
   RequireLib();
   EXPECT_EQ(syms_.rocdxg_smi_get_vram_usage(0, nullptr), HSAKMT_STATUS_INVALID_PARAMETER);
@@ -210,7 +221,9 @@ TEST_F(WslFunctionalReadOnly, LiveDeviceCountNonZero) {
 TEST_F(WslFunctionalReadOnly, LiveDeviceInfoPopulated) {
   RequireGpu();
   rocdxg_smi_device_info_t info{};
+  info.struct_size = sizeof(info);
   ASSERT_EQ(syms_.rocdxg_smi_get_device_info(0, &info), HSAKMT_STATUS_SUCCESS);
+  EXPECT_EQ(info.struct_size, sizeof(info)) << "library should report what it filled";
   EXPECT_EQ(info.asic.vendor_id, 0x1002u) << "expected an AMD vendor id";
   EXPECT_GT(info.vram.vram_size_mb, 0u);
   EXPECT_NE(info.board.product_name[0], '\0') << "product name should not be empty";
@@ -220,6 +233,8 @@ TEST_F(WslFunctionalReadOnly, LiveDeviceInfoIsStableAcrossCalls) {
   RequireGpu();
   rocdxg_smi_device_info_t a{};
   rocdxg_smi_device_info_t b{};
+  a.struct_size = sizeof(a);
+  b.struct_size = sizeof(b);
   ASSERT_EQ(syms_.rocdxg_smi_get_device_info(0, &a), HSAKMT_STATUS_SUCCESS);
   ASSERT_EQ(syms_.rocdxg_smi_get_device_info(0, &b), HSAKMT_STATUS_SUCCESS);
   EXPECT_EQ(a.asic.device_id, b.asic.device_id);
@@ -231,6 +246,7 @@ TEST_F(WslFunctionalReadOnly, LiveDeviceInfoRejectsOutOfRangeNode) {
   uint32_t count = 0;
   ASSERT_EQ(syms_.rocdxg_smi_get_device_count(&count), HSAKMT_STATUS_SUCCESS);
   rocdxg_smi_device_info_t info{};
+  info.struct_size = sizeof(info);
   EXPECT_EQ(syms_.rocdxg_smi_get_device_info(count, &info), HSAKMT_STATUS_INVALID_NODE_UNIT);
 }
 

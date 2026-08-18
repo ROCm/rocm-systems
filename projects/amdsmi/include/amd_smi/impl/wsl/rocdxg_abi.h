@@ -109,6 +109,7 @@ typedef struct rocdxg_smi_asic_info {
   uint64_t asic_serial;
   char market_name[ROCDXG_SMI_MAX_STRING_LENGTH];
   uint32_t num_of_compute_units;
+  uint32_t num_xcc;
   uint64_t target_graphics_version;
 } rocdxg_smi_asic_info_t;
 
@@ -221,7 +222,12 @@ typedef struct rocdxg_smi_fw_info {
   uint32_t num_fw_info;
 } rocdxg_smi_fw_info_t;
 
+// struct_size is set by the caller to sizeof(rocdxg_smi_device_info_t).
+// librocdxg rejects a mismatch with BUFFER_TOO_SMALL rather than writing past
+// the end of this struct, which is what makes the mirrored layout below safe
+// against a librocdxg built from different headers. Keep it first.
 typedef struct rocdxg_smi_device_info {
+  uint32_t struct_size;
   rocdxg_smi_bdf_info_t bdf;
   rocdxg_smi_asic_info_t asic;
   rocdxg_smi_board_info_t board;

@@ -214,6 +214,7 @@ amdsmi_status_t WSLGPUBackend::try_populate(std::vector<AMDSmiSocket*>& sockets,
   uint32_t gpu_index = 0;
   for (uint32_t node_id = 0; node_id < device_count; ++node_id) {
     rocdxg_smi_device_info_t info = {};
+    info.struct_size = sizeof(info);
     hstatus = g_wsl_syms.rocdxg_smi_get_device_info(node_id, &info);
     if (hstatus != HSAKMT_STATUS_SUCCESS) {
       g_wsl_syms.hsaKmtReleaseSystemProperties();
@@ -567,9 +568,11 @@ amdsmi_status_t WSLGPUBackend::get_gpu_metrics_info(amdsmi_gpu_metrics_t* info) 
   // Populate current clocks from rocdxg. Guard against UINT32_MAX sentinel
   // (rocdxg returns UINT32_MAX when a field is unsupported on this version).
   if (metrics.current_gfxclk <= 0xFFFEU) {
-    // The rocdxg ABI reports no XCC count, so only the first slot is filled.
-    // Multi-XCC parts would repeat the same clock across slots anyway.
-    info->current_gfxclks[0] = static_cast<uint16_t>(metrics.current_gfxclk);
+    // All XCCs run at the same GFX clock in WSL; propagate to every XCC slot.
+    uint32_t n = std::min(std::max(device_info_.asic.num_xcc, 1u),
+                          static_cast<uint32_t>(AMDSMI_MAX_NUM_GFX_CLKS));
+    for (uint32_t i = 0; i < n; ++i)
+      info->current_gfxclks[i] = static_cast<uint16_t>(metrics.current_gfxclk);
   }
   if (metrics.current_socclk <= 0xFFFEU)
     info->current_socclk = static_cast<uint16_t>(metrics.current_socclk);
