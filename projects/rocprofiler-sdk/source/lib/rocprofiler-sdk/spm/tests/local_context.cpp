@@ -202,3 +202,36 @@ TEST(spm_core, local_context_override_restarts_pre_kernel_call)
     registration::finalize();
     context::pop_client(1);
 }
+
+// A local start override must not promote a context whose global enabled flag is false.
+TEST(spm_core, local_context_start_cannot_promote_globally_stopped)
+{
+    rocprofiler::common::set_env("ROCPROFILER_SPM_BETA_ENABLED", true);
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+
+    context::context ctx{};
+    ctx.context_idx  = 54;
+    ctx.dispatch_spm = std::make_unique<context::spm_dispatch_counter_collection_service>();
+    ctx.dispatch_spm->enabled.wlock([](auto& data) { data = false; });
+
+    std::atomic<int>                            hits{0};
+    auto                                        active = as_active(ctx);
+    kernel_replay::scoped_local_context_control loop{active};
+
+    kernel_replay::set_toggles_armed(true);
+    EXPECT_EQ(kernel_replay::replay_local_start_context({.handle = ctx.context_idx}),
+              ROCPROFILER_STATUS_SUCCESS);
+    kernel_replay::set_toggles_armed(false);
+
+    invoke_pre_kernel_call(ctx, &hits);
+    EXPECT_EQ(hits.load(), 0) << "local start must not promote a globally stopped context";
+
+    registration::set_init_status(1);
+    registration::finalize();
+    context::pop_client(1);
+}
