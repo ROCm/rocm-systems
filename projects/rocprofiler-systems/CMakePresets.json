@@ -78,7 +78,7 @@
             "description": "Debug build with MPI support",
             "displayName": "Debug build with MPI",
             "inherits": "debug",
-            "name": "mpi-debug"
+            "name": "debug-mpi"
         },
         {
             "binaryDir": "${sourceDir}/build/mpi-release",
@@ -88,7 +88,7 @@
             "description": "Release build with MPI support",
             "displayName": "Release build with MPI",
             "inherits": "release",
-            "name": "mpi-release"
+            "name": "release-mpi"
         },
         {
             "binaryDir": "${sourceDir}/build/coverage",
