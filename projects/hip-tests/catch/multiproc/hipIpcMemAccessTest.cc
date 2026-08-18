@@ -76,8 +76,10 @@ HIP_TEST_CASE(Unit_hipIpcMemAccess_Semaphores) {
   // Use PID-qualified names to avoid collisions with stale semaphores from
   // prior runs (which may be owned by a different user and unremovable).
   // Avoids system("rm -rf ...") which is blocked under ASAN.
-  std::string sem_name1 = "/my-sem-object1-" + std::to_string(getpid());
-  std::string sem_name2 = "/my-sem-object2-" + std::to_string(getpid());
+  const auto unique_suffix = std::to_string(getpid()) + "-" +
+                             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  std::string sem_name1 = "/my-sem-object1-" + unique_suffix;
+  std::string sem_name2 = "/my-sem-object2-" + unique_suffix;
   sem_ob1 = sem_open(sem_name1.c_str(), O_CREAT | O_EXCL, 0660, 0);
   sem_ob2 = sem_open(sem_name2.c_str(), O_CREAT | O_EXCL, 0660, 0);
   REQUIRE(sem_ob1 != SEM_FAILED);
