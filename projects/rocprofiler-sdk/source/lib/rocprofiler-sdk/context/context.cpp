@@ -120,6 +120,20 @@ dispatch_counter_collection_service::intersects(
     return false;
 }
 
+bool
+spm_dispatch_counter_collection_service::intersects(
+    const spm_dispatch_counter_collection_service& rhs) const
+{
+    if(agents.empty() || rhs.agents.empty()) return true;
+    const auto& small = (agents.size() < rhs.agents.size()) ? agents : rhs.agents;
+    const auto& large = (agents.size() < rhs.agents.size()) ? rhs.agents : agents;
+    for(const auto& agent_id : small)
+    {
+        if(large.count(agent_id) > 0) return true;
+    }
+    return false;
+}
+
 context_array_t&
 get_registered_contexts(context_array_t& data, context_filter_t filter)
 {
@@ -319,6 +333,13 @@ start_context(rocprofiler_context_id_t context_id)
             // sets of GPU agents. Overlapping agent sets would cross-talk in post_kernel_call.
             return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
         }
+        else if(cfg->dispatch_spm && itr->dispatch_spm &&
+                cfg->dispatch_spm->intersects(*itr->dispatch_spm))
+        {
+            // Two SPM dispatch contexts can run concurrently as long as they target disjoint
+            // sets of GPU agents. A context with no agent restriction claims every agent.
+            return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+        }
     }
 
     uint64_t rocp_tot_contexts = get_registered_contexts_impl()->size();
@@ -396,8 +417,9 @@ stop_context(rocprofiler_context_id_t idx)
             // Stop queue-interposed services before clearing the active slot so
             // disable_serialization() always runs before dispatches stop being instrumented.
             // Clearing the slot first opens the opposite window, in which
-            // kernel_dispatch_phase_enter_hook sees no active context and a dispatch is submitted
-            // without serializer packets while the serializer is still enabled.
+            // kernel_dispatch_phase_enter_hook / write_hook sees no active context and a
+            // dispatch is submitted without serializer packets while the serializer is still
+            // enabled.
             if(_expected->dispatch_counter_collection)
             {
                 rocprofiler::counters::stop_context(const_cast<context*>(_expected));

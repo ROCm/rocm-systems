@@ -42,6 +42,7 @@
 #include "lib/rocprofiler-sdk/pc_sampling/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/rocprofiler-sdk/spm/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
@@ -191,6 +192,12 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
                                             packet,
                                             packet.instrumentation_packets,
                                             dispatch_time);
+        spm::signal_completion_hook(queue_info_session.queue,
+                                    packet.kernel_packet,
+                                    _session,
+                                    packet,
+                                    packet.instrumentation_packets,
+                                    dispatch_time);
 
         if(packet.is_serialized)
         {
@@ -330,12 +337,12 @@ WriteInterceptor(const void* packets,
     auto*      gls                 = ::rocprofiler::hip::graph::current_launch_state();
     const bool graph_launch_active = (gls != nullptr);
     // Services migrated off the queue-controller callback no longer count toward
-    // get_notifiers(); detect them explicitly so a counters-only or ATT-only run still
-    // enters the interceptor.
+    // get_notifiers(); detect them explicitly so a single-service run still enters the interceptor.
     const bool no_real_consumers =
         (queue.get_notifiers() == 0 && !counters::is_any_active() &&
          !thread_trace::is_any_active() &&
          !pc_sampling::is_configured_on_agent(queue.get_agent().get_rocp_agent()->id) &&
+         !spm::is_any_active() &&
          context::get_active_contexts(full_packet_instrumentation_context_filter).empty());
 
     if(pkt_count == 0 || (no_real_consumers && !graph_launch_active))
@@ -667,6 +674,15 @@ WriteInterceptor(const void* packets,
                                      corr_id,
                                      _packet_data.instrumentation_packets,
                                      _packet_data.is_serialized);
+            spm::write_hook(queue,
+                            kernel_packet,
+                            kernel_id,
+                            dispatch_id,
+                            &_packet_data.user_data,
+                            _packet_data.tracing_data.external_correlation_ids,
+                            corr_id,
+                            _packet_data.instrumentation_packets,
+                            _packet_data.is_serialized);
 
             bool inserted_before = false;
             if(_packet_data.is_serialized)
@@ -805,6 +821,7 @@ WriteInterceptor(const void* packets,
     // Services migrated off the registry require per-packet mode.
     if(counters::is_any_active()) should_batch_packets = false;
     if(thread_trace::is_any_active()) should_batch_packets = false;
+    if(spm::is_any_active()) should_batch_packets = false;
 
     if(should_batch_packets)
     {
