@@ -503,10 +503,6 @@ SSetGprIdxOnSopc::SSetGprIdxOnSopc(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
-    ssrc1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const SopcInstLiteralMachineInst *>(inst)->simm32));
   m0.apply_fieldless_caps(false, false, false);
   m0_in.apply_fieldless_caps(false, false, false);
 }
