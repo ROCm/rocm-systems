@@ -986,7 +986,8 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
     {
         _parser
             .add_argument({ "--ai-nics" },
-                          "AI NIC IDs for SMI queries. Supports comma-separated list")
+                          "[DEPRECATED: use --nics instead] AI NIC interface names for SMI queries. "
+                          "Supports comma-separated list")
             .dtype("list of strings")
             .action([&](parser_t& p) {
                 update_env(_data, env_vars::SAMPLING_AINICS,

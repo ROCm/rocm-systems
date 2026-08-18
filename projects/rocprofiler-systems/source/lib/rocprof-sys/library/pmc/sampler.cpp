@@ -163,8 +163,38 @@ configure_nic_profiling(const std::shared_ptr<provider_t>& provider)
 {
     using namespace collectors::nic;
 
-    const auto _nics_val = config::get_sampling_nics();
-    if(_nics_val.empty() || _nics_val == "none") return;
+    // If the user set SAMPLING_AINICS (--ai-nics) directly, warn and — when
+    // SAMPLING_NICS is also configured — clear it so --nics has full control.
+    const auto _ainics_direct   = config::get_sampling_ainics();
+    const bool _ainics_user_set = !_ainics_direct.empty() && _ainics_direct != "none";
+
+    const auto _nics_val        = config::get_sampling_nics();
+    const bool _nics_configured = !_nics_val.empty() && _nics_val != "none";
+
+    if(_ainics_user_set)
+    {
+        if(_nics_configured)
+        {
+            // Both options active: --nics takes full control; discard --ai-nics value.
+            LOG_WARNING("Both ROCPROFSYS_SAMPLING_NICS and ROCPROFSYS_SAMPLING_AINICS "
+                        "are set. ROCPROFSYS_SAMPLING_AINICS (--ai-nics) is deprecated "
+                        "and will be ignored; ROCPROFSYS_SAMPLING_NICS (--nics) takes "
+                        "full control and determines AI NIC routing automatically.");
+            config::set_setting_value(std::string{ env_vars::SAMPLING_AINICS },
+                                      std::string{ "none" });
+        }
+        else
+        {
+            // Only --ai-nics set: warn, but honour it for backward compatibility.
+            // We return below without touching SAMPLING_AINICS, so the nic_collector
+            // reads it as-is via get_sampling_ainics() when it calls enumerate_devices().
+            LOG_WARNING("ROCPROFSYS_SAMPLING_AINICS / --ai-nics is deprecated. "
+                        "Use ROCPROFSYS_SAMPLING_NICS / --nics instead; AI NIC "
+                        "classification is automatic.");
+        }
+    }
+
+    if(!_nics_configured) return;
 
     // Collect AI NIC names from the AMD SMI provider (empty when not available)
 #if defined(ROCPROFSYS_BUILD_AINIC)
@@ -214,24 +244,15 @@ configure_nic_profiling(const std::shared_ptr<provider_t>& provider)
                   "(requested: {})", _nics_val);
     }
 
-    // Route AI NICs to AMD SMI by updating SAMPLING_AINICS (unless already set).
+    // Route AI NICs to AMD SMI. Any user-set SAMPLING_AINICS has already been
+    // cleared above when --nics is active, so we always set it from classification.
 #if defined(ROCPROFSYS_BUILD_AINIC)
     if(!ai_nics.empty())
     {
-        const auto current_ainics = config::get_sampling_ainics();
-        if(current_ainics.empty() || current_ainics == "none")
-        {
-            const auto ainics_str = fmt::format("{}", fmt::join(ai_nics, ","));
-            config::set_setting_value(std::string{ env_vars::SAMPLING_AINICS },
-                                      ainics_str);
-            LOG_INFO("SAMPLING_NICS: routed {} AI NIC(s) to AMD SMI backend: {}",
-                     ai_nics.size(), fmt::join(ai_nics, ", "));
-        }
-        else
-        {
-            LOG_DEBUG("SAMPLING_NICS: ROCPROFSYS_SAMPLING_AINICS already set to "
-                      "'{}', not overriding", current_ainics);
-        }
+        const auto ainics_str = fmt::format("{}", fmt::join(ai_nics, ","));
+        config::set_setting_value(std::string{ env_vars::SAMPLING_AINICS }, ainics_str);
+        LOG_INFO("SAMPLING_NICS: routed {} AI NIC(s) to AMD SMI backend: {}",
+                 ai_nics.size(), fmt::join(ai_nics, ", "));
     }
 #endif
 }
