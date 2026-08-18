@@ -5,6 +5,7 @@
 
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/target_registry.h"
+#include "util/except.h"
 
 #include <cstring>
 #include <unordered_map>
@@ -116,31 +117,36 @@ rj_status_t rj_code_inst_list_create(rj_code_object_t *obj, rj_code_target_id_t 
                                      rj_code_inst_list_t **inst_list) {
   if (!obj || !obj->co || !inst_list)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  *inst_list = nullptr;
 
   auto *decoder = create_decoder_for_target(target_id);
   if (!decoder)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  auto owned = std::make_unique<rj_code_inst_list_t>();
+  try {
+    auto owned = std::make_unique<rj_code_inst_list_t>();
 
-  // DBT local caves are emitted into .text, so instruction-list callers only
-  // need the text sections to see translated code.
-  for (const auto *sec : obj->co->text_sections()) {
-    const auto *inst_data = reinterpret_cast<const uint32_t *>(sec->data());
-    std::size_t inst_data_size = sec->size() / sizeof(uint32_t);
-    // Each executable section owns a separate data buffer, so decoding starts
-    // at word zero for each section.
-    std::size_t word_index = 0;
-    while (word_index < inst_data_size) {
-      auto *raw_inst = decoder->decode(&inst_data[word_index]);
-      std::unique_ptr<Instruction> inst(raw_inst);
-      owned->list.push_back(*inst);
-      word_index += static_cast<std::size_t>(inst->size()) / sizeof(uint32_t);
-      owned->storage.push_back(std::move(inst));
+    // DBT local caves are emitted into .text, so instruction-list callers only
+    // need the text sections to see translated code.
+    for (const auto *sec : obj->co->text_sections()) {
+      const auto *inst_data = reinterpret_cast<const uint32_t *>(sec->data());
+      std::size_t inst_data_size = sec->size() / sizeof(uint32_t);
+      // Each executable section owns a separate data buffer, so decoding starts
+      // at word zero for each section.
+      std::size_t word_index = 0;
+      while (word_index < inst_data_size) {
+        auto *raw_inst = decoder->decode(&inst_data[word_index]);
+        std::unique_ptr<Instruction> inst(raw_inst);
+        owned->list.push_back(*inst);
+        word_index += static_cast<std::size_t>(inst->size()) / sizeof(uint32_t);
+        owned->storage.push_back(std::move(inst));
+      }
     }
-  }
 
-  *inst_list = owned.release();
+    *inst_list = owned.release();
+  } catch (const util::InvalidInst &) {
+    return ROCJITSU_STATUS_ERROR;
+  }
   return ROCJITSU_STATUS_SUCCESS;
 }
 
@@ -167,6 +173,7 @@ rj_status_t rj_code_basic_block_list_create(rj_code_object_t *obj, rj_code_targe
                                             rj_code_basic_block_list_t **list) {
   if (!obj || !obj->co || !list)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  *list = nullptr;
 
   auto *decoder = create_decoder_for_target(target_id);
   if (!decoder)
@@ -176,10 +183,13 @@ rj_status_t rj_code_basic_block_list_create(rj_code_object_t *obj, rj_code_targe
   if (arch == ROCJITSU_CODE_ARCH_INVALID)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  auto owned = std::make_unique<rj_code_basic_block_list_t>();
-  owned->blocks = BasicBlock::build(*obj->co, *decoder, arch);
-
-  *list = owned.release();
+  try {
+    auto owned = std::make_unique<rj_code_basic_block_list_t>();
+    owned->blocks = BasicBlock::build(*obj->co, *decoder, arch);
+    *list = owned.release();
+  } catch (const util::InvalidInst &) {
+    return ROCJITSU_STATUS_ERROR;
+  }
   return ROCJITSU_STATUS_SUCCESS;
 }
 
