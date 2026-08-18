@@ -482,6 +482,18 @@ Clock type descriptions
   If we have 5 high and 5 low samples, that means 50% utilization (50% GPU busy, or 50% GPU use).
   The windows and sampling vary from generation to generation, but that is how GPU and VRAM use
   is calculated in a generic sense.
+
+  .. note::
+
+     On GFXOFF-capable hardware, the GPU-use value can remain at or near 100% even when no
+     kernels are executing. A resident KFD/ROCm compute context (for example, a process that
+     has initialized the device but is currently idle) can keep GFXOFF disabled, and while
+     GFXOFF is held off, ``gpu_busy_percent`` can continue to report the graphics block as
+     busy. When the GPU-use value is high but no work seems to be running, cross-check a
+     signal that reflects actual execution before concluding the GPU is busy: package power
+     (the ``power1_average`` sysfs attribute, exposed via hwmon) or the GRBM ``GUI_ACTIVE``
+     status bit (shown by tools such as ``amdgpu_top`` as the GRBM "Graphics Pipe" counter).
+
   ``--showmeminfo`` (and VRAM% in concise output) will show the amount of VRAM used (visible, total, GTT),
   as well as the total available for those partitions. The percentage shown there indicates the
   amount of used memory in terms of current allocations.
