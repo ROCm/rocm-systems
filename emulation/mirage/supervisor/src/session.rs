@@ -774,7 +774,15 @@ impl Session {
         Arc<Exec>,
         tokio::sync::mpsc::Receiver<crate::process::OutputChunk>,
     )> {
-        let specs = crate::spec::build_specs(&self.describe()?, def, id)?;
+        // The run process is the one the user is sitting in front of, so
+        // its own streams are the ones a workload would be given; see
+        // [`crate::spec::CallerStreams`].
+        let specs = crate::spec::build_specs(
+            &self.describe()?,
+            def,
+            id,
+            crate::spec::CallerStreams::probe(),
+        )?;
         Ok(Exec::start(id.clone(), def.clone(), specs))
     }
 

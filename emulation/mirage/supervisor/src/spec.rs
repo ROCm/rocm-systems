@@ -20,13 +20,18 @@
 //! it decides is testable without a container runtime or an emulator.
 //! The one thing it asks the world about is a containerised
 //! `--workdir`, which is a question only the image can answer and is
-//! asked only when the caller passed one. Two more things are read from
-//! the process rather than passed in, and both are properties
-//! of the terminal mirage was started from rather than of the session:
-//! whether the caller's streams are a terminal, and which runtime
-//! directory this mirage resolved. Both callers — `mirage run` and
-//! `mirage exec` — are the process the user is sitting in front of, which
-//! is what makes reading them here correct.
+//! asked only when the caller passed one. One more thing is read from
+//! the process rather than passed in — which runtime directory this
+//! mirage resolved — and both callers necessarily agree on it.
+//!
+//! Whether the caller's streams are a terminal used to be read here too,
+//! and it was the one input that broke the promise above. A test runs
+//! with its streams captured, so the probe answered `false` every time
+//! and the interactive container path — the one that asks the provider
+//! for `-t` — could not be reached from a test at all: the branch that
+//! most needed pinning was the branch no test could enter. It is a
+//! parameter now, [`CallerStreams`], which the caller probes once with
+//! [`CallerStreams::probe`] and a test states outright.
 
 use std::collections::BTreeMap;
 
@@ -68,6 +73,51 @@ pub(crate) const CONTAINER_RUNTIME_DIR: &str = "/mnt/mirage/runtime";
 /// or reads it: it is a supervisor-internal attribution, not part of the
 /// on-process contract `mirage cleanup` recovers from a crash with.
 pub const ENV_EXEC: &str = "MIRAGE_EXEC";
+
+/// Whether the streams the caller will hand its workload are terminals.
+///
+/// Passed in rather than probed inside [`build_specs`], because it is a
+/// property of the process the user is sitting in front of and not of
+/// the session being described — and because probing it deeper down put
+/// an ambient read inside a function whose whole value is being a pure
+/// function of its arguments.
+///
+/// All three streams, not just stdin: see [`wants_tty`] for why `-t` on
+/// a partly-redirected exec is destructive rather than merely useless.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CallerStreams {
+    all_terminals: bool,
+}
+
+impl CallerStreams {
+    /// Ask this process's standard streams.
+    ///
+    /// The call both `mirage run` and `mirage exec` make, once, on their
+    /// way into [`build_specs`]. It is the only place in spec-building
+    /// that touches ambient state, and it is deliberately at the edge.
+    #[must_use]
+    pub fn probe() -> Self {
+        use std::io::IsTerminal as _;
+        Self::new(
+            std::io::stdin().is_terminal()
+                && std::io::stdout().is_terminal()
+                && std::io::stderr().is_terminal(),
+        )
+    }
+
+    /// State the answer outright, for a caller that already knows it and
+    /// for a test that needs the branch a captured process cannot reach.
+    #[must_use]
+    pub const fn new(all_terminals: bool) -> Self {
+        Self { all_terminals }
+    }
+
+    /// Whether every one of the three is a terminal.
+    #[must_use]
+    pub const fn all_terminals(self) -> bool {
+        self.all_terminals
+    }
+}
 
 /// Build the spawn specs for one exec.
 ///
@@ -147,6 +197,7 @@ pub fn build_specs(
     desc: &SessionDescription,
     def: &ExecDef,
     exec_id: &ExecId,
+    caller: CallerStreams,
 ) -> Result<Vec<SpawnSpec>> {
     let node_count = desc.node_count.max(1);
     // The job's shape and this exec's, kept apart deliberately; see the
@@ -209,19 +260,11 @@ pub fn build_specs(
     let stdio = StdioMode::for_exec(nodes.len() * nproc as usize);
 
     // And, for a containerised exec, whether to ask the provider for a
-    // pseudo-terminal inside the container. Probed here rather than
-    // deeper down because this is the process the user is sitting in
-    // front of: both callers of `build_specs` — `mirage run` and
-    // `mirage exec` — own the terminal their workload will run on.
-    let tty = {
-        use std::io::IsTerminal as _;
-        wants_tty(
-            stdio,
-            std::io::stdin().is_terminal()
-                && std::io::stdout().is_terminal()
-                && std::io::stderr().is_terminal(),
-        )
-    };
+    // pseudo-terminal inside the container. The caller answered the
+    // ambient half of that question — see [`CallerStreams`] — so what is
+    // left here is the decision, which is a function of its arguments
+    // and reachable from a test.
+    let tty = wants_tty(stdio, caller.all_terminals());
 
     // The runtime directory that owns everything this call starts, read
     // from the environment rather than from `desc` because both callers
@@ -663,6 +706,19 @@ mod tests {
     use mirage_core::proto::ContainerTargets;
     use mirage_core::session::SessionId;
 
+    /// A caller whose streams are redirected.
+    ///
+    /// What a test process actually has, and the right default for every
+    /// test that is not about the terminal.
+    const CAPTURED: CallerStreams = CallerStreams::new(false);
+
+    /// A caller sitting at a terminal.
+    ///
+    /// What no test process ever is, which is exactly why this has to be
+    /// statable rather than probed: the interactive container path is
+    /// unreachable from a captured test otherwise.
+    const AT_A_TERMINAL: CallerStreams = CallerStreams::new(true);
+
     /// A one-process-per-node session, the shape almost every test wants.
     fn desc(node_count: u32) -> SessionDescription {
         job(node_count, 1)
@@ -709,7 +765,7 @@ mod tests {
         // The interactive case: `mirage run -- bash` on a one-node
         // session. Its streams are the caller's own, unmediated, which is
         // the only way a shell prints a prompt and reads a keystroke.
-        let specs = build_specs(&desc(1), &exec_def(1, None), &id()).unwrap();
+        let specs = build_specs(&desc(1), &exec_def(1, None), &id(), CAPTURED).unwrap();
         assert_eq!(specs.len(), 1);
         assert_eq!(specs[0].stdio, StdioMode::Inherit { stdin: true });
     }
@@ -720,7 +776,7 @@ mod tests {
         // and one terminal cannot be shared between readers — so mirage
         // takes the output to prefix it and offers stdin to nobody,
         // rather than picking a rank to receive it silently.
-        let specs = build_specs(&desc(3), &exec_def(1, None), &id()).unwrap();
+        let specs = build_specs(&desc(3), &exec_def(1, None), &id(), CAPTURED).unwrap();
         assert_eq!(specs.len(), 3);
         assert!(specs.iter().all(|s| s.stdio == StdioMode::Capture));
     }
@@ -729,7 +785,7 @@ mod tests {
     fn several_processes_on_one_node_are_still_multi_process() {
         // The rule is about how many processes share the terminal, not
         // how many nodes there are.
-        let specs = build_specs(&job(1, 4), &exec_def(4, None), &id()).unwrap();
+        let specs = build_specs(&job(1, 4), &exec_def(4, None), &id(), CAPTURED).unwrap();
         assert_eq!(specs.len(), 4);
         assert!(specs.iter().all(|s| s.stdio == StdioMode::Capture));
     }
@@ -739,7 +795,7 @@ mod tests {
         // The escape hatch for a multi-node session: one node, one
         // process, so it takes the single-process branch and gets the
         // terminal. This is what `mirage exec --node 2 -- bash` is for.
-        let specs = build_specs(&desc(4), &exec_def(1, Some(2)), &id()).unwrap();
+        let specs = build_specs(&desc(4), &exec_def(1, Some(2)), &id(), CAPTURED).unwrap();
         assert_eq!(specs.len(), 1);
         assert_eq!(specs[0].stdio, StdioMode::Inherit { stdin: true });
     }
@@ -749,7 +805,7 @@ mod tests {
         // The process has to believe it *is* node 2, or a workload
         // started this way sees a different world from its neighbours:
         // wrong rank, wrong world size, wrong rendezvous.
-        let specs = build_specs(&desc(4), &exec_def(1, Some(2)), &id()).unwrap();
+        let specs = build_specs(&desc(4), &exec_def(1, Some(2)), &id(), CAPTURED).unwrap();
         let at = |k: &str| specs[0].env.get(k).cloned().unwrap_or_default();
         assert_eq!(at("MIRAGE_RANK"), "2");
         assert_eq!(at("RANK"), "2");
@@ -759,7 +815,7 @@ mod tests {
 
     #[test]
     fn a_node_outside_the_topology_is_refused() {
-        let err = build_specs(&desc(2), &exec_def(1, Some(7)), &id()).unwrap_err();
+        let err = build_specs(&desc(2), &exec_def(1, Some(7)), &id(), CAPTURED).unwrap_err();
         assert!(err.to_string().contains("no node 7"), "{err}");
     }
 
@@ -769,7 +825,7 @@ mod tests {
         def.exec
             .env
             .insert("LD_PRELOAD".to_string(), "/user/mine.so".to_string());
-        let specs = build_specs(&desc(1), &def, &id()).unwrap();
+        let specs = build_specs(&desc(1), &def, &id(), CAPTURED).unwrap();
         assert_eq!(
             specs[0].env.get("LD_PRELOAD").map(String::as_str),
             Some("/lib/interpose.so:/user/mine.so")
@@ -782,13 +838,13 @@ mod tests {
         // rendezvous.
         let mut def = exec_def(1, None);
         def.exec.env.insert("RANK".to_string(), "99".to_string());
-        let specs = build_specs(&desc(2), &def, &id()).unwrap();
+        let specs = build_specs(&desc(2), &def, &id(), CAPTURED).unwrap();
         assert_eq!(specs[1].env.get("RANK").map(String::as_str), Some("1"));
     }
 
     #[test]
     fn local_and_global_ranks_are_distinct_with_several_procs_per_node() {
-        let specs = build_specs(&job(2, 2), &exec_def(2, None), &id()).unwrap();
+        let specs = build_specs(&job(2, 2), &exec_def(2, None), &id(), CAPTURED).unwrap();
         assert_eq!(specs.len(), 4);
         let at = |i: usize, k: &str| specs[i].env.get(k).cloned().unwrap_or_default();
         assert_eq!(at(3, "RANK"), "3");
@@ -807,7 +863,7 @@ mod tests {
         // mis-form rather than fail: the six ranks the run started and
         // the two the exec started rendezvous on the same port with
         // irreconcilable ideas of how many of them there are.
-        let specs = build_specs(&job(2, 3), &exec_def(1, None), &id()).unwrap();
+        let specs = build_specs(&job(2, 3), &exec_def(1, None), &id(), CAPTURED).unwrap();
         assert_eq!(specs.len(), 2, "one process per node, as before");
         let at = |i: usize, k: &str| specs[i].env.get(k).cloned().unwrap_or_default();
 
@@ -828,7 +884,7 @@ mod tests {
         // `mirage exec --node 1 -- bash` on a three-process-per-node job.
         // One process, so it keeps the terminal — and it is rank 3, the
         // identity node 1's own first rank has.
-        let specs = build_specs(&job(2, 3), &exec_def(1, Some(1)), &id()).unwrap();
+        let specs = build_specs(&job(2, 3), &exec_def(1, Some(1)), &id(), CAPTURED).unwrap();
         assert_eq!(specs.len(), 1);
         assert_eq!(specs[0].stdio, StdioMode::Inherit { stdin: true });
         let at = |k: &str| specs[0].env.get(k).cloned().unwrap_or_default();
@@ -842,7 +898,7 @@ mod tests {
     fn an_exec_may_fill_as_many_of_a_nodes_slots_as_the_job_has() {
         // Asking for the job's own shape reproduces the run's grid
         // exactly, which is the equivalence `mirage exec` rests on.
-        let specs = build_specs(&job(2, 3), &exec_def(3, Some(1)), &id()).unwrap();
+        let specs = build_specs(&job(2, 3), &exec_def(3, Some(1)), &id(), CAPTURED).unwrap();
         let ranks: Vec<String> = specs
             .iter()
             .map(|s| s.env.get("RANK").cloned().unwrap_or_default())
@@ -866,11 +922,11 @@ mod tests {
         // interactive" — `--node 1 --nproc-per-node 3` would be three
         // processes fighting over one terminal, which is the shape the
         // capture rule exists to prevent.
-        let one = build_specs(&job(2, 3), &exec_def(1, Some(1)), &id()).unwrap();
+        let one = build_specs(&job(2, 3), &exec_def(1, Some(1)), &id(), CAPTURED).unwrap();
         assert_eq!(one.len(), 1);
         assert_eq!(one[0].stdio, StdioMode::Inherit { stdin: true });
 
-        let three = build_specs(&job(2, 3), &exec_def(3, Some(1)), &id()).unwrap();
+        let three = build_specs(&job(2, 3), &exec_def(3, Some(1)), &id(), CAPTURED).unwrap();
         assert_eq!(three.len(), 3);
         assert!(
             three.iter().all(|s| s.stdio == StdioMode::Capture),
@@ -891,7 +947,7 @@ mod tests {
         // this would put two live processes on one rank of one
         // rendezvous — the same silent mis-forming, arrived at from the
         // other direction.
-        let err = build_specs(&job(2, 2), &exec_def(3, None), &id()).unwrap_err();
+        let err = build_specs(&job(2, 2), &exec_def(3, None), &id(), CAPTURED).unwrap_err();
         let text = err.to_string();
         assert!(text.contains("2 process(es) per node"), "{text}");
         assert!(text.contains("--nproc-per-node 3"), "{text}");
@@ -925,7 +981,7 @@ mod tests {
         // and a NCCL identity built from it both take the ranks at their
         // word, so the disagreement forms two rendezvous rather than
         // failing to connect.
-        let specs = build_specs(&job(3, 2), &exec_def(2, None), &id()).unwrap();
+        let specs = build_specs(&job(3, 2), &exec_def(2, None), &id(), CAPTURED).unwrap();
         let addrs: Vec<&str> = specs
             .iter()
             .filter_map(|s| s.env.get("MASTER_ADDR").map(String::as_str))
@@ -953,7 +1009,7 @@ mod tests {
         // `::1` on a dual-stack host while a store listens on IPv4.
         let mut d = desc(2);
         d.head_addr = "127.0.0.1".to_string();
-        let specs = build_specs(&d, &exec_def(1, None), &id()).unwrap();
+        let specs = build_specs(&d, &exec_def(1, None), &id(), CAPTURED).unwrap();
         for spec in &specs {
             assert_eq!(
                 spec.env.get("MASTER_ADDR").map(String::as_str),
@@ -966,7 +1022,7 @@ mod tests {
 
     #[test]
     fn an_impossible_world_size_is_refused_rather_than_forked() {
-        let err = build_specs(&job(2, u32::MAX), &exec_def(1, None), &id()).unwrap_err();
+        let err = build_specs(&job(2, u32::MAX), &exec_def(1, None), &id(), CAPTURED).unwrap_err();
         assert!(err.to_string().contains("more than the"), "{err}");
     }
 
@@ -979,7 +1035,7 @@ mod tests {
             names: vec!["mirage-s-node-0".to_string(), "mirage-s-node-1".to_string()],
             scratch: scratch.path().to_path_buf(),
         });
-        let specs = build_specs(&d, &exec_def(1, None), &id()).unwrap();
+        let specs = build_specs(&d, &exec_def(1, None), &id(), CAPTURED).unwrap();
 
         assert_eq!(specs[1].command, "podman");
         assert_eq!(specs[1].args[0], "exec");
@@ -1001,7 +1057,7 @@ mod tests {
         // The tag is the only record of the association that survives the
         // owning run being `SIGKILL`ed, so `mirage cleanup` can find what
         // was stranded. See [`mirage_core::reclaim`].
-        let specs = build_specs(&job(2, 2), &exec_def(2, None), &id()).unwrap();
+        let specs = build_specs(&job(2, 2), &exec_def(2, None), &id(), CAPTURED).unwrap();
         assert_eq!(specs.len(), 4);
         for spec in &specs {
             assert_eq!(
@@ -1025,7 +1081,7 @@ mod tests {
         // cleanup` running under a different `MIRAGE_RUNTIME` sees a
         // healthy workload as a crashed run's leftovers.
         let runtime = mirage_core::container::owning_runtime();
-        let specs = build_specs(&job(2, 2), &exec_def(2, None), &id()).unwrap();
+        let specs = build_specs(&job(2, 2), &exec_def(2, None), &id(), CAPTURED).unwrap();
         for spec in &specs {
             assert_eq!(
                 spec.env.get("MIRAGE_RUNTIME").map(String::as_str),
@@ -1051,7 +1107,7 @@ mod tests {
         def.exec
             .env
             .insert("MIRAGE_RUNTIME".to_string(), "/not/mine".to_string());
-        let specs = build_specs(&desc(1), &def, &id()).unwrap();
+        let specs = build_specs(&desc(1), &def, &id(), CAPTURED).unwrap();
         assert_eq!(
             specs[0].env.get("MIRAGE_RUNTIME").map(String::as_str),
             Some(mirage_core::container::owning_runtime().as_str())
@@ -1066,7 +1122,7 @@ mod tests {
         // is what being in one session means — and a run reaping what a
         // departed `mirage exec` left behind would take its own live
         // workload with it.
-        let specs = build_specs(&job(2, 2), &exec_def(2, None), &id()).unwrap();
+        let specs = build_specs(&job(2, 2), &exec_def(2, None), &id(), CAPTURED).unwrap();
         assert_eq!(specs.len(), 4);
         for spec in &specs {
             assert_eq!(
@@ -1096,7 +1152,7 @@ mod tests {
             names: vec!["mirage-s-node-0".to_string()],
             scratch: scratch.path().to_path_buf(),
         });
-        let specs = build_specs(&d, &exec_def(1, None), &id()).unwrap();
+        let specs = build_specs(&d, &exec_def(1, None), &id(), CAPTURED).unwrap();
         assert_eq!(
             specs[0].env.get("MIRAGE_SESSION").map(String::as_str),
             Some("s")
@@ -1154,11 +1210,56 @@ mod tests {
     }
 
     #[test]
+    fn a_terminal_caller_reaches_provider_dash_t_and_a_redirected_one_does_not() {
+        // The same decision as above, but through `build_specs` and out
+        // the far side as provider argv — which is what actually reaches
+        // podman, and which the unit above cannot see.
+        //
+        // This is the test the ambient probe made impossible. A test
+        // process has its streams captured, so the probe answered
+        // `false` unconditionally and the `-t` branch was unreachable
+        // from any test in this file; the branch a user hits every time
+        // they type `mirage run --image X -- bash` was the one branch
+        // with no coverage at all. `CallerStreams` is why it has some.
+        let dir = tempfile::tempdir().unwrap();
+        let d = containerised("no-such-provider".to_string(), dir.path());
+
+        let at_terminal = build_specs(&d, &exec_def(1, None), &id(), AT_A_TERMINAL).unwrap();
+        assert_eq!(at_terminal.len(), 1);
+        assert!(
+            at_terminal[0].args.contains(&"-t".to_string()),
+            "an interactive containerised exec from a terminal must ask the \
+             provider for one: {:?}",
+            at_terminal[0].args
+        );
+
+        let redirected = build_specs(&d, &exec_def(1, None), &id(), CAPTURED).unwrap();
+        assert!(
+            !redirected[0].args.contains(&"-t".to_string()),
+            "`-t` merges stderr into stdout, so a redirected run given one \
+             would put its diagnostics in the output file: {:?}",
+            redirected[0].args
+        );
+
+        // And the shape still decides first: a grid gets no terminal even
+        // when the caller has one, because nobody's stdin is connected.
+        let grid = build_specs(&job(1, 3), &exec_def(3, None), &id(), AT_A_TERMINAL).unwrap();
+        assert_eq!(grid.len(), 3);
+        for spec in &grid {
+            assert!(
+                !spec.args.contains(&"-t".to_string()),
+                "a captured rank asked for a pseudo-terminal: {:?}",
+                spec.args
+            );
+        }
+    }
+
+    #[test]
     fn a_workload_inherits_the_callers_environment_by_default() {
         // Mirage's parent is the terminal the user typed in, so what they
         // exported there — a token, a PYTHONPATH, a proxy — they meant
         // for the workload.
-        let specs = build_specs(&desc(1), &exec_def(1, None), &id()).unwrap();
+        let specs = build_specs(&desc(1), &exec_def(1, None), &id(), CAPTURED).unwrap();
         assert!(specs[0].inherit_env);
     }
 
@@ -1166,7 +1267,7 @@ mod tests {
     fn clear_env_asks_for_an_almost_empty_environment() {
         let mut def = exec_def(1, None);
         def.clear_env = true;
-        let specs = build_specs(&desc(1), &def, &id()).unwrap();
+        let specs = build_specs(&desc(1), &def, &id(), CAPTURED).unwrap();
         assert!(!specs[0].inherit_env);
         // The emulator's own variables survive either way: they are
         // layered on explicitly, not inherited, and a workload that lost
@@ -1189,7 +1290,7 @@ mod tests {
         });
         let mut def = exec_def(1, None);
         def.clear_env = true;
-        let specs = build_specs(&d, &def, &id()).unwrap();
+        let specs = build_specs(&d, &def, &id(), CAPTURED).unwrap();
         assert!(specs[0].inherit_env);
     }
 
@@ -1278,7 +1379,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let d = containerised_nodes(2, dir.path());
 
-        let specs = build_specs(&d, &exec_def(1, None), &id()).unwrap();
+        let specs = build_specs(&d, &exec_def(1, None), &id(), CAPTURED).unwrap();
 
         assert_eq!(specs.len(), 2);
         for spec in &specs {
@@ -1304,7 +1405,7 @@ mod tests {
         // single node container.
         let dir = tempfile::tempdir().unwrap();
         let one_container = containerised_nodes(1, dir.path());
-        let specs = build_specs(&one_container, &exec_def(1, None), &id()).unwrap();
+        let specs = build_specs(&one_container, &exec_def(1, None), &id(), CAPTURED).unwrap();
         assert_eq!(
             exec_env(&specs[0], ENV_NCCL_SOCKET_IFNAME).as_deref(),
             Some(NCCL_IFNAME_LOOPBACK)
@@ -1315,7 +1416,7 @@ mod tests {
             ENV_NCCL_SOCKET_IFNAME.to_string(),
             NCCL_IFNAME_LOOPBACK.to_string(),
         );
-        let specs = build_specs(&host, &exec_def(1, None), &id()).unwrap();
+        let specs = build_specs(&host, &exec_def(1, None), &id(), CAPTURED).unwrap();
         for spec in &specs {
             assert_eq!(
                 spec.env.get(ENV_NCCL_SOCKET_IFNAME).map(String::as_str),
@@ -1337,7 +1438,7 @@ mod tests {
             .env
             .insert(ENV_NCCL_SOCKET_IFNAME.to_string(), "eth1".to_string());
 
-        let specs = build_specs(&d, &def, &id()).unwrap();
+        let specs = build_specs(&d, &def, &id(), CAPTURED).unwrap();
 
         assert_eq!(
             exec_env(&specs[0], ENV_NCCL_SOCKET_IFNAME).as_deref(),
@@ -1357,7 +1458,7 @@ mod tests {
         // beside the point.
         let dir = tempfile::tempdir().unwrap();
         let d = containerised(executing_provider(dir.path()), dir.path());
-        let err = build_specs(&d, &exec_def_in("/nope/nope"), &id()).unwrap_err();
+        let err = build_specs(&d, &exec_def_in("/nope/nope"), &id(), CAPTURED).unwrap_err();
 
         let message = err.to_string();
         assert!(message.contains("--workdir /nope/nope"), "{message}");
@@ -1378,7 +1479,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let d = containerised(executing_provider(dir.path()), dir.path());
         let here = dir.path().to_string_lossy().to_string();
-        let specs = build_specs(&d, &exec_def_in(&here), &id()).unwrap();
+        let specs = build_specs(&d, &exec_def_in(&here), &id(), CAPTURED).unwrap();
         assert!(
             specs[0]
                 .args
@@ -1406,7 +1507,7 @@ mod tests {
                 .to_string(),
             dir.path(),
         );
-        let specs = build_specs(&d, &exec_def(1, None), &id()).unwrap();
+        let specs = build_specs(&d, &exec_def(1, None), &id(), CAPTURED).unwrap();
         assert!(
             !specs[0].args.iter().any(|a| a == "-w"),
             "{:?}",

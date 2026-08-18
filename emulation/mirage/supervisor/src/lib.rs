@@ -50,4 +50,4 @@ pub use exec::Exec;
 pub use process::{Exit, OutputChunk, SpawnSpec, Spawned, StdioMode};
 pub use run::Run;
 pub use session::Session;
-pub use spec::build_specs;
+pub use spec::{CallerStreams, build_specs};

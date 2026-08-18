@@ -31,6 +31,11 @@ use mirage_core::profile::ProfileDef;
 use mirage_core::session::{CreateSessionRequest, SessionContext, SessionHealth};
 use mirage_supervisor::Run;
 
+/// A caller whose streams are redirected, which is what a test process
+/// has. Stated rather than probed so spec-building stays a function of
+/// its arguments; see `mirage_supervisor::CallerStreams`.
+const CAPTURED: mirage_supervisor::CallerStreams = mirage_supervisor::CallerStreams::new(false);
+
 // ---------------------------------------------------------------------
 // A stub emulator backend
 // ---------------------------------------------------------------------
@@ -507,8 +512,8 @@ async fn a_description_lets_another_process_build_the_same_processes() {
     assert_eq!(desc.env.get(STUB_ENV).map(String::as_str), Some("1"));
 
     let id = ExecId::new("x-1").unwrap();
-    let specs =
-        mirage_supervisor::build_specs(&desc, &def(&run, "exit 0", None), &id).expect("specs");
+    let specs = mirage_supervisor::build_specs(&desc, &def(&run, "exit 0", None), &id, CAPTURED)
+        .expect("specs");
     assert_eq!(specs.len(), 2);
     assert_eq!(specs[0].env.get("RANK").map(String::as_str), Some("0"));
     assert_eq!(specs[1].env.get("RANK").map(String::as_str), Some("1"));
@@ -525,7 +530,7 @@ async fn an_exec_built_from_a_description_runs_like_one_built_by_the_run() {
     let d = def(&run, &format!("test -n \"${STUB_ENV}\""), None);
 
     let id = ExecId::new("x-2").unwrap();
-    let specs = mirage_supervisor::build_specs(&desc, &d, &id).unwrap();
+    let specs = mirage_supervisor::build_specs(&desc, &d, &id, CAPTURED).unwrap();
     let (exec, mut output) = mirage_supervisor::Exec::start(id, d, specs);
     let drain = tokio::spawn(async move { while output.recv().await.is_some() {} });
     tokio::time::timeout(Duration::from_secs(30), exec.wait_finished())
@@ -1235,12 +1240,14 @@ async fn every_description_of_a_session_names_the_same_rendezvous() {
         &first,
         &def(&run, "true", None),
         &ExecId::new("x-a").unwrap(),
+        CAPTURED,
     )
     .unwrap();
     let b = mirage_supervisor::build_specs(
         &second,
         &def(&run, "true", None),
         &ExecId::new("x-b").unwrap(),
+        CAPTURED,
     )
     .unwrap();
     assert_eq!(a[1].env.get("MASTER_PORT"), b[1].env.get("MASTER_PORT"));

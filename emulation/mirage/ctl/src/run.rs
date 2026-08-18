@@ -457,7 +457,15 @@ pub async fn exec_cmd(a: ExecArgsCli) -> anyhow::Result<ExitCode> {
         .map_or(0, |d| d.as_nanos());
     let id = ExecId::new(format!("x-{}-{started}", std::process::id()))
         .map_err(|e| anyhow::anyhow!("could not build an exec id: {e}"))?;
-    let specs = mirage_supervisor::build_specs(&desc, &def, &id)?;
+    // `mirage exec` spawns its ranks as its own children in its own
+    // terminal, so the streams to ask about are this process's; see
+    // [`mirage_supervisor::CallerStreams`].
+    let specs = mirage_supervisor::build_specs(
+        &desc,
+        &def,
+        &id,
+        mirage_supervisor::CallerStreams::probe(),
+    )?;
     let (exec, output) = Exec::start(id, def, specs);
 
     // Normally the run waits for us and the lease outlives the workload.
