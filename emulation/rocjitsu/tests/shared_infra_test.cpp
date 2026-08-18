@@ -6725,6 +6725,7 @@ void expect_vector_lane_reads_use_own_wave_vgprs(rj_code_arch_t arch) {
     cu->write_vgpr(vbase + 141, 0, 0xbeef0000u + i);
     cu->write_vgpr(vbase + 141, 2, 0x200u + i);
     cu->write_vgpr(vbase + 141, 31, 0x400u + i);
+    cu->write_vgpr(vbase + 141, 43, 0x600u + i);
   }
 
   auto decoder = Decoder::create(arch);
@@ -6800,6 +6801,27 @@ void expect_vector_lane_reads_use_own_wave_vgprs(rj_code_arch_t arch) {
     cu->execute_instruction(inst.get(), *wfs[i]);
     EXPECT_EQ(cu->read_vgpr(vbase + 141, 2), 0x200u + i);
     EXPECT_EQ(cu->read_vgpr(vbase + 141, 31), 0x500u + i);
+  }
+
+  // Wave32 still exposes 64 physical VGPR lanes to V_WRITELANE/V_READLANE.
+  // Compilers use the inactive upper lanes as scalar spill storage.
+  for (uint32_t i = 0; i < wfs.size(); ++i) {
+    ASSERT_EQ(wfs[i]->wf_size(), 32u);
+    const uint32_t sbase = wfs[i]->sgpr_alloc().base;
+    const uint32_t vbase = wfs[i]->vgpr_alloc().base;
+    std::unique_ptr<Instruction> write_inst(decoder->decode(kWritelaneV141S4S2.data()));
+    std::unique_ptr<Instruction> read_inst(decoder->decode(kReadlaneS4V141S2.data()));
+    ASSERT_NE(write_inst, nullptr);
+    ASSERT_NE(read_inst, nullptr);
+    cu->write_sgpr(sbase + 2, 43);
+    cu->write_sgpr(sbase + 4, 0x700u + i);
+    cu->execute_instruction(write_inst.get(), *wfs[i]);
+    EXPECT_EQ(cu->read_vgpr(vbase + 141, 31), 0x500u + i);
+    EXPECT_EQ(cu->read_vgpr(vbase + 141, 43), 0x700u + i);
+
+    cu->write_sgpr(sbase + 4, 0);
+    cu->execute_instruction(read_inst.get(), *wfs[i]);
+    EXPECT_EQ(cu->read_sgpr(sbase + 4), 0x700u + i);
   }
 }
 

@@ -297,11 +297,12 @@ public:
   /// @details DPP semantic helpers still evaluate every active lane so scalar
   /// side results see the complete operation. This mask suppresses both the
   /// architectural VGPR commit and its plugin observation for row/bank-masked
-  /// or invalid-source lanes.
-  uint64_t vgpr_write_mask() const { return vgpr_write_mask_ & lane_mask(); }
+  /// or invalid-source lanes. Unlike EXEC, the mask covers all 64 physical
+  /// lanes: Wave32 V_WRITELANE instructions may use lanes 32-63 as storage.
+  uint64_t vgpr_write_mask() const { return vgpr_write_mask_; }
 
   /// @brief Set the execution-local VGPR write-effect mask.
-  void set_vgpr_write_mask(uint64_t val) { vgpr_write_mask_ = val & lane_mask(); }
+  void set_vgpr_write_mask(uint64_t val) { vgpr_write_mask_ = val; }
 
   /// @brief Return the raw architectural VCC register pair.
   /// @returns Raw VCC register value, including non-lane bits in wave32 mode.
@@ -794,7 +795,7 @@ public:
     sgpr_alloc_ = {};
     vgpr_alloc_ = {};
     exec_ = lane_mask();
-    vgpr_write_mask_ = lane_mask();
+    vgpr_write_mask_ = ~0ULL;
     vcc_ = 0;
     m0_ = 0;
     set_mode_raw(0);
