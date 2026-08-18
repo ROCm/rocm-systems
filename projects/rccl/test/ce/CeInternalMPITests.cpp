@@ -550,9 +550,14 @@ TEST_F(CeInternalMPITest, MemOpSyncCaptureResetsFlags)
     requireMinRanks(2);
 
     const int nRanks = ceComm->nRanks;
-    ASSERT_EQ(hipMemset(ceComm->ceColl.baseUCSymReadyPtr, 0xAB,
-                        static_cast<size_t>(nRanks) * sizeof(uint32_t)),
+    // Warmup AllGather may leave useCompletePtr true; reset targets the active array.
+    ceComm->ceColl.useCompletePtr = false;
+    ASSERT_EQ(ceResetUcSyncWindowOnStream(ceComm, getActiveStream()), hipSuccess);
+    ASSERT_EQ(hipMemsetAsync(ceComm->ceColl.baseUCSymReadyPtr, 0xAB,
+                             static_cast<size_t>(nRanks) * sizeof(uint32_t), getActiveStream()),
               hipSuccess);
+    ASSERT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
+    MPI_Barrier(MPI_COMM_WORLD);
 
     CeSimulatedCaptureGuard capture(ceComm);
     const bool useCompleteBefore = ceComm->ceColl.useCompletePtr;
@@ -576,13 +581,9 @@ TEST_F(CeInternalMPITest, MemOpSyncCaptureResetCoversAllRanks)
     requireMinRanks(2);
 
     const int nRanks = ceComm->nRanks;
-    for(int i = 0; i < nRanks; ++i)
-    {
-        const uint32_t pattern = static_cast<uint32_t>(0x1000 + i);
-        ASSERT_EQ(hipMemcpy(static_cast<uint32_t*>(ceComm->ceColl.baseUCSymReadyPtr) + i,
-                            &pattern, sizeof(uint32_t), hipMemcpyHostToDevice),
-                  hipSuccess);
-    }
+    ceComm->ceColl.useCompletePtr = false;
+    ASSERT_EQ(ceWriteUcReadyPatternsOnStream(ceComm, getActiveStream()), hipSuccess);
+    MPI_Barrier(MPI_COMM_WORLD);
 
     CeSimulatedCaptureGuard capture(ceComm);
     ASSERT_EQ(ncclMemOpSync(ceComm, getActiveStream(), nullptr), ncclSuccess);
@@ -861,8 +862,9 @@ TEST_F(CeInternalMPITest, LaunchBatchOpsEvenInternalSyncCountRestoresUseComplete
     EXPECT_EQ(ceComm->ceColl.useCompletePtr, useCompleteBefore);
 }
 
-// LAUNCH-06: Odd internal sync count without padding leaves useCompletePtr flipped.
-TEST_F(CeInternalMPITest, LaunchBatchOpsOddSyncCountWithoutPaddingFlipsUseCompletePtr)
+// LAUNCH-06: One mid-loop sync (odd) still gets a padding ncclMemOpSync under capture,
+//            restoring useCompletePtr.  numOps=9 → sync at op 8 + padding sync.
+TEST_F(CeInternalMPITest, LaunchBatchOpsOddMidLoopSyncCountGetsPaddingRestoresUseCompletePtr)
 {
     if(!ceSimulatedCaptureSupported())
         GTEST_SKIP() << "Simulated capture requires ROCm >= 6.1 graph support";
@@ -870,7 +872,7 @@ TEST_F(CeInternalMPITest, LaunchBatchOpsOddSyncCountWithoutPaddingFlipsUseComple
     requireMinRanks(2);
 
     using namespace RCCLTestGuards;
-    constexpr int    kOps   = 8; // one mid-loop sync, padding not appended
+    constexpr int    kOps   = 9; // one mid-loop sync; padding makes total sync count even
     constexpr size_t kBytes = sizeof(float);
 
     std::vector<DeviceBufferAutoGuard> srcGuards(kOps), dstGuards(kOps);
@@ -905,8 +907,8 @@ TEST_F(CeInternalMPITest, LaunchBatchOpsOddSyncCountWithoutPaddingFlipsUseComple
     ncclCeCollArgs          collArgs{};
     ASSERT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream(), &collArgs), ncclSuccess);
     ASSERT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
-    EXPECT_NE(ceComm->ceColl.useCompletePtr, useCompleteBefore)
-        << "single mid-loop sync must flip useCompletePtr when padding is not applied";
+    EXPECT_EQ(ceComm->ceColl.useCompletePtr, useCompleteBefore)
+        << "odd mid-loop sync count must be padded to restore useCompletePtr for replay";
 }
 
 // ===========================================================================

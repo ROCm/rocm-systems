@@ -82,6 +82,35 @@ inline std::vector<uint32_t> ceReadUcCompleteFlags(const ncclComm* comm)
     return host;
 }
 
+// Reset UC ready/complete flag arrays on the same stream used by ncclMemOpSync.
+// Default-stream hipMemset/hipMemcpy races with batch memops on the test stream.
+inline hipError_t ceResetUcSyncWindowOnStream(ncclComm* comm, hipStream_t stream)
+{
+    const size_t nBytes = static_cast<size_t>(comm->nRanks) * sizeof(uint32_t);
+    hipError_t   err    = hipMemsetAsync(comm->ceColl.baseUCSymReadyPtr, 0, nBytes, stream);
+    if(err != hipSuccess)
+        return err;
+    err = hipMemsetAsync(comm->ceColl.baseUCSymComplPtr, 0, nBytes, stream);
+    if(err != hipSuccess)
+        return err;
+    return hipStreamSynchronize(stream);
+}
+
+// Seed distinct per-rank patterns into the ready array on stream.
+inline hipError_t ceWriteUcReadyPatternsOnStream(ncclComm* comm, hipStream_t stream)
+{
+    auto* readyPtrs = reinterpret_cast<uint32_t*>(comm->ceColl.baseUCSymReadyPtr);
+    for(int i = 0; i < comm->nRanks; ++i)
+    {
+        const uint32_t pattern = static_cast<uint32_t>(0x1000 + i);
+        hipError_t err =
+            hipMemcpyAsync(&readyPtrs[i], &pattern, sizeof(uint32_t), hipMemcpyHostToDevice, stream);
+        if(err != hipSuccess)
+            return err;
+    }
+    return hipStreamSynchronize(stream);
+}
+
 #else
 
 inline bool ceSimulatedCaptureSupported() { return false; }
