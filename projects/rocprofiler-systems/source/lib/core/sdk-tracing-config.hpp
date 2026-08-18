@@ -311,23 +311,6 @@ sdk_tracing_config<SdkBackend, Externals>::get_callback_domains()
         LOG_WARNING("rocprofiler-sdk version not initialized");
     }
 
-    if constexpr(compile_time_sdk_version >=
-                 version_info{ .major = 1, .minor = 3, .patch = 4 })
-    {
-        if(sdk_runtime_version >= version_info{ .major = 1, .minor = 3, .patch = 4 })
-        {
-            supported.emplace(SdkApi::CALLBACK_TRACING_ROCSHMEM_API);
-        }
-    }
-    if constexpr(compile_time_sdk_version >=
-                 version_info{ .major = 1, .minor = 3, .patch = 5 })
-    {
-        if(sdk_runtime_version >= version_info{ .major = 1, .minor = 3, .patch = 5 })
-        {
-            supported.emplace(SdkApi::CALLBACK_TRACING_HIPFILE_API);
-        }
-    }
-
     auto       callback_domains = std::unordered_set<kind_t>{};
     const auto domains_input =
         rocprofsys::delimit(Externals::get_rocm_domains(), " ,;:\t\n");
