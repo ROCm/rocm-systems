@@ -137,8 +137,8 @@ TEST_P(HipFileVerifyBytes, RoundTripGuardsAllRegions)
     // offset buf_off = 4_KiB):
     // [head device sentinel region][data][tail device sentinel region]
     uint8_t *data = bufferStart() + 4_KiB;
-    launchAndVerifyBytes(bufferStart(), buffer_bytes, data, n, defaultGrid(n), dim3(kDefaultWorkgroupSize),
-                         kStride);
+    assertVerifyAndModifyBytes(bufferStart(), buffer_bytes, data, n, defaultGrid(n),
+                               dim3(kDefaultWorkgroupSize), kStride);
 
     ASSERT_EQ(static_cast<ssize_t>(io_bytes),
               hipFileWrite(tmpfile_handle, device_buffer, io_bytes, file_off, buf_off));
