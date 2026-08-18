@@ -405,7 +405,6 @@ add_subdirectory(fuzz/decode)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_subdirectory(tools/rocjitsu)
 endif()
-# Tests and scaling tools.
 if(BUILD_TESTING)
     add_subdirectory(tests)
 endif()

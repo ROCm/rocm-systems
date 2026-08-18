@@ -622,6 +622,11 @@ class TestExecutor:
                 print("SKIP: Build step skipped (--no-build)")
             return True
 
+        if not self.build_config.get("enabled", True):
+            if self.args.verbose:
+                print("SKIP: librccl build disabled (build_configuration.enabled=false)")
+            return True
+
         print("="*80)
         print("BUILDING RCCL")
         print("="*80)

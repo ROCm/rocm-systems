@@ -19,6 +19,25 @@ namespace {
 using namespace rocjitsu;
 using namespace rocjitsu::test::cdna5;
 
+TEST(Gfx1250ExecutionTest, LdsAccessesRejectWrappedRanges) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto &lds = cu->lds();
+  constexpr uint32_t kWrappedAddress = UINT32_MAX - 3;
+  constexpr uint32_t kValue = 0x12345678u;
+
+  lds.write32(kWrappedAddress, kValue);
+  EXPECT_EQ(lds.read32(kWrappedAddress), 0u);
+
+  std::array<uint8_t, sizeof(kValue)> bytes{};
+  std::memcpy(bytes.data(), &kValue, sizeof(kValue));
+  lds.write(kWrappedAddress, bytes.data(), bytes.size());
+  bytes.fill(0xff);
+  const auto &const_lds = lds;
+  const_lds.read(kWrappedAddress, bytes.data(), bytes.size());
+  EXPECT_EQ(bytes, (std::array<uint8_t, sizeof(kValue)>{}));
+}
+
 TEST(Gfx1250SimulationTest, DispatchesEndpgmThroughConfig) {
   Gfx1250Sim sim;
   const uint32_t code[] = {S_ENDPGM_GFX12};
@@ -315,6 +334,44 @@ TEST(Gfx1250SimulationTest, TtmpWorkgroupIdsUseGridCoordinatesFor2DDispatch) {
   // TTMP9 (s117) holds grid_wg_id_x; TTMP7 (s115) packs wg_id_y/z.
   EXPECT_EQ(target->sgpr(117), 1u);
   EXPECT_EQ(target->sgpr(115), 1u);
+  EXPECT_NE(target->sgpr(116) & (1u << 30), 0u);
+}
+
+TEST(Gfx1250SimulationTest, Ttmp8EncodesWaveIdWithinWorkgroup) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code));
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch(kernel_object, 64, 64);
+  step_until_xcd_halted(sim);
+
+  ASSERT_EQ(sim.snapshot->snapshots().size(), 2u);
+  std::vector<uint32_t> ttmp8_values;
+  for (const auto &wf : sim.snapshot->snapshots())
+    ttmp8_values.push_back(wf.sgpr(116));
+  std::sort(ttmp8_values.begin(), ttmp8_values.end());
+  EXPECT_EQ(ttmp8_values, (std::vector<uint32_t>{0, 1u << 25}));
+}
+
+TEST(Gfx1250SimulationTest, Ttmp8EncodesQueuePacketId) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code));
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch(kernel_object, 32, 32);
+  queue.dispatch(kernel_object, 32, 32);
+  step_until_xcd_halted(sim);
+
+  ASSERT_EQ(sim.snapshot->snapshots().size(), 2u);
+  std::array<uint32_t, 2> queue_packet_ids{};
+  for (const auto &wf : sim.snapshot->snapshots()) {
+    ASSERT_GE(wf.dispatch_id, 1u);
+    ASSERT_LE(wf.dispatch_id, 2u);
+    queue_packet_ids[wf.dispatch_id - 1] = wf.sgpr(116) & 0x1FFFFFFu;
+  }
+  EXPECT_EQ(queue_packet_ids, (std::array<uint32_t, 2>{0, 1}));
 }
 
 TEST(Gfx1250SimulationTest, GlobalStoreWritesVisibleMemory) {
