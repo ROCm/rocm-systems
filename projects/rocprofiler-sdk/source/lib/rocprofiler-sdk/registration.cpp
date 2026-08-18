@@ -356,10 +356,25 @@ struct client_library
 
     friend bool operator==(const client_library& lhs, const client_library& rhs)
     {
-        return std::tie(lhs.configure_func, lhs.configure_attach_func) ==
-                   std::tie(rhs.configure_func, rhs.configure_attach_func) ||
-               std::tie(lhs.configure_result, lhs.configure_attach_result) ==
-                   std::tie(rhs.configure_result, rhs.configure_attach_result);
+        auto _cfg_func_match = std::tie(lhs.configure_func, lhs.configure_attach_func) ==
+                               std::tie(rhs.configure_func, rhs.configure_attach_func);
+
+        auto _has_results = [](auto* result, auto* attach_result) {
+            return (result != nullptr) || (attach_result != nullptr);
+        };
+
+        auto _lhs_has_results = _has_results(lhs.configure_result, lhs.configure_attach_result);
+        auto _rhs_has_results = _has_results(rhs.configure_result, rhs.configure_attach_result);
+
+        // if either client does not have configure results yet, only compare the configure
+        // functions
+        if(!_lhs_has_results || !_rhs_has_results) return _cfg_func_match;
+
+        // if both clients have configure results, compare the configure results as well
+        auto _cfg_result_match = std::tie(lhs.configure_result, lhs.configure_attach_result) ==
+                                 std::tie(rhs.configure_result, rhs.configure_attach_result);
+
+        return (_cfg_func_match || _cfg_result_match);
     }
 };
 
