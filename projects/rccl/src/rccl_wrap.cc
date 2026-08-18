@@ -109,9 +109,14 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
     // Change LL protocol threshold
     info->protocol = NCCL_PROTO_LL;
   } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") &&
-             comm->nNodes == 1 && (info->func == ncclFuncReduceScatter) && sizePerRank <= 131072) {
-    // Change LL protocol threshold
-    info->protocol = NCCL_PROTO_LL;
+             comm->nNodes == 1 && (info->func == ncclFuncReduceScatter) && sizePerRank <= 1048576) {
+#ifdef ENABLE_WARP_SPEED
+    if (sizePerRank <= 131072)
+#endif
+    {
+      // Change LL protocol threshold
+      info->protocol = NCCL_PROTO_LL;
+    }
   } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") &&
              comm->nNodes == 1 && (info->func == ncclFuncReduceScatter) && sizePerRank <= 352128) {
     // Change LL protocol threshold
@@ -615,11 +620,6 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
     return false;
   }
 
-  // Direct AllGather incompatible with UBR
-  if (ncclParamLocalRegister()) {
-    return false;
-  }
-
   if (rcclUseAinic()) {
     INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER disabled on AINIC. ");
     return false;
@@ -890,8 +890,11 @@ bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan) 
 
   // WarpSpeed is not supported currently for the following cases:
   // 1. if any work batch in the plan contains P2P work
-  // 2. or any collective task is not using RING algorithm
+  // 2. if the plan contains AllGatherV-fused work; that kernel
+  //    does not implement WarpSpeed's warp-level channel distribution
+  // 3. or any collective task is not using RING algorithm
   bool hasP2p = !ncclIntruQueueEmpty(&plan->p2pTaskQueue);
+  bool hasBcast = !ncclIntruQueueEmpty(&plan->bcastTaskQueue);
   bool hasNonRing = false;
   struct ncclTaskColl* task = ncclIntruQueueHead(&plan->collTaskQueue);
   while (task != nullptr) {
@@ -901,7 +904,7 @@ bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan) 
     }
     task = task->next;
   }
-  return (!hasP2p && !hasNonRing);
+  return (!hasP2p && !hasBcast && !hasNonRing);
 }
 
 bool rcclIsAboveWarpSpeedThreshold(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes) {
@@ -923,8 +926,12 @@ bool rcclCanUseWarpSpeedAuto(struct ncclComm* comm, int nNodes) {
          (rcclParamWarpSpeedAutoMode() != 0) && comm->cuCount > 128; // Only use in SPX mode, 256 CU on gfx950
 }
 
+bool rcclWarpSpeedChannelCountSupported(struct ncclComm* comm) {
+  return comm->nChannels <= (MAXCHANNELS) / 2;
+}
+
 ncclResult_t validChannelsForWarpSpeed(struct ncclComm* comm, struct ncclTaskColl* info) {
-  if (info->useWarpSpeed && comm->nChannels > (MAXCHANNELS) / 2) {
+  if (info->useWarpSpeed && !rcclWarpSpeedChannelCountSupported(comm)) {
     WARN("WarpSpeed does not support more than %d channels. Current number of channels is %d. To avoid hang, run with "
          "RCCL_WARP_SPEED_AUTO=0",
          MAXCHANNELS / 2, comm->nChannels);
@@ -962,8 +969,16 @@ ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* in
       if (!unrollFactorSet) comm->unroll = NCCL_UNROLL_2;
     }
     if (rcclIsAboveWarpSpeedThreshold(comm, info, nBytes)) {
-      info->nWarps = 4;
-      info->useWarpSpeed = true;
+      // Skip WarpSpeed when the comm exceeds its channel limit (e.g. RCCL_ENABLE_INTRANET=1 drives
+      // nChannels to MAXCHANNELS) instead of failing. Force-enable still errors below.
+      if (!rcclWarpSpeedChannelCountSupported(comm)) {
+        if (comm->rank == 0)
+          INFO(NCCL_TUNING, "RCCL WarpSpeed auto-disabled: %d channels exceeds max %d supported",
+               comm->nChannels, MAXCHANNELS / 2);
+      } else {
+        info->nWarps = 4;
+        info->useWarpSpeed = true;
+      }
     }
   }
   NCCLCHECK(validChannelsForWarpSpeed(comm, info));

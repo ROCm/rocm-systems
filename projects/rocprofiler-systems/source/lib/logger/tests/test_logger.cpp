@@ -260,19 +260,19 @@ TEST_F(logger_test, logger_instance_is_singleton)
 
 TEST_F(logger_test, fork_child_gets_different_pid_in_filename)
 {
-    pid_t parent_pid = getpid();
+    const pid_t parent_pid = getpid();
 
-    pid_t child_pid = fork();
+    const pid_t child_pid = fork();
     if(child_pid == 0)
     {
-        pid_t current_pid = getpid();
+        const pid_t current_pid = getpid();
 
         auto child_filename =
             rocprofsys::logger_detail::include_process_id_in_filename("test.log");
         auto expected_filename = "test_" + std::to_string(current_pid) + ".log";
 
-        bool pid_differs      = (current_pid != parent_pid);
-        bool filename_correct = (child_filename == expected_filename);
+        const bool pid_differs      = (current_pid != parent_pid);
+        const bool filename_correct = (child_filename == expected_filename);
 
         _exit((pid_differs && filename_correct) ? 0 : 1);
     }
@@ -280,7 +280,7 @@ TEST_F(logger_test, fork_child_gets_different_pid_in_filename)
     {
         int status;
         waitpid(child_pid, &status, 0);
-        int child_exit_code = WEXITSTATUS(status);
+        const int child_exit_code = WEXITSTATUS(status);
 
         EXPECT_EQ(child_exit_code, 0) << "Child should have different PID in filename";
     }
@@ -294,7 +294,7 @@ TEST_F(logger_test, fork_resets_logger_in_child)
     int pipefd[2];
     ASSERT_EQ(pipe(pipefd), 0) << "pipe() failed";
 
-    pid_t child_pid = fork();
+    const pid_t child_pid = fork();
     if(child_pid == 0)
     {
         close(pipefd[0]);
@@ -303,7 +303,7 @@ TEST_F(logger_test, fork_resets_logger_in_child)
 
         auto& child_logger = rocprofsys::logger_t::instance();
 
-        bool logger_has_name = (child_logger.name() == "rocprofiler-systems");
+        const bool logger_has_name = (child_logger.name() == "rocprofiler-systems");
 
         child_logger.info("fork_reset_child_marker");
         child_logger.flush();
@@ -340,7 +340,7 @@ TEST_F(logger_test, logger_settings_default_values)
     unsetenv(rocprofsys::env_vars::LOG_LEVEL);
     unsetenv(rocprofsys::env_vars::LOG_FILE);
 
-    rocprofsys::logger_settings_t settings;
+    const rocprofsys::logger_settings_t settings;
 
     EXPECT_EQ(settings.get_log_level(), spdlog::level::info);
     EXPECT_TRUE(settings.get_log_file().empty());
@@ -351,7 +351,7 @@ TEST_F(logger_test, logger_settings_with_env_vars)
     setenv(rocprofsys::env_vars::LOG_LEVEL, "debug", 1);
     setenv(rocprofsys::env_vars::LOG_FILE, "/tmp/test.log", 1);
 
-    rocprofsys::logger_settings_t settings;
+    const rocprofsys::logger_settings_t settings;
 
     EXPECT_EQ(settings.get_log_level(), spdlog::level::debug);
     EXPECT_EQ(settings.get_log_file(), "/tmp/test.log");
@@ -364,8 +364,8 @@ TEST_F(logger_test, logger_settings_monochrome)
 {
     setenv(rocprofsys::env_vars::MONOCHROME, "1", 1);
 
-    rocprofsys::logger_settings_t settings;
-    const auto*                   pattern = settings.get_log_pattern();
+    const rocprofsys::logger_settings_t settings;
+    const auto*                         pattern = settings.get_log_pattern();
 
     EXPECT_TRUE(std::string(pattern).find("%^") == std::string::npos);
     EXPECT_TRUE(std::string(pattern).find("%$") == std::string::npos);
@@ -375,27 +375,27 @@ TEST_F(logger_test, logger_settings_monochrome)
 
 TEST_F(logger_test, fork_child_creates_log_file_with_child_pid)
 {
-    std::string test_log_base = "/tmp/test_fork_logger";
-    std::string test_log_ext  = ".log";
-    std::string test_log_file = test_log_base + test_log_ext;
+    const std::string test_log_base = "/tmp/test_fork_logger";
+    const std::string test_log_ext  = ".log";
+    const std::string test_log_file = test_log_base + test_log_ext;
 
-    pid_t child_pid = fork();
+    const pid_t child_pid = fork();
     if(child_pid == 0)
     {
         setenv(rocprofsys::env_vars::LOG_FILE, test_log_file.c_str(), 1);
 
-        pid_t current_pid = getpid();
+        const pid_t current_pid = getpid();
 
         auto& child_logger = rocprofsys::logger_t::instance();
 
-        std::string expected_child_log_file =
+        const std::string expected_child_log_file =
             test_log_base + "_" + std::to_string(current_pid) + test_log_ext;
 
         child_logger.info("Child process log entry");
         child_logger.flush();
 
         std::ifstream child_log(expected_child_log_file);
-        bool          child_log_exists = child_log.good();
+        const bool    child_log_exists = child_log.good();
 
         std::string content;
         bool        has_content = false;
@@ -413,7 +413,7 @@ TEST_F(logger_test, fork_child_creates_log_file_with_child_pid)
     {
         int status;
         waitpid(child_pid, &status, 0);
-        int child_exit_code = WEXITSTATUS(status);
+        const int child_exit_code = WEXITSTATUS(status);
 
         EXPECT_EQ(child_exit_code, 0)
             << "Child process failed to create its own log file with child PID";
@@ -445,7 +445,7 @@ TEST_F(logger_test, concurrent_logging_during_fork_no_deadlock)
     int pipefd[2];
     ASSERT_EQ(pipe(pipefd), 0) << "pipe() failed";
 
-    pid_t child_pid = fork();
+    const pid_t child_pid = fork();
     if(child_pid == 0)
     {
         close(pipefd[0]);
@@ -468,8 +468,8 @@ TEST_F(logger_test, concurrent_logging_during_fork_no_deadlock)
     for(auto& t : threads)
         t.join();
 
-    int   status;
-    pid_t waited = waitpid(child_pid, &status, 0);
+    int         status;
+    const pid_t waited = waitpid(child_pid, &status, 0);
     ASSERT_NE(waited, -1) << "waitpid failed";
     ASSERT_TRUE(WIFEXITED(status)) << "Child did not exit normally (possible deadlock)";
     EXPECT_EQ(WEXITSTATUS(status), 0);
@@ -492,7 +492,7 @@ TEST_F(logger_test, multiple_sequential_forks)
         int pipefd[2];
         ASSERT_EQ(pipe(pipefd), 0) << "pipe() failed on fork " << i;
 
-        pid_t child_pid = fork();
+        const pid_t child_pid = fork();
         if(child_pid == 0)
         {
             close(pipefd[0]);
@@ -503,7 +503,7 @@ TEST_F(logger_test, multiple_sequential_forks)
             child_logger.info("sequential_fork_child_{}", i);
             child_logger.flush();
 
-            bool valid = (child_logger.name() == "rocprofiler-systems");
+            const bool valid = (child_logger.name() == "rocprofiler-systems");
             _exit(valid ? 0 : 1);
         }
 
@@ -540,23 +540,23 @@ TEST_F(logger_test, multiple_sequential_forks)
 
 TEST_F(logger_test, parent_continues_logging_after_fork)
 {
-    std::string log_base = "/tmp/test_parent_post_fork";
-    std::string log_file = log_base + ".log";
+    const std::string log_base = "/tmp/test_parent_post_fork";
+    const std::string log_file = log_base + ".log";
 
     setenv(rocprofsys::env_vars::LOG_FILE, log_file.c_str(), 1);
 
     // Force a fresh logger with the file sink
     // (the singleton was already created without a file sink,
     //  so we test via a child that gets a fresh logger)
-    pid_t child_pid = fork();
+    const pid_t child_pid = fork();
     if(child_pid == 0)
     {
         auto& child_logger = rocprofsys::logger_t::instance();
         child_logger.info("parent_post_fork_marker");
         child_logger.flush();
 
-        pid_t       current_pid = getpid();
-        std::string expected_log_file =
+        const pid_t       current_pid = getpid();
+        const std::string expected_log_file =
             log_base + "_" + std::to_string(current_pid) + ".log";
 
         std::ifstream log(expected_log_file);
@@ -593,16 +593,16 @@ TEST_F(logger_test, fork_child_gets_new_logger_instance)
     EXPECT_EQ(parent_logger.name(), "rocprofiler-systems");
     EXPECT_FALSE(parent_logger.sinks().empty());
 
-    pid_t child_pid = fork();
+    const pid_t child_pid = fork();
     if(child_pid == 0)
     {
         auto& child_logger = rocprofsys::logger_t::instance();
 
         // The child logger should be freshly created with default sinks
         // (stdout only, since ROCPROFSYS_LOG_FILE is not set)
-        bool has_sinks = !child_logger.sinks().empty();
-        bool has_name  = (child_logger.name() == "rocprofiler-systems");
-        bool can_log   = true;
+        const bool has_sinks = !child_logger.sinks().empty();
+        const bool has_name  = (child_logger.name() == "rocprofiler-systems");
+        bool       can_log   = true;
 
         try
         {
@@ -663,7 +663,7 @@ TEST_F(logger_test, concurrent_logging_stress_with_fork)
     ASSERT_EQ(pipe(pipefd), 0) << "pipe() failed";
 
     // Fork while threads are actively logging
-    pid_t child_pid = fork();
+    const pid_t child_pid = fork();
     if(child_pid == 0)
     {
         close(pipefd[0]);
@@ -687,8 +687,8 @@ TEST_F(logger_test, concurrent_logging_stress_with_fork)
     for(auto& t : threads)
         t.join();
 
-    int   status;
-    pid_t waited = waitpid(child_pid, &status, 0);
+    int         status;
+    const pid_t waited = waitpid(child_pid, &status, 0);
     ASSERT_NE(waited, -1) << "waitpid failed";
     ASSERT_TRUE(WIFEXITED(status))
         << "Child did not exit normally under stress (possible deadlock)";

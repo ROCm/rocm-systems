@@ -8,6 +8,8 @@
 #define ROCJITSU_ISA_ARCH_AMDGPU_RDNA4_DECODER_H_
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
+#include <array>
+#include <cstddef>
 #include <memory>
 
 namespace rocjitsu {
@@ -18,6 +20,7 @@ namespace rdna4 {
 
 class Decoder {
 public:
+  static constexpr std::size_t kMaxInstructionWords = 3;
   static std::unique_ptr<Instruction> decode(const MachineInst *opcode);
 };
 
