@@ -90,6 +90,9 @@ public:
 private:
   void load_sections();
 
+  /// Section-header metadata for executable SHT_NOBITS ranges. These are not
+  /// materialized in all_sections(), whose entries always own readable bytes.
+  std::vector<std::unique_ptr<Section>> executable_nobits_sections_;
   rj_code_target_id_t target_id_ = ROCJITSU_CODE_TARGET_INVALID;
   std::string offload_kind_;
   std::string target_triple_;
