@@ -199,19 +199,6 @@ std::unordered_map<ncclComm_t, rocshmem::rocshmem_team_t> ncclCommToRshmemTeam;
 //   1 = force cheap fence off (__threadfence_system), 2 = force cheap fence on (override auto, e.g. re-enable on gfx950)
 RCCL_PARAM(CheapPostSendFenceOff, "CHEAP_POST_SEND_FENCE_OFF", 0);
 
-int rcclComputeCheapPostSendFenceOff(int cudaArch, int64_t param, bool uncachedMemSupported) {
-  // Cheap fence is only safe when cache-bypassing load/store builtins are available.
-  if (!uncachedMemSupported) return 1;
-  // Force cheap fence on regardless of arch (override auto, e.g. re-enable on gfx950).
-  if (param == 2) return 0;
-  // Any other non-zero value forces the full __threadfence_system().
-  if (param != 0) return 1;
-  // Arch-tuned auto: cheap fence on for gfx942 (940) and gfx1250 (1250);
-  // off for gfx950 (950) and everything else.
-  if (cudaArch == 940 || cudaArch == 1250) return 0;
-  return 1;
-}
-
 /**
  * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes.
  */

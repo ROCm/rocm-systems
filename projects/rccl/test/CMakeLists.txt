@@ -221,7 +221,6 @@ if(BUILD_TESTS)
     ScatterTests.cpp
     P2pChannelScalingTests.cpp
     VersionGateTests.cpp
-    CheapPostSendFenceTests.cpp
     SendRecvTests.cpp
     StandaloneTests.cpp
     DdaIpcTests.cpp
@@ -306,6 +305,7 @@ if(BUILD_TESTS)
       RomeTopoConsensusTests.cpp
       EnqueueCountTests.cpp
       DdaCollCommonTests.cpp
+      CheapPostSendFenceTests.cpp
       VersionInfoTests.cpp
       device/TestOp128.cpp
       device/TestTDM.cpp
