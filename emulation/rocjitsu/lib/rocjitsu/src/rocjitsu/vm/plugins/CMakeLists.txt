@@ -179,6 +179,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND RJ_BUILD_DATA_HAZARD_CORE)
             $<BUILD_INTERFACE:${RJ_HAZARD_CORE_INCLUDE_DIR}>
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/rocjitsu/data_hazard>
     )
+    target_compile_features(rocjitsu_data_hazard_core PUBLIC cxx_std_20)
     set_target_properties(
         rocjitsu_data_hazard_core
         PROPERTIES

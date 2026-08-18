@@ -24,11 +24,10 @@ find_path(HAZARD_CORE_INCLUDE_DIR data_hazard_engine.h
           PATH_SUFFIXES rocjitsu/data_hazard)
 find_library(HAZARD_CORE_LIBRARY data_hazard_core)
 
+target_compile_features(my_simulator PRIVATE cxx_std_20)
 target_include_directories(my_simulator PRIVATE ${HAZARD_CORE_INCLUDE_DIR})
 target_link_libraries(my_simulator PRIVATE ${HAZARD_CORE_LIBRARY})
 ```
-
-The engine requires C++17.
 
 ## Public headers
 
