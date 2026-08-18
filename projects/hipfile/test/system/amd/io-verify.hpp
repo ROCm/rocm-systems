@@ -127,7 +127,7 @@ defaultGrid(size_t n)
 inline hoff_t
 fileSize(int fd)
 {
-    struct stat st{};
+    struct stat st {};
     EXPECT_EQ(0, fstat(fd, &st));
     return static_cast<hoff_t>(st.st_size);
 }
