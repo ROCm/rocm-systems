@@ -549,6 +549,8 @@ if(BUILD_TESTS)
   )
 
   add_executable(rccl-UnitTestsGdr ${TEST_GDR_SOURCE_FILES})
+  # Ensure hipify-staged headers (including debug.h) exist before compiling this target.
+  add_dependencies(rccl-UnitTestsGdr hipify_all)
   # rccl-UnitTestsAmdSmi: tests for the amdsmi_wrap layer.
   #
   # AmdSmiFabricTests.cpp covers the fabric predicates and struct layout pinned in
