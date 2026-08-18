@@ -71,6 +71,26 @@
             "name": "release"
         },
         {
+            "binaryDir": "${sourceDir}/build/mpi-debug",
+            "cacheVariables": {
+                "ROCPROFSYS_USE_MPI": "ON"
+            },
+            "description": "Debug build with MPI support",
+            "displayName": "Debug build with MPI",
+            "inherits": "debug",
+            "name": "mpi-debug"
+        },
+        {
+            "binaryDir": "${sourceDir}/build/mpi-release",
+            "cacheVariables": {
+                "ROCPROFSYS_USE_MPI": "ON"
+            },
+            "description": "Release build with MPI support",
+            "displayName": "Release build with MPI",
+            "inherits": "release",
+            "name": "mpi-release"
+        },
+        {
             "binaryDir": "${sourceDir}/build/coverage",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
