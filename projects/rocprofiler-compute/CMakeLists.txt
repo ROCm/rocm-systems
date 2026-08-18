@@ -7,6 +7,16 @@ set(ROCM_SYSTEMS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 set(CMAKE_PREFIX_PATH $ENV{ROCM_PATH} "/opt/rocm/")
 message(STATUS "ROCM_PATH: $ENV{ROCM_PATH}")
 
+# TheRock ROCm bundles elfutils and zlib under lib/rocm_sysdeps; prefer them
+# when present, otherwise fall through to the distro packages.
+foreach(rocm_root IN LISTS CMAKE_PREFIX_PATH)
+    if(IS_DIRECTORY "${rocm_root}/lib/rocm_sysdeps/lib")
+        list(PREPEND CMAKE_LIBRARY_PATH "${rocm_root}/lib/rocm_sysdeps/lib")
+        set(ENV{PKG_CONFIG_PATH} "${rocm_root}/lib/rocm_sysdeps/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+        break()
+    endif()
+endforeach()
+
 if(
     CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR
     AND CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR
