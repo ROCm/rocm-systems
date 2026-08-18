@@ -12,6 +12,8 @@
 #include "rocjitsu/kmd/linux/sysfs.h"
 
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/kmd/linux/amdgpu_properties.h"
+#include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "rocjitsu/vm/soc.h"
 
@@ -143,8 +145,15 @@ TEST(SysfsTopologyDebugCapabilityTest, PerGfxipDebugBitsMatchDriver) {
     const uint32_t cap2 = static_cast<uint32_t>(props["capability2"]);
     const uint64_t dp = props["debug_prop"];
 
-    // Base trap-debugger support is advertised on every simulated GPU.
-    EXPECT_TRUE(cap & HSA_CAP_TRAP_DEBUG_SUPPORT);
+    // Base trap-debugger support is advertised on every GPU the CWSR codec can
+    // produce a record for, and withheld on the rest: rocdbgapi reads wave state
+    // out of the save area, so an agent whose record layout the simulator does
+    // not model cannot be serviced and must be declined at attach rather than at
+    // every wave stop. The sub-capabilities below stay driver-derived either
+    // way; they describe a support that is simply no longer claimed.
+    EXPECT_EQ(static_cast<bool>(cap & HSA_CAP_TRAP_DEBUG_SUPPORT),
+              rocjitsu::kmd::cwsr_layout_modelled_for_gc_ip_version(
+                  rocjitsu::kmd::gc_ip_version_for_gfx_target_version(e.gfx_target_version)));
     EXPECT_TRUE(cap & HSA_CAP_TRAP_DEBUG_WAVE_LAUNCH_TRAP_OVERRIDE_SUPPORTED);
     EXPECT_TRUE(cap & HSA_CAP_TRAP_DEBUG_WAVE_LAUNCH_MODE_SUPPORTED);
     EXPECT_TRUE(cap & HSA_CAP_TRAP_DEBUG_FIRMWARE_SUPPORTED);
@@ -170,7 +179,10 @@ TEST(SysfsTopologyDebugCapabilityTest, PerGfxipDebugBitsMatchDriver) {
 }
 
 TEST(SysfsTopologyDebugCapabilityTest, ExplicitCapabilityAndDebugPropArePreserved) {
-  Sysfs::GpuInfo gpu = make_gpu_info(110000u /* gfx1100 */);
+  // gfx942, so the trap-debug bit survives the override and this stays a test
+  // about the override rather than about the CWSR gate; the gfx1100 case is
+  // CapturedCapabilityCannotReadvertiseUnservicableTrapDebug's.
+  Sysfs::GpuInfo gpu = make_gpu_info(90402u /* gfx942 */);
   gpu.capability = HSA_CAP_TRAP_DEBUG_SUPPORT;
   gpu.capability2 = HSA_CAP2_TRAP_DEBUG_LDS_OUT_OF_ADDR_RANGE_SUPPORTED;
   gpu.debug_prop = HSA_DBG_DISPATCH_INFO_ALWAYS_VALID;
@@ -445,8 +457,21 @@ TEST(SysfsTopologyDebugCapabilityTest, ConfigTopologyMatchesRealHardware) {
     // The synthetic topology re-derives the HSA_CAP_ASIC_REVISION field from the
     // config's revision_id, so compare the feature bits with that field masked
     // out (the captured dumps carry the physical part's revision there).
-    const uint32_t asic_mask = static_cast<uint32_t>(HSA_CAP_ASIC_REVISION_MASK);
+    //
+    // HSA_CAP_TRAP_DEBUG_SUPPORT is masked out for a different reason: it is the
+    // one bit the simulator deliberately does not reproduce faithfully. A part
+    // whose CWSR record layout the codec cannot produce is not debuggable here
+    // however debuggable the physical device is, so the bit is withheld and
+    // checked below against the gate instead of against the dump.
+    const uint32_t asic_mask = static_cast<uint32_t>(HSA_CAP_ASIC_REVISION_MASK) |
+                               static_cast<uint32_t>(HSA_CAP_TRAP_DEBUG_SUPPORT);
     EXPECT_EQ(static_cast<uint32_t>(props["capability"]) & ~asic_mask, e->capability & ~asic_mask);
+    EXPECT_TRUE(e->capability & HSA_CAP_TRAP_DEBUG_SUPPORT)
+        << "the physical part advertises it, so the simulator's value is a real deviation";
+    EXPECT_EQ(
+        static_cast<bool>(static_cast<uint32_t>(props["capability"]) & HSA_CAP_TRAP_DEBUG_SUPPORT),
+        kmd::cwsr_layout_modelled_for_gc_ip_version(
+            kmd::gc_ip_version_for_gfx_target_version(loaded.device.gfx_target_version)));
     EXPECT_EQ(static_cast<uint32_t>(props["capability2"]), e->capability2);
     EXPECT_EQ(props["debug_prop"], e->debug_prop);
   }

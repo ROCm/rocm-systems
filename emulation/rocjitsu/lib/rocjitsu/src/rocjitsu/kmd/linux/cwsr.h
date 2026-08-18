@@ -20,6 +20,7 @@
 #define ROCJITSU_KMD_LINUX_CWSR_H_
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/kmd/linux/amdgpu_properties.h"
 
 #include <array>
 #include <cstdint>
@@ -46,6 +47,24 @@ constexpr bool cwsr_layout_modelled(rj_code_arch_t arch) {
   // packet id in TTMP6, so CDNA1/CDNA2 are deliberately excluded even though
   // they are also gfx9.
   return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+}
+
+/// @brief The same question as cwsr_layout_modelled(), asked of a GPU named the
+/// way KFD names one.
+/// @details The two predicates exist because their callers hold different
+/// identities. The DBG_TRAP paths have a SoC and so an arch enum; the KFD
+/// topology paths only ever see a @c gfx_target_version, which they translate to
+/// the GC hardware IP version the amdkfd driver keys on. Kept adjacent so the
+/// two spellings of "gfx942 and gfx950 only" cannot be updated apart --
+/// KfdTopologyTest.ArchAndGcSpellingsOfTheCwsrGateAgree pins them together.
+/// \NPI update this alongside cwsr_layout_modelled() when the codec learns a
+/// new record layout.
+/// @param gc_ip_version Packed GC hardware IP version, as
+///        gc_ip_version_for_gfx_target_version() produces.
+/// @returns True if serialize/deserialize produce an image dbgapi can decode.
+constexpr bool cwsr_layout_modelled_for_gc_ip_version(uint32_t gc_ip_version) {
+  return gc_ip_version == make_gc_ip_version(9, 4, 3) || // gfx942 (CDNA3)
+         gc_ip_version == make_gc_ip_version(9, 5, 0);   // gfx950 (CDNA4)
 }
 
 /// @brief Number of scalar slots in a saved SGPR block (gfx9.4 sgpr_count).

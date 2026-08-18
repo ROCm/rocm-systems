@@ -3433,6 +3433,84 @@ TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesOnlyDescribableDevices) {
   }
 }
 
+// The simulator services a debugger by writing a CWSR record rocm-dbgapi parses
+// out of /proc/<pid>/mem, so an agent it cannot produce a record for is not
+// debuggable no matter what the driver would advertise for that part. The
+// support bit is what rocdbgapi keys agent_t::supports_debugging() on, so
+// withholding it declines at attach instead of at every individual wave stop.
+TEST(KfdTopologyTest, TrapDebugSupportTracksTheModelledCwsrLayouts) {
+  struct Part {
+    uint32_t gfx_target_version;
+    const char *name;
+  };
+  // Every part the arch-keyed predicate accepts, and a representative spread of
+  // the ones it does not: an older gfx9, an RDNA3 and the newest gfx12.
+  constexpr Part kModelled[] = {{90402u, "gfx942"}, {90500u, "gfx950"}};
+  constexpr Part kUnmodelled[] = {{90010u, "gfx90a"}, {110000u, "gfx1100"}, {120500u, "gfx1250"}};
+
+  for (const Part &part : kModelled) {
+    const rocjitsu::kmd::DebugTopology topology =
+        rocjitsu::kmd::effective_topology_for(part.gfx_target_version, 0, 0, 0, 0);
+    EXPECT_NE(topology.capability & HSA_CAP_TRAP_DEBUG_SUPPORT, 0u) << part.name;
+    EXPECT_TRUE(rocjitsu::kmd::cwsr_layout_modelled_for_gc_ip_version(
+        rocjitsu::kmd::gc_ip_version_for_gfx_target_version(part.gfx_target_version)))
+        << part.name;
+  }
+
+  for (const Part &part : kUnmodelled) {
+    const rocjitsu::kmd::DebugTopology topology =
+        rocjitsu::kmd::effective_topology_for(part.gfx_target_version, 0, 0, 0, 0);
+    EXPECT_EQ(topology.capability & HSA_CAP_TRAP_DEBUG_SUPPORT, 0u) << part.name;
+    // Only that one bit is withheld: the node still describes the device the
+    // driver would, so a non-debug consumer sees no difference.
+    EXPECT_NE(topology.capability & HSA_CAP_ATS_PRESENT, 0u) << part.name;
+    EXPECT_NE(topology.capability & HSA_CAP_WATCH_POINTS_SUPPORTED, 0u) << part.name;
+    EXPECT_NE(topology.debug_prop, 0u) << part.name;
+  }
+}
+
+// The two predicates name the same set through different identities, so a part
+// added to one and not the other would silently re-open the gap above.
+TEST(KfdTopologyTest, ArchAndGcSpellingsOfTheCwsrGateAgree) {
+  struct Part {
+    rj_code_arch_t arch;
+    uint32_t gfx_target_version;
+    const char *name;
+  };
+  constexpr Part kParts[] = {
+      {ROCJITSU_CODE_ARCH_CDNA1, 90002u, "gfx908"},
+      {ROCJITSU_CODE_ARCH_CDNA2, 90010u, "gfx90a"},
+      {ROCJITSU_CODE_ARCH_CDNA3, 90402u, "gfx942"},
+      {ROCJITSU_CODE_ARCH_CDNA4, 90500u, "gfx950"},
+      {ROCJITSU_CODE_ARCH_RDNA3, 110000u, "gfx1100"},
+      {ROCJITSU_CODE_ARCH_RDNA4, 120000u, "gfx1200"},
+  };
+
+  for (const Part &part : kParts)
+    EXPECT_EQ(rocjitsu::kmd::cwsr_layout_modelled(part.arch),
+              rocjitsu::kmd::cwsr_layout_modelled_for_gc_ip_version(
+                  rocjitsu::kmd::gc_ip_version_for_gfx_target_version(part.gfx_target_version)))
+        << part.name;
+}
+
+// A config may capture a real device's capability word, which carries that
+// device's trap-debug bit. Inheriting it would restore exactly the mismatch the
+// derived gate closes.
+TEST(KfdTopologyTest, CapturedCapabilityCannotReadvertiseUnservicableTrapDebug) {
+  const uint32_t captured = rocjitsu::kmd::default_non_debug_capability() |
+                            HSA_CAP_TRAP_DEBUG_SUPPORT | HSA_CAP_TRAP_DEBUG_FIRMWARE_SUPPORTED;
+
+  const rocjitsu::kmd::DebugTopology unmodelled =
+      rocjitsu::kmd::effective_topology_for(110000u, captured, 0, 0, 0);
+  EXPECT_EQ(unmodelled.capability & HSA_CAP_TRAP_DEBUG_SUPPORT, 0u);
+  EXPECT_NE(unmodelled.capability & HSA_CAP_ATS_PRESENT, 0u) << "the override was discarded";
+
+  // The same captured word on a part the codec does model passes through.
+  const rocjitsu::kmd::DebugTopology modelled =
+      rocjitsu::kmd::effective_topology_for(90500u, captured, 0, 0, 0);
+  EXPECT_NE(modelled.capability & HSA_CAP_TRAP_DEBUG_SUPPORT, 0u);
+}
+
 TEST(KfdTopologyTest, EffectiveTopologyDerivesGfx121Capability2) {
   const rocjitsu::kmd::DebugTopology topology =
       rocjitsu::kmd::effective_topology_for(120100u, 0, 0, 0, 0);
@@ -3878,6 +3956,43 @@ TEST_F(KfdIoctlRdna3Test, DbgTrapDeclinesWaveStopsOnAPartWithNoModelledCwsrLayou
   uint64_t notifications = 0;
   EXPECT_EQ(::read(notifier, &notifications, sizeof(notifications)), -1);
   EXPECT_EQ(errno, EAGAIN);
+}
+
+// The stop gate above is the last line of defence, not the first: rocdbgapi asks
+// the device snapshot whether an agent is debuggable before it attaches to one.
+// Withholding the support bit there declines at the capability boundary, with
+// every other agent in the process still usable, rather than letting an attach
+// succeed and then declining each individual wave stop behind it.
+TEST_F(KfdIoctlRdna3Test, DbgTrapDeviceSnapshotWithholdsTrapDebugOnUnmodelledArch) {
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(getpid());
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = make_debug_fd();
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
+
+  kfd_dbg_device_info_entry entry{};
+  kfd_ioctl_dbg_trap_args snap{};
+  snap.pid = static_cast<uint32_t>(getpid());
+  snap.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+  snap.device_snapshot.entry_size = sizeof(entry);
+  snap.device_snapshot.num_devices = 1;
+  snap.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(&entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snap), 0);
+  ASSERT_EQ(snap.device_snapshot.num_devices, 1u);
+
+  ASSERT_FALSE(rocjitsu::kmd::cwsr_layout_modelled_for_gc_ip_version(
+      rocjitsu::kmd::gc_ip_version_for_gfx_target_version(entry.gfx_target_version)))
+      << "this fixture is supposed to be a part the CWSR codec does not model";
+  EXPECT_EQ(entry.capability & HSA_CAP_TRAP_DEBUG_SUPPORT, 0u)
+      << "an agent whose CWSR record the simulator cannot produce advertised trap debugging";
+
+  // Only that claim is withheld. The agent is still enumerated, still carries
+  // its address-watch description, and is still usable for everything a
+  // non-debugging client does with it.
+  EXPECT_EQ(entry.gpu_id, kRdna3GpuId);
+  EXPECT_NE(entry.capability & HSA_CAP_WATCH_POINTS_SUPPORTED, 0u);
+  EXPECT_NE(entry.debug_prop, 0u);
+  EXPECT_NE(entry.simd_count, 0u);
 }
 
 // rocm-dbgapi reaches the same publication through its own request rather than
@@ -4918,22 +5033,30 @@ TEST_F(KfdIoctlTest, DbgTrapDebuggerExitReapsSessionAndAllowsReenable) {
 
   rocjitsu::amdgpu::Wavefront *wave = nullptr;
   rocjitsu::amdgpu::CommandProcessor *wave_cp = nullptr;
+  rocjitsu::amdgpu::ComputeUnitCore *wave_cu = nullptr;
   soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
     if (wave != nullptr || cp->compute_units().empty())
       return;
     wave_cp = cp;
-    wave = cp->compute_units().front()->dispatch_wf(/*wg_id=*/0, /*pc=*/0x600000000ULL,
-                                                    /*sgprs=*/16, /*vgprs=*/4);
+    wave_cu = cp->compute_units().front();
+    wave = wave_cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0x600000000ULL,
+                                /*sgprs=*/16, /*vgprs=*/4);
   });
   ASSERT_NE(wave, nullptr);
   ASSERT_NE(wave_cp, nullptr);
-  wave->set_process_id(target_process);
-  wave->set_queue_id(create.queue_id);
-  wave->set_debug_halted(true);
-  wave->set_debug_suspended(true);
-  wave->set_debug_single_step(true);
-  wave->set_status_halt(true);
-  wave->set_self_halted(true);
+  ASSERT_NE(wave_cu, nullptr);
+  // Under the CU's wave-state lock, the same one release_debuggee_state takes:
+  // the reaper thread is already running, so every access to a wave's debug
+  // state from here on shares its mutex or races it.
+  wave_cu->with_wave_state_locked([&] {
+    wave->set_process_id(target_process);
+    wave->set_queue_id(create.queue_id);
+    wave->set_debug_halted(true);
+    wave->set_debug_suspended(true);
+    wave->set_debug_single_step(true);
+    wave->set_status_halt(true);
+    wave->set_self_halted(true);
+  });
   wave_cp->set_queue_debug_suspended(create.queue_id, target_process, true);
 
   ASSERT_EQ(kill(debugger_pid, SIGKILL), 0);
@@ -4950,12 +5073,37 @@ TEST_F(KfdIoctlTest, DbgTrapDebuggerExitReapsSessionAndAllowsReenable) {
 
   // The reaper runs the same release path an explicit DISABLE does, so the
   // stopped wave is running again and its queue can launch.
-  EXPECT_FALSE(wave->debug_halted()) << "debugger-exit reaper stranded a stopped wave";
-  EXPECT_FALSE(wave->debug_suspended());
-  EXPECT_FALSE(wave->debug_single_step());
-  EXPECT_FALSE(wave->status_halt())
+  //
+  // Poll for the wave rather than reading it once: the closed notifier above is
+  // not a happens-before for this. The reaper drops the session -- and with it
+  // the fd -- while still holding debug_sessions_mutex_, then releases the
+  // debuggee only after unlocking, so the fd can already be gone while the wave
+  // is still stopped. Sample under the CU's wave-state lock, which is what the
+  // release itself holds while it writes these fields.
+  struct WaveStop {
+    bool debug_halted = true;
+    bool debug_suspended = true;
+    bool debug_single_step = true;
+    bool status_halt = true;
+    bool self_halted = true;
+  };
+  auto sample = [&] {
+    return wave_cu->with_wave_state_locked([&] {
+      return WaveStop{wave->debug_halted(), wave->debug_suspended(), wave->debug_single_step(),
+                      wave->status_halt(), wave->self_halted()};
+    });
+  };
+  WaveStop stop = sample();
+  for (int attempt = 0; attempt < 100 && stop.debug_halted; ++attempt) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    stop = sample();
+  }
+  EXPECT_FALSE(stop.debug_halted) << "debugger-exit reaper stranded a stopped wave";
+  EXPECT_FALSE(stop.debug_suspended);
+  EXPECT_FALSE(stop.debug_single_step);
+  EXPECT_FALSE(stop.status_halt)
       << "the architectural halt outlived the session, so the wave re-halts at the handler return";
-  EXPECT_FALSE(wave->self_halted());
+  EXPECT_FALSE(stop.self_halted);
   EXPECT_FALSE(wave_cp->queue_debug_suspended_for_test(create.queue_id, target_process))
       << "the queue launch gate stayed shut after the debugger died";
 
