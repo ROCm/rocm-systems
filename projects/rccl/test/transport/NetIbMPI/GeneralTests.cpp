@@ -1006,23 +1006,37 @@ TEST_F(NetIbMPITest, RapidConnectDisconnect) {
     // Count only RDMA objects owned by THIS process so a co-tenant test churning
     // QPs/CQs/MRs/PDs between the before/after snapshots cannot cause a spurious leak
     // failure under a parallel (--jobs>1) run. `rdma resource show` lines carry
-    // " pid <N> "; if our PID appears, count only our lines, else fall back to a
-    // system-wide count (mirrors CaptureRdmaResources() in NetIbMPITestBase.hpp).
+    // " pid <N> "; we count lines matching our own PID.
+    //
+    // The own-vs-system decision is based on whether the output exposes a pid column at
+    // all (a stable property of the iproute2 version), NOT on whether our PID currently
+    // owns any object. This matters because the connect/disconnect loop closes everything
+    // it opens, so at both the before and after snapshots this process typically owns ZERO
+    // QPs/CQs -- a per-snapshot "did we see our pid" test would then fall back to a
+    // system-wide count that includes a co-tenant's churn, and could even pick different
+    // modes for before vs after. Keying off the pid-column presence keeps both snapshots in
+    // the same mode and correctly reports our own count as 0 when we own nothing. Only when
+    // the tool emits no pid column at all do we fall back to a system-wide non-empty count
+    // (mirrors CaptureRdmaResources() in NetIbMPITestBase.hpp).
     const std::string rdmaPidFilter = " pid " + std::to_string(getpid()) + " ";
-    auto countNonEmptyLines = [&rdmaPidFilter](const std::string& text) -> int {
+    auto countRdmaLines = [&rdmaPidFilter](const std::string& text) -> int {
         std::istringstream iss(text);
         std::string line;
-        int count = 0, owned = 0;
-        bool sawPid = false;
+        int total = 0, owned = 0;
+        bool hasPidColumn = false;
         while (std::getline(iss, line)) {
-            if (line.empty()) continue;
-            count++;
+            if (line.empty()) {
+                continue;
+            }
+            total++;
+            if (line.find(" pid ") != std::string::npos) {
+                hasPidColumn = true;
+            }
             if (line.find(rdmaPidFilter) != std::string::npos) {
                 owned++;
-                sawPid = true;
             }
         }
-        return sawPid ? owned : count;
+        return hasPidColumn ? owned : total;
     };
 
     auto readRdmaResourceCounts = [&]() -> RdmaResourceCounts {
@@ -1042,10 +1056,10 @@ TEST_F(NetIbMPITest, RapidConnectDisconnect) {
 
         if (qpOut.empty() || cqOut.empty() || mrOut.empty() || pdOut.empty()) return counts;
 
-        counts.qp = countNonEmptyLines(qpOut);
-        counts.cq = countNonEmptyLines(cqOut);
-        counts.mr = countNonEmptyLines(mrOut);
-        counts.pd = countNonEmptyLines(pdOut);
+        counts.qp = countRdmaLines(qpOut);
+        counts.cq = countRdmaLines(cqOut);
+        counts.mr = countRdmaLines(mrOut);
+        counts.pd = countRdmaLines(pdOut);
 
         return counts;
     };
