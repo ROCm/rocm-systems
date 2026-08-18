@@ -8,6 +8,7 @@
 
 #include "rocjitsu/isa/instruction.h"
 
+#include <cstddef>
 #include <memory>
 
 namespace rocjitsu::test {
@@ -25,6 +26,8 @@ class DownstreamIsa {
 public:
   class Decoder {
   public:
+    // Source-integrated decoders publish their maximum encoded width and raw lookahead.
+    static constexpr std::size_t kMaxInstructionWords = 1;
     static std::unique_ptr<Instruction> decode(const rj_code_binary_inst_t *raw) {
       return std::make_unique<DownstreamInstruction>(raw);
     }

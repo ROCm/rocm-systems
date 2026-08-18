@@ -3,6 +3,7 @@
 
 #include "config.hpp"
 #include "amd_smi.hpp"
+#include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "common/defines.h"
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
@@ -15,7 +16,8 @@
 #include "mproc.hpp"
 #include "perf.hpp"
 #include "perfetto.hpp"
-#include "rocprofiler-sdk.hpp"
+#include "sdk-tracing-config-deps.hpp"
+#include "sdk-tracing-config.hpp"
 #include "utility.hpp"
 
 #include <timemory/backends/capability.hpp>
@@ -53,6 +55,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <linux/capability.h>
@@ -983,7 +986,9 @@ configure_settings(bool _init)
         std::string{ "perf::PERF_COUNT_HW_CACHE_REFERENCES" }, "sampling",
         "hardware_counters");
 
-    rocprofiler_sdk::config_settings(_config);
+    rocprofiler_sdk::sdk_tracing_config<
+        rocprofiler_sdk::wrapper,
+        rocprofiler_sdk::default_sdk_externals>::config_settings(_config);
     amd_smi::config_settings(_config);
 
     ROCPROFSYS_CONFIG_SETTING(size_t, env_vars::PERFETTO_SHMEM_SIZE_HINT_KB,
@@ -3032,10 +3037,17 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
 std::string
 get_ump_absolute_path()
 {
-    auto ensure_dir = [](std::string path) {
-        if(!path.empty() && !path::is_directory(path))
+    auto try_create_directory = [](std::string path) {
+        if(!path.empty())
         {
-            tim::filepath::makedir(path);
+            try
+            {
+                std::filesystem::create_directories(path);
+            } catch(const std::filesystem::filesystem_error& e)
+            {
+                LOG_WARNING("Failed to create unified memory output directory '{}': {}",
+                            path, e.code().message());
+            }
         }
         return path;
     };
@@ -3070,14 +3082,14 @@ get_ump_absolute_path()
         auto explicit_path = get_setting_value<std::string>(
             std::string{ env_vars::UNIFIED_MEMORY_OUTPUT_PATH });
         if(explicit_path && !explicit_path->empty())
-            return ensure_dir(make_absolute(*explicit_path));
+            return try_create_directory(make_absolute(*explicit_path));
     }
 
     if(!settings_are_configured())
     {
         auto env_path =
             rocprofsys::get_env<std::string>(env_vars::UNIFIED_MEMORY_OUTPUT_PATH, "");
-        if(!env_path.empty()) return ensure_dir(make_absolute(env_path));
+        if(!env_path.empty()) return try_create_directory(make_absolute(env_path));
         return settings::output_path();
     }
 

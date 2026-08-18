@@ -252,6 +252,31 @@ class TestConfig(RocprofsysTest):
             use_abort_fail_regex=False,
         )
 
+    def test_cli_flag_rejects_invalid(self, config_target, create_config_file):
+        """A bad config passed with -c should be rejected, just like the env var.
+
+        The tests above already cover the env var, so here we just pass the same
+        bad file through -c to make sure that path is validated too. One binary is
+        enough since both share the same arg parsing.
+        """
+        config_file = create_config_file(
+            {"ROCPROFSYS_TRACE_DURATION": "not-a-number"},
+            "cli_flag_invalid_trace_duration.cfg",
+            skip_filter=True,
+        )
+        result = self.run_test(
+            "sys_run",
+            target=config_target,
+            env=MINIMAL_RUNTIME_ENV,
+            sys_run_args=["-c", str(config_file)],
+            fail_on_pass=True,
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[r"[Ii]nvalid value.*ROCPROFSYS_TRACE_DURATION"],
+            use_abort_fail_regex=False,
+        )
+
     @pytest.mark.timeout(120)
     def test_missing(self, test_output_dir: Path, config_target: str):
         """Test that missing config file causes failure."""

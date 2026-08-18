@@ -36,8 +36,10 @@ template <rj_code_arch_t Arch> struct IsaTrait;
 /// templates depend on:
 ///   - `WF_SIZE`               — lanes per wavefront.
 ///   - `WF_SIZE_MAX`           — largest supported wavefront size.
+///   - `MAX_WF_SLOTS`          — maximum simulated wavefront slots per CU.
 ///   - `MAX_SGPRS_PER_WF`      — maximum scalar GPRs.
 ///   - `MAX_VGPRS_PER_WF`      — maximum vector GPRs.
+///   - `MAX_ADDRESSABLE_VGPRS_PER_WF` — maximum ordinary VGPR address span.
 ///   - `MAX_ACC_VGPRS_PER_WF`  — maximum accumulator VGPRs (0 if absent).
 ///   - `WAITCNT_LGKMCNT_MASK`  — lgkmcnt field mask in S_WAITCNT (0 if no
 ///                               monolithic S_WAITCNT — RDNA4 only).
@@ -49,8 +51,10 @@ template <typename Isa>
 concept GpuIsa = requires {
   { Isa::WF_SIZE } -> std::convertible_to<uint32_t>;
   { Isa::WF_SIZE_MAX } -> std::convertible_to<uint32_t>;
+  { Isa::MAX_WF_SLOTS } -> std::convertible_to<uint32_t>;
   { Isa::MAX_SGPRS_PER_WF } -> std::convertible_to<uint32_t>;
   { Isa::MAX_VGPRS_PER_WF } -> std::convertible_to<uint32_t>;
+  { Isa::MAX_ADDRESSABLE_VGPRS_PER_WF } -> std::convertible_to<uint32_t>;
   { Isa::MAX_ACC_VGPRS_PER_WF } -> std::convertible_to<uint32_t>;
   { Isa::WAITCNT_LGKMCNT_MASK } -> std::convertible_to<uint32_t>;
   { Isa::MODE_HAS_GPR_IDX_EN } -> std::convertible_to<bool>;

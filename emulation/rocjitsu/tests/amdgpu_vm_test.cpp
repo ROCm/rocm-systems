@@ -21,6 +21,7 @@
 #include "rocjitsu/vm/soc.h"
 
 #include "simdojo/sim/simulation.h"
+#include "util/except.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -87,7 +88,7 @@ struct VmFixture {
   amdgpu::GpuMemory *gpu_mem = nullptr;
 
   VmFixture(std::string_view arch = "cdna3", uint32_t num_cus = 1, uint32_t num_wf_slots = 10,
-            uint32_t lds_size_kb = 64, uint32_t sgprs_per_wf = 104) {
+            uint32_t lds_size_kb = 64, uint32_t sgprs_per_wf = 104, uint32_t vgprs_per_wf = 256) {
     std::string cu_range = "cu[0:" + std::to_string(num_cus) + "]";
     std::string links;
     for (uint32_t i = 0; i < num_cus; ++i) {
@@ -116,7 +117,9 @@ struct VmFixture {
                        R"({"key":"sgprs_per_wf","value":")" +
                        std::to_string(sgprs_per_wf) +
                        R"("},)"
-                       R"({"key":"vgprs_per_wf","value":"256"},)"
+                       R"({"key":"vgprs_per_wf","value":")" +
+                       std::to_string(vgprs_per_wf) +
+                       R"("},)"
                        R"({"key":"lds_size_kb","value":")" +
                        std::to_string(lds_size_kb) +
                        R"("})"
@@ -183,6 +186,14 @@ struct VmFixture {
     return addr;
   }
 };
+
+TEST(ComputeUnitConfigTest, RejectsWavefrontSlotsAboveIsaMaximum) {
+  EXPECT_THROW((void)VmFixture("cdna3", 1, 33), util::ConfigError);
+}
+
+TEST(ComputeUnitConfigTest, RejectsVgprSpanAboveIsaMaximum) {
+  EXPECT_THROW((void)VmFixture("cdna3", 1, 32, 64, 104, 513), util::ConfigError);
+}
 
 // Drive the engine until the listed CUs have no resident wavefronts. A wavefront
 // frees itself at s_endpgm (num_wfs()/has_active_wfs() drop as it halts), so the
@@ -3195,6 +3206,77 @@ TEST(DsTransposeTest, ReadB64TrB16_AccBit) {
   EXPECT_NE(acc_val, 0u) << "AccVGPR a" << VDST << " should have been written by ds_read";
   EXPECT_NE(acc_val, 42u) << "AccVGPR a" << VDST
                           << " should contain LDS data, not the VGPR sentinel";
+}
+
+constexpr uint32_t tr_b16_halfword_value(uint32_t lane, uint32_t halfword) {
+  return (0x1200u + lane * 0x11u + halfword) & 0xffffu;
+}
+
+constexpr uint32_t pack_u16_pair(uint32_t lo, uint32_t hi) {
+  return (lo & 0xffffu) | ((hi & 0xffffu) << 16);
+}
+
+// Verify the ds_read_b64_tr_b16 cross-lane layout: within each 16-lane group,
+// destination lane l halfword n comes from source lane
+// ((l & 0x30) | ((l & 0xc) >> 2)) + 4 * n, halfword (l & 3). Expected values use
+// the same reference formula as tests/dbt/cdna4_to_cdna3_lds_hip_test.cpp.
+TEST(DsTransposeTest, ReadB64TrB16_LaneLayout) {
+  VmFixture f("cdna4", 1, 10);
+  auto *snap = f.capture_halts();
+
+  constexpr uint32_t VDST = 4;
+  constexpr uint32_t TID_REG = 0;
+  constexpr uint32_t ADDR_REG = 1;
+  constexpr uint32_t DS_OP = 227; // ds_read_b64_tr_b16
+  constexpr uint32_t WAVE_SIZE = 64;
+  constexpr uint32_t BYTES_PER_LANE = 8;
+
+  // Kernel:
+  //   v_add_u32 v1, v0, v0     ; v1 = 2 * tid
+  //   v_add_u32 v1, v1, v1     ; v1 = 4 * tid
+  //   v_add_u32 v1, v1, v1     ; v1 = 8 * tid (per-lane LDS byte address)
+  //   ds_read_b64_tr_b16 v[4:5], v1
+  //   s_waitcnt lgkmcnt(0)
+  //   s_endpgm
+  using namespace enc;
+  const uint32_t code[] = {
+      v_add_u32(ADDR_REG, VGPR_SRC(TID_REG), TID_REG),
+      v_add_u32(ADDR_REG, VGPR_SRC(ADDR_REG), ADDR_REG),
+      v_add_u32(ADDR_REG, VGPR_SRC(ADDR_REG), ADDR_REG),
+      ds_lo(DS_OP),
+      ds_hi(VDST, /*data0=*/0, ADDR_REG),
+      S_WAITCNT_0,
+      S_ENDPGM,
+  };
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+
+  auto *cu = f.cu();
+  for (uint32_t lane = 0; lane < WAVE_SIZE; ++lane) {
+    const uint32_t source_lo =
+        pack_u16_pair(tr_b16_halfword_value(lane, 0), tr_b16_halfword_value(lane, 1));
+    const uint32_t source_hi =
+        pack_u16_pair(tr_b16_halfword_value(lane, 2), tr_b16_halfword_value(lane, 3));
+    cu->lds().write32(lane * BYTES_PER_LANE, source_lo);
+    cu->lds().write32(lane * BYTES_PER_LANE + 4, source_hi);
+  }
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, WAVE_SIZE);
+  f.engine->run();
+
+  ASSERT_EQ(snap->snapshots().size(), 1u);
+  const auto &wf = snap->snapshots().front();
+
+  for (uint32_t lane = 0; lane < WAVE_SIZE; ++lane) {
+    const uint32_t halfword = lane & 3;
+    const uint32_t source_base = (lane & 0x30) + ((lane & 0x0c) >> 2);
+    const uint32_t expected_lo = pack_u16_pair(tr_b16_halfword_value(source_base + 0, halfword),
+                                               tr_b16_halfword_value(source_base + 4, halfword));
+    const uint32_t expected_hi = pack_u16_pair(tr_b16_halfword_value(source_base + 8, halfword),
+                                               tr_b16_halfword_value(source_base + 12, halfword));
+    EXPECT_EQ(wf.vgpr(VDST, lane), expected_lo) << "lane " << lane << " v" << VDST;
+    EXPECT_EQ(wf.vgpr(VDST + 1, lane), expected_hi) << "lane " << lane << " v" << (VDST + 1);
+  }
 }
 
 // Write-through scalar stores must use the store's VMID. Two page tables map

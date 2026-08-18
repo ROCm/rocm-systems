@@ -18,6 +18,7 @@
 #include <cassert>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -186,6 +187,15 @@ public:
   /// @brief Override the LDS backing for this workgroup placement.
   /// Passing nullptr restores the owning CU's LDS.
   void set_lds(Lds *lds) { lds_ = lds; }
+
+  /// @brief Return whether this wave's compute unit has GPU memory backing.
+  bool has_gpu_memory() const;
+
+  /// @brief Read GPU memory in this wave's process address space.
+  void read_gpu_memory(uint64_t addr, std::span<uint8_t> dst) const;
+
+  /// @brief Write GPU memory in this wave's process address space.
+  void write_gpu_memory(uint64_t addr, std::span<const uint8_t> src);
 
   /// @brief Return this workgroup's rank within its cluster.
   uint32_t cluster_rank() const { return cluster_rank_; }
