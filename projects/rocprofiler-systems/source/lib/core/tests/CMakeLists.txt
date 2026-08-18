@@ -27,34 +27,16 @@ target_link_libraries(
 
 target_include_directories(track-registry-tests PRIVATE ${PROJECT_SOURCE_DIR}/source/lib)
 
-add_library(sdk-tracing-config-tests OBJECT test_sdk_tracing_config.cpp)
-
-target_link_libraries(
-    sdk-tracing-config-tests
-    PRIVATE
-    rocprofiler-systems-googletest-library
-    rocprofiler-systems-core-library
-    rocprofiler-systems-logger
-    rocprofiler-systems-headers
-    rocprofiler-systems-rocm
-    rocprofiler-systems-timemory
-)
-
-target_include_directories(
-    sdk-tracing-config-tests
-    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib
-)
-
 add_library(output-format-tests OBJECT test_output_format.cpp)
 
 target_link_libraries(
     output-format-tests
     PRIVATE
-    rocprofiler-systems-googletest-library
-    rocprofiler-systems-core-library
-    rocprofiler-systems-logger
-    rocprofiler-systems-headers
-    rocprofiler-systems-timemory
+        rocprofiler-systems-googletest-library
+        rocprofiler-systems-core-library
+        rocprofiler-systems-logger
+        rocprofiler-systems-headers
+        rocprofiler-systems-timemory
 )
 
 target_include_directories(
@@ -67,11 +49,11 @@ add_library(parse-numeric-range-tests OBJECT test_parse_numeric_range.cpp)
 target_link_libraries(
     parse-numeric-range-tests
     PRIVATE
-    rocprofiler-systems-googletest-library
-    rocprofiler-systems-core-library
-    rocprofiler-systems-logger
-    rocprofiler-systems-headers
-    rocprofiler-systems-timemory
+        rocprofiler-systems-googletest-library
+        rocprofiler-systems-core-library
+        rocprofiler-systems-logger
+        rocprofiler-systems-headers
+        rocprofiler-systems-timemory
 )
 
 target_include_directories(
@@ -84,11 +66,11 @@ add_library(rank-passes-filter-tests OBJECT test_rank_passes_filter.cpp)
 target_link_libraries(
     rank-passes-filter-tests
     PRIVATE
-    rocprofiler-systems-googletest-library
-    rocprofiler-systems-core-library
-    rocprofiler-systems-logger
-    rocprofiler-systems-headers
-    rocprofiler-systems-timemory
+        rocprofiler-systems-googletest-library
+        rocprofiler-systems-core-library
+        rocprofiler-systems-logger
+        rocprofiler-systems-headers
+        rocprofiler-systems-timemory
 )
 
 target_include_directories(
@@ -101,11 +83,11 @@ add_library(state-tests OBJECT test_state.cpp)
 target_link_libraries(
     state-tests
     PRIVATE
-    rocprofiler-systems-googletest-library
-    rocprofiler-systems-core-library
-    rocprofiler-systems-logger
-    rocprofiler-systems-headers
-    rocprofiler-systems-timemory
+        rocprofiler-systems-googletest-library
+        rocprofiler-systems-core-library
+        rocprofiler-systems-logger
+        rocprofiler-systems-headers
+        rocprofiler-systems-timemory
 )
 
 target_include_directories(

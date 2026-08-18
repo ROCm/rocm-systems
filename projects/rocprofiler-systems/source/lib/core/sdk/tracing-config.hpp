@@ -38,7 +38,7 @@ concept tracing_kind_for =
     std::same_as<TracingKind, typename SdkBackend::buffer_tracing_kind_t>;
 
 template <typename Externals>
-concept sdk_tracing_config_externals = requires(std::string_view setting_name) {
+concept tracing_config_externals = requires(std::string_view setting_name) {
     typename Externals::ProcessState;
     typename Externals::ProcessState::State;
     {
@@ -56,8 +56,8 @@ concept sdk_tracing_config_externals = requires(std::string_view setting_name) {
 }  // namespace concepts
 
 template <typename SdkBackend, typename Externals>
-    requires concepts::sdk_tracing_config_externals<Externals>
-class sdk_tracing_config
+    requires concepts::tracing_config_externals<Externals>
+class tracing_config
 {
 public:
     struct operation_options_env_names
@@ -160,9 +160,9 @@ namespace rocprofsys::rocprofiler_sdk
 
 /// @brief Return the version of the rocprofiler-sdk
 template <typename SdkBackend, typename Externals>
-    requires concepts::sdk_tracing_config_externals<Externals>
+    requires concepts::tracing_config_externals<Externals>
 common::version
-sdk_tracing_config<SdkBackend, Externals>::get_version()
+tracing_config<SdkBackend, Externals>::get_version()
 {
     auto version = common::version{};
     SdkBackend::get_version(&version.major, &version.minor, &version.patch);
@@ -170,9 +170,9 @@ sdk_tracing_config<SdkBackend, Externals>::get_version()
 }
 
 template <typename SdkBackend, typename Externals>
-    requires concepts::sdk_tracing_config_externals<Externals>
+    requires concepts::tracing_config_externals<Externals>
 std::vector<std::string>
-sdk_tracing_config<SdkBackend, Externals>::get_domain_choices()
+tracing_config<SdkBackend, Externals>::get_domain_choices()
 {
     const auto& buffered_tracing_info = SdkBackend::get_buffer_tracing_names();
     const auto& callback_tracing_info = SdkBackend::get_callback_tracing_names();
@@ -220,9 +220,9 @@ sdk_tracing_config<SdkBackend, Externals>::get_domain_choices()
 }
 
 template <typename SdkBackend, typename Externals>
-    requires concepts::sdk_tracing_config_externals<Externals>
+    requires concepts::tracing_config_externals<Externals>
 std::string
-sdk_tracing_config<SdkBackend, Externals>::get_domain_defaults()
+tracing_config<SdkBackend, Externals>::get_domain_defaults()
 {
     auto defaults = std::string{ "hip_runtime_api,marker_api,kernel_dispatch,"
                                  "memory_copy,scratch_memory" };
@@ -237,9 +237,9 @@ sdk_tracing_config<SdkBackend, Externals>::get_domain_defaults()
 }
 
 template <typename SdkBackend, typename Externals>
-    requires concepts::sdk_tracing_config_externals<Externals>
-std::vector<typename sdk_tracing_config<SdkBackend, Externals>::operation_setting_spec>
-sdk_tracing_config<SdkBackend, Externals>::get_operation_settings()
+    requires concepts::tracing_config_externals<Externals>
+std::vector<typename tracing_config<SdkBackend, Externals>::operation_setting_spec>
+tracing_config<SdkBackend, Externals>::get_operation_settings()
 {
     const auto& buffered_tracing_info = SdkBackend::get_buffer_tracing_names();
     const auto& callback_tracing_info = SdkBackend::get_callback_tracing_names();
@@ -271,9 +271,9 @@ sdk_tracing_config<SdkBackend, Externals>::get_operation_settings()
 }
 
 template <typename SdkBackend, typename Externals>
-    requires concepts::sdk_tracing_config_externals<Externals>
+    requires concepts::tracing_config_externals<Externals>
 std::unordered_set<typename SdkBackend::callback_tracing_kind_t>
-sdk_tracing_config<SdkBackend, Externals>::get_callback_domains()
+tracing_config<SdkBackend, Externals>::get_callback_domains()
 {
     using kind_t = typename SdkBackend::callback_tracing_kind_t;
 
@@ -328,9 +328,9 @@ sdk_tracing_config<SdkBackend, Externals>::get_callback_domains()
 }
 
 template <typename SdkBackend, typename Externals>
-    requires concepts::sdk_tracing_config_externals<Externals>
+    requires concepts::tracing_config_externals<Externals>
 std::unordered_set<typename SdkBackend::buffer_tracing_kind_t>
-sdk_tracing_config<SdkBackend, Externals>::get_buffered_domains()
+tracing_config<SdkBackend, Externals>::get_buffered_domains()
 {
     using kind_t = typename SdkBackend::buffer_tracing_kind_t;
 
@@ -379,11 +379,11 @@ sdk_tracing_config<SdkBackend, Externals>::get_buffered_domains()
 }
 
 template <typename SdkBackend, typename Externals>
-    requires concepts::sdk_tracing_config_externals<Externals>
+    requires concepts::tracing_config_externals<Externals>
 template <typename TracingKind>
     requires concepts::tracing_kind_for<SdkBackend, TracingKind>
 std::vector<std::int32_t>
-sdk_tracing_config<SdkBackend, Externals>::get_operations(TracingKind kind)
+tracing_config<SdkBackend, Externals>::get_operations(TracingKind kind)
 {
     const auto names = assemble_operation_env_names_for_kind(kind);
     if(names.is_empty())
@@ -391,17 +391,17 @@ sdk_tracing_config<SdkBackend, Externals>::get_operations(TracingKind kind)
         if constexpr(std::same_as<TracingKind,
                                   typename SdkBackend::callback_tracing_kind_t>)
         {
-            finalize_and_throw(fmt::format(
-                "sdk_tracing_config::get_operations: no options registered for "
-                "callback tracing kind {}",
-                static_cast<int>(kind)));
+            finalize_and_throw(
+                fmt::format("tracing_config::get_operations: no options registered for "
+                            "callback tracing kind {}",
+                            static_cast<int>(kind)));
         }
         else
         {
-            finalize_and_throw(fmt::format(
-                "sdk_tracing_config::get_operations: no options registered for "
-                "buffer tracing kind {}",
-                static_cast<int>(kind)));
+            finalize_and_throw(
+                fmt::format("tracing_config::get_operations: no options registered for "
+                            "buffer tracing kind {}",
+                            static_cast<int>(kind)));
         }
     }
 
@@ -437,11 +437,11 @@ sdk_tracing_config<SdkBackend, Externals>::get_operations(TracingKind kind)
 }
 
 template <typename SdkBackend, typename Externals>
-    requires concepts::sdk_tracing_config_externals<Externals>
+    requires concepts::tracing_config_externals<Externals>
 template <typename TracingKind>
     requires concepts::tracing_kind_for<SdkBackend, TracingKind>
 std::unordered_set<std::int32_t>
-sdk_tracing_config<SdkBackend, Externals>::get_backtrace_operations(TracingKind kind)
+tracing_config<SdkBackend, Externals>::get_backtrace_operations(TracingKind kind)
 {
     const auto names = assemble_operation_env_names_for_kind(kind);
     if(names.is_empty())
@@ -449,14 +449,14 @@ sdk_tracing_config<SdkBackend, Externals>::get_backtrace_operations(TracingKind 
         if constexpr(std::same_as<TracingKind,
                                   typename SdkBackend::callback_tracing_kind_t>)
         {
-            finalize_and_throw(fmt::format("sdk_tracing_config::get_backtrace_"
+            finalize_and_throw(fmt::format("tracing_config::get_backtrace_"
                                            "operations: no options registered for "
                                            "callback tracing kind {}",
                                            static_cast<int>(kind)));
         }
         else
         {
-            finalize_and_throw(fmt::format("sdk_tracing_config::get_backtrace_"
+            finalize_and_throw(fmt::format("tracing_config::get_backtrace_"
                                            "operations: no options registered for "
                                            "buffer tracing kind {}",
                                            static_cast<int>(kind)));
@@ -484,11 +484,11 @@ sdk_tracing_config<SdkBackend, Externals>::get_backtrace_operations(TracingKind 
 }
 
 template <typename SdkBackend, typename Externals>
-    requires concepts::sdk_tracing_config_externals<Externals>
+    requires concepts::tracing_config_externals<Externals>
 template <typename TracingKind>
     requires concepts::tracing_kind_for<SdkBackend, TracingKind>
 std::vector<std::pair<std::int32_t, std::string>>
-sdk_tracing_config<SdkBackend, Externals>::all_operation_items_for_kind(
+tracing_config<SdkBackend, Externals>::all_operation_items_for_kind(
     TracingKind tracing_kind)
 {
     auto items = [&] {
@@ -517,16 +517,16 @@ sdk_tracing_config<SdkBackend, Externals>::all_operation_items_for_kind(
 }
 
 template <typename SdkBackend, typename Externals>
-    requires concepts::sdk_tracing_config_externals<Externals>
+    requires concepts::tracing_config_externals<Externals>
 std::vector<std::pair<std::string, std::regex>>
-sdk_tracing_config<SdkBackend, Externals>::compile_operation_patterns(
+tracing_config<SdkBackend, Externals>::compile_operation_patterns(
     const std::string& operations_setting_env_name)
 {
     const auto setting_value = Externals::get_setting_value(operations_setting_env_name);
     if(!setting_value)
     {
         finalize_and_throw(fmt::format(
-            "sdk_tracing_config::compile_operation_patterns: no registered setting '{}'",
+            "tracing_config::compile_operation_patterns: no registered setting '{}'",
             operations_setting_env_name));
     }
 
@@ -547,9 +547,9 @@ sdk_tracing_config<SdkBackend, Externals>::compile_operation_patterns(
 }
 
 template <typename SdkBackend, typename Externals>
-    requires concepts::sdk_tracing_config_externals<Externals>
+    requires concepts::tracing_config_externals<Externals>
 bool
-sdk_tracing_config<SdkBackend, Externals>::matches_any_operation_pattern(
+tracing_config<SdkBackend, Externals>::matches_any_operation_pattern(
     std::string_view operations_setting_env_name, const std::string& operation_name,
     const std::vector<std::pair<std::string, std::regex>>& patterns)
 {
@@ -566,9 +566,9 @@ sdk_tracing_config<SdkBackend, Externals>::matches_any_operation_pattern(
 }
 
 template <typename SdkBackend, typename Externals>
-    requires concepts::sdk_tracing_config_externals<Externals>
+    requires concepts::tracing_config_externals<Externals>
 void
-sdk_tracing_config<SdkBackend, Externals>::finalize_and_throw(
+tracing_config<SdkBackend, Externals>::finalize_and_throw(
     std::string_view exception_message)
 {
     Externals::ProcessState::set(Externals::ProcessState::Finalized);
@@ -576,11 +576,11 @@ sdk_tracing_config<SdkBackend, Externals>::finalize_and_throw(
 }
 
 template <typename SdkBackend, typename Externals>
-    requires concepts::sdk_tracing_config_externals<Externals>
+    requires concepts::tracing_config_externals<Externals>
 template <typename TracingKind>
     requires concepts::tracing_kind_for<SdkBackend, TracingKind>
-typename sdk_tracing_config<SdkBackend, Externals>::operation_options_env_names
-sdk_tracing_config<SdkBackend, Externals>::assemble_operation_env_names_for_kind(
+typename tracing_config<SdkBackend, Externals>::operation_options_env_names
+tracing_config<SdkBackend, Externals>::assemble_operation_env_names_for_kind(
     TracingKind kind)
 {
     std::string_view name{};
@@ -611,9 +611,9 @@ sdk_tracing_config<SdkBackend, Externals>::assemble_operation_env_names_for_kind
 }
 
 template <typename SdkBackend, typename Externals>
-    requires concepts::sdk_tracing_config_externals<Externals>
+    requires concepts::tracing_config_externals<Externals>
 constexpr std::unordered_set<typename SdkBackend::callback_tracing_kind_t>
-sdk_tracing_config<SdkBackend, Externals>::get_supported_callback_domains()
+tracing_config<SdkBackend, Externals>::get_supported_callback_domains()
 {
     auto supported = std::unordered_set<typename SdkBackend::callback_tracing_kind_t>{
         SdkBackend::CALLBACK_TRACING_HSA_CORE_API,
@@ -653,9 +653,9 @@ sdk_tracing_config<SdkBackend, Externals>::get_supported_callback_domains()
 }
 
 template <typename SdkBackend, typename Externals>
-    requires concepts::sdk_tracing_config_externals<Externals>
+    requires concepts::tracing_config_externals<Externals>
 constexpr std::unordered_set<typename SdkBackend::buffer_tracing_kind_t>
-sdk_tracing_config<SdkBackend, Externals>::get_supported_buffer_domains()
+tracing_config<SdkBackend, Externals>::get_supported_buffer_domains()
 {
     auto supported = std::unordered_set<typename SdkBackend::buffer_tracing_kind_t>{
         SdkBackend::BUFFER_TRACING_KERNEL_DISPATCH,
@@ -693,9 +693,9 @@ sdk_tracing_config<SdkBackend, Externals>::get_supported_buffer_domains()
 }
 
 template <typename SdkBackend, typename Externals>
-    requires concepts::sdk_tracing_config_externals<Externals>
+    requires concepts::tracing_config_externals<Externals>
 std::unordered_map<std::string, std::vector<typename SdkBackend::callback_tracing_kind_t>>
-sdk_tracing_config<SdkBackend, Externals>::get_callback_domain_map()
+tracing_config<SdkBackend, Externals>::get_callback_domain_map()
 {
     using kind_t              = typename SdkBackend::callback_tracing_kind_t;
     const auto& callback_info = SdkBackend::get_callback_tracing_names();
@@ -746,9 +746,9 @@ sdk_tracing_config<SdkBackend, Externals>::get_callback_domain_map()
 }
 
 template <typename SdkBackend, typename Externals>
-    requires concepts::sdk_tracing_config_externals<Externals>
+    requires concepts::tracing_config_externals<Externals>
 std::unordered_map<std::string, std::vector<typename SdkBackend::buffer_tracing_kind_t>>
-sdk_tracing_config<SdkBackend, Externals>::get_buffered_domain_map()
+tracing_config<SdkBackend, Externals>::get_buffered_domain_map()
 {
     using kind_t            = typename SdkBackend::buffer_tracing_kind_t;
     const auto& buffer_info = SdkBackend::get_buffer_tracing_names();
@@ -853,8 +853,8 @@ sdk_tracing_config<SdkBackend, Externals>::get_buffered_domain_map()
 }
 
 template <typename SdkBackend, typename Externals>
-    requires concepts::sdk_tracing_config_externals<Externals>
-const std::unordered_set<std::string_view> sdk_tracing_config<
+    requires concepts::tracing_config_externals<Externals>
+const std::unordered_set<std::string_view> tracing_config<
     SdkBackend, Externals>::s_domains_to_skip_for_operation_options{
 
     "none",        "correlation_id_retirement", "marker_control_api", "marker_name_api",

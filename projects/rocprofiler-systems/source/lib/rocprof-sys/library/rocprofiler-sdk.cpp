@@ -19,8 +19,8 @@
 #include "core/output_file_registry.hpp"
 #include "core/perfetto.hpp"
 #include "core/perfetto_fwd.hpp"
-#include "core/sdk-tracing-config-deps.hpp"
-#include "core/sdk-tracing-config.hpp"
+#include "core/sdk/tracing-config-deps.hpp"
+#include "core/sdk/tracing-config.hpp"
 #include "core/state.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
@@ -92,11 +92,11 @@ namespace rocprofiler_sdk
 {
 namespace
 {
-// Per-name imports (not a merged alias) for the production sdk_tracing_config<Wrapper,
+// Per-name imports (not a merged alias) for the production tracing_config<Wrapper,
 // Externals> instantiation used below: keeps both template arguments visible at each call
 // site instead of collapsing them behind an opaque name.
-using rocprofiler_sdk::default_sdk_externals;
-using rocprofiler_sdk::sdk_tracing_config;
+using rocprofiler_sdk::default_externals;
+using rocprofiler_sdk::tracing_config;
 using rocprofiler_sdk::wrapper;
 
 using tool_agent_vec_t                         = std::vector<tool_agent>;
@@ -2481,14 +2481,13 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         _domains_ss << "- " << itr << "\n";
     LOG_DEBUG("Available ROCm Domains: \n {}", _domains_ss.str());
 
-    using sdk_tracing_config_t =
-        sdk_tracing_config<backends::rocprofiler_sdk::backend<wrapper>,
-                           default_sdk_externals>;
+    using tracing_config_t =
+        tracing_config<backends::rocprofiler_sdk::backend<wrapper>, default_externals>;
 
-    auto _callback_domains = sdk_tracing_config_t::get_callback_domains();
-    auto _buffered_domain  = sdk_tracing_config_t::get_buffered_domains();
+    auto _callback_domains = tracing_config_t::get_callback_domains();
+    auto _buffered_domain  = tracing_config_t::get_buffered_domains();
     auto _counter_events   = config::get_rocm_counter_events();
-    auto _version          = sdk_tracing_config_t::get_version();
+    auto _version          = tracing_config_t::get_version();
     if(_version.formatted() == 0)
     {
         LOG_WARNING("rocprofiler-sdk version not initialized");
@@ -2553,9 +2552,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     {
         if(_callback_domains.count(itr) > 0)
         {
-            auto _ops = sdk_tracing_config_t::get_operations(itr);
+            auto _ops = tracing_config_t::get_operations(itr);
             _data->backtrace_operations.emplace(
-                itr, sdk_tracing_config_t::get_backtrace_operations(itr));
+                itr, tracing_config_t::get_backtrace_operations(itr));
             ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
                 _data->primary_ctx, itr, _ops.data(), _ops.size(), tool_tracing_callback,
                 _data));

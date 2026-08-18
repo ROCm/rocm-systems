@@ -14,9 +14,9 @@
 namespace rocprofsys::rocprofiler_sdk
 {
 
-// Default Externals for sdk_tracing_config: reads settings and config from the global
+// Default Externals for tracing_config: reads settings and config from the global
 // singletons. Replaced by a mock in tests.
-struct default_sdk_externals
+struct default_externals
 {
     static bool get_use_rcclp() { return ::rocprofsys::config::get_use_rcclp(); }
     static bool get_use_ompt() { return ::rocprofsys::config::get_use_ompt(); }
