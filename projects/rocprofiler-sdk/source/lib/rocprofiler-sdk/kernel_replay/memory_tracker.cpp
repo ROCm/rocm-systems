@@ -69,9 +69,8 @@ unsupported_executable_inventory()
     // Distinct ContextT so this singleton does not share storage with inventory().
     struct unsupported_executable_tag
     {};
-    static auto*& _v =
-        common::static_object<common::Synchronized<tracked_map_t>,
-                              unsupported_executable_tag>::construct();
+    static auto*& _v = common::static_object<common::Synchronized<tracked_map_t>,
+                                             unsupported_executable_tag>::construct();
     return *_v;
 }
 
@@ -97,8 +96,9 @@ record_unsupported_executable(void* ptr, size_t size)
     // Only ordinary coarse device VRAM. HIP kernarg pools / fine-grained regions fail trackable and
     // stay out of both inventories (silent omit is correct for those).
     if(!q.trackable) return;
-    unsupported_executable_inventory().wlock(
-        [&](auto& _map) { _map[ptr] = alloc_info_t{size, q.agent}; });
+    unsupported_executable_inventory().wlock([&](auto& _map) {
+        _map[ptr] = alloc_info_t{size, q.agent};
+    });
 }
 
 hsa_status_t

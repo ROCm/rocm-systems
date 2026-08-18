@@ -1059,8 +1059,8 @@ WriteInterceptor(const void* packets,
 
                 // Restore device memory between passes so the next pass sees identical inputs.
                 // A failed host->device copy leaves the snapshot only partially applied; continuing
-                // would submit the next pass over corrupted memory and (because the final pass skips
-                // restore) would also leave that corruption visible to the application.
+                // would submit the next pass over corrupted memory and (because the final pass
+                // skips restore) would also leave that corruption visible to the application.
                 ROCP_FATAL_IF(!kernel_replay::memory_snapshot::restore(snapshot)) << fmt::format(
                     "kernel replay: restore failed between passes (partial host->device copy); "
                     "aborting rather than continuing with corrupted device memory");
