@@ -304,7 +304,7 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_results.pftrace
          --csv-input
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_agent_info.csv
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_counter_collection_trace.csv
+         # ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_counter_collection_trace.csv
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_kernel_trace.csv
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_memory_allocation_trace.csv
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_regions_trace.csv

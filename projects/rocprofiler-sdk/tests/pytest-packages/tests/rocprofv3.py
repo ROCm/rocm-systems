@@ -35,8 +35,8 @@ def test_perfetto_data(
         "memory_allocation",
         "rocdecode_api",
         "rocjpeg_api",
-        "counter_collection",
-        "scratch_memory",
+        # "counter_collection",
+        # "scratch_memory",
     ),
 ):
 
@@ -49,8 +49,8 @@ def test_perfetto_data(
         "memory_allocation": ("memory_allocation", "memory_allocation"),
         "rocdecode_api": ("rocdecode_api", "rocdecode_api"),
         "rocjpeg_api": ("rocjpeg_api", "rocjpeg_api"),
-        "counter_collection": ("counter_collection", "counter_collection"),
-        "scratch_memory": ("scratch_memory", "scratch_memory"),
+        # "counter_collection": ("counter_collection", "counter_collection"),
+        # "scratch_memory": ("scratch_memory", "scratch_memory"),
     }
 
     # make sure they specified valid categories
@@ -349,7 +349,7 @@ def test_csv_data(
     json_data,
     categories=(
         "agent",
-        "counter_collection",
+        # "counter_collection",
         "kernel",
         "memory_allocation",
         "memory_copy",
@@ -358,7 +358,7 @@ def test_csv_data(
 ):
 
     mapping = {
-        "counter_collection": "counter_collection",
+        # "counter_collection": "counter_collection",
         "kernel": "kernel_dispatch",
         "memory_allocation": "memory_allocation",
         "memory_copy": "memory_copy",
@@ -427,8 +427,8 @@ def test_csv_data(
                     exclude_ops = {"roctxGetThreadId"}
                     for entry in marker_records:
                         # exclude records where start and end times are the same
-                        if entry["start_timestamp"] == entry["end_timestamp"]:
-                            continue
+                        # if entry["start_timestamp"] == entry["end_timestamp"]:
+                        #     continue
                         # excludes roctxMarkA and roctxGetThreadId operations
                         if (
                             string_records

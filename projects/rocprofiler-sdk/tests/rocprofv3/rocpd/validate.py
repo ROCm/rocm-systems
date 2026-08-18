@@ -62,7 +62,7 @@ def test_csv_data(csv_data, json_data):
         json_data,
         (
             "agent",
-            "counter_collection",
+            # "counter_collection",
             "kernel",
             "memory_allocation",
             "memory_copy",

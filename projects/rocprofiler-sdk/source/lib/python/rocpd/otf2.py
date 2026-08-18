@@ -35,8 +35,14 @@ from . import output_config
 
 
 def get_perfetto_category_name(category):
-    """Map category names to perfetto category names"""
+    """Map category names to perfetto category names.
+
+    Handles both legacy raw category names (e.g. HIP_RUNTIME_API) and the
+    new schema format where rocpd_info_category already stores the mapped
+    perfetto names (e.g. hip_api).
+    """
     category_map = {
+        # Legacy raw category names (old schema)
         "NONE": "none",
         "HSA_CORE_API": "hsa_api",
         "HSA_AMD_EXT_API": "hsa_api",
@@ -70,6 +76,21 @@ def get_perfetto_category_name(category):
         "KFD_PAGE_MIGRATE": "kfd_events",
         "KFD_PAGE_FAULT": "kfd_events",
         "KFD_QUEUE": "kfd_events",
+        # New schema: rocpd_info_category already stores perfetto category names
+        "none": "none",
+        "hsa_api": "hsa_api",
+        "hip_api": "hip_api",
+        "marker_api": "marker_api",
+        "memory_copy": "memory_copy",
+        "memory_allocation": "memory_allocation",
+        "kernel_dispatch": "kernel_dispatch",
+        "scratch_memory": "scratch_memory",
+        "rccl_api": "rccl_api",
+        "openmp": "openmp",
+        "rocdecode_api": "rocdecode_api",
+        "rocjpeg_api": "rocjpeg_api",
+        "kfd_events": "kfd_events",
+        "CPU": "none",
     }
     return category_map.get(category, "none")
 
@@ -277,11 +298,14 @@ def write_otf2(importData, config):
                                 )
                                 events = []
                                 for start, end, name, category in data:
-                                    attributes = {
-                                        perfetto_category: get_perfetto_category_name(
-                                            category
-                                        )
-                                    }
+                                    perfetto_cat = get_perfetto_category_name(category)
+                                    # Skip instantaneous marker events (roctxMarkA
+                                    # point-in-time marks have start == end and have
+                                    # no meaningful representation as OTF2 enter/leave
+                                    # pairs; they are also excluded from validation).
+                                    if perfetto_cat == "marker_api" and start == end:
+                                        continue
+                                    attributes = {perfetto_category: perfetto_cat}
 
                                     region = archive.definitions.region(
                                         name=name,

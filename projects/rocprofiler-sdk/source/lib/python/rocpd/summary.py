@@ -332,7 +332,7 @@ def create_summary_queries(
 
     NAME_COLUMN_MAP = {
         "memory_allocations": "type",
-        "scratch_memory": "operation",
+        #        "scratch_memory": "operation",
     }
 
     avoid_view_pattern = ("rocpd", "region", "counter", "pmc")
