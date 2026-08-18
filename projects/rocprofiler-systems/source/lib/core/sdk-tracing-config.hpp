@@ -91,9 +91,9 @@ public:
 
     static common::version get_version();
 
-    static std::vector<std::string>            domain_choices();
-    static std::string                         domain_defaults();
-    static std::vector<operation_setting_spec> operation_settings();
+    static std::vector<std::string>            get_domain_choices();
+    static std::string                         get_domain_defaults();
+    static std::vector<operation_setting_spec> get_operation_settings();
 
     static std::unordered_set<typename SdkBackend::callback_tracing_kind_t>
     get_callback_domains();
@@ -174,7 +174,7 @@ sdk_tracing_config<SdkBackend, Externals>::get_version()
 template <typename SdkBackend, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
 std::vector<std::string>
-sdk_tracing_config<SdkBackend, Externals>::domain_choices()
+sdk_tracing_config<SdkBackend, Externals>::get_domain_choices()
 {
     const auto& buffered_tracing_info = SdkBackend::get_buffer_tracing_names();
     const auto& callback_tracing_info = SdkBackend::get_callback_tracing_names();
@@ -224,7 +224,7 @@ sdk_tracing_config<SdkBackend, Externals>::domain_choices()
 template <typename SdkBackend, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
 std::string
-sdk_tracing_config<SdkBackend, Externals>::domain_defaults()
+sdk_tracing_config<SdkBackend, Externals>::get_domain_defaults()
 {
     auto defaults = std::string{ "hip_runtime_api,marker_api,kernel_dispatch,"
                                  "memory_copy,scratch_memory" };
@@ -241,7 +241,7 @@ sdk_tracing_config<SdkBackend, Externals>::domain_defaults()
 template <typename SdkBackend, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
 std::vector<typename sdk_tracing_config<SdkBackend, Externals>::operation_setting_spec>
-sdk_tracing_config<SdkBackend, Externals>::operation_settings()
+sdk_tracing_config<SdkBackend, Externals>::get_operation_settings()
 {
     const auto& buffered_tracing_info = SdkBackend::get_buffer_tracing_names();
     const auto& callback_tracing_info = SdkBackend::get_callback_tracing_names();
@@ -306,7 +306,7 @@ sdk_tracing_config<SdkBackend, Externals>::get_callback_domains()
     const auto domain_map = get_callback_domain_map();
 
     // Check that the domains are valid
-    const auto valid_choices = domain_choices();
+    const auto valid_choices = get_domain_choices();
 
     const auto invalid_domain_fn = [&valid_choices](const auto& domainv) {
         return !std::ranges::any_of(
@@ -346,7 +346,7 @@ sdk_tracing_config<SdkBackend, Externals>::get_buffered_domains()
     auto domains = rocprofsys::delimit(Externals::get_rocm_domains(), " ,;:\t\n");
     // Check that the domains are valid
 
-    const auto valid_choices = domain_choices();
+    const auto valid_choices = get_domain_choices();
     const auto domain_map    = get_buffered_domain_map();
 
     const auto invalid_domain_fn = [&valid_choices](const auto& domainv) {

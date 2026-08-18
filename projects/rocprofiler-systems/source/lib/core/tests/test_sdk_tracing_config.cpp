@@ -224,7 +224,7 @@ public:
     MOCK_METHOD(bool, get_use_unified_memory_profiling, ());
     MOCK_METHOD(std::string, get_rocm_domains, ());
     MOCK_METHOD(std::optional<std::string>, get_setting_value, (std::string_view));
-    MOCK_METHOD(void, set_state, (std::uint32_t) );
+    MOCK_METHOD(void, set_state, (std::uint32_t));
 };
 
 inline std::unique_ptr<gtest::StrictMock<gmock_sdk_externals>> g_mock_externals;
@@ -469,7 +469,7 @@ TEST_F(sdk_tracing_config_test, domain_choices_returns_expected_choices)
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    const auto choices = sut::domain_choices();
+    const auto choices = sut::get_domain_choices();
 
     EXPECT_THAT(choices,
                 gtest::IsSupersetOf({ "hip_api", "hsa_api", "marker_api", "roctx" }));
@@ -482,7 +482,7 @@ TEST_F(sdk_tracing_config_test, domain_defaults_returns_expected_defaults)
     using sut =
         sdk_tracing_config<tagged_backend<domain_settings_test>, mock_sdk_externals>;
 
-    EXPECT_EQ(sut::domain_defaults(),
+    EXPECT_EQ(sut::get_domain_defaults(),
               "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,scratch_memory");
 }
 
@@ -500,7 +500,7 @@ TEST_F(sdk_tracing_config_test, operation_settings_registers_marker_api_domain_a
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    const auto specs = sut::operation_settings();
+    const auto specs = sut::get_operation_settings();
 
     auto itr = std::ranges::find_if(specs, [](const auto& spec) {
         return spec.env_names.operations_include_env_name ==
@@ -983,7 +983,7 @@ TEST_F(sdk_tracing_config_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    sut::operation_settings();
+    sut::get_operation_settings();
 
     EXPECT_CALL(*g_mock_externals,
                 get_setting_value(gtest::Eq("ROCPROFSYS_ROCM_MARKER_API_OPERATIONS")))
@@ -1020,7 +1020,7 @@ TEST_F(sdk_tracing_config_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    sut::operation_settings();
+    sut::get_operation_settings();
 
     EXPECT_CALL(*g_mock_externals,
                 get_setting_value(gtest::Eq("ROCPROFSYS_ROCM_MEMORY_COPY_OPERATIONS")))
@@ -1052,7 +1052,7 @@ TEST_F(sdk_tracing_config_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    sut::operation_settings();
+    sut::get_operation_settings();
 
     EXPECT_CALL(*g_mock_externals,
                 get_setting_value(gtest::Eq(
@@ -1085,7 +1085,7 @@ TEST_F(sdk_tracing_config_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    sut::operation_settings();
+    sut::get_operation_settings();
 
     EXPECT_CALL(*g_mock_externals,
                 get_setting_value(gtest::Eq(

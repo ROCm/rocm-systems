@@ -477,14 +477,14 @@ configure_rocm_tracing_settings(const std::shared_ptr<settings>& _config)
         backends::rocprofiler_sdk::backend<rocprofiler_sdk::wrapper>,
         rocprofiler_sdk::default_sdk_externals>;
 
-    const auto rocm_domain_choices = sdk_tracing_config_t::domain_choices();
+    const auto rocm_domain_choices = sdk_tracing_config_t::get_domain_choices();
     const auto rocm_domain_description =
         fmt::format("Specification of ROCm domains to trace/profile. Choices: {}",
                     fmt::join(rocm_domain_choices, ", "));
 
     ROCPROFSYS_CONFIG_SETTING(
         std::string, env_vars::ROCM_DOMAINS, rocm_domain_description,
-        sdk_tracing_config_t::domain_defaults(), "rocm", "rocprofiler-sdk")
+        sdk_tracing_config_t::get_domain_defaults(), "rocm", "rocprofiler-sdk")
         ->set_choices(rocm_domain_choices);
 
     ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::ROCM_EVENTS,
@@ -495,7 +495,7 @@ configure_rocm_tracing_settings(const std::shared_ptr<settings>& _config)
                               std::string{}, "rocm", "hardware_counters");
 
     auto registered_operation_settings = std::unordered_set<std::string>{};
-    for(const auto& spec : sdk_tracing_config_t::operation_settings())
+    for(const auto& spec : sdk_tracing_config_t::get_operation_settings())
     {
         if(registered_operation_settings
                .emplace(spec.env_names.operations_include_env_name)
@@ -2101,8 +2101,8 @@ print_settings(
             for(size_t i = 0; i < nfields; ++i)
             {
                 const size_t _wextra = (_md && i < 2) ? 2 : 0;
-                _widths.at(i) = std::max<size_t>(_widths.at(i),
-                                                 _data.back().at(i).length() + _wextra);
+                _widths.at(i)        = std::max<size_t>(_widths.at(i),
+                                                        _data.back().at(i).length() + _wextra);
             }
         }
     }
