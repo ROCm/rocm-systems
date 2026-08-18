@@ -1,23 +1,39 @@
 # Configuration
 
-Simulation topologies are defined declaratively in JSON. The config
-specifies the component hierarchy, link connectivity, and simulation
-parameters.
+Rocjitsu behavior is configured declaratively in JSON. Simulator configs
+specify the component hierarchy, link connectivity, and simulation parameters;
+DBT guest configs select the guest and host targets and execution backend.
 
-## Config files
+## Simulator configs
 
-Pre-built configs are in `configs/`:
+Pre-built simulator configs are in `configs/`:
 
 | File | Description |
 |---|---|
+| `gfx942_cdna3.json` | Single CDNA3 GPU (standalone simulation) |
+| `gfx942_cdna3_kmd.json` | Single CDNA3 GPU (daemon/KFD mode) |
 | `gfx950_cdna4.json` | Single CDNA4 GPU (standalone simulation) |
 | `gfx950_cdna4_kmd.json` | Single CDNA4 GPU (daemon/KFD mode) |
 | `gfx950_cdna4_kmd_2gpu.json` | Two CDNA4 GPUs (multi-GPU daemon mode) |
-| `gfx942_cdna3.json` | Single CDNA3 GPU (standalone simulation) |
-| `gfx942_cdna3_kmd.json` | Single CDNA3 GPU (daemon/KFD mode) |
 | `gfx1250.json` | Single gfx1250 GPU (standalone simulation, no KMD) |
+| `gfx1100_w7900.json` | Single RDNA3 GPU (standalone simulation) |
+| `gfx1151.json` | Single RDNA3.5 GPU (standalone simulation) |
+| `gfx1201_r9700.json` | Single RDNA4 GPU (standalone simulation) |
+
+## DBT guest configs
+
+The checked-in [DBT guest-mode](rocjitsu_dbt_guest.md) configs cover hardware
+and simulated host execution:
+
+| File | Description |
+|---|---|
+| `guest_gfx950_on_gfx942.json` | CDNA4 guest on a CDNA3 hardware host |
+| `guest_gfx950_on_simulated_gfx942.json` | CDNA4 guest on a simulated CDNA3 host |
+| `guest_gfx950_on_gfx1201.json` | CDNA4 guest on an RDNA4 hardware host |
 
 ## JSON structure
+
+The remaining sections describe simulator topology configs.
 
 ```json
 {
@@ -55,9 +71,28 @@ The example above is intentionally minimal and single-threaded.
 | Field | Type | Description |
 |---|---|---|
 | `max_ticks` | int | Maximum simulation ticks (0 = unlimited) |
-| `num_threads` | int | Number of PDES engine partitions/worker threads. |
-| `exec_mode` | string | `"functional"` or `"cycle"` |
+| `num_threads` | int | Simdojo engine partitions (one per XCD when partitioned) |
+| `exec_mode` | string | Execution mode. Use `"clocked"` for clocked execution; `"functional"` is the default/fallback. |
 | `vm.arch` | string | Architecture: `cdna3`, `cdna4`, etc. |
+
+`exec_mode` is matched literally: only the exact string `"clocked"` selects
+clocked mode. If the field is omitted, set to `"functional"`, or given any
+other value, the simulator runs in functional mode.
+
+### Simulation threading
+
+`num_threads` controls Simdojo engine partitions and their worker threads.
+The value is clamped to the number of XCDs visible to the VM. With
+`num_threads: 1`, all XCDs stay in one engine partition. With
+`num_threads: 4` on the 8-XCD CDNA4 configs, whole XCD subtrees are assigned
+round-robin to four partitions; with `num_threads: 8`, each XCD gets its own
+partition. A single XCD is never split across partitions.
+
+For multi-GPU VMs, clamping uses the aggregate XCD count across all SoCs.
+Partition assignment follows one global XCD ordering across the SoCs and is
+deliberately locality-agnostic. For example, two 8-XCD GPUs permit up to 16
+partitions, while `num_threads: 4` assigns XCDs from both GPUs to each
+partition.
 
 ### Topology
 

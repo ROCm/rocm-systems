@@ -16,7 +16,7 @@ namespace env_vars = rocprofsys::env_vars;
 static std::string
 find_env_var(const std::vector<std::string>& env, std::string_view var_name)
 {
-    std::string prefix = std::string(var_name) + "=";
+    const std::string prefix = std::string(var_name) + "=";
     for(const auto& entry : env)
     {
         if(std::string_view{ entry }.find(prefix) == 0) return entry;
@@ -256,8 +256,8 @@ TEST_F(UpdateEnvTest, RealWorld_Timing_DoubleValues)
                m_updated_envs, m_original_envs);
 
     ASSERT_EQ(m_env_vars.size(), 2);
-    std::string delay_var = find_env_var(m_env_vars, env_vars::TRACE_DELAY);
-    std::string freq_var  = find_env_var(m_env_vars, env_vars::SAMPLING_FREQ);
+    const std::string delay_var = find_env_var(m_env_vars, env_vars::TRACE_DELAY);
+    const std::string freq_var  = find_env_var(m_env_vars, env_vars::SAMPLING_FREQ);
 
     EXPECT_TRUE(delay_var.find(std::string{ env_vars::TRACE_DELAY } + "=") == 0);
     EXPECT_TRUE(freq_var.find(std::string{ env_vars::SAMPLING_FREQ } + "=") == 0);
@@ -265,7 +265,7 @@ TEST_F(UpdateEnvTest, RealWorld_Timing_DoubleValues)
 
 TEST_F(UpdateEnvTest, StringTypes_StdString)
 {
-    std::string value = "test_string_value";
+    const std::string value = "test_string_value";
     update_env(m_env_vars, "STRING_VAR", value, update_mode::REPLACE, ":", m_updated_envs,
                m_original_envs);
 
@@ -310,15 +310,16 @@ TEST_F(UpdateEnvTest, MultipleVariables_DifferentNames)
 
 TEST_F(UpdateEnvTest, LongPath_Append)
 {
-    std::string long_path = "/very/long/path/to/some/directory/with/many/subdirectories/"
-                            "that/might/be/used/in/real/world";
+    const std::string long_path =
+        "/very/long/path/to/some/directory/with/many/subdirectories/"
+        "that/might/be/used/in/real/world";
     m_env_vars.emplace_back("PATH=/usr/bin:/bin");
     m_original_envs.insert("PATH=/usr/bin:/bin");
 
     update_env(m_env_vars, "PATH", long_path, update_mode::APPEND, ":", m_updated_envs,
                m_original_envs);
 
-    std::string expected = "PATH=/usr/bin:/bin:" + long_path;
+    const std::string expected = "PATH=/usr/bin:/bin:" + long_path;
     EXPECT_EQ(m_env_vars[0], expected);
 }
 

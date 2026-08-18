@@ -8,7 +8,7 @@
 #define ROCJITSU_VM_AMDGPU_WAVEFRONT_H_
 
 #include "rocjitsu/base/api.h"
-#include "rocjitsu/isa/arch/amdgpu/vgpr_msb.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/instruction_compute_unit_view.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
@@ -170,6 +170,12 @@ public:
   /// @brief Set the per-WG LDS base offset.
   void set_lds_base(uint32_t base) { lds_base_ = base; }
 
+  /// @brief Return the aligned LDS allocation size for this workgroup.
+  uint32_t lds_size() const { return lds_size_; }
+
+  /// @brief Set the aligned LDS allocation size for this workgroup.
+  void set_lds_size(uint32_t size) { lds_size_ = size; }
+
   /// @brief Return the LDS backing selected for this workgroup placement.
   ///
   /// CU-mode workgroups use their owning CU's LDS. WGP-mode workgroups can
@@ -245,11 +251,17 @@ public:
   /// @param val New M0 value.
   void set_m0(uint32_t val) { m0_ = val; }
 
+  static constexpr uint32_t DX10_CLAMP_BIT = 1u << 8;
   static constexpr uint32_t GPR_IDX_EN_BIT = 1u << 27;
   static constexpr uint32_t FP16_OVFL_BIT = 1u << 23;
 
+  bool dx10_clamp() const { return (mode_raw_ & DX10_CLAMP_BIT) != 0; }
   bool gpr_idx_en() const { return mode_has_gpr_idx_en_ && ((mode_raw_ & GPR_IDX_EN_BIT) != 0); }
   bool fp16_ovfl() const { return (mode_raw_ & FP16_OVFL_BIT) != 0; }
+  uint32_t fp_round_mode_f32() const { return mode_raw_ & 0x3u; }
+  uint32_t fp_round_mode_f16_f64() const { return (mode_raw_ >> 2) & 0x3u; }
+  uint32_t fp_denorm_mode_f32() const { return (mode_raw_ >> 4) & 0x3u; }
+  uint32_t fp_denorm_mode_f16_f64() const { return (mode_raw_ >> 6) & 0x3u; }
   uint32_t gpr_idx_offset() const { return m0_ & 0xFF; }
   uint32_t gpr_idx_mode() const { return (m0_ >> 8) & 0xF; }
 
@@ -470,6 +482,7 @@ public:
     dispatch_id_ = 0;
     process_id_ = 0;
     lds_base_ = 0;
+    lds_size_ = 0;
     lds_ = nullptr;
     cluster_rank_ = 0;
     cluster_size_ = 1;
@@ -514,6 +527,7 @@ protected:
   uint32_t dispatch_id_ = 0;  ///< Dispatch ID (set per dispatch, unique per dispatch).
   uint32_t process_id_ = 0;   ///< Owning process ID (PASID analog, set per dispatch).
   uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
+  uint32_t lds_size_ = 0;     ///< Aligned per-WG LDS allocation size.
   Lds *lds_ = nullptr;        ///< Placement-selected LDS backing; nullptr means CU-local LDS.
   uint32_t cluster_rank_ = 0; ///< Workgroup rank inside the dispatch cluster.
   uint32_t cluster_size_ = 1; ///< Number of workgroups in the dispatch cluster.

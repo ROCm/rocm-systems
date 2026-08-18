@@ -24,23 +24,30 @@
 # libva is provided exclusively by TheRock's amd-mesa sysdeps, staged under
 # ${ROCM_PATH}/lib/rocm_sysdeps. The shared libraries carry a rocm_sysdeps_
 # prefix on both Linux and Windows. ROCM_PATH is the only knob needed.
-find_path(LIBVA_INCLUDE_DIR NAMES va/va.h PATHS ${ROCM_PATH}/lib/rocm_sysdeps/include NO_DEFAULT_PATH)
-find_library(LIBVA_LIBRARY NAMES rocm_sysdeps_va PATHS ${ROCM_PATH}/lib/rocm_sysdeps/lib NO_DEFAULT_PATH)
+# Search super-project (e.g. amd-mesa) sysdeps first when building in TheRock.
+if(DEFINED THEROCK_SUPERPROJECT_INCLUDE_DIRS)
+  list(APPEND _libva_include_hints ${THEROCK_SUPERPROJECT_INCLUDE_DIRS})
+  list(APPEND _libva_library_hints ${CMAKE_LIBRARY_PATH})
+endif()
+
+find_path(LIBVA_INCLUDE_DIR NAMES va/va.h PATHS ${_libva_include_hints} ${ROCM_PATH}/lib/rocm_sysdeps/include NO_DEFAULT_PATH)
+find_library(LIBVA_LIBRARY NAMES rocm_sysdeps_va HINTS ${_libva_library_hints} ${ROCM_PATH}/lib/rocm_sysdeps/lib NO_DEFAULT_PATH)
 
 if(WIN32)
   # Windows uses the va_win32 D3D12 display backend; va-drm is Linux-only.
-  find_library(LIBVA_WIN32_LIBRARY NAMES rocm_sysdeps_va_win32 PATHS ${ROCM_PATH}/lib/rocm_sysdeps/lib NO_DEFAULT_PATH)
+  find_library(LIBVA_WIN32_LIBRARY NAMES rocm_sysdeps_va_win32 HINTS ${_libva_library_hints} ${ROCM_PATH}/lib/rocm_sysdeps/lib NO_DEFAULT_PATH)
 
   include(FindPackageHandleStandardArgs)
   find_package_handle_standard_args(Libva DEFAULT_MSG LIBVA_INCLUDE_DIR LIBVA_LIBRARY LIBVA_WIN32_LIBRARY)
   mark_as_advanced(LIBVA_INCLUDE_DIR LIBVA_LIBRARY LIBVA_WIN32_LIBRARY)
 else()
-  find_library(LIBVA_DRM_LIBRARY NAMES rocm_sysdeps_va-drm PATHS ${ROCM_PATH}/lib/rocm_sysdeps/lib NO_DEFAULT_PATH)
+  find_library(LIBVA_DRM_LIBRARY NAMES rocm_sysdeps_va-drm HINTS ${_libva_library_hints} ${ROCM_PATH}/lib/rocm_sysdeps/lib NO_DEFAULT_PATH)
 
   include(FindPackageHandleStandardArgs)
-  find_package_handle_standard_args(Libva DEFAULT_MSG LIBVA_INCLUDE_DIR LIBVA_LIBRARY)
+  find_package_handle_standard_args(Libva DEFAULT_MSG LIBVA_INCLUDE_DIR LIBVA_LIBRARY LIBVA_DRM_LIBRARY)
   mark_as_advanced(LIBVA_INCLUDE_DIR LIBVA_LIBRARY LIBVA_DRM_LIBRARY)
 endif()
+
 
 if(Libva_FOUND)
   # Find VA Version

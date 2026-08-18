@@ -26,6 +26,7 @@ The RCCL public repository is located within the rocm-systems repo at `<https://
 
   .. grid-item-card:: How to
 
+    * :doc:`Use the device API and GIN <./how-to/device-api-gin>`
     * :doc:`Using the RCCL Tuner plugin <./how-to/using-rccl-tuner-plugin-api>`
     * :doc:`Using the NCCL Net plugin <./how-to/using-nccl>`
     * :doc:`Fault tolerance in RCCL <./how-to/fault-tolerance>`

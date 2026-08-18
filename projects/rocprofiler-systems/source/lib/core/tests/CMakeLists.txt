@@ -19,6 +19,24 @@ target_link_libraries(
 
 target_include_directories(track-registry-tests PRIVATE ${PROJECT_SOURCE_DIR}/source/lib)
 
+add_library(sdk-tracing-config-tests OBJECT test_sdk_tracing_config.cpp)
+
+target_link_libraries(
+    sdk-tracing-config-tests
+    PRIVATE
+        rocprofiler-systems-googletest-library
+        rocprofiler-systems-core-library
+        rocprofiler-systems-logger
+        rocprofiler-systems-headers
+        rocprofiler-systems-rocm
+        rocprofiler-systems-timemory
+)
+
+target_include_directories(
+    sdk-tracing-config-tests
+    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib
+)
+
 add_library(output-format-tests OBJECT test_output_format.cpp)
 
 target_link_libraries(
@@ -67,5 +85,22 @@ target_link_libraries(
 
 target_include_directories(
     rank-passes-filter-tests
+    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib/
+)
+
+add_library(state-tests OBJECT test_state.cpp)
+
+target_link_libraries(
+    state-tests
+    PRIVATE
+        rocprofiler-systems-googletest-library
+        rocprofiler-systems-core-library
+        rocprofiler-systems-logger
+        rocprofiler-systems-headers
+        rocprofiler-systems-timemory
+)
+
+target_include_directories(
+    state-tests
     PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib/
 )

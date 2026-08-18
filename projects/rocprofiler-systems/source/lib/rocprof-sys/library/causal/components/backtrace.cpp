@@ -78,7 +78,7 @@ backtrace::global_init()
 void
 overflow::sample(int _sig)
 {
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     static thread_local const auto& _tinfo      = thread_info::get();
     auto                            _tid        = _tinfo->index_data->sequent_value;
@@ -147,9 +147,9 @@ backtrace::sample(int _sig)
 
     ++_protect_flag;
     // on RedHat, the unw_step within get_unw_signal_frame_stack_raw involves a mutex lock
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
-    m_index = causal::experiment::get_index();
-    m_stack = get_unw_signal_frame_stack_raw<depth, ignore_depth>();
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    m_index                  = causal::experiment::get_index();
+    m_stack                  = get_unw_signal_frame_stack_raw<depth, ignore_depth>();
 
     auto _set_current_selection = [](auto _stack) {
         // save the former selection count
@@ -213,8 +213,8 @@ backtrace::get_period(std::uint64_t _units)
 {
     using cast_type = std::conditional_t<std::is_floating_point<Tp>::value, Tp, double>;
 
-    double       _period = 1.0 / 1000.0;
-    std::int64_t _period_nsec =
+    const double       _period = 1.0 / 1000.0;
+    const std::int64_t _period_nsec =
         static_cast<std::int64_t>(_period * units::sec) % units::sec;
     return static_cast<Tp>(_period_nsec) / static_cast<cast_type>(_units);
 }

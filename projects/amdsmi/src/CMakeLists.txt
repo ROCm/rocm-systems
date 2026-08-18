@@ -173,8 +173,17 @@ function(amdsmi_configure_common_target _TARGET)
     )
 
     if(ENABLE_WSL_BACKEND)
-        target_compile_definitions(${_TARGET} PRIVATE ENABLE_WSL_BACKEND AMDSMI_ENABLE_WSL_BACKEND)
-        target_include_directories(${_TARGET} PRIVATE ${PROJECT_SOURCE_DIR}/../rocr-runtime/libhsakmt/include)
+        target_compile_definitions(${_TARGET} PRIVATE ENABLE_WSL_BACKEND)
+        set(_WSL_HSAKMT_INC "${PROJECT_SOURCE_DIR}/../rocr-runtime/libhsakmt/include")
+        if(NOT EXISTS "${_WSL_HSAKMT_INC}/hsakmt/rocdxg_smi.h")
+            message(
+                FATAL_ERROR
+                "ENABLE_WSL_BACKEND=ON requires ${_WSL_HSAKMT_INC}/hsakmt/rocdxg_smi.h "
+                "(built from rocr-runtime/libhsakmt's WIN_SDK/dxg path). "
+                "Check out and build the matching libhsakmt tree before enabling this flag."
+            )
+        endif()
+        target_include_directories(${_TARGET} PRIVATE ${_WSL_HSAKMT_INC})
     endif()
 
     target_include_directories(
