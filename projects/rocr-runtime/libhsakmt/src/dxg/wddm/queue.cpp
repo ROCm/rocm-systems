@@ -771,10 +771,14 @@ hsa_status_t ComputeQueue::KernelDispatchAqlToPm4(char* cpu, hsa_kernel_dispatch
     i += cmd_util.BuildWriteData64Command(cpu + i, (uint64_t*)ring_rptr,
                                           cmdbuf_aql_frame_write_index + 1);
 
-  // Check if we exceeded the frame size
-  if ((i - ib_size) > cmdbuf_aql_frame_size) {
-    pr_err("PM4 command buffer overflow in KernelDispatch: used %" PRIu64 " bytes, limit %u bytes\n",
-           i - ib_size, cmdbuf_aql_frame_size);
+  // This packet was written at ib_size, not at the frame base: SwitchAql2PM4() merges a
+  // run of consecutive dispatches into one frame, which is exactly what
+  // cmdbuf_aql_merge_limit_ bounds, so the frame has to be measured cumulatively. Testing
+  // this packet alone would never notice the run itself outgrowing the frame.
+  if (i > cmdbuf_aql_frame_size) {
+    pr_err("PM4 command buffer overflow in KernelDispatch: used %" PRIu64
+           " bytes at offset %" PRIu64 ", limit %u bytes\n",
+           i - ib_size, ib_size, cmdbuf_aql_frame_size);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
@@ -860,10 +864,13 @@ hsa_status_t ComputeQueue::BarrierGenericAqlToPm4(char* cpu, hsa_barrier_and_pac
     i += cmd_util.BuildWriteData64Command(cpu + i, (uint64_t*)ring_rptr,
                                           cmdbuf_aql_frame_write_index + 1);
 
-  // Check if we exceeded the frame size
-  if ((i - ib_size) > cmdbuf_aql_frame_size) {
-    pr_err("PM4 command buffer overflow in BarrierGeneric: used %" PRIu64 " bytes, limit %u bytes\n",
-           i - ib_size, cmdbuf_aql_frame_size);
+  // Cumulative for the same reason as in KernelDispatchAqlToPm4(): a barrier terminates a
+  // merge run rather than starting one, so it is appended to whatever the run before it
+  // already put in this frame.
+  if (i > cmdbuf_aql_frame_size) {
+    pr_err("PM4 command buffer overflow in BarrierGeneric: used %" PRIu64
+           " bytes at offset %" PRIu64 ", limit %u bytes\n",
+           i - ib_size, ib_size, cmdbuf_aql_frame_size);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 

@@ -693,7 +693,9 @@ void WDDMDevice::InitCmdbufInfo(void) {
   // checked is per (block, block_index) in CounterPacketConstruct::can_collect(),
   // so a pass may emit many more events than this. What keeps an oversized pass
   // from overflowing the frame is the runtime bounds check in
-  // VendorSpecificAqlToPm4(), not this constant. The original 128 B alignment
+  // VendorSpecificAqlToPm4() - and, since every translation path now measures
+  // the frame cumulatively, the matching checks in KernelDispatchAqlToPm4() and
+  // BarrierGenericAqlToPm4() - not this constant. The original 128 B alignment
   // slack is retained, and the per-counter cost still scales with device
   // geometry instead of being a blunt over-allocation.
   constexpr uint32_t kFrameAlignmentMargin    = 128;
