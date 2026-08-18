@@ -13,6 +13,7 @@
 #include "test-options.h"
 
 #include <array>
+#include <cstdint>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 #include <string>
@@ -40,8 +41,8 @@ HIPFILE_WARN_NO_GLOBAL_CTOR_OFF
 // ---------------------------------------------------------------------------
 namespace {
 
-constexpr hoff_t kFileOffBase = static_cast<hoff_t>(kChunkBytes + kFourKiB);
-constexpr hoff_t kBufOffBase  = static_cast<hoff_t>(kFourKiB);
+constexpr hoff_t kFileOffBase = static_cast<hoff_t>(kChunkBytes + 4_KiB);
+constexpr hoff_t kBufOffBase  = static_cast<hoff_t>(4_KiB);
 
 // Data starts at `base+delta`, where `base` is one of `kFileOffBase` or `kBufOffBase`.
 struct OffParam {
@@ -83,15 +84,15 @@ struct HipFileVerifyUnaligned : public testing::TestWithParam<std::tuple<OffPara
         file_off = kFileOffBase + fileDelta();
         buf_off  = kBufOffBase + bufferDelta();
 
-        // Device layout (each sentinel region ~kFourKiB (+-1), data io_bytes):
+        // Device layout (each sentinel region ~4_KiB (+-1), data io_bytes):
         // [head device sentinel region][data][tail device sentinel region]
-        buffer_bytes = io_bytes + 2 * kFourKiB;
+        buffer_bytes = io_bytes + 2 * 4_KiB;
 
-        // File layout (each sentinel region kFourKiB, data io_bytes; data begins at file
+        // File layout (each sentinel region 4_KiB, data io_bytes; data begins at file
         // offset file_off past the chunk boundary). Size through the tail bracket:
         // [head file sentinel region][data][tail file sentinel region]
         const hoff_t tail_off = file_off + static_cast<hoff_t>(io_bytes);
-        ASSERT_EQ(0, ftruncate(tmpfile.fd, tail_off + static_cast<hoff_t>(kFourKiB)));
+        ASSERT_EQ(0, ftruncate(tmpfile.fd, tail_off + static_cast<hoff_t>(4_KiB)));
 
         hipFileDescr_t descr{};
         descr.type      = hipFileHandleTypeOpaqueFD;
@@ -112,18 +113,18 @@ struct HipFileVerifyUnaligned : public testing::TestWithParam<std::tuple<OffPara
         hipFileHandleDeregister(tmpfile_handle);
     }
 
-    unsigned char *bufferStart() const
+    uint8_t *bufferStart() const
     {
-        return static_cast<unsigned char *>(device_buffer);
+        return static_cast<uint8_t *>(device_buffer);
     }
 };
 
 TEST_P(HipFileVerifyUnaligned, RoundTripGuardsAllRegions)
 {
-    const size_t n        = io_bytes; // one byte per element
-    const size_t slack_n  = kFourKiB; // file sentinel region bracket size in bytes
-    const hoff_t head_off = file_off - static_cast<hoff_t>(kFourKiB); // head file sentinel region byte offset
-    const hoff_t tail_off = file_off + static_cast<hoff_t>(io_bytes);
+    const size_t n           = io_bytes; // one byte per element
+    const size_t slack_n     = 4_KiB;    // file sentinel region bracket size in bytes
+    const hoff_t head_off    = file_off - static_cast<hoff_t>(4_KiB); // head file sentinel region byte offset
+    const hoff_t tail_off    = file_off + static_cast<hoff_t>(io_bytes);
     constexpr size_t kStride = 2; // every-other byte
 
     // File layout (each sentinel region slack_n bytes, data n bytes):
@@ -136,9 +137,9 @@ TEST_P(HipFileVerifyUnaligned, RoundTripGuardsAllRegions)
     ASSERT_EQ(static_cast<ssize_t>(io_bytes),
               hipFileRead(tmpfile_handle, device_buffer, io_bytes, file_off, buf_off));
 
-    // Device layout (each sentinel region ~kFourKiB (+-1), data n bytes):
+    // Device layout (each sentinel region ~4_KiB (+-1), data n bytes):
     // [head device sentinel region][data][tail device sentinel region]
-    unsigned char *data = bufferStart() + static_cast<size_t>(buf_off);
+    uint8_t *data = bufferStart() + static_cast<size_t>(buf_off);
     launchAndVerifyBytes(bufferStart(), buffer_bytes, data, n, defaultGrid(n), dim3(kDefaultWorkgroupSize),
                          kStride);
 
@@ -146,11 +147,11 @@ TEST_P(HipFileVerifyUnaligned, RoundTripGuardsAllRegions)
               hipFileWrite(tmpfile_handle, device_buffer, io_bytes, file_off, buf_off));
 
     assertHoleZero(tmpfile.fd, 0, head_off);
-    std::vector<unsigned char> head = readFileBytes(tmpfile.fd, head_off, slack_n);
+    std::vector<uint8_t> head = readFileBytes(tmpfile.fd, head_off, slack_n);
     assertBytesConstant(head.data(), 0, slack_n, kByteFileSlack);
-    std::vector<unsigned char> body = readFileBytes(tmpfile.fd, file_off, n);
+    std::vector<uint8_t> body = readFileBytes(tmpfile.fd, file_off, n);
     assertBytesModified(body.data(), n, kStride);
-    std::vector<unsigned char> tail = readFileBytes(tmpfile.fd, tail_off, slack_n);
+    std::vector<uint8_t> tail = readFileBytes(tmpfile.fd, tail_off, slack_n);
     assertBytesConstant(tail.data(), 0, slack_n, kByteFileSlack);
 }
 
@@ -167,10 +168,10 @@ INSTANTIATE_TEST_SUITE_P(
     , HipFileVerifyUnaligned,
     testing::Combine(testing::Values(OffParam{0, "file_aligned"}, OffParam{1, "file_unaligned"}),
                      testing::Values(OffParam{0, "buffer_aligned"}, OffParam{1, "buffer_unaligned"}),
-                     testing::Values(SizeParam{kFourKiB, "small_aligned"},
-                                     SizeParam{kFourKiB + 1, "small_unaligned"},
-                                     SizeParam{kChunkBytes + kFourKiB, "large_aligned"},
-                                     SizeParam{kChunkBytes + kFourKiB + 1, "large_unaligned"})),
+                     testing::Values(SizeParam{4_KiB, "small_aligned"},
+                                     SizeParam{4_KiB + 1, "small_unaligned"},
+                                     SizeParam{kChunkBytes + 4_KiB, "large_aligned"},
+                                     SizeParam{kChunkBytes + 4_KiB + 1, "large_unaligned"})),
     unalignedName);
 
 // ---------------------------------------------------------------------------
@@ -200,10 +201,10 @@ constexpr hoff_t kGapAligned   = kFourKiBOff; // distance from EOF to the start 
 constexpr hoff_t kGapUnaligned = kFourKiBOff + 1;
 constexpr hoff_t kOverlap =
     kFourKiBOff / 2; // the bytes from the file that a write that also extends the file will overlap
-constexpr size_t kSizeAligned    = kFourKiB; // io_bytes
-constexpr size_t kSizeUnaligned  = kFourKiB + 1;
-constexpr size_t kLargeAligned   = kChunkBytes + kFourKiB; // spans more than one chunk
-constexpr size_t kLargeUnaligned = kChunkBytes + kFourKiB + 1;
+constexpr size_t kSizeAligned    = 4_KiB; // io_bytes
+constexpr size_t kSizeUnaligned  = 4_KiB + 1;
+constexpr size_t kLargeAligned   = kChunkBytes + 4_KiB; // spans more than one chunk
+constexpr size_t kLargeUnaligned = kChunkBytes + 4_KiB + 1;
 constexpr hoff_t kBufAligned     = 0; // where the data starts within the device buffer
 constexpr hoff_t kBufUnaligned   = 1;
 
@@ -262,10 +263,10 @@ struct HipFileExtendUnaligned : public testing::TestWithParam<ExtendScenarioPara
 
         ASSERT_EQ(0, ftruncate(tmpfile.fd, static_cast<off_t>(r.ext.base_len)));
 
-        // Device layout (each sentinel region ~kFourKiB, data r.io_bytes; data begins at
+        // Device layout (each sentinel region ~4_KiB, data r.io_bytes; data begins at
         // buffer offset r.buf_off, which may be +1 unaligned within the head sentinel region):
         // [head device sentinel region][data][tail device sentinel region]
-        buffer_bytes = r.io_bytes + 2 * kFourKiB;
+        buffer_bytes = r.io_bytes + 2 * 4_KiB;
 
         hipFileDescr_t descr{};
         descr.type      = hipFileHandleTypeOpaqueFD;
@@ -284,9 +285,9 @@ struct HipFileExtendUnaligned : public testing::TestWithParam<ExtendScenarioPara
         hipFileHandleDeregister(tmpfile_handle);
     }
 
-    unsigned char *bufferStart() const
+    uint8_t *bufferStart() const
     {
-        return static_cast<unsigned char *>(device_buffer);
+        return static_cast<uint8_t *>(device_buffer);
     }
 };
 
@@ -296,7 +297,7 @@ TEST_P(HipFileExtendUnaligned, Extends)
     const size_t               n       = r.io_bytes;
     constexpr size_t           kStride = 2;
 
-    unsigned char *data = bufferStart() + static_cast<size_t>(r.buf_off);
+    uint8_t *data = bufferStart() + static_cast<size_t>(r.buf_off);
     ASSERT_EQ(hipSuccess, hipMemset(data, kByteEntry, n));
 
     launchAndVerifyBytes(bufferStart(), buffer_bytes, data, n, defaultGrid(n), dim3(kDefaultWorkgroupSize),
@@ -315,7 +316,7 @@ TEST_P(HipFileExtendUnaligned, Extends)
     ASSERT_EQ(static_cast<ssize_t>(r.io_bytes),
               hipFileWrite(tmpfile_handle, device_buffer, r.io_bytes, r.ext.file_off, r.buf_off));
 
-    std::vector<unsigned char> body = readFileBytes(tmpfile.fd, r.ext.file_off, n);
+    std::vector<uint8_t> body = readFileBytes(tmpfile.fd, r.ext.file_off, n);
     assertBytesModified(body.data(), n, kStride);
 
     // Hole was zero-filled.
@@ -328,7 +329,7 @@ TEST_P(HipFileExtendUnaligned, Extends)
 
     // Existing data below the write is fully intact.
     if (preserved_n > 0) {
-        std::vector<unsigned char> head = readFileBytes(tmpfile.fd, 0, preserved_n);
+        std::vector<uint8_t> head = readFileBytes(tmpfile.fd, 0, preserved_n);
         assertBytesConstant(head.data(), 0, preserved_n, kByteFileSlack);
     }
 }
