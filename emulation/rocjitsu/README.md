@@ -133,7 +133,6 @@ See [docs/building.md](docs/building.md) for container setup with PyTorch.
 | [Simdojo Engine](docs/simdojo.md) | PDES simulation framework |
 | [DBT Design](docs/dbt-design.md) | Binary translator architecture |
 | [DBI Design](docs/dbi-design.md) | Binary instrumentation (in progress) |
-| [CDNA5 Tensor DMA](docs/tensor-dma.md) | gfx1250 tensor descriptor, bounds, iteration, gather, and padding model |
 | [Codegen](docs/codegen.md) | ISA codegen pipeline and regen commands |
 | [ISA Target Providers](docs/isa-target-providers.md) | Static target registration and per-component subsets |
 
