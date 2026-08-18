@@ -4,6 +4,7 @@
 #pragma once
 
 #include "common/delimit.hpp"
+#include "common/string_utility.hpp"
 #include "common/version.hpp"
 #include "logger/debug.hpp"
 
@@ -108,9 +109,6 @@ public:
     static std::unordered_set<std::int32_t> get_backtrace_operations(TracingKind kindv);
 
 private:
-    template <typename Tp>
-    static std::string to_lower(const Tp& val);
-
     template <typename TracingKind>
         requires concepts::tracing_kind_for<SdkBackend, TracingKind>
     static std::vector<std::pair<std::int32_t, std::string>> all_operation_items_for_kind(
@@ -191,7 +189,7 @@ sdk_tracing_config<SdkBackend, Externals>::get_domain_choices()
     choices.reserve(buffered_tracing_info.size() + callback_tracing_info.size());
 
     auto add_domain_f = [&choices, &domains_to_skip](std::string_view domain_to_add) {
-        const auto domain_lowercase = to_lower(domain_to_add);
+        const auto domain_lowercase = utility::string::to_lower(domain_to_add);
         if(domains_to_skip.contains(domain_lowercase))
         {
             return;
@@ -493,22 +491,6 @@ sdk_tracing_config<SdkBackend, Externals>::get_backtrace_operations(TracingKind 
 
 template <typename SdkBackend, typename Externals>
     requires concepts::sdk_tracing_config_externals<Externals>
-template <typename Tp>
-std::string
-sdk_tracing_config<SdkBackend, Externals>::to_lower(const Tp& value)
-{
-    auto str_copy = std::string{ value };
-
-    for(auto& itr : str_copy)
-    {
-        itr = static_cast<char>(::tolower(itr));
-    }
-
-    return str_copy;
-}
-
-template <typename SdkBackend, typename Externals>
-    requires concepts::sdk_tracing_config_externals<Externals>
 template <typename TracingKind>
     requires concepts::tracing_kind_for<SdkBackend, TracingKind>
 std::vector<std::pair<std::int32_t, std::string>>
@@ -626,7 +608,7 @@ sdk_tracing_config<SdkBackend, Externals>::assemble_operation_env_names_for_kind
     }
 
     if(!has_operations ||
-       s_domains_to_skip_for_operation_options.contains(to_lower(name)))
+       s_domains_to_skip_for_operation_options.contains(utility::string::to_lower(name)))
     {
         return {};
     }
@@ -761,7 +743,8 @@ sdk_tracing_config<SdkBackend, Externals>::get_callback_domain_map()
         const auto& ditr = callback_info[idx];
         if(supported.contains(ditr.value))
         {
-            domain_map.emplace(to_lower(ditr.name), std::vector<kind_t>{ ditr.value });
+            domain_map.emplace(utility::string::to_lower(ditr.name),
+                               std::vector<kind_t>{ ditr.value });
         }
     }
 
@@ -867,7 +850,7 @@ sdk_tracing_config<SdkBackend, Externals>::get_buffered_domain_map()
         const auto& domain = buffer_info[index];
         if(supported.contains(domain.value))
         {
-            domain_map.emplace(to_lower(domain.name),
+            domain_map.emplace(utility::string::to_lower(domain.name),
                                std::vector<kind_t>{ domain.value });
         }
     }
