@@ -24,9 +24,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
     - Decoder integration tests have been migrated to Python, simplifying test authoring and making it easier for downstream tools to validate their trace-decoding pipelines.
 
 ### Changed
-- Bump rocpd schema to version 3.0.1 which supports NIC agent types.
-- Bump rocpd schema to version 3.0.2 for HIP graph per-node attribution (`graph_exec_id`/`graph_node_id` columns on `rocpd_kernel_dispatch`/`rocpd_memory_copy` and the new `rocpd_graph_launch` table). The pre-graph-attribution 3.0.1 schema is now frozen under `versions/3.0.1/` per the rocpd schema versioning scheme.
-- Bump rocpd schema to version 3.0.3 for SPM support. The pre-spm-support 3.0.2 schema is now frozen under `versions/3.0.2/` per the rocpd schema versioning scheme.
+
 
 ### Resolved issues
 
@@ -67,6 +65,9 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Idle inline queues with no active profiling consumers now bypass queue interposition entirely, reducing overhead for applications that create queues but do not immediately dispatch work.
 - DWARF information is now parsed lazily, reducing startup overhead for attach and tracing sessions on large binaries.
 - Disabled autoflush in thread trace to prevent premature buffer flushes that produced incomplete or corrupted traces.
+- Bump rocpd schema to version 3.0.1 which supports NIC agent types.
+- Bump rocpd schema to version 3.0.2 for HIP graph per-node attribution (`graph_exec_id`/`graph_node_id` columns on `rocpd_kernel_dispatch`/`rocpd_memory_copy` and the new `rocpd_graph_launch` table). The pre-graph-attribution 3.0.1 schema is now frozen under `versions/3.0.1/` per the rocpd schema versioning scheme.
+- Bump rocpd schema to version 3.0.3 for SPM support. The pre-spm-support 3.0.2 schema is now frozen under `versions/3.0.2/` per the rocpd schema versioning scheme.
 
 ### Resolved issues
 
