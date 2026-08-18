@@ -29,16 +29,14 @@
 #include "fakes/init_fakes.h"
 #include "../common/ProcessIsolatedTestRunner.hpp"  // fork+execv process isolation
 
-// Pull in alloc.h / param.h now so their macros are visible to be #undef'd
-// before init.cc's transitive includes see them (same rationale as p2p-test.cc).
+// Pull in alloc.h now so its macros are visible to be #undef'd before init.cc's
+// transitive includes see them (same rationale as p2p-test.cc).
 #include "alloc.h"
-#include "param.h"
 
-// NCCL_PARAM redirector: route every generated ncclParamXxx() through
-// g_loadParam on each call (no caching), so tests can flip params per-case.
-#undef NCCL_PARAM
-#define NCCL_PARAM(name, env, deftVal) \
-  int64_t ncclParam##name() { return g_loadParam((env), (deftVal)); }
+// NCCL_PARAM redirector (shared with p2p-test.cc): routes every generated
+// ncclParamXxx() through g_loadParam on each call so tests can flip params
+// per-case. Also pulls in param.h (needed by the RCCL_PARAM redirectors below).
+#include "fakes/param_redirect.h"
 
 // RCCL_PARAM / RCCL_PARAM_NCCL_ALIAS redirectors: init.cc uses these heavily
 // (Gfx9CheapFenceOff, InitChannels, LL128ForceEnable, InjectFaults, ...). The

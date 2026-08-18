@@ -130,7 +130,10 @@ if(BUILD_TESTS)
   set(TEST_MICRO_INIT_SOURCE_FILES
     init-test.cc
     fakes/init_fakes.cc                  # init-only seams (micro_getenv, ResetInitFakes)
-    fakes/init_stubs.cc                  # fail-loud deep-path stubs + data symbols
+    fakes/bootstrap_stubs.cc             # fail-loud stub floor, grouped by subsystem
+    fakes/topo_stubs.cc
+    fakes/transport_stubs.cc
+    fakes/nccl_stubs.cc                  # core/lifecycle stubs + data symbols
     fakes/nccl_fakes.cc                  # reusable nccl* stubs
     fakes/hip_fakes.cc                   # HIP runtime seams
     ${PROJECT_BINARY_DIR}/hipify/src/misc/argcheck.cc  # real PtrCheck/CommCheck
@@ -464,7 +467,10 @@ endif()
 set(TEST_MICRO_INIT_SOURCE_FILES
   init-test.cc
   fakes/init_fakes.cc
-  fakes/init_stubs.cc
+  fakes/bootstrap_stubs.cc
+  fakes/topo_stubs.cc
+  fakes/transport_stubs.cc
+  fakes/nccl_stubs.cc
   fakes/nccl_fakes.cc
   fakes/hip_fakes.cc
   ${RCCL_HIPIFY_DIR}/src/misc/argcheck.cc

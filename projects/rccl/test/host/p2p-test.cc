@@ -23,18 +23,11 @@
 // to see them, and the shim below would land too late.
 #include "alloc.h"
 
-// Same pattern for param.h: pull it in now so we can #undef NCCL_PARAM and
-// replace it with a redirector that routes every generated ncclParamXxx()
-// through g_loadParam on every call (no caching). Without this,
-// ncclParamLegacyCudaRegister() and friends would cache their default on
-// first call -- which means tests can't flip them between cases. The
-// redirected body matches the real NCCL_PARAM signature
-// (`int64_t ncclParam<name>()`) but skips the cache and uninitialized
-// machinery entirely.
-#include "param.h"
-#undef NCCL_PARAM
-#define NCCL_PARAM(name, env, deftVal) \
-    int64_t ncclParam##name() { return g_loadParam((env), (deftVal)); }
+// NCCL_PARAM redirector (shared with init-test.cc): routes every generated
+// ncclParamXxx() through g_loadParam on each call so tests can flip a param's
+// value between cases (without this, ncclParamLegacyCudaRegister() and friends
+// would cache their default on first call). See param_redirect.h.
+#include "fakes/param_redirect.h"
 
 // Macro shim: replace the header-only function templates ncclCudaCallocAsync
 // and ncclCudaMemcpyAsync from alloc.h with thin trampolines that route
