@@ -62,22 +62,25 @@ endfunction()
 
 # Reports whether the KFD device node (/dev/kfd) is present. Absence typically indicates a
 # WSL2/DXG environment (or a container without KFD passthrough), where GPU work is
-# scheduled through the dxg path instead of the native KFD driver. The result is cached so
-# the filesystem check runs only once per configure.
+# scheduled through the dxg path instead of the native KFD driver.
+#
+# The answer describes the machine running cmake, which is not necessarily the machine
+# running ctest: ROCm is routinely configured inside a container that does not pass
+# /dev/kfd through even though the bare-metal host does have it. Set
+# ROCPROFILER_SDK_ASSUME_KFD to say so explicitly (ON to keep the KFD-gated tests and the
+# unscaled timeouts, OFF to force the no-KFD behavior); it overrides the probe entirely.
+# Deliberately not cached, so a configure-host change is picked up by re-running cmake
+# rather than needing the build tree wiped.
 function(rocprofiler_sdk_kfd_available _VAR)
-    if(NOT DEFINED ROCPROFILER_SDK_KFD_AVAILABLE)
-        if(EXISTS "/dev/kfd")
-            set(ROCPROFILER_SDK_KFD_AVAILABLE
-                ON
-                CACHE INTERNAL "KFD device node present")
-        else()
-            set(ROCPROFILER_SDK_KFD_AVAILABLE
-                OFF
-                CACHE INTERNAL "KFD device node present")
-        endif()
+    if(DEFINED ROCPROFILER_SDK_ASSUME_KFD)
+        set(_KFD_AVAILABLE "${ROCPROFILER_SDK_ASSUME_KFD}")
+    elseif(EXISTS "/dev/kfd")
+        set(_KFD_AVAILABLE ON)
+    else()
+        set(_KFD_AVAILABLE OFF)
     endif()
     set(${_VAR}
-        "${ROCPROFILER_SDK_KFD_AVAILABLE}"
+        "${_KFD_AVAILABLE}"
         PARENT_SCOPE)
 endfunction()
 
