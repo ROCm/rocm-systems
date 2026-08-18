@@ -200,10 +200,10 @@ namespace
 {
 thread_local active_event_context_t g_active_event_ctx = {};
 
-using event_queue_map_t    = std::unordered_map<uint64_t, rocprofiler_queue_id_t>;
+using event_info_map_t     = std::unordered_map<uint64_t, event_record_info_t>;
 using coalesce_group_map_t = std::unordered_map<uint64_t, coalesce_group_ptr_t>;
 
-common::Synchronized<event_queue_map_t>    g_event_queue_map    = {};
+common::Synchronized<event_info_map_t>     g_event_info_map     = {};
 common::Synchronized<coalesce_group_map_t> g_coalesce_group_map = {};
 
 void
@@ -230,7 +230,7 @@ check_coalesced_record(uint64_t hip_event_handle)
                                                ROCPROFILER_HIP_EVENT_RECORD,
                                                corr_id->internal);
 
-    auto source_queue = lookup_event_queue(hip_event_handle);
+    auto event_info = lookup_event_info(hip_event_handle);
 
     auto pending            = coalesce_pending_t{};
     pending.tracing_data    = std::move(hip_event_tracing_data);
@@ -238,10 +238,10 @@ check_coalesced_record(uint64_t hip_event_handle)
         sizeof(rocprofiler_callback_tracing_hip_event_data_t),
         rocprofiler_timestamp_t{0},
         rocprofiler_timestamp_t{0},
-        rocprofiler_agent_id_t{0},
-        source_queue,
+        event_info.agent_id,
+        event_info.queue_id,
         hip_event_handle,
-        source_queue};
+        event_info.queue_id};
     pending.tid              = thr_id;
     pending.internal_corr_id = corr_id->internal;
     pending.ancestor_corr_id = corr_id->ancestor;
@@ -322,18 +322,18 @@ get_active_event_context()
 }
 
 void
-record_event_queue(uint64_t hip_event_handle, rocprofiler_queue_id_t queue_id)
+record_event_info(uint64_t hip_event_handle, event_record_info_t info)
 {
-    g_event_queue_map.wlock([&](auto& map) { map[hip_event_handle] = queue_id; });
+    g_event_info_map.wlock([&](auto& map) { map[hip_event_handle] = info; });
 }
 
-rocprofiler_queue_id_t
-lookup_event_queue(uint64_t hip_event_handle)
+event_record_info_t
+lookup_event_info(uint64_t hip_event_handle)
 {
-    return g_event_queue_map.rlock([&](const auto& map) -> rocprofiler_queue_id_t {
+    return g_event_info_map.rlock([&](const auto& map) -> event_record_info_t {
         auto it = map.find(hip_event_handle);
         if(it != map.end()) return it->second;
-        return rocprofiler_queue_id_t{.handle = 0};
+        return event_record_info_t{};
     });
 }
 
@@ -373,10 +373,12 @@ update_table<::HipDispatchTable>(::HipDispatchTable* table)
     if(table->hipEventRecord_spt_fn)
         table->hipEventRecord_spt_fn =
             event_record_wrapper<api::hipEventRecord_spt>(table->hipEventRecord_spt_fn);
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 10
     if(table->hipEventRecordWithFlags_fn)
         table->hipEventRecordWithFlags_fn =
             event_record_with_flags_wrapper<api::hipEventRecordWithFlags>(
                 table->hipEventRecordWithFlags_fn);
+#endif
     if(table->hipStreamWaitEvent_fn)
         table->hipStreamWaitEvent_fn =
             stream_wait_event_wrapper<api::hipStreamWaitEvent>(table->hipStreamWaitEvent_fn);
@@ -384,9 +386,6 @@ update_table<::HipDispatchTable>(::HipDispatchTable* table)
         table->hipStreamWaitEvent_spt_fn = stream_wait_event_wrapper<api::hipStreamWaitEvent_spt>(
             table->hipStreamWaitEvent_spt_fn);
 }
-
-template void
-update_table<::HipDispatchTable>(::HipDispatchTable*);
 
 }  // namespace event
 }  // namespace hip

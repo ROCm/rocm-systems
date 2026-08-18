@@ -732,11 +732,15 @@ WriteInterceptor(const void* packets,
                     auto source_queue = queue.get_id();
                     if(event_ctx->operation == ROCPROFILER_HIP_EVENT_RECORD)
                     {
-                        hip::event::record_event_queue(event_ctx->hip_event_handle, queue.get_id());
+                        hip::event::record_event_info(
+                            event_ctx->hip_event_handle,
+                            hip::event::event_record_info_t{
+                                queue.get_id(), queue.get_agent().get_rocp_agent()->id});
                     }
                     else if(event_ctx->operation == ROCPROFILER_HIP_EVENT_WAIT)
                     {
-                        source_queue = hip::event::lookup_event_queue(event_ctx->hip_event_handle);
+                        source_queue =
+                            hip::event::lookup_event_info(event_ctx->hip_event_handle).queue_id;
                     }
 
                     _barrier_data.callback_record = rocprofiler_callback_tracing_hip_event_data_t{

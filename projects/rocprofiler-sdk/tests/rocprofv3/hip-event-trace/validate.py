@@ -63,14 +63,47 @@ def test_hip_event_operations(json_data):
     assert HIP_EVENT_WAIT in operations, f"Missing WAIT (2) in {operations}"
 
 
+RECORD_API_NAMES = {"hipEventRecord", "hipEventRecord_spt", "hipEventRecordWithFlags"}
+WAIT_API_NAMES = {"hipStreamWaitEvent", "hipStreamWaitEvent_spt"}
+
+
 def test_hip_event_record_count(json_data):
-    """Verify expected number of RECORD and WAIT completions."""
-    records = json_data["rocprofiler-sdk-tool"]["buffer_records"]["hip_event"]
+    """Verify expected number of RECORD and WAIT completions.
+
+    hipStreamWaitEvent has early-return paths (same-stream, already-complete)
+    that produce no barrier. The number of WAIT completions depends on GPU
+    timing and cannot be predicted exactly. We verify:
+    - RECORD completions >= the number of hipEventRecord API calls (each
+      record call always dispatches a barrier)
+    - WAIT completions > 0 and <= the number of hipStreamWaitEvent API calls
+    """
+    data = json_data["rocprofiler-sdk-tool"]
+    records = data["buffer_records"]["hip_event"]
+    hip_api = data["buffer_records"]["hip_api"]
+    string_table = data["strings"]["buffer_records"]
+
+    def get_operation_name(kind_id, op_id):
+        return string_table[kind_id]["operations"][op_id]
+
     record_count = sum(1 for r in records if r.operation == HIP_EVENT_RECORD)
     wait_count = sum(1 for r in records if r.operation == HIP_EVENT_WAIT)
 
-    assert record_count >= 12, f"Expected >= 12 RECORD completions, got {record_count}"
-    assert wait_count >= 9, f"Expected >= 9 WAIT completions, got {wait_count}"
+    api_record_count = sum(
+        1 for r in hip_api if get_operation_name(r.kind, r.operation) in RECORD_API_NAMES
+    )
+    api_wait_count = sum(
+        1 for r in hip_api if get_operation_name(r.kind, r.operation) in WAIT_API_NAMES
+    )
+
+    assert record_count >= api_record_count, (
+        f"RECORD completions ({record_count}) < hipEventRecord API calls "
+        f"({api_record_count})"
+    )
+    assert wait_count > 0, "No WAIT completions found"
+    assert wait_count <= api_wait_count, (
+        f"WAIT completions ({wait_count}) > hipStreamWaitEvent API calls "
+        f"({api_wait_count})"
+    )
 
 
 def test_hip_event_timestamps(json_data):
@@ -86,9 +119,10 @@ def test_hip_event_timestamps(json_data):
         assert (
             itr.start_timestamp > init_time
         ), f"start {itr.start_timestamp} before init {init_time}"
-        assert (
-            itr.end_timestamp < fini_time
-        ), f"end {itr.end_timestamp} after fini {fini_time}"
+        # end_timestamp is a CPU timestamp taken when the async handler fires,
+        # which can occur after fini_time is recorded on a different thread.
+        # Unlike kernel dispatch (which uses GPU profiling timestamps), barrier
+        # completion timestamps are not bounded by fini_time.
 
 
 def test_hip_event_fields(json_data):

@@ -4040,8 +4040,7 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
                              rccl_output.get_generator(),
                              memory_allocation_output.get_generator(),
                              rocdecode_output.get_generator(),
-                             rocjpeg_output.get_generator(),
-                             hip_event_output.get_generator());
+                             rocjpeg_output.get_generator());
     }
 
     if(tool::get_config().rocpd_output && outdata.num_output > 0 &&

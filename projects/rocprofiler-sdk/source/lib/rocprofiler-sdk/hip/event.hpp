@@ -76,11 +76,17 @@ struct active_event_context_t
 active_event_context_t*
 get_active_event_context();
 
-void
-record_event_queue(uint64_t hip_event_handle, rocprofiler_queue_id_t queue_id);
+struct event_record_info_t
+{
+    rocprofiler_queue_id_t queue_id = {.handle = 0};
+    rocprofiler_agent_id_t agent_id = {.handle = 0};
+};
 
-rocprofiler_queue_id_t
-lookup_event_queue(uint64_t hip_event_handle);
+void
+record_event_info(uint64_t hip_event_handle, event_record_info_t info);
+
+event_record_info_t
+lookup_event_info(uint64_t hip_event_handle);
 
 struct coalesce_pending_t
 {
