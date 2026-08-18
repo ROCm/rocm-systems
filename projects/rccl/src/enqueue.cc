@@ -3822,103 +3822,136 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           ceArSymRegistered) {
         INFO(NCCL_INIT, "Taking CE collective path with symmetric registered windows for user buffers");
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
-                                   opDev));
+                                   /*ddaPipeline=*/false, /*ddaSubChunkBytes=*/0, opDev));
 
-      } else if (rcclParamForceCe() && CeScratchAvailable && winRegType != ncclSymSendRegRecvReg &&
-                 winRegType != ncclSymSendNonregRecvReg && !hasSysmemSegment && comm->ddaScratch != nullptr &&
-                 recvBytes <= comm->ddaScratchBytes && info->coll != ncclFuncAllReduce) {
-        INFO(NCCL_TUNING, "Using DDA scratch for CE collective, count=%zu, recvBytes=%zu", info->count, recvBytes);
-        NCCLCHECK(ceCollTaskAppend(comm, info, /*sendWin=*/nullptr, /*recvWin=*/nullptr, comm->ddaScratch,
-                                   comm->ddaPeerPtrsHost, opDev));
-      } else if (ceAllReduceFits && !hasSysmemSegment) {
-        INFO(NCCL_COLL, "CE AllReduce Path without symmetric memory registration, count=%zu", info->count);
-        NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
-                                   opDev));
       } else {
-        INFO(NCCL_INIT, "Taking kernel-based collective path");
-        // currently legacy sendrecv needs src and dst buffers to be registered
-        // we cannot allow UB if alltoall/scatter/gather fallback to legacy sendrecv
-        // when src or dst buffers are not registered
-        struct ncclReg* sendReg = NULL;
-        struct ncclReg* recvReg = NULL;
-        bool allowUB = false;
-        bool captured = false;
-        struct ncclCudaGraph graph;
-        // For cuda graph checking
-        NCCLCHECK(ncclCudaGetCapturingGraph(&graph, info->stream, comm->config.graphUsageMode));
-        captured = ncclCudaGraphValid(graph);
-        if (info->coll == ncclFuncAlltoAll) {
-          NCCLCHECK(ncclRegFind(comm, info->sendbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype),
-                                &sendReg));
-          NCCLCHECK(ncclRegFind(comm, info->recvbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype),
-                                &recvReg));
-          allowUB = captured || (sendReg != NULL && recvReg != NULL);
-          for (int r = 0; r < comm->nRanks; r++) {
-            NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI,
-                                    (void*)((char*)info->sendbuff + r * info->count * ncclTypeSize(info->datatype)),
-                                    info->count, info->datatype, r, allowUB));
-            NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI,
-                                    (void*)((char*)info->recvbuff + r * info->count * ncclTypeSize(info->datatype)),
-                                    info->count, info->datatype, r, allowUB));
-          }
-        } else if (info->coll == ncclFuncAllGather && info->useDirect) {
-          NCCLCHECK(ncclRegFind(comm, info->sendbuff, info->count * ncclTypeSize(info->datatype), &sendReg));
-          NCCLCHECK(ncclRegFind(comm, info->recvbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype),
-                                &recvReg));
-          allowUB = captured || (sendReg != NULL && recvReg != NULL);
-          size_t rankOffset = info->count * ncclTypeSize(info->datatype);
-          for (int r = 0; r < comm->nRanks; r++) {
-            NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI, (void*)info->sendbuff, info->count,
-                                    info->datatype, r, allowUB));
-            NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI, (void*)((char*)info->recvbuff + r * rankOffset),
-                                    info->count, info->datatype, r, allowUB));
-          }
-        } else if (info->coll == ncclFuncReduceScatter && info->useDirect) {
-          NCCLCHECK(ncclRegFind(comm, info->sendbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype),
-                                &sendReg));
-          NCCLCHECK(ncclRegFind(comm, info->recvbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype),
-                                &recvReg));
-          allowUB = captured || (sendReg != NULL && recvReg != NULL);
-          size_t rankOffset = info->count * ncclTypeSize(info->datatype);
-          for (int r = 0; r < comm->nRanks; r++) {
-            NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI, (void*)((char*)info->sendbuff + r * rankOffset),
-                                    info->count, info->datatype, r, allowUB));
-            NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI, (void*)((char*)info->recvbuff + r * rankOffset),
-                                    info->count, info->datatype, r, allowUB));
-          }
-        } else if (info->coll == ncclFuncGather) {
-          size_t offset = 0;
-          allowUB = captured;
-          NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI, (void*)info->sendbuff, info->count, info->datatype,
-                                  info->root, allowUB));
-          if (comm->rank == info->root) {
-            for (int r = 0; r < comm->nRanks; r++) {
-              void* buff = (void*)((char*)info->recvbuff + offset);
-              NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI, buff, info->count, info->datatype, r,
-                                      allowUB));
-              offset += info->count * ncclTypeSize(info->datatype);
+        bool ddaHandled = false;
+        bool unregistered =
+          winRegType != ncclSymSendRegRecvReg && winRegType != ncclSymSendNonregRecvReg && !hasSysmemSegment;
+        if (CeScratchAvailable && unregistered && rcclParamForceCe() && comm->ddaScratch != nullptr) {
+          size_t typeBytes = ncclTypeSize(info->datatype);
+          if (recvBytes <= comm->ddaScratchBytes) {
+            // whole result fits -> single-shot DDA (no pipeline)
+            INFO(NCCL_TUNING, "Using DDA scratch for CE collective (single-shot), count=%zu, recvBytes=%zu",
+                 info->count, recvBytes);
+            NCCLCHECK(ceCollTaskAppend(comm, info, /*sendWin=*/nullptr, /*recvWin=*/nullptr, comm->ddaScratch,
+                                       comm->ddaPeerPtrsHost,
+                                       /*ddaPipeline=*/false, /*ddaSubChunkBytes=*/0, opDev));
+            ddaHandled = true;
+          } else if (rcclParamCePipeline() && comm->ceColl.pipeline != nullptr &&
+                     info->coll == ncclFuncAllGather) { // only AG is pipelined so far
+            // result > scratch -> pipeline through a multi-buffered scratch.
+            // all buffers must fit: nbuf * nRanks * sub <= ddaScratchBytes
+            size_t maxSub = comm->ddaScratchBytes / ((size_t)NCCL_CE_NUM_SLOTS * (size_t)comm->nRanks);
+            size_t sub = rcclParamCePipelineChunkBytes();
+            if (sub == 0 || sub > maxSub) sub = maxSub; // auto-size / clamp to bound
+            sub = (sub / typeBytes) * typeBytes;        // element-align
+            if (sub >= typeBytes) {
+              INFO(NCCL_TUNING, "Using DDA scratch for CE collective (pipelined, sub=%zu)", sub);
+              NCCLCHECK(ceCollTaskAppend(comm, info, /*sendWin=*/nullptr, /*recvWin=*/nullptr, comm->ddaScratch,
+                                         comm->ddaPeerPtrsHost,
+                                         /*ddaPipeline=*/true, /*ddaSubChunkBytes=*/sub, opDev));
+              ddaHandled = true;
             }
           }
-        } else if (info->coll == ncclFuncScatter) {
-          size_t offset = 0;
-          allowUB = captured;
-          if (comm->rank == info->root) {
-            for (int r = 0; r < comm->nRanks; r++) {
-              void* buff = (void*)((char*)info->sendbuff + offset);
-              NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI, buff, info->count, info->datatype, r,
-                                      allowUB));
-              offset += info->count * ncclTypeSize(info->datatype);
+        }
+        if (!ddaHandled) {
+          if (ceAllReduceFits && !hasSysmemSegment) {
+            INFO(NCCL_COLL, "CE AllReduce Path without symmetric memory registration, count=%zu", info->count);
+            NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
+                                       /*ddaPipeline=*/false, /*ddaSubChunkBytes=*/0, opDev));
+          } else {
+            INFO(NCCL_INIT, "Taking kernel-based collective path");
+            // currently legacy sendrecv needs src and dst buffers to be registered
+            // we cannot allow UB if alltoall/scatter/gather fallback to legacy sendrecv
+            // when src or dst buffers are not registered
+            struct ncclReg* sendReg = NULL;
+            struct ncclReg* recvReg = NULL;
+            bool allowUB = false;
+            bool captured = false;
+            struct ncclCudaGraph graph;
+            // For cuda graph checking
+            NCCLCHECK(ncclCudaGetCapturingGraph(&graph, info->stream, comm->config.graphUsageMode));
+            captured = ncclCudaGraphValid(graph);
+            if (info->coll == ncclFuncAlltoAll) {
+              NCCLCHECK(ncclRegFind(comm, info->sendbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype),
+                                    &sendReg));
+              NCCLCHECK(ncclRegFind(comm, info->recvbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype),
+                                    &recvReg));
+              allowUB = captured || (sendReg != NULL && recvReg != NULL);
+              for (int r = 0; r < comm->nRanks; r++) {
+                NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI,
+                                        (void*)((char*)info->sendbuff + r * info->count * ncclTypeSize(info->datatype)),
+                                        info->count, info->datatype, r, allowUB));
+                NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI,
+                                        (void*)((char*)info->recvbuff + r * info->count * ncclTypeSize(info->datatype)),
+                                        info->count, info->datatype, r, allowUB));
+              }
+            } else if (info->coll == ncclFuncAllGather && info->useDirect) {
+              NCCLCHECK(ncclRegFind(comm, info->sendbuff, info->count * ncclTypeSize(info->datatype), &sendReg));
+              NCCLCHECK(ncclRegFind(comm, info->recvbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype),
+                                    &recvReg));
+              allowUB = captured || (sendReg != NULL && recvReg != NULL);
+              size_t rankOffset = info->count * ncclTypeSize(info->datatype);
+              for (int r = 0; r < comm->nRanks; r++) {
+                NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI, (void*)info->sendbuff, info->count,
+                                        info->datatype, r, allowUB));
+                NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI,
+                                        (void*)((char*)info->recvbuff + r * rankOffset), info->count, info->datatype, r,
+                                        allowUB));
+              }
+            } else if (info->coll == ncclFuncReduceScatter && info->useDirect) {
+              NCCLCHECK(ncclRegFind(comm, info->sendbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype),
+                                    &sendReg));
+              NCCLCHECK(ncclRegFind(comm, info->recvbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype),
+                                    &recvReg));
+              allowUB = captured || (sendReg != NULL && recvReg != NULL);
+              size_t rankOffset = info->count * ncclTypeSize(info->datatype);
+              for (int r = 0; r < comm->nRanks; r++) {
+                NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI,
+                                        (void*)((char*)info->sendbuff + r * rankOffset), info->count, info->datatype, r,
+                                        allowUB));
+                NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI,
+                                        (void*)((char*)info->recvbuff + r * rankOffset), info->count, info->datatype, r,
+                                        allowUB));
+              }
+            } else if (info->coll == ncclFuncGather) {
+              size_t offset = 0;
+              allowUB = captured;
+              NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI, (void*)info->sendbuff, info->count,
+                                      info->datatype, info->root, allowUB));
+              if (comm->rank == info->root) {
+                for (int r = 0; r < comm->nRanks; r++) {
+                  void* buff = (void*)((char*)info->recvbuff + offset);
+                  NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI, buff, info->count, info->datatype, r,
+                                          allowUB));
+                  offset += info->count * ncclTypeSize(info->datatype);
+                }
+              }
+            } else if (info->coll == ncclFuncScatter) {
+              size_t offset = 0;
+              allowUB = captured;
+              if (comm->rank == info->root) {
+                for (int r = 0; r < comm->nRanks; r++) {
+                  void* buff = (void*)((char*)info->sendbuff + offset);
+                  NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI, buff, info->count, info->datatype, r,
+                                          allowUB));
+                  offset += info->count * ncclTypeSize(info->datatype);
+                }
+              }
+              NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI, (void*)info->recvbuff, info->count,
+                                      info->datatype, info->root, allowUB));
+            } else if (ceAvailable && comm->symmetricSupport && info->coll == ncclFuncAllGather &&
+                       info->count > ncclParamSymCeThreshold() && comm->minCompCap >= 100 &&
+                       comm->isAllDirectNvlink) {
+              // Use CE for Allgather on Blackwell with size > 8MB
+              NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr,
+                                         /*ddaPeerBases=*/nullptr,
+                                         /*ddaPipeline=*/false, /*ddaSubChunkBytes=*/0, opDev));
+            } else {
+              NCCLCHECK(collTaskAppend(comm, info, opDev));
             }
           }
-          NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI, (void*)info->recvbuff, info->count, info->datatype,
-                                  info->root, allowUB));
-        } else if (ceAvailable && comm->symmetricSupport && info->coll == ncclFuncAllGather &&
-                   info->count > ncclParamSymCeThreshold() && comm->minCompCap >= 100 && comm->isAllDirectNvlink) {
-          // Use CE for Allgather on Blackwell with size > 8MB
-          NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
-                                     opDev));
-        } else {
-          NCCLCHECK(collTaskAppend(comm, info, opDev));
         }
       }
     }

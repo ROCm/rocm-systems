@@ -741,7 +741,7 @@ static ncclResult_t ncclCeAllGatherPipelined(struct ncclComm* comm, struct ncclC
     if (chunk >= NCCL_CE_NUM_SLOTS)
       CUDACHECKGOTO(cudaStreamWaitEvent(stream, p->doneEvent[slot], 0), ret, fail);
 
-    NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);            // (1) ready
+    NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);            // (1) ready
 
     batch.numOps = 0;                                                       // (2) send
     for (int r = 0; r < nRanks; r++) {
@@ -751,9 +751,9 @@ static ncclResult_t ncclCeAllGatherPipelined(struct ncclComm* comm, struct ncclC
       batch.sizes[batch.numOps] = n;
       batch.numOps++;
     }
-    NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, args, &batch, stream), ret, fail);
+    NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &batch, stream, args), ret, fail);
 
-    NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);            // (3) complete
+    NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);            // (3) complete
 
     // (4) copy-back slot: overlaps the next chunk's barrier + SDMA push.
     CUDACHECKGOTO(cudaEventRecord(p->readyEvent[slot], stream), ret, fail);
