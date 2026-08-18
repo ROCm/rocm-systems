@@ -176,11 +176,16 @@ Start a second one there:
 mirage exec --node 2 -- bash
 ```
 
-That is a single-process exec, so it takes the first branch: a real
+That leaves a single process, so it takes the first branch: a real
 interactive shell, in the window you ran it from, on node 2 of the
 running session. The process still believes it is that node — same rank
 variables, same `WORLD_SIZE`, same rendezvous as its neighbours — so it
 is a shell *inside* the job rather than beside it.
+
+`--node` says *where*, not *how many*. Add `--nproc-per-node 3` and you
+get three processes on node 2, captured and labelled like any other
+grid — the process count decides the terminal, and it wins over having
+named a node.
 
 ## Where things live
 

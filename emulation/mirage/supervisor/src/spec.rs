@@ -102,12 +102,19 @@ pub const ENV_EXEC: &str = "MIRAGE_EXEC";
 ///   node's local rank 0 — ranks `0`, `P`, `2P`, … of a `WORLD_SIZE` of
 ///   `N * P`.
 /// * `mirage exec --node n -- cmd` starts exactly that node's local rank
-///   0, which is what keeps it a single-process exec and therefore an
-///   interactive one.
+///   0, which leaves one process and therefore an interactive one.
 /// * `--nproc-per-node k` fills the first `k` slots of each node it runs
 ///   on, and `k` may not exceed the job's own `P`: rank `node * P + P` is
 ///   the next node's rank 0, and two live processes claiming one rank in
 ///   one rendezvous is the failure this whole section exists to prevent.
+/// * The two compose. `--node n --nproc-per-node k` is `k` processes on
+///   node `n`, ranks `n*P` through `n*P + k - 1`. `--node` chooses
+///   *where*; the process count chooses the streams, and the count is
+///   what decides — so this shape is captured and labelled, exactly as a
+///   `k`-process exec across every node would be. `--node` alone is
+///   interactive because it leaves one process, not because it named a
+///   node, and stating it the other way round is what made the CLI
+///   documentation contradict this module.
 ///
 /// # Where a containerised workload starts
 ///
@@ -846,6 +853,36 @@ mod tests {
             .map(|s| s.env.get("LOCAL_RANK").cloned().unwrap_or_default())
             .collect();
         assert_eq!(locals, ["0", "1", "2"]);
+    }
+
+    #[test]
+    fn a_named_node_is_interactive_only_while_it_stays_one_process() {
+        // The two flags compose, and the documentation has to say which
+        // one decides the terminal. `--node` selects *where*; the number
+        // of processes decides *whether anyone gets stdin*, and it is
+        // the process count that wins.
+        //
+        // Read the other way round — "naming a node makes the exec
+        // interactive" — `--node 1 --nproc-per-node 3` would be three
+        // processes fighting over one terminal, which is the shape the
+        // capture rule exists to prevent.
+        let one = build_specs(&job(2, 3), &exec_def(1, Some(1)), &id()).unwrap();
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].stdio, StdioMode::Inherit { stdin: true });
+
+        let three = build_specs(&job(2, 3), &exec_def(3, Some(1)), &id()).unwrap();
+        assert_eq!(three.len(), 3);
+        assert!(
+            three.iter().all(|s| s.stdio == StdioMode::Capture),
+            "three processes on one node cannot share the caller's terminal: {:?}",
+            three.iter().map(|s| s.stdio).collect::<Vec<_>>()
+        );
+        // Still on the node that was named, and nowhere else.
+        assert!(
+            three.iter().all(|s| s.node / 3 == 1),
+            "`--nproc-per-node` spread the exec off the node it named: {:?}",
+            three.iter().map(|s| s.node).collect::<Vec<_>>()
+        );
     }
 
     #[test]

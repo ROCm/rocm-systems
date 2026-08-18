@@ -590,8 +590,8 @@ pub struct ExecArgsCli {
     /// This is how you get an interactive shell on a multi-node job. A
     /// job spanning several nodes has every rank's output multiplexed
     /// and nobody's stdin connected, because one terminal cannot be
-    /// shared between readers. Naming one node makes this a
-    /// single-process exec, which does get the terminal:
+    /// shared between readers. Naming one node leaves a single process,
+    /// which does get the terminal:
     ///
     /// ```text
     /// mirage exec --node 2 -- bash
@@ -599,6 +599,16 @@ pub struct ExecArgsCli {
     ///
     /// The process still believes it is that node: same rank variables,
     /// same `WORLD_SIZE`, same rendezvous as its neighbours.
+    ///
+    /// It composes with `--nproc-per-node`, which decides how many of
+    /// that node's slots to fill: `--node 1 --nproc-per-node 3` starts
+    /// three processes on node 1, as ranks `1*P`, `1*P+1` and `1*P+2` of
+    /// the job's own grid. What `--node` selects is *where*; what
+    /// decides the terminal is the process count, and the count wins —
+    /// so an exec asking for more than one process is captured and
+    /// labelled whether it named a node or not. `--node` alone is
+    /// interactive because it leaves one process, not because it named
+    /// a node.
     #[arg(long, short = 'n')]
     pub node: Option<u32>,
 

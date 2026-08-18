@@ -469,8 +469,8 @@ and no stdin relay.
   rather than saying it never existed.
 * `-n`/`--node N` runs on that node **only**, instead of on every node
   in the session. This is how you get an interactive shell on a
-  multi-node job: naming one node makes the exec a single-process job,
-  and a single-process job gets the terminal.
+  multi-node job: naming one node leaves a single-process job, and a
+  single-process job gets the terminal.
 
   ```sh
   $ mirage exec --node 2 -- bash
@@ -484,6 +484,26 @@ and no stdin relay.
 * `--nproc-per-node N`, `--env KEY=VALUE`, `--clear-env-vars` and
   `--workdir DIR` mean exactly what they mean on `run`, including which
   jobs get the terminal and which get `[<rank>] ` prefixes.
+
+  `--node` and `--nproc-per-node` compose, and it is worth being precise
+  about which one decides the terminal, because the two read as if they
+  contradict each other. `--node` chooses *where* the exec runs;
+  `--nproc-per-node` chooses *how many* of that node's slots it fills.
+  The process count is what decides the streams, and it wins:
+
+  ```sh
+  $ mirage exec --node 1 -- bash                    # 1 process → interactive
+  $ mirage exec --node 1 --nproc-per-node 3 -- ./a  # 3 processes → captured
+  [3] ...
+  [4] ...
+  [5] ...
+  ```
+
+  So `--node` alone is interactive because it leaves one process, not
+  because it named a node. The three above are node 1's own ranks in the
+  job's grid — `1*P`, `1*P+1`, `1*P+2` for a job of `P` processes per
+  node — and asking for more than the job's `P` is refused rather than
+  spilling into the next node's rank 0.
 * The exec's processes die with this command, and this command exits with
   the workload's exit code. Ctrl-C is forwarded, then escalates, exactly
   as in `run`.

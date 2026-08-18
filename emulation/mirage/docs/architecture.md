@@ -259,10 +259,17 @@ applied.
   rank 0 sends keystrokes somewhere the user cannot see.
 
 That leaves a real gap: there is no way to be interactive *with* a
-multi-node job. `mirage exec --node N` fills it. Naming one node makes
-the exec a single-process job, so it takes the first branch and gets the
+multi-node job. `mirage exec --node N` fills it. Naming one node leaves
+a single-process job, so it takes the first branch and gets the
 terminal, while still receiving that node's rank variables and the
 session's `WORLD_SIZE` — a shell inside the job rather than beside it.
+
+Note which half of that does the work. `--node` narrows *where* the exec
+runs; the branch is chosen by the process count, which `--nproc-per-node`
+sets independently. `--node N --nproc-per-node K` is K processes on node
+N, and takes the second branch like any other grid. Reading `--node` as
+"the interactive flag" is how the two end up documented as conflicting
+when they are orthogonal.
 
 A process that owns the terminal is also made the terminal's foreground
 process group, because a background group that reads its controlling

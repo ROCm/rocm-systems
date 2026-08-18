@@ -2106,6 +2106,84 @@ fn exec_can_target_one_node_of_a_multi_node_session() {
     run.wait(Duration::from_secs(60));
 }
 
+/// `--node` and `--nproc-per-node` compose, and the count decides the
+/// streams.
+///
+/// The pair reads as a contradiction if `--node` is described as "the
+/// interactive flag": naming a node is what gets you a shell, and yet
+/// `--node 1 --nproc-per-node 3` is plainly not one shell. It is not a
+/// contradiction — `--node` says *where* and the process count says
+/// *whether anyone gets stdin* — but nothing pinned it, so this asserts
+/// the shape from outside: three processes, all on the named node, all
+/// captured and labelled with the job's own rank numbers.
+#[test]
+fn a_named_node_takes_nproc_per_node_and_is_captured_when_it_does() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("p");
+
+    // A job of two nodes with three slots each: ranks 0-5, and node 1's
+    // own slots are 3, 4 and 5.
+    let mut run = env.spawn_run(
+        &[
+            "--profile",
+            "p",
+            "--num-nodes",
+            "2",
+            "--nproc-per-node",
+            "3",
+        ],
+        &["/bin/sh", "-c", "sleep 300"],
+    );
+    let id = run.await_ready(Duration::from_secs(90));
+
+    let out = env.ok(&[
+        "exec",
+        "--session",
+        &id,
+        "--node",
+        "1",
+        "--nproc-per-node",
+        "3",
+        "--",
+        "/bin/sh",
+        "-c",
+        "echo slot-$RANK/$LOCAL_RANK",
+    ]);
+
+    // Node 1's ranks, and only node 1's. A `--nproc-per-node` that
+    // ignored `--node` would start six processes; one that renumbered
+    // from zero would print `slot-0/0` and put two live processes on
+    // rank 0 of the rendezvous.
+    for (global, local) in [(3, 0), (4, 1), (5, 2)] {
+        assert!(
+            out.contains(&format!("slot-{global}/{local}")),
+            "node 1 slot {local} should be the job's rank {global}: {out}"
+        );
+    }
+    for absent in ["slot-0/", "slot-1/", "slot-2/"] {
+        assert!(
+            !out.contains(absent),
+            "`--node 1` also started node 0's ranks: {out}"
+        );
+    }
+
+    // And it is captured, because three processes cannot share one
+    // terminal — the labels are the observable form of that.
+    for label in ["[3]", "[4]", "[5]"] {
+        assert!(
+            out.contains(label),
+            "a multi-process exec must be labelled even when it named a \
+             node: {out}"
+        );
+    }
+
+    run.signal(Signal::SIGINT);
+    run.wait(Duration::from_secs(60));
+}
+
 /// The run's exit code is the workload's own, however the workload ended.
 ///
 /// The bottom layer of the exit-code contract, and the one scripts lean
