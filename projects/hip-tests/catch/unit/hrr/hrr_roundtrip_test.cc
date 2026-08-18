@@ -734,6 +734,69 @@ HIP_TEST_CASE(Unit_HRR_MemsetD2DPitchAllocRoundtrip) {
   hrr_run_exact_roundtrip("Unit_HRR_MemsetD2DPitchAlloc_Direct", cap.path);
 }
 
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_MemsetSpt_Direct: hipMemset_spt / hipMemsetAsync_spt /
+ *     hipMemset2D_spt / hipMemset2DAsync_spt each fill their own buffer with
+ *     their own byte pattern, and each buffer is read back by its own D2H.
+ *     The workload calls the ordinary hipMemset* names and is compiled with
+ *     -fgpu-default-stream=per-thread, so the archive is what proves the _spt
+ *     entry points were the ones reached; assert the recorded API ids before
+ *     replaying.
+ *   - Replay with HIP_HRR_D2H_EXACT=1 and REQUIRE exit 0.  Exact mode matters:
+ *     the default oracle falls back to float tolerance (atol=rtol=1e-3) and
+ *     accepts a zero-initialised replay buffer whenever the captured pattern
+ *     decodes to a small magnitude, which would let a NOOP _spt memset handler
+ *     pass.  The workload also picks patterns that are out of tolerance in every
+ *     candidate encoding, so exact mode is belt and braces, not the only guard.
+ *   - REQUIRE at least 4 validated D2H buffers, one per API under test: a NOOP
+ *     playback handler for any single _spt memset fails its own buffer and turns
+ *     the playback exit code into 1.
+ */
+HIP_TEST_CASE(Unit_HRR_MemsetSptRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memsetspt"};
+  hrr_capture_direct("Unit_HRR_MemsetSpt_Direct", cap.path);
+
+  {
+    hrr::Archive arc;
+    REQUIRE(hrr::load_archive(cap.path.string(), arc));
+    auto recorded = [&arc](hrr_api_id_t api) {
+      return std::any_of(arc.events.begin(), arc.events.end(), [api](const hrr::Event& e) {
+        return e.header().event_type == static_cast<uint16_t>(api);
+      });
+    };
+    REQUIRE(recorded(HRR_API_HIPMEMSET_SPT));
+    REQUIRE(recorded(HRR_API_HIPMEMSETASYNC_SPT));
+    REQUIRE(recorded(HRR_API_HIPMEMSET2D_SPT));
+    REQUIRE(recorded(HRR_API_HIPMEMSET2DASYNC_SPT));
+    // The readbacks must stay on the plain hipMemcpy: hipMemcpy_spt records no
+    // data blob, so a redirected readback would silently drop the D2H oracle
+    // the exit-code and pass-count checks below depend on.
+    REQUIRE(recorded(HRR_API_HIPMEMCPY));
+  }
+
+  auto [ret, out] = hrr_playback_env(cap.path, {{"HIP_HRR_D2H_EXACT", "1"}});
+  INFO("Playback stdout:\n" << out);
+  INFO("Playback exit code: " << ret);
+#ifdef _WIN32
+  // Device-output fidelity is best-effort on the Windows CI target (same policy
+  // as hrr_run_playback), so only a crash fails the test there.
+  REQUIRE(ret < 128);
+#else
+  REQUIRE(ret == 0);  // any byte mismatch in exact mode exits 1
+
+  size_t pos = out.find("D2H checks");
+  REQUIRE(pos != std::string::npos);
+  size_t colon = out.find(':', pos);
+  REQUIRE(colon != std::string::npos);
+  int d2h_pass = 0;
+  sscanf(out.c_str() + colon + 1, " %d pass", &d2h_pass);
+  INFO("D2H pass=" << d2h_pass);
+  CHECK(d2h_pass >= 4);  // one validated buffer per _spt memset API
+#endif
+}
+
 HIP_TEST_CASE(Unit_HRR_MemsetVariantsRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memsetvariants"};
   hrr_run_roundtrip("Unit_HRR_MemsetVariants_Direct", cap.path);
