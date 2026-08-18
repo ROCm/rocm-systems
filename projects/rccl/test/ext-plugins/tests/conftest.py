@@ -20,7 +20,7 @@ OMPI_INSTALL_DIR = os.environ.get("OMPI_INSTALL_DIR", "path/to/ompi/install")
 RCCL_TESTS_DIR = os.environ.get("RCCL_TESTS_DIR", "path/to/rccl-tests")
 
 PLUGIN_DIR = f"{RCCL_INSTALL_DIR}/plugins/tuner/example"
-PLUGIN_SO = f"{PLUGIN_DIR}/libnccl-tuner-example.so"
+PLUGIN_SO = f"{PLUGIN_DIR}/librccl-tuner-example.so"
 
 PROFILER_DIR = f"{RCCL_INSTALL_DIR}/plugins/profiler/example"
 PROFILER_SO = f"{PROFILER_DIR}/librccl-profiler-example.so"
