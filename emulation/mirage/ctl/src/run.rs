@@ -228,7 +228,18 @@ async fn run_owned(
             a.clear_env_vars,
         )?;
 
-        let (exec, output) = run.exec(&def).await?;
+        // Raced against the socket, not awaited alone. Starting an exec
+        // reaches a container `--workdir` probe -- a provider round trip
+        // -- and `serving` is polled by the bring-up `select!` and by the
+        // workload `select!` and by nothing in between, so without this
+        // arm the run answers nobody for the length of that probe: bound,
+        // accepting into the backlog, and silent. A `mirage exec` in
+        // another terminal waited it out and was then told this run "is
+        // either still starting up, or shutting down", which is neither.
+        let (exec, output) = tokio::select! {
+            started = run.exec(&def) => started?,
+            () = &mut serving => unreachable!("the control socket serves until dropped"),
+        };
 
         // Keep serving for as long as the workload runs. `select!` rather
         // than a spawned task so the server stops when the workload does,

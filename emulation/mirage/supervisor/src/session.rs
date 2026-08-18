@@ -731,7 +731,7 @@ impl Session {
         };
 
         // Everything from here to the re-lock runs without the lock held.
-        let started = self.spawn_exec(def, &id);
+        let started = self.spawn_exec(def, &id).await;
 
         let tearing_down = {
             let mut inner = self.lock();
@@ -766,7 +766,7 @@ impl Session {
     /// Split out so the caller can keep this off the critical section:
     /// it materialises the pid-file directory, forks once per rank and
     /// wires up the output pumps.
-    fn spawn_exec(
+    async fn spawn_exec(
         &self,
         def: &ExecDef,
         id: &ExecId,
@@ -774,17 +774,40 @@ impl Session {
         Arc<Exec>,
         tokio::sync::mpsc::Receiver<crate::process::OutputChunk>,
     )> {
+        // Described here, on the runtime, because it needs `self` and is
+        // a few field reads. Everything after it is owned, which is what
+        // lets the rest move to a blocking thread.
+        let desc = self.describe()?;
+        let def = def.clone();
+        let id = id.clone();
         // The run process is the one the user is sitting in front of, so
         // its own streams are the ones a workload would be given; see
         // [`crate::spec::CallerStreams`].
-        let specs = crate::spec::build_specs(
-            &self.describe()?,
-            def,
-            id,
-            crate::spec::CallerStreams::probe(),
-        )?;
-        Ok(Exec::start(id.clone(), def.clone(), specs))
+        let caller = crate::spec::CallerStreams::probe();
+
+        // On a blocking thread, because both halves of this genuinely
+        // block and neither is anything a runtime thread should be doing.
+        //
+        // `build_specs` runs the container `--workdir` probe, which is a
+        // provider round trip -- a `podman exec` into the node container,
+        // for as long as that takes. `Exec::start` forks and execs one
+        // process per rank, up to `MAX_WORLD_SIZE` of them. Held on the
+        // runtime, either one stalls every other task in the process, and
+        // the visible cost was the control socket: `mirage run` polls its
+        // `serving` future from a `select!`, and a task that blocks in
+        // `poll` blocks its siblings -- so for the whole of a slow probe
+        // the socket was bound, accepting into the backlog, and answering
+        // nobody. A `mirage exec` in another terminal sat there and was
+        // eventually told the run "is either still starting up, or
+        // shutting down", which it was not.
+        tokio::task::spawn_blocking(move || {
+            let specs = crate::spec::build_specs(&desc, &def, &id, caller)?;
+            Ok(Exec::start(id, def, specs))
+        })
+        .await
+        .map_err(|e| MirageError::other(format!("starting an exec: {e}")))?
     }
+
 
     /// Describe this session for a client that wants to start processes
     /// in it.

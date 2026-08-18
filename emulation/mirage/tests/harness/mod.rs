@@ -332,6 +332,18 @@ impl Run {
         self.child.as_ref().map(std::process::Child::id)
     }
 
+    /// Whether the run is still going.
+    ///
+    /// A question with a deadline attached everywhere else in this
+    /// suite — but some properties are about a run that must *not* have
+    /// exited yet, and those need the instantaneous answer.
+    pub(crate) fn is_running(&mut self) -> bool {
+        matches!(
+            self.child.as_mut().map(std::process::Child::try_wait),
+            Some(Ok(None))
+        )
+    }
+
     /// Signal the run, as a user pressing Ctrl-C in its terminal would.
     pub(crate) fn signal(&self, sig: nix::sys::signal::Signal) {
         if let Some(pid) = self.pid() {

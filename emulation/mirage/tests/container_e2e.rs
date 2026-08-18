@@ -48,8 +48,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use harness::{
-    Env as BaseEnv, TEST_EMULATOR, assert_no_leaks, marker, skip_without_emulator, tagged_sleep,
-    wait_for,
+    Env as BaseEnv, TEST_EMULATOR, assert_no_leaks, count_processes, marker, skip_without_emulator,
+    tagged_sleep, wait_for,
 };
 use nix::sys::signal::Signal;
 
@@ -57,6 +57,12 @@ use nix::sys::signal::Signal;
 /// to the provider several times per node, so it is slower than a plain
 /// one.
 const READY: Duration = Duration::from_secs(60);
+
+/// A container `--workdir` the mock provider takes five seconds to deny.
+///
+/// See the `exec)` case of the mock for why the workdir probe is the
+/// only place this window can be opened.
+const STALL_WORKDIR: &str = "/mirage-test-stalls-then-missing";
 
 struct Env {
     base: BaseEnv,
@@ -294,6 +300,17 @@ case "$1" in
     if [ "$autoremove" = 1 ]; then rm -f "$STATE/containers/$name"; fi
     exit 0 ;;
   exec)
+    # A deliberate stall, and the only thing in this mock that is not
+    # imitating an engine. The container `--workdir` probe is the one
+    # step of a run that talks to the provider after the session is
+    # healthy, which makes it the only place a test can hold a run open
+    # *between* "this session is up and borrowable" and "this run's own
+    # command has failed". A `--workdir` naming this path takes five
+    # seconds to answer "no such directory"; every other path answers at
+    # once. See `a_failing_runs_own_command_still_waits_for_a_borrower`.
+    case " $* " in
+      *__STALL_PATH__*) sleep 5 ;;
+    esac
     # Consume the flags mirage builds, collecting `-e K=V` into the
     # environment, then run the command. This is the mock's real job:
     # it proves the argv mirage produces is one an engine can execute.
@@ -376,6 +393,7 @@ case "$1" in
 esac
 "#
     .replace("__LOG__", &log.display().to_string())
+    .replace("__STALL_PATH__", STALL_WORKDIR)
     .replace(
         "__STATE__",
         &log.parent()
@@ -859,7 +877,7 @@ fn ending_a_containerised_run_kills_the_workload_inside_the_container() {
     wait_for(
         "the containerised workload to start",
         Duration::from_secs(15),
-        || harness::count_processes(&tag) > 0,
+        || count_processes(&tag) > 0,
     );
 
     // Ctrl-C in the run's terminal, which is the way a containerised job
@@ -1076,6 +1094,93 @@ fn cleanup_spares_the_containers_of_a_live_run() {
 
     run.signal(Signal::SIGINT);
     run.wait(READY);
+    assert_no_leaks(&tag);
+}
+
+/// A run whose own command fails still waits for a borrower.
+///
+/// The borrower wait used to live only on the path where everything went
+/// right. Once a session is healthy it is borrowable, but the two steps
+/// between readiness and the workload starting — building the exec
+/// definition and starting it — returned with `?` straight past the wait
+/// and into `Run::destroy`. So a run whose own `--workdir` was wrong tore
+/// the session down under a borrower that had done nothing wrong, while
+/// an identical run whose workdir was fine waited for it. Same session,
+/// same borrower, opposite treatment, decided by something the borrower
+/// has no part in.
+///
+/// Containerised because the workdir probe is the only step after
+/// readiness that asks the provider anything, and therefore the only
+/// place the window can be held open long enough to attach to; see
+/// [`STALL_WORKDIR`].
+#[test]
+fn a_failing_runs_own_command_still_waits_for_a_borrower() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_containerized_profile("cp");
+    let tag = marker("failing-run-borrower");
+
+    // The session comes up, and then this run's own command fails: the
+    // probe stalls five seconds and answers "no such directory".
+    let mut run = env.base.spawn_run(
+        &["--profile", "cp", "--workdir", STALL_WORKDIR],
+        &["/bin/true"],
+    );
+    let watch = run.watch_stderr();
+    let id = run.await_ready(READY);
+
+    // Inside the stall: borrow the session the way another terminal
+    // would, and hold it. That this can be done at all is the other half
+    // of the fix — the run keeps serving its socket across the probe.
+    let mut borrower = std::process::Command::new(env.base.bin())
+        .args([
+            "exec",
+            "--session",
+            &id,
+            "--",
+            "/bin/sh",
+            "-c",
+            &tagged_sleep(&tag),
+        ])
+        .envs(env.base.child_env())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    wait_for("the borrower to start its workload", READY, || {
+        count_processes(&tag) > 0
+    });
+
+    // The property. On the unfixed code the run is already gone by now,
+    // having reported the workdir error and destroyed the session; this
+    // line is never printed because `wait_for_borrowers` was never
+    // reached.
+    wait_for("the failing run to wait for its borrower", READY, || {
+        watch.contains("borrower(s) are still using session")
+    });
+    assert!(
+        run.is_running(),
+        "a run that failed its own command exited while a borrower held \
+         the session:\n{}",
+        watch.text()
+    );
+
+    // And the interrupt escape survives the move: the user still decides
+    // when they have waited long enough, and the error that ended the run
+    // is still the error they are told about.
+    run.signal(Signal::SIGINT);
+    let out = String::from_utf8_lossy(&run.wait(READY).stderr).into_owned();
+    assert!(
+        out.contains(STALL_WORKDIR),
+        "the run must still report why its own command failed, rather \
+         than losing it to the borrower wait:\n{out}"
+    );
+
+    let _ = borrower.kill();
+    let _ = borrower.wait();
     assert_no_leaks(&tag);
 }
 
