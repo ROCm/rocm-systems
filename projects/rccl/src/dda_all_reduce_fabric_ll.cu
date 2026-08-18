@@ -31,12 +31,8 @@
 #include <utility>
 
 RCCL_PARAM_DECLARE(DdaLL);
-
-// Total message size gates each LL tier, both also under DDA_LL. One-shot is tried
-// first, so <= 1 MiB takes one-shot and up to 16 MiB takes two-shot; past that the
-// message falls through to LL128/Simple. A threshold of 0 disables that tier.
-RCCL_PARAM(DdaLLOneShotThreshold, "DDA_LL_ONESHOT_THRESHOLD", (size_t)(1) * 1024 * 1024);
-RCCL_PARAM(DdaLLTwoShotThreshold, "DDA_LL_TWOSHOT_THRESHOLD", (size_t)(16) * 1024 * 1024);
+RCCL_PARAM_DECLARE(DdaLLOneShotThreshold);
+RCCL_PARAM_DECLARE(DdaLLTwoShotThreshold);
 
 namespace {
 

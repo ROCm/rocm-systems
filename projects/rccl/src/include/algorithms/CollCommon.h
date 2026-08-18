@@ -220,9 +220,9 @@ inline std::pair<dim3, dim3> getGridAndBlockDims(size_t count, int typeSize, siz
 // layout is identical on every rank and call. The effective size gate is the total
 // collected size, so the actual per-rank payload is under the cap.
 // Footprint = 2 banks * nRanks * (kDdaLLMaxBytes * 2) for the 8B->16B
-// expansion; 256 MiB at 16 MiB for 4 ranks
+// expansion; 128 MiB at 8 MiB for 4 ranks
 // TODO: instead of making it fixed, use the size based on scratch size
-constexpr size_t kDdaLLMaxBytes = 16777216;                     // 16M
+constexpr size_t kDdaLLMaxBytes = (size_t)(8) * 1024 * 1024;      // 8M
 
 // 16-byte LL line: two (4B data, 4B flag) pairs carrying 8B of payload.
 union LLPacket16 {
