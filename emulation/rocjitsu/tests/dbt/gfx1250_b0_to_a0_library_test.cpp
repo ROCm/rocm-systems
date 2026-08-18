@@ -201,6 +201,7 @@ TEST(Gfx1250B0ToA0Library, FansOutRequiredWorkAsCallbackViews) {
       .severity = rocjitsu::DiagnosticSeverity::Error,
       .kind = rocjitsu::DiagnosticKind::ExpandMissing,
       .guest_offset = 8,
+      .output_offset = std::nullopt,
       .mnemonic = "v_test",
       .message = "primary diagnostic",
       .required_work = {"first required step", "second required step"},

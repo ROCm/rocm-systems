@@ -503,8 +503,12 @@ HIP_TEST_CASE(Unit_HRR_ZeroInitRoundtrip) {
   int d2h_pass = 0, d2h_fail = 0;
   REQUIRE(hrr_parse_d2h_summary(out, d2h_pass, d2h_fail));
   INFO("D2H pass=" << d2h_pass << " fail=" << d2h_fail);
+// With ASAN enabled this won't be true, because inside Unit_HRR_ZeroInitRead_Direct
+// fresh device allocations are not zeroed with ASAN enabled
+#if !defined(ENABLE_ADDRESS_SANITIZER)
   CHECK(d2h_pass >= 1);
   CHECK(d2h_fail == 0);
+#endif
 }
 
 /**
