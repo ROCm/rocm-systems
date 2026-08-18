@@ -5,9 +5,9 @@
 
 #include "amd_smi/impl/nic/amd_smi_ainic_device.h"
 
-extern "C" {
+// Included bare: the header opens its own extern "C", and wrapping it again
+// would extend C linkage over the C++-only declarations at its tail.
 #include "amd_smi/impl/nic/amdsmi_unified/interface/smi_nic_interface.h"
-}
 
 namespace amd::smi {
 
