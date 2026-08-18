@@ -25,20 +25,7 @@
 import contextlib
 import os
 import argparse
-import socket
 import sys
-
-
-def process_filename():
-    """Path of the list-avail output file, or None when writing to stdout."""
-    if not os.environ.get("ROCPROF_OUTPUT_LIST_AVAIL_FILE"):
-        return None
-
-    file_path = os.environ.get("ROCPROF_OUTPUT_PATH", os.getcwd())
-    filename = os.environ.get(
-        "ROCPROF_OUTPUT_FILE_NAME", socket.gethostname() + "/" + str(os.getpid())
-    )
-    return os.path.join(file_path, filename + "_list_avail.txt")
 
 
 def format_help(formatter, w=120, h=40):
@@ -511,16 +498,15 @@ def process_pmc_check(args):
                 agent_ids.append(agent)
         return agent_ids
 
-    def get_counter_handle(counter_name):
-        agent_counters = avail.get_counters()
-        for agent, counters in agent_counters.items():
-            for counter in counters:
-                if counter.get_as_dict()["Counter_Name"] == counter_name:
-                    return counter.counter_handle
+    def get_counter_handle(counter_name, agent):
+        # a handle may be agent specific, so resolve it against the agent it
+        # will be checked on rather than against whichever agent lists it first
+        for counter in agent_counters[agent]:
+            if counter.get_as_dict()["Counter_Name"] == counter_name:
+                return counter.counter_handle
         avail.fatal_error("Invalid counter name")
 
     def get_counter_names(pmc_list, agent):
-        agent_counters = avail.get_counters()
         counter_names = []
         for pmc in pmc_list:
             for counter in agent_counters[agent]:
@@ -555,6 +541,7 @@ def process_pmc_check(args):
 
     device_pmc = {}
     agent_info_map = avail.get_agent_info_map()
+    agent_counters = avail.get_counters()
 
     for pmc in args.pmc:
         counter, qualifiers = process_qualifiers(pmc)
@@ -563,19 +550,21 @@ def process_pmc_check(args):
                 agent_handle = get_device_agent(args.device)
                 if agent_handle not in device_pmc.keys():
                     device_pmc.setdefault(agent_handle, [])
-                device_pmc[agent_handle].append(get_counter_handle(counter))
+                device_pmc[agent_handle].append(get_counter_handle(counter, agent_handle))
             else:
                 agent_ids = get_gpu_agents()
                 for agent_handle in agent_ids:
                     if agent_handle not in device_pmc.keys():
                         device_pmc.setdefault(agent_handle, [])
-                    device_pmc[agent_handle].append(get_counter_handle(counter))
+                    device_pmc[agent_handle].append(
+                        get_counter_handle(counter, agent_handle)
+                    )
         else:
             for itr in qualifiers:
                 agent_handle = get_device_agent(int(itr["device"]))
                 if agent_handle not in device_pmc.keys():
                     device_pmc.setdefault(agent_handle, [])
-                device_pmc[agent_handle].append(get_counter_handle(counter))
+                device_pmc[agent_handle].append(get_counter_handle(counter, agent_handle))
 
     if avail.check_pmc(device_pmc) is True:
         for agent, pmc in device_pmc.items():
@@ -617,22 +606,15 @@ def main(argv=None):
     )
     args = parse_arguments(argv)
     if args.command:
-        output_file = process_filename()
-        output_stream = None
-        if output_file is not None:
-            try:
-                os.makedirs(os.path.dirname(output_file) or ".", exist_ok=True)
-                output_stream = open(output_file, "w")
-            except OSError as error:
-                avail.fatal_error(f"Unable to write list-avail output: {error}")
         try:
-            if output_stream is None:
-                args.func(args)
-            else:
-                with output_stream, contextlib.redirect_stdout(output_stream):
-                    args.func(args)
-        except (AttributeError, OSError) as error:
-            avail.fatal_error(f"Unable to load rocprofv3-avail library: {error}")
+            args.func(args)
+        except BrokenPipeError:
+            # A reader such as `head` closed the pipe. Send what is still
+            # buffered to /dev/null so the interpreter does not fail again
+            # while flushing at shutdown.
+            with contextlib.suppress(OSError, ValueError):
+                os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+            return 1
 
 
 if __name__ == "__main__":

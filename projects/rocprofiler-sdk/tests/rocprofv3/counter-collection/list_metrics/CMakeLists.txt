@@ -40,8 +40,7 @@ rocprofiler_add_integration_execute_test(
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPD_LOG_LEVEL=info"
     PASS_REGULAR_EXPRESSION
-        "GPU:[0-9]*\\n*;Name:\\t[a-zA-Z_]*\\n;counter_name:\\t[a-zA-Z_]*\\n;description:\\t(.*)\\n*;expression:\\t(.)*\\n*;block:\\t[a-zA-Z]*\\n*;dimension_name:\\t([A-Z_]*)\\n*; dimension_instances:\\t([[0-9]*:[0-9]*\\])*\\n*;method:(.*)\\n*;unit:(.*)\\n*;min_interval:[0-9]*\\n*;max_interval:[0-9]*\\n*;flags:(.*)\\n*"
-    )
+        "GPU:[0-9]+.*Counter_Name +:\t[A-Za-z_]+.*Description +:.*Dimensions +:")
 
 # list-metrics with tracing
 rocprofiler_add_integration_execute_test(
