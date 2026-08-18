@@ -45,9 +45,9 @@ hipError_t launchVerifyAndModify(int32_t *device_buffer_start, size_t device_buf
 // modify_stride:       only Data bytes whose data-index is a multiple of this are set to
 //                      `modified`; verify-in still covers the whole Data region. Must be
 //                      >= 1; pass 1 to modify every byte.
-hipError_t launchVerifyAndModifyBytes(unsigned char *buf, size_t buf_size, unsigned char *arr, size_t n,
-                                      unsigned char entry, unsigned char modified, int32_t *first_bad_idx,
-                                      unsigned char slack_sentinel, int32_t *first_bad_slack_idx, dim3 grid,
-                                      dim3 workgroup, size_t modify_stride);
+hipError_t launchVerifyAndModifyBytes(uint8_t *buf, size_t buf_size, uint8_t *arr, size_t n, uint8_t entry,
+                                      uint8_t modified, int32_t *first_bad_idx, uint8_t slack_sentinel,
+                                      int32_t *first_bad_slack_idx, dim3 grid, dim3 workgroup,
+                                      size_t modify_stride);
 
 } // namespace hipFileTest

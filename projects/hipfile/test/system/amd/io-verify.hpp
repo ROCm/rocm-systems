@@ -6,6 +6,7 @@
 #pragma once
 
 #include "backend/fallback.h"
+#include "hipfile-literals.h"
 #include "hipfile-warnings.h"
 #include "hipfile.h"
 
@@ -28,13 +29,12 @@ namespace hipFileTest {
 // ---------------------------------------------------------------------------
 // Transfer sizes and file offsets shared by the I/O verification tests.
 // ---------------------------------------------------------------------------
-constexpr size_t  kFourKiB              = 4 * 1024;
 constexpr size_t  kChunkBytes           = hipFile::Fallback::DefaultChunkSize;
 constexpr int32_t kDefaultWorkgroupSize = 256;
 constexpr hoff_t  kCombinedFileOff =
-    static_cast<hoff_t>(kChunkBytes + kFourKiB); // exercises chunking and save room for file sentinel
+    static_cast<hoff_t>(kChunkBytes + 4_KiB); // exercises chunking and save room for file sentinel
 constexpr hoff_t kChunkOff   = static_cast<hoff_t>(kChunkBytes);
-constexpr hoff_t kFourKiBOff = static_cast<hoff_t>(kFourKiB);
+constexpr hoff_t kFourKiBOff = static_cast<hoff_t>(4_KiB);
 
 // ---------------------------------------------------------------------------
 // Device sentinel region: values and sizing.
@@ -43,13 +43,13 @@ constexpr hoff_t kFourKiBOff = static_cast<hoff_t>(kFourKiB);
 // device memory regions where it is not supposed to.
 // ---------------------------------------------------------------------------
 constexpr int32_t kSentinel     = -1;
-constexpr int     kSentinelByte = 0xFF;
+constexpr uint8_t kSentinelByte = 0xFF;
 
 // Number of elements in a sentinel region (sentinel region always 4KiB).
 inline constexpr size_t
 slackElems()
 {
-    return kFourKiB / sizeof(int32_t);
+    return 4_KiB / sizeof(int32_t);
 }
 
 // ---------------------------------------------------------------------------
@@ -62,8 +62,8 @@ struct SizeParam {
 
 HIPFILE_WARN_NO_EXIT_DTOR_OFF
 inline const std::array<SizeParam, 3> combined_sizes{{
-    {kFourKiB, "sub_chunk"},
-    {kChunkBytes + kFourKiB, "cross_chunk"},
+    {4_KiB, "sub_chunk"},
+    {kChunkBytes + 4_KiB, "cross_chunk"},
     {2 * kChunkBytes, "multi_chunk"},
 }};
 HIPFILE_WARN_NO_EXIT_DTOR_ON
@@ -140,8 +140,8 @@ assertHoleZero(int fd, hoff_t from, hoff_t to)
     if (n == 0) {
         return;
     }
-    std::vector<unsigned char> hole(n, 0xEE); // pre-fill non-zero so a short pread is caught
-    ssize_t                    rv = pread(fd, hole.data(), n, from);
+    std::vector<uint8_t> hole(n, 0xEE); // pre-fill non-zero so a short pread is caught
+    ssize_t              rv = pread(fd, hole.data(), n, from);
     ASSERT_EQ(static_cast<ssize_t>(n), rv);
     for (size_t i = 0; i < n; ++i) {
         ASSERT_EQ(0, hole[i]) << "hole byte non-zero at file offset " << (from + static_cast<hoff_t>(i));
@@ -272,18 +272,18 @@ launchAndVerify(int32_t *start, size_t alloc_n, int32_t *arr, size_t n, dim3 gri
 // byte-granular helpers
 // ---------------------------------------------------------------------------
 inline void
-seedFileBytesConstant(int fd, hoff_t byte_offset, size_t n, unsigned char value)
+seedFileBytesConstant(int fd, hoff_t byte_offset, size_t n, uint8_t value)
 {
-    std::vector<unsigned char> host(n, value);
-    ssize_t                    rv = pwrite(fd, host.data(), n, byte_offset);
+    std::vector<uint8_t> host(n, value);
+    ssize_t              rv = pwrite(fd, host.data(), n, byte_offset);
     ASSERT_EQ(static_cast<ssize_t>(n), rv);
 }
 
-inline std::vector<unsigned char>
+inline std::vector<uint8_t>
 readFileBytes(int fd, hoff_t byte_offset, size_t n)
 {
-    std::vector<unsigned char> file(n);
-    ssize_t                    rv = pread(fd, file.data(), n, byte_offset);
+    std::vector<uint8_t> file(n);
+    ssize_t              rv = pread(fd, file.data(), n, byte_offset);
     EXPECT_EQ(static_cast<ssize_t>(n), rv);
     return file;
 }
@@ -291,8 +291,8 @@ readFileBytes(int fd, hoff_t byte_offset, size_t n)
 // Launches the byte verify+modify kernel and asserts neither the payload bytes nor the
 // device sentinel region was corrupted.
 inline void
-launchAndVerifyBytes(unsigned char *start, size_t alloc_bytes, unsigned char *arr, size_t n, dim3 grid,
-                     dim3 workgroup, size_t modify_stride)
+launchAndVerifyBytes(uint8_t *start, size_t alloc_bytes, uint8_t *arr, size_t n, dim3 grid, dim3 workgroup,
+                     size_t modify_stride)
 {
     ASSERT_NE(0U, modify_stride) << "modify_stride must be >= 1";
     BadIdxFlag bad;

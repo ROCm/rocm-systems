@@ -78,8 +78,8 @@ launchVerifyAndModify(int32_t *device_buffer_start, size_t device_buffer_size, i
 //    - (buf + data_start)[i] = entry iff i % modify_stride != 0.
 //                            = modified iff i % modify_stride == 0.
 static __global__ void
-verifyAndModifyBytes(unsigned char *buf, size_t buf_size, size_t data_start, size_t n, unsigned char entry,
-                     unsigned char modified, int32_t *first_bad_idx, unsigned char slack_sentinel,
+verifyAndModifyBytes(uint8_t *buf, size_t buf_size, size_t data_start, size_t n, uint8_t entry,
+                     uint8_t modified, int32_t *first_bad_idx, uint8_t slack_sentinel,
                      int32_t *first_bad_slack_idx, size_t modify_stride)
 {
     const size_t stride = static_cast<size_t>(blockDim.x) * gridDim.x;
@@ -105,10 +105,9 @@ verifyAndModifyBytes(unsigned char *buf, size_t buf_size, size_t data_start, siz
 }
 
 hipError_t
-launchVerifyAndModifyBytes(unsigned char *buf, size_t buf_size, unsigned char *arr, size_t n,
-                           unsigned char entry, unsigned char modified, int32_t *first_bad_idx,
-                           unsigned char slack_sentinel, int32_t *first_bad_slack_idx, dim3 grid,
-                           dim3 workgroup, size_t modify_stride)
+launchVerifyAndModifyBytes(uint8_t *buf, size_t buf_size, uint8_t *arr, size_t n, uint8_t entry,
+                           uint8_t modified, int32_t *first_bad_idx, uint8_t slack_sentinel,
+                           int32_t *first_bad_slack_idx, dim3 grid, dim3 workgroup, size_t modify_stride)
 {
     const size_t data_start = static_cast<size_t>(arr - buf);
     verifyAndModifyBytes<<<grid, workgroup>>>(buf, buf_size, data_start, n, entry, modified, first_bad_idx,
