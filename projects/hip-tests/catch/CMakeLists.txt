@@ -392,7 +392,7 @@ if(HIP_PLATFORM STREQUAL "amd")
     # Which results in errors about missing headers etc
     set(win_cxx_standard -std=c++17)
   endif()
-  add_compile_options(${HIP_PATH_OPT} ${win_cxx_standard} -x hip -Wall -Wextra -Wvla -Wno-deprecated ${win_disable_warnings})
+  add_compile_options(${HIP_PATH_OPT} ${win_cxx_standard} -x hip -Wall -Wextra -Wvla -Wno-unused-function -Wno-deprecated ${win_disable_warnings})
   if(HIP_TESTS_ENABLE_WERROR)
       add_compile_options(-Werror)
   endif()
