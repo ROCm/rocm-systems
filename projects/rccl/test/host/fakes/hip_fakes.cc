@@ -238,6 +238,14 @@ hipError_t hipDeviceGet(hipDevice_t* device, int)
     return hipErrorInvalidValue;
 }
 
+hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t)
+{
+    if (uuid) {
+        *uuid = hipUUID{};
+    }
+    return hipSuccess;
+}
+
 hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int)
 {
     if (!pi) return g_hipDeviceGetAttributeResult;

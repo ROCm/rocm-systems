@@ -50,11 +50,22 @@ ncclResult_t ncclNetFinalize(struct ncclComm* comm) { return ncclSuccess; }
 int ncclOsCpuCount(const ncclAffinity& affinity) { ::abort(); }
 ncclResult_t ncclOsGetAffinity(ncclAffinity* affinity) { ::abort(); }
 ncclResult_t ncclOsSetAffinity(const ncclAffinity& affinity) { ::abort(); }
+// Early env/system read (checkHsaEnvSetting reaches this): succeed with an
+// empty value rather than abort so the reached path doesn't crash.
+ncclResult_t ncclOsTopoGetStrFromSys(const char* path, const char* fileName, char* strValue, int maxLen)
+{
+    if (strValue && maxLen > 0) {
+        strValue[0] = '\0';
+    }
+    return ncclSuccess;
+}
 ncclResult_t ncclProfilerPluginFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclProfilerPluginInit(struct ncclComm* comm) { ::abort(); }
 void ncclProfilerProxyTraceDumpIfAny(void* profilerContext) { }
 ncclResult_t ncclRasCommFini(const struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRegCleanup(struct ncclComm* comm) { return ncclSuccess; }
+ncclResult_t ncclRmaInit(struct ncclComm* comm) { ::abort(); }
+ncclResult_t ncclRmaInitFromParent(struct ncclComm* comm, struct ncclComm* parent) { ::abort(); }
 ncclResult_t ncclRmaProxyFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclStrongStreamDestruct(struct ncclStrongStream* ss) { return ncclSuccess; }
 ncclResult_t ncclSymkFinalize(struct ncclComm* comm) { ::abort(); }
@@ -67,6 +78,7 @@ bool rcclUseAinic() { ::abort(); }
 // Complex signatures / extern-C APIs / data + TLS.
 ncclResult_t freeChannel(struct ncclChannel*, int, int, int, struct ncclComm*) { return ncclSuccess; }
 ncclResult_t ncclAsyncLaunch(struct ncclAsyncJob*, ncclResult_t(*)(struct ncclAsyncJob*), void(*)(struct ncclAsyncJob*), void(*)(void*), struct ncclComm*) { ::abort(); }
+int64_t ncclParamGraphStreamOrdering() { return 0; }
 int64_t rcclParamHierarchicalAllGather() { ::abort(); }
 int64_t rcclParamPxnOptQpUsage() { ::abort(); }
 namespace latency_profiler { ncclResult_t collTraceInit(struct ncclComm*) { ::abort(); } ncclResult_t collTraceDestroy(struct ncclComm*) { ::abort(); } }
