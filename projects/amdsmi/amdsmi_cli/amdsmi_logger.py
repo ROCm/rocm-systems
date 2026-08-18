@@ -139,10 +139,6 @@ class AMDSMILogger:
             elif key == "gpu":
                 stored_gpu = string_value
                 table_values += string_value.rjust(3)
-            elif key == "brcm_nic":
-                table_values += string_value.rjust(3)
-            elif key == "brcm_switch":
-                table_values += string_value.rjust(3)
             elif key == "xcp":
                 stored_gpu = string_value
                 table_values += string_value.rjust(5)
@@ -175,27 +171,6 @@ class AMDSMILogger:
                 table_values += string_value.rjust(12)
             elif key in ("pcie_replay"):
                 table_values += string_value.rjust(13)
-            # BRCM Device Metrics
-            # NIC
-            elif key == "NIC_TEMP_CURRENT":
-                table_values += string_value.rjust(21)
-            elif key == "NIC_TEMP_CRIT_ALARM":
-                table_values += string_value.rjust(22)
-            elif key == "NIC_TEMP_EMERGENCY_ALARM":
-                table_values += string_value.rjust(26)
-            elif key == "NIC_TEMP_SHUTDOWN_ALARM":
-                table_values += string_value.rjust(25)
-            elif key == "NIC_TEMP_MAX_ALARM":
-                table_values += string_value.rjust(20)
-            # SWITCH
-            elif key == "CURRENT_LINK_SPEED":
-                table_values += string_value.rjust(25)
-            elif key == "MAX_LINK_SPEED":
-                table_values += string_value.rjust(20)
-            elif key == "CURRENT_LINK_WIDTH":
-                table_values += string_value.rjust(20)
-            elif key == "MAX_LINK_WIDTH":
-                table_values += string_value.rjust(20)
             # Only for handling topology tables
             elif "gpu_" in key:
                 table_values += string_value.ljust(13)
@@ -311,7 +286,7 @@ class AMDSMILogger:
         # Increase tabbing for device arguments by pulling them out of the main dictionary and assigning them to an empty string
         tabbed_dictionary = {}
         for key, value in capitalized_json.items():
-            if key not in ["GPU", "CPU", "CORE", "BRCM_NIC", "BRCM_SWITCH", "AI_NIC"]:
+            if key not in ["GPU", "CPU", "CORE", "AI_NIC"]:
                 tabbed_dictionary[key] = value
             # Filter out N/A values under clock
             if key == "CLOCK":
@@ -497,18 +472,6 @@ class AMDSMILogger:
             "message": message,
         }
 
-    def store_nic_output(self, device_handle, argument, data):
-        """Convert device handle to nic id and store output
-        params:
-            device_handle - device handle object to the target device output
-            argument (str) - key to store data
-            data (dict | list) - Data store against argument
-        return:
-            Nothing
-        """
-        nic_id = self.helpers.get_nic_id_from_device_handle(device_handle)
-        self._store_nic_output_amdsmi(nic_id=nic_id, argument=argument, data=data)
-
     def store_ainic_output(self, device_handle, argument, data):
         """Convert device handle to ainic id and store output
         params:
@@ -520,18 +483,6 @@ class AMDSMILogger:
         """
         nic_id = self.helpers.get_ainic_id_from_device_handle(device_handle)
         self._store_ainic_output_amdsmi(nic_id=nic_id, argument=argument, data=data)
-
-    def store_switch_output(self, device_handle, argument, data):
-        """Convert device handle to switch id and store output
-        params:
-            device_handle - device handle object to the target device output
-            argument (str) - key to store data
-            data (dict | list) - Data store against argument
-        return:
-            Nothing
-        """
-        switch_id = self.helpers.get_switch_id_from_device_handle(device_handle)
-        self._store_switch_output_amdsmi(switch_id=switch_id, argument=argument, data=data)
 
     def store_cpu_output(self, device_handle, argument, data):
         """Convert device handle to cpu id and store output
@@ -620,27 +571,6 @@ class AMDSMILogger:
         else:
             raise ValueError("Invalid output format: expected json, csv, or human_readable")
 
-    def _store_nic_output_amdsmi(self, nic_id, argument, data):
-        if argument == "timestamp":  # Make sure timestamp is the first element in the output
-            self.output["timestamp"] = int(time.time())
-
-        if self.is_json_format() or self.is_human_readable_format():
-            self.output["brcm_nic"] = int(nic_id)
-            if argument == "values" and isinstance(data, dict):
-                self.output.update(data)
-            else:
-                self.output[argument] = data
-        elif self.is_csv_format():
-            self.output["brcm_nic"] = int(nic_id)
-
-            if argument == "values" or isinstance(data, dict):
-                flat_dict = self.flatten_dict(data)
-                self.output.update(flat_dict)
-            else:
-                self.output[argument] = data
-        else:
-            raise ValueError("Invalid output format: expected json, csv, or human_readable")
-
     def _store_ainic_output_amdsmi(self, nic_id, argument, data):
         if argument == "timestamp":  # Make sure timestamp is the first element in the output
             self.output["timestamp"] = int(time.time())
@@ -653,27 +583,6 @@ class AMDSMILogger:
                 self.output[argument] = data
         elif self.is_csv_format():
             self.output["ai_nic"] = int(nic_id)
-
-            if argument == "values" or isinstance(data, dict):
-                flat_dict = self.flatten_dict(data)
-                self.output.update(flat_dict)
-            else:
-                self.output[argument] = data
-        else:
-            raise ValueError("Invalid output format: expected json, csv, or human_readable")
-
-    def _store_switch_output_amdsmi(self, switch_id, argument, data):
-        if argument == "timestamp":  # Make sure timestamp is the first element in the output
-            self.output["timestamp"] = int(time.time())
-
-        if self.is_json_format() or self.is_human_readable_format():
-            self.output["brcm_switch"] = int(switch_id)
-            if argument == "values" and isinstance(data, dict):
-                self.output.update(data)
-            else:
-                self.output[argument] = data
-        elif self.is_csv_format():
-            self.output["brcm_switch"] = int(switch_id)
 
             if argument == "values" or isinstance(data, dict):
                 flat_dict = self.flatten_dict(data)

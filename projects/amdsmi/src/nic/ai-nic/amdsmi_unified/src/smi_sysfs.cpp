@@ -17,7 +17,7 @@ SmiSysfsReader::SysfsStatus SmiSysfsReader::readAll(const std::string& filepath,
     return SmiSysfsReader::SysfsStatus::FileNotFound;
   }
 
-  if (!SmiSysfsReader::exists(filepath)) {
+  if (!SmiSysfsReader::is_readable(filepath)) {
     return SmiSysfsReader::SysfsStatus::IOError;
   }
 
@@ -59,7 +59,7 @@ SmiSysfsReader::SysfsStatus SmiSysfsReader::readLine(const std::string& filepath
     return SmiSysfsReader::SysfsStatus::FileNotFound;
   }
 
-  if (!SmiSysfsReader::exists(filepath)) {
+  if (!SmiSysfsReader::is_readable(filepath)) {
     return SmiSysfsReader::SysfsStatus::IOError;
   }
 
@@ -87,10 +87,15 @@ SmiSysfsReader::SysfsStatus SmiSysfsReader::readLine(const std::string& filepath
     }
   }
 
-  return SmiSysfsReader::SysfsStatus::Success;
+  /**
+   * Reached only when the file was empty or the line held no token: nothing was
+   * written to `content`, so reporting Success would hand the caller its default
+   * (int{0}) as if it were a real reading. Signal that no value was available.
+   */
+  return SmiSysfsReader::SysfsStatus::IOError;
 }
 
-bool SmiSysfsReader::exists(const std::string& filepath) {
+bool SmiSysfsReader::is_readable(const std::string& filepath) {
   std::ifstream file(filepath);
   return file.good();
 }
