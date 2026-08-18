@@ -1035,6 +1035,9 @@ auto AMDSmiGPUDevice::get_fabric_info_from_ualoe(amdsmi_fabric_info_t& fabric_in
   auto local_accelerators =
       std::array<gpu_device::details::AcceleratorArrayType_t, AMDSMI_FABRIC_MAX_LOCAL_GPUS>{};
 
+  // Clears bdf, so it precedes the assignment below.
+  init_fabric_info_defaults(&local_fabric_info);
+
   if (has_ifoe_related_bdf()) {
     local_fabric_info.bdf = *fabric_bdf_list_.begin();
   } else {
@@ -1055,40 +1058,6 @@ auto AMDSmiGPUDevice::get_fabric_info_from_ualoe(amdsmi_fabric_info_t& fabric_in
    *      - 00000111 (last 3 bits are 1, all others 0)
    */
   // local_fabric_info.bdf.function_number = ((bdf_.function_number + kUALOE_BDF_OFFSET) & 0x07);
-  local_fabric_info.fabric_version =
-      std::numeric_limits<decltype(local_fabric_info.fabric_version)>::max();
-
-  local_fabric_info.fabric_info.v1.fabric_type = static_cast<amdsmi_fabric_type_t>(
-      std::numeric_limits<decltype(local_fabric_info.fabric_info.v1.fabric_type)>::max());
-
-  local_fabric_info.fabric_info.v1.accelerator_id =
-      std::numeric_limits<decltype(local_fabric_info.fabric_info.v1.accelerator_id)>::max();
-
-  local_fabric_info.fabric_info.v1.bandwidth =
-      std::numeric_limits<decltype(local_fabric_info.fabric_info.v1.bandwidth)>::max();
-
-  local_fabric_info.fabric_info.v1.latency =
-      std::numeric_limits<decltype(local_fabric_info.fabric_info.v1.latency)>::max();
-
-  // Sentinel when sysfs provides no ppod_id: UUID 99999999-9999-9999-9999-999999999999 (16 × 0x99)
-  std::fill(std::begin(local_fabric_info.fabric_info.v1.ppod_id),
-            std::end(local_fabric_info.fabric_info.v1.ppod_id), static_cast<std::uint8_t>(0x99));
-
-  local_fabric_info.fabric_info.v1.ppod_size =
-      std::numeric_limits<decltype(local_fabric_info.fabric_info.v1.ppod_size)>::max();
-
-  local_fabric_info.fabric_info.v1.vpod_id =
-      std::numeric_limits<decltype(local_fabric_info.fabric_info.v1.vpod_id)>::max();
-
-  local_fabric_info.fabric_info.v1.vpod_size =
-      std::numeric_limits<decltype(local_fabric_info.fabric_info.v1.vpod_size)>::max();
-
-  local_fabric_info.fabric_info.v1.addr_mode = static_cast<amdsmi_fabric_npa_address_mode_t>(
-      std::numeric_limits<decltype(local_fabric_info.fabric_info.v1.addr_mode)>::max());
-
-  local_fabric_info.fabric_info.v1.accel_state =
-      static_cast<amdsmi_fabric_accelerator_vpod_state_t>(
-          std::numeric_limits<decltype(local_fabric_info.fabric_info.v1.accel_state)>::max());
 
   std::fill(std::begin(local_active_accelerators), std::end(local_active_accelerators),
             std::numeric_limits<gpu_device::details::AcceleratorArrayType_t>::max());

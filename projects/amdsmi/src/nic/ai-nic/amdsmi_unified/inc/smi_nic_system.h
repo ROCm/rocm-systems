@@ -21,25 +21,17 @@
 #include "smi_nic.h"
 #include "smi_nic_subsystem.h"
 
-/**
- * @brief Convert BDF string format to uint64_t
- *
- * Converts a BDF string to uint64_t format:
- * (domain << 16) | (bus << 8) | (device << 3) | function
- *
- * @param bdf BDF string
- * @return uint64_t BDF value, or 0 if parsing fails
- */
-uint64_t parse_bdf(const std::string& bdf);
-
 class SmiNicSystem {
  public:
   SmiNicSystem();
+  // Test seam: point discovery at a fake sysfs tree instead of the real /sys.
+  SmiNicSystem(const std::string& pci_path, const std::string& net_path);
   ~SmiNicSystem() = default;
 
   void register_subsystem(std::unique_ptr<SmiNicSubsystem> subsystem);
-  void discover_nics();
-  bool driver_loaded(const std::string& bdf, DriverType driver_type) const;
+  // ainic_only=true drops non-AINIC NICs (product() != NicProduct::AINIC).
+  void discover_nics(bool ainic_only = false);
+  bool is_driver_loaded(const std::string& bdf, DriverType driver_type) const;
 
   std::vector<std::string> list_bdfs();
   bool interface_exists(const std::string& iface);
@@ -56,6 +48,13 @@ class SmiNicSystem {
  private:
   std::string net_path_;
   std::string pci_path_;
+  /**
+   * One transport shared by every port this system discovers, instead of one
+   * backend per port. The netlink backend opens its socket eagerly on
+   * construction, so per-port ownership would hold N sockets for N ports;
+   * sharing holds one.
+   */
+  std::shared_ptr<amd::smi::nic::transport::NicTransport> transport_;
   std::vector<const SmiNic*> nics_;
   std::vector<std::unique_ptr<SmiNicSubsystem>> subsystems_;
 };

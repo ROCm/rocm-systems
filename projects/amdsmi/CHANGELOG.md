@@ -29,7 +29,33 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Exposed under the same names in the Python `amdsmi_get_gpu_asic_info()` dictionary and in `amd-smi static --asic`. The C fields report `0xFFFFFFFF` when unsupported; Python and the CLI render that as `N/A`.
   - ABI-preserving: the fields take two `uint32_t` slots from `amdsmi_asic_info_t.reserved`, which shrinks from 17 to 15 entries. The structure size and all other field offsets are unchanged.
 
+- **`amd-smi list --nic` now enumerates Infinity Fabric over Ethernet (IFoE) endpoints**.  
+  - The `ifoe`-bound functions (`0x1022:0x1747`) were absent from the NIC inventory. They now appear as rows reporting their BDF and `MODE: fwctl-only`. Their firmware versions come from `amd-smi firmware --nic`, which reaches them with no change.
+  - These endpoints have no VPD, no hwmon node, and no netdev, so identity, `PERMANENT_ADDRESS`, and every `metric --nic` field read `N/A` for them. They are listed rather than filtered so `--nic all` resolves to the same device set in every subcommand.
+  - NIC indices are positional, so adding these rows renumbers the AI-NIC cards that follow them. Select a device by BDF where the identity has to be stable.
+
+- **`amd-smi list --nic` now notes when PCI VPD was unreadable**.  
+  - `PRODUCT_NAME`, `PART_NUMBER`, and `SERIAL_NUMBER` come from `/sys/bus/pci/devices/*/vpd`, which is mode 0600, so an unprivileged run cannot be told apart from a card with no VPD image. When the caller is not root and any of the three reads `N/A`, one note on stderr says so. JSON and CSV output are unaffected.
+
 ### Changed
+
+- **AI-NIC discovery now recognizes both Pensando upstream bridge device IDs**.  
+  - Only `0x0008` was matched, so a host whose cards present `0x1008` reported a single NIC instead of one per card. `amd-smi list --nic all` and `amd-smi metric --nic all` now enumerate every card present.
+
+- **AI-NIC identity and telemetry now read the port function instead of the upstream bridge**.  
+  - The NIC handle names the PCIe bridge, while PCI VPD, hwmon, and the devlink instance register on the port function beneath it. `ASIC_TEMP_C` and `PORT_SPLIT` reported `N/A` on every AI-NIC as a result, and `PRODUCT_NAME`, `PART_NUMBER`, and `SERIAL_NUMBER` were empty on cards whose bridge exposes no `vpd` node.
+  - Identity prefers the NIC's own VPD field by field and fills only the absent fields from the port, so a bridge carrying a partial image no longer suppresses the values the port does carry.
+  - On a card with more than one port, the devlink-sourced fields report port 0.
+  - `SERIAL_NUMBER` keeps its devlink board-serial fallback, which now also addresses the port function.
+
+- **AI-NIC `HEALTH` now reads the card's management function**.  
+  - The devlink health reporter belongs to the card's `pds_core` function (`0x100c`), which sits behind the other downstream port of the card's internal PCIe switch. It is therefore neither the bridge the NIC handle names nor the port function the rest of telemetry uses, and addressing health at the port found no reporter, so `HEALTH` read `UNSUPPORTED` on every AI-NIC.
+  - Discovery now records that function alongside the ports, and health alone is addressed there. `PORT_SPLIT` and firmware continue to read the port function, which answers both.
+  - A card that exposes no separate management function is unaffected: health keeps using the address the rest of telemetry uses.
+
+- **`amd-smi fabric` now reports `UNKNOWN` instead of a real state for fabric fields it could not read**.  
+  - `FABRIC_TYPE`, `ADDR_MODE`, and `ACCEL_STATE` were defaulted through `std::numeric_limits<T>::max()`, which is not specialized for enumeration types and so yielded `0` rather than the intended sentinel. A GPU with no readable UALink data therefore reported `UALOE`, `SOURCE_ALIASING`, and `UNCONFIGURED` as if they had been measured.
+  - The three fields now default to `AMDSMI_FABRIC_TYPE_UNKNOWN`, `AMDSMI_FABRIC_NPA_ADDRESS_MODE_UNKNOWN`, and `AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNKNOWN`. The integer fields on the same structure were already correct and are unchanged.
 
 - **`amdsmi_get_clock_info()` now returns `AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS` for clock values that exceed `INT_MAX`**.  
   - Such values were previously narrowed to a negative number and returned as data.

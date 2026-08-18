@@ -13,34 +13,20 @@
 
 #include "smi_nic_subsystem.h"
 #include "smi_sysfs.h"
+#include "vendor_registry.h"
 
 namespace fs = std::filesystem;
 
-uint64_t parse_bdf(const std::string& bdf) {
-  if (bdf.length() != 12) {
-    return 0;
+SmiNicSystem::SmiNicSystem() : SmiNicSystem("/sys/bus/pci/devices", "/sys/class/net") {}
+
+SmiNicSystem::SmiNicSystem(const std::string& pci_path, const std::string& net_path)
+    : net_path_(net_path),
+      pci_path_(pci_path),
+      transport_(amd::smi::nic::transport::create_transport(
+          amd::smi::nic::transport::NicBackend_t::Auto)) {
+  for (auto& plugin : make_default_vendor_plugins()) {
+    register_subsystem(std::move(plugin));
   }
-
-  if (bdf[4] != ':' || bdf[7] != ':' || bdf[10] != '.') {
-    return 0;
-  }
-
-  try {
-    uint64_t domain = std::stoul(bdf.substr(0, 4), nullptr, 16);
-    uint64_t bus = std::stoul(bdf.substr(5, 2), nullptr, 16);
-    uint64_t device = std::stoul(bdf.substr(8, 2), nullptr, 16);
-    uint64_t function = std::stoul(bdf.substr(11, 1), nullptr, 16);
-
-    return (domain << 16) | (bus << 8) | (device << 3) | function;
-  } catch (const std::exception&) {
-    return 0;
-  }
-}
-
-SmiNicSystem::SmiNicSystem() : net_path_("/sys/class/net"), pci_path_("/sys/bus/pci/devices") {
-  register_subsystem(std::make_unique<SmiNicSubsystemPensando>());
-  // TODO: broadcom
-  // register_subsystem(std::make_unique<SmiNicSubsystemBroadcom>());
 }
 
 void SmiNicSystem::register_subsystem(std::unique_ptr<SmiNicSubsystem> subsystem) {
@@ -52,7 +38,7 @@ bool SmiNicSystem::interface_exists(const std::string& iface) {
   return fs::exists(fs::path(net_path_) / fs::path(iface).string(), ec);
 }
 
-bool SmiNicSystem::driver_loaded(const std::string& bdf, DriverType driver_type) const {
+bool SmiNicSystem::is_driver_loaded(const std::string& bdf, DriverType driver_type) const {
   const SmiNic* nic = nullptr;
 
   for (const auto& entry : nics_) {
@@ -77,16 +63,22 @@ bool SmiNicSystem::driver_loaded(const std::string& bdf, DriverType driver_type)
     return false;
   }
 
+  // Resolve to the plugin that discovered this NIC. Keying on the vendor enum
+  // instead would hand the query to the first plugin reporting that vendor, so
+  // any later plugin sharing it (IFoE behind Pensando, both AMD) is shadowed
+  // and answers against the wrong driver path.
   for (const auto& subsystem : subsystems_) {
-    if (subsystem->vendor() == nic->vendor()) {
-      return subsystem->driver_loaded(bdf, driver_type);
+    for (const auto& owned : subsystem->get_nics()) {
+      if (owned.get() == nic) {
+        return subsystem->is_driver_loaded(bdf, driver_type);
+      }
     }
   }
 
   return false;
 }
 
-void SmiNicSystem::discover_nics() {
+void SmiNicSystem::discover_nics(bool ainic_only) {
   std::error_code ec;
 
   if (!fs::exists(pci_path_, ec) || !fs::is_directory(pci_path_, ec)) {
@@ -95,25 +87,22 @@ void SmiNicSystem::discover_nics() {
 
   nics_.clear();
   for (auto& subsystem : subsystems_) {
-    subsystem->discover(pci_path_, net_path_);
+    subsystem->discover(pci_path_, net_path_, transport_);
     const auto& subsys_nics = subsystem->get_nics();
     for (const auto& nic : subsys_nics) {
+      if (ainic_only && nic->product() != NicProduct::AINIC) {
+        continue;
+      }
       nics_.push_back(nic.get());
     }
   }
 
-  // Sort NICs by BDF
+  // Sort NICs by BDF. This orders the vector this class exposes, not the index
+  // amd-smi prints: that follows the socket walk, and a fabric endpoint sharing
+  // its GPU's socket takes that socket's position regardless of the order here.
   std::sort(nics_.begin(), nics_.end(), [](const SmiNic* x, const SmiNic* y) {
     return parse_bdf(x->bdf()) < parse_bdf(y->bdf());
   });
-
-  // Sort ports within each NIC by BDF for consistency
-  for (auto* nic : nics_) {
-    auto& ports = const_cast<std::vector<SmiNicPort>&>(nic->nic_ports());
-    std::sort(ports.begin(), ports.end(), [](const SmiNicPort& x, const SmiNicPort& y) {
-      return parse_bdf(x.bdf()) < parse_bdf(y.bdf());
-    });
-  }
 }
 
 const std::vector<const SmiNic*>& SmiNicSystem::get_nics() const { return nics_; }
