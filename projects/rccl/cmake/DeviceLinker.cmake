@@ -294,12 +294,11 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   if((ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN) AND TARGET rocshmem_static)
     add_dependencies(${_dev_target} rocshmem_static)
   endif()
-  # ENABLE_ROCSHMEM_GIN: pass rocshmem device bitcode to per-kernel compiles
-  # so GIN device symbols (QueuePair::put_nbi, etc.) resolve during the
-  # per-arch device.elf link step.
-  # ENABLE_ROCSHMEM does not use the device linker (requires -fgpu-rdc
-  # --hip-link for librocshmem.a); see ENABLE_DEVICE_LINKER guard below.
-  if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_INSTALL_DIR)
+  # Pass rocshmem device bitcode to per-kernel compiles so rocshmem device
+  # symbols resolve during the per-arch device.elf link step.
+  # ENABLE_ROCSHMEM: rocshmem_n_pes, alltoall_wg, etc.
+  # ENABLE_ROCSHMEM_GIN: QueuePair::put_nbi, atomic_add, etc.
+  if((ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN) AND ROCSHMEM_INSTALL_DIR)
     set(_rocshmem_bc "${ROCSHMEM_INSTALL_DIR}/lib/librocshmem_device_${DL_GPU_TARGET}.bc")
     target_compile_options(${_dev_target} PRIVATE --rocshmem-bitcode=${_rocshmem_bc})
   endif()
@@ -1081,16 +1080,12 @@ if(GENERATE_SYM_KERNELS)
       set(_this_bc_flag "${_sym_rocshmem_bc_flag}")
       set(_this_bc_deps "${_sym_rocshmem_deps}")
     endif()
-    # rocSHMEM backends pinned off here: neither specializes ncclGinApi_Wait or
-    # ncclGinApi_FlushAsync, which the symmetric GIN kernels call.
     add_custom_command(
       OUTPUT  ${_sym_obj}
       COMMAND ${DL_CLANG}
         -x hip ${DL_OFFLOAD_ARCH_FLAGS}
         ${DL_HIP_COMPILER_FLAGS}
         -DRCCL_DEVICE_LINKER
-        -DNCCL_GIN_ROCSHMEM_GDA_ENABLE=0
-        -DNCCL_GIN_ANVIL_SDMA_ENABLE=0
         ${_link_def_flags}
         ${_host_inc_flags}
         ${DL_OPT_FLAGS}

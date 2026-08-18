@@ -7,8 +7,8 @@ rocSHMEM:
 
 | Backend | `NCCL_GIN_TYPE` | Description |
 |---------|----------------|-------------|
-| GDA (QueuePair) | 4 | GPU-initiated RDMA via IB QueuePairs posted from device code |
-| Anvil SDMA | 5 | GPU-initiated DMA via the SDMA engine (Anvil) |
+| GDA (QueuePair) | 5 | GPU-initiated RDMA via IB QueuePairs posted from device code |
+| Anvil SDMA | 6 | GPU-initiated DMA via the SDMA engine (Anvil) |
 
 The upstream GIN framework also provides a host-side IB proxy backend
 (`NCCL_GIN_TYPE=2`) that does not require rocSHMEM.
@@ -49,7 +49,7 @@ for the alltoall\_wg offload path.  Does not enable GIN plugins.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `NCCL_GIN_ENABLE` | `1` | Enable/disable GIN (all backends) |
-| `NCCL_GIN_TYPE` | (auto) | Force a specific backend: `4`=GDA, `5`=SDMA |
+| `NCCL_GIN_TYPE` | (auto) | Force a specific backend: `5`=GDA, `6`=SDMA |
 | `NCCL_GIN_ANVIL_SDMA_THRESHOLD` | `128` | Minimum message size (bytes) to use SDMA; smaller messages fall back to the IB proxy |
 | `NCCL_GIN_ANVIL_SDMA_FUSED_SIGNAL` | `0` | Enable fused signal mode for SDMA (experimental) |
 | `NCCL_CUMEM_ENABLE` | `0` | Required: GIN needs `hipMemCreate`-based allocations |
@@ -67,7 +67,7 @@ docker run -it --rm --shm-size 64G \
     rccl-gin \
     mpirun -n 8 -mca pml ob1 -mca btl ^openib \
         -x NCCL_GIN_ENABLE=1 \
-        -x NCCL_GIN_TYPE=5 \
+        -x NCCL_GIN_TYPE=6 \
         -x NCCL_GIN_ANVIL_SDMA_THRESHOLD=128 \
         -x NCCL_GIN_ANVIL_SDMA_FUSED_SIGNAL=0 \
         -x NCCL_CUMEM_ENABLE=1 \
@@ -82,15 +82,15 @@ docker run -it --rm --shm-size 64G \
         rccl-tests/alltoall_perf -b 128 -e 1024M -f 2 -g 1 -R 2 -D 3 -A 1
 ```
 
-To use the GDA backend instead, set `NCCL_GIN_TYPE=4`.
+To use the GDA backend instead, set `NCCL_GIN_TYPE=5`.
 
 ### Platform requirements
 
-GDA (`NCCL_GIN_TYPE=4`) requires a supported GDA NIC provider (mlx5, bnxt,
+GDA (`NCCL_GIN_TYPE=5`) requires a supported GDA NIC provider (mlx5, bnxt,
 or ionic) with the corresponding user-space RDMA driver and firmware.
 See the [rocSHMEM GDA NIC dependencies](https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/install.html#gda-nic-dependencies).
 
-SDMA (`NCCL_GIN_TYPE=5`) requires an Anvil-capable GPU (MI300/MI350 class)
+SDMA (`NCCL_GIN_TYPE=6`) requires an Anvil-capable GPU (MI300/MI350 class)
 and `NCCL_CUMEM_ENABLE=1`.
 
 ## Known limitations

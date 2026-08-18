@@ -168,4 +168,20 @@ struct ncclGinApi_Get<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
   }
 };
 
+template <>
+struct ncclGinApi_FlushAsync<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, int, ncclGinRequest_t*, bool,
+                                      ncclGinDescriptorSmem*, uint32_t) {
+    __builtin_trap();
+  }
+};
+
+template <>
+struct ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, ncclGinRequest_t&, bool,
+                                      ncclGinDescriptorSmem*, cuda::memory_order, uint32_t*) {
+    __builtin_trap();
+  }
+};
+
 #endif /* _NCCL_DEVICE_GIN_ROCSHMEM_GDA_H_ */

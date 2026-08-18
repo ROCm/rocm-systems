@@ -512,7 +512,6 @@ if(ENABLE_ROCSHMEM_GIN)
     src/gin/gin_rocshmem_gda_factory.cc
     src/gin/gin_plugin_anvil_sdma.cc
     src/gin/gin_anvil_ipc_table_host.cc
-    src/gin/gin_anvil_sdma_oss7_device.cc
     src/gin_alltoall_sdma.cu
   )
 endif()
