@@ -63,6 +63,7 @@ TEST(ConfigLoaderTest, LoadCdna4Config) {
   auto *xcd = soc->xcd(0);
   EXPECT_EQ(xcd->num_shader_engines(), 4u);
   EXPECT_EQ(xcd->shader_engine(0)->num_compute_units(), 9u);
+  EXPECT_EQ(kmd::drm_cu_active_number(loaded.device.simd_count, loaded.device.simd_per_cu), 256u);
 }
 
 TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
@@ -88,10 +89,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
                                              rdna4.device.num_shader_arrays_per_engine,
                                          rdna4.device.num_shader_arrays_per_engine),
             4u);
-  EXPECT_EQ(kmd::drm_cu_active_number(rdna4.device.num_shader_engines *
-                                          rdna4.device.num_shader_arrays_per_engine,
-                                      rdna4.device.num_cu_per_sh),
-            64u);
+  EXPECT_EQ(kmd::drm_cu_active_number(rdna4.device.simd_count, rdna4.device.simd_per_cu), 64u);
   EXPECT_EQ(kmd::external_rev_id_for_gfx_target_version(rdna4.device.gfx_target_version,
                                                         rdna4.device.revision_id),
             0x51u);
@@ -137,10 +135,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
                                              rdna3.device.num_shader_arrays_per_engine,
                                          rdna3.device.num_shader_arrays_per_engine),
             6u);
-  EXPECT_EQ(kmd::drm_cu_active_number(rdna3.device.num_shader_engines *
-                                          rdna3.device.num_shader_arrays_per_engine,
-                                      rdna3.device.num_cu_per_sh),
-            96u);
+  EXPECT_EQ(kmd::drm_cu_active_number(rdna3.device.simd_count, rdna3.device.simd_per_cu), 96u);
   EXPECT_EQ(kmd::external_rev_id_for_gfx_target_version(rdna3.device.gfx_target_version,
                                                         rdna3.device.revision_id),
             0x1u);
@@ -174,10 +169,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
                                              rdna35.device.num_shader_arrays_per_engine,
                                          rdna35.device.num_shader_arrays_per_engine),
             2u);
-  EXPECT_EQ(kmd::drm_cu_active_number(rdna35.device.num_shader_engines *
-                                          rdna35.device.num_shader_arrays_per_engine,
-                                      rdna35.device.num_cu_per_sh),
-            32u);
+  EXPECT_EQ(kmd::drm_cu_active_number(rdna35.device.simd_count, rdna35.device.simd_per_cu), 32u);
   EXPECT_EQ(kmd::external_rev_id_for_gfx_target_version(rdna35.device.gfx_target_version,
                                                         rdna35.device.revision_id),
             0xc1u);

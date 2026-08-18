@@ -331,10 +331,13 @@ TEST(SysfsTopologyGeometryTest, Mi350xMatchesCapturedPhysicalAndActiveCuCounts) 
     EXPECT_EQ(active_cus, 256u);
 
     EXPECT_EQ(loaded.device.device_id, 30112u);
-    EXPECT_EQ(loaded.device.local_mem_size, 309220868096u);
+    EXPECT_EQ(loaded.device.local_mem_size, 309220868096ULL);
     EXPECT_EQ(loaded.device.mem_clk_max, 1900u);
     EXPECT_EQ(loaded.device.num_sdma_engines, 2u);
     EXPECT_EQ(loaded.device.num_sdma_xgmi_engines, 14u);
+    EXPECT_EQ(loaded.device.num_sdma_queues_per_engine, 8u);
+    ASSERT_TRUE(props.count("num_sdma_queues_per_engine"));
+    EXPECT_EQ(props["num_sdma_queues_per_engine"], 8u);
     EXPECT_EQ(loaded.device.num_cp_queues, 24u);
     EXPECT_EQ(loaded.device.max_engine_clk_fcompute, 2200u);
   }

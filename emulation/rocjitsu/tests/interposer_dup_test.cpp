@@ -452,6 +452,14 @@ namespace {
 // callers open /dev/kfd first.
 int open_drm_render() { return open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC); }
 
+bool query_drm_device_info(int drm_fd, drm_amdgpu_info_device *device) {
+  drm_amdgpu_info query{};
+  query.return_pointer = reinterpret_cast<uint64_t>(device);
+  query.return_size = sizeof(*device);
+  query.query = AMDGPU_INFO_DEV_INFO;
+  return ioctl(drm_fd, DRM_IOCTL_AMDGPU_INFO, &query) == 0;
+}
+
 // Create an mmap-able, sized stand-in for a dmabuf export fd. PRIME_FD_TO_HANDLE
 // fstats the fd for the BO size and later MAP mmaps it, so the fd must be a real
 // sized, mappable object; a memfd satisfies both without a KFD allocation.
@@ -496,6 +504,23 @@ int64_t monotonic_deadline_after(std::chrono::nanoseconds delay) {
 }
 
 } // namespace
+
+TEST(InterposerDrmTest, DeviceInfoReportsActiveCuCount) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+
+  int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+
+  drm_amdgpu_info_device device{};
+  ASSERT_TRUE(query_drm_device_info(drm, &device));
+  EXPECT_EQ(device.device_id, 30112u);
+  EXPECT_EQ(device.cu_active_number, 256u);
+
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
 
 TEST(InterposerSyncobjTest, VmTimelineWaitObservesSynchronousMapAndUnmap) {
   int kfd = open_kfd();

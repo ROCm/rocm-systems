@@ -2351,42 +2351,43 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
         return 0;
       }
       case AMDGPU_INFO_DEV_INFO: {
-        if (info->return_size >= sizeof(drm_amdgpu_info_device)) {
-          auto *dev = static_cast<drm_amdgpu_info_device *>(out);
-          dev->device_id = gpu->device_id;
-          dev->chip_rev = gpu->revision_id;
-          dev->external_rev = rocjitsu::kmd::external_rev_id_for_gfx_target_version(
-              gpu->gfx_target_version, gpu->revision_id);
-          dev->pci_rev = gpu->pci_revision_id;
-          dev->family = gpu->family_id;
-          // libdrm reports shader engines, which GpuInfo already stores
-          // directly; the KFD array_count these helpers invert is the derived
-          // value. Round-tripping through drm_shader_engine_count keeps the two
-          // views pinned to one definition.
-          dev->num_shader_engines = rocjitsu::kmd::drm_shader_engine_count(
-              gpu->array_count_per_xcc(), gpu->num_shader_arrays_per_engine);
-          dev->num_shader_arrays_per_engine = gpu->num_shader_arrays_per_engine;
-          dev->gpu_counter_freq = 100000;
-          dev->max_engine_clock = gpu->max_engine_clk_fcompute;
-          dev->max_memory_clock = gpu->mem_clk_max;
-          dev->wave_front_size = gpu->wave_front_size;
-          dev->num_cu_per_sh = gpu->num_cu_per_sh;
-          dev->num_hw_gfx_contexts =
-              rocjitsu::kmd::num_hw_gfx_contexts_for_gfx_target_version(gpu->gfx_target_version);
-          dev->vram_type = gpu->vram_type;
-          dev->vram_bit_width = gpu->mem_width;
-          dev->cu_active_number =
-              rocjitsu::kmd::drm_cu_active_number(gpu->array_count_per_xcc(), gpu->num_cu_per_sh);
-          // VA aperture — libdrm's VA manager (amdgpu_vamgr_init) needs a sane
-          // range. Mirror the KFD GPUVM aperture used elsewhere.
-          dev->virtual_address_offset = 0x200000;       // 2 MiB
-          dev->virtual_address_max = 0x800000000000ULL; // 47-bit canonical
-          dev->virtual_address_alignment = 0x1000;      // 4 KiB
-          dev->pte_fragment_size = 0x200000;            // 2 MiB
-          dev->gart_page_size = 0x1000;                 // 4 KiB
-          dev->high_va_offset = 0xffff800000000000ULL;
-          dev->high_va_max = 0xffffffffffffffffULL;
-        }
+        drm_amdgpu_info_device dev{};
+        dev.device_id = gpu->device_id;
+        dev.chip_rev = gpu->revision_id;
+        dev.external_rev = rocjitsu::kmd::external_rev_id_for_gfx_target_version(
+            gpu->gfx_target_version, gpu->revision_id);
+        dev.pci_rev = gpu->pci_revision_id;
+        dev.family = gpu->family_id;
+        // libdrm reports shader engines, which GpuInfo already stores directly;
+        // round-trip the derived KFD array_count to keep the two views pinned to
+        // one definition.
+        dev.num_shader_engines = rocjitsu::kmd::drm_shader_engine_count(
+            gpu->array_count_per_xcc(), gpu->num_shader_arrays_per_engine);
+        dev.num_shader_arrays_per_engine = gpu->num_shader_arrays_per_engine;
+        dev.gpu_counter_freq = 100000;
+        dev.max_engine_clock = gpu->max_engine_clk_fcompute;
+        dev.max_memory_clock = gpu->mem_clk_max;
+        dev.wave_front_size = gpu->wave_front_size;
+        dev.num_cu_per_sh = gpu->num_cu_per_sh;
+        dev.num_hw_gfx_contexts =
+            rocjitsu::kmd::num_hw_gfx_contexts_for_gfx_target_version(gpu->gfx_target_version);
+        dev.vram_type = gpu->vram_type;
+        dev.vram_bit_width = gpu->mem_width;
+        dev.cu_active_number =
+            rocjitsu::kmd::drm_cu_active_number(gpu->simd_count, gpu->simd_per_cu);
+        // VA aperture — libdrm's VA manager (amdgpu_vamgr_init) needs a sane
+        // range. Mirror the KFD GPUVM aperture used elsewhere.
+        dev.virtual_address_offset = 0x200000;       // 2 MiB
+        dev.virtual_address_max = 0x800000000000ULL; // 47-bit canonical
+        dev.virtual_address_alignment = 0x1000;      // 4 KiB
+        dev.pte_fragment_size = 0x200000;            // 2 MiB
+        dev.gart_page_size = 0x1000;                 // 4 KiB
+        dev.high_va_offset = 0xffff800000000000ULL;
+        dev.high_va_max = 0xffffffffffffffffULL;
+
+        // Older libdrm headers use a shorter trailing struct. The kernel ABI
+        // returns the prefix that fits instead of withholding every field.
+        std::memcpy(out, &dev, std::min<size_t>(info->return_size, sizeof(dev)));
         return 0;
       }
       default:
