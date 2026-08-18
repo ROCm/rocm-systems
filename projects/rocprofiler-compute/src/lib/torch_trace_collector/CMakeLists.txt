@@ -96,10 +96,9 @@ string(REPLACE "\n" ";" _ttc_probe_lines "${_ttc_probe_escaped}")
 list(GET _ttc_probe_lines 0 _py_major)
 list(GET _ttc_probe_lines 1 _py_minor)
 list(GET _ttc_probe_lines 2 _torch_version)
-list(GET _ttc_probe_lines 3 _torch_includes)
-list(GET _ttc_probe_lines 4 _torch_libs)
-list(GET _ttc_probe_lines 5 _torch_wheel_lib_dir)
 list(GET _ttc_probe_lines 6 _src_fingerprint)
+
+set(_torch_includes ${TORCH_INCLUDE_DIRS})
 
 set(_tag "py${_py_major}.${_py_minor}_torch${_torch_version}_src${_src_fingerprint}")
 set(_so_name "torch_trace_collector-${_tag}")
@@ -167,10 +166,7 @@ find_path(
     REQUIRED
 )
 
-# Resolve the torch libraries by absolute path. The wheel lib directory covers
-# wheels that omit it from library_paths().
-set(_torch_lib_search_dirs ${_torch_libs} ${_torch_wheel_lib_dir})
-list(REMOVE_DUPLICATES _torch_lib_search_dirs)
+set(_torch_lib_search_dirs "${TORCH_INSTALL_PREFIX}/lib")
 
 set(_torch_resolved_libs "")
 foreach(_libname IN ITEMS torch torch_cpu c10)
