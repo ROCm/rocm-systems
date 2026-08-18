@@ -68,8 +68,8 @@ message(
     "torch_trace_collector: find_package(Torch) ${TORCH_INSTALL_PREFIX}"
 )
 
-# Probe the environment for python/torch metadata and the source fingerprint.
-# Exit code 3 means torch or torch.utils.cpp_extension is unavailable.
+# Probe Python version, torch version, source fingerprint, and CXX11 ABI.
+# Exit code 3 means torch is not importable.
 execute_process(
     COMMAND "${_ttc_python}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/probe_torch.py"
     OUTPUT_VARIABLE _ttc_probe
@@ -80,8 +80,8 @@ execute_process(
 if(_ttc_probe_rc EQUAL 3)
     message(
         ${_ttc_unavailable_severity}
-        "torch_trace_collector: torch or torch.utils.cpp_extension is not importable "
-        "in ${_ttc_python}; the extension is not built.\n${_ttc_probe_err}"
+        "torch_trace_collector: torch is not importable in ${_ttc_python}; the "
+        "extension is not built.\n${_ttc_probe_err}"
     )
     return()
 elseif(NOT _ttc_probe_rc EQUAL 0)
@@ -96,7 +96,8 @@ string(REPLACE "\n" ";" _ttc_probe_lines "${_ttc_probe_escaped}")
 list(GET _ttc_probe_lines 0 _py_major)
 list(GET _ttc_probe_lines 1 _py_minor)
 list(GET _ttc_probe_lines 2 _torch_version)
-list(GET _ttc_probe_lines 6 _src_fingerprint)
+list(GET _ttc_probe_lines 3 _src_fingerprint)
+list(GET _ttc_probe_lines 4 _torch_cxx11_abi)
 
 set(_torch_includes ${TORCH_INCLUDE_DIRS})
 
