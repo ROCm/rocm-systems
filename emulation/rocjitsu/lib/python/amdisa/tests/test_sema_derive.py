@@ -2227,7 +2227,7 @@ class TestDeriveDsRead:
             ('DS_LOAD_TR_B64', 'ds_read_tr_b8', 2, 3),
             ('DS_LOAD_TR16_B128', 'ds_read_tr_b16', 4, 4),
             ('DS_LOAD_TR_B128', 'ds_read_tr_b16', 4, 4),
-            ('DS_READ_B64_TR_B16', 'ds_read_tr_b16', 2, 4),
+            ('DS_READ_B64_TR_B16', 'ds_read_tr_b16', 2, 5),
         ],
     )
     def test_gfx1250_ds_transpose_loads(
