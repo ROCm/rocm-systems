@@ -10,7 +10,7 @@ particular version of the GPU stack (i.e. CUDA) from the network code which is b
 particular version of the networking stack. That way, we can easily integrate any CUDA version
 with any network stack version.
 
-NCCL network plugins come as a shared library called `libnccl-net.so`. That shared library
+NCCL network plugins come as a shared library called `librccl-net.so`. That shared library
 contains one or more implementations of the NCCL NET API, in the form of versioned structs,
 filled with pointers to all required functions.
 
@@ -18,13 +18,13 @@ filled with pointers to all required functions.
 
 ## Plugin name and supporting multiple network plugins
 
-When NCCL is initialized, it will look for a `libnccl-net.so` library and dynamically load it,
+When NCCL is initialized, it will look for a `librccl-net.so` library and dynamically load it,
 then look for symbols inside the library.
 
 The `NCCL_NET_PLUGIN` environment variable allows multiple plugins to coexist. If set, NCCL
-will look for a library with a name of `libnccl-net-${NCCL_NET_PLUGIN}.so`. It is therefore
-advised to name the library following that pattern, with a symlink pointing `libnccl-net.so`
-to `libnccl-net-${NCCL_NET_PLUGIN}.so`. That way, if there are multiple plugins in the path,
+will look for a library with a name of `librccl-net-${NCCL_NET_PLUGIN}.so`. It is therefore
+advised to name the library following that pattern, with a symlink pointing `librccl-net.so`
+to `librccl-net-${NCCL_NET_PLUGIN}.so`. That way, if there are multiple plugins in the path,
 setting `NCCL_NET_PLUGIN` will allow users to select the right plugin.
 
 ## Struct versioning
@@ -182,7 +182,7 @@ be used for all logging, especially when `NCCL_DEBUG=INFO` is set.
 
 Note: setting `NCCL_NET=<plugin name>` will ensure a specific network implementation is used, with
 a matching `name`. This is not to be confused with `NCCL_NET_PLUGIN` which defines a suffix to the
-`libnccl-net.so`library name to load.
+`librccl-net.so`library name to load.
 
 `init`
 

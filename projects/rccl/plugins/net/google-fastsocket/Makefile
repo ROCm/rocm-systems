@@ -1,6 +1,6 @@
 CUDA_HOME?=/usr/local/cuda
 INC:=-I$(CUDA_HOME)/include
-PLUGIN_SO:=libnccl-net.so
+PLUGIN_SO:=librccl-net.so
 
 default: $(PLUGIN_SO)
 
