@@ -141,6 +141,7 @@ GPU: 0
   - New APIs: `amdsmi_get_gpu_accelerator_partition_mem_alloc_mode()`, `amdsmi_set_gpu_accelerator_partition_mem_alloc_mode()`.
   - New enum: `amdsmi_accelerator_partition_mem_alloc_mode_t` (`AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_CAPPING`, `AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_ALL`).
   - Supersedes the equivalent `compute_partition` memory allocation mode APIs, which are now deprecated.
+  - The `amd-smi` CLI keeps its existing `compute_partition_mem_alloc_mode` JSON output key for continuity; only the C API names change.
 
 - **Added physical accelerator ID and tray info via UALoE**.
   - `amdsmi_asic_info_t` gained a `physical_acc_id` field, populated by `amdsmi_get_gpu_asic_info()`.
