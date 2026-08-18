@@ -575,32 +575,6 @@ rsmi_status_t rsmi_num_monitor_devices(uint32_t* num_devices) {
   CATCH
 }
 
-rsmi_status_t rsmi_num_nic_monitor_devices(uint32_t* num_devices) {
-  TRY assert(num_devices != nullptr);
-  if (num_devices == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
-
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
-
-  *num_devices = static_cast<uint32_t>(smi.nic_devices().size());
-  return RSMI_STATUS_SUCCESS;
-  CATCH
-}
-
-rsmi_status_t rsmi_num_switch_monitor_devices(uint32_t* num_devices) {
-  TRY assert(num_devices != nullptr);
-  if (num_devices == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
-
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
-
-  *num_devices = static_cast<uint32_t>(smi.switch_devices().size());
-  return RSMI_STATUS_SUCCESS;
-  CATCH
-}
-
 rsmi_status_t rsmi_dev_ecc_enabled_get(uint32_t dv_ind, uint64_t* enabled_blks) {
   TRY rsmi_status_t ret;
   std::string feature_line;
@@ -840,40 +814,6 @@ rsmi_status_t rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t* bdfid) {
      << " returning pci_id = " << std::to_string(pci_id) << " ("
      << amd::smi::print_int_as_hex(pci_id) << ")";
   LOG_INFO(ss);
-
-  ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-     << ", reporting RSMI_STATUS_SUCCESS";
-  LOG_TRACE(ss);
-  return RSMI_STATUS_SUCCESS;
-  CATCH
-}
-
-rsmi_status_t rsmi_nic_dev_pci_id_get(uint32_t dv_ind, uint64_t* bdfid) {
-  TRY std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
-  LOG_TRACE(ss);
-
-  GET_NIC_DEV_FROM_INDX
-
-  uint64_t domain = 0;
-  *bdfid = amd::smi::bdfid_from_domain(dev->bdfid(), domain);
-
-  ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-     << ", reporting RSMI_STATUS_SUCCESS";
-  LOG_TRACE(ss);
-  return RSMI_STATUS_SUCCESS;
-  CATCH
-}
-
-rsmi_status_t rsmi_switch_dev_pci_id_get(uint32_t dv_ind, uint64_t* bdfid) {
-  TRY std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
-  LOG_TRACE(ss);
-
-  GET_SWITCH_DEV_FROM_INDX
-
-  uint64_t domain = 0;
-  *bdfid = amd::smi::bdfid_from_domain(dev->bdfid(), domain);
 
   ss << __PRETTY_FUNCTION__ << " | ======= end ======="
      << ", reporting RSMI_STATUS_SUCCESS";

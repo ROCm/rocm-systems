@@ -36,10 +36,6 @@
 #ifdef ENABLE_WSL_BACKEND
 #include "amd_smi/impl/amd_smi_wsl_device.h"
 #endif
-#ifdef BRCM_NIC
-#include "amd_smi/impl/nic/amd_smi_nic_device.h"
-#include "amd_smi/impl/nic/amd_smi_switch_device.h"
-#endif  // BRCM_NIC
 #include <algorithm>
 #include <map>
 #include <regex>
@@ -286,10 +282,6 @@ amdsmi_status_t AMDSmiSystem::init(uint64_t flags) {
   }
 #endif
   if (flags & AMDSMI_INIT_AMD_NICS) {
-    amd_smi_status = populate_brcm_nic_devices();
-    if (amd_smi_status != AMDSMI_STATUS_SUCCESS) return amd_smi_status;
-    amd_smi_status = populate_brcm_switch_devices();
-    if (amd_smi_status != AMDSMI_STATUS_SUCCESS) return amd_smi_status;
     amd_smi_status = populate_amd_ainic_devices();
     if (amd_smi_status != AMDSMI_STATUS_SUCCESS) return amd_smi_status;
   }
@@ -308,7 +300,7 @@ amdsmi_status_t AMDSmiSystem::populate_amd_cpus() {
     // energy or HSMP driver, or the CPU/SMU is in a bad state (busy, timeout,
     // prerequisite not satisfied, etc.). This must NOT be fatal to amdsmi_init()
     // - GPU and NIC functionality must remain usable. Skip CPU population and
-    // continue, mirroring the non-fatal BRCM/AI NIC discovery paths.
+    // continue, mirroring the non-fatal AI NIC discovery path.
     std::cout << "\tESMI Not initialized, drivers not found " << std::endl;
     return AMDSMI_STATUS_SUCCESS;
   }
@@ -430,7 +422,11 @@ static amdsmi_status_t populate_amd_ainic_device(const smi_nic_ctx_t& ctx, uint6
   static_assert(sizeof(smi_nic_driver_info_t) == sizeof(ai_nic_info.driver));
   status = smi_get_nic_driver_info(ctx, bdf_int,
                                    reinterpret_cast<smi_nic_driver_info_t*>(&ai_nic_info.driver));
-  CHK_AMDNIC_RET(status)
+  // A fwctl-only NIC has no host netdev to query for driver name/version; that is
+  // not a failure. Keep the device with empty driver info.
+  if (status != SMI_NIC_STATUS_NO_DATA) {
+    CHK_AMDNIC_RET(status)
+  }
 
   static_assert(sizeof(smi_nic_asic_info_t) == sizeof(ai_nic_info.asic));
   status = smi_get_nic_asic_info(ctx, bdf_int,
@@ -445,12 +441,21 @@ static amdsmi_status_t populate_amd_ainic_device(const smi_nic_ctx_t& ctx, uint6
   static_assert(sizeof(smi_nic_port_info_t) == sizeof(ai_nic_info.port));
   status = smi_get_nic_port_info(ctx, bdf_int,
                                  reinterpret_cast<smi_nic_port_info_t*>(&ai_nic_info.port));
-  CHK_AMDNIC_RET(status);
+  // A fwctl-only NIC has no host netdev/port to report link state for; that is
+  // not a failure. Keep the device with empty port info.
+  if (status != SMI_NIC_STATUS_NO_DATA) {
+    CHK_AMDNIC_RET(status)
+  }
 
   static_assert(sizeof(smi_nic_rdma_devices_info_t) == sizeof(ai_nic_info.rdma_dev));
   status = smi_get_nic_rdma_dev_info(
       ctx, bdf_int, reinterpret_cast<smi_nic_rdma_devices_info_t*>(&ai_nic_info.rdma_dev));
-  CHK_AMDNIC_RET(status)
+  // RDMA is optional: a NIC whose RDMA/RoCE driver isn't loaded (or that exposes
+  // no RDMA devices) is still a valid NIC. Keep it with empty RDMA info instead
+  // of dropping the whole device.
+  if (status != SMI_NIC_STATUS_DRIVER_NOT_LOADED && status != SMI_NIC_STATUS_NO_DATA) {
+    CHK_AMDNIC_RET(status)
+  }
 
   return AMDSMI_STATUS_SUCCESS;
 }
@@ -473,7 +478,8 @@ std::tuple<uint64_t, amdsmi_bdf_t> bdf_to_int(const std::string& bdf) {
 }
 
 amdsmi_status_t AMDSmiSystem::populate_amd_ainic_devices() {
-  smi_nic_status_t status = smi_nic_create_context(&ainic_ctx_);
+  bool ainic_only = (nic_filter_ == AMDSMI_NIC_FILTER_AINIC_ONLY);
+  smi_nic_status_t status = smi_nic_create_context(&ainic_ctx_, ainic_only);
   CHK_AMDNIC_RET(status);
 
   smi_nic_discovery_t discovery = {};
@@ -498,7 +504,6 @@ amdsmi_status_t AMDSmiSystem::populate_amd_ainic_devices() {
       LOG_INFO(ss);
       continue;
     }
-    ai_nic_info_.emplace_back(ai_nic_info);
 
     auto [domain, bus, device_id, function] = parse_bdfid(bdfid);
 
@@ -529,139 +534,7 @@ amdsmi_status_t AMDSmiSystem::populate_amd_ainic_devices() {
   }
   return AMDSMI_STATUS_SUCCESS;
 }
-const auto& AMDSmiSystem::get_ai_nic_info() const { return ai_nic_info_; }
 
-amdsmi_status_t AMDSmiSystem::populate_brcm_nic_devices() {
-#ifdef BRCM_NIC
-  uint32_t device_count = 0;
-  amdsmi_status_t amd_smi_status = no_drm_nic_.init();
-  if (amd_smi_status != AMDSMI_STATUS_SUCCESS) {
-    // No NIC driver/support present (e.g. CI without NIC hardware) - not fatal
-    return AMDSMI_STATUS_SUCCESS;
-  }
-
-  rsmi_status_t ret = rsmi_num_nic_monitor_devices(&device_count);
-  if (ret != RSMI_STATUS_SUCCESS) {
-    // No NIC devices or driver not available - not fatal, continue with empty list
-    return AMDSMI_STATUS_SUCCESS;
-  }
-
-  for (uint32_t i = 0; i < device_count; i++) {
-    // NIC device uses the bdf as the socket id
-    std::string socket_id;
-    uint64_t bdfid = 0;
-    rsmi_status_t ret = rsmi_nic_dev_pci_id_get(i, &bdfid);
-    if (ret != RSMI_STATUS_SUCCESS) {
-      continue;
-    }
-
-    auto [domain, bus, device_id, function] = parse_bdfid(bdfid);
-
-    // The BD part of the BDF is used as the socket id as it
-    // represents a physical device.
-    std::stringstream ss;
-    ss << std::setfill('0') << std::uppercase << std::hex << std::setw(4) << domain << ":"
-       << std::setw(2) << bus << ":" << std::setw(2) << device_id;
-    socket_id = ss.str();
-
-    // Multiple devices may share the same socket
-    AMDSmiSocket* socket = nullptr;
-    for (unsigned int j = 0; j < sockets_.size(); j++) {
-      if (sockets_[j]->get_socket_id() == socket_id) {
-        socket = sockets_[j];
-        break;
-      }
-    }
-    if (socket == nullptr) {
-      socket = new AMDSmiSocket(socket_id);
-      sockets_.push_back(socket);
-    }
-
-    auto [domain_number, bus_number, device_number, function_number] = parse_bdfid(bdfid);
-    amdsmi_bdf_t bdf = {.function_number = function_number,
-                        .device_number = device_number,
-                        .bus_number = bus_number,
-                        .domain_number = domain_number};
-
-    auto device = std::make_unique<AMDSmiNICDevice>(i, bdf, no_drm_nic_);
-
-    std::string nicPath;
-    if ((no_drm_nic_.get_device_path_by_index(i, &nicPath)) != AMDSMI_STATUS_SUCCESS) continue;
-    std::string driverPath = nicPath + "/driver";
-    std::error_code ec;
-    auto target = std::filesystem::read_symlink(driverPath, ec);
-    if (ec) continue;
-    if (target.string().find("bnxt_en") == std::string::npos) continue;
-
-    socket->add_processor(device.get());
-    nic_processors_.insert(device.get());
-    device.release();
-  }
-#endif  // BRCM_NIC
-  return AMDSMI_STATUS_SUCCESS;
-}
-
-amdsmi_status_t AMDSmiSystem::populate_brcm_switch_devices() {
-#ifdef BRCM_NIC
-  uint32_t device_count = 0;
-  amdsmi_status_t amd_smi_status = no_drm_switch_.init();
-  if (amd_smi_status != AMDSMI_STATUS_SUCCESS) {
-    // No switch driver/support present (e.g. CI without NIC hardware) - not fatal
-    return AMDSMI_STATUS_SUCCESS;
-  }
-
-  rsmi_status_t ret = rsmi_num_switch_monitor_devices(&device_count);
-  if (ret != RSMI_STATUS_SUCCESS) {
-    // No switch devices or driver not available - not fatal, continue with empty list
-    return AMDSMI_STATUS_SUCCESS;
-  }
-
-  for (uint32_t i = 0; i < device_count; i++) {
-    // NIC device uses the bdf as the socket id
-    std::string socket_id;
-    uint64_t bdfid = 0;
-    rsmi_status_t ret = rsmi_switch_dev_pci_id_get(i, &bdfid);
-    if (ret != RSMI_STATUS_SUCCESS) {
-      // return amd::smi::rsmi_to_amdsmi_status(ret);
-      // device might be removed; continue with next device;
-      continue;
-    }
-
-    auto [domain, bus, device_id, function] = parse_bdfid(bdfid);
-
-    // The BD part of the BDF is used as the socket id as it
-    // represents a physical device.
-    std::stringstream ss;
-    ss << std::setfill('0') << std::uppercase << std::hex << std::setw(4) << domain << ":"
-       << std::setw(2) << bus << ":" << std::setw(2) << device_id;
-    socket_id = ss.str();
-
-    // Multiple devices may share the same socket
-    AMDSmiSocket* socket = nullptr;
-    for (unsigned int j = 0; j < sockets_.size(); j++) {
-      if (sockets_[j]->get_socket_id() == socket_id) {
-        socket = sockets_[j];
-        break;
-      }
-    }
-    if (socket == nullptr) {
-      socket = new AMDSmiSocket(socket_id);
-      sockets_.push_back(socket);
-    }
-
-    amdsmi_bdf_t bdf = {};
-    bdf.function_number = bdfid & 0x7;
-    bdf.device_number = (bdfid >> 3) & 0x1f;
-    bdf.bus_number = (bdfid >> 8) & 0xff;
-    bdf.domain_number = (bdfid >> 32) & 0xffffffff;
-
-    AMDSmiProcessor* device = new AMDSmiSWITCHDevice(i, bdf, no_drm_switch_);
-    socket->add_processor(device);
-    switch_processors_.insert(device);
-  }
-#endif
-  return AMDSMI_STATUS_SUCCESS;
-}
 amdsmi_status_t AMDSmiSystem::get_gpu_socket_id(uint32_t index, std::string& socket_id) {
   uint64_t bdfid = 0;
   rsmi_status_t ret = rsmi_dev_pci_id_get(index, &bdfid);
@@ -757,14 +630,6 @@ amdsmi_status_t AMDSmiSystem::handle_to_processor(amdsmi_processor_handle proces
 
   // double check handlers is here
   if (std::find(processors_.begin(), processors_.end(), *processor) != processors_.end()) {
-    return AMDSMI_STATUS_SUCCESS;
-  }
-  if (std::find(nic_processors_.begin(), nic_processors_.end(), *processor) !=
-      nic_processors_.end()) {
-    return AMDSMI_STATUS_SUCCESS;
-  }
-  if (std::find(switch_processors_.begin(), switch_processors_.end(), *processor) !=
-      switch_processors_.end()) {
     return AMDSMI_STATUS_SUCCESS;
   }
   if (std::find(ainic_processors_.begin(), ainic_processors_.end(), *processor) !=

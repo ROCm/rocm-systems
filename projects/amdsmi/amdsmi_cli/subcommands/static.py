@@ -1377,91 +1377,13 @@ class StaticCommands:
         if not self.logger.is_json_format():
             self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
 
-    def _filter_nics_from_args(subcommand):
-        @functools.wraps(subcommand)
-        def wrapper(self, *args, **kwargs):
-            original_nic = None
-            if len(args) > 0:
-                original_nic = args[0].nic
-                nics, ainics = self._get_nics_from_args(args[0])
-                if len(nics) == 0:
-                    args[0].nic = None
-                else:
-                    args[0].nic = nics
-            result = subcommand(self, *args, **kwargs)
-            if len(args) > 0:
-                args[0].nic = original_nic
-            return result
-
-        return wrapper
-
-    @_filter_nics_from_args
-    def _static_brcm_nic(self, args, multiple_devices=False, nic=None):
-        """Get Static information for target nic
-
-        Args:
-            args (Namespace): Namespace containing the parsed CLI args
-            multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
-            nic (device_handle, optional): device_handle for target device. Defaults to None.
-
-        Returns:
-            None: Print output via AMDSMILogger to destination
-        """
-
-        if nic:
-            args.nic = nic
-
-        # Handle multiple NICs
-        handled_multiple_nics, device_handle = self.helpers.handle_brcm_nics(
-            args, self.logger, self._static_brcm_nic
-        )
-        if handled_multiple_nics:
-            return  # This function is recursive
-        args.nic = device_handle
-        if not args.nic:
-            return
-
-        # Get nic id for logging
-        nic_id = self.helpers.get_nic_id_from_device_handle(args.nic)
-        logging.debug(f"Static Arg information for NIC {nic_id} on {self.helpers.os_info()}")
-
-        static_dict = {}
-        if self.logger.is_json_format():
-            static_dict["ai_nic"] = int(nic_id)
-
-        if args.nic:
-            try:
-                nic_info = amdsmi_interface.amdsmi_get_nic_info(args.nic)
-                if nic_info:
-                    static_dict["nic"] = {
-                        "bdf": f"{nic_info['bdf']}",
-                        "UUID": f"{nic_info['UUID']}",
-                        "Device Name": f"{nic_info['Device Name']}",
-                        "Part Number": f"{nic_info['Part Number']}",
-                        "Firmware_Version": f"{nic_info['Firmware_Version']}",
-                    }
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                static_dict["nic"] = "N/A"
-                logging.debug("Failed to get NIC %s | %s", nic_id, e.get_error_info())
-
-        multiple_devices_csv_override = False
-        if not self.logger.is_json_format():
-            self.logger.store_nic_output(args.nic, "values", static_dict)
-        else:
-            self.logger.store_nic_json_output.append(static_dict)
-        if multiple_devices:
-            self.logger.store_multiple_device_output()
-            return  # Skip printing when there are multiple devices
-        if not self.logger.is_json_format():
-            self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
-
     def _filter_ainics_from_args(subcommand):
         @functools.wraps(subcommand)
         def wrapper(self, *args, **kwargs):
             original_nic = None
             if len(args) > 0:
                 original_nic = args[0].nic
-                nics, ainics = self._get_nics_from_args(args[0])
+                ainics = self._get_ainics_from_args(args[0])
                 if len(ainics) == 0:
                     args[0].nic = None
                 else:
@@ -1548,22 +1470,14 @@ class StaticCommands:
             nic = None
             if self.helpers.is_ainic_initialized():
                 nic = self.device_handles_ainics
-            if self.helpers.is_brcm_nic_initialized():
-                nic = self.device_handles_brcm_nics
             args.nic = nic
             return False
         else:
-            if (
-                not self.helpers.is_ainic_initialized()
-                and not self.helpers.is_brcm_nic_initialized()
-            ):
+            if not self.helpers.is_ainic_initialized():
                 return False
             self.logger.output = {}
             self.logger.clear_multiple_devices_output()
-            if self.helpers.is_ainic_initialized():
-                self._static_ainic(args, multiple_devices, nic)
-            if self.helpers.is_brcm_nic_initialized():
-                self._static_brcm_nic(args, multiple_devices, nic)
+            self._static_ainic(args, multiple_devices, nic)
             return True
 
     def static(
@@ -1765,7 +1679,6 @@ class StaticCommands:
             self.logger.output = {}
             self.logger.clear_multiple_devices_output()
             self._static_ainic(args, multiple_devices, nic)
-            self._static_brcm_nic(args, multiple_devices, nic)
 
         if self.logger.is_json_format():
             self.logger.combine_arrays_to_json()

@@ -28,6 +28,7 @@ extern "C" {
 #endif
 
 #include <linux/ethtool.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -127,6 +128,7 @@ typedef struct {
   char part_number[SMI_NIC_MAX_STRING_LENGTH];
   char serial_number[SMI_NIC_MAX_STRING_LENGTH];
   char vendor_name[SMI_NIC_MAX_STRING_LENGTH];
+  uint32_t capability; /**< Capability bitmask (SmiNicCapability), mirrors amdsmi asic capability */
 } smi_nic_asic_info_t;
 
 /**
@@ -166,7 +168,7 @@ typedef struct {
   char type[SMI_NIC_MAX_STRING_LENGTH];
   char flavour[SMI_NIC_MAX_STRING_LENGTH];
   char netdev[SMI_NIC_MAX_STRING_LENGTH];
-  uint8_t ifindex;
+  uint32_t ifindex;
   char mac_address[SMI_NIC_MAX_STRING_LENGTH];
   uint8_t carrier;
   uint16_t mtu;
@@ -232,6 +234,8 @@ typedef struct {
  * can be used concurrently from different threads.
  *
  * @param[out] ctx Pointer to store the created context handle
+ * @param[in] ainic_only If true, discover only AMD AINIC devices; if false,
+ *            discover all supported NICs.
  *
  * @return ::SMI_NIC_STATUS_SUCCESS if context created successfully
  * @return ::SMI_NIC_STATUS_WRONG_PARAM if ctx is NULL
@@ -241,7 +245,7 @@ typedef struct {
  * @note The context must be destroyed with smi_nic_destroy_context()
  *
  */
-smi_nic_status_t smi_nic_create_context(smi_nic_ctx_t* ctx);
+smi_nic_status_t smi_nic_create_context(smi_nic_ctx_t* ctx, bool ainic_only);
 
 /**
  * @brief Destroy a NIC context and free its resources

@@ -32,6 +32,7 @@
 
 #include "smi_nic_subsystem.h"
 #include "smi_sysfs.h"
+#include "vendor_registry.h"
 
 namespace fs = std::filesystem;
 
@@ -56,10 +57,16 @@ uint64_t parse_bdf(const std::string& bdf) {
   }
 }
 
-SmiNicSystem::SmiNicSystem() : net_path_("/sys/class/net"), pci_path_("/sys/bus/pci/devices") {
-  register_subsystem(std::make_unique<SmiNicSubsystemPensando>());
-  // TODO: broadcom
-  // register_subsystem(std::make_unique<SmiNicSubsystemBroadcom>());
+SmiNicSystem::SmiNicSystem() : SmiNicSystem("/sys/bus/pci/devices", "/sys/class/net") {}
+
+SmiNicSystem::SmiNicSystem(const std::string& pci_path, const std::string& net_path)
+    : net_path_(net_path),
+      pci_path_(pci_path),
+      transport_(amd::smi::nic::transport::create_transport(
+          amd::smi::nic::transport::NicBackend_t::Auto)) {
+  for (auto& plugin : make_default_vendor_plugins()) {
+    register_subsystem(std::move(plugin));
+  }
 }
 
 void SmiNicSystem::register_subsystem(std::unique_ptr<SmiNicSubsystem> subsystem) {
@@ -105,7 +112,7 @@ bool SmiNicSystem::driver_loaded(const std::string& bdf, DriverType driver_type)
   return false;
 }
 
-void SmiNicSystem::discover_nics() {
+void SmiNicSystem::discover_nics(bool ainic_only) {
   std::error_code ec;
 
   if (!fs::exists(pci_path_, ec) || !fs::is_directory(pci_path_, ec)) {
@@ -114,9 +121,12 @@ void SmiNicSystem::discover_nics() {
 
   nics_.clear();
   for (auto& subsystem : subsystems_) {
-    subsystem->discover(pci_path_, net_path_);
+    subsystem->discover(pci_path_, net_path_, transport_);
     const auto& subsys_nics = subsystem->get_nics();
     for (const auto& nic : subsys_nics) {
+      if (ainic_only && nic->product() != NicProduct::AINIC) {
+        continue;
+      }
       nics_.push_back(nic.get());
     }
   }

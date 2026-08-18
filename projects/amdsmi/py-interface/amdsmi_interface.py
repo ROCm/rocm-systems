@@ -160,8 +160,6 @@ class AmdSmiDeviceType(IntEnum):
     NON_AMD_CPU_DEVICE = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_NON_AMD_CPU
     AMD_CPU_CORE_DEVICE = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE
     AINIC_DEVICE = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_AMD_NIC
-    BRCM_NIC_DEVICE = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_BRCM_NIC
-    BRCM_SWITCH_DEVICE = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH
 
 
 class AmdSmiMmIp(IntEnum):
@@ -709,8 +707,14 @@ class AmdSmiProcessorType(IntEnum):
     AMD_CPU_CORE = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE
     AMD_APU = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_AMD_APU
     AMD_AINIC = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_AMD_NIC
-    AMD_BRCM_NIC = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_BRCM_NIC
-    AMD_BRCM_SWITCH = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH
+
+
+class AmdSmiNicHealthState(IntEnum):
+    UNKNOWN = amdsmi_wrapper.AMDSMI_NIC_HEALTH_UNKNOWN
+    HEALTHY = amdsmi_wrapper.AMDSMI_NIC_HEALTH_HEALTHY
+    WARNING = amdsmi_wrapper.AMDSMI_NIC_HEALTH_WARNING
+    ERROR = amdsmi_wrapper.AMDSMI_NIC_HEALTH_ERROR
+    UNSUPPORTED = amdsmi_wrapper.AMDSMI_NIC_HEALTH_UNSUPPORTED
 
 
 class AmdSmiRegType(IntEnum):
@@ -2484,10 +2488,13 @@ def amdsmi_get_gpu_device_bdf_bdf(
     return bdf_info
 
 
-def amdsmi_get_nic_info(processor_handle: amdsmi_wrapper.amdsmi_processor_handle) -> Dict[str, Any]:
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
-    return None  # disabled feature
+def _decode_nic_capabilities(bitmask: int) -> List[str]:
+    """Expand an asic capability bitmask into short capability names (e.g. FWCTL)."""
+    return [
+        name.replace("AMDSMI_NIC_CAP_", "")
+        for bit, name in amdsmi_wrapper.amdsmi_nic_capability_bits_t__enumvalues.items()
+        if bitmask & bit
+    ]
 
 
 def amdsmi_get_ainic_info_summary(nic_info):
@@ -2500,6 +2507,7 @@ def amdsmi_get_ainic_info_summary(nic_info):
         "Part Number": nic_info.asic.part_number.decode("utf-8"),
         "Serial Number": nic_info.asic.serial_number.decode("utf-8"),
         "Vendor Name": nic_info.asic.vendor_name.decode("utf-8"),
+        "Capability": _decode_nic_capabilities(nic_info.asic.capability),
         # "Firmware_Version": nic_info.versions.running.fw.decode('utf-8'),
     }
 
@@ -2517,6 +2525,7 @@ def amdsmi_get_ainic_info_detail(ainic_info_struct):
             "PART_NUMBER": ainic_info_struct.asic.part_number.decode("utf-8"),
             "SERIAL_NUMBER": ainic_info_struct.asic.serial_number.decode("utf-8"),
             "VENDOR_NAME": ainic_info_struct.asic.vendor_name.decode("utf-8"),
+            "CAPABILITY": _decode_nic_capabilities(ainic_info_struct.asic.capability),
         },
         "BUS": {
             "bdf": _format_bdf(ainic_info_struct.bus.bdf),
@@ -2642,109 +2651,63 @@ def amdsmi_get_ainic_info(
         return amdsmi_get_ainic_info_summary(nic_info)
 
 
-def amdsmi_get_switch_device_bdf(processor_handle: amdsmi_wrapper.amdsmi_processor_handle) -> str:
-
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
-
-    bdf_info = amdsmi_wrapper.amdsmi_bdf_t()
-    _check_res(
-        amdsmi_wrapper.amdsmi_get_switch_device_bdf(processor_handle, ctypes.byref(bdf_info))
-    )
-
-    return _format_bdf(bdf_info)
-
-
-def amdsmi_get_nic_temp_info(
-    processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
-) -> Dict[str, ctypes.c_uint32]:
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
-
-    temp_measure = amdsmi_wrapper.amdsmi_brcm_nic_temperature_metric_t()
-    _check_res(
-        amdsmi_wrapper.amdsmi_get_nic_temp_info(processor_handle, ctypes.byref(temp_measure))
-    )
-
-    temp_info_dict = {
-        "NIC_TEMP_CURRENT": math.trunc(temp_measure.nic_temp_input / 1000),
-        "NIC_TEMP_CRIT_ALARM": temp_measure.nic_temp_crit_alarm,
-        "NIC_TEMP_EMERGENCY_ALARM": temp_measure.nic_temp_emergency_alarm,
-        "NIC_TEMP_SHUTDOWN_ALARM": temp_measure.nic_temp_shutdown_alarm,
-        "NIC_TEMP_MAX_ALARM": temp_measure.nic_temp_max_alarm,
-    }
-    for key, value in temp_info_dict.items():
-        if value == 0xFFFF:
-            temp_info_dict[key] = "N/A"
-
-    return temp_info_dict
-
-
 def amdsmi_get_nic_fw_info(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
-) -> Dict[str, ctypes.c_uint32]:
+) -> Dict[str, str]:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    fw_info = amdsmi_wrapper.struct_amdsmi_brcm_nic_firmware_t()
+    fw_info = amdsmi_wrapper.amdsmi_nic_fw_info_t()
     _check_res(amdsmi_wrapper.amdsmi_get_nic_fw_info(processor_handle, ctypes.byref(fw_info)))
 
-    fw_info_dict = {
-        "Package Version": fw_info.nic_fw_pkg_version.decode("utf-8"),
-        "EFI Version": fw_info.nic_fw_efi_version.decode("utf-8"),
-        "Firmware Version": fw_info.nic_fw_version.decode("utf-8"),
-        "NCSI Version": fw_info.nic_fw_ncsi_version.decode("utf-8"),
-        "RoCE Version": fw_info.nic_fw_roce_version.decode("utf-8"),
-    }
-    for key, value in fw_info_dict.items():
-        if value == "":
-            fw_info_dict[key] = "N/A"
+    fw_info_dict = {}
+    # num_fw comes from the C layer; clamp to the fixed fw[] capacity so a bad
+    # count can't drive an out-of-bounds ctypes access.
+    for i in range(min(fw_info.num_fw, len(fw_info.fw))):
+        entry = fw_info.fw[i]
+        name = entry.name.decode("utf-8")
+        version = entry.version.decode("utf-8")
+        fw_info_dict[name] = version if version else "N/A"
 
     return fw_info_dict
 
 
-def amdsmi_get_switch_link_info(
+def amdsmi_get_nic_telemetry(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
-) -> Dict[str, ctypes.c_uint32]:
+) -> Dict[str, Any]:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    link_measure = amdsmi_wrapper.struct_amdsmi_brcm_switch_link_metric_t()
-    _check_res(
-        amdsmi_wrapper.amdsmi_get_switch_link_info(processor_handle, ctypes.byref(link_measure))
-    )
+    telem = amdsmi_wrapper.amdsmi_nic_telemetry_t()
+    _check_res(amdsmi_wrapper.amdsmi_get_nic_telemetry(processor_handle, ctypes.byref(telem)))
 
-    link_info_dict = {
-        "CURRENT_LINK_SPEED": link_measure.current_link_speed,
-        "MAX_LINK_SPEED": link_measure.max_link_speed,
-        "CURRENT_LINK_WIDTH": link_measure.current_link_width,
-        "MAX_LINK_WIDTH": link_measure.max_link_width,
+    # Width-max sentinels mean the NIC does not expose the metric; surface "N/A".
+    def _u(value, sentinel):
+        return "N/A" if value == sentinel else value
+
+    # A future firmware/library could report a state past the current enum;
+    # degrade to UNKNOWN rather than raising a non-AmdSmiException ValueError.
+    try:
+        health_state = AmdSmiNicHealthState(telem.health.state).name
+    except ValueError:
+        health_state = AmdSmiNicHealthState.UNKNOWN.name
+
+    return {
+        "temperature": {
+            "asic_temp_c": _u(telem.temperature.asic_temp_c, 0xFFFF),
+            "transceiver_temp_c": _u(telem.temperature.transceiver_temp_c, 0xFFFF),
+            "board_temp_c": _u(telem.temperature.board_temp_c, 0xFFFF),
+        },
+        "health": {
+            "state": health_state,
+            "error_count": _u(telem.health.error_count, 0xFFFFFFFF),
+            "reporter": telem.health.reporter.decode("utf-8"),
+        },
+        "port_split": {
+            "splittable": _u(telem.port_split.splittable, 0xFF),
+            "split_count": _u(telem.port_split.split_count, 0xFF),
+        },
     }
-    for key, value in link_info_dict.items():
-        if value == 0xFFFF:
-            link_info_dict[key] = "N/A"
-
-    return link_info_dict
-
-
-def amdsmi_get_root_switch(amdsmi_bdf: Union[str, amdsmi_wrapper.amdsmi_bdf_t]) -> str:
-    # An empty BDF means the caller has no device to resolve (e.g. NIC info
-    # unavailable); report it as N/A instead of forcing callers to guard.
-    if isinstance(amdsmi_bdf, str):
-        if not amdsmi_bdf:
-            return "N/A"
-        parsed_bdf = _parse_bdf(amdsmi_bdf)
-        if parsed_bdf is None:
-            raise AmdSmiBdfFormatException(amdsmi_bdf)
-        amdsmi_bdf = _make_amdsmi_bdf_from_list(parsed_bdf)
-    elif not isinstance(amdsmi_bdf, amdsmi_wrapper.amdsmi_bdf_t):
-        raise AmdSmiParameterException(amdsmi_bdf, amdsmi_wrapper.amdsmi_bdf_t)
-
-    switch_bdf_info = amdsmi_wrapper.amdsmi_bdf_t()
-
-    _check_res(amdsmi_wrapper.amdsmi_get_root_switch(amdsmi_bdf, ctypes.byref(switch_bdf_info)))
-
-    return _format_bdf(switch_bdf_info)
 
 
 def amdsmi_get_gpu_device_uuid(processor_handle: processor_handle_t) -> str:
@@ -3810,57 +3773,6 @@ def amdsmi_get_gpu_process_list_by_pid(processor_handles: list) -> list:
         )
 
     return result
-
-
-def amdsmi_get_nic_fw_version(processor_handle: amdsmi_wrapper.amdsmi_processor_handle) -> str:
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
-
-    uuid = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
-
-    uuid_length = ctypes.c_uint32()
-    uuid_length.value = AMDSMI_MAX_STRING_LENGTH
-
-    _check_res(
-        amdsmi_wrapper.amdsmi_get_nic_fw_version(processor_handle, ctypes.byref(uuid_length), uuid)
-    )
-    return uuid.value.decode("utf-8")
-
-
-def amdsmi_get_nic_device_uuid(processor_handle: amdsmi_wrapper.amdsmi_processor_handle) -> str:
-
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
-
-    uuid = ctypes.create_string_buffer(AMDSMI_GPU_UUID_SIZE)
-
-    uuid_length = ctypes.c_uint32()
-    uuid_length.value = AMDSMI_GPU_UUID_SIZE
-
-    _check_res(
-        amdsmi_wrapper.amdsmi_get_nic_device_uuid(processor_handle, ctypes.byref(uuid_length), uuid)
-    )
-
-    return uuid.value.decode("utf-8")
-
-
-def amdsmi_get_switch_device_uuid(processor_handle: amdsmi_wrapper.amdsmi_processor_handle) -> str:
-
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
-
-    uuid = ctypes.create_string_buffer(AMDSMI_GPU_UUID_SIZE)
-
-    uuid_length = ctypes.c_uint32()
-    uuid_length.value = AMDSMI_GPU_UUID_SIZE
-
-    _check_res(
-        amdsmi_wrapper.amdsmi_get_switch_device_uuid(
-            processor_handle, ctypes.byref(uuid_length), uuid
-        )
-    )
-
-    return uuid.value.decode("utf-8")
 
 
 def amdsmi_get_gpu_driver_info(processor_handle: processor_handle_t) -> Dict[str, Any]:
@@ -5010,34 +4922,6 @@ def amdsmi_get_gpu_topo_numa_affinity(processor_handle: processor_handle_t):
     return numa_node.value
 
 
-def amdsmi_get_nic_topo_numa_affinity(processor_handle: amdsmi_wrapper.amdsmi_processor_handle):
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
-
-    numa_node = ctypes.c_int32()
-
-    _check_res(
-        amdsmi_wrapper.amdsmi_get_nic_topo_numa_affinity(processor_handle, ctypes.byref(numa_node))
-    )
-
-    return numa_node.value
-
-
-def amdsmi_get_switch_topo_numa_affinity(processor_handle: amdsmi_wrapper.amdsmi_processor_handle):
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
-
-    numa_node = ctypes.c_int32()
-
-    _check_res(
-        amdsmi_wrapper.amdsmi_get_switch_topo_numa_affinity(
-            processor_handle, ctypes.byref(numa_node)
-        )
-    )
-
-    return numa_node.value
-
-
 def amdsmi_get_gpu_topo_cpu_affinity(processor_handle: amdsmi_wrapper.amdsmi_processor_handle):
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
@@ -5053,66 +4937,6 @@ def amdsmi_get_gpu_topo_cpu_affinity(processor_handle: amdsmi_wrapper.amdsmi_pro
         )
     )
     return gpucpuaffid.value.decode("utf-8")
-
-
-def amdsmi_get_nic_topo_cpu_affinity(processor_handle: amdsmi_wrapper.amdsmi_processor_handle):
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
-
-    niccpuaffid = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
-
-    niccpuaffid_length = ctypes.c_uint32()
-    niccpuaffid_length.value = AMDSMI_MAX_STRING_LENGTH
-
-    _check_res(
-        amdsmi_wrapper.amdsmi_get_nic_topo_cpu_affinity(
-            processor_handle, ctypes.byref(niccpuaffid_length), niccpuaffid
-        )
-    )
-    return niccpuaffid.value.decode("utf-8")
-
-
-def amdsmi_get_switch_topo_cpu_affinity(processor_handle: amdsmi_wrapper.amdsmi_processor_handle):
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
-
-    switchcpuaffid = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
-
-    switchcpuaffid_length = ctypes.c_uint32()
-    switchcpuaffid_length.value = AMDSMI_MAX_STRING_LENGTH
-
-    _check_res(
-        amdsmi_wrapper.amdsmi_get_switch_topo_cpu_affinity(
-            processor_handle, ctypes.byref(switchcpuaffid_length), switchcpuaffid
-        )
-    )
-    return switchcpuaffid.value.decode("utf-8")
-
-
-def amdsmi_get_nic_gpu_topo_info(
-    processor_handle_src: amdsmi_wrapper.amdsmi_processor_handle,
-    processor_handle_dst: amdsmi_wrapper.amdsmi_processor_handle,
-):
-
-    if not isinstance(processor_handle_src, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(processor_handle_src, amdsmi_wrapper.amdsmi_processor_handle)
-    if not isinstance(processor_handle_dst, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(processor_handle_dst, amdsmi_wrapper.amdsmi_processor_handle)
-
-    niccgpuinfo = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
-
-    niccgpuinfo_length = ctypes.c_uint32()
-    niccgpuinfo_length.value = AMDSMI_MAX_STRING_LENGTH
-
-    _check_res(
-        amdsmi_wrapper.amdsmi_get_nic_gpu_topo_info(
-            processor_handle_src,
-            processor_handle_dst,
-            ctypes.byref(niccgpuinfo_length),
-            niccgpuinfo,
-        )
-    )
-    return niccgpuinfo.value.decode("utf-8")
 
 
 def amdsmi_set_power_cap(processor_handle: processor_handle_t, sensor_ind: int, cap: int) -> None:
@@ -6307,117 +6131,6 @@ def amdsmi_get_gpu_partition_metrics_info(processor_handle: processor_handle_t) 
         gpu_metrics_output.update(_apu_metrics_na_dict())
 
     return gpu_metrics_output
-
-
-def amdsmi_get_nic_metrics_info(
-    processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
-) -> Dict[str, Any]:
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
-
-    # Create data type
-    nic_metrics = amdsmi_wrapper.amdsmi_brcm_nic_hwmon_metrics_t()
-    nic_power_metrics = amdsmi_wrapper.amdsmi_brcm_nic_hwmon_power_t()
-    nic_temperature_metrics = amdsmi_wrapper.amdsmi_brcm_nic_temperature_metric_t()
-
-    _check_res(
-        amdsmi_wrapper.amdsmi_get_nic_metrics_info(processor_handle, ctypes.byref(nic_metrics))
-    )
-
-    nic_power_metrics = nic_metrics.nic_power
-    nic_temperature_metrics = nic_metrics.nic_temperature
-
-    nic_metrics_output = {
-        # Power attributes
-        "nic_power_async": nic_power_metrics.nic_power_async.decode("utf-8"),
-        "nic_power_control": nic_power_metrics.nic_power_control.decode("utf-8"),
-        "nic_power_runtime_active_time": nic_power_metrics.nic_power_runtime_active_time,
-        "nic_power_runtime_status": nic_power_metrics.nic_power_runtime_status.decode("utf-8"),
-        "nic_power_runtime_usage": nic_power_metrics.nic_power_runtime_usage,
-        "nic_power_runtime_active_kids": nic_power_metrics.nic_power_runtime_active_kids,
-        "nic_power_runtime_enabled": nic_power_metrics.nic_power_runtime_enabled.decode("utf-8"),
-        "nic_power_runtime_suspended_time": nic_power_metrics.nic_power_runtime_suspended_time,
-        # Temperature attributes
-        "nic_temp_crit_alarm": nic_temperature_metrics.nic_temp_crit_alarm,
-        "nic_temp_emergency_alarm": nic_temperature_metrics.nic_temp_emergency_alarm,
-        "nic_temp_shutdown_alarm": nic_temperature_metrics.nic_temp_shutdown_alarm,
-        "nic_temp_max_alarm": nic_temperature_metrics.nic_temp_max_alarm,
-        "nic_temp_crit": math.trunc(nic_temperature_metrics.nic_temp_crit / 1000),
-        "nic_temp_emergency": math.trunc(nic_temperature_metrics.nic_temp_emergency / 1000),
-        "nic_temp_input": math.trunc(nic_temperature_metrics.nic_temp_input / 1000),
-        "nic_temp_max": math.trunc(nic_temperature_metrics.nic_temp_max / 1000),
-        "nic_temp_shutdown": math.trunc(nic_temperature_metrics.nic_temp_shutdown / 1000),
-        # Error attributes
-        "nic_dev_correctable": nic_metrics.nic_device_aer_dev_correctable.decode("utf-8"),
-        "nic_dev_fatal": nic_metrics.nic_device_aer_dev_fatal.decode("utf-8"),
-        "nic_dev_nonfatal": nic_metrics.nic_device_aer_dev_nonfatal.decode("utf-8"),
-    }
-
-    return nic_metrics_output
-
-
-def amdsmi_get_switch_metrics_info(
-    processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
-) -> Dict[str, Any]:
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
-
-    # Create data type
-    switch_metrics = amdsmi_wrapper.struct_amdsmi_brcm_switch_metric_t()
-    switch_power_metrics = amdsmi_wrapper.amdsmi_brcm_switch_power_metric_t()
-
-    _check_res(
-        amdsmi_wrapper.amdsmi_get_switch_metrics_info(
-            processor_handle, ctypes.byref(switch_metrics)
-        )
-    )
-
-    switch_power_metrics = switch_metrics.brcm_power
-
-    switch_metrics_output = {
-        "brcm_power_async": switch_power_metrics.brcm_power_async.decode("utf-8"),
-        "brcm_power_control": switch_power_metrics.brcm_power_control.decode("utf-8"),
-        "brcm_power_runtime_active_kids": switch_power_metrics.brcm_power_runtime_active_kids.decode(
-            "utf-8"
-        ),
-        "brcm_power_runtime_active_time": switch_power_metrics.brcm_power_runtime_active_time.decode(
-            "utf-8"
-        ),
-        "brcm_power_runtime_enabled": switch_power_metrics.brcm_power_runtime_enabled.decode(
-            "utf-8"
-        ),
-        "brcm_power_runtime_status": switch_power_metrics.brcm_power_runtime_status.decode("utf-8"),
-        "brcm_power_runtime_suspended_time": switch_power_metrics.brcm_power_runtime_suspended_time.decode(
-            "utf-8"
-        ),
-        "brcm_power_runtime_usage": switch_power_metrics.brcm_power_runtime_usage.decode("utf-8"),
-        "brcm_power_wakeup": switch_power_metrics.brcm_power_wakeup.decode("utf-8"),
-        "brcm_power_wakeup_abort_count": switch_power_metrics.brcm_power_wakeup_abort_count.decode(
-            "utf-8"
-        ),
-        "brcm_power_wakeup_active": switch_power_metrics.brcm_power_wakeup_active.decode("utf-8"),
-        "brcm_power_wakeup_active_count": switch_power_metrics.brcm_power_wakeup_active_count.decode(
-            "utf-8"
-        ),
-        "brcm_power_wakeup_count": switch_power_metrics.brcm_power_wakeup_count.decode("utf-8"),
-        "brcm_power_wakeup_last_time_ms": switch_power_metrics.brcm_power_wakeup_last_time_ms.decode(
-            "utf-8"
-        ),
-        "brcm_power_wakeup_max_time_ms": switch_power_metrics.brcm_power_wakeup_max_time_ms.decode(
-            "utf-8"
-        ),
-        "brcm_power_wakeup_total_time_ms": switch_power_metrics.brcm_power_wakeup_total_time_ms.decode(
-            "utf-8"
-        ),
-        # Error attributes
-        "brcm_device_aer_dev_correctable": switch_metrics.brcm_device_aer_dev_correctable.decode(
-            "utf-8"
-        ),
-        "brcm_device_aer_dev_fatal": switch_metrics.brcm_device_aer_dev_fatal.decode("utf-8"),
-        "brcm_device_aer_dev_nonfatal": switch_metrics.brcm_device_aer_dev_nonfatal.decode("utf-8"),
-    }
-
-    return switch_metrics_output
 
 
 def amdsmi_get_gpu_od_volt_curve_regions(

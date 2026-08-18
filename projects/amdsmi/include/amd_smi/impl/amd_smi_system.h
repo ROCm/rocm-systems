@@ -33,11 +33,6 @@
 #include <set>
 #include <vector>
 
-#ifdef BRCM_NIC
-#include "amd_smi/impl/nic/amd_smi_no_drm_nic.h"
-#include "amd_smi/impl/nic/amd_smi_no_drm_switch.h"
-#endif  // BRCM_NIC
-
 namespace amd::smi {
 
 // Singleton: Only one system in an application
@@ -69,10 +64,10 @@ class AMDSmiSystem {
 
   std::vector<uint32_t> get_cpu_sockets_from_numa_node(int32_t numa_node);
 
-  const auto& get_ai_nic_info() const;
+  void set_nic_filter(amdsmi_nic_filter_t mode) { nic_filter_ = mode; }
 
  private:
-  AMDSmiSystem() : init_flag_(AMDSMI_INIT_AMD_GPUS) {}
+  AMDSmiSystem() : init_flag_(AMDSMI_INIT_AMD_GPUS), nic_filter_(AMDSMI_NIC_FILTER_ALL) {}
 
   /* The GPU socket id is used to identify the socket, so that the XCDs
   on the same physical device will be collected under the same socket.
@@ -82,20 +77,16 @@ class AMDSmiSystem {
   amdsmi_status_t populate_amd_gpu_devices();
   amdsmi_status_t populate_amd_cpus();
   amdsmi_status_t populate_amd_ainic_devices();
-  amdsmi_status_t populate_brcm_nic_devices();
-  amdsmi_status_t populate_brcm_switch_devices();
   uint64_t init_flag_;
+  // NIC discovery filter, read in populate_amd_ainic_devices(). Default
+  // AMDSMI_NIC_FILTER_ALL keeps every NIC visible; a C caller enables AINIC-only
+  // discovery via amdsmi_set_nic_filter(AMDSMI_NIC_FILTER_AINIC_ONLY) before
+  // amdsmi_init, and disables it again with AMDSMI_NIC_FILTER_ALL.
+  amdsmi_nic_filter_t nic_filter_;
   AMDSmiDrm drm_;
   smi_nic_ctx_t ainic_ctx_;
-  std::vector<AMDSmiAINICDevice::AINICInfo> ai_nic_info_;
-#ifdef BRCM_NIC
-  AMDSmiNoDrmNIC no_drm_nic_;
-  AMDSmiNoDrmSwitch no_drm_switch_;
-#endif  // BRCM_NIC
   std::vector<AMDSmiSocket*> sockets_;
-  std::set<AMDSmiProcessor*> processors_;         // Track valid processors
-  std::set<AMDSmiProcessor*> nic_processors_;     // Track valid nic processors
-  std::set<AMDSmiProcessor*> switch_processors_;  // Track valid switch processors
+  std::set<AMDSmiProcessor*> processors_;  // Track valid processors
   std::set<AMDSmiProcessor*> ainic_processors_;
 };
 }  // namespace amd::smi

@@ -54,10 +54,13 @@ uint64_t parse_bdf(const std::string& bdf);
 class SmiNicSystem {
  public:
   SmiNicSystem();
+  // Test seam: point discovery at a fake sysfs tree instead of the real /sys.
+  SmiNicSystem(const std::string& pci_path, const std::string& net_path);
   ~SmiNicSystem() = default;
 
   void register_subsystem(std::unique_ptr<SmiNicSubsystem> subsystem);
-  void discover_nics();
+  // ainic_only=true drops non-AINIC NICs (product() != NicProduct::AINIC).
+  void discover_nics(bool ainic_only = false);
   bool driver_loaded(const std::string& bdf, DriverType driver_type) const;
 
   std::vector<std::string> list_bdfs();
@@ -75,6 +78,13 @@ class SmiNicSystem {
  private:
   std::string net_path_;
   std::string pci_path_;
+  /**
+   * One transport shared by every port this system discovers, instead of one
+   * backend per port. The netlink backend opens its socket eagerly on
+   * construction, so per-port ownership would hold N sockets for N ports;
+   * sharing holds one.
+   */
+  std::shared_ptr<amd::smi::nic::transport::NicTransport> transport_;
   std::vector<const SmiNic*> nics_;
   std::vector<std::unique_ptr<SmiNicSubsystem>> subsystems_;
 };

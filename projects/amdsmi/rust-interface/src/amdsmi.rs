@@ -5246,6 +5246,102 @@ pub fn amdsmi_get_gpu_asic_info(
     Ok(info)
 }
 
+/// Get the firmware versions for the NIC with the specified processor handle.
+///
+/// # Arguments
+///
+/// * `processor_handle` - A handle to the NIC for which the firmware information is being queried.
+///
+/// # Returns
+///
+/// * `AmdsmiResult<AmdsmiNicFwInfoT>` - Returns `Ok(AmdsmiNicFwInfoT)` containing the [`AmdsmiNicFwInfoT`] if successful, or an error if it fails.
+///
+/// # Example
+///
+/// ```no_run
+/// # use amdsmi::*;
+/// #
+/// # fn main() {
+/// #   // Initialize the AMD SMI library for NICs
+/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdNics).expect("Failed to initialize AMD SMI");
+/// #
+///     // Example NIC processor_handle, assuming at least one NIC is present
+///     let processor_handle = amdsmi_get_processor_handles!()[0];
+///
+///     // Retrieve the NIC firmware versions
+///     match amdsmi_get_nic_fw_info(processor_handle) {
+///         Ok(info) => println!("NIC firmware info: {:?}", info),
+///         Err(e) => panic!("Failed to get NIC firmware info: {}", e),
+///     }
+/// #
+/// #   // Shut down the AMD SMI library
+/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_nic_fw_info` call fails.
+pub fn amdsmi_get_nic_fw_info(
+    processor_handle: AmdsmiProcessorHandle,
+) -> AmdsmiResult<AmdsmiNicFwInfoT> {
+    let mut info = MaybeUninit::<AmdsmiNicFwInfoT>::uninit();
+    call_unsafe!(amdsmi_wrapper::amdsmi_get_nic_fw_info(
+        processor_handle,
+        info.as_mut_ptr()
+    ));
+    let info = unsafe { info.assume_init() };
+    Ok(info)
+}
+
+/// Get live telemetry (temperature, health, port-split) for the NIC with the specified processor handle.
+///
+/// # Arguments
+///
+/// * `processor_handle` - A handle to the NIC for which the telemetry is being queried.
+///
+/// # Returns
+///
+/// * `AmdsmiResult<AmdsmiNicTelemetryT>` - Returns `Ok(AmdsmiNicTelemetryT)` containing the [`AmdsmiNicTelemetryT`] if successful, or an error if it fails.
+///
+/// # Example
+///
+/// ```no_run
+/// # use amdsmi::*;
+/// #
+/// # fn main() {
+/// #   // Initialize the AMD SMI library for NICs
+/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdNics).expect("Failed to initialize AMD SMI");
+/// #
+///     // Example NIC processor_handle, assuming at least one NIC is present
+///     let processor_handle = amdsmi_get_processor_handles!()[0];
+///
+///     // Retrieve live NIC telemetry
+///     match amdsmi_get_nic_telemetry(processor_handle) {
+///         Ok(info) => println!("NIC telemetry: {:?}", info),
+///         Err(e) => panic!("Failed to get NIC telemetry: {}", e),
+///     }
+/// #
+/// #   // Shut down the AMD SMI library
+/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_nic_telemetry` call fails.
+pub fn amdsmi_get_nic_telemetry(
+    processor_handle: AmdsmiProcessorHandle,
+) -> AmdsmiResult<AmdsmiNicTelemetryT> {
+    let mut info = MaybeUninit::<AmdsmiNicTelemetryT>::uninit();
+    call_unsafe!(amdsmi_wrapper::amdsmi_get_nic_telemetry(
+        processor_handle,
+        info.as_mut_ptr()
+    ));
+    let info = unsafe { info.assume_init() };
+    Ok(info)
+}
+
 /// Get the GPU VRAM information for the device with the specified processor handle.
 ///
 /// Given a processor handle `processor_handle`, this function retrieves the GPU VRAM information

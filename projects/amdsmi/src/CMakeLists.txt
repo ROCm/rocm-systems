@@ -18,27 +18,8 @@ set(SO_VERSION_GIT_TAG_PREFIX "amdsmi_so_ver")
 set(SRC_DIR "amd_smi")
 set(INC_DIR "${PROJECT_SOURCE_DIR}/include/amd_smi")
 
-option(BRCM_NIC "Build brcm-nic" OFF)
-if(BRCM_NIC)
-    add_compile_definitions(BRCM_NIC)
-    set(NIC_SOURCES
-        "${PROJECT_SOURCE_DIR}/src/nic/brcm-nic/amd_smi_lspci_commands.cc"
-        "${PROJECT_SOURCE_DIR}/src/nic/brcm-nic/amd_smi_nic_device.cc"
-        "${PROJECT_SOURCE_DIR}/src/nic/brcm-nic/amd_smi_no_drm_nic.cc"
-        "${PROJECT_SOURCE_DIR}/src/nic/brcm-nic/amd_smi_no_drm_switch.cc"
-        "${PROJECT_SOURCE_DIR}/src/nic/brcm-nic/amd_smi_switch_device.cc"
-    )
-    set(NIC_INCLUDES
-        ${INC_DIR}/impl/nic/amd_smi_lspci_commands.h
-        ${INC_DIR}/impl/nic/amd_smi_nic_device.h
-        ${INC_DIR}/impl/nic/amd_smi_no_drm_nic.h
-        ${INC_DIR}/impl/nic/amd_smi_no_drm_switch.h
-        ${INC_DIR}/impl/nic/amd_smi_switch_device.h
-    )
-endif()
-
-set(NIC_SOURCES ${NIC_SOURCES} "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amd_smi_ainic_device.cc")
-set(NIC_INCLUDES ${NIC_INCLUDES} ${INC_DIR}/impl/nic/amd_smi_ainic_device.h)
+set(NIC_SOURCES "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amd_smi_ainic_device.cc")
+set(NIC_INCLUDES ${INC_DIR}/impl/nic/amd_smi_ainic_device.h)
 set(NIC_INCLUDE_DIRS "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/")
 
 set(SRC_LIST
@@ -197,6 +178,7 @@ function(amdsmi_configure_common_target _TARGET)
             ${DRM_INCLUDE_DIRS}
             ${DRM_AMDGPU_INCLUDE_DIRS}
             ${NIC_INCLUDE_DIRS}
+            ${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc
             ${UALOE_INCLUDE_DIR}
     )
     target_include_directories(
@@ -359,6 +341,7 @@ set(UNIFIED_NIC_INCLUDES
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_nic.h"
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_nic_subsystem.h"
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_nic_system.h"
+    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_nic_transport.h"
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_sysfs.h"
 )
 install(

@@ -23,11 +23,11 @@
 # AMD SMI NIC integration guide
 
 **Purpose**: This is a **contribution guide** for adding NIC device support to
-the AMD SMI bare-metal (BM) library. It is *not* a Broadcom-specific guide and
-it is *not* an end-user reference for the `amd-smi` CLI or Python interface;
-BRCM SMI is referenced only as a working example of the vendor-integration
-pattern. This document is intended for developers extending AMD SMI with new
-NIC backends (AMD or third-party).
+the AMD SMI bare-metal (BM) library. It is *not* an end-user reference for the
+`amd-smi` CLI or Python interface; it is intended for developers extending AMD
+SMI with new NIC backends (AMD or third-party). This guide uses the in-tree
+Pensando (ionic) plugin throughout as the worked example of the
+vendor-integration pattern.
 
 This document describes the AMD SMI public APIs, data structures, interfaces,
 and conventions for integrating Network Interface Card (NIC) device support
@@ -41,7 +41,7 @@ shares with the BM library are the public AMD SMI header (`amdsmi.h`, common
 API subset) and the NIC library sources. Anything outside those two shared
 components is BM-specific. For the host library, see:
 
-- Source: [amd/MxGPU-Virtualization — `smi-lib`](https://github.com/amd/MxGPU-Virtualization/tree/staging/smi-lib)
+- Source: [amd/MxGPU-Virtualization (`smi-lib`)](https://github.com/amd/MxGPU-Virtualization/tree/staging/smi-lib)
 - User guide: [AMD SMI for virtualization (Instinct docs)](https://instinct.docs.amd.com/projects/amd-smi-virt/en/latest/)
 
 AMD SMI provides a unified management interface for AMD accelerators (GPUs,
@@ -52,13 +52,13 @@ document covers:
 - [Public API conventions and naming](#public-api-conventions)
 - [Data structures and type definitions](#data-structures)
 - [Device discovery and initialization](#public-api-reference)
-- [NIC Information APIs](#nic-information-apis) (ASIC, bus, NUMA, ports, driver, RDMA, statistics, vendor statistics)
+- [NIC Information APIs](#nic-information-apis) (ASIC, bus, NUMA, ports, driver, firmware, RDMA, statistics, vendor statistics)
 - [Sysfs data source mapping](#sysfs-data-source-reference)
 - [Code organization and integration points](#code-organization)
 - Example usage ([C](#example-querying-nic-information-c) and [Python](#example-querying-nic-information-python))
-- [Vendor SMI module integration pattern (with BRCM SMI as reference)](#vendor-smi-module-architecture)
+- [Vendor plugin integration pattern (with Pensando as reference)](#vendor-plugin-architecture)
 - [CLI commands for NIC management](#amd-smi-cli-commands-for-nic)
-- [Build configuration for vendor support](#build-system)
+- [Build configuration for NIC support](#build-system)
 
 ---
 
@@ -77,13 +77,15 @@ System
         └── NIC    (AMDSMI_PROCESSOR_TYPE_AMD_NIC)
 ```
 
-Vendor-specific processor types for third-party NICs are also supported and are
-assigned distinct `amdsmi_processor_type_t` identifiers during device discovery (see
-the [Processor types](#processor-types) section).
+AMD SMI surfaces every discovered NIC, AMD or third-party, through the single
+`AMDSMI_PROCESSOR_TYPE_AMD_NIC` processor type. The public API does not expose a
+per-vendor processor type; vendor distinction is an implementation detail of the
+NIC library's plugin layer (see
+[Vendor plugin architecture](#vendor-plugin-architecture)).
 
 Each NIC is represented as a **processor handle** (`amdsmi_processor_handle`).
-Handles are obtained via the standard AMD SMI discovery APIs and are then
-passed to device-specific query functions.
+You obtain handles from the standard AMD SMI discovery APIs, then pass them to
+device-specific query functions.
 
 ```mermaid
 flowchart TD
@@ -91,14 +93,13 @@ flowchart TD
     System --> SocketN[Socket N ...]
     Socket0 --> GPU[AMD GPU<br/>AMDSMI_PROCESSOR_TYPE_AMD_GPU]
     Socket0 --> CPU[AMD CPU / CPU Core<br/>AMDSMI_PROCESSOR_TYPE_AMD_CPU]
-    Socket0 --> NIC[AMD NIC<br/>AMDSMI_PROCESSOR_TYPE_AMD_NIC]
-    Socket0 --> VNIC[Vendor NIC<br/>for example, Broadcom]
+    Socket0 --> NIC[NIC<br/>AMDSMI_PROCESSOR_TYPE_AMD_NIC]
 ```
 
 ### Processor types
 
 The `amdsmi_processor_type_t` enum defines all device types detectable by AMD SMI.
-The values relevant to NIC devices are:
+The value relevant to NIC devices is:
 
 ```c
 typedef enum {
@@ -109,115 +110,119 @@ typedef enum {
     AMDSMI_PROCESSOR_TYPE_NON_AMD_CPU,   // Non-AMD CPU
     AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE,  // AMD CPU Core
     AMDSMI_PROCESSOR_TYPE_AMD_APU,       // AMD APU (GPU + CPU on a single die)
-    AMDSMI_PROCESSOR_TYPE_AMD_NIC,       // AMD NIC (for example, Pensando)
-    // Additional vendor-specific NIC types follow here
+    AMDSMI_PROCESSOR_TYPE_AMD_NIC        // NIC (AMD or third-party)
 } amdsmi_processor_type_t;
 ```
 
-Third-party NIC vendors are assigned their own processor type values appended
-to this enum, enabling the dispatch layer to route API calls to the correct
-device implementation.
+All NIC backends report their devices under `AMDSMI_PROCESSOR_TYPE_AMD_NIC`. A
+new vendor does **not** add a processor-type value; it registers a discovery
+plugin instead (see [Vendor plugin architecture](#vendor-plugin-architecture)).
 
 ### Initialization flags
 
-To discover **AMD** NIC devices specifically, pass the `AMDSMI_INIT_AMD_NICS` flag during initialization:
+To discover NIC devices, pass the `AMDSMI_INIT_AMD_NICS` flag during initialization:
 
 ```c
-#define AMDSMI_INIT_AMD_NICS  (1 << 4)   // Initialize AMD NIC discovery only
+#define AMDSMI_INIT_AMD_NICS  (1 << 4)   // Initialize NIC discovery
 ```
 
 :::{note}
-`AMDSMI_INIT_AMD_NICS` only enables discovery of **AMD** NIC devices. You can
-also discover NIC devices (AMD or vendor) by passing
-`AMDSMI_INIT_ALL_PROCESSORS`, or by OR-ing `AMDSMI_INIT_AMD_NICS` with other
-initialization flags (for example,
-`AMDSMI_INIT_AMD_NICS | AMDSMI_INIT_AMD_GPUS`). Vendor NIC modules (for
-example, BRCM SMI) perform their own discovery when their respective build
-option is enabled (see
-[Vendor SMI module architecture](#vendor-smi-module-architecture)).
+You can also discover NIC devices by passing `AMDSMI_INIT_ALL_PROCESSORS`, or by
+OR-ing `AMDSMI_INIT_AMD_NICS` with other initialization flags (for example,
+`AMDSMI_INIT_AMD_NICS | AMDSMI_INIT_AMD_GPUS`). All registered vendor plugins
+run during discovery regardless of vendor (see
+[Vendor plugin architecture](#vendor-plugin-architecture)).
 :::
 
-### Vendor SMI module architecture
+### Vendor plugin architecture
 
-Third-party vendors (for example, Broadcom) can integrate their NIC support via
-a standalone **Vendor SMI Module** — a self-contained library that lives under a
-dedicated directory (for example, `brcm-smi/`) and is conditionally compiled
-into the main `amd_smi` library.
+NIC support lives in a self-contained static library, `amdsminic`, under
+`src/nic/ai-nic/amdsmi_unified/`. That library exposes a vendor-neutral C
+interface (`smi_nic_interface.h`) to the AMD SMI dispatch layer and, internally,
+drives discovery through a set of **vendor plugins**. A plugin is a C++ class
+that implements the `SmiNicSubsystem` interface and knows how to recognize and
+enumerate one vendor's hardware.
 
-**Module structure:**
+**Key design points:**
 
-```
-<vendor>-smi/
-├── include/<vendor>_smi/
-│   ├── <vendor>smi.h            # Vendor's public C API header (internal use)
-│   └── impl/                    # Internal implementation headers
-│       ├── <vendor>_smi_nic_device.h
-│       └── <vendor>_smi_discovery.h
-├── src/
-│   ├── <vendor>_smi.cc          # Core init/shutdown/discovery, getString
-│   ├── <vendor>_smi_discovery.cc
-│   └── <vendor>_smi_nic_device.cc
-├── cmake/
-│   └── <vendor>_smi_config.cmake.in
-├── CMakeLists.txt
-└── <VENDOR>_SMI_DOCUMENTATION.md
-```
+1. **One registration point.** `make_default_vendor_plugins()` (in
+   `src/vendors/vendor_registry.{h,cpp}`) returns one plugin instance per
+   supported vendor. Adding a partner is a new `src/vendors/<name>/`
+   subdirectory plus one `push_back` line in this function; nothing else in the
+   core discovery path changes.
 
-**Key design principles:**
+2. **Plugins implement `SmiNicSubsystem`.** The base interface
+   (`inc/smi_nic_subsystem.h`) is:
 
-1. **Compile-time flag**: Vendor modules are enabled via a CMake option
-   (for example, `ENABLE_BRCM_SMI=ON`). Vendor modules are off by default.
+   ```cpp
+   class SmiNicSubsystem {
+    public:
+     virtual void discover(const std::string& pci_path, const std::string& net_path,
+                           std::shared_ptr<amd::smi::nic::transport::NicTransport> transport) = 0;
+     virtual NicVendor vendor() const = 0;
+     virtual bool driver_loaded(const std::string& bdf, DriverType driver_type) const = 0;
+     virtual const std::vector<std::unique_ptr<SmiNic>>& get_nics() const = 0;
 
-2. **Vendor types are internal to the vendor module**: A vendor module may
-   define internal types prefixed with the vendor name (for example,
-   `brcmsmi_status_t`, `brcmsmi_nic_info_t`, `brcmsmi_bdf_t`) for use inside
-   its own sources. **These types must not appear in the public AMD SMI
-   header (`amdsmi.h`).** The public surface uses only `amdsmi_status_t`,
-   `amdsmi_bdf_t`, `amdsmi_processor_handle`, and the standard
-   `amdsmi_nic_*` structures. Keep vendor data structures (for example, the
-   vendor's `nic_info`) as close as possible to the corresponding
-   `amdsmi_nic_*` structures so the wrapper layer is a straight field copy.
+    protected:
+     std::pair<uint16_t, uint16_t> read_pci_ids(const std::string& sysfs_bus_path) const;
+     bool resolve_bdf(const std::string& symlink, std::string& bdf) const;
+   };
+   ```
 
-3. **Unified public API — no vendor-specific wrapper symbols**: A vendor
-   backend is consumed through the standard AMD SMI dispatch. Discovery uses
-   `amdsmi_get_processor_handles_by_type()`; queries use the existing
-   `amdsmi_get_nic_*` APIs. The dispatch layer (`src/amd_smi/amd_smi.cc`)
-   forwards calls to the vendor module's implementation and converts any
-   vendor status code or BDF to the AMD SMI equivalents at that boundary.
-   Add new vendor-specific `amdsmi_<vendor>_*` symbols only when a piece of
-   functionality genuinely cannot be expressed through the existing public API.
+   The protected helpers `read_pci_ids()` and `resolve_bdf()` are shared by every
+   plugin so vendors don't reimplement sysfs PCI parsing.
 
-4. **Generic string retrieval (vendor-internal)**: A vendor module may expose
-   a `<vendor>smi_getString()` helper for retrieving string-based information
-   from devices using method names (for example, `"get_nic_info"`,
-   `"get_nic_metrics"`). This is an internal convenience for the wrapper
-   layer and is not part of the public AMD SMI surface.
+3. **Discovery is id-match based.** `SmiNicSystem::discover_nics()`
+   (`src/smi_nic_system.cpp`) walks `/sys/bus/pci/devices` and `/sys/class/net`
+   and calls each registered plugin's `discover()`. A plugin scans the PCI path,
+   uses `read_pci_ids()` to match its own `VENDOR_ID`/`DEVICE_ID`, builds a
+   `SmiNic` for each match, then associates network ports with it. The system
+   aggregates every plugin's `get_nics()` into one BDF-sorted list.
 
-5. **Python interface uses the public AMD SMI API only**: All Python
-   bindings live in `py-interface/amdsmi_interface.py` and
-   `py-interface/amdsmi_wrapper.py` and bind only to the public `amdsmi.h`
-   symbols. No vendor-specific Python wrapper module is needed.
+4. **Ports reuse the shared ethtool transport.** Port objects (`SmiNicPort`)
+   already own a transport created via
+   `create_transport(NicBackend_t::Auto)` (`inc/smi_nic_transport.h`). `Auto`
+   tries the netlink backend first (kernel 5.6+ with libnl-3, built only when
+   `HAVE_LIBNL3` is defined) and falls back to the ioctl backend. A plugin that
+   builds on `SmiNic`/`SmiNicPort` inherits FEC, pause, link-settings, driver
+   info, and ethtool statistics for free. It does not need to create a
+   transport of its own.
 
-6. **Unified CLI**: The AMD SMI CLI (`amdsmi_cli/amdsmi_commands.py`) lists
-   and queries all NIC backends through the same code path. For example,
-   `amd-smi list` and `amd-smi monitor -nic` enumerate every NIC processor
-   handle returned by the public API — AMD AI NIC and vendor NICs alike —
-   with no per-vendor delegation class.
+5. **Public surface stays unified.** Plugins are internal to `amdsminic`. They
+   do not add symbols to `amdsmi.h`; all access is through the standard
+   `amdsmi_get_nic_*` APIs, which the dispatch layer forwards into the library's
+   `smi_nic_*` C interface.
 
-### Building with vendor SMI support
+The reference plugin is Pensando/ionic
+(`src/vendors/pensando/pensando_subsystem.{h,cpp}`):
 
-To build AMD SMI with Broadcom NIC support:
-
-```bash
-mkdir build && cd build
-cmake .. -DENABLE_BRCM_SMI=ON
-make -j$(nproc)
+```cpp
+class SmiNicSubsystemPensando : public SmiNicSubsystem {
+  // ...
+ private:
+  static constexpr uint16_t VENDOR_ID = 0x1dd8;
+  static constexpr uint16_t DEVICE_ID = 0x0008;   // PCI bridge
+  static constexpr uint16_t PORT_ID   = 0x1002;   // downstream port function
+};
 ```
 
-When `ENABLE_BRCM_SMI=OFF` (the default), all BRCM-specific code is excluded
-and the NIC CLI commands display:
-```
-ERROR | NIC monitoring requires BRCM SMI support. Rebuild with -DENABLE_BRCM_SMI=ON
+Its `discover()` matches `VENDOR_ID`/`DEVICE_ID` for the bridge, then
+`discover_ports()` walks `/sys/class/net`, resolves each interface's PCI BDF,
+matches `PORT_ID`, confirms the port is downstream of the bridge, and collects
+InfiniBand/RDMA info and statistics on each accepted port.
+
+```mermaid
+flowchart LR
+    App[User Application / CLI / Python] --> AmdSmi[libamd_smi.so<br/>Public API: amdsmi.h]
+    AmdSmi --> Dispatch[Dispatch layer<br/>src/amd_smi/amd_smi.cc]
+    Dispatch --> NicLib[amdsminic static lib<br/>smi_nic_interface.h]
+    NicLib --> System[SmiNicSystem<br/>discover_nics]
+    System --> Registry[make_default_vendor_plugins]
+    Registry --> Pensando[Pensando plugin<br/>src/vendors/pensando/]
+    Registry --> VendorX[Other vendor plugin<br/>src/vendors/&lt;name&gt;/]
+    Pensando --> Transport[Shared ethtool transport<br/>ioctl / netlink]
+    VendorX --> Transport
+    Transport --> Sysfs[(Linux sysfs / netdev /<br/>infiniband / ethtool)]
 ```
 
 ---
@@ -236,6 +241,7 @@ Examples:
 - `amdsmi_get_nic_asic_info()`
 - `amdsmi_get_nic_bus_info()`
 - `amdsmi_get_nic_port_info()`
+- `amdsmi_get_nic_telemetry()`
 - `amdsmi_get_nic_rdma_port_statistics()`
 
 ### Parameter conventions
@@ -306,6 +312,7 @@ typedef struct {
     char     part_number[AMDSMI_MAX_STRING_LENGTH];
     char     serial_number[AMDSMI_MAX_STRING_LENGTH];
     char     vendor_name[AMDSMI_MAX_STRING_LENGTH];
+    uint32_t capability;
 } amdsmi_nic_asic_info_t;
 ```
 
@@ -315,7 +322,8 @@ typedef struct {
 - `subvendor_id`: `/sys/bus/pci/devices/<BDF>/subsystem_vendor`
 - `subsystem_id`: `/sys/bus/pci/devices/<BDF>/subsystem_device`
 - `revision`: `/sys/bus/pci/devices/<BDF>/revision`
-- `product_name`, `part_number`, `serial_number`: VPD data, read from `/sys/bus/pci/devices/<BDF>/vpd` when present, with `lspci -vvv -s <BDF>` as a fallback for devices that don't expose the sysfs VPD entry.
+- `product_name`, `part_number`, `serial_number`: VPD data, parsed from `/sys/bus/pci/devices/<BDF>/vpd` when present. When the device exposes no sysfs VPD entry, `product_name` and `part_number` are reported as unavailable; `serial_number` falls back to the devlink board serial (`DEVLINK_ATTR_INFO_BOARD_SERIAL_NUMBER`) and is reported as unavailable only when that is also absent. The devlink `DEVLINK_ATTR_INFO_SERIAL_NUMBER` attribute is deliberately *not* used — it is a MAC-derived EUI, not the physical board serial.
+- `capability`: bitmask of `amdsmi_nic_capability_bits_t` — `AMDSMI_NIC_CAP_FWCTL` (firmware-control management function, e.g. Pensando/POLLARA) and `AMDSMI_NIC_CAP_NETDEV` (host network port(s) present). Derived from the discovered device, not sysfs.
 
 ### NIC bus information
 
@@ -382,7 +390,7 @@ typedef struct {
     char     type[AMDSMI_MAX_STRING_LENGTH];
     char     flavour[AMDSMI_MAX_STRING_LENGTH];
     char     netdev[AMDSMI_MAX_STRING_LENGTH];
-    uint8_t  ifindex;
+    uint32_t ifindex;
     char     mac_address[AMDSMI_MAX_STRING_LENGTH];
     uint8_t  carrier;
     uint16_t mtu;
@@ -400,6 +408,10 @@ typedef struct {
     amdsmi_nic_port_t ports[AMDSMI_MAX_NIC_PORTS];
 } amdsmi_nic_port_info_t;
 ```
+
+The port fields sourced from ethtool (`active_fec`, the `pause_*` fields, and
+`link_speed`) are populated through the shared transport layer described in
+[Vendor plugin architecture](#vendor-plugin-architecture).
 
 **Active FEC bitmask values** (example mapping from `ethtool_fecparam`):
 
@@ -427,6 +439,61 @@ typedef struct {
     char name[AMDSMI_MAX_STRING_LENGTH];
     char version[AMDSMI_MAX_STRING_LENGTH];
 } amdsmi_nic_driver_info_t;
+```
+
+### NIC firmware information
+
+```c
+typedef struct {
+    char name[AMDSMI_MAX_STRING_LENGTH];
+    char version[AMDSMI_MAX_STRING_LENGTH];
+} amdsmi_nic_fw_t;
+
+typedef struct {
+    uint32_t        num_fw;
+    amdsmi_nic_fw_t fw[AMDSMI_MAX_NIC_FW];
+} amdsmi_nic_fw_info_t;
+```
+
+### NIC telemetry
+
+Live temperature, health, and port-split state. Temperature is read via
+sysfs/hwmon; health and port-split come over devlink (libnl3). A metric the NIC
+does not expose is reported through a width-max sentinel in its sub-struct
+(`UINT16_MAX`, `UINT32_MAX`, or `UINT8_MAX`), not a failed call.
+
+```c
+typedef enum {
+    AMDSMI_NIC_HEALTH_UNKNOWN = 0,      // reserved: reporter present, state indeterminate
+    AMDSMI_NIC_HEALTH_HEALTHY = 1,
+    AMDSMI_NIC_HEALTH_WARNING = 2,      // reserved: no producing path yet
+    AMDSMI_NIC_HEALTH_ERROR = 3,
+    AMDSMI_NIC_HEALTH_UNSUPPORTED = 4,  // no health reporter exposed
+} amdsmi_nic_health_state_t;
+
+typedef struct {
+    uint16_t asic_temp_c;
+    uint16_t transceiver_temp_c;
+    uint16_t board_temp_c;
+} amdsmi_nic_temperature_t;
+
+typedef struct {
+    uint8_t  state;          // an amdsmi_nic_health_state_t value
+    uint8_t  reserved[3];
+    uint32_t error_count;    // UINT32_MAX when unavailable; real counts saturate to UINT32_MAX-1
+    char     reporter[64];   // devlink reporter name; "" if none
+} amdsmi_nic_health_t;
+
+typedef struct {
+    uint8_t splittable;
+    uint8_t split_count;
+} amdsmi_nic_port_split_t;
+
+typedef struct {
+    amdsmi_nic_temperature_t temperature;
+    amdsmi_nic_health_t      health;
+    amdsmi_nic_port_split_t  port_split;
+} amdsmi_nic_telemetry_t;
 ```
 
 ### NIC RDMA device information
@@ -465,8 +532,8 @@ typedef struct {
 } amdsmi_nic_stat_t;
 ```
 
-Used by both `amdsmi_get_nic_rdma_port_statistics()` and
-`amdsmi_get_nic_vendor_statistics()`.
+Used by `amdsmi_get_nic_rdma_port_statistics()`,
+`amdsmi_get_nic_port_statistics()`, and `amdsmi_get_nic_vendor_statistics()`.
 
 ---
 
@@ -476,17 +543,16 @@ The canonical reference for every AMD SMI public API is the header
 [`projects/amdsmi/include/amd_smi/amdsmi.h`](../../include/amd_smi/amdsmi.h)
 and the rendered Sphinx documentation at the
 [AMD SMI documentation](https://rocm.docs.amd.com/projects/amdsmi/en/latest/).
-For end-to-end usage examples, see
-[`amd_smi_nic.cc`](../../example/amd_smi_nic.cc) for NIC queries and the BRCM
-examples listed in the [Code organization](#code-organization) section. The
-summaries below provide a NIC-focused subset of that reference; use the header
-and the in-tree examples as the source of truth.
+For an end-to-end usage example, see
+[`amd_smi_nic.cc`](../../example/amd_smi_nic.cc). The summaries below provide a
+NIC-focused subset of that reference; use the header and the in-tree example as
+the source of truth.
 
 :::{note}
 The signatures listed in this section reflect the **bare-metal (BM) AMD SMI**
 library. The host AMD SMI library is a separate codebase with its own user
 guide; see
-[amd/MxGPU-Virtualization — `smi-lib`](https://github.com/amd/MxGPU-Virtualization/tree/staging/smi-lib)
+[amd/MxGPU-Virtualization (`smi-lib`)](https://github.com/amd/MxGPU-Virtualization/tree/staging/smi-lib)
 and the
 [AMD SMI for virtualization user guide](https://instinct.docs.amd.com/projects/amd-smi-virt/en/latest/).
 :::
@@ -510,13 +576,14 @@ amdsmi_status_t amdsmi_get_socket_handles(uint32_t *socket_count,
                                           amdsmi_socket_handle *socket_handles);
 
 // Get processor handles filtered by type
-// Supports: AMDSMI_PROCESSOR_TYPE_AMD_NIC and other vendor-specific NIC types
 amdsmi_status_t amdsmi_get_processor_handles_by_type(
     amdsmi_socket_handle socket_handle,
     amdsmi_processor_type_t processor_type,
     amdsmi_processor_handle *processor_handles,
     uint32_t *processor_count);
 ```
+
+NIC handles are requested with `processor_type = AMDSMI_PROCESSOR_TYPE_AMD_NIC`.
 
 **Two-call pattern for discovery:**
 
@@ -549,6 +616,16 @@ amdsmi_status_t amdsmi_get_nic_driver_info(
     amdsmi_processor_handle processor_handle,
     amdsmi_nic_driver_info_t *info);
 
+// NIC Firmware Information (firmware versions read over devlink/libnl3)
+amdsmi_status_t amdsmi_get_nic_fw_info(
+    amdsmi_processor_handle processor_handle,
+    amdsmi_nic_fw_info_t *info);
+
+// NIC Telemetry (temperature, health, port-split)
+amdsmi_status_t amdsmi_get_nic_telemetry(
+    amdsmi_processor_handle processor_handle,
+    amdsmi_nic_telemetry_t *info);
+
 // NIC Port Information
 amdsmi_status_t amdsmi_get_nic_port_info(
     amdsmi_processor_handle processor_handle,
@@ -578,12 +655,25 @@ amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(
 2. Allocate an array of `num_stats` elements.
 3. Call again with the allocated array.
 
-### NIC vendor statistics
+### NIC port statistics and vendor statistics
 
-This API uses a **two-call pattern**. It returns vendor-specific NIC counters
-for the requested NIC port. The vendor driver defines the exact set of counters.
+> **Not yet implemented.** `amdsmi_get_nic_port_statistics` and
+> `amdsmi_get_nic_vendor_statistics` currently return
+> `AMDSMI_STATUS_NOT_YET_IMPLEMENTED`. The counters exist in the NIC library's
+> transport layer but aren't bridged to the public API yet; the two-call
+> contract below describes the intended shape once that bridge lands.
+
+Both APIs use a **two-call pattern** and return per-port counters. Port
+statistics are the standard driver counters for a NIC port; vendor statistics
+are the driver-defined counters exposed via `ethtool -S`.
 
 ```c
+amdsmi_status_t amdsmi_get_nic_port_statistics(
+    amdsmi_processor_handle processor_handle,
+    uint32_t port_index,
+    uint32_t *num_stats,
+    amdsmi_nic_stat_t *stats);
+
 amdsmi_status_t amdsmi_get_nic_vendor_statistics(
     amdsmi_processor_handle processor_handle,
     uint32_t port_index,
@@ -599,233 +689,83 @@ amdsmi_status_t amdsmi_get_nic_vendor_statistics(
 
 ---
 
-## BRCM SMI integration in AMD SMI
+## Vendor plugin implementation
 
-When built with `ENABLE_BRCM_SMI=ON`, Broadcom NIC support is compiled into
-`libamd_smi.so` and exposed **through the standard public AMD SMI API — no
-parallel `amdsmi_brcm_*` symbols are added to `amdsmi.h`**. You discover and
-query Broadcom NICs the same way as AMD NICs:
+This section is for contributors working on the NIC library itself. Public
+consumers should use the `amdsmi_*` API described above; they never see the
+internal C interface or the C++ plugin classes discussed here.
 
-- **Discovery**: `amdsmi_get_processor_handles_by_type(socket, AMDSMI_PROCESSOR_TYPE_AMD_NIC, ...)`
-  returns processor handles for every NIC backend registered with the
-  dispatch layer (AMD AI NIC and any enabled vendor NICs such as BRCM).
-  Where a backend distinction is needed, vendor processor types may be
-  appended to `amdsmi_processor_type_t` (for example, a `*_BRCM_NIC` value) and
-  used as the type argument; the public query APIs remain the same.
-- **Queries**: the existing `amdsmi_get_nic_asic_info()`,
-  `amdsmi_get_nic_bus_info()`, `amdsmi_get_nic_numa_info()`,
-  `amdsmi_get_nic_port_info()`, `amdsmi_get_nic_rdma_dev_info()`,
-  `amdsmi_get_nic_rdma_port_statistics()`, and
-  `amdsmi_get_nic_vendor_statistics()` are dispatched to the BRCM backend
-  when the handle belongs to a Broadcom device.
-- **Status and BDF**: all public-facing return codes and bus identifiers use
-  `amdsmi_status_t` and the standard `amdsmi` BDF representation. Vendor
-  status codes and BDFs are an implementation detail of the vendor module
-  and are converted by the dispatch or wrapper layer at the public boundary
-  (see [BRCM SMI native C API](#brcm-smi-native-c-api-brcmsmih)).
+### Internal C interface (`smi_nic_interface.h`)
 
-The public AMD SMI surface for Broadcom NIC support is the same as for AMD
-NICs; no Broadcom-specific examples are needed at this level. See
-[Example: Querying NIC information \(C)](#example-querying-nic-information-c)
-and [Example: Querying NIC information (Python)](#example-querying-nic-information-python).
-
----
-
-## BRCM SMI native C API (`brcmsmi.h`)
-
-The standalone BRCM SMI library (`brcm-smi/include/brcm_smi/brcmsmi.h`) is the
-**internal** C API used by the AMD SMI dispatch layer when forwarding NIC
-queries to the Broadcom backend. This section is for contributors working on
-the vendor module itself; **use the `amdsmi_*` API for all public access**
-(see [BRCM SMI integration in AMD SMI](#brcm-smi-integration-in-amd-smi)).
-
-:::{note}
-`brcmsmi_status_t`, `brcmsmi_bdf_t`, and the `brcmsmi_processor_handle` and
-`brcmsmi_socket_handle` opaque handle types are **internal to this vendor
-module**. The wrapper layer in `src/amd_smi/amd_smi.cc` converts them to
-`amdsmi_status_t` and the standard `amdsmi` BDF representation at the public
-boundary. None of these vendor types appear in `amdsmi.h`.
-:::
-
-### Key types (internal)
+The `amdsminic` static library exposes a vendor-neutral C interface,
+`include/amd_smi/impl/nic/amdsmi_unified/interface/smi_nic_interface.h`, that the
+AMD SMI dispatch layer (`src/amd_smi/amd_smi.cc`) calls. It is context-based:
 
 ```c
-#define BRCMSMI_MAX_STRING_LENGTH 256
+smi_nic_status_t smi_nic_create_context(smi_nic_ctx_t* ctx);
+smi_nic_status_t smi_nic_destroy_context(smi_nic_ctx_t ctx);
+smi_nic_status_t smi_discover_nics(smi_nic_ctx_t ctx, smi_nic_discovery_t* discovery);
 
-typedef enum {
-    BRCMSMI_STATUS_SUCCESS = 0,
-    BRCMSMI_STATUS_INVALID_ARGS,
-    BRCMSMI_STATUS_NOT_SUPPORTED,
-    BRCMSMI_STATUS_FILE_ERROR,
-    BRCMSMI_STATUS_PERMISSION,
-    BRCMSMI_STATUS_OUT_OF_RESOURCES,
-    BRCMSMI_STATUS_INTERNAL_EXCEPTION,
-    BRCMSMI_STATUS_INIT_ERROR,
-    BRCMSMI_STATUS_NOT_INITIALIZED,
-    BRCMSMI_STATUS_ALREADY_INITIALIZED,
-    BRCMSMI_STATUS_INSUFFICIENT_SIZE,
-    BRCMSMI_STATUS_NOT_FOUND
-} brcmsmi_status_t;            // converted to amdsmi_status_t at the wrapper
-
-typedef enum {
-    BRCMSMI_PROCESSOR_TYPE_NIC,
-    BRCMSMI_PROCESSOR_TYPE_ALL
-} brcmsmi_processor_type_t;
-
-typedef void* brcmsmi_processor_handle;   // never exposed in amdsmi.h
-typedef void* brcmsmi_socket_handle;      // never exposed in amdsmi.h
-
-typedef struct {                          // converted to amdsmi BDF at the wrapper
-    uint64_t domain_number;
-    uint64_t bus_number;
-    uint64_t device_number;
-    uint64_t function_number;
-} brcmsmi_bdf_t;
+smi_nic_status_t smi_get_nic_asic_info(smi_nic_ctx_t ctx, uint64_t device,
+                                       smi_nic_asic_info_t* info);
+smi_nic_status_t smi_get_nic_bus_info(smi_nic_ctx_t ctx, uint64_t device,
+                                      smi_nic_bus_info_t* info);
+// ...and the remaining smi_get_nic_* queries.
 ```
 
-### Key structures (internal)
+`smi_nic_status_t` and the `smi_nic_*` structures are **internal to the NIC
+library**. The dispatch layer converts them to `amdsmi_status_t` and the
+`amdsmi_nic_*` structures at the public boundary; none of the `smi_nic_*` types
+appear in `amdsmi.h`.
 
-Keep vendor structures as close as possible to the corresponding public
-`amdsmi_nic_*` structures so the wrapper layer is a straight field copy:
+### C++ plugin layer
 
-```c
-typedef struct {
-    char nic_device_name[BRCMSMI_MAX_STRING_LENGTH];
-    char nic_part_number[BRCMSMI_MAX_STRING_LENGTH];
-    char nic_firmware_version[BRCMSMI_MAX_STRING_LENGTH];
-    char nic_uuid[BRCMSMI_MAX_STRING_LENGTH];
-    brcmsmi_bdf_t nic_bdf;
-} brcmsmi_nic_info_t;
+Behind the C interface, `SmiNicSystem` (`src/smi_nic_system.cpp`) drives
+discovery through the vendor plugins:
 
-typedef struct {
-    uint32_t nic_temp_input;
-    uint32_t nic_temp_max;
-    uint32_t nic_temp_crit;
-    uint32_t nic_temp_emergency;
-    uint32_t nic_temp_shutdown;
-    // alarm fields
-} brcmsmi_nic_temperature_metric_t;
-```
+- Its constructor calls `make_default_vendor_plugins()` and registers each
+  returned `SmiNicSubsystem`.
+- `discover_nics()` iterates the registered plugins, calling
+  `discover("/sys/bus/pci/devices", "/sys/class/net", transport)` on each and collecting
+  their `get_nics()` into one BDF-sorted list.
+- `driver_loaded()` routes a query to the plugin whose `vendor()` matches the
+  NIC that owns the BDF.
 
-### Key functions (internal)
+The Pensando plugin (`src/vendors/pensando/`) is the reference implementation.
+It matches its PCI IDs during `discover()`, walks `/sys/class/net` in
+`discover_ports()` to associate ports with the device, and implements
+`driver_loaded()` for the `ionic` and `ionic_rdma` drivers.
 
-```c
-// Lifecycle
-brcmsmi_status_t brcmsmi_init(uint64_t init_flags);
-brcmsmi_status_t brcmsmi_shutdown();
+### Device discovery details (Pensando reference)
 
-// Discovery
-brcmsmi_status_t brcmsmi_discover_devices(brcmsmi_discovery_result_t *result);
-brcmsmi_status_t brcmsmi_get_socket_handles(uint32_t *socket_count,
-                                            brcmsmi_socket_handle *socket_handles);
+| Step | Mechanism |
+|------|-----------|
+| Bridge match | Scan `/sys/bus/pci/devices`; `read_pci_ids()` must equal `VENDOR_ID`/`DEVICE_ID`. |
+| Port match | Walk `/sys/class/net`; `resolve_bdf()` on each `<iface>/device`; `read_pci_ids()` must equal `VENDOR_ID`/`PORT_ID`. |
+| Downstream check | Confirm the port BDF resolves under the bridge BDF via the sysfs symlink path. |
+| Driver presence | `driver_loaded()` checks `/sys/bus/pci/drivers/ionic` and `/sys/bus/auxiliary/drivers/ionic_rdma.rdma`. |
 
-// Processor handles
-brcmsmi_status_t brcmsmi_get_nic_processor_handles(
-    brcmsmi_socket_handle socket_handle,
-    uint32_t *processor_count,
-    brcmsmi_processor_handle **processor_handles);
-
-// NIC queries
-brcmsmi_status_t brcmsmi_get_nic_info(brcmsmi_processor_handle handle,
-                                      brcmsmi_nic_info_t *info);
-brcmsmi_status_t brcmsmi_get_nic_temp_info(brcmsmi_processor_handle handle,
-                                           brcmsmi_nic_temperature_metric_t *info);
-brcmsmi_status_t brcmsmi_get_nic_power_info(brcmsmi_processor_handle handle,
-                                            brcmsmi_nic_hwmon_power_t *info);
-brcmsmi_status_t brcmsmi_get_nic_device_info(brcmsmi_processor_handle handle,
-                                             brcmsmi_nic_hwmon_device_t *info);
-brcmsmi_status_t brcmsmi_get_nic_fw_info(brcmsmi_processor_handle handle,
-                                         brcmsmi_nic_firmware_t *info);
-brcmsmi_status_t brcmsmi_get_nic_device_bdf(brcmsmi_processor_handle handle,
-                                            brcmsmi_bdf_t *bdf);
-
-// Generic string retrieval (internal helper)
-brcmsmi_status_t brcmsmi_getString(brcmsmi_processor_handle handle,
-                                   const char *method_name,
-                                   unsigned int value_length,
-                                   char *value);
-```
-
-:::{note}
-For full API documentation, see `brcm-smi/BRCM_SMI_DOCUMENTATION.md` in the
-repository.
-:::
-
-### BRCM device discovery details
-
-BRCM devices are discovered via sysfs:
-
-| Device type | Discovery path | Identification |
-|-------------|---------------|----------------|
-| NIC | `/sys/class/hwmon/` | Vendor ID `0x14e4` (via `<path>/device/vendor`) |
-
-The BRCM NIC driver must be loaded for NIC devices to appear under
-`/sys/class/hwmon`. Without the BRCM driver, NIC devices won't be discovered.
-
-### NIC monitor attributes
-
-| Attribute | Sysfs File | Description |
-|-----------|-----------|-------------|
-| `NIC_TEMP_CURRENT` | `temp1_input` | Current temperature (millidegrees) |
-| `NIC_TEMP_CRIT_ALARM` | `temp1_crit_alarm` | Critical temperature alarm |
-| `NIC_TEMP_EMERGENCY_ALARM` | `temp1_emergency_alarm` | Emergency temperature alarm |
-| `NIC_TEMP_SHUTDOWN_ALARM` | `temp1_shutdown_alarm` | Shutdown temperature alarm |
-| `NIC_TEMP_MAX_ALARM` | `temp1_max_alarm` | Max temperature alarm |
+The vendor's kernel driver must be loaded for its ports to appear under
+`/sys/class/net`; without it, no ports are discovered for that device.
 
 ---
 
 ## AMD SMI CLI commands for NIC
 
-The `amd-smi` CLI is **unified across all NIC backends**: the same commands
-operate on AMD AI NIC and any enabled vendor NICs (for example, Broadcom when
-built with `ENABLE_BRCM_SMI=ON`). There is no per-vendor CLI delegation —
-every NIC processor handle returned by the public API is enumerated through the
-same code path.
+The `amd-smi` CLI enumerates every NIC the library discovers through the same
+public discovery path used above. There is no per-vendor CLI code. NIC-capable
+subcommands accept a device selector:
 
-### List devices
-
-```bash
-# List all devices (GPUs and all NIC backends: AMD + vendor NICs)
-amd-smi list
+```
+-N, --nic <ID | BDF | UUID> ...
 ```
 
-Output includes every discovered NIC — AMD AI NIC and Broadcom NIC alike —
-with its BDF and UUID.
-
-### Monitor NIC devices
-
-```bash
-# Monitor NIC temperature and alarm attributes (all NIC backends)
-amd-smi monitor -nic
-```
-
-Displays real-time NIC temperature readings (current, critical alarm,
-emergency alarm, shutdown alarm, max alarm) for every NIC device.
-
-### NIC metrics
-
-```bash
-# Get NIC metrics (power, temperature, errors) for all NIC backends
-amd-smi metric -nic
-```
-
-### NIC topology
-
-```bash
-# Show NIC topology information
-amd-smi topology -nic
-```
-
-Shows the relationship between NIC devices, GPU devices, and NUMA nodes.
-
-### Dump NIC information
-
-```bash
-# Dump comprehensive NIC information (all backends) to file
-amd-smi dump --nic --file output.txt
-```
-
-Collects PCI device information, lspci output, and detailed device data.
+`amd-smi list` includes discovered NICs alongside GPUs, and `amd-smi static`
+reports NIC identity details (BDF, product name, part/serial number, vendor)
+when a NIC is selected with `-N/--nic`. `amd-smi metric --nic` reports NIC
+telemetry (temperature, health, port-split) and `amd-smi firmware --nic` reports
+NIC firmware versions. The selector works only when you initialize NIC discovery
+(see [Initialization flags](#initialization-flags)).
 
 ---
 
@@ -837,15 +777,13 @@ Collects PCI device information, lspci output, and detailed device data.
 |------|-----------|
 | PCI device | `/sys/bus/pci/devices/<BDF>/` |
 | Network interface | `/sys/class/net/<iface>/device/` |
-| Hwmon (via net iface) | `/sys/class/net/<iface>/device/hwmon/hwmonX/` |
+| InfiniBand / RDMA | `/sys/class/infiniband/<dev>/ports/<N>/` |
 | PCI power runtime | `/sys/bus/pci/devices/<BDF>/power/` |
 
 ### NIC sysfs mapping
 
 | Data Category | Sysfs Files |
 |--------------|-------------|
-| Temperature | `temp1_input`, `temp1_max`, `temp1_crit`, `temp1_emergency`, `temp1_shutdown`, `temp1_*_alarm` |
-| Power Runtime | `power/async`, `power/control`, `power/runtime_status`, `power/runtime_active_time`, `power/runtime_suspended_time`, `power/runtime_usage`, `power/runtime_active_kids`, `power/runtime_enabled` |
 | PCI Device Info | `vendor`, `device`, `subsystem_vendor`, `subsystem_device`, `revision`, `class`, `modalias`, `reset_method` |
 | PCIe Link | `current_link_speed`, `max_link_speed`, `current_link_width`, `max_link_width` |
 | DMA | `dma_mask_bits`, `consistent_dma_mask_bits` |
@@ -854,10 +792,13 @@ Collects PCI device information, lspci output, and detailed device data.
 | SR-IOV | `sriov_numvfs`, `sriov_totalvfs`, `sriov_offset`, `sriov_stride`, `sriov_vf_device`, `sriov_vf_total_msix`, `sriov_drivers_autoprobe` |
 | ARI | `ari_enabled` |
 | PCI Power State | `power_state`, `d3cold_allowed`, `broken_parity_status` |
-| Wakeup | `power/wakeup`, `power/wakeup_count`, `power/wakeup_active_count`, `power/wakeup_abort_count`, `power/wakeup_expire_count`, `power/wakeup_last_time_ms`, `power/wakeup_max_time_ms`, `power/wakeup_total_time_ms` |
+| Power Runtime | `power/control`, `power/runtime_status`, `power/runtime_active_time`, `power/runtime_suspended_time`, `power/runtime_usage`, `power/runtime_enabled` |
 | NUMA | `numa_node` |
 | CPU Affinity | `/sys/devices/system/node/node<N>/cpulist` |
-| VPD Data | Via `lspci -vvv -s <BDF>` (part number, serial number, firmware version) |
+| Network port | `/sys/class/net/<iface>/` (`address`, `mtu`, `carrier`, `operstate`, `speed`, `dev_port`, `ifindex`, `type`) |
+| RDMA | `/sys/class/infiniband/<dev>/` (`node_guid`, `node_type`, `sys_image_guid`, `fw_ver`, `ports/<N>/state`, `ports/<N>/counters/*`) |
+| VPD Data | `/sys/bus/pci/devices/<BDF>/vpd` when present (product name, part number, serial number) |
+| Board serial (fallback) | devlink `DEVLINK_ATTR_INFO_BOARD_SERIAL_NUMBER` — serial-number source when VPD is absent |
 
 ---
 
@@ -867,159 +808,121 @@ Collects PCI device information, lspci output, and detailed device data.
 build under ROCm, which is the focus of this contribution guide. The Host AMD
 SMI library is a **separate codebase** with its own rules, conventions, and
 build system (see
-[amd/MxGPU-Virtualization — `smi-lib`](https://github.com/amd/MxGPU-Virtualization/tree/staging/smi-lib)
+[amd/MxGPU-Virtualization (`smi-lib`)](https://github.com/amd/MxGPU-Virtualization/tree/staging/smi-lib)
 and the
 [AMD SMI for virtualization user guide](https://instinct.docs.amd.com/projects/amd-smi-virt/en/latest/)).
 The only components shared between the two are:
 
 - the **public header** `include/amd_smi/amdsmi.h` (the common API subset), and
-- the **NIC library** sources under `src/nic/` (and any associated headers
-  under `include/amd_smi/impl/nic/`).
+- the **NIC library** sources under `src/nic/` (and its interface headers under
+  `include/amd_smi/impl/nic/`).
 
-Vendor SMI modules such as `brcm-smi/` are part of the BM tree shown below.
-When modifying the NIC library or the public header, contributors should keep
-in mind that those changes are consumed by both the BM build and the host
-build and must remain compatible across them. Anything outside the two shared
-components above is BM-specific.
+When modifying the NIC library or the public header, keep in mind that those
+changes are consumed by both the BM build and the host build and must remain
+compatible across them. Anything outside the two shared components above is
+BM-specific.
 
 The AMD SMI NIC implementation (BM build) follows this directory structure:
 
 ```
 projects/amdsmi/
 ├── include/amd_smi/
-│   ├── amdsmi.h                          # Public API header (structs + function declarations)
+│   ├── amdsmi.h                              # Public API header (structs + function declarations)
 │   └── impl/
-│       ├── amd_smi_common.h              # Internal common definitions
-│       ├── amd_smi_utils.h               # Utility functions (sysfs readers, helpers)
-│       └── nic/
-│           ├── amd_smi_ainic_device.h    # AMD NIC device class
-│           └── <vendor>_device.h         # Vendor-specific NIC device class(es)
+│       ├── amd_smi_common.h                  # Internal common definitions
+│       ├── amd_smi_utils.h                   # Utility functions (sysfs readers, helpers)
+│       └── nic/amdsmi_unified/interface/
+│           └── smi_nic_interface.h           # Internal C interface consumed by the dispatch layer
 ├── src/
 │   ├── amd_smi/
-│   │   ├── amd_smi.cc                   # Main API implementation (dispatch layer)
-│   │   ├── amd_smi_system.cc            # System-level init, device discovery
-│   │   └── amd_smi_utils.cc             # Sysfs reading utilities
-│   └── nic/
-│       ├── ai-nic/                       # AMD NIC (Pensando/ionic) implementation
-│       │   ├── inc/                      # Internal headers
-│       │   ├── src/                      # Implementation sources
-│       │   └── interface/                # Library API exposed to AMD SMI dispatch
-│       └── <vendor>/                     # Vendor-specific NIC implementation
-│           ├── <vendor>_nic_device.cc    # NIC device methods
-│           └── <vendor>_sysfs.cc         # Sysfs/data-source queries
-├── brcm-smi/                             # Broadcom vendor SMI module (self-contained)
-│   ├── include/brcm_smi/
-│   │   ├── brcmsmi.h                     # BRCM SMI internal C header (vendor types + APIs)
-│   │   ├── brcm_smi_device.h             # Device management classes
-│   │   ├── brcm_smi_discovery.h          # Device discovery interface
-│   │   └── impl/                         # Internal implementation headers
-│   │       ├── brcm_smi_nic_device.h
-│   │       ├── brcm_smi_lspci_commands.h
-│   │       ├── brcm_smi_processor.h
-│   │       ├── brcm_smi_socket.h
-│   │       └── brcm_smi_system.h
-│   ├── src/
-│   │   ├── brcm_smi.cc                  # Core init/shutdown/queries/getString
-│   │   ├── brcm_smi_discovery.cc         # Device discovery (sysfs scanning)
-│   │   ├── brcm_smi_device.cc            # Device manager
-│   │   ├── brcm_smi_nic_device.cc        # NIC device methods
-│   │   ├── brcm_smi_lspci_commands.cc    # lspci data extraction
-│   │   ├── brcm_smi_socket.cc
-│   │   ├── brcm_smi_processor.cc
-│   │   ├── brcm_smi_system.cc
-│   │   └── brcm_smi_utils.cc
-│   ├── cmake/
-│   │   └── brcm_smi_config.cmake.in
-│   ├── CMakeLists.txt
-│   └── BRCM_SMI_DOCUMENTATION.md         # Full BRCM SMI documentation
+│   │   ├── amd_smi.cc                        # Public API implementation (dispatch layer)
+│   │   ├── amd_smi_system.cc                 # System-level init, device discovery
+│   │   └── amd_smi_utils.cc                  # Sysfs reading utilities
+│   └── nic/ai-nic/amdsmi_unified/            # amdsminic static library
+│       ├── CMakeLists.txt                    # Explicit CPP_SRCS list; add new sources here (no globbing)
+│       ├── inc/                              # Internal headers
+│       │   ├── smi_nic.h                     # SmiNic / SmiNicPort / SmiInfiniBand
+│       │   ├── smi_nic_subsystem.h           # SmiNicSubsystem base interface + shared helpers
+│       │   ├── smi_nic_system.h              # SmiNicSystem
+│       │   ├── smi_nic_transport.h           # NicTransport + create_transport() factory
+│       │   ├── smi_nic_vpd.h                  # PCI VPD (Vital Product Data) TLV parser interface
+│       │   ├── smi_ethtool_ioctl.h           # ethtool ioctl helpers (ioctl transport)
+│       │   ├── smi_devlink_netlink.h         # devlink-over-netlink helpers
+│       │   ├── netlink_wrapper.h             # NLSocket / NLMessage (libnl-3 RAII wrappers)
+│       │   ├── netlink_generic.h             # GenericNetlinkClient (generic netlink)
+│       │   ├── netlink_ethtool.h             # EthtoolNetlinkClient (ethtool over netlink)
+│       │   └── smi_sysfs.h                   # Sysfs readers
+│       └── src/
+│           ├── smi_nic.cpp                   # SmiNic / SmiNicPort (owns the Auto transport)
+│           ├── smi_nic_system.cpp            # SmiNicSystem::discover_nics()
+│           ├── smi_nic_subsystem.cpp         # read_pci_ids() / resolve_bdf() helpers
+│           ├── smi_nic_interface.cpp         # C interface implementation
+│           ├── smi_nic_transport_ioctl.cpp   # ioctl transport backend + create_transport() factory
+│           ├── smi_nic_transport_netlink.cpp # netlink transport backend (built when HAVE_LIBNL3)
+│           ├── smi_ethtool_ioctl.cpp         # ethtool ioctl backend
+│           ├── smi_nic_vpd.cpp               # PCI VPD TLV parser (product/part/serial)
+│           ├── smi_devlink_netlink.cpp       # devlink-over-netlink backend
+│           ├── netlink_wrapper.cpp           # libnl-3 socket/message wrappers
+│           ├── netlink_generic.cpp           # generic netlink (genl) client
+│           ├── netlink_ethtool.cpp           # ethtool-over-netlink client
+│           ├── smi_sysfs.cpp
+│           └── vendors/
+│               ├── vendor_registry.{h,cpp}   # make_default_vendor_plugins()
+│               ├── pensando/
+│               │   └── pensando_subsystem.{h,cpp}  # Reference vendor plugin (registered)
+│               └── broadcom/
+│                   └── broadcom_subsystem.{h,cpp}  # Broadcom plugin (compiled and registered)
 ├── py-interface/
-│   ├── amdsmi_interface.py               # Python wrapper (high-level, public AMD SMI API only)
-│   └── amdsmi_wrapper.py                 # Python ctypes bindings to amdsmi.h
+│   ├── amdsmi_interface.py                   # Python wrapper (high-level, public AMD SMI API only)
+│   └── amdsmi_wrapper.py                     # Python ctypes bindings to amdsmi.h (auto-generated)
 ├── amdsmi_cli/
-│   ├── amdsmi_commands.py                # Unified CLI command implementations (all NIC backends)
-│   └── amdsmi_parser.py                  # CLI argument parsing
-├── example/
-│   ├── amd_smi_nic.cc                   # AMD NIC C++ example (public AMD SMI API)
-│   ├── brcm_smi_discovery_example.cc     # BRCM device discovery example (internal vendor API)
-│   ├── brcm_smi_nic_example.cc           # BRCM NIC monitoring example (internal vendor API)
-│   ├── brcm_smi_unified_example.cc       # Unified AMD SMI + BRCM integration example
-│   └── BRCM_SMI_EXAMPLES_README.md       # BRCM examples documentation
-└── tests/
-    └── amd_smi_test/functional/
-        ├── sys_info_read.cc              # NIC integration tests
-        └── brcm_smi_read.cc              # BRCM SMI functional tests
-```
-
-### Vendor SMI module integration (visualization)
-
-The diagram below shows how a vendor SMI module (BRCM SMI shown as the
-reference) plugs into the AMD SMI dispatch layer. The same pattern applies to
-any future vendor module.
-
-```mermaid
-flowchart LR
-    App[User Application / CLI / Python] --> AmdSmi[libamd_smi.so<br/>Public API: amdsmi.h]
-    AmdSmi --> Dispatch{Dispatch by<br/>amdsmi_processor_type_t}
-    Dispatch --> AmdNic[AMD NIC backend<br/>src/nic/ai-nic/]
-    Dispatch --> Brcm[BRCM SMI Module<br/>brcm-smi/<br/>ENABLE_BRCM_SMI=ON]
-    Dispatch --> VendorX[Other Vendor Module<br/>vendor-smi/]
-    AmdNic --> Sysfs[(Linux sysfs / hwmon /<br/>lspci / ethtool)]
-    Brcm --> Sysfs
-    VendorX --> Sysfs
+│   ├── amdsmi_commands.py                    # Unified CLI command implementations
+│   └── amdsmi_parser.py                      # CLI argument parsing
+└── example/
+    └── amd_smi_nic.cc                        # NIC C++ example (public AMD SMI API)
 ```
 
 ### Key integration points
 
-1. **Public header** (`include/amd_smi/amdsmi.h`): Contains all public data
-   structures and API declarations. Add new structs and functions here. Vendor
-   modules do **not** add parallel `amdsmi_<vendor>_*` symbols here — the
-   public surface stays unified.
+1. **Public header** (`include/amd_smi/amdsmi.h`): All public NIC structs and
+   API declarations. New NIC functionality is exposed here through unified
+   `amdsmi_get_nic_*` APIs. Vendor plugins do **not** add symbols here.
 
-2. **Dispatch layer** (`src/amd_smi/amd_smi.cc`): Routes API calls to the
-   correct device implementation based on processor type. Vendor-specific code
-   is compiled conditionally. The dispatch layer converts any vendor-internal
-   status code or BDF to `amdsmi_status_t` or `amdsmi_bdf_t` at the public
+2. **Dispatch layer** (`src/amd_smi/amd_smi.cc`): Routes public `amdsmi_get_nic_*`
+   calls into the `amdsminic` library's `smi_nic_*` C interface and converts the
+   library's status codes and structures to their `amdsmi_*` equivalents at the
    boundary.
 
-3. **Vendor SMI module** (`brcm-smi/`): Self-contained Broadcom SMI library
-   with its own internal header (`brcmsmi.h`), type system, and implementation.
-   Built into `libamd_smi.so` when `ENABLE_BRCM_SMI=ON`. Its types are not
-   exposed in `amdsmi.h`.
+3. **NIC library C interface**
+   (`include/amd_smi/impl/nic/amdsmi_unified/interface/smi_nic_interface.h`):
+   The vendor-neutral, context-based C API that the dispatch layer consumes.
 
-4. **Device classes** (under `include/amd_smi/impl/nic/` and
-   `brcm-smi/include/brcm_smi/impl/`): Each device type has a class that
-   implements device-specific queries.
+4. **Discovery and plugins** (`src/nic/ai-nic/amdsmi_unified/`): `SmiNicSystem`
+   drives discovery via `make_default_vendor_plugins()`; each plugin implements
+   `SmiNicSubsystem`. This is where a new vendor is added.
 
-5. **Sysfs readers** (under `src/nic/<vendor>/` and `brcm-smi/src/`):
-   The sysfs file reading logic. Utility functions read sysfs values as
-   integers or strings.
+5. **Shared transport** (`inc/smi_nic_transport.h`,
+   `src/smi_nic_transport_{ioctl,netlink}.cpp`): The ethtool transport used by
+   `SmiNicPort`. `create_transport()` selects the backend
+   (`NicBackend_t::{Auto, Ioctl, Netlink}`).
 
-6. **Discovery** (`src/amd_smi/amd_smi_system.cc` and
-   `brcm-smi/src/brcm_smi_discovery.cc`): Device enumeration and handle
-   creation during initialization.
+6. **Python interface** (`py-interface/amdsmi_interface.py`,
+   `py-interface/amdsmi_wrapper.py`): Bindings to the public `amdsmi.h` only. A
+   new backend is reachable from Python as soon as it is reachable from C; no
+   per-vendor Python module is needed.
 
-7. **Python interface** (`py-interface/amdsmi_interface.py`,
-   `py-interface/amdsmi_wrapper.py`): Python bindings to the public
-   `amdsmi.h` only. There is no vendor-specific Python wrapper module —
-   you access Broadcom NICs via the same `amdsmi_interface` calls as AMD NICs.
+7. **CLI** (`amdsmi_cli/amdsmi_commands.py`): Enumerates every NIC through the
+   public discovery API; no per-vendor delegation class.
 
-8. **CLI** (`amdsmi_cli/amdsmi_commands.py`): Unified command-line interface.
-   Commands such as `amd-smi list -nic`, `monitor -nic`, and `metric -nic`
-   enumerate every NIC backend through the public API — there is no per-vendor
-   delegation class.
-
-9. **Examples** (`example/amd_smi_nic.cc`, `example/brcm_smi_*_example.cc`):
-   The `amd_smi_nic.cc` example uses the public AMD SMI API and covers
-   Broadcom NICs as well when `ENABLE_BRCM_SMI=ON`. The
-   `brcm_smi_*_example.cc` files exercise the internal BRCM SMI library and
-   are intended for vendor-module contributors.
+8. **Example** (`example/amd_smi_nic.cc`): Uses the public AMD SMI API and
+   exercises every NIC backend.
 
 ---
 
 (example-querying-nic-information-c)=
 ## Example: Querying NIC information \(C)
 
-A complete, build-tested C/C++ example for querying AMD NIC ASIC, bus, NUMA,
+A complete, build-tested C/C++ example for querying NIC ASIC, bus, NUMA,
 port, and RDMA statistics is maintained in the repository at
 [projects/amdsmi/example/amd_smi_nic.cc](../../example/amd_smi_nic.cc). It is
 compiled as part of the `BUILD_EXAMPLES=ON` CMake target.
@@ -1037,8 +940,8 @@ error handling and all supported queries.
 int main() {
     amdsmi_status_t status;
 
-    // Initialize with AMD NIC support (use AMDSMI_INIT_ALL_PROCESSORS to also
-    // include GPUs, CPUs, and vendor NICs in the same process).
+    // Initialize with NIC support (use AMDSMI_INIT_ALL_PROCESSORS to also
+    // include GPUs and CPUs in the same process).
     status = amdsmi_init(AMDSMI_INIT_AMD_NICS);
     if (status != AMDSMI_STATUS_SUCCESS) {
         fprintf(stderr, "Failed to initialize AMD SMI: %d\n", status);
@@ -1072,6 +975,7 @@ int main() {
                 printf("  Product:      %s\n", asic.product_name);
                 printf("  Part Number:  %s\n", asic.part_number);
                 printf("  Serial:       %s\n", asic.serial_number);
+                printf("  Capability:   0x%08x\n", asic.capability);
             }
 
             // Query Bus info
@@ -1151,37 +1055,32 @@ try:
     for socket in sockets:
         # Discover NIC processors
         nic_handles = amdsmi.amdsmi_get_processor_handles_by_type(
-            socket, amdsmi.AmdSmiProcessorType.AMD_NIC
+            socket, amdsmi.AmdSmiProcessorType.AMD_AINIC
         )
 
         for idx, nic in enumerate(nic_handles):
-            # Query ASIC info
-            asic = amdsmi.amdsmi_get_nic_asic_info(nic)
+            # Summary info: BDF, product name, part/serial number, vendor
+            info = amdsmi.amdsmi_get_ainic_info(nic)
             print(f"NIC {idx}:")
-            print(f"  Vendor ID:   0x{asic['vendor_id']:04x}")
-            print(f"  Device ID:   0x{asic['device_id']:04x}")
-            print(f"  Product:     {asic['product_name']}")
-            print(f"  Part Number: {asic['part_number']}")
+            print(f"  BDF:           {info['bdf']}")
+            print(f"  Product Name:  {info['Product Name']}")
+            print(f"  Part Number:   {info['Part Number']}")
+            print(f"  Serial Number: {info['Serial Number']}")
+            print(f"  Vendor Name:   {info['Vendor Name']}")
 
-            # Query Bus info
-            bus = amdsmi.amdsmi_get_nic_bus_info(nic)
-            print(f"  BDF:         {bus['bdf']}")
-            print(f"  Max PCIe Width: {bus['max_pcie_width']}")
+            # Detailed info: pass detail=True for the full nested dict (ASIC IDs, etc.)
+            detail = amdsmi.amdsmi_get_ainic_info(nic, detail=True)
+            asic = detail["ASIC"]
+            print(f"  Vendor ID:     {asic['VENDOR_ID']}")
+            print(f"  Device ID:     {asic['DEVICE_ID']}")
+            print(f"  Revision:      {asic['REVISION']}")
+            print(f"  Capability:    {asic['CAPABILITY']}")  # e.g. ['FWCTL', 'NETDEV']
 
-            # Query Port info
-            ports = amdsmi.amdsmi_get_nic_port_info(nic)
-            for p_idx, port in enumerate(ports['ports']):
-                print(f"  Port {p_idx}:")
-                print(f"    Netdev:     {port['netdev']}")
-                print(f"    MAC:        {port['mac_address']}")
-                print(f"    Link State: {port['link_state']}")
-                print(f"    Link Speed: {port['link_speed']} Mb/s")
-
-            # Query RDMA port statistics (two-call pattern)
-            stats = amdsmi.amdsmi_get_nic_rdma_port_statistics(nic, rdma_port_index=0)
-            print(f"  RDMA Port 0 Statistics ({len(stats)}):")
-            for stat in stats:
-                print(f"    {stat['name']} = {stat['value']}")
+            # Firmware versions (name -> version). Not yet implemented: this call
+            # currently raises AmdSmiLibraryException(AMDSMI_STATUS_NOT_YET_IMPLEMENTED).
+            fw = amdsmi.amdsmi_get_nic_fw_info(nic)
+            for name, version in fw.items():
+                print(f"  FW {name}: {version}")
 finally:
     amdsmi.amdsmi_shut_down()
 ```
@@ -1192,99 +1091,40 @@ finally:
 
 ### Adding a new NIC vendor
 
-To add support for a new NIC vendor (for example, a new network card), you can
-choose from two integration approaches:
+Adding support for a new NIC vendor means adding a discovery plugin to the
+`amdsminic` library. The public API surface does not change: your devices are
+reported under `AMDSMI_PROCESSOR_TYPE_AMD_NIC` and queried through the existing
+`amdsmi_get_nic_*` APIs.
 
-#### Approach A: Direct integration (inline with AMD SMI)
+1. **Create the plugin sources** under
+   `src/nic/ai-nic/amdsmi_unified/src/vendors/<name>/`:
+   - Add `<name>_subsystem.{h,cpp}` with a class that derives from
+     `SmiNicSubsystem` (`inc/smi_nic_subsystem.h`) and implements `discover()`,
+     `vendor()`, `driver_loaded()`, and `get_nics()`.
+   - Match your hardware by PCI vendor/device ID in `discover()` using the
+     inherited `read_pci_ids()` helper; use `resolve_bdf()` to map a network
+     interface back to its PCI BDF. Follow `vendors/pensando/` as the model.
+   - Build your NIC and port objects on `SmiNic`/`SmiNicPort` so you inherit the
+     shared ethtool transport (FEC, pause, link settings, driver info,
+     statistics) and sysfs readers. The default `create_transport(Auto)` backend
+     already used by `SmiNicPort` needs no per-vendor setup.
 
-Suitable for simpler implementations:
+2. **Register the plugin** in
+   `src/nic/ai-nic/amdsmi_unified/src/vendors/vendor_registry.cpp`:
+   - `#include "<name>/<name>_subsystem.h"`.
+   - Add one `plugins.push_back(std::make_unique<SmiNicSubsystem<Name>>());`
+     line inside `make_default_vendor_plugins()`.
 
-1. **Define a processor type** in `amdsmi.h`:
-   ```c
-   AMDSMI_PROCESSOR_TYPE_<VENDOR>_NIC,
-   ```
+3. **Add the source(s) to CMake and re-run.** `CMakeLists.txt` enumerates
+   sources explicitly (no globbing): append your `.cpp` files to `CPP_SRCS`, or
+   to `CPP_SRCS_NETLINK` if they depend on libnl-3. Then re-run `cmake` (do not
+   rely on an incremental `make`).
 
-2. **Create a device class** under `include/amd_smi/impl/nic/`:
-   - Inherit from `AMDSmiProcessor`.
-   - Implement device query methods.
+4. **CLI and Python**: No changes needed. The unified CLI and the Python
+   bindings reach your devices through the public discovery API as soon as the
+   plugin is registered.
 
-3. **Create a sysfs reader class** under `include/amd_smi/impl/nic/`:
-   - Implement `init()`, `cleanup()`, and query methods.
-   - Read data from sysfs files or other standard Linux interfaces.
-
-4. **Implement source files** under `src/nic/<vendor>/`:
-   - Map sysfs files to AMD SMI struct fields.
-   - Use the provided sysfs utility functions for reading integer and string values, or implement equivalent readers.
-
-5. **Register device discovery** in `amd_smi_system.cc`:
-   - Add PCI vendor and device ID matching.
-   - Create processor handles during `amdsmi_init()`.
-
-6. **Add API dispatch** in `amd_smi.cc`:
-   - Map public API calls to the new device class methods.
-   - Use compile-time guards or runtime processor type checks for vendor-specific routing.
-
-7. **Map to public structs**:
-   - All public-facing data must use standard `amdsmi_nic_*` structures.
-   - Do **not** expose vendor-specific types in the public API.
-   - Internal vendor-specific structures may be used in implementation files.
-
-8. **Add Python bindings** in `amdsmi_wrapper.py` and `amdsmi_interface.py`.
-
-#### Approach B: Vendor SMI module (recommended for complex implementations)
-
-This is the approach used by Broadcom in PR #71. It is suitable for vendors
-with extensive hardware monitoring or existing libraries that warrant a separate
-module. The vendor module stays self-contained and is plugged into the unified
-AMD SMI dispatch — **no new vendor-specific symbols are added to the public
-`amdsmi.h`**.
-
-1. **Create a vendor SMI module** under `<vendor>-smi/`:
-   - Define an internal header (`<vendor>smi.h`) with device-specific types
-     and APIs for use *inside* the module only.
-   - Keep vendor data structures (for example, `<vendor>smi_nic_info_t`) as
-     close as possible to the corresponding public `amdsmi_nic_*` structures
-     so the wrapper layer is a straight field copy.
-   - Implement device discovery via sysfs scanning.
-   - Optionally implement a `<vendor>smi_getString()` helper for internal use.
-   - Include your own `CMakeLists.txt` and documentation.
-
-2. **Add CMake integration**:
-   - Add `option(ENABLE_<VENDOR>_SMI "Build <Vendor> SMI Library" OFF)` to
-     the root `CMakeLists.txt`.
-   - When enabled, add your sources to `CMN_SRC_LIST` and your headers to
-     `CMN_INC_LIST`.
-   - Define `ENABLE_<VENDOR>_SMI=1` as a compile definition.
-
-3. **Register with the dispatch layer** in `src/amd_smi/amd_smi.cc`:
-   - If needed, add a vendor processor-type value to `amdsmi_processor_type_t` in
-     `amdsmi.h` (for example, `AMDSMI_PROCESSOR_TYPE_<VENDOR>_NIC`).
-   - Wire device discovery into `amdsmi_init()` so the backend's handles are
-     returned by `amdsmi_get_processor_handles_by_type()`.
-   - In the dispatch for each `amdsmi_get_nic_*` public API, forward to the
-     vendor library function and **convert the vendor status code or BDF to
-     `amdsmi_status_t` or `amdsmi_bdf_t` at this boundary**. Don't propagate
-     vendor types past the wrapper.
-   - Add a new `amdsmi_<vendor>_*` public symbol only when the functionality
-     genuinely cannot be expressed through an existing or extended
-     `amdsmi_get_nic_*` API.
-
-4. **CLI**: No changes are needed. The unified CLI in
-   `amdsmi_cli/amdsmi_commands.py` automatically picks up your backend
-   through the public discovery API. Don't create a per-vendor
-   `<Vendor>SMICommands` delegation class.
-
-5. **Python interface**: No changes are needed. `py-interface/amdsmi_interface.py`
-   binds only to public `amdsmi.h` symbols, so your backend is reachable from
-   Python as soon as it is reachable from C. Don't create a
-   `<vendor>smi_interface.py`.
-
-6. **Add examples and tests**:
-   - Use the existing public-API example (`example/amd_smi_nic.cc`) for
-     end-to-end demonstrations — it exercises every NIC backend.
-   - Internal vendor-library examples (`example/<vendor>_smi_*.cc`) are
-     optional and intended for vendor-module contributors only.
-   - Add functional tests under `tests/`.
+5. **Tests**: Add functional tests under `tests/`.
 
 ### Data source strategy
 
@@ -1292,45 +1132,52 @@ The following rules govern *where* a backend should read its data from. They
 are the single most important guideline for keeping the public API surface
 generic across vendors.
 
-1. **sysfs first — for everything common.** Read all metrics, identifiers,
-   link state, hwmon sensor values, AER counters, SR-IOV state, power-runtime
-   state, and any other attribute exposed by the standard Linux PCI, hwmon,
-   netdev, or RDMA subsystems from sysfs:
+1. **sysfs first, for everything common.** Read all metrics, identifiers,
+   link state, AER counters, SR-IOV state, power-runtime state, and any other
+   attribute exposed by the standard Linux PCI, netdev, or RDMA subsystems from
+   sysfs:
    - `/sys/bus/pci/devices/<BDF>/...`
-   - `/sys/bus/pci/devices/<BDF>/hwmon/hwmon<N>/...`
    - `/sys/class/net/<iface>/...`
    - `/sys/class/infiniband/<dev>/ports/<N>/...`
 
-   Backends must use sysfs as the source for any field declared in `amdsmi.h`.
+   Backends must use sysfs (via the shared `smi_sysfs` readers) as the source
+   for any field that sysfs exposes.
 
-2. **VPD via sysfs `vpd` when available; `lspci -vvv` only as a fallback.**
+2. **ethtool via the shared transport.** For FEC, pause, link settings, driver
+   info, and driver statistics, use the transport layer (`NicTransport`,
+   obtained from `create_transport()`) rather than shelling out to `ethtool`.
+   The `Auto` backend uses netlink where available and falls back to ioctl.
+
+3. **VPD via sysfs `vpd`.**
    Parse product name, part number, and serial number from
-   `/sys/bus/pci/devices/<BDF>/vpd` when the binary VPD blob is exposed.
-   Falling back to `lspci -vvv` parsing is acceptable but discouraged for
-   long-running daemons because it forks a process per query.
+   `/sys/bus/pci/devices/<BDF>/vpd` when the binary VPD blob is exposed. When a
+   device does not expose the sysfs VPD entry, product name and part number are
+   reported as unavailable. Backends must not shell out to external tools for VPD.
+   For the serial number only, fall back to the devlink board serial
+   (`DEVLINK_ATTR_INFO_BOARD_SERIAL_NUMBER`) before giving up — this is a distinct
+   physical source, not synthesized data (rule 5), so the fallback is compliant.
+   Do not use `DEVLINK_ATTR_INFO_SERIAL_NUMBER`; it is a MAC-derived EUI.
 
-3. **ioctl or vendor RPC — only for vendor-specific data.** A backend may
-   use a vendor ioctl, netlink, or vendor library call **only** when the
-   needed data is not available via sysfs (for example, vendor counters that
-   the kernel driver doesn't export to sysfs). Keep such code paths behind
-   the backend's vendor-specific files (`src/nic/<vendor>/...`) and
-   **don't** leak vendor types into the public header.
+4. **Vendor RPC, only for vendor-specific data.** A backend may use a vendor
+   ioctl, netlink, or library call **only** when the needed data is not
+   available via sysfs or the shared transport. Keep such code inside the
+   plugin's `vendors/<name>/` files and don't leak vendor types into the public
+   header or the `smi_nic_interface.h` C interface.
 
-4. **No synthesized data.** If a sysfs attribute (or vendor source) doesn't
-   exist for a given device, return the documented "unsupported" sentinel
-   (see [Unsupported or unavailable fields](#unsupported-or-unavailable-fields))
-   or omit the entry from the variable-length list — never substitute zero.
+5. **No synthesized data.** If a source doesn't exist for a given device, return
+   the documented "unsupported" sentinel (see
+   [Unsupported or unavailable fields](#unsupported-or-unavailable-fields)) or
+   omit the entry from the variable-length list; never substitute zero.
 
 ### Key principles
 
 - **Use standard AMD SMI naming conventions**: `amdsmi_get_nic_*()`.
 - **All output structs are caller-allocated**: You allocate the struct and pass a pointer.
 - **Two-call pattern for variable-length data**: First call with `NULL` to get size, second call to fill.
-- **sysfs is the primary data source for common metrics; use vendor ioctl only for vendor-specific data** (see [Data source strategy](#data-source-strategy)).
+- **sysfs and the shared transport are the primary data sources; use vendor RPC only for vendor-specific data** (see [Data source strategy](#data-source-strategy)).
 - **Generic over vendor-specific**: Prefer reusable APIs (for example, `amdsmi_get_nic_asic_info()`) over vendor-locked APIs. Vendor-specific naming must not appear in the public API.
-- **Thread safety**: Use per-device mutexes for concurrent access.
 - **Error handling**: Always validate pointers, check init state, and return appropriate status codes.
-- **No vendor-specific types in public headers**: Don't expose internal vendor-specific structures through the public API header (`amdsmi.h`).
+- **No vendor-specific types in public headers**: Don't expose internal vendor-specific structures through `amdsmi.h`.
 
 ---
 
@@ -1347,7 +1194,7 @@ library sources.
 | Surface | Source location | Public docs |
 |---------|----------------|-------------|
 | **Bare-metal (BM) under ROCm** | [`rocm-systems/projects/amdsmi`](https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi) | [ROCm AMD SMI documentation](https://rocm.docs.amd.com/projects/amdsmi/en/latest/) |
-| **Host AMD SMI** (virtualization host) | [amd/MxGPU-Virtualization — `smi-lib`](https://github.com/amd/MxGPU-Virtualization/tree/staging/smi-lib) | [AMD SMI for virtualization user guide](https://instinct.docs.amd.com/projects/amd-smi-virt/en/latest/) |
+| **Host AMD SMI** (virtualization host) | [amd/MxGPU-Virtualization (`smi-lib`)](https://github.com/amd/MxGPU-Virtualization/tree/staging/smi-lib) | [AMD SMI for virtualization user guide](https://instinct.docs.amd.com/projects/amd-smi-virt/en/latest/) |
 
 External contributions described in this guide target the **bare-metal** AMD
 SMI library; see
@@ -1357,37 +1204,35 @@ documented in its repository and user guide linked above.
 
 ### Supported platforms
 
-- **Bare-metal (BM) under ROCm** — Linux bare-metal with ROCm installed; primary deployment surface and the focus of this guide.
-- **Host AMD SMI (virtualization host)** — Linux virtualization host (KVM/QEMU) managing AMD devices passed through to guests; maintained in its own repository (linked above).
+- **Bare-metal (BM) under ROCm**: Linux bare-metal with ROCm installed; primary deployment surface and the focus of this guide.
+- **Host AMD SMI (virtualization host)**: Linux virtualization host (KVM/QEMU) managing AMD devices passed through to guests; maintained in its own repository (linked above).
 
-NIC APIs documented in this guide are part of the shared public header and
-are exposed by both libraries. Vendor SMI modules (for example, BRCM SMI)
-require the relevant vendor kernel driver to be loaded on the platform
-performing the queries.
+NIC APIs documented in this guide are part of the shared public header and are
+exposed by both libraries. A NIC backend requires its vendor kernel driver to
+be loaded on the platform performing the queries.
 
 ### Build system
 
 The BM AMD SMI library uses CMake (≥ 3.15) with a C++17-compatible compiler.
-Vendor-specific NIC support is enabled via CMake options at build time.
-The host AMD SMI library has its own build system, documented in its
-repository linked above.
+The NIC library (`amdsminic`) is built as part of the main library. The netlink
+transport backend is compiled only when libnl-3 is present (detected via
+`pkg-config`, guarded by `HAVE_LIBNL3`); otherwise the ioctl backend is used.
+The host AMD SMI library has its own build system, documented in its repository
+linked above.
 
 | CMake Option | Default | Description (BM build) |
 |--|--|--|
 | `BUILD_TESTS` | `OFF` | Build test suite |
 | `BUILD_EXAMPLES` | `OFF` | Build example programs |
-| `ENABLE_BRCM_SMI` | `OFF` | Build with Broadcom NIC support |
 | `ENABLE_ESMI_LIB` | `ON` | Build ESMI Library |
 
 ### Dependencies
 
-The following runtime dependencies are required by the BM AMD SMI library:
+The following runtime dependencies are relevant to the BM AMD SMI NIC library:
 
-- Linux kernel sysfs (PCIe device info)
-- hwmon subsystem (temperature, power)
-- `lspci` / `pciutils` (VPD data extraction; sysfs `vpd` is preferred when present)
-- ethtool (FEC mode data, optional)
-- Broadcom NIC driver (required for BRCM NIC device discovery)
+- Linux kernel sysfs (PCIe device info, netdev, InfiniBand/RDMA, VPD)
+- libnl-3 (optional; enables the netlink ethtool transport backend)
+- The relevant NIC vendor kernel driver (required for that vendor's device discovery)
 
 ---
 
@@ -1395,4 +1240,5 @@ The following runtime dependencies are required by the BM AMD SMI library:
 
 | Version | Date | Description |
 |---------|------|-------------|
-| 1.0 | April 26, 2026 | Initial public release. Covers AMD SMI bare-metal (BM) NIC public APIs (ASIC, bus, NUMA, ports, driver, RDMA, RDMA port statistics, vendor statistics), data structures, conventions, sysfs data sources, code organization, the BRCM SMI vendor module integration pattern, CLI commands, and external contribution guidelines for adding new NIC vendors. |
+| 2.0 | July 16, 2026 | Replaced the retired vendor-SMI-module example with the in-tree `amdsminic` vendor-plugin framework (`SmiNicSubsystem`, `make_default_vendor_plugins()`, Pensando reference) and the shared ethtool transport. Updated public NIC API list, code organization, CLI, and build sections to match the current tree. |
+| 1.0 | April 26, 2026 | Initial public release. Covered AMD SMI bare-metal (BM) NIC public APIs, data structures, conventions, sysfs data sources, code organization, CLI commands, and external contribution guidelines for adding new NIC vendors. |

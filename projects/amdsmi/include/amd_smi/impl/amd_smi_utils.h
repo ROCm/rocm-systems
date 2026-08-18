@@ -72,9 +72,7 @@ std::string smi_amdgpu_split_string(std::string str, char delim);
 std::vector<std::string> split_string(const std::string& line, char delim);
 std::string smi_amdgpu_get_status_string(amdsmi_status_t ret, bool fullStatus);
 
-uint32_t smi_brcm_get_value_u32(const std::string& folder, const std::string& file_name);
-std::string smi_brcm_get_value_string(const std::string& folder, const std::string& file_name);
-amdsmi_status_t smi_brcm_execute_cmd_get_data(const std::string& command, std::string* data);
+std::string smi_read_sysfs_string(const std::string& folder, const std::string& file_name);
 
 amdsmi_status_t smi_clear_char_and_reinitialize(char buffer[], uint32_t len, std::string newString);
 

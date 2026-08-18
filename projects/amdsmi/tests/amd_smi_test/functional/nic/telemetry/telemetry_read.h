@@ -1,10 +1,5 @@
 /*
- * Copyright (c) Broadcom Inc All Rights Reserved.
- *
- *  Developed by:
- *            Broadcom Inc
- *
- *            www.broadcom.com
+ * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,14 +20,32 @@
  * THE SOFTWARE.
  */
 
-#ifndef AMD_SMI_LSPCI_COMMANDS_H_
-#define AMD_SMI_LSPCI_COMMANDS_H_
+#ifndef TESTS_AMD_SMI_TEST_FUNCTIONAL_NIC_TELEMETRY_TELEMETRY_READ_H_
+#define TESTS_AMD_SMI_TEST_FUNCTIONAL_NIC_TELEMETRY_TELEMETRY_READ_H_
 
-#include "amd_smi/amdsmi.h"
-#include "rocm_smi/rocm_smi_logger.h"
+#include "test_base.h"
 
-amdsmi_status_t get_lspci_device_data(std::string bdf_str, std::string search_key,
-                                      std::string& version);
-amdsmi_status_t get_lspci_root_switch(amdsmi_bdf_t device_bdf, amdsmi_bdf_t* switchBdf);
+class TestNicTelemetryRead : public TestBase {
+ public:
+  TestNicTelemetryRead();
 
-#endif  // AMD_SMI_LSPCI_COMMANDS_H_
+  // @Brief: Destructor for test case of TestNicTelemetryRead
+  virtual ~TestNicTelemetryRead();
+
+  // @Brief: Setup the environment for measurement
+  virtual void SetUp();
+
+  // @Brief: Core measurement execution
+  virtual void Run();
+
+  // @Brief: Clean up and retrieve the resource
+  virtual void Close();
+
+  // @Brief: Display results
+  virtual void DisplayResults() const;
+
+  // @Brief: Display information about what this test does
+  virtual void DisplayTestInfo(void);
+};
+
+#endif  // TESTS_AMD_SMI_TEST_FUNCTIONAL_NIC_TELEMETRY_TELEMETRY_READ_H_

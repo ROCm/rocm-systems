@@ -22,21 +22,24 @@
 
 #include "smi_nic.h"
 
-#include <linux/ethtool.h>
 #include <linux/if_arp.h>
 
-#include <algorithm>
 #include <array>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <iterator>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
-#include "smi_ethtool_ioctl.h"
+#include "smi_nic_transport.h"
+#include "smi_nic_vpd.h"
 #include "smi_sysfs.h"
 
 static std::string nic_type_to_string(NicType type) {
@@ -68,7 +71,19 @@ static std::optional<T> get_sysfs_data(const std::string& path) {
         return static_cast<T>(std::get<int>(val));
       }
       if (std::holds_alternative<std::string>(val)) {
-        return static_cast<T>(std::stoul(std::get<std::string>(val), nullptr, 0));
+        /**
+         * A numeric field can legitimately hold a non-numeric string (e.g. the
+         * PCI core reports "Unknown speed" for links it cannot classify).
+         * stoul would throw across the extern "C" boundary, so treat an
+         * unparsable value as absent rather than propagating the exception.
+         */
+        try {
+          return static_cast<T>(std::stoul(std::get<std::string>(val), nullptr, 0));
+        } catch (const std::invalid_argument&) {
+          return std::nullopt;
+        } catch (const std::out_of_range&) {
+          return std::nullopt;
+        }
       }
     }
   }
@@ -76,14 +91,31 @@ static std::optional<T> get_sysfs_data(const std::string& path) {
   return std::nullopt;
 }
 
+// Reads the PCI device's VPD image (device-level attribute, present even for a
+// portless fwctl-only NIC) and decodes its identity fields. Absent/unreadable
+// VPD yields all-nullopt fields.
+static amd::smi::nic::vpd::VpdFields read_device_vpd(const std::string& sysfs_bus_path) {
+  std::ifstream file(sysfs_bus_path + "/vpd", std::ios::binary);
+  if (!file) {
+    return {};
+  }
+  std::vector<uint8_t> image((std::istreambuf_iterator<char>(file)),
+                             std::istreambuf_iterator<char>());
+  return amd::smi::nic::vpd::parse_pci_vpd(image);
+}
+
 // **** SmiNicPort ****
 
 SmiNicPort::SmiNicPort(const std::string& iface, const std::string& bdf,
-                       const std::string& sysfs_class_path, const std::string& sysfs_bus_path)
+                       const std::string& sysfs_class_path, const std::string& sysfs_bus_path,
+                       std::shared_ptr<amd::smi::nic::transport::NicTransport> transport)
     : iface_(iface),
       bdf_(bdf),
       sysfs_class_path_(sysfs_class_path),
-      sysfs_bus_path_(sysfs_bus_path) {
+      sysfs_bus_path_(sysfs_bus_path),
+      transport_(transport ? std::move(transport)
+                           : amd::smi::nic::transport::create_transport(
+                                 amd::smi::nic::transport::NicBackend_t::Auto)) {
   port_num_ = get_sysfs_data<uint32_t>(sysfs_class_path_ + "/dev_port");
   auto type_value = get_sysfs_data<int>(sysfs_class_path_ + "/type");
 
@@ -114,8 +146,8 @@ std::optional<std::string> SmiNicPort::mac_address() const {
 
 std::optional<uint32_t> SmiNicPort::port_num() const { return port_num_; }
 
-std::optional<uint8_t> SmiNicPort::ifindex() const {
-  return get_sysfs_data<uint8_t>(sysfs_class_path_ + "/ifindex");
+std::optional<uint32_t> SmiNicPort::ifindex() const {
+  return get_sysfs_data<uint32_t>(sysfs_class_path_ + "/ifindex");
 }
 
 std::optional<uint8_t> SmiNicPort::carrier() const {
@@ -138,59 +170,30 @@ const std::string SmiNicPort::port_type() const { return nic_type_to_string(type
 
 std::string SmiNicPort::flavour() const { return "N/A"; }
 
-std::optional<uint32_t> SmiNicPort::active_fec() const {
-  struct ethtool_fecparam fec;
-  fec.cmd = ETHTOOL_GFECPARAM;
-
-  int ret = smi_ethtool_ioctl(iface_, &fec);
-  if (ret == 0) {
-    return fec.active_fec;
-  }
-  return std::nullopt;
+std::optional<bool> SmiNicPort::autoneg() const {
+  auto result = transport_->get_link_settings(iface_);
+  return result.success ? std::optional<bool>(result.value.autoneg != 0) : std::nullopt;
 }
 
-std::optional<std::string> SmiNicPort::autoneg() const {
-  struct ethtool_link_settings link_settings;
-  link_settings.cmd = ETHTOOL_GLINKSETTINGS;
-
-  int ret = smi_ethtool_ioctl(iface_, &link_settings);
-  if (ret == 0) {
-    return link_settings.autoneg ? "on" : "off";
-  }
-  return std::nullopt;
+std::optional<amd::smi::nic::transport::PauseParams> SmiNicPort::pause_params() const {
+  auto result = transport_->get_pause_params(iface_);
+  return result.success ? std::optional<amd::smi::nic::transport::PauseParams>(result.value)
+                        : std::nullopt;
 }
 
-std::optional<std::string> SmiNicPort::pause_autoneg() const {
-  struct ethtool_pauseparam pause;
-  pause.cmd = ETHTOOL_GPAUSEPARAM;
-
-  int ret = smi_ethtool_ioctl(iface_, &pause);
-  if (ret == 0) {
-    return pause.autoneg ? "on" : "off";
+std::optional<std::string> SmiNicPort::permanent_address() const {
+  auto result = transport_->get_permanent_address(iface_);
+  if (!result.success) {
+    return std::nullopt;
   }
-  return std::nullopt;
-}
 
-std::optional<std::string> SmiNicPort::pause_rx() const {
-  struct ethtool_pauseparam pause;
-  pause.cmd = ETHTOOL_GPAUSEPARAM;
-
-  int ret = smi_ethtool_ioctl(iface_, &pause);
-  if (ret == 0) {
-    return pause.rx_pause ? "on" : "off";
+  std::stringstream ss;
+  ss << std::hex << std::setfill('0');
+  for (size_t i = 0; i < result.value.mac.size(); i++) {
+    if (i > 0) ss << ":";
+    ss << std::setw(2) << static_cast<unsigned int>(result.value.mac[i]);
   }
-  return std::nullopt;
-}
-
-std::optional<std::string> SmiNicPort::pause_tx() const {
-  struct ethtool_pauseparam pause;
-  pause.cmd = ETHTOOL_GPAUSEPARAM;
-
-  int ret = smi_ethtool_ioctl(iface_, &pause);
-  if (ret == 0) {
-    return pause.tx_pause ? "on" : "off";
-  }
-  return std::nullopt;
+  return ss.str();
 }
 
 void SmiNicPort::discover_infiniband() {
@@ -232,55 +235,15 @@ const std::vector<SmiInfiniBand>& SmiNicPort::infiniband() const { return infini
 uint8_t SmiNicPort::infiniband_num() const { return static_cast<uint8_t>(infiniband_.size()); }
 
 void SmiNicPort::collect_vendor_statistics() {
-  int ret = 0;
-  uint32_t stats_num = 0;
-
-  auto drvinfo = std::make_unique<ethtool_drvinfo>();
-  drvinfo->cmd = ETHTOOL_GDRVINFO;
-
-  ret = smi_ethtool_ioctl(iface_, drvinfo.get());
-  if (ret != 0 || !drvinfo) {
-    return;
-  }
-  stats_num = drvinfo->n_stats;
-
-  size_t strings_len = sizeof(ethtool_gstrings) + stats_num * ETH_GSTRING_LEN;
-  std::unique_ptr<ethtool_gstrings, decltype(&free)> strings(
-      static_cast<ethtool_gstrings*>(std::calloc(1, strings_len)), &free);
-  strings->cmd = ETHTOOL_GSTRINGS;
-  strings->string_set = ETH_SS_STATS;
-  strings->len = static_cast<__u32>(stats_num);
-
-  ret = smi_ethtool_ioctl(iface_, strings.get());
-  if (ret != 0 || !strings) {
+  auto result = transport_->get_statistics(iface_);
+  if (!result.success) {
     return;
   }
 
-  size_t stats_len = sizeof(ethtool_stats) + stats_num * sizeof(uint64_t);
-  std::unique_ptr<ethtool_stats, decltype(&free)> stats(
-      static_cast<ethtool_stats*>(std::calloc(1, stats_len)), &free);
-  stats->cmd = ETHTOOL_GSTATS;
-  stats->n_stats = static_cast<__u32>(stats_num);
-
-  ret = smi_ethtool_ioctl(iface_, stats.get());
-  if (ret != 0 || !stats) {
-    return;
-  }
-
-  add_vendor_statistic(strings.get(), stats.get());
-}
-
-void SmiNicPort::add_vendor_statistic(struct ethtool_gstrings* strings,
-                                      struct ethtool_stats* stats) {
-  if (!strings || !stats) {
-    return;
-  }
-  for (unsigned int i = 0; i < stats->n_stats; ++i) {
-    std::string key(reinterpret_cast<char*>(&strings->data[i * ETH_GSTRING_LEN]), ETH_GSTRING_LEN);
-    key.erase(std::find(key.begin(), key.end(), '\0'), key.end());
+  for (size_t i = 0; i < result.value.names.size(); ++i) {
+    const std::string& key = result.value.names[i];
     if (vendor_stat_allowed(key)) {
-      uint64_t value = stats->data[i];
-      vendor_stats_map_[key] = value;
+      vendor_stats_map_[key] = result.value.values[i];
     }
   }
 }
@@ -309,22 +272,6 @@ void SmiNicPort::collect_standard_statistics() {
 
 const std::map<std::string, uint64_t>& SmiNicPort::get_standard_stats_map() const {
   return standard_stats_map_;
-}
-
-std::optional<std::string> SmiNicPort::read_vpd_content() const {
-  auto vpd = get_sysfs_data<std::string>(sysfs_bus_path_ + "/vpd");
-  if (!vpd) {
-    return std::nullopt;
-  }
-
-  std::string content = vpd.value();
-  content.erase(std::remove_if(content.begin(), content.end(),
-                               [](char c) {
-                                 return !(std::isprint(static_cast<unsigned char>(c)) || c == '\n');
-                               }),
-                content.end());
-
-  return content;
 }
 
 std::string SmiNicPort::map_vendor_stat_to_string(SmiVendorStat stat) const {
@@ -493,6 +440,14 @@ const std::vector<SmiNicPort>& SmiNic::nic_ports() const { return ports_; }
 
 uint8_t SmiNic::nic_ports_num() const { return static_cast<uint8_t>(ports_.size()); }
 
+uint32_t SmiNic::capabilities() const {
+  uint32_t caps = 0;
+  if (nic_ports_num() > 0) {
+    caps |= SMI_NIC_CAP_NETDEV;
+  }
+  return caps;
+}
+
 std::optional<uint16_t> SmiNic::vendor_id() const {
   return get_sysfs_data<uint16_t>(sysfs_bus_path_ + "/vendor");
 }
@@ -517,32 +472,7 @@ std::optional<std::string> SmiNic::perm_address() const {
   if (ports_.empty()) {
     return std::nullopt;
   }
-
-  const std::string& port_iface = ports_[0].interface();
-  constexpr size_t addr_len = 6;
-  // ethtool_perm_addr has a flexible array member data[], so we must
-  // allocate extra space beyond the struct header for the address bytes.
-  std::vector<uint8_t> buf(sizeof(struct ethtool_perm_addr) + addr_len, 0);
-  auto* permaddr = reinterpret_cast<struct ethtool_perm_addr*>(buf.data());
-  permaddr->cmd = ETHTOOL_GPERMADDR;
-  permaddr->size = addr_len;
-
-  int ret = smi_ethtool_ioctl(port_iface, permaddr);
-  if (ret != 0) {
-    return std::nullopt;
-  }
-
-  if (permaddr->size == addr_len) {
-    std::stringstream ss;
-    ss << std::hex << std::setfill('0');
-    for (size_t i = 0; i < addr_len; i++) {
-      if (i > 0) ss << ":";
-      ss << std::setw(2) << static_cast<unsigned int>(permaddr->data[i]);
-    }
-    return ss.str();
-  }
-
-  return std::nullopt;
+  return ports_[0].permanent_address();
 }
 
 std::optional<uint32_t> SmiNic::pcie_class() const {
@@ -566,13 +496,59 @@ std::optional<std::string> SmiNic::numa_affinity(uint8_t node) const {
   return get_sysfs_data<std::string>(path);
 }
 
-std::optional<std::string> SmiNic::product_name() const { return std::nullopt; }
+std::optional<std::string> SmiNic::product_name() const {
+  return read_device_vpd(sysfs_bus_path_).product_name;
+}
 
-std::optional<std::string> SmiNic::part_number() const { return std::nullopt; }
+std::optional<std::string> SmiNic::part_number() const {
+  return read_device_vpd(sysfs_bus_path_).part_number;
+}
 
-std::optional<std::string> SmiNic::serial_number() const { return std::nullopt; }
+std::optional<std::string> SmiNic::serial_number() const {
+  return read_device_vpd(sysfs_bus_path_).serial_number;
+}
 
-std::optional<std::string> SmiNic::vendor_name() const { return std::nullopt; }
+std::optional<std::string> SmiNic::vendor_name() const {
+  // Vendors with richer sources (e.g. Pensando VPD) override this; the base
+  // resolves the discovered vendor enum so plain-SmiNic vendors (bnxt) still
+  // report a name instead of falling through to "N/A".
+  switch (vendor_) {
+    case NicVendor::AMD:
+      return std::string("AMD");
+    case NicVendor::Broadcom:
+      return std::string("Broadcom");
+    case NicVendor::Unknown:
+      break;
+  }
+  return std::nullopt;
+}
+
+/**
+ * Generic hwmon discovery: standard NIC drivers (e.g. bnxt_en) register a hwmon
+ * node under the PCI device exposing the ASIC die temperature in tempN_input
+ * (millidegrees C). Vendors without such a node (e.g. Pensando pds_core, ionic)
+ * return nullopt and report unsupported. Only the ASIC sensor has a generic
+ * source; transceiver/board temperatures need a vendor override.
+ */
+std::optional<std::string> SmiNic::hwmon_temp_path(NicTempSensor sensor) const {
+  if (sensor != NicTempSensor::Asic) {
+    return std::nullopt;
+  }
+
+  const std::string hwmon_root = sysfs_bus_path_ + "/hwmon";
+  std::error_code ec;
+  if (!std::filesystem::is_directory(hwmon_root, ec)) {
+    return std::nullopt;
+  }
+
+  for (const auto& entry : std::filesystem::directory_iterator(hwmon_root, ec)) {
+    std::filesystem::path input = entry.path() / "temp1_input";
+    if (std::filesystem::exists(input, ec)) {
+      return input.string();
+    }
+  }
+  return std::nullopt;
+}
 
 // **** SmiNicPensando ****
 
@@ -582,105 +558,8 @@ SmiNicPensando::SmiNicPensando(const std::string& iface, const std::string& bdf,
                                NicProduct product)
     : SmiNic(iface, bdf, type, sysfs_class_path, sysfs_bus_path, vendor, product) {}
 
+uint32_t SmiNicPensando::capabilities() const { return SmiNic::capabilities() | SMI_NIC_CAP_FWCTL; }
+
 std::optional<std::string> SmiNicPensando::vendor_name() const {
   return std::string("AMD Pensando Systems, Inc.");
-}
-
-std::optional<std::string> SmiNicPensando::product_name() const {
-  if (ports_.empty()) {
-    return std::nullopt;
-  }
-
-  auto vpd = ports_[0].read_vpd_content();
-  if (!vpd) {
-    return std::nullopt;
-  }
-
-  const std::string& content = vpd.value();
-  size_t pn_pos = content.find("PN");
-
-  if (pn_pos != std::string::npos) {
-    std::string product_name = content.substr(0, pn_pos);
-    product_name.erase(product_name.find_last_not_of(" \n\r\t") + 1);
-    product_name.erase(0, product_name.find_first_not_of(" \n\r\t"));
-    return product_name;
-  }
-
-  return std::nullopt;
-}
-
-std::optional<std::string> SmiNicPensando::part_number() const {
-  if (ports_.empty()) {
-    return std::nullopt;
-  }
-
-  auto vpd = ports_[0].read_vpd_content();
-  if (!vpd) {
-    return std::nullopt;
-  }
-
-  const std::string& content = vpd.value();
-  size_t pn_pos = content.find("PN");
-  size_t sn_pos = content.find("SN", pn_pos);
-
-  if (pn_pos != std::string::npos && sn_pos != std::string::npos) {
-    std::string part_number = content.substr(pn_pos + 2, sn_pos - (pn_pos + 2));
-    part_number.erase(part_number.find_last_not_of(" \n\r\t") + 1);
-    part_number.erase(0, part_number.find_first_not_of(" \n\r\t"));
-    return part_number;
-  }
-
-  return std::nullopt;
-}
-
-std::optional<std::string> SmiNicPensando::serial_number() const {
-  if (ports_.empty()) {
-    return std::nullopt;
-  }
-
-  auto vpd = ports_[0].read_vpd_content();
-  if (!vpd) {
-    return std::nullopt;
-  }
-
-  const std::string& content = vpd.value();
-  size_t sn_pos = content.find("SN");
-  size_t mdt_pos = content.find("MDT", sn_pos);
-
-  if (sn_pos != std::string::npos && mdt_pos != std::string::npos) {
-    std::string serial_number = content.substr(sn_pos + 2, mdt_pos - (sn_pos + 2));
-    serial_number.erase(serial_number.find_last_not_of(" \n\r\t") + 1);
-    serial_number.erase(0, serial_number.find_first_not_of(" \n\r\t"));
-    return serial_number;
-  }
-
-  return std::nullopt;
-}
-
-// **** SmiNicBroadcom ****
-
-SmiNicBroadcom::SmiNicBroadcom(const std::string& iface, const std::string& bdf, NicType type,
-                               const std::string& sysfs_class_path,
-                               const std::string& sysfs_bus_path, NicVendor vendor,
-                               NicProduct product)
-    : SmiNic(iface, bdf, type, sysfs_class_path, sysfs_bus_path, vendor, product) {}
-
-std::optional<std::string> SmiNicBroadcom::vendor_name() const {
-  // TODO: broadcom - get vendor name
-  return std::string("Broadcom Inc.");
-}
-
-std::optional<std::string> SmiNicBroadcom::product_name() const {
-  // TODO: broadcom - get product name
-  return std::nullopt;
-}
-
-std::optional<std::string> SmiNicBroadcom::part_number() const {
-  // TODO: broadcom - get part number
-  return std::nullopt;
-}
-
-std::optional<std::string> SmiNicBroadcom::serial_number() const {
-  // TODO: broadcom - get serial number
-  return std::nullopt;
 }

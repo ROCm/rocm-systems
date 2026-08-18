@@ -402,6 +402,11 @@ add_subdirectory("src")
 
 if(BUILD_TESTS)
     set(TESTS_COMPONENT "tests")
+    # enable_testing() must run in the top-level directory scope so ctest finds
+    # the root CTestTestfile.cmake; when only tests/amd_smi_test calls it, `ctest`
+    # only works when invoked from that subdirectory. This makes the registered
+    # tests (e.g. nic_telemetry_suite) discoverable from the build root.
+    enable_testing()
     add_subdirectory("tests/amd_smi_test")
     add_subdirectory("tests/python")
 endif()

@@ -111,12 +111,39 @@ target_link_libraries(
     c
     stdc++
     pthread
-    ${AMDSMINIC_PATH}
+    amdsminic
     ${FILESYSTEM_LIB}
 )
 
+# Self-contained NIC telemetry contract suite. It drives the telemetry facade
+# against injected fakes (IDevlinkClient) and a tmpdir hwmon tree, so it needs no
+# live NIC and no root and is safe to run in CI. Building it here (under
+# BUILD_TESTS) means it can no longer silently rot the way a script-only target
+# does, and add_test() lets `ctest` gate it. The remaining NIC test tools
+# (test_nic_transport_suite, benchmark_nic_transport, probe_devlink_*) stay in
+# tests/nic/build_tests.sh by design: they require a live interface + root and
+# cannot run unattended. -fno-rtti matches the ABI amdsminic is built against.
+add_executable(test_nic_telemetry_suite ${CMAKE_CURRENT_SOURCE_DIR}/../nic/test_nic_telemetry_suite.cpp)
+target_compile_options(test_nic_telemetry_suite PRIVATE -fno-rtti)
+target_link_libraries(test_nic_telemetry_suite amdsminic ${FILESYSTEM_LIB})
+add_test(NAME nic_telemetry_suite COMMAND test_nic_telemetry_suite)
+
+# Self-contained NIC discovery suite. Redirects vendor driver sysfs lookups to a
+# tmpdir tree, so it needs no live NIC and no root and is safe to run in CI.
+add_executable(test_nic_discovery_suite ${CMAKE_CURRENT_SOURCE_DIR}/../nic/test_nic_discovery_suite.cpp)
+target_compile_options(test_nic_discovery_suite PRIVATE -fno-rtti)
+# Vendor subsystem headers live under the NIC src tree (a PRIVATE include of
+# amdsminic), so expose it here for the direct vendor include this suite needs.
+target_include_directories(test_nic_discovery_suite PRIVATE ${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/src)
+target_link_libraries(test_nic_discovery_suite amdsminic ${FILESYSTEM_LIB})
+add_test(NAME nic_discovery_suite COMMAND test_nic_discovery_suite)
+
 # Install tests
-install(TARGETS ${TEST} DESTINATION ${SHARE_INSTALL_PREFIX}/tests COMPONENT ${TESTS_COMPONENT})
+install(
+    TARGETS ${TEST} test_nic_telemetry_suite test_nic_discovery_suite
+    DESTINATION ${SHARE_INSTALL_PREFIX}/tests
+    COMPONENT ${TESTS_COMPONENT}
+)
 
 install(
     FILES amdsmitst.exclude detect_asic_filter.sh

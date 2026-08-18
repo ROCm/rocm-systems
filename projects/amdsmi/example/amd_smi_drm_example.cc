@@ -423,9 +423,7 @@ static const std::map<amdsmi_processor_type_t, std::string> processor_type_map =
     {AMDSMI_PROCESSOR_TYPE_NON_AMD_GPU, "NON_AMD_GPU"},
     {AMDSMI_PROCESSOR_TYPE_NON_AMD_CPU, "NON_AMD_CPU"},
     {AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE, "AMD_CPU_CORE"},
-    {AMDSMI_PROCESSOR_TYPE_AMD_NIC, "AMD_AINIC"},
-    {AMDSMI_PROCESSOR_TYPE_BRCM_NIC, "BRCM_NIC"},
-    {AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH, "BRCM_SWITCH"}};
+    {AMDSMI_PROCESSOR_TYPE_AMD_NIC, "AMD_AINIC"}};
 
 static const std::map<amdsmi_link_type_t, std::string> link_type_map = {
     {AMDSMI_LINK_TYPE_INTERNAL, "INTERNAL"},

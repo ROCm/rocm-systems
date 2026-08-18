@@ -3224,416 +3224,47 @@ class MetricCommands:
         if not self.logger.is_json_format():
             self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
 
-    def metric_nic(
-        self,
-        args,
-        multiple_devices=False,
-        watching_output=False,
-        watch=None,
-        watch_time=None,
-        iterations=None,
-        nic=None,
-        nic_power=None,
-        nic_temperature=None,
-        nic_errors=None,
-    ):
-        """Get Metric information for target nic
+    def metric_nic(self, args, multiple_devices=False, nic=None):
+        """Get metric (telemetry) information for target nic
 
         Args:
             args (Namespace): Namespace containing the parsed CLI args
             multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
-            watching_output (bool, optional): True if watch argument has been set. Defaults to False.
-            nic_power (bool, optional): Value override for args.nic_power. Defaults to None.
-            nic_temperature (bool, optional): Value override for args.nic_temperature. Defaults to None.
-            nic_errors (bool, optional): Value override for args.nic_errors. Defaults to None.
-
-        Raises:
-            IndexError: Index error if nic list is empty
+            nic (device_handle, optional): device_handle for target device. Defaults to None.
 
         Returns:
             None: Print output via AMDSMILogger to destination
         """
-        # Set args.* to passed in arguments
         if nic:
             args.nic = nic
-        if watch:
-            args.watch = watch
-        if watch_time:
-            args.watch_time = watch_time
-        if iterations:
-            args.iterations = iterations
-
-        # TODO: Need to add OS wise condition for the parameters
-
-        if nic_power:
-            args.nic_power = nic_power
-        if nic_temperature:
-            args.nic_temperature = nic_temperature
-        if nic_errors:
-            args.nic_errors = nic_errors
-
-        # Maintaining format as per other metric functions so above TODO can be resolved easily
-        current_platform_args = ["nic_power", "nic_temperature", "nic_errors"]
-        current_platform_values = [args.nic_power, args.nic_temperature, args.nic_errors]
 
         # Handle No NIC passed
         if args.nic == None:
-            args.nic = self.device_handles_brcm_nics
-
-        # Handle watch logic, will only enter this block once
-        if args.watch:
-            self.helpers.handle_watch(args=args, subcommand=self.metric_nic, logger=self.logger)
-            return
+            args.nic = self.device_handles_ainics
 
         # Handle multiple NICs
-        if isinstance(args.nic, list):
-            if len(args.nic) > 1:
-                # Deepcopy nics as recursion will destroy the nic list
-                stored_nics = []
-                for nic in args.nic:
-                    stored_nics.append(nic)
+        if args.nic != None:
+            handled_multiple_nics, device_handle = self.helpers.handle_ainics(
+                args, self.logger, self.metric_nic
+            )
+            if handled_multiple_nics:
+                return  # This function is recursive
 
-                # Store output from multiple devices
-                for device_handle in args.nic:
-                    self.metric_nic(
-                        args,
-                        multiple_devices=True,
-                        watching_output=watching_output,
-                        nic=device_handle,
-                    )
-
-                # Reload original nics
-                args.nic = stored_nics
-
-                # Print multiple device output
-                self.logger.print_output(
-                    multiple_device_enabled=True, watching_output=watching_output
-                )
-
-                # Add output to total watch output and clear multiple device output
-                if watching_output:
-                    self.logger.store_watch_output(multiple_device_enabled=True)
-
-                    # Flush the watching output
-                    self.logger.print_output(
-                        multiple_device_enabled=True, watching_output=watching_output
-                    )
-
-                return
-            elif len(args.nic) == 1:
-                args.nic = args.nic[0]
-            else:
-                raise IndexError("args.nic should not be an empty list")
-
-        # Get nic_id for logging
-        nic_id = self.helpers.get_nic_id_from_device_handle(args.nic)
-
-        # Put the metrics table in the debug logs
-        nic_metric_info = {}
-
+        args.nic = device_handle
+        nic_id = self.helpers.get_ainic_id_from_device_handle(args.nic)
+        telemetry = {}
         try:
-            nic_metric_info = amdsmi_interface.amdsmi_get_nic_metrics_info(args.nic)
-            nic_metric_str = json.dumps(nic_metric_info, indent=4)
-            logging.debug("NIC Metrics table for %s | %s", nic_id, nic_metric_str)
+            telemetry = amdsmi_interface.amdsmi_get_nic_telemetry(args.nic)
         except amdsmi_exception.AmdSmiLibraryException as e:
-            logging.debug("Unable to load NIC Metrics table for %s | %s", nic_id, e.err_info)
+            logging.debug("Failed to get telemetry for nic %s | %s", nic_id, e.get_error_info())
 
-        logging.debug(f"Metric Arg information for NIC {nic_id} on {self.helpers.os_info()}")
-        logging.debug(f"Args:   {current_platform_args}")
-        logging.debug(f"Values: {current_platform_values}")
-
-        # Set the platform applicable args to True if no args are set
-        if not any(current_platform_values):
-            for arg in current_platform_args:
-                setattr(args, arg, True)
-
-        # Add timestamp and store values for specified arguments
-        values_dict = {}
-
-        if "nic_power" in current_platform_args:
-            if args.nic_power:
-                power_dict = {}
-                sysfs_blocks = {
-                    "nic_power_async": "",
-                    "nic_power_control": "",
-                    "nic_power_runtime_active_time": "",
-                    "nic_power_runtime_status": "",
-                    "nic_power_runtime_usage": "",
-                    "nic_power_runtime_active_kids": "",
-                    "nic_power_runtime_enabled": "",
-                    "nic_power_runtime_suspended_time": "",
-                }
-
-                for key in nic_metric_info.keys():
-                    if key in sysfs_blocks.keys():
-                        if isinstance(nic_metric_info[key], int):
-                            value = nic_metric_info[key]
-                        else:
-                            value = (nic_metric_info[key].split("\n")[0]).upper()
-
-                        if value == "" or value == 65535:
-                            value = "N/A"
-                        power_dict[key] = self.helpers.unit_format(
-                            self.logger, value, sysfs_blocks[key]
-                        )
-
-                values_dict["nic_power"] = power_dict
-
-        if "nic_temperature" in current_platform_args:
-            if args.nic_temperature:
-                temp_dict = {}
-                sysfs_blocks = {
-                    "nic_temp_crit_alarm": "",
-                    "nic_temp_emergency_alarm": "",
-                    "nic_temp_shutdown_alarm": "",
-                    "nic_temp_max_alarm": "",
-                    "nic_temp_crit": "\N{DEGREE SIGN}C",
-                    "nic_temp_emergency": "\N{DEGREE SIGN}C",
-                    "nic_temp_input": "\N{DEGREE SIGN}C",
-                    "nic_temp_max": "\N{DEGREE SIGN}C",
-                    "nic_temp_shutdown": "\N{DEGREE SIGN}C",
-                }
-
-                for key in nic_metric_info.keys():
-                    if key in sysfs_blocks.keys():
-                        if isinstance(nic_metric_info[key], int):
-                            value = nic_metric_info[key]
-                        else:
-                            value = (nic_metric_info[key].split("\n")[0]).upper()
-
-                        if value == "" or value == 65535:
-                            value = "N/A"
-                        temp_dict[key] = self.helpers.unit_format(
-                            self.logger, value, sysfs_blocks[key]
-                        )
-
-                values_dict["nic_temperature"] = temp_dict
-
-        if "nic_errors" in current_platform_args:
-            if args.nic_errors:
-                err_dict = {}
-                sysfs_blocks = ["nic_dev_correctable", "nic_dev_fatal", "nic_dev_nonfatal"]
-
-                for key in nic_metric_info.keys():
-                    if key in sysfs_blocks:
-                        err_dict[key] = {}
-                        content_list = nic_metric_info[key].split("\n")
-                        for content in content_list:
-                            if content != "" and content.lower() != "n/a":
-                                err_dict[key][content.split(" ")[0]] = content.split(" ")[1]
-
-                values_dict["nic_errors"] = err_dict
-
-        # Store timestamp first if watching_output is enabled
-        if watching_output:
-            self.logger.store_nic_output(args.nic, "timestamp", int(time.time()))
-        self.logger.store_nic_output(args.nic, "values", values_dict)
+        self.logger.store_ainic_output(args.nic, "values", telemetry)
 
         if multiple_devices:
             self.logger.store_multiple_device_output()
             return  # Skip printing when there are multiple devices
 
-        self.logger.print_output(watching_output=watching_output)
-
-        if watching_output:  # End of single gpu add to watch_output
-            self.logger.store_watch_output(multiple_device_enabled=False)
-
-    def metric_switch(
-        self,
-        args,
-        multiple_devices=False,
-        watching_output=False,
-        watch=None,
-        watch_time=None,
-        iterations=None,
-        switch=None,
-        switch_power=None,
-        switch_errors=None,
-    ):
-        """Get Metric information for target switch
-
-        Args:
-            args (Namespace): Namespace containing the parsed CLI args
-            multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
-            watching_output (bool, optional): True if watch argument has been set. Defaults to False.
-            switch_power (bool, optional): Value override for args.switch_power. Defaults to None.
-            switch_errors (bool, optional): Value override for args.switch_errors. Defaults to None.
-
-        Raises:
-            IndexError: Index error if switch list is empty
-
-        Returns:
-            None: Print output via AMDSMILogger to destination
-        """
-        # Set args.* to passed in arguments
-        if switch:
-            args.switch = switch
-        if watch:
-            args.watch = watch
-        if watch_time:
-            args.watch_time = watch_time
-        if iterations:
-            args.iterations = iterations
-
-        # TODO: Need to add OS wise condition for the parameters
-
-        if switch_power:
-            args.switch_power = switch_power
-        if switch_errors:
-            args.switch_errors = switch_errors
-
-        # Maintaining format as per other metric functions so above TODO can be resolved easily
-        current_platform_args = ["switch_power", "switch_errors"]
-        current_platform_values = [args.switch_power, args.switch_errors]
-
-        # Handle No SWITCH passed
-        if args.switch == None:
-            args.switch = self.device_handles_switchs
-
-        # Handle watch logic, will only enter this block once
-        if args.watch:
-            self.helpers.handle_watch(args=args, subcommand=self.metric_switch, logger=self.logger)
-            return
-
-        # Handle multiple Switches
-        if isinstance(args.switch, list):
-            if len(args.switch) > 1:
-                # Deepcopy switches as recursion will destroy the switch list
-                stored_switches = []
-                for switch in args.switch:
-                    stored_switches.append(switch)
-
-                # Store output from multiple devices
-                for device_handle in args.switch:
-                    self.metric_switch(
-                        args,
-                        multiple_devices=True,
-                        watching_output=watching_output,
-                        switch=device_handle,
-                    )
-
-                # Reload original switches
-                args.switch = stored_switches
-
-                # Print multiple device output
-                self.logger.print_output(
-                    multiple_device_enabled=True, watching_output=watching_output
-                )
-
-                # Add output to total watch output and clear multiple device output
-                if watching_output:
-                    self.logger.store_watch_output(multiple_device_enabled=True)
-
-                    # Flush the watching output
-                    self.logger.print_output(
-                        multiple_device_enabled=True, watching_output=watching_output
-                    )
-
-                return
-            elif len(args.switch) == 1:
-                args.switch = args.switch[0]
-            else:
-                return  # intermittent issue with args.switch being an empty list. raise IndexError("args.switch should not be an empty list")
-
-        # Get switch_id for logging
-        switch_id = self.helpers.get_switch_id_from_device_handle(args.switch)
-
-        # Put the metrics table in the debug logs
-        switch_metric_info = {}
-        try:
-            switch_metric_info = amdsmi_interface.amdsmi_get_switch_metrics_info(args.switch)
-            switch_metric_str = json.dumps(switch_metric_info, indent=4)
-            logging.debug("SWITCH Metrics table for %s | %s", switch_id, switch_metric_str)
-        except amdsmi_exception.AmdSmiLibraryException as e:
-            logging.debug("Unable to load SWITCH Metrics table for %s | %s", switch_id, e.err_info)
-
-        logging.debug(f"Metric Arg information for SWITCH {switch_id} on {self.helpers.os_info()}")
-        logging.debug(f"Args:   {current_platform_args}")
-        logging.debug(f"Values: {current_platform_values}")
-
-        # Set the platform applicable args to True if no args are set
-        if not any(current_platform_values):
-            for arg in current_platform_args:
-                setattr(args, arg, True)
-
-        # Add timestamp and store values for specified arguments
-        values_dict = {}
-
-        if "switch_power" in current_platform_args:
-            if args.switch_power:
-                power_dict = {}
-                sysfs_blocks = {
-                    "brcm_power_async": "",
-                    "brcm_power_control": "",
-                    "brcm_power_runtime_active_kids": "",
-                    "brcm_power_runtime_active_time": "",
-                    "brcm_power_runtime_enabled": "",
-                    "brcm_power_runtime_status": "",
-                    "brcm_power_runtime_suspended_time": "",
-                    "brcm_power_runtime_usage": "",
-                    "brcm_power_wakeup": "",
-                    "brcm_power_wakeup_abort_count": "",
-                    "brcm_power_wakeup_active": "",
-                    "brcm_power_wakeup_active_count": "",
-                    "brcm_power_wakeup_count": "",
-                    "brcm_power_wakeup_last_time_ms": "",
-                    "brcm_power_wakeup_max_time_ms": "",
-                    "brcm_power_wakeup_total_time_ms": "",
-                }
-
-                for key in switch_metric_info.keys():
-                    if key in sysfs_blocks.keys():
-                        if isinstance(switch_metric_info[key], int):
-                            value = switch_metric_info[key]
-                        else:
-                            value = (switch_metric_info[key].split("\n")[0]).upper()
-
-                        if value == "":
-                            value = "N/A"
-                        power_dict[key] = self.helpers.unit_format(
-                            self.logger, value, sysfs_blocks[key]
-                        )
-
-                values_dict["switch_power"] = power_dict
-
-        if "switch_errors" in current_platform_args:
-            if args.switch_errors:
-                err_dict = {}
-                sysfs_blocks = [
-                    "brcm_device_aer_dev_correctable",
-                    "brcm_device_aer_dev_fatal",
-                    "brcm_device_aer_dev_nonfatal",
-                ]
-
-                for key in switch_metric_info.keys():
-                    if key in sysfs_blocks:
-                        err_dict[key] = {}
-
-                        if switch_metric_info[key] == "N/A":
-                            continue
-
-                        content_list = switch_metric_info[key].split("\n")
-                        for content in content_list:
-                            if content != "":
-                                err_dict[key][content.split(" ")[0]] = content.split(" ")[1]
-
-                values_dict["switch_errors"] = err_dict
-
-        # TODO: ADD "NA" conditions in interface file
-        # Store timestamp first if watching_output is enabled
-        if watching_output:
-            self.logger.store_switch_output(args.switch, "timestamp", int(time.time()))
-
-        self.logger.store_switch_output(args.switch, "values", values_dict)
-
-        if multiple_devices:
-            self.logger.store_multiple_device_output()
-            return  # Skip printing when there are multiple devices
-
-        self.logger.print_output(watching_output=watching_output)
-
-        if watching_output:  # End of single gpu add to watch_output
-            self.logger.store_watch_output(multiple_device_enabled=False)
+        self.logger.print_output()
 
     def metric(
         self,
@@ -3641,15 +3272,6 @@ class MetricCommands:
         multiple_devices=False,
         watching_output=False,
         gpu=None,
-        nic=None,
-        nic_power=None,
-        nic_temperature=None,
-        nic_errors=None,
-        brcm_nic=None,
-        switch=None,
-        switch_power=None,
-        switch_errors=None,
-        brcm_switch=None,
         usage=None,
         watch=None,
         watch_time=None,
@@ -3780,16 +3402,6 @@ class MetricCommands:
             core_floor_limit (bool, optional): Value override for args.core_floor_limit. Defaults to None
             core_eff_floor_limit (bool, optional): Value override for args.core_eff_floor_limit. Defaults to None
 
-            nic (nic_handle, optional): device_handle for target device. Defaults to None.
-            nic_power (bool, optional): Value override for args.nic_power. Defaults to None.
-            nic_temperature (bool, optional): Value override for args.nic_temperature. Defaults to None.
-            nic_errors (bool, optional): Value override for args.nic_errors. Defaults to None.
-            brcm_nic (bool, optional): Value override for args.brcm_nic. Defaults to None.
-                        switch (cpu_handle, optional): device_handle for target device. Defaults to None.
-            switch_power (bool, optional): Value override for args.switch_power. Defaults to None.
-            switch_errors (bool, optional): Value override for args.switch_errors. Defaults to None.
-                        brcm_switch (bool, optional): Value override for args.brcm_switch. Defaults to None.
-
         Raises:
             IndexError: Index error if gpu list is empty
 
@@ -3804,46 +3416,11 @@ class MetricCommands:
             args.cpu = cpu
         if core:
             args.core = core
-        if self.helpers.is_brcm_nic_initialized() and (
-            getattr(args, "brcm_nic", False) or brcm_nic
-        ):
-            args.nic_power = args.power
-            args.nic_temperature = args.temperature
-            args.nic_errors = args.ecc
-            self.logger.output = {}
-            self.logger.clear_multiple_devices_output()
-            self.metric_nic(
-                args,
-                multiple_devices,
-                watching_output,
-                watch,
-                watch_time,
-                iterations,
-                nic,
-                nic_power,
-                nic_temperature,
-                nic_errors,
-            )
-            return
 
-        if self.helpers.is_brcm_switch_initialized() and (
-            getattr(args, "brcm_switch", False) or brcm_switch
-        ):
-            args.switch_power = args.power
-            args.switch_errors = args.ecc
+        if self.helpers.is_ainic_initialized() and getattr(args, "nic", None):
             self.logger.output = {}
             self.logger.clear_multiple_devices_output()
-            self.metric_switch(
-                args,
-                multiple_devices,
-                watching_output,
-                watch,
-                watch_time,
-                iterations,
-                switch,
-                switch_power,
-                switch_errors,
-            )
+            self.metric_nic(args, multiple_devices)
             return
 
         # Check if a GPU argument has been set

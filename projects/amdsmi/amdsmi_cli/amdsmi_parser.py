@@ -154,13 +154,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             self.gpu_choices = {}
             self.gpu_choices_str = ""
 
-        if self.helpers.is_brcm_switch_initialized():
-            self.switch_choices, self.switch_choices_str = self.helpers.get_switch_choices()
-        else:
-            self.switch_choices = {}
-            self.switch_choices_str = ""
-
-        if self.helpers.is_ainic_initialized() or self.helpers.is_brcm_nic_initialized():
+        if self.helpers.is_ainic_initialized():
             self.nic_choices, self.nic_choices_str = self.helpers.get_nic_choices()
         else:
             self.nic_choices = {}
@@ -877,40 +871,6 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         return _NICSelectAction
 
-    def _switch_select(self, switch_choices):
-        """Custom argparse action to return the device handle(s) for the switches(s) selected
-        This will set the destination (args.switch) to a list of 1 or more device handles
-        If 1 or more device handles are not found then raise an ArgumentError for the first invalid switch seen
-        """
-
-        amdsmi_helpers = self.helpers
-
-        class _SwitchSelectAction(argparse.Action):
-            output_format = self.helpers.get_output_format()
-
-            # Checks the values
-            def __call__(self, parser, args, values, option_string=None):
-                if "all" in switch_choices:
-                    del switch_choices["all"]
-                status, selected_device_handles = (
-                    amdsmi_helpers.get_device_handles_from_switch_selections(
-                        switch_selections=values, switch_choices=switch_choices
-                    )
-                )
-                if status:
-                    setattr(args, self.dest, selected_device_handles)
-                else:
-                    if selected_device_handles == "":
-                        raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(
-                            "--switch", _SwitchSelectAction.output_format
-                        )
-                    else:
-                        raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(
-                            selected_device_handles, _SwitchSelectAction.output_format
-                        )
-
-        return _SwitchSelectAction
-
     def _cpu_select(self, cpu_choices):
         """Custom argparse action to return the device handle(s) for the cpu(s) selected
         This will set the destination (args.cpu) to a list of 1 or more device handles
@@ -1352,20 +1312,12 @@ class AMDSMIParser(argparse.ArgumentParser):
                 "-v", "--vf", action="store", nargs="+", help=vf_help, choices=self.vf_choices
             )
 
-        if self.helpers.is_ainic_initialized() or self.helpers.is_brcm_nic_initialized():
+        if self.helpers.is_ainic_initialized():
             nic_help = (
                 f"Select a NIC ID, BDF, or UUID from the possible choices:\n{self.nic_choices_str}"
             )
             device_args.add_argument(
                 "-N", "--nic", action=self._nic_select(self.nic_choices), nargs="+", help=nic_help
-            )
-        if self.helpers.is_brcm_switch_initialized():
-            switch_help = f"Select a SWITCH ID, BDF, or UUID from the possible choices:\n{self.switch_choices_str}"
-            device_args.add_argument(
-                "--switch",
-                action=self._switch_select(self.switch_choices),
-                nargs="+",
-                help=switch_help,
             )
 
     def _add_command_modifiers(self, subcommand_parser: argparse.ArgumentParser):
@@ -1676,7 +1628,6 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Optional arguments help text
         fw_list_help = "All FW list information"
-        nic_firmware_help = "Broadcom NIC firmware attributes"
         err_records_help = "All error records information"
 
         # Create firmware subparser
@@ -1698,10 +1649,6 @@ class AMDSMIParser(argparse.ArgumentParser):
             help=fw_list_help,
             default=True,
         )
-        if self.helpers.is_brcm_nic_initialized():
-            firmware_parser.add_argument(
-                "--brcm_nic", action="store_true", required=False, help=nic_firmware_help
-            )
 
         # Options to only display on a Hypervisor
         if self.helpers.is_hypervisor():
@@ -1761,7 +1708,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
     def _add_metric_parser(self, subparsers: argparse._SubParsersAction, func):
         # Subparser help text
-        metric_help = "Gets metric/performance information about the specified GPU, NIC, or switch"
+        metric_help = "Gets metric/performance information about the specified GPU"
         metric_subcommand_help = f"{self.description}\n\nIf no GPU is specified, returns metric information for all GPUs on the system.\
                                 \nIf no metric argument is provided, all metric information will be displayed."
         metric_optionals_title = "Metric arguments"
@@ -1771,8 +1718,6 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Help text for Arguments only Available on Linux Virtual OS and Baremetal platforms
         mem_usage_help = "Memory usage per block"
-        nic_metric_help = "Broadcom NIC metric attributes"
-        switch_metric_help = "Broadcom switch metric attributes"
 
         # Help text for Arguments only on Hypervisor and Baremetal platforms
         power_help = "Current power usage"
@@ -2186,16 +2131,6 @@ class AMDSMIParser(argparse.ArgumentParser):
                 help=core_eff_floor_limit_help,
             )
 
-        # Add BRCM NIC/Switch Arguments
-        if self.helpers.is_brcm_nic_initialized():
-            metric_parser.add_argument(
-                "--brcm_nic", action="store_true", required=False, help=nic_metric_help
-            )
-        if self.helpers.is_brcm_switch_initialized():
-            metric_parser.add_argument(
-                "--brcm_switch", action="store_true", required=False, help=switch_metric_help
-            )
-
         # Add Universal Arguments & watch Args
         self._add_watch_arguments(metric_parser)
         self._add_device_arguments(metric_parser, required=False)
@@ -2338,8 +2273,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         atomics_help = "Display 32 and 64-bit atomic io link capability between nodes"
         dma_help = "Display P2P direct memory access (DMA) link capability between nodes"
         bi_dir_help = "Display P2P bi-directional link capability between nodes"
-        nic_topo_help = "Display nic and gpu connectivity"
-        nic_shownuma_help = "Display nic,gpu's numa and cpu affinity"
 
         # Create topology subparser
         topology_parser = subparsers.add_parser(
@@ -2381,14 +2314,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         topology_parser.add_argument(
             "-z", "--bi-dir", action="store_true", required=False, help=bi_dir_help
         )
-        if self.helpers.is_brcm_nic_initialized():
-            topology_parser.add_argument(
-                "--nic_topo", action="store_true", required=False, help=nic_topo_help
-            )
-        if self.helpers.is_brcm_switch_initialized():
-            topology_parser.add_argument(
-                "--nic_switch", action="store_true", required=False, help=nic_shownuma_help
-            )
 
     def _add_set_value_parser(self, subparsers: argparse._SubParsersAction, func):
         if not self.helpers.is_linux():
@@ -3005,8 +2930,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         ecc_help = "Monitor ECC single bit, ECC double bit, and PCIe replay error counts"
         mem_usage_help = "Monitor memory usage in MB"
         pcie_bandwidth_help = "Monitor PCIe bandwidth in Mb/s"
-        nic_monitor_help = "Broadcom NIC monitor attributes"
-        switch_monitor_help = "Broadcom switch monitor attributes"
         process_help = "Enable Process information table below monitor output;\n    Process Name may require elevated permissions"
         violation_help = "Monitor power and thermal violation status (%%);\n    Only available for MI300 or newer ASICs"
 
@@ -3063,14 +2986,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         monitor_parser.add_argument(
             "-q", "--process", action="store_true", required=False, help=process_help
         )
-        if self.helpers.is_brcm_nic_initialized():
-            monitor_parser.add_argument(
-                "--brcm_nic", action="store_true", required=False, help=nic_monitor_help
-            )
-        if self.helpers.is_brcm_switch_initialized():
-            monitor_parser.add_argument(
-                "--brcm_switch", action="store_true", required=False, help=switch_monitor_help
-            )
         if not self.helpers.is_virtual_os():
             monitor_parser.add_argument(
                 "-V", "--violation", action="store_true", required=False, help=violation_help
