@@ -12,7 +12,6 @@ import pandas as pd
 import pytest
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
-from utils import csv_compression
 
 MODULE = "rocprof_compute_analyze.analysis_base"
 
@@ -38,7 +37,7 @@ def test_concat_result_csvs_concatenates_rocpd_results(tmp_path, monkeypatch) ->
 
     inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
     inst.concat_result_csvs(
-        csv_compression.find_csvs(tmp_path, "results_*.csv"), tmp_path / "pmc_perf.csv"
+        sorted(tmp_path.glob("results_*.csv.gz")), tmp_path / "pmc_perf.csv"
     )
     merged = pd.read_csv(tmp_path / "pmc_perf.csv")
 
@@ -63,7 +62,7 @@ def test_concat_result_csvs_skips_empty_and_errors_when_all_empty(
     inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
     with pytest.raises(SystemExit):
         inst.concat_result_csvs(
-            csv_compression.find_csvs(tmp_path, "results_*.csv"),
+            sorted(tmp_path.glob("results_*.csv.gz")),
             tmp_path / "pmc_perf.csv",
         )
 
@@ -89,14 +88,14 @@ def test_concat_result_csvs_skips_zero_byte_compressed_pass(
 
     inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
     inst.concat_result_csvs(
-        csv_compression.find_csvs(tmp_path, "results_*.csv"), tmp_path / "pmc_perf.csv"
+        sorted(tmp_path.glob("results_*.csv.gz")), tmp_path / "pmc_perf.csv"
     )
 
     assert pd.read_csv(tmp_path / "pmc_perf.csv")["Counter_Value"].tolist() == [10]
 
 
 def test_join_workload_csvs_finds_compressed_results(tmp_path, monkeypatch) -> None:
-    """find_csvs matches compressed results_*.csv.gz artifacts."""
+    """join_workload_csvs picks up compressed results_*.csv.gz artifacts."""
     common.patch_console(monkeypatch, MODULE, "debug", "warning", "log")
 
     header = "GPU_ID,Kernel_Name,Counter_Name,Counter_Value\n"
@@ -124,7 +123,7 @@ def test_concat_result_csvs_errors_on_truncated_compressed_results(
     inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
     with pytest.raises(SystemExit):
         inst.concat_result_csvs(
-            csv_compression.find_csvs(tmp_path, "results_*.csv"),
+            sorted(tmp_path.glob("results_*.csv.gz")),
             tmp_path / "pmc_perf.csv",
         )
 
@@ -141,7 +140,7 @@ def test_concat_result_csvs_errors_when_only_headers(tmp_path, monkeypatch) -> N
     inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
     with pytest.raises(SystemExit):
         inst.concat_result_csvs(
-            csv_compression.find_csvs(tmp_path, "results_*.csv"),
+            sorted(tmp_path.glob("results_*.csv.gz")),
             tmp_path / "pmc_perf.csv",
         )
 
@@ -159,7 +158,7 @@ def test_concat_result_csvs_rejects_wide_legacy_results(tmp_path, monkeypatch) -
     inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
     with pytest.raises(SystemExit):
         inst.concat_result_csvs(
-            csv_compression.find_csvs(tmp_path, "results_*.csv"),
+            sorted(tmp_path.glob("results_*.csv.gz")),
             tmp_path / "pmc_perf.csv",
         )
 

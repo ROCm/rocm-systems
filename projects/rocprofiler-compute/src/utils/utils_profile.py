@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import csv
 import fcntl
 import importlib
 import os
@@ -392,7 +393,12 @@ def gen_sysinfo(
         blocks.append("roofline")
     data["ip_blocks"] = "|".join(blocks)
 
-    csv_ops.write_csv_from_dicts(workload_dir + "/" + "sysinfo.csv", [data])
+    # sysinfo.csv is the one profile CSV that stays plain.
+    sysinfo_path = Path(workload_dir) / "sysinfo.csv"
+    with open(sysinfo_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(data.keys()))
+        writer.writeheader()
+        writer.writerow(data)
 
 
 def get_submodules(package_name: str) -> list[str]:

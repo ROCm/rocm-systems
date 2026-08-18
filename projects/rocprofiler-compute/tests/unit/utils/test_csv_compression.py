@@ -47,31 +47,21 @@ def test_compressed_name_accepts_path(tmp_path):
 # =============================================================================
 
 
-def test_write_compresses_gz_name(tmp_path):
+def test_write_compresses(tmp_path):
     path = tmp_path / "out.csv.gz"
 
-    with csv_compression.open_csv_write(path) as f:
+    with csv_compression.open_gzip_csv_write(path) as f:
         f.write(CONTENT)
 
     with gzip.open(path, "rt", encoding="utf-8") as f:
         assert f.read() == CONTENT
 
 
-def test_write_leaves_plain_name_uncompressed(tmp_path):
-    """pmc_perf.csv and sysinfo.csv stay plain."""
-    path = tmp_path / "out.csv"
-
-    with csv_compression.open_csv_write(path) as f:
-        f.write(CONTENT)
-
-    assert path.read_text(encoding="utf-8") == CONTENT
-
-
 def test_written_gzip_is_one_complete_member(tmp_path):
     """The contract says one member per file, which is what readers assume."""
     path = tmp_path / "out.csv.gz"
 
-    with csv_compression.open_csv_write(path) as f:
+    with csv_compression.open_gzip_csv_write(path) as f:
         for _ in range(1000):
             f.write(CONTENT)
 
@@ -86,21 +76,13 @@ def test_written_gzip_is_one_complete_member(tmp_path):
 
 
 def test_read_gzip(gzip_csv):
-    with csv_compression.open_csv_read(gzip_csv) as f:
-        assert f.read() == CONTENT
-
-
-def test_read_plain(tmp_path):
-    path = tmp_path / "data.csv"
-    path.write_text(CONTENT, encoding="utf-8")
-
-    with csv_compression.open_csv_read(path) as f:
+    with csv_compression.open_gzip_csv_read(gzip_csv) as f:
         assert f.read() == CONTENT
 
 
 def test_read_missing_file_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
-        csv_compression.open_csv_read(tmp_path / "absent.csv.gz")
+        csv_compression.open_gzip_csv_read(tmp_path / "absent.csv.gz")
 
 
 def test_truncated_gzip_raises_a_corrupt_csv_error(tmp_path):
@@ -109,7 +91,7 @@ def test_truncated_gzip_raises_a_corrupt_csv_error(tmp_path):
     path.write_bytes(gzip.compress((CONTENT * 1000).encode("utf-8"))[:40])
 
     with pytest.raises(csv_compression.CORRUPT_CSV_ERRORS):
-        with csv_compression.open_csv_read(path) as f:
+        with csv_compression.open_gzip_csv_read(path) as f:
             f.read()
 
 
@@ -121,47 +103,8 @@ def test_corrupt_gzip_raises_a_corrupt_csv_error(tmp_path):
     path.write_bytes(raw)
 
     with pytest.raises(csv_compression.CORRUPT_CSV_ERRORS):
-        with csv_compression.open_csv_read(path) as f:
+        with csv_compression.open_gzip_csv_read(path) as f:
             f.read()
-
-
-# =============================================================================
-# Discovery
-# =============================================================================
-
-
-def test_find_csvs_matches_compressed_artifacts(tmp_path):
-    (tmp_path / "results_a.csv.gz").write_bytes(gzip.compress(CONTENT.encode()))
-    (tmp_path / "results_b.csv.gz").write_bytes(gzip.compress(CONTENT.encode()))
-    (tmp_path / "sysinfo.csv").write_text(CONTENT, encoding="utf-8")
-
-    found = csv_compression.find_csvs(tmp_path, "results_*.csv")
-
-    assert [p.name for p in found] == ["results_a.csv.gz", "results_b.csv.gz"]
-
-
-def test_find_csvs_orders_by_artifact_name(tmp_path):
-    for name in ("results_c.csv.gz", "results_a.csv.gz", "results_b.csv.gz"):
-        (tmp_path / name).write_bytes(gzip.compress(CONTENT.encode()))
-
-    found = csv_compression.find_csvs(tmp_path, "results_*.csv")
-
-    assert [p.name for p in found] == [
-        "results_a.csv.gz",
-        "results_b.csv.gz",
-        "results_c.csv.gz",
-    ]
-
-
-def test_find_csvs_on_empty_directory(tmp_path):
-    assert csv_compression.find_csvs(tmp_path, "results_*.csv") == []
-
-
-def test_compressed_name_does_not_fall_back_to_plain(tmp_path):
-    plain = tmp_path / "counters.csv"
-    plain.write_text(CONTENT, encoding="utf-8")
-
-    assert csv_compression.compressed_name(plain) == tmp_path / "counters.csv.gz"
 
 
 # =============================================================================

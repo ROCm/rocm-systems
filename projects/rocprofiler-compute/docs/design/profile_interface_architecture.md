@@ -337,10 +337,13 @@ and the `--join-type` references in the docs.
 
 Status: implemented.
 
-Gzip streaming reduces size of the two large counter CSV intermediates from AD-2.
+Gzip streaming reduces size of the counter and marker CSV intermediates from AD-2.
 Phase B does not change the profile/analyze contract shape. Python and the native
-tool each compress at CSV read/write over a shared format contract; analyze accepts
-plain `.csv` for backward compatibility.
+tool each compress at CSV read/write over a shared format contract. Compressed
+artifacts are gzip-only: `csv_compression` opens nothing plain, and analyze
+discovers them by their `.csv.gz` name rather than sniffing file contents.
+`sysinfo.csv` and the `pmc_perf.csv` analyze intermediate stay plain and are
+opened by their callers with the builtin `open`.
 
 ```mermaid
 sequenceDiagram

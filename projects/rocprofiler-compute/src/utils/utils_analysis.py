@@ -594,8 +594,10 @@ def validate_workload(path: str) -> None:
     if pmc_perf_path.is_file():
         files_to_check = [pmc_perf_path]
     else:
-        # read_csv infers gzip from the .gz suffix, so both forms read alike.
-        files_to_check = csv_compression.find_csvs(workload_dir, "results_*.csv")
+        # read_csv infers gzip from the .gz suffix.
+        files_to_check = sorted(
+            workload_dir.glob(f"results_*.csv{csv_compression.GZIP_SUFFIX}")
+        )
 
     if not files_to_check:
         console_error("analysis", "No profiling data found.")

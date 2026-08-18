@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import gzip
 import inspect
 import os
 import re
@@ -16,9 +17,6 @@ src_candidate = os.path.join(ROOT, "src")
 SRC = src_candidate if os.path.isdir(src_candidate) else ROOT
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
-
-# Imported after sys.path is extended, since it lives under src/.
-from utils import csv_compression  # noqa: E402
 
 SUPPORTED_ARCHS = {
     "gfx908": {"mi100": ["MI100"]},
@@ -58,11 +56,14 @@ def check_resource_allocation():
 def check_file_pattern(pattern, file_path):
     """Check if the given pattern exists in the file.
 
-    Opened through the compression boundary so a compressed results file is
-    searched by its contents, the same as a plain one.
+    Callers pass compressed counter artifacts as well as plain files such as
+    pmc_perf.csv and profiling_config.yaml, so the reader follows the name.
     """
-    content = ""
-    with csv_compression.open_csv_read(file_path) as f:
+    if str(file_path).endswith(".gz"):
+        opener = gzip.open(file_path, "rt", encoding="utf-8")
+    else:
+        opener = open(file_path, encoding="utf-8")
+    with opener as f:
         content = f.read()
     return len(re.findall(pattern, content)) != 0
 

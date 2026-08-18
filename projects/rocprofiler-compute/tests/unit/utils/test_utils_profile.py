@@ -3,6 +3,7 @@
 
 """Unit tests for utils/utils_profile.py."""
 
+import gzip
 import os
 from unittest import mock
 
@@ -10,7 +11,6 @@ import pandas as pd
 import pytest
 
 import utils.utils_profile as utils_profile
-from utils import csv_compression
 from utils.utils_profile import (
     _augment_marker_csv,
     _parse_function_backend,
@@ -171,7 +171,7 @@ def stub_run_prof_deps(monkeypatch, counter_csv_body, warnings):
     def fake_convert(db_paths, counter_csv, marker_csv):
         assert counter_csv.endswith(".csv.gz"), counter_csv
         if counter_csv_body is not None:
-            with csv_compression.open_csv_write(counter_csv) as f:
+            with gzip.open(counter_csv, "wt", encoding="utf-8") as f:
                 f.write(counter_csv_body)
 
     monkeypatch.setattr(
@@ -213,7 +213,7 @@ def test_run_prof_zero_kernels_writes_no_results_csv(
     )
 
     assert any("No GPU kernel data collected" in m for m in warnings)
-    assert csv_compression.find_csvs(workload_dir, "results_*.csv") == []
+    assert sorted(workload_dir.glob("results_*.csv.gz")) == []
     assert not (workload_dir / "out").exists()
 
 
@@ -242,8 +242,6 @@ def test_run_prof_relabels_dispatch_and_kernel_ids(tmp_path, monkeypatch):
     )
 
     results_csv = workload_dir / "results_pmc_perf_test.csv.gz"
-    assert results_csv.name.endswith(".csv.gz")
-
     results = pd.read_csv(results_csv)
     assert "PID" not in results.columns
     assert results["Dispatch_ID"].tolist() == [0, 0, 1, 2]
@@ -1008,10 +1006,11 @@ def test_augment_marker_csv_adds_backend_column(tmp_path):
 
 def test_augment_marker_csv_handles_unknown_schema(tmp_path):
     """A CSV without a Function column copies verbatim instead of corrupting."""
-    src = tmp_path / "src.csv"
-    dst = tmp_path / "dst.csv"
-    src.write_text("Foo,Bar\n1,2\n3,4\n", encoding="utf-8")
+    src = tmp_path / "src.csv.gz"
+    dst = tmp_path / "dst.csv.gz"
+    with gzip.open(src, "wt", newline="", encoding="utf-8") as f:
+        f.write("Foo,Bar\n1,2\n3,4\n")
 
     _augment_marker_csv(str(src), str(dst))
 
-    assert dst.read_text(encoding="utf-8") == src.read_text(encoding="utf-8")
+    assert dst.read_bytes() == src.read_bytes()

@@ -207,7 +207,8 @@ def check_csv_files(output_dir, num_devices, num_kernels):
     """
     files_in_workload = os.listdir(output_dir)
 
-    # results_*.csv.gz is the only counter artifact form we keep in workloads.
+    # Profile counter artifacts are gzip; pmc_perf.csv and the other analyze
+    # inputs stay plain.
     def is_csv(name):
         if name.startswith("results_"):
             return name.endswith(".csv.gz")
@@ -255,7 +256,7 @@ def check_non_pmc_files(output_dir, num_devices, num_kernels):
 
     # Load non-PMC files into return dict
     for file in files_in_workload:
-        # Skip PMC files (already validated above), compressed or not
+        # Skip PMC files, already validated above
         if file.startswith("pmc_perf_") or file.startswith("results_"):
             continue
 

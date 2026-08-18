@@ -145,7 +145,7 @@ from pathlib import Path
 from typing import List, Optional
 
 
-def find_csvs(directory: Path, pattern: str) -> List[Path]:
+def list_result_csvs(directory: Path) -> List[Path]:
     ...
 
 
@@ -161,7 +161,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def find_csvs(directory: Path, pattern: str) -> list[Path]:
+def list_result_csvs(directory: Path) -> list[Path]:
     ...
 
 
