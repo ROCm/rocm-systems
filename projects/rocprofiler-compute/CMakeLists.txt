@@ -1378,8 +1378,7 @@ if(INSTALL_TESTS)
         COMPONENT tests
         FILES_MATCHING
         PATTERN "*.py"
-        PATTERN "cg_module_a.hsaco"
-        PATTERN "cg_module_b.hsaco"
+        PATTERN "*.hsaco"
         PATTERN "__pycache__" EXCLUDE
     )
     install(
