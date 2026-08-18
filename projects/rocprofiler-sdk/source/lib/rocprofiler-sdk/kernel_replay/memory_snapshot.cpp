@@ -137,6 +137,13 @@ snap(hsa_agent_t agent)
 {
     device_snapshot_t out{};
 
+    // Note: trackable allocations carrying HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG are recorded in
+    // memory_tracker::unsupported_executable() and omitted from the main inventory. Declining
+    // replay whenever that side inventory is non-empty is not viable -- the HIP runtime (and the
+    // SDK's own AQL pools) routinely keep such allocations live -- so they remain an unsupported
+    // omitted class for beta (documented in the public header). Direct-HSA apps that put ordinary
+    // writable device data behind the flag observe the same omission.
+
     const auto [inventory, module_vars] = [&]() {
         try
         {

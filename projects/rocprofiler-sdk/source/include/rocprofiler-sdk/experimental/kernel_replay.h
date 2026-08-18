@@ -69,9 +69,11 @@ ROCPROFILER_EXTERN_C_INIT
  * variables. Unified or managed memory, @c hipMallocAsync and other virtual-memory-mapped
  * allocations, and host, fine-grained and kernarg memory are not captured, so a kernel writing to
  * them observes values accumulated across passes rather than identical inputs. Allocations carrying
- * @c HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG are also excluded (HIP kernarg pools / profiler buffers);
- * a direct-HSA application that puts ordinary writable device data behind that flag sees the same
- * omission and is an unsupported allocation class for beta replay.
+ * @c HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG are excluded from the snapshot (HIP kernarg pools /
+ * profiler buffers share that flag). A direct-HSA application that puts ordinary writable device
+ * data behind the same flag sees the same omission -- an unsupported allocation class for beta.
+ * Declining every replay while any such trackable allocation is live is not viable because the HIP
+ * runtime itself keeps them live under interception.
  *
  * @see `docs/how-to/using-kernel-replay.rst` for the full limitation list and
  * `docs/conceptual/kernel_replay/kernel_replay_memory_snapshot.md` for what the snapshot covers

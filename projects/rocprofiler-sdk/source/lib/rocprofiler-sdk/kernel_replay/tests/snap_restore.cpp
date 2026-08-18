@@ -239,7 +239,7 @@ TEST(kernel_replay_snapshot, restore_reverts_device_memory)
             ASSERT_FLOAT_EQ(b[i], 9001.0f + i) << "mutated elem " << i;
     }
 
-    msnp::restore(snapshot);
+    ASSERT_TRUE(msnp::restore(snapshot));
     {
         // restore reverted to A
         auto a = read_device(buffer, N_ELEMS);
@@ -295,7 +295,7 @@ TEST(kernel_replay_snapshot, restore_prevents_inplace_accumulation_across_passes
                 << "module counter after saxpy, pass " << pass;
         }
 
-        msnp::restore(snapshot);
+        ASSERT_TRUE(msnp::restore(snapshot));
         {
             // restore reverts to snapped inputs -- no accumulation into the next pass
             auto reverted = read_device(y, N_ELEMS);
@@ -355,7 +355,7 @@ TEST(kernel_replay_snapshot, restore_reverts_multiple_buffers)
             ASSERT_FLOAT_EQ(mutated[i], base[b] + 77000.0f + i) << "buf " << b << " elem " << i;
     }
 
-    msnp::restore(snapshot);
+    ASSERT_TRUE(msnp::restore(snapshot));
 
     for(int b = 0; b < kBufs; ++b)
     {
@@ -436,20 +436,19 @@ TEST(kernel_replay_snapshot, pool_filter_excludes_kernarg_and_cpu)
     ASSERT_EQ(hipFree(dev), hipSuccess);
 }
 
-// Snapshots must exclude allocations carrying HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG (HIP kernarg
-// pools and profiler buffers). Assert the exclusion directly via the intercepted HSA table so the
-// check does not depend on replay-window serialization.
+// Snapshots must exclude allocations carrying HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG from the main
+// inventory (HIP kernarg pools / profiler buffers share that flag). When the allocation is
+// otherwise trackable (coarse device VRAM -- what a direct-HSA app may put behind the flag), it is
+// recorded in the unsupported side inventory. snap() does not decline on that side inventory: the
+// HIP runtime routinely keeps trackable+executable allocations live, so declining would disable
+// replay for ordinary HIP apps. Assert the inventory exclusion (and side-table bookkeeping) directly
+// via the intercepted HSA table so the check does not depend on replay-window serialization.
 TEST(kernel_replay_snapshot, executable_flag_excluded_from_inventory)
 {
     if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
 
     const auto agent = gpu_agent();
     ASSERT_NE(agent.handle, 0U) << "no GPU agent found";
-
-    auto* ext = hsa::get_amd_ext_table();
-    ASSERT_NE(ext, nullptr);
-    ASSERT_NE(ext->hsa_amd_memory_pool_allocate_fn, nullptr);
-    ASSERT_NE(ext->hsa_amd_memory_pool_free_fn, nullptr);
 
     struct pool_pick_t
     {
@@ -460,8 +459,8 @@ TEST(kernel_replay_snapshot, executable_flag_excluded_from_inventory)
     (void) hsa_amd_agent_iterate_memory_pools(
         agent,
         [](hsa_amd_memory_pool_t p, void* data) -> hsa_status_t {
-            auto* out = static_cast<pool_pick_t*>(data);
-            hsa_amd_segment_t segment{};
+            auto*              out = static_cast<pool_pick_t*>(data);
+            hsa_amd_segment_t  segment{};
             if(hsa_amd_memory_pool_get_info(p, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment) !=
                HSA_STATUS_SUCCESS)
                 return HSA_STATUS_SUCCESS;
@@ -481,17 +480,29 @@ TEST(kernel_replay_snapshot, executable_flag_excluded_from_inventory)
 
     if(!pick.found) GTEST_SKIP() << "no coarse global memory pool on agent";
 
+    // Interceptor wrappers are installed on the runtime-facing HSA table, not on
+    // get_amd_ext_table()'s internal (unwrapped) copy. tracking_pool_allocate/free invoke those
+    // same wrappers so this unit test exercises the executable-flag path directly.
     constexpr uint32_t kExecutableFlag = (1U << 2);  // HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG
     void*              ptr             = nullptr;
-    // Allocate through the intercepted table so the tracker wrapper sees the flag.
-    ASSERT_EQ(ext->hsa_amd_memory_pool_allocate_fn(pick.pool, 4096, kExecutableFlag, &ptr),
+    ASSERT_EQ(mt::tracking_pool_allocate(pick.pool, 4096, kExecutableFlag, &ptr),
               HSA_STATUS_SUCCESS);
     ASSERT_NE(ptr, nullptr);
 
     EXPECT_FALSE(inventory_contains(ptr, agent))
         << "executable-flag allocation must not enter the snapshot inventory";
 
-    ASSERT_EQ(ext->hsa_amd_memory_pool_free_fn(ptr), HSA_STATUS_SUCCESS);
+    const auto q = mt::query_alloc(ptr);
+    if(q.trackable)
+    {
+        EXPECT_EQ(mt::unsupported_executable(agent).count(ptr), 1U)
+            << "trackable+executable allocation must enter the unsupported side inventory";
+        EXPECT_TRUE(mt::agent_has_unsupported_executable(agent));
+    }
+
+    ASSERT_EQ(mt::tracking_pool_free(ptr), HSA_STATUS_SUCCESS);
+    EXPECT_EQ(mt::unsupported_executable(agent).count(ptr), 0U)
+        << "side inventory must clear this pointer on free";
 }
 
 // A __device__ module global mutated by a kernel must be reverted by restore(). It is not a
@@ -514,7 +525,7 @@ TEST(kernel_replay_snapshot, restore_reverts_module_variable)
     sync_ok();
     ASSERT_EQ(kernel_launch::read_module_counter(), kBase + 1) << "kernel mutation did not land";
 
-    msnp::restore(snapshot);
+    ASSERT_TRUE(msnp::restore(snapshot));
     EXPECT_EQ(kernel_launch::read_module_counter(), kBase)
         << "module variable (__device__ global) was not restored by snapshot/restore";
 }
@@ -541,7 +552,7 @@ TEST(kernel_replay_snapshot, restore_prevents_module_variable_accumulation_acros
         sync_ok();
         ASSERT_EQ(kernel_launch::read_module_counter(), kBase + 1) << "mutation, pass " << pass;
 
-        msnp::restore(snapshot);
+        ASSERT_TRUE(msnp::restore(snapshot));
         ASSERT_EQ(kernel_launch::read_module_counter(), kBase) << "post-restore, pass " << pass;
     }
 
