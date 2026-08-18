@@ -3,6 +3,7 @@
 
 #include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/vm/virtual_machine.h"
 
 #include "checkpoint_generated.h"
@@ -163,10 +164,18 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
             ttmps[t] = w->ttmp(t);
           auto ttmps_vec = builder.CreateVector(ttmps.data(), ttmps.size());
 
+          // Dispatch identity. The flat wg_id above cannot stand in for it --
+          // unflattening needs the grid dimensions, which belong to the
+          // dispatch packet and are not checkpointed -- and trap entry publishes
+          // exactly these three values in TTMP8/9/10 for the CWSR record to
+          // match.
+          const auto &wg_coord = w->wg_coord();
+          auto wg_coord_vec = builder.CreateVector(wg_coord.data(), wg_coord.size());
+
           auto wfs = fb::CreateWavefrontState(builder, w->wf_id(), w->wg_id(), w->pc, w->exec_raw(),
                                               w->vcc(), w->m0(), w->is_halted(), w->status_raw(),
                                               sgprs_vec, vgprs_vec, w->mode_raw(),
-                                              w->wave_sched_mode_raw(), ttmps_vec);
+                                              w->wave_sched_mode_raw(), ttmps_vec, wg_coord_vec);
           wf_offsets.push_back(wfs);
         }
 
@@ -313,6 +322,21 @@ LoadedConfig restore_checkpoint(const std::string &path) {
             const uint32_t available = std::min<uint32_t>(16, sgprs->size() - kLegacyTtmpSgprBase);
             for (uint32_t t = 0; t < available; ++t)
               wf->set_ttmp(t, sgprs->Get(kLegacyTtmpSgprBase + t));
+          }
+
+          // Dispatch identity. A record written before this field existed has
+          // to fall back to something defined, and the only other place the
+          // coordinate appears is the TTMP file: on the architectures that do
+          // not carry workgroup ids in TTMP6/7/9, trap entry writes x/y/z into
+          // TTMP8/9/10 and the CWSR codec reads them from there, so those slots
+          // are authoritative for any wave that reached a trap handler. Waves
+          // that never trapped leave them zero, which is what the coordinate
+          // restored to before this field was added; nothing else in an old
+          // record can improve on that.
+          if (auto *wg_coord = wf_state->wg_coord(); wg_coord != nullptr && wg_coord->size() >= 3) {
+            wf->set_wg_coord(wg_coord->Get(0), wg_coord->Get(1), wg_coord->Get(2));
+          } else if (!isa_properties(cu->arch()).uses_ttmp_workgroup_ids) {
+            wf->set_wg_coord(wf->ttmp(8), wf->ttmp(9), wf->ttmp(10));
           }
 
           if (auto *vgprs = wf_state->vgprs()) {

@@ -4892,6 +4892,50 @@ TEST_F(KfdIoctlTest, DbgTrapDebuggerExitReapsSessionAndAllowsReenable) {
   first_enable.enable.dbg_fd = static_cast<uint32_t>(first_notifier);
   ASSERT_EQ(daemon_debug_enable(daemon, debugger, first_enable), 0);
 
+  // A wave stopped for this debugger. Erasing the session is only half of the
+  // release: a wave left halted with its queue gate shut outlives the debugger
+  // that stopped it, and nothing else will ever resume it, so the inferior is
+  // stranded for good. Set both halves of the stop -- the scheduler's flag and
+  // the architectural STATUS.HALT that s_rfe consults -- because clearing only
+  // the former re-halts the wave at the handler return.
+  const uint32_t target_process = daemon.open_process(target_pid);
+  ASSERT_NE(target_process, 0u);
+  std::vector<uint8_t> ring(4096);
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  // Not kGpuId: this daemon is a bare SimulatedKfd over soc_, with no
+  // setup_topology() call to rename its single device, so it keeps the
+  // constructor's default id. Only self-consistency matters here -- the release
+  // path finds the queue's GPU by the same number this creates it under.
+  create.gpu_id = 0;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  ASSERT_EQ(daemon.ioctl(target_process, AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  rocjitsu::amdgpu::Wavefront *wave = nullptr;
+  rocjitsu::amdgpu::CommandProcessor *wave_cp = nullptr;
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    if (wave != nullptr || cp->compute_units().empty())
+      return;
+    wave_cp = cp;
+    wave = cp->compute_units().front()->dispatch_wf(/*wg_id=*/0, /*pc=*/0x600000000ULL,
+                                                    /*sgprs=*/16, /*vgprs=*/4);
+  });
+  ASSERT_NE(wave, nullptr);
+  ASSERT_NE(wave_cp, nullptr);
+  wave->set_process_id(target_process);
+  wave->set_queue_id(create.queue_id);
+  wave->set_debug_halted(true);
+  wave->set_debug_suspended(true);
+  wave->set_debug_single_step(true);
+  wave->set_status_halt(true);
+  wave->set_self_halted(true);
+  wave_cp->set_queue_debug_suspended(create.queue_id, target_process, true);
+
   ASSERT_EQ(kill(debugger_pid, SIGKILL), 0);
   int status = 0;
   ASSERT_EQ(waitpid(debugger_pid, &status, 0), debugger_pid);
@@ -4903,6 +4947,17 @@ TEST_F(KfdIoctlTest, DbgTrapDebuggerExitReapsSessionAndAllowsReenable) {
   EXPECT_EQ(fcntl(first_notifier, F_GETFD), -1) << "debugger-exit reaper did not release notifier";
   EXPECT_EQ(errno, EBADF);
   ASSERT_EQ(kill(target_pid, 0), 0) << "target exited with its debugger";
+
+  // The reaper runs the same release path an explicit DISABLE does, so the
+  // stopped wave is running again and its queue can launch.
+  EXPECT_FALSE(wave->debug_halted()) << "debugger-exit reaper stranded a stopped wave";
+  EXPECT_FALSE(wave->debug_suspended());
+  EXPECT_FALSE(wave->debug_single_step());
+  EXPECT_FALSE(wave->status_halt())
+      << "the architectural halt outlived the session, so the wave re-halts at the handler return";
+  EXPECT_FALSE(wave->self_halted());
+  EXPECT_FALSE(wave_cp->queue_debug_suspended_for_test(create.queue_id, target_process))
+      << "the queue launch gate stayed shut after the debugger died";
 
   ASSERT_EQ(ptrace(PTRACE_ATTACH, target_pid, nullptr, nullptr), 0) << strerror(errno);
   ASSERT_EQ(waitpid(target_pid, &status, 0), target_pid);
@@ -4927,6 +4982,7 @@ TEST_F(KfdIoctlTest, DbgTrapDebuggerExitReapsSessionAndAllowsReenable) {
   target_guard.release();
   daemon.close(debugger);
   daemon.close(replacement_debugger);
+  daemon.close(target_process);
 }
 
 #if defined(__SANITIZE_THREAD__)

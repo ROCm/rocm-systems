@@ -1263,6 +1263,64 @@ TEST(CheckpointTest, RefusesToSaveTrappedOrDebuggerStoppedWaves) {
   wf->set_runtime_suspended(false);
 }
 
+// wg_coord is dispatch identity, and the flat wg_id cannot stand in for it: the
+// grid dimensions needed to unflatten one into the other live in the dispatch
+// packet, which is not part of a checkpoint. A restored wave that lost the
+// coordinate publishes the wrong workgroup in TTMP8/9/10 at trap entry and can
+// no longer be matched to its own CWSR record.
+TEST(CheckpointTest, RoundTripsWorkgroupCoordinates) {
+  const char *json = R"({"max_ticks":10000,"num_threads":1,
+    "vm":{"arch":"cdna3"},
+    "topology":{
+      "root":{
+        "name":"soc","type":"soc",
+        "children":[
+          {"name":"vram","type":"gpu_memory"},
+          {"name":"xcd0","type":"xcd","children":[
+            {"name":"l2","type":"l2_cache"},
+            {"name":"cp","type":"command_processor"},
+            {"name":"se0","type":"shader_engine","children":[
+              {"name":"cu[0:1]","type":"compute_unit","config":[
+                {"key":"num_wf_slots","value":"1"},
+                {"key":"sgprs_per_wf","value":"104"},
+                {"key":"vgprs_per_wf","value":"256"},
+                {"key":"lds_size_kb","value":"64"}
+              ]}
+            ]}
+          ]}
+        ]
+      },
+      "links":[
+        {"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
+        {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}
+      ]
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+  // A flat id that is not any of the coordinates, so restoring wg_id into them
+  // would not pass either.
+  auto *wf = cu->dispatch_wf(/*wg_id=*/9, /*pc=*/0x1000, cu->config().sgprs_per_wf,
+                             cu->config().vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_wg_coord(3, 5, 7);
+
+  test::ScopedTempFile checkpoint("rocjitsu-wg-coord-checkpoint-");
+  ASSERT_NO_THROW(
+      config::save_checkpoint(checkpoint.path(), *loaded.soc(), 1, loaded.engine_config));
+
+  auto restored = config::restore_checkpoint(checkpoint.path());
+  auto *restored_cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(restored_cu, nullptr);
+  ASSERT_EQ(restored_cu->num_wfs(), 1u);
+  const auto *restored_wf = restored_cu->wf(0);
+  ASSERT_NE(restored_wf, nullptr);
+  EXPECT_EQ(restored_wf->wg_id(), 9u);
+  EXPECT_EQ(restored_wf->wg_coord(), (std::array<uint32_t, 3>{3, 5, 7}));
+}
+
 TEST(CApiTest, CreateAndDestroyFromString) {
   const char *json = R"({"max_ticks":10000,"num_threads":1,
     "vm":{"arch":"cdna3"},

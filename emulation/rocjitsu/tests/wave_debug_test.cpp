@@ -494,6 +494,81 @@ TEST(WaveDebugTest, SelfHaltedMarkerDoesNotSurviveTheStopThatSetIt) {
   EXPECT_TRUE(wf->is_halted());
 }
 
+// S_SENDMSGHALT with nobody attached. The instruction halts the wave whether or
+// not a debugger is there to resume it, so the flags it raises must be exactly
+// the same ones a debugger stop raises -- and no more. What this pins is that
+// an undebugged run does not diverge: the halt is a stop, not a corruption. The
+// wave keeps the interrupted EXEC rather than running on under the handler's
+// mask, its slot is not silently retired behind the halt, and clearing the two
+// halves of the stop -- which is all a session release does -- puts it back on
+// the scheduler and lets it retire.
+TEST(WaveDebugTest, SendmsghaltWithoutADebugSessionHaltsAndStaysReleasable) {
+  WaveDebugFixture fx;
+  constexpr uint32_t kStatusHalt = 1u << 13;
+  constexpr uint32_t kSSendmsghaltInterrupt = 0xBF910001u;
+  constexpr uint64_t kApplicationExec = 0x5u;
+
+  fx.gpu_mem.write32(kKernelAddr, kSTrapBreakpoint);
+  fx.gpu_mem.write32(kKernelAddr + 4, kSEndpgm);
+
+  // The handler runs under its own mask, the way the real one does on its way
+  // to MSG_INTERRUPT, so a lost EXEC restore is visible here.
+  const uint32_t handler[] = {
+      0x806C846Cu, // s_add_u32  ttmp0, ttmp0, 4
+      0x826D806Du, // s_addc_u32 ttmp1, ttmp1, 0
+      0xBEFE00FFu,
+      0x80000000u,            // s_mov_b32 exec_lo, 0x80000000
+      kSSendmsghaltInterrupt, // s_sendmsghalt sendmsg(MSG_INTERRUPT)
+      0xBE801F6Cu,            // s_rfe_b64 ttmp[0:1]
+  };
+  for (uint32_t i = 0; i < std::size(handler); ++i)
+    fx.gpu_mem.write32(kTrapHandlerAddr + i * 4, handler[i]);
+
+  // debug_enabled clear: no debugger, so TTMP13 bit 23 stays 0 and nothing in
+  // the driver is watching this wave.
+  fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
+    return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0, false};
+  });
+  fx.cu->set_sendmsg_handler([](amdgpu::Wavefront &, uint32_t message) { return message == 1; });
+
+  auto *wf = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(kApplicationExec);
+
+  fx.cu->step(); // s_trap -> handler
+  ASSERT_TRUE(wf->in_trap_handler());
+
+  for (int i = 0; i < 6 && !wf->debug_halted(); ++i)
+    fx.cu->step();
+
+  EXPECT_TRUE(wf->debug_halted()) << "s_sendmsghalt did not halt an undebugged wave";
+  EXPECT_NE(wf->status_raw() & kStatusHalt, 0u);
+  EXPECT_TRUE(wf->self_halted())
+      << "an undebugged s_sendmsghalt must record provenance too, or the release below "
+         "leaves STATUS.HALT set and the wave re-halts at s_rfe";
+  EXPECT_FALSE(wf->is_halted()) << "the slot was retired behind a wave that is only stopped";
+
+  // Stepping a stopped wave must not advance it, with or without a debugger.
+  const uint64_t stopped_pc = wf->pc;
+  fx.cu->step();
+  EXPECT_EQ(wf->pc, stopped_pc);
+
+  // What a session release does: drop both halves of the stop. Nothing else is
+  // needed to make the wave runnable again.
+  wf->set_status_halt(false);
+  wf->set_self_halted(false);
+  wf->set_debug_halted(false);
+  for (int i = 0; i < 3 && wf->in_trap_handler(); ++i)
+    fx.cu->step();
+  ASSERT_FALSE(wf->in_trap_handler()) << "the handler never returned";
+  EXPECT_EQ(wf->exec(), kApplicationExec)
+      << "the application resumed under the handler's EXEC mask";
+
+  for (int i = 0; i < 4 && !wf->is_halted(); ++i)
+    fx.cu->step();
+  EXPECT_TRUE(wf->is_halted()) << "the wave never retired, so its dispatch cannot complete";
+}
+
 // The CWSR codec reproduces the gfx9.4 record layout only, and the differences
 // elsewhere are not confined to one field. Serializing a wave from an
 // unmodelled architecture would hand rocm-dbgapi an image it decodes against a
