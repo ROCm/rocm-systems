@@ -205,13 +205,10 @@ jobs:
               CODE_NAME=jammy
             fi
             echo "code_name=${CODE_NAME}" >> $GITHUB_OUTPUT
-            CMAKE_COMPILER_FLAGS=""
           else
             PIP_SYSTEM_FLAGS=""
-            CMAKE_COMPILER_FLAGS="-DCMAKE_C_COMPILER=${{ env.ROCM_PATH }}/llvm/bin/clang -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/llvm/bin/clang++"
           fi
           echo "pip_system_flags=${PIP_SYSTEM_FLAGS}" >> $GITHUB_OUTPUT
-          echo "cmake_compiler_flags=${CMAKE_COMPILER_FLAGS}" >> $GITHUB_OUTPUT
 
       - name: Install dependencies (Ubuntu)
         if: matrix.system.distro == 'ubuntu'
@@ -225,13 +222,7 @@ jobs:
         if: matrix.system.distro == 'rhel'
         shell: bash
         run: |
-          dnf install -y pkgconf-pkg-config python3.11 python3.11-pip
-          alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 2
-          alternatives --set python3 /usr/bin/python3.11
-          # cmake was pip-installed in the image for python3.9; its /usr/local/bin/ctest
-          # shebang now resolves to python3.11, so reinstall for the new interpreter.
-          python3.11 -m pip install cmake
-
+          dnf install -y pkgconf-pkg-config
           echo "✅ ROCm Dependencies Installed!"
 
       - name: Install Latest Nightly ROCm
@@ -285,7 +276,6 @@ jobs:
             -- \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
-            ${{ steps.setup_env.outputs.cmake_compiler_flags }} \
             -DENABLE_TESTS=ON \
             -DINSTALL_TESTS=ON \
             -DPYTEST_NUMPROCS=8 \
