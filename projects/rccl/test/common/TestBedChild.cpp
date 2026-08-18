@@ -71,6 +71,14 @@ namespace RcclUnitTesting
     this->verbose = verbose;
     this->printValues = printValues;
     this->useRankThreading = useRankThreading;
+    // Initialize pid/fds to -1 so a child that is never forked (or whose InitPipes fails) is
+    // distinguishable from a live worker: teardown skips waitpid() on pid < 0 and close(-1)
+    // is a harmless no-op. Prevents waitpid() on an uninitialized pid during pool teardown.
+    this->pid          = -1;
+    this->parentWriteFd = -1;
+    this->parentReadFd  = -1;
+    this->childWriteFd  = -1;
+    this->childReadFd   = -1;
   }
 
   int TestBedChild::InitPipes()
@@ -206,13 +214,23 @@ namespace RcclUnitTesting
     // Read vectors BY VALUE (size + elements) to match TestBed::InitComms; the old
     // PIPE_READ(vector) copied a 24-byte control block that only dereferenced correctly
     // in a freshly-forked child (fork-COW). Reused pool workers need real values.
-    { int _n = 0; PIPE_READ(_n); this->numCollectivesInGroup.resize(_n);
-      for (int _i = 0; _i < _n; ++_i) PIPE_READ(this->numCollectivesInGroup[_i]); }
+    int numColls = 0;
+    PIPE_READ(numColls);
+    this->numCollectivesInGroup.resize(numColls);
+    for (int i = 0; i < numColls; ++i)
+    {
+      PIPE_READ(this->numCollectivesInGroup[i]);
+    }
     PIPE_READ(this->useBlocking);
     bool useMultiRankPerGpu;
     PIPE_READ(useMultiRankPerGpu);
-    { int _n = 0; PIPE_READ(_n); this->numStreamsPerGroup.resize(_n);
-      for (int _i = 0; _i < _n; ++_i) PIPE_READ(this->numStreamsPerGroup[_i]); }
+    int numStreams = 0;
+    PIPE_READ(numStreams);
+    this->numStreamsPerGroup.resize(numStreams);
+    for (int i = 0; i < numStreams; ++i)
+    {
+      PIPE_READ(this->numStreamsPerGroup[i]);
+    }
 
     // Read the GPUs this child uses and prepare storage for collective args / datasets
     int numGpus;

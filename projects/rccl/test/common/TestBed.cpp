@@ -57,8 +57,8 @@ namespace RcclUnitTesting
     if (ev.verbose) TEST_INFO("Detected %d GPUs", this->numDevicesAvailable);
 
     // Communicator process pool: ON by default; set UT_COMM_POOL=0 to disable.
-    char const* poolEnv = getenv("UT_COMM_POOL");
-    this->poolMode = !(poolEnv && poolEnv[0] == '0');
+    // Parsed/registered centrally in EnvVars (shown in the config banner) like every UT_* var.
+    this->poolMode = ev.commPool;
     this->configUsedPool = false;
   }
 
@@ -104,21 +104,38 @@ namespace RcclUnitTesting
       // Lazily fork the persistent pool once (one worker per device).
       if (this->poolChildren.empty())
       {
-        int const poolSize = this->numDevicesAvailable;
+        // Size the pool to the devices that actually exist. numDevicesAvailable comes from
+        // UT_MAX_GPUS, which is an unclamped override: if it exceeds the real device count we
+        // would fork workers for nonexistent devices whose Warmup hipSetDevice() then fails.
+        int poolSize = this->numDevicesAvailable;
+        int hipDeviceCount = 0;
+        if (hipGetDeviceCount(&hipDeviceCount) == hipSuccess && hipDeviceCount > 0 &&
+            hipDeviceCount < poolSize)
+        {
+          poolSize = hipDeviceCount;
+        }
         this->poolChildren.assign(poolSize, nullptr);
         for (int d = 0; d < poolSize; ++d)
         {
           this->poolChildren[d] = new TestBedChild(d, ev.verbose, ev.printValues, ev.useMultithreading);
           if (this->poolChildren[d]->InitPipes() != TEST_SUCCESS)
           {
-            TEST_ERROR("Unable to create pipes to pool child process");
-            return;
+            // Reap whatever was already forked and fail the test: a half-built pool leaves
+            // childList empty, and TEST_ERROR alone would not register a gtest failure, so the
+            // sweep would march on to SetCollectiveArgs and index an empty childList -> SEGV.
+            TeardownPool();
+            FAIL() << "Unable to create pipes to pool child process " << d;
           }
           pid_t pid = fork();
           if (pid == 0)
           {
             this->poolChildren[d]->StartExecutionLoop();
             return;
+          }
+          if (pid < 0)
+          {
+            TeardownPool();
+            FAIL() << "fork() failed for pool child process " << d;
           }
           this->poolChildren[d]->pid = pid;
           close(this->poolChildren[d]->childWriteFd);
@@ -132,7 +149,11 @@ namespace RcclUnitTesting
         int const warmCmd = TestBedChild::CHILD_WARMUP;
         for (int d = 0; d < poolSize; ++d)
         {
-          ASSERT_EQ(write(this->poolChildren[d]->parentWriteFd, &warmCmd, sizeof(warmCmd)), sizeof(warmCmd));
+          if (write(this->poolChildren[d]->parentWriteFd, &warmCmd, sizeof(warmCmd)) != (ssize_t)sizeof(warmCmd))
+          {
+            TeardownPool();
+            FAIL() << "Failed to send WARMUP to pool worker " << d;
+          }
         }
         for (int d = 0; d < poolSize; ++d)
         {
@@ -140,8 +161,8 @@ namespace RcclUnitTesting
           ssize_t const r = read(this->poolChildren[d]->parentReadFd, &st, sizeof(st));
           if (r != (ssize_t)sizeof(st) || st != TEST_SUCCESS)
           {
-            TEST_ERROR("Pool worker %d failed to warm up", d);
-            return;
+            TeardownPool();
+            FAIL() << "Pool worker " << d << " failed to warm up";
           }
         }
       }
@@ -153,9 +174,10 @@ namespace RcclUnitTesting
       for (int c = 0; c < this->numActiveChildren && mappable; ++c)
       {
         int const worker = deviceIdsPerProcess[c].empty() ? -1 : deviceIdsPerProcess[c][0];
-        if (worker < 0 || worker >= (int)this->poolChildren.size() || usedWorkers.count(worker))
+        if (worker < 0 || worker >= (int)this->poolChildren.size() ||
+            this->poolChildren[worker] == nullptr || usedWorkers.count(worker))
         {
-          mappable = false;  // out-of-range or collision (e.g. multi-rank-per-GPU) -> fork-fresh
+          mappable = false;  // out-of-range, missing worker, or collision (multi-rank-per-GPU) -> fork-fresh
           break;
         }
         usedWorkers.insert(worker);
@@ -257,8 +279,13 @@ namespace RcclUnitTesting
       // Serialize the vector BY VALUE (size + elements), not the 24-byte control block:
       // the old PIPE_WRITE(vector) shipped heap pointers that were only valid in the child
       // via fork-time COW, which breaks for reused pool workers (stale COW snapshot).
-      { int _n = (int)numCollectivesInGroup.size(); PIPE_WRITE(childId, _n);
-        for (int _i = 0; _i < _n; ++_i) { int _v = numCollectivesInGroup[_i]; PIPE_WRITE(childId, _v); } }
+      int const numColls = (int)numCollectivesInGroup.size();
+      PIPE_WRITE(childId, numColls);
+      for (int i = 0; i < numColls; ++i)
+      {
+        int const value = numCollectivesInGroup[i];
+        PIPE_WRITE(childId, value);
+      }
 
       // Send the RCCL communication with blocking or non-blocking option
       PIPE_WRITE(childId, useBlocking);
@@ -267,8 +294,13 @@ namespace RcclUnitTesting
       PIPE_WRITE(childId, useMulti);
 
       // Send how many streams to use per group call (by value: size + elements, see above).
-      { int _n = (int)numStreamsPerGroup.size(); PIPE_WRITE(childId, _n);
-        for (int _i = 0; _i < _n; ++_i) { int _v = numStreamsPerGroup[_i]; PIPE_WRITE(childId, _v); } }
+      int const numStreams = (int)numStreamsPerGroup.size();
+      PIPE_WRITE(childId, numStreams);
+      for (int i = 0; i < numStreams; ++i)
+      {
+        int const value = numStreamsPerGroup[i];
+        PIPE_WRITE(childId, value);
+      }
 
       // Send the GPUs this child uses
       int const numGpus = deviceIdsPerProcess[childId].size();
@@ -705,8 +737,13 @@ namespace RcclUnitTesting
       {
         continue;
       }
-      ssize_t const w = write(c->parentWriteFd, &cmd, sizeof(cmd));
-      (void)w;
+      // Only a forked worker (pid > 0) has a reader on the pipe; skip the STOP write for a
+      // never-forked entry. close(-1) on an unopened fd is a harmless no-op.
+      if (c->pid > 0)
+      {
+        ssize_t const w = write(c->parentWriteFd, &cmd, sizeof(cmd));
+        (void)w;
+      }
       close(c->parentWriteFd);
       close(c->parentReadFd);
     }
@@ -716,8 +753,12 @@ namespace RcclUnitTesting
       {
         continue;
       }
-      int returnVal = 0;
-      waitpid(c->pid, &returnVal, 0);
+      // Reap only workers we actually forked; a never-forked entry has pid == -1.
+      if (c->pid > 0)
+      {
+        int returnVal = 0;
+        waitpid(c->pid, &returnVal, 0);
+      }
       delete c;
     }
     this->poolChildren.clear();

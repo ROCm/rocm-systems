@@ -31,6 +31,7 @@ namespace RcclUnitTesting
     bool useInteractive; // Run in interactive mode                [UT_INTERACTIVE]
     int  timeoutUs;      // Set timeout for child in microseconds  [UT_TIMEOUT_US]
     bool useMultithreading; // Multi-thread single-process ranks   [UT_MULTITHREAD]
+    bool commPool;       // Reuse child processes across configs    [UT_COMM_POOL]
 
     bool isGfx94;        // Detects if architecture is gfx94
     bool isGfx95;        // Detects if architecture is gfx95
