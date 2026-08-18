@@ -33,7 +33,7 @@
 //!    ran arbitrary code between fork and exec in a process where almost
 //!    nothing is legal to call.
 //!
-//! 3. **Termination escalates and then confirms.** [`terminate`] sends
+//! 3. **Termination escalates and then confirms.** [`Spawned::terminate`] sends
 //!    `SIGTERM` to the group, waits a bounded grace period, sends
 //!    `SIGKILL`, and only returns once the child has actually been
 //!    reaped. `SIGKILL` cannot be caught, so the second stage always
@@ -247,7 +247,7 @@ impl ContainerProc {
     /// For the second attempt in [`Spawned::terminate`], where the
     /// wrapper has had the provider client's entire lifetime to record
     /// its pid: if the file is still absent it is not coming, and
-    /// waiting another [`PID_FILE_WAIT`] only makes teardown slower.
+    /// waiting another `PID_FILE_WAIT` only makes teardown slower.
     pub async fn signal_recorded(&self, sig: Signal) -> bool {
         match self.pid() {
             Some(pid) => self.deliver(pid, sig).await,

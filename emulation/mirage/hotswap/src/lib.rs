@@ -71,7 +71,7 @@ pub const DEFAULT_ADAPTER_POLICY: &str = "compile";
 
 /// The recognised HotSwap adapter policies, mirroring env_contract.py's
 /// `ADAPTER_POLICIES`. Each maps to a set of backend adapters via
-/// [`adapter_backends_for_policy`].
+/// `adapter_backends_for_policy`.
 pub const ADAPTER_POLICIES: &[&str] = &["none", "env", "native_build", "triton", "compile", "full"];
 
 /// The physical GPU architectures HotSwap can retarget code *onto*,
@@ -175,7 +175,7 @@ impl EmulatorBackend for Hotswap {
 impl Hotswap {
     /// [`EmulatorBackend::injection_def`] against an explicit view of
     /// the machine: the HotSwap install to wire in (as
-    /// [`installed_lib_dir`] reports it) and the GPU to retarget onto.
+    /// `installed_lib_dir` reports it) and the GPU to retarget onto.
     ///
     /// Both are threaded in for the reason `mirage_rocjitsu::dbt` threads
     /// its environment lookup: they come from `$HOTSWAP_HOME` and the
@@ -561,7 +561,7 @@ fn installed_lib_dir() -> std::result::Result<PathBuf, String> {
 }
 
 /// `dir` when it holds every library HotSwap needs, else a message
-/// naming the ones it does not. Split out from [`installed_lib_dir`] so
+/// naming the ones it does not. Split out from `installed_lib_dir` so
 /// the check can be made against a staged tree rather than whatever this
 /// machine happens to have installed.
 fn complete_tree(dir: PathBuf) -> std::result::Result<PathBuf, String> {

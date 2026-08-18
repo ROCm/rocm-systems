@@ -123,7 +123,7 @@ fn stderr_wants_colour() -> bool {
 }
 
 /// The full emulator registry: every backend crate compiled into this
-/// binary registers itself via [`inventory`], and
+/// binary registers itself via the `inventory` crate, and
 /// [`mirage_core::registry::registry`] probes each one for its identity
 /// and live install / support status. No backend is named here, so
 /// enabling or disabling a backend's feature simply adds or removes it
@@ -273,7 +273,7 @@ fn emulators_cmd(long: bool, json: bool) {
 /// directory it cannot write reads as a machine with no configuration at
 /// all: `profile list` prints nothing and exits 0, and `run` then blames
 /// a missing `mi350x` — which exists, and would have been written here.
-/// [`config_dir_hint`] turns that into the sentence the user needs.
+/// `config_dir_hint` turns that into the sentence the user needs.
 pub fn ensure_builtins_present() {
     let outcome = [
         mirage_builtin::ensure_agents(false).map(|_| ()),
@@ -446,7 +446,7 @@ pub enum ProfileCmd {
 /// Arguments for `mirage profile create`.
 ///
 /// A named struct rather than an inline variant body because
-/// [`build_profile_create`] consumes the whole payload: six of these
+/// `build_profile_create` consumes the whole payload: six of these
 /// fields are `Option<String>`, so passing them positionally meant a
 /// transposition — image where the description belongs, say — compiled
 /// silently and wrote the wrong profile to disk.

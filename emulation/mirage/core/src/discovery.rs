@@ -20,7 +20,7 @@
 //!
 //! Backends that opt in via [`LibSearch::system_fallbacks`] also search
 //! a set of generic locations (first match wins), as implemented by
-//! [`LibSearch::search_dirs`]:
+//! `LibSearch::search_dirs`:
 //!
 //! 1. Every directory on `$LD_LIBRARY_PATH`.
 //! 2. `$ROCM_HOME` / `$ROCM_PATH` — the ROCm install root
@@ -330,7 +330,7 @@ impl RuntimeLocation {
     /// an empty `runtime:` line would only invite the question.
     ///
     /// The middle of a long `searched` list is elided (see
-    /// [`REPORT_HEAD`]); the serialized form carries every entry, which
+    /// `REPORT_HEAD`); the serialized form carries every entry, which
     /// is the direction that costs nothing.
     #[must_use]
     pub fn report(&self) -> Vec<(&'static str, String)> {

@@ -48,7 +48,7 @@ pub struct PortDef {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ComponentDef {
-    /// Name or range pattern like "xcd[0:7]".
+    /// Name or range pattern like `"xcd[0:7]"`.
     pub name: String,
 
     /// Registry type: "compute_unit", "l2_cache", etc.
@@ -94,7 +94,7 @@ pub struct LinkDef {
     #[serde(default)]
     pub dst: String,
 
-    /// Pattern: "soc.xcd[i].l2 -> soc.iod[i/4].msc".
+    /// Pattern: `"soc.xcd[i].l2 -> soc.iod[i/4].msc"`.
     #[serde(default)]
     pub pattern: String,
 
@@ -266,7 +266,8 @@ pub struct AgentDef {
 /// will fail to parse those as [`AgentDef`]; callers that need raw
 /// access should read the file at [`crate::paths::agent_path`].
 ///
-/// [`get`] is where a `MaybeRef::Ref` on a topology is followed, so it is
+/// [`crate::store::agent_get`] is where a `MaybeRef::Ref` on a topology is
+/// followed, so it is
 /// also where that reference is checked, and where one that resolves to
 /// nothing is reported — see [`crate::topology::store`].
 pub mod store {

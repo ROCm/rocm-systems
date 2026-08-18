@@ -65,7 +65,7 @@ fn builtin_documents() -> Vec<(DocKind, String, serde_json::Value)> {
     out
 }
 
-/// What one pass of [`ensure`] did to one kind of builtin.
+/// What one pass of `ensure` did to one kind of builtin.
 ///
 /// A report rather than a success-or-error, because the interesting
 /// outcome is neither: a builtin the user has edited is left alone, which
@@ -97,7 +97,7 @@ impl Ensured {
     }
 }
 
-/// Write all builtin agents to disk. See [`ensure`] for what `force`
+/// Write all builtin agents to disk. See `ensure` for what `force`
 /// does — and does not — allow.
 ///
 /// # Errors
@@ -108,7 +108,7 @@ pub fn ensure_agents(force: bool) -> Result<Ensured> {
     ensure(DocKind::Agent, agents(), force)
 }
 
-/// Write all builtin topologies to disk. See [`ensure`].
+/// Write all builtin topologies to disk. See `ensure`.
 ///
 /// # Errors
 ///
@@ -117,7 +117,7 @@ pub fn ensure_topologies(force: bool) -> Result<Ensured> {
     ensure(DocKind::Topology, topologies(), force)
 }
 
-/// Write all builtin profiles to disk. See [`ensure`].
+/// Write all builtin profiles to disk. See `ensure`.
 ///
 /// # Errors
 ///

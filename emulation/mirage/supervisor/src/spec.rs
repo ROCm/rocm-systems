@@ -82,7 +82,7 @@ pub const ENV_EXEC: &str = "MIRAGE_EXEC";
 /// an ambient read inside a function whose whole value is being a pure
 /// function of its arguments.
 ///
-/// All three streams, not just stdin: see [`wants_tty`] for why `-t` on
+/// All three streams, not just stdin: see `wants_tty` for why `-t` on
 /// a partly-redirected exec is destructive rather than merely useless.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CallerStreams {

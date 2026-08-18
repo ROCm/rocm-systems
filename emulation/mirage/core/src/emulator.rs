@@ -158,7 +158,7 @@ pub struct EmulatorDescription {
 ///
 /// Implementations are stateless singletons (a unit struct is typical);
 /// any per-session state is resolved on demand from the on-disk session
-/// definition (see [`crate::session::resolve_profile`]).
+/// definition (see `mirage_supervisor::session::resolve_profile`).
 pub trait EmulatorBackend: Sync + Send + std::fmt::Debug {
     /// Returns a description of the emulator, including its name, version, and a brief description.
     fn description(&self) -> EmulatorDescription;

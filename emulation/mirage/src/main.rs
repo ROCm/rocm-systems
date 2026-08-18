@@ -231,8 +231,13 @@ fn is_global_flag(arg: &str) -> bool {
     }
 }
 
-/// The subcommand a drop-in invocation is routed to, and the only one
-/// that also honours [`ATTACH`].
+/// The subcommand a drop-in invocation is routed to.
+///
+/// Also the only one that accepts `--attach`, the `rocjitsu` spelling of
+/// `--daemon`. It used to be translated here, against an `ATTACH`
+/// constant this comment outlived; `run` declares it as a clap alias
+/// now, so an explicit `mirage run --attach` needs nothing from the
+/// rewriter and neither does a drop-in one.
 const RUN: &str = "run";
 
 /// The one-line shape shown by every usage error [`dropin_argv`] raises.

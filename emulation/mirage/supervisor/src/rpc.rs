@@ -2,7 +2,7 @@
 //!
 //! One socket per run, named after its session, living for exactly as
 //! long as the run does. It answers [`Request::Describe`] and
-//! [`Request::Attach`] with a [`SessionDescription`] and nothing else —
+//! [`Request::Attach`] with a [`mirage_core::proto::SessionDescription`] and nothing else —
 //! see [`mirage_core::proto`] for why that is the whole protocol.
 //!
 //! The two differ only in what happens next. `Describe` closes; `Attach`

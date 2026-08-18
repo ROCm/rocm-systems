@@ -32,7 +32,7 @@
 //!   disappearing without a word is the same defect one level down.
 //!   The name is claimed from the filesystem rather than from a stat, so
 //!   two `create`s racing for it produce one winner and one refusal
-//!   instead of two successes (see [`write_new`]).
+//!   instead of two successes (see `write_new`).
 //! * A delete of a pristine builtin is refused, because mirage rewrites
 //!   every missing builtin on the next command — the file would come
 //!   straight back and the "deleted" would have been a lie. Deleting one
@@ -688,7 +688,7 @@ pub fn profile_put(profile: &ProfileDef) -> Result<Stored> {
 ///
 /// Returns [`MirageError::ProfileNotFound`] if there is no such profile,
 /// or a rejection if it is an untouched builtin (which mirage would
-/// simply write back — see [`guard_delete`]).
+/// simply write back — see `guard_delete`).
 pub fn profile_delete(name: &str) -> Result<()> {
     validate_name(DocKind::Profile, name)?;
     let path = crate::paths::profile_path(name);
@@ -773,7 +773,7 @@ fn resolve_topology_refs(referrer: Referrer<'_>, topology: &TopologyDef) -> Resu
 ///
 /// Returns an error if there is no such topology, or if it is an
 /// untouched builtin (which mirage would simply write back — see
-/// [`guard_delete`]).
+/// `guard_delete`).
 pub fn topology_delete(name: &str) -> Result<()> {
     validate_name(DocKind::Topology, name)?;
     let path = crate::paths::topology_path(name);
@@ -831,7 +831,7 @@ pub fn agent_put(name: &str, agent: &AgentDef) -> Result<Stored> {
 /// # Errors
 ///
 /// Returns an error if there is no such agent, or if it is an untouched
-/// builtin (which mirage would simply write back — see [`guard_delete`]).
+/// builtin (which mirage would simply write back — see `guard_delete`).
 pub fn agent_delete(name: &str) -> Result<()> {
     validate_name(DocKind::Agent, name)?;
     let path = crate::paths::agent_path(name);

@@ -168,7 +168,7 @@ pub const CONTAINER_MIRAGE_DIR: &str = "/mnt/mirage";
 /// # The spelling is not the path
 ///
 /// Both sides are reduced to their components first, by
-/// [`normalise_container_path`], because a mount destination has many
+/// `normalise_container_path`, because a mount destination has many
 /// spellings and the engine acts on the location rather than on the
 /// text. `/mnt/mirage/../mirage` names the reserved directory and used
 /// to pass this test — the comparison was textual-by-component, `..` is
@@ -193,7 +193,7 @@ pub fn covers_mirage_dir(container_path: &str) -> bool {
 /// path *below* one overlays a piece of it — and the second is the one
 /// that looks harmless.
 ///
-/// Component-wise via [`normalise_container_path`], so `/mnt/mirage` and
+/// Component-wise via `normalise_container_path`, so `/mnt/mirage` and
 /// `/mnt/mirage/../mirage/runtime` overlap and `/mnt/mirage` and
 /// `/mnt/mirage-of-my-own` do not. A textual `starts_with` would get the
 /// second wrong in the direction that refuses honest mounts.
@@ -422,7 +422,7 @@ pub fn network_is_ours(provider: &str, name: &str) -> bool {
 /// somebody else.
 ///
 /// The distinction from `!container_is_ours` is the whole point: an
-/// *unanswerable* question is not an answer. [`inspect_label`] folds a
+/// *unanswerable* question is not an answer. `inspect_label` folds a
 /// provider that could not be spawned, one that exited non-zero, and a
 /// container that no longer exists all into `None`, so treating "not
 /// ours" as "leave it alone" turns a transient engine failure during
@@ -854,7 +854,7 @@ fn worth_retrying(e: &std::io::Error) -> bool {
 
 /// Run a provider command, retrying transient spawn failures.
 ///
-/// See [`worth_retrying`] for which failures are treated as transient and
+/// See `worth_retrying` for which failures are treated as transient and
 /// why the bias is towards retrying. Generic over the result so the same
 /// policy covers both `output()` and `spawn()`; `mirage_container` calls
 /// it for the latter rather than keeping a second copy that had already

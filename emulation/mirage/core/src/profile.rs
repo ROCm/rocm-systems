@@ -268,7 +268,7 @@ fn distinct_hacks(hacks: &[Hack]) -> Vec<Hack> {
 
 /// Generate the Dockerfile that builds a derivative of `base` with each
 /// distinct hack in `hacks` applied as an additional layer, in the order
-/// [`distinct_hacks`] fixes. Returns `None` when `hacks` is empty (no
+/// `distinct_hacks` fixes. Returns `None` when `hacks` is empty (no
 /// derivative image is needed).
 pub fn hacks_dockerfile(base: &str, hacks: &[Hack]) -> Option<String> {
     let hacks = distinct_hacks(hacks);

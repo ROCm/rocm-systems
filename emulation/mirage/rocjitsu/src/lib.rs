@@ -433,7 +433,7 @@ pub const LIB_ENV: &str = "ROCJITSU_LIB";
 /// backend's library — see that module for the order. On top of the
 /// shared policy this adds the two locations that are specific to
 /// rocjitsu: an in-tree build beside this checkout
-/// ([`in_tree_relative_dirs`]) and, last, the in-container mount
+/// (`in_tree_relative_dirs`) and, last, the in-container mount
 /// directory ([`CONTAINER_LIB_DIR`]).
 pub fn kmd_preload() -> Option<PathBuf> {
     runtime_location().path().map(std::path::Path::to_path_buf)
@@ -480,7 +480,7 @@ pub fn runtime_location() -> RuntimeLocation {
 /// Call `f` with the search policy for the KMD interposer.
 ///
 /// The in-tree build locations are computed rather than listed (see
-/// [`in_tree_relative_dirs`]), so the [`LibSearch`] borrows them and
+/// `in_tree_relative_dirs`), so the [`LibSearch`] borrows them and
 /// cannot be returned; handing it to a callback is what lets the search
 /// and any future "we looked here" guidance share one definition.
 fn with_kmd_search<R>(f: impl FnOnce(&LibSearch<'_>) -> R) -> R {

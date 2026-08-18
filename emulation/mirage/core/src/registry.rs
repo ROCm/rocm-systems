@@ -4,7 +4,7 @@
 //! into a global registry via [`inventory`] (see
 //! [`crate::emulator::EmulatorBackendDef`]). This module assembles that
 //! registry into a list of [`EmulatorInfo`] — each backend's static
-//! [`EmulatorDescription`] plus its live runtime status (installed,
+//! [`crate::emulator::EmulatorDescription`] plus its live runtime status (installed,
 //! where its runtime library is or was looked for, and whether this host
 //! supports it) — and provides the generic [`find`] /
 //! [`default_emulator`] / [`make_def`] helpers that operate over a
@@ -27,10 +27,10 @@ use crate::discovery::RuntimeLocation;
 use crate::emulator::{EmulatorBackendDef, EmulatorDef, EmulatorKind, ExecMode, SupportStatus};
 use crate::topology::TopologyDef;
 
-/// A registry entry: a backend's static [`EmulatorDescription`]
+/// A registry entry: a backend's static [`crate::emulator::EmulatorDescription`]
 /// flattened together with its live runtime status on this host.
 ///
-/// [`EmulatorDescription`]: crate::emulator::EmulatorDescription
+/// [`crate::emulator::EmulatorDescription`]: crate::emulator::EmulatorDescription
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EmulatorInfo {
     /// Canonical name of the backend (also its [`EmulatorKind`]).

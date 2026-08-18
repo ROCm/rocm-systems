@@ -1,7 +1,7 @@
 //! Strongly-typed builtin [`TopologyDef`]s (system layouts).
 //!
 //! Each topology references a builtin agent by name; see
-//! [`crate::agents`] for the agents themselves.
+//! [`mod@crate::agents`] for the agents themselves.
 
 use mirage_core::common::MaybeRef;
 use mirage_core::topology::TopologyDef;

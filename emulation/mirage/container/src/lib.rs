@@ -1765,7 +1765,7 @@ impl Engine {
     /// A question, so an engine that will not answer it is reported as
     /// "no" — including the engine this one *stopped* asking because the
     /// caller cancelled. Bring-up reads its own switch straight
-    /// afterwards; see [`Self::probe`].
+    /// afterwards; see `Self::probe`.
     pub fn image_present(&self, image: &str) -> bool {
         self.probe(
             &[
@@ -2379,7 +2379,7 @@ impl Engine {
     }
 
     /// Run the provider with `args` and return whether it exited zero,
-    /// however long it takes. See [`Self::probe`] for the cancellable
+    /// however long it takes. See `Self::probe` for the cancellable
     /// form and for which callers want which.
     fn status(&self, args: &[String]) -> Result<bool> {
         let status = spawn_retrying_etxtbsy(|| {

@@ -27,7 +27,7 @@
 //! to something unrelated.
 //!
 //! So the marker lives on the process itself:
-//! [`ENV_SESSION`](crate::container::ENV_SESSION) is set in every
+//! [`crate::container::ENV_SESSION`] is set in every
 //! workload's environment. It cannot go stale, because it is gone the
 //! moment the process is; there is no recycling window, because the pid
 //! and the evidence are read from the same `/proc` entry; and it is
@@ -54,7 +54,7 @@
 //! with.
 //!
 //! So the marker is a pair. Every workload also carries
-//! [`ENV_RUNTIME`](crate::container::ENV_RUNTIME), holding the resolved
+//! [`crate::container::ENV_RUNTIME`], holding the resolved
 //! runtime directory of the run that started it, and the scan ignores
 //! anything whose recorded directory is not the caller's own — the same
 //! pair, and the same rule, as the [`LABEL_SESSION`] and [`LABEL_RUNTIME`]

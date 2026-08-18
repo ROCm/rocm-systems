@@ -1261,7 +1261,7 @@ async fn sole_live_run() -> anyhow::Result<SessionId> {
 
 /// The sessions whose sockets actually answer, removing the corpses.
 ///
-/// [`live_runs`] lists socket *files*, and a file outlives a run that was
+/// `live_runs` lists socket *files*, and a file outlives a run that was
 /// `SIGKILL`ed. That is the right answer for `mirage exec`, which wants to
 /// report "that session is gone" rather than silently skip it, and the
 /// wrong one for cleanup: a corpse socket would make `purge` refuse to run

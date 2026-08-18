@@ -53,7 +53,8 @@ impl TopologyDef {
 
 /// On-disk topology store backed by `<MIRAGE_CONFIG>/topology/`.
 ///
-/// [`get`] is where a `MaybeRef::Ref` on a profile is followed, so it is
+/// [`crate::store::topology_get`] is where a `MaybeRef::Ref` on a profile is
+/// followed, so it is
 /// also where that reference is checked: a name that arrived inside a
 /// document, rather than from a command line, is interpolated into
 /// `<config>/topology/<name>.json` by exactly the same rule and escapes
