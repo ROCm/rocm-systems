@@ -10,7 +10,7 @@
 # `all` runs the whole pipeline end to end.
 #
 # Usage:
-#   run_host_tests.sh [deps|rccl-configure|hipify|configure|build|guards|run|all] [extra gtest args]
+#   run_host_tests.sh [deps|rccl-configure|hipify|configure|build|guards|run|coverage|all] [extra gtest args]
 #   (default phase: all)
 #
 # Phases:
@@ -24,6 +24,9 @@
 #   configure       configure test/host
 #   build           build all host binaries (default target)
 #   run             run every host binary (timestamped log + per-binary JUnit XML)
+#   coverage        run every host-test binary under llvm profiling and emit
+#                   text + HTML source-based coverage reports (requires the
+#                   host tests to be built with -DMICRO_COVERAGE=ON, the default)
 #   all             rccl-configure -> hipify -> configure -> build -> run
 #
 # Knobs (environment variables, all optional):
@@ -38,6 +41,7 @@
 #                                                   when bisecting a failure. Deliberately NOT named
 #                                                   GTEST_SHUFFLE: gtest owns that name and reads an
 #                                                   empty value as TRUE, so clearing it would shuffle)
+#   COVERAGE_DIR  coverage output dir (coverage)   (default: <BUILD_DIR>/coverage)
 # Any args after the phase are forwarded to the test binary, e.g.:
 #   run_host_tests.sh run --gtest_filter='BitOps*' --gtest_repeat=5
 #
@@ -58,6 +62,7 @@ HOST_TEST_SHUFFLE="${HOST_TEST_SHUFFLE---gtest_shuffle}"  # `-` not `:-`: an exp
 read -ra HOST_TEST_SHUFFLE_ARGS <<< "$HOST_TEST_SHUFFLE"
 LOG_FILE="${LOG_FILE:-$SCRIPT_DIR/host_tests.log}"
 XML_FILE="${XML_FILE:-$SCRIPT_DIR/host_tests.xml}"
+COVERAGE_DIR="${COVERAGE_DIR:-$BUILD_DIR/coverage}"
 JOBS="$(nproc 2>/dev/null || echo 4)"
 
 PHASE="${1:-all}"
@@ -170,6 +175,54 @@ do_guards() {
   "$venv/bin/python" -m pytest "$gd/tests" -v
 }
 
+# Run every host-test binary under llvm source-based coverage and emit both a
+# text summary and a browsable HTML report. Requires the host tests to have been
+# built with -DMICRO_COVERAGE=ON (the default), which instruments every host-only
+# test binary with -fprofile-instr-generate -fcoverage-mapping.
+do_coverage() {
+  echo "==> Coverage  (out: $COVERAGE_DIR)"
+  mkdir -p "$COVERAGE_DIR"
+  rm -f "$COVERAGE_DIR"/*.profraw
+
+  local test_bins
+  mapfile -t test_bins < <(find "$BUILD_DIR" -maxdepth 1 -type f -executable)
+  if [ "${#test_bins[@]}" -eq 0 ]; then
+    echo "error: no test binaries found in $BUILD_DIR -- run the build phase first" >&2
+    exit 1
+  fi
+
+  local exe
+  for exe in "${test_bins[@]}"; do
+    LLVM_PROFILE_FILE="$COVERAGE_DIR/%m-%p.profraw" "$exe"
+  done
+
+  llvm-profdata merge -sparse "$COVERAGE_DIR"/*.profraw \
+    -o "$COVERAGE_DIR/merged.profdata"
+
+  # -object args for every binary beyond the first (llvm-cov takes the first
+  # positional binary, then -object for each additional one).
+  local object_args=()
+  local bin
+  for bin in "${test_bins[@]:1}"; do
+    object_args+=(-object "$bin")
+  done
+
+  llvm-cov report \
+    "${test_bins[0]}" "${object_args[@]}" \
+    -instr-profile="$COVERAGE_DIR/merged.profdata" \
+    --show-branch-summary --show-region-summary \
+    > "$COVERAGE_DIR/coverage.txt"
+
+  llvm-cov show \
+    "${test_bins[0]}" "${object_args[@]}" \
+    -instr-profile="$COVERAGE_DIR/merged.profdata" \
+    -format=html -output-dir="$COVERAGE_DIR/html" \
+    --show-branches=count
+
+  echo "    text report: $COVERAGE_DIR/coverage.txt"
+  echo "    html report: $COVERAGE_DIR/html/index.html"
+}
+
 # The `run` phase aggregates every check the host-test pipeline executes: the
 # gtest suite plus any CPU-only guards. The host-test workflow invokes `run`
 # (and `all` ends with it), so adding a future check here makes both CI and
@@ -189,6 +242,7 @@ case "$PHASE" in
   build)          do_build ;;
   guards)         do_guards ;;
   run)            do_run "$@" ;;
+  coverage)       do_coverage ;;
   all)            do_rccl_configure; do_hipify; do_configure; do_build; do_run "$@" ;;
-  *) echo "usage: $0 [deps|rccl-configure|hipify|configure|build|run|guards|all] [extra gtest args]" >&2; exit 2 ;;
+  *) echo "usage: $0 [deps|rccl-configure|hipify|configure|build|run|guards|coverage|all] [extra gtest args]" >&2; exit 2 ;;
 esac

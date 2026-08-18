@@ -707,10 +707,12 @@ target_link_libraries(rccl-UnitTestsMicro PRIVATE
 # llvm source-based coverage (host-only build: no -Xarch_device split needed
 # because --offload-host-only never runs the amdgcn device pass).
 # On by default; disable with -DMICRO_COVERAGE=OFF.
-option(MICRO_COVERAGE "Build rccl-UnitTestsMicro with llvm source-based coverage" ON)
+option(MICRO_COVERAGE "Build the host-only test binaries with llvm source-based coverage" ON)
 if(MICRO_COVERAGE)
-  target_compile_options(rccl-UnitTestsMicro PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-  target_link_options(rccl-UnitTestsMicro PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+  foreach(_cov_tgt rccl-UnitTestsMicro rccl-HostUnitTests rccl-source-wrappers)
+    target_compile_options(${_cov_tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(${_cov_tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+  endforeach()
 endif()
 
 # --- Standalone init micro-test binaries --------------------------------
