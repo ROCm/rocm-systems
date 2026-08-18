@@ -92,22 +92,24 @@ protected:
     // is usable, in which case the test skips.
     static std::string resolvePluginSo()
     {
+        // NCCL_PROFILER_PLUGIN is generic NCCL configuration and may name some
+        // other profiler, which would emit no nccl_p2p_* metrics, so it counts
+        // only when it names the Inspector. NCCL_INSPECTOR_PLUGIN_SO is specific
+        // to the Inspector and is taken as given.
+        const char* generic = getenv("NCCL_PROFILER_PLUGIN");
+        if(generic && std::string(generic).find("inspector") == std::string::npos)
+            generic = nullptr;
+
         const char* candidates[] = {getenv("NCCL_INSPECTOR_PLUGIN_SO"),
-                                     getenv("NCCL_PROFILER_PLUGIN"),
+                                    generic,
 #ifdef RCCL_INSPECTOR_PLUGIN_SO
-                                     RCCL_INSPECTOR_PLUGIN_SO
-#else
-                                     nullptr
+                                    RCCL_INSPECTOR_PLUGIN_SO,
 #endif
         };
         for(const char* c : candidates)
         {
             if(c && c[0] != '\0' && access(c, R_OK) == 0)
-            {
-                std::string path(c);
-                if(path.find("inspector") != std::string::npos)
-                    return path;
-            }
+                return c;
         }
         return "";
     }
@@ -285,8 +287,9 @@ TEST_F(InspectorPromP2pMPITest, PromP2pMetricsEmittedWhenEnabled)
     ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
 
     if(plugin_so_.empty())
-        GTEST_SKIP() << "Inspector plugin not found; set NCCL_INSPECTOR_PLUGIN_SO to "
-                        "librccl-profiler-inspector.so to run this test.";
+        GTEST_SKIP() << "Inspector plugin not available: build with "
+                        "-DBUILD_PROFILER_INSPECTOR=ON (the default with BUILD_TESTS), or set "
+                        "NCCL_INSPECTOR_PLUGIN_SO to a librccl-profiler-inspector.so.";
 
     dump_dir_ = makeDumpDir();
     setInspectorEnv(/*enableP2p=*/true);
@@ -316,8 +319,9 @@ TEST_F(InspectorPromP2pMPITest, PromP2pMetricsSuppressedWhenDisabled)
     ASSERT_MPI_TRUE(validateTestPrerequisites(kMinProcessesForMPI));
 
     if(plugin_so_.empty())
-        GTEST_SKIP() << "Inspector plugin not found; set NCCL_INSPECTOR_PLUGIN_SO to "
-                        "librccl-profiler-inspector.so to run this test.";
+        GTEST_SKIP() << "Inspector plugin not available: build with "
+                        "-DBUILD_PROFILER_INSPECTOR=ON (the default with BUILD_TESTS), or set "
+                        "NCCL_INSPECTOR_PLUGIN_SO to a librccl-profiler-inspector.so.";
 
     dump_dir_ = makeDumpDir();
     setInspectorEnv(/*enableP2p=*/false);
