@@ -6,6 +6,7 @@
 #include <cassert>
 #include <memory>
 #include <mutex>
+#include <unordered_map>
 
 namespace rocm_timesync
 {
@@ -67,15 +68,11 @@ public:
         if (!lookup_before(gpu_id, gpu_timestamp, before))
             return LookupResult::ErrTooOld;
 
-        //std::cerr << "gpu_timestamp=" << gpu_timestamp << " before=" << before.gpu_timestamp << std::endl;
-
         //
         // We must have at least one point after.
         //
         if (!lookup_after(gpu_id, gpu_timestamp, after))
             return LookupResult::ErrTooNew;
-
-        //std::cerr << "gpu_timestamp=" << gpu_timestamp << " after=" << after.gpu_timestamp << std::endl;
 
         //
         // Exact match.
@@ -190,10 +187,7 @@ public:
     : cache_(std::move(cache))
     , backing_(std::move(backing)) {}
 
-    ~cached_timesync_db() {
-        std::cout << "cache_queries: " << (cache_queries_ - cache_misses_) << "/" << cache_queries_ << std::endl;
-        std::cout << "backing_queries: " << (backing_queries_ - backing_misses_) << "/" << backing_queries_ << std::endl;
-    }
+    ~cached_timesync_db() {}
 
     bool write(const entry_t& entry) override
     {
@@ -225,7 +219,6 @@ public:
             return ret;
         ++backing_misses_;
 
-        std::cerr << "INFLUX_CLIENT MISS gpu_timestamp=" << gpu_timestamp << std::endl;
         return ret;
     }
 
