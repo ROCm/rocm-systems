@@ -9,6 +9,7 @@ extern "C" {
 #endif
 
 #include <linux/ethtool.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -108,6 +109,7 @@ typedef struct {
   char part_number[SMI_NIC_MAX_STRING_LENGTH];
   char serial_number[SMI_NIC_MAX_STRING_LENGTH];
   char vendor_name[SMI_NIC_MAX_STRING_LENGTH];
+  uint32_t capability; /**< Capability bitmask (SmiNicCapability), mirrors amdsmi asic capability */
 } smi_nic_asic_info_t;
 
 /**
@@ -147,7 +149,7 @@ typedef struct {
   char type[SMI_NIC_MAX_STRING_LENGTH];
   char flavour[SMI_NIC_MAX_STRING_LENGTH];
   char netdev[SMI_NIC_MAX_STRING_LENGTH];
-  uint8_t ifindex;
+  uint32_t ifindex;
   char mac_address[SMI_NIC_MAX_STRING_LENGTH];
   uint8_t carrier;
   uint16_t mtu;
@@ -213,6 +215,8 @@ typedef struct {
  * can be used concurrently from different threads.
  *
  * @param[out] ctx Pointer to store the created context handle
+ * @param[in] ainic_only If true, discover only AMD AINIC devices; if false,
+ *            discover all supported NICs.
  *
  * @return ::SMI_NIC_STATUS_SUCCESS if context created successfully
  * @return ::SMI_NIC_STATUS_WRONG_PARAM if ctx is NULL
@@ -222,7 +226,7 @@ typedef struct {
  * @note The context must be destroyed with smi_nic_destroy_context()
  *
  */
-smi_nic_status_t smi_nic_create_context(smi_nic_ctx_t* ctx);
+smi_nic_status_t smi_nic_create_context(smi_nic_ctx_t* ctx, bool ainic_only);
 
 /**
  * @brief Destroy a NIC context and free its resources
@@ -415,7 +419,48 @@ smi_nic_status_t smi_get_nic_rdma_port_statistics_list(smi_nic_ctx_t ctx, uint64
                                                        smi_nic_stat_info_t* stats);
 
 #ifdef __cplusplus
-}
+}  // extern "C"
+
+// Declared, not included: this header is installed and smi_nic_telemetry.h is
+// not, so including it would ship a header that cannot be compiled. Both types
+// are only ever read through an out pointer, and every in-tree caller that
+// supplies one already has the defining header.
+namespace amd::smi::nic::telemetry {
+struct NicTelemetrySnapshot;
+}  // namespace amd::smi::nic::telemetry
+namespace amd::nic::netlink {
+struct DevlinkDeviceInfo;
+}  // namespace amd::nic::netlink
+
+/**
+ * @brief C++-only: live telemetry for the NIC registered under @p device.
+ *
+ * Reads through the discovered NIC, with its vendor subclass and its ports, so
+ * devlink and hwmon are addressed at the port function rather than the bridge
+ * the handle names. Resolution and the read both happen under the context lock,
+ * so no reference to a context-owned NIC escapes.
+ *
+ * @param ctx Context returned by ::smi_nic_create_context.
+ * @param device Packed BDF, in the ::amdsmi_bdf_t as_uint encoding.
+ * @param snapshot Filled on success; unmodified otherwise.
+ * @return ::smi_nic_status_t | ::SMI_NIC_STATUS_SUCCESS on success, non-zero on failure.
+ */
+smi_nic_status_t smi_get_nic_telemetry(smi_nic_ctx_t ctx, uint64_t device,
+                                       amd::smi::nic::telemetry::NicTelemetrySnapshot* snapshot);
+
+/**
+ * @brief C++-only: devlink firmware/identity versions for the NIC under @p device.
+ *
+ * Same resolution and locking as ::smi_get_nic_telemetry. The version list is a
+ * raw vendor-defined name/value set, so it is forwarded unchanged.
+ *
+ * @param ctx Context returned by ::smi_nic_create_context.
+ * @param device Packed BDF, in the ::amdsmi_bdf_t as_uint encoding.
+ * @param info Filled on success; unmodified otherwise.
+ * @return ::smi_nic_status_t | ::SMI_NIC_STATUS_SUCCESS on success, non-zero on failure.
+ */
+smi_nic_status_t smi_get_nic_fw_info(smi_nic_ctx_t ctx, uint64_t device,
+                                     amd::nic::netlink::DevlinkDeviceInfo* info);
 #endif
 
 #endif  // __SMI_NIC_INTERFACE_H__
