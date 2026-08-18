@@ -73,9 +73,9 @@ struct HipFileVerify : public testing::TestWithParam<std::tuple<IoTestParam, Siz
 
         io_bytes = std::get<1>(GetParam()).bytes;
         // The data modification kernel will also verify that the sentinel regions of the device buffer are
-        // unmodified. Device layout (each sentinel region is kFourKiB, data is io_bytes): [head device
+        // unmodified. Device layout (each sentinel region is 4_KiB, data is io_bytes): [head device
         // sentinel region][data][tail device sentinel region]
-        buffer_bytes = io_bytes + 2 * kFourKiB;
+        buffer_bytes = io_bytes + 2 * 4_KiB;
 
         // Size the file to hold io_bytes of data plus a leading empty chunk.
         ASSERT_EQ(0, ftruncate(tmpfile.fd, static_cast<off_t>(io_bytes + kChunkBytes)));
@@ -154,7 +154,7 @@ TEST_P(HipFileVerify, ReadDeliversDoubledData)
 TEST_P(HipFileVerify, RoundTripGuardsDeviceSlack)
 {
     const size_t n       = elems();
-    const hoff_t buf_off = static_cast<hoff_t>(kFourKiB); // one head device sentinel region
+    const hoff_t buf_off = static_cast<hoff_t>(4_KiB); // one head device sentinel region
 
     seedFilePattern(tmpfile.fd, 0, n);
     ASSERT_EQ(static_cast<ssize_t>(io_bytes),
@@ -177,9 +177,9 @@ TEST_P(HipFileVerify, RoundTripGuardsDeviceSlack)
 TEST_P(HipFileVerify, RoundTripGuardsFileSlack)
 {
     const size_t n         = elems();
-    const size_t bracket_n = kFourKiB / sizeof(int32_t);    // file sentinel region head/tail each
-    const hoff_t file_off  = static_cast<hoff_t>(kFourKiB); // data starts after head
-    const size_t total_n   = bracket_n + n + bracket_n;     // head + data + tail
+    const size_t bracket_n = 4_KiB / sizeof(int32_t);    // file sentinel region head/tail each
+    const hoff_t file_off  = static_cast<hoff_t>(4_KiB); // data starts after head
+    const size_t total_n   = bracket_n + n + bracket_n;  // head + data + tail
     const hoff_t tail_off  = static_cast<hoff_t>((bracket_n + n) * sizeof(int32_t));
 
     // File layout (each sentinel region bracket_n ints, data n ints):
@@ -211,10 +211,10 @@ verifyName(const testing::TestParamInfo<HipFileVerify::ParamType> &info)
 
 INSTANTIATE_TEST_SUITE_P(, HipFileVerify,
                          testing::Combine(testing::ValuesIn(io_test_params),
-                                          testing::Values(SizeParam{kFourKiB, "sub_chunk"},
-                                                          SizeParam{kChunkBytes - kFourKiB, "near_chunk"},
+                                          testing::Values(SizeParam{4_KiB, "sub_chunk"},
+                                                          SizeParam{kChunkBytes - 4_KiB, "near_chunk"},
                                                           SizeParam{kChunkBytes, "exact_chunk"},
-                                                          SizeParam{kChunkBytes + kFourKiB, "cross_chunk"},
+                                                          SizeParam{kChunkBytes + 4_KiB, "cross_chunk"},
                                                           SizeParam{2 * kChunkBytes, "multi_chunk"})),
                          verifyName);
 
@@ -306,15 +306,15 @@ struct HipFileVerifyCombined
 
         io_bytes = std::get<1>(GetParam()).bytes;
         // Over-allocate a device sentinel region on each side of the data.
-        // Device layout (each sentinel region kFourKiB, data io_bytes):
+        // Device layout (each sentinel region 4_KiB, data io_bytes):
         // [head device sentinel region][data][tail device sentinel region].
-        buffer_bytes = io_bytes + 2 * kFourKiB;
+        buffer_bytes = io_bytes + 2 * 4_KiB;
 
-        // File layout (each sentinel region kFourKiB, data io_bytes; data begins at file
+        // File layout (each sentinel region 4_KiB, data io_bytes; data begins at file
         // offset kCombinedFileOff past the chunk boundary):
         // [head file sentinel region][data][tail file sentinel region].
         const hoff_t tail_off = kCombinedFileOff + static_cast<hoff_t>(io_bytes);
-        ASSERT_EQ(0, ftruncate(tmpfile.fd, tail_off + static_cast<hoff_t>(kFourKiB)));
+        ASSERT_EQ(0, ftruncate(tmpfile.fd, tail_off + static_cast<hoff_t>(4_KiB)));
 
         hipFileDescr_t descr{};
         descr.type      = hipFileHandleTypeOpaqueFD;
@@ -358,10 +358,10 @@ struct HipFileVerifyCombined
 TEST_P(HipFileVerifyCombined, RoundTripGuardsAllRegions)
 {
     const size_t n        = elems();
-    const size_t slack_n  = kFourKiB / sizeof(int32_t);
-    const hoff_t buf_off  = static_cast<hoff_t>(kFourKiB); // device head device sentinel region
+    const size_t slack_n  = 4_KiB / sizeof(int32_t);
+    const hoff_t buf_off  = static_cast<hoff_t>(4_KiB); // device head device sentinel region
     const hoff_t file_off = kCombinedFileOff;
-    const hoff_t head_off = file_off - static_cast<hoff_t>(kFourKiB); // head file sentinel region
+    const hoff_t head_off = file_off - static_cast<hoff_t>(4_KiB); // head file sentinel region
     const hoff_t tail_off = file_off + static_cast<hoff_t>(io_bytes);
     const size_t kStride  = stride();
 
@@ -491,7 +491,7 @@ struct HipFileExtend : public testing::TestWithParam<std::tuple<IoTestParam, Sce
 
         // One head sentinel region + data + one tail sentinel region.
         // [head device sentinel region][data][tail device sentinel region].
-        buffer_bytes = io_bytes + 2 * kFourKiB;
+        buffer_bytes = io_bytes + 2 * 4_KiB;
 
         hipFileDescr_t descr{};
         descr.type      = hipFileHandleTypeOpaqueFD;
@@ -532,7 +532,7 @@ TEST_P(HipFileExtend, Extends)
 {
     const size_t     n       = elems();
     const size_t     slack_n = slackElems();
-    const hoff_t     buf_off = static_cast<hoff_t>(kFourKiB);
+    const hoff_t     buf_off = static_cast<hoff_t>(4_KiB);
     constexpr size_t kStride = 2;
 
     // Device layout (each sentinel region slack_n ints, data n ints):
@@ -582,11 +582,10 @@ extendName(const testing::TestParamInfo<HipFileExtend::ParamType> &info)
            std::get<2>(info.param).name;
 }
 
-INSTANTIATE_TEST_SUITE_P(, HipFileExtend,
-                         testing::Combine(testing::ValuesIn(io_test_params),
-                                          testing::ValuesIn(extend_scenarios),
-                                          testing::Values(SizeParam{kFourKiB, "small"},
-                                                          SizeParam{kChunkBytes + kFourKiB, "large"})),
-                         extendName);
+INSTANTIATE_TEST_SUITE_P(
+    , HipFileExtend,
+    testing::Combine(testing::ValuesIn(io_test_params), testing::ValuesIn(extend_scenarios),
+                     testing::Values(SizeParam{4_KiB, "small"}, SizeParam{kChunkBytes + 4_KiB, "large"})),
+    extendName);
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON
