@@ -46,7 +46,7 @@ public:
 inline constexpr std::string_view kRoctxUserScopeName = "ROCPROF_TORCHTRACE_INFO";
 inline const c10::DebugInfoKind   kRoctxDbgKind(&kRoctxUserScopeName);
 #else
-inline constexpr c10::DebugInfoKind kRoctxDbgKind = c10::DebugInfoKind::TEST_INFO_2;
+inline const c10::DebugInfoKind kRoctxDbgKind = c10::DebugInfoKind::TEST_INFO_2;
 #endif
 
 // Overlays the published USER_SCOPE chain onto the thread stack.
