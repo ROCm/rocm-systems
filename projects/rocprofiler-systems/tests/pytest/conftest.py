@@ -786,9 +786,9 @@ def attach_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]
 
 def nic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
     caps = rocprof_config.capabilities
-    if caps.papi_nic_events is not None:
+    if caps.default_nic is not None:
         return None
-    return "Requires PAPI network events to be available"
+    return "No usable network interface found in /proc/net/dev"
 
 
 def ainic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:

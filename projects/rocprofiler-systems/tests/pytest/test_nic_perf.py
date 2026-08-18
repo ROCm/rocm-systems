@@ -28,7 +28,7 @@ def nic_perf_env(rocprof_config) -> dict[str, str]:
         "ROCPROFSYS_SAMPLING_CPUS": "none",
         "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,papi_array,network_stats",
         "ROCPROFSYS_NETWORK_INTERFACE": f"{rocprof_config.capabilities.default_nic}",
-        "ROCPROFSYS_PAPI_EVENTS": f"{rocprof_config.capabilities.papi_nic_events}",
+        "ROCPROFSYS_SAMPLING_NICS": ",".join(rocprof_config.capabilities.default_nic.split()),
         "ROCPROFSYS_SAMPLING_DELAY": "0.05",
         "PAPI_NET_REFRESH_LATENCY": "100000",
         "ROCPROFSYS_TRACE_LEGACY": "ON",

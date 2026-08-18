@@ -59,6 +59,7 @@
 #include <limits>
 #include <linux/capability.h>
 #include <numeric>
+#include <set>
 #include <ostream>
 #include <sstream>
 #include <string>
@@ -849,7 +850,7 @@ configure_settings(bool _init)
         "interfaces detected via AMD SMI) are profiled via AMD SMI. When set, "
         "ROCPROFSYS_PAPI_EVENTS is used as-is if it already contains net::: events; "
         "otherwise rx/tx byte and rx/tx packet event strings are constructed automatically.",
-        std::string{ "none" }, "sampling", "process_sampling");
+        std::string{ "none" }, "sampling");
 
     ROCPROFSYS_CONFIG_SETTING(
         std::string, env_vars::SAMPLING_GPUS,
@@ -1553,13 +1554,59 @@ configure_settings(bool _init)
 
     if(_config->get_papi_events().empty())
     {
-        // If SAMPLING_NICS is configured, PAPI net::: events will be injected in
-        // pmc::setup() once the AMD SMI provider is available for AI NIC
-        // classification. Keep PAPI enabled so those deferred events take effect.
+        // If SAMPLING_NICS is configured, inject PAPI net::: events at config time
+        // for conventional NICs (those in /proc/net/dev). This must happen before
+        // configure_mode_settings() runs -- conventional NIC profiling uses PAPI
+        // timer-based sampling and does NOT require AMD SMI or process sampling.
+        // AI NIC routing to SAMPLING_AINICS is deferred to pmc::setup().
         auto        _nics_it  = _config->find(std::string{ env_vars::SAMPLING_NICS });
         const auto& _nics_val = static_cast<tim::tsettings<std::string>&>(
             *_nics_it->second).get();
-        if(_nics_val.empty() || _nics_val == "none")
+
+        if(!_nics_val.empty() && _nics_val != "none")
+        {
+            std::set<std::string> _available_nics;
+            {
+                std::ifstream _fdev("/proc/net/dev");
+                std::string   _line;
+                // Skip the two header lines of /proc/net/dev.
+                std::getline(_fdev, _line);
+                std::getline(_fdev, _line);
+                while(std::getline(_fdev, _line))
+                {
+                    auto _colon = _line.find(':');
+                    if(_colon == std::string::npos) continue;
+                    auto _name = _line.substr(0, _colon);
+                    utility::trim_str(_name);
+                    if(!_name.empty() && _name != "lo")
+                        _available_nics.insert(_name);
+                }
+            }
+            std::vector<std::string> _conventional;
+            if(_nics_val == "all")
+                _conventional.assign(_available_nics.begin(), _available_nics.end());
+            else
+                for(const auto& _nic : rocprofsys::delimit(_nics_val, ", "))
+                    if(_available_nics.count(_nic) > 0)
+                        _conventional.push_back(_nic);
+            if(!_conventional.empty())
+            {
+                std::string _papi_events;
+                for(const auto& _iface : _conventional)
+                {
+                    if(!_papi_events.empty()) _papi_events += ' ';
+                    _papi_events += fmt::format(
+                        "net:::{}:rx:byte net:::{}:tx:byte "
+                        "net:::{}:rx:packet net:::{}:tx:packet",
+                        _iface, _iface, _iface, _iface);
+                }
+                _config->get_papi_events() = _papi_events;
+                LOG_INFO("SAMPLING_NICS: injected PAPI net events at config time for "
+                         "{} conventional NIC(s): {}",
+                         _conventional.size(), fmt::join(_conventional, ", "));
+            }
+        }
+        if(_config->get_papi_events().empty())
         {
             trait::runtime_enabled<comp::papi_config>::set(false);
             trait::runtime_enabled<comp::papi_common<void>>::set(false);

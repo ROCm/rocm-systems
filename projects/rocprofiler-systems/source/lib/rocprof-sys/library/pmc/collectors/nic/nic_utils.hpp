@@ -127,8 +127,8 @@ build_papi_net_events(const std::vector<std::string>& interfaces)
     for(const auto& iface : interfaces)
     {
         if(!events.empty()) events += ' ';
-        events += fmt::format("net:::{}:rx_byte net:::{}:tx_byte "
-                              "net:::{}:rx_packet net:::{}:tx_packet",
+        events += fmt::format("net:::{}:rx:byte net:::{}:tx:byte "
+                              "net:::{}:rx:packet net:::{}:tx:packet",
                               iface, iface, iface, iface);
     }
     return events;

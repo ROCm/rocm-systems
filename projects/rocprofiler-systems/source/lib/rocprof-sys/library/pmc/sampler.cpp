@@ -211,38 +211,17 @@ configure_nic_profiling(const std::shared_ptr<provider_t>& provider)
     // Split requested interfaces into conventional (PAPI) and AI (AMD SMI) categories
     const auto [conventional, ai_nics] = classify_nics(_nics_val, ai_names, available);
 
-    // Inject PAPI net::: events for conventional NICs, unless PAPI_EVENTS already set
-    // by the user (explicit ROCPROFSYS_PAPI_EVENTS takes precedence).
-    // get_config() is internal to config.cpp; read PAPI_EVENTS directly from env.
+    // Conventional NIC PAPI events are injected at config initialization time
+    // (config.cpp configure()) so they take effect even when process sampling
+    // is disabled.  Log what was classified here for observability.
     if(!conventional.empty())
-    {
-        const auto current_papi = rocprofsys::get_env<std::string>(
-            env_vars::PAPI_EVENTS, std::string{});
-        if(current_papi.empty())
-        {
-            const auto events_str = build_papi_net_events(conventional);
-            config::set_setting_value(std::string{ env_vars::PAPI_EVENTS }, events_str);
-            LOG_INFO("SAMPLING_NICS: registered {} conventional NIC(s) for PAPI net "
-                     "sampling: {}",
-                     conventional.size(), fmt::join(conventional, ", "));
-            // Re-assert that PAPI traits are enabled (config skips disabling them when
-            // SAMPLING_NICS is set, but be explicit here for clarity).
-            trait::runtime_enabled<comp::papi_config>::set(true);
-            trait::runtime_enabled<comp::papi_common<void>>::set(true);
-            trait::runtime_enabled<comp::papi_array_t>::set(true);
-            trait::runtime_enabled<comp::papi_vector>::set(true);
-        }
-        else
-        {
-            LOG_DEBUG("SAMPLING_NICS: ROCPROFSYS_PAPI_EVENTS already set, "
-                      "skipping auto-construction of net::: events");
-        }
-    }
+        LOG_DEBUG("SAMPLING_NICS: {} conventional NIC(s) handled via PAPI net "
+                  "events (injected at config time): {}",
+                  conventional.size(), fmt::join(conventional, ", "));
     else
-    {
-        LOG_DEBUG("SAMPLING_NICS: no conventional NICs found for PAPI net sampling "
+        LOG_DEBUG("SAMPLING_NICS: no conventional NICs found in /proc/net/dev "
                   "(requested: {})", _nics_val);
-    }
+
 
     // Route AI NICs to AMD SMI. Any user-set SAMPLING_AINICS has already been
     // cleared above when --nics is active, so we always set it from classification.
