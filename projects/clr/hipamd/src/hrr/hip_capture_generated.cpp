@@ -775,6 +775,20 @@ static hipError_t capture_hipDeviceGetLimit(size_t* pValue, enum hipLimit_t limi
 }
 
 // Generated shim
+static hipError_t capture_hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask, hipDevice_t device) {
+  hipError_t r = g_real_table.hipDeviceGetLuid_fn(luid, deviceNodeMask, device);
+  if (r == hipSuccess) {
+    hrr_args_hipDeviceGetLuid a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.luid = reinterpret_cast<uint64_t>(luid);
+    a.deviceNodeMask = reinterpret_cast<uint64_t>(deviceNodeMask);
+    a.device = static_cast<uint64_t>(static_cast<int>(device));
+    hrr_cap::writer::write_event_raw(HRR_API_HIPDEVICEGETLUID, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
 static hipError_t capture_hipDeviceGetMemPool(hipMemPool_t* mem_pool, int device) {
   hipError_t r = g_real_table.hipDeviceGetMemPool_fn(mem_pool, device);
   if (r == hipSuccess) {
@@ -7889,6 +7903,7 @@ void hip_capture_build_table() {
   g_cap_table.hipDeviceGetDefaultMemPool_fn = capture_hipDeviceGetDefaultMemPool;
   g_cap_table.hipDeviceGetGraphMemAttribute_fn = capture_hipDeviceGetGraphMemAttribute;
   g_cap_table.hipDeviceGetLimit_fn = capture_hipDeviceGetLimit;
+  g_cap_table.hipDeviceGetLuid_fn = capture_hipDeviceGetLuid;
   g_cap_table.hipDeviceGetMemPool_fn = capture_hipDeviceGetMemPool;
   g_cap_table.hipDeviceGetName_fn = capture_hipDeviceGetName;
   g_cap_table.hipDeviceGetP2PAttribute_fn = capture_hipDeviceGetP2PAttribute;

@@ -2585,6 +2585,12 @@ _OUT_BUFFER_PARAMS: Dict[str, Dict[str, int]] = {
     'hipMemExportToShareableHandle':     {'shareableHandle': 8},
     'hipMemPoolExportToShareableHandle': {'shared_handle': 8},
     'hipMemGetHandleForAddressRange':    {'handle': 8},
+    # A `char*` the callee fills rather than a string it reads: hipDeviceGetLuid
+    # memcpys the low and high parts of the adapter LUID into luid[0..7]. Without
+    # a size here the pointee rule would give it a single char to write eight
+    # bytes into. Only the Windows path writes; Linux returns hipErrorNotSupported
+    # before touching the buffer.
+    'hipDeviceGetLuid':                  {'luid': 8},
 }
 
 # APIs that create device allocations: API name -> (rec_ptr_param, size_param)
