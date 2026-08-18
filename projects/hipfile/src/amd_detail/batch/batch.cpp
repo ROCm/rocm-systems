@@ -342,7 +342,7 @@ BatchContext::submitOperations(BatchOperations pending_ops)
         throw std::invalid_argument("ops must not be empty");
     }
     {
-        std::unique_lock<std::shared_mutex> context_lock{context_mutex};
+        std::lock_guard<std::mutex> context_lock{context_mutex};
 
         if (finished) {
             throw InvalidBatchHandle();
@@ -365,7 +365,7 @@ BatchContext::submitOperations(BatchOperations pending_ops)
             task_group->run([self, op]() {
                 op->run();
                 {
-                    std::unique_lock<std::shared_mutex> _ulock{self->context_mutex};
+                    std::lock_guard<std::mutex> _lock{self->context_mutex};
 
                     // A cancel may have moved this operation to completed_ops
                     // already. Cancellation only stops queued work that has not
@@ -403,7 +403,7 @@ BatchContext::getStatus(unsigned min_nr, unsigned *nr, hipFileIOEvents_t *iocbp,
     const unsigned event_capacity = *nr;
     *nr                           = 0;
 
-    std::unique_lock<std::shared_mutex> ulock{context_mutex};
+    std::unique_lock<std::mutex> ulock{context_mutex};
 
     auto collect_completed_events = [this, event_capacity, nr, iocbp]() {
         const auto copied = std::min(static_cast<size_t>(event_capacity), completed_ops.size());
@@ -430,7 +430,7 @@ BatchContext::getStatus(unsigned min_nr, unsigned *nr, hipFileIOEvents_t *iocbp,
 void
 BatchContext::cancelOperations()
 {
-    std::unique_lock<std::shared_mutex> lock{context_mutex};
+    std::lock_guard<std::mutex> lock{context_mutex};
 
     task_group->cancel();
     completeCanceledOperations();
@@ -441,7 +441,7 @@ void
 BatchContext::cancelOperationsAndWait()
 {
     {
-        std::unique_lock<std::shared_mutex> lock{context_mutex};
+        std::lock_guard<std::mutex> lock{context_mutex};
 
         finished = true;
         task_group->cancel();
@@ -449,7 +449,7 @@ BatchContext::cancelOperationsAndWait()
     }
     task_group->wait();
     {
-        std::unique_lock<std::shared_mutex> lock{context_mutex};
+        std::lock_guard<std::mutex> lock{context_mutex};
         status_cv.notify_all();
     }
 }

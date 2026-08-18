@@ -449,11 +449,12 @@ private:
     const unsigned capacity;
 
     /// Per-Context mutex to limit access to one caller at a time.
-    /// Shared as internally we can be more strategic about concurrent access.
-    mutable std::shared_mutex context_mutex;
+    /// Every critical section mutates submitted_ops or completed_ops, so all
+    /// access is exclusive.
+    mutable std::mutex context_mutex;
 
     /// Wakes callers waiting for operations to become terminal.
-    std::condition_variable_any status_cv;
+    std::condition_variable status_cv;
 
     /// IO Operations that have been submitted, but not completed
     /// shared_ptr as it may need to be passed to a backend.
