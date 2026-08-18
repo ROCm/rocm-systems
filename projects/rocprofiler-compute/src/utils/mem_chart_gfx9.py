@@ -218,14 +218,9 @@ _SL1D_H = 4
 _L1I_H = 4
 _TOTAL_H = _VL1D_H + _LDS_H + _SL1D_H + _L1I_H
 
-# Panel widths
-_L1_PANEL_W = 20  # fits hit-rate line + progress bar
-_L2_PANEL_W = 18  # narrower: only hit%
-_FABRIC_PANEL_W = 22  # fits "Data Fabric" title + traffic lines
-_HBM_PANEL_W_GFX950 = 18  # fits Read/Write/Atomic BW lines
-_HBM_PANEL_W_DEFAULT = 10
-_MALL_PANEL_W = 18
-_UMC_PANEL_W = 8
+# Panel widths — all non-Kernel IP blocks share one width for a uniform grid
+_IP_BLOCK_W = 22
+# IO row panels (separate layout above/below the main grid)
 _XGMI_PANEL_W = 24  # fits "XGMI (to Peer GPU)" label
 _PCIE_PANEL_W = 46  # fits "PCIe (to CPU or Non-XGMI connected GPU)" label
 
@@ -323,20 +318,20 @@ def _build_l1_stack(metrics: dict[str, Any]) -> Group:
     vl1_panel = build_cache_panel(
         "VL1D",
         [("Hit", metrics["vl1_hit"], "%", COLORS["hit"])],
-        width=_L1_PANEL_W,
+        width=_IP_BLOCK_W,
         height=_VL1D_H,
     )
-    lds_panel = build_ip_block("LDS", _L1_PANEL_W, _LDS_H)
+    lds_panel = build_ip_block("LDS", _IP_BLOCK_W, _LDS_H)
     sl1d_panel = build_cache_panel(
         "sL1D",
         [("Hit", metrics["sl1d_hit"], "%", COLORS["hit"])],
-        width=_L1_PANEL_W,
+        width=_IP_BLOCK_W,
         height=_SL1D_H,
     )
     l1i_panel = build_cache_panel(
         "L1I",
         [("Hit", metrics["il1_hit"], "%", COLORS["hit"])],
-        width=_L1_PANEL_W,
+        width=_IP_BLOCK_W,
         height=_L1I_H,
     )
 
@@ -547,7 +542,7 @@ def create_mem_chart_diagram(
     l2 = build_cache_panel(
         "L2",
         [("Hit", metrics["l2_hit"], "%", COLORS["hit"])],
-        width=_L2_PANEL_W,
+        width=_IP_BLOCK_W,
         height=_TOTAL_H,
     )
     l2_fab_edges = build_bw_edge_column(
@@ -568,16 +563,14 @@ def create_mem_chart_diagram(
         std_arrows,
     )
     if is_gfx950:
-        fabric = build_ip_block("Data Fabric", _FABRIC_PANEL_W, _TOTAL_H)
+        fabric = build_ip_block("Data Fabric", _IP_BLOCK_W, _TOTAL_H)
         hbm_content = _build_hbm_content(metrics)
-        hbm = build_ip_block("HBM", _HBM_PANEL_W_GFX950, _TOTAL_H, hbm_content)
+        hbm = build_ip_block("HBM", _IP_BLOCK_W, _TOTAL_H, hbm_content)
     else:
         fabric_content = _build_fabric_content(metrics)
-        fabric = build_ip_block(
-            "Data Fabric", _FABRIC_PANEL_W, _TOTAL_H, fabric_content
-        )
-        hbm = build_ip_block("HBM", _HBM_PANEL_W_DEFAULT, _TOTAL_H)
-    umc = build_ip_block("UMC", _UMC_PANEL_W, _TOTAL_H)
+        fabric = build_ip_block("Data Fabric", _IP_BLOCK_W, _TOTAL_H, fabric_content)
+        hbm = build_ip_block("HBM", _IP_BLOCK_W, _TOTAL_H)
+    umc = build_ip_block("UMC", _IP_BLOCK_W, _TOTAL_H)
 
     grid_cols: list[tuple[RenderableType, VerticalAlignMethod]] = [
         (kernel, "top"),
@@ -589,7 +582,7 @@ def create_mem_chart_diagram(
         (fabric, "top"),
     ]
     if has_mall:
-        grid_cols.append((build_ip_block("MALL", _MALL_PANEL_W, _TOTAL_H), "top"))
+        grid_cols.append((build_ip_block("MALL", _IP_BLOCK_W, _TOTAL_H), "top"))
     grid_cols.extend([(umc, "top"), (hbm, "top")])
 
     main_layout = Table.grid(padding=0)
