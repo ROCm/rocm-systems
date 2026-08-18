@@ -23,15 +23,17 @@
 # THE SOFTWARE.
 
 import argparse
+import importlib.machinery
 import importlib.util
 import pathlib
 import sys
 
 
 def _load_rocprofv3(path):
-    spec = importlib.util.spec_from_file_location("rocprofv3_under_test", path)
+    loader = importlib.machinery.SourceFileLoader("rocprofv3_under_test", str(path))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    loader.exec_module(module)
     return module
 
 

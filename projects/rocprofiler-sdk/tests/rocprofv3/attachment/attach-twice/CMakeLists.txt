@@ -33,7 +33,7 @@ set(attachment-env
 add_test(
     NAME rocprofv3-test-attachment-reattach-config-filter
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/validate_reattach_config.py
-            ${CMAKE_CURRENT_SOURCE_DIR}/../../../../source/bin/rocprofv3.py)
+            $<TARGET_FILE:rocprofiler-sdk::rocprofv3>)
 
 set_tests_properties(
     rocprofv3-test-attachment-reattach-config-filter
