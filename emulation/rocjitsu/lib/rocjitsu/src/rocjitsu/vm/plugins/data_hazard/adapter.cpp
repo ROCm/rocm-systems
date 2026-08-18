@@ -132,7 +132,10 @@ WaitAction make_wait_action(const WaitInfo &wait) {
     add_counter(action, WaitCntType::TENSOR, wait.immediate);
     break;
   case WaitKind::BarrierWait:
-    action.is_workgroup_barrier = true;
+    // Deliberately not a completed workgroup barrier: this runs before the
+    // wave stalls, while other waves may still be issuing pre-barrier
+    // accesses. The epoch is closed from onAmdgpuBarrierResolved, which runs
+    // once every wave has arrived.
     break;
   case WaitKind::AddressTranslation:
     action.is_address_translation = true;

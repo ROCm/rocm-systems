@@ -45,6 +45,11 @@ struct WaitCounterClear {
 struct WaitAction {
   std::vector<WaitCounterClear> counters;
   bool waits_for_idle = false;
+  // Closes the shared LDS epoch, so set it only once the barrier has completed
+  // for the wave. A frontend that classifies a barrier instruction before
+  // executing it must leave this false and report the barrier as a BarrierEvent
+  // when the simulator resolves it; closing the epoch while other waves are
+  // still issuing pre-barrier accesses hides the races between them.
   bool is_workgroup_barrier = false;
   bool is_address_translation = false;
   bool is_wait_instruction = false;

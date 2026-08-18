@@ -141,7 +141,9 @@ event:
    named counter's FIFO down to the immediate's target depth.
 3. **Barrier** — closes the current LDS epoch for the workgroup. Accesses
    recorded in the closed epoch are checked pairwise for cross-wave races and
-   then discarded.
+   then discarded. The epoch closes when the simulator resolves the barrier,
+   not when a wave reaches it: a wave that arrives early shares its epoch with
+   the waves still issuing pre-barrier accesses, so those races are compared.
 
 Pending operations are tracked at the granularity they are issued: registers as
 spans of consecutive registers, LDS and global memory as byte ranges. A
