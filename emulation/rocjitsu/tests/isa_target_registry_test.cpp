@@ -24,6 +24,7 @@ namespace {
 class FixtureDecoder final : public Decoder {
 public:
   Instruction *decode(const rj_code_binary_inst_t *) override { return nullptr; }
+  std::size_t max_instruction_words() const override { return 1; }
 };
 
 std::unique_ptr<Decoder> create_fixture_decoder() { return std::make_unique<FixtureDecoder>(); }
