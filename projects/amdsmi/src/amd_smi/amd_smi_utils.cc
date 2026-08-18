@@ -895,21 +895,7 @@ std::string smi_amdgpu_get_status_string(amdsmi_status_t ret, bool fullStatus = 
   return std::string(err_str);
 }
 
-uint32_t smi_brcm_get_value_u32(const std::string& folder, const std::string& file_name) {
-  std::string file_path = folder + "/" + file_name;
-  std::ifstream file(file_path.c_str(), std::ifstream::in);
-  if (!file.is_open()) {
-    return 0xFFFF;
-  } else {
-    std::string line;
-    getline(file, line);
-    return static_cast<uint32_t>(stoi(line));
-  }
-
-  return 0;
-}
-
-std::string smi_brcm_get_value_string(const std::string& folder, const std::string& file_name) {
+std::string smi_read_sysfs_string(const std::string& folder, const std::string& file_name) {
   std::stringstream temp;
   std::string file_path = folder + "/" + file_name;
   std::ifstream file(file_path.c_str(), std::ifstream::in);
@@ -926,27 +912,6 @@ std::string smi_brcm_get_value_string(const std::string& folder, const std::stri
   }
 
   return temp.str();
-}
-
-amdsmi_status_t smi_brcm_execute_cmd_get_data(const std::string& command, std::string* data) {
-  std::string result;
-  char buffer[128];
-
-  // Open a pipe to execute the command
-  std::shared_ptr<FILE> pipe(popen(command.c_str(), "r"), [](FILE* f) {
-    if (f) pclose(f);
-  });
-  if (!pipe) {
-    return AMDSMI_STATUS_API_FAILED;
-  }
-
-  // Read the output of the command into the buffer
-  while (fgets(buffer, sizeof(buffer), pipe.get()) != nullptr) {
-    result += buffer;
-  }
-  *data = result;
-
-  return AMDSMI_STATUS_SUCCESS;
 }
 
 // TODO(amdsmi_team): Do we want to include these functions in header?
@@ -1477,4 +1442,27 @@ void init_asic_info_defaults(amdsmi_asic_info_t* info) {
   info->physical_acc_id = std::numeric_limits<uint32_t>::max();
   info->chip_rev_id = std::numeric_limits<uint32_t>::max();
   info->external_rev_id = std::numeric_limits<uint32_t>::max();
+}
+
+void init_fabric_info_defaults(amdsmi_fabric_info_t* info) {
+  if (info == nullptr) {
+    return;
+  }
+  std::memset(info, 0, sizeof(*info));
+  auto& v1 = info->fabric_info.v1;
+
+  info->fabric_version = std::numeric_limits<decltype(info->fabric_version)>::max();
+  v1.fabric_type = AMDSMI_FABRIC_TYPE_UNKNOWN;
+  v1.accelerator_id = std::numeric_limits<decltype(v1.accelerator_id)>::max();
+  v1.bandwidth = std::numeric_limits<decltype(v1.bandwidth)>::max();
+  v1.latency = std::numeric_limits<decltype(v1.latency)>::max();
+
+  // Sentinel when sysfs provides no ppod_id: UUID 99999999-9999-9999-9999-999999999999 (16 × 0x99)
+  std::fill(std::begin(v1.ppod_id), std::end(v1.ppod_id), static_cast<std::uint8_t>(0x99));
+
+  v1.ppod_size = std::numeric_limits<decltype(v1.ppod_size)>::max();
+  v1.vpod_id = std::numeric_limits<decltype(v1.vpod_id)>::max();
+  v1.vpod_size = std::numeric_limits<decltype(v1.vpod_size)>::max();
+  v1.addr_mode = AMDSMI_FABRIC_NPA_ADDRESS_MODE_UNKNOWN;
+  v1.accel_state = AMDSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNKNOWN;
 }

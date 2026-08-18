@@ -15,7 +15,7 @@ class SmiSysfsReader {
 
   static SysfsStatus readAll(const std::string& filepath, std::vector<SysfsValue>& content);
   static SysfsStatus readLine(const std::string& filepath, SysfsValue& content);
-  static bool exists(const std::string& filepath);
+  static bool is_readable(const std::string& filepath);
 
   SmiSysfsReader() = delete;
 };

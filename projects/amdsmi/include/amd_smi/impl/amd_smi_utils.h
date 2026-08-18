@@ -54,9 +54,7 @@ std::string smi_amdgpu_split_string(std::string str, char delim);
 std::vector<std::string> split_string(const std::string& line, char delim);
 std::string smi_amdgpu_get_status_string(amdsmi_status_t ret, bool fullStatus);
 
-uint32_t smi_brcm_get_value_u32(const std::string& folder, const std::string& file_name);
-std::string smi_brcm_get_value_string(const std::string& folder, const std::string& file_name);
-amdsmi_status_t smi_brcm_execute_cmd_get_data(const std::string& command, std::string* data);
+std::string smi_read_sysfs_string(const std::string& folder, const std::string& file_name);
 
 amdsmi_status_t smi_clear_char_and_reinitialize(char buffer[], uint32_t len, std::string newString);
 
@@ -308,5 +306,16 @@ const char* smi_amdgpu_pp_dpm_filename_for_clk_type(amdsmi_clk_type_t clk_type);
  *  @param[out] info Structure to reset to its not-supported state.
  */
 void init_asic_info_defaults(amdsmi_asic_info_t* info);
+
+/**
+ *  @brief Reset amdsmi_fabric_info_t to its not-supported state.
+ *
+ *  The caller overwrites only what the fabric sysfs tree answers for, so a
+ *  field it stays silent about reports a sentinel rather than a plausible zero.
+ *  Callers set `bdf` after this returns; it is cleared here.
+ *
+ *  @param[out] info Structure to reset to its not-supported state.
+ */
+void init_fabric_info_defaults(amdsmi_fabric_info_t* info);
 
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_
