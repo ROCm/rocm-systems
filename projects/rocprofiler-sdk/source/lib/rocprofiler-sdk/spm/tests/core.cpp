@@ -1067,12 +1067,22 @@ TEST(spm_queue_hooks, stop_context_in_flight_completion_routes_via_hook_path)
                                                 &user_data,
                                                 {},
                                                 &corr_id);
-            if(!ret_pkt.packet) continue;
+            if(!ret_pkt.packet)
+            {
+                ROCPROFILER_CALL(rocprofiler_spm_destroy_counter_config(expected.id),
+                                 "Could not delete profile id");
+                continue;
+            }
 
             size_t map_size_before_stop = 0;
             cb_info->packet_return_map.rlock(
                 [&](const auto& data) { map_size_before_stop = data.size(); });
-            if(map_size_before_stop == 0) continue;
+            if(map_size_before_stop == 0)
+            {
+                ROCPROFILER_CALL(rocprofiler_spm_destroy_counter_config(expected.id),
+                                 "Could not delete profile id");
+                continue;
+            }
 
             ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
             EXPECT_FALSE(rocprofiler::spm::is_any_active());
