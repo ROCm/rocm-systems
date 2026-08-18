@@ -72,7 +72,7 @@ RCCL_FILES = hipify_rccl/graph/topo.cc \
 			hipify_rccl/graph/archinfo.cc \
 			../../src/misc/param.cc \
 			../../src/misc/nvmlwrap_stub.cc \
-			../../src/rccl_wrap.cc \
+			hipify_rccl/rccl_wrap.cc \
 			hipify_rccl/collectives.cc \
 			hipify_rccl/register.cc \
 			hipify_rccl/enqueue.cc
@@ -126,6 +126,7 @@ hipify:
 	cp -a ../../src/enqueue.cc hipify_rccl/
 	cp -a ../../src/register/register.cc hipify_rccl/
 	cp -a ../../src/collectives.cc hipify_rccl/
+	cp -a ../../src/rccl_wrap.cc hipify_rccl/
 	cp -a ../../src/misc/archinfo.cc hipify_rccl/graph/
 	# Hipify all header and source files (CUDA -> HIP).
 	# Walk every subdirectory under hipify_rccl/include/ recursively so that
