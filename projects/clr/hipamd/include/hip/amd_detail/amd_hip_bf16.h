@@ -1490,7 +1490,7 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hge2(const __hip_bfloat162 a,
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hgt2(const __hip_bfloat162 a,
                                                    const __hip_bfloat162 b) {
   return __hip_bfloat162{{__hgt(a.x, b.x) ? HIPRT_ONE_BF16 : HIPRT_ZERO_BF16},
-                         {__hgt(a.y, b.y) ? HIPRT_ONE_BF16 : HIPRT_ONE_BF16}};
+                         {__hgt(a.y, b.y) ? HIPRT_ONE_BF16 : HIPRT_ZERO_BF16}};
 }
 
 /**
@@ -1499,7 +1499,7 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hgt2(const __hip_bfloat162 a,
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hisnan2(const __hip_bfloat162 a) {
   return __hip_bfloat162{{__hisnan(a.x) ? HIPRT_ONE_BF16 : HIPRT_ZERO_BF16},
-                         {__hisnan(a.y) ? HIPRT_ONE_BF16 : HIPRT_ONE_BF16}};
+                         {__hisnan(a.y) ? HIPRT_ONE_BF16 : HIPRT_ZERO_BF16}};
 }
 
 /**
