@@ -4,6 +4,7 @@
 #include "cg_args.hpp"
 
 #include <hip/hip_runtime.h>
+#include <sysexits.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -35,12 +36,6 @@ constexpr std::uint32_t default_device    = 0;
 
 constexpr std::string_view module_a_filename = "cg_module_a.hsaco";
 constexpr std::string_view module_b_filename = "cg_module_b.hsaco";
-
-class ArgumentError : public std::runtime_error
-{
-public:
-    using std::runtime_error::runtime_error;
-};
 
 enum class KernelKind
 {
@@ -139,7 +134,7 @@ void reject_duplicate(bool& seen, std::string_view option)
 {
     if (seen)
     {
-        throw ArgumentError("option specified more than once: " + std::string(option));
+        throw std::invalid_argument("option specified more than once: " + std::string(option));
     }
     seen = true;
 }
@@ -168,14 +163,14 @@ std::optional<std::string_view> take_option_value(std::string_view argument,
         const std::string_view value = argument.substr(long_option.size() + 1);
         if (value.empty())
         {
-            throw ArgumentError("option requires a value: " + std::string(long_option));
+            throw std::invalid_argument("option requires a value: " + std::string(long_option));
         }
         return value;
     }
 
     if (argument_index + 1 >= argument_count)
     {
-        throw ArgumentError("option requires a value: " + std::string(long_option));
+        throw std::invalid_argument("option requires a value: " + std::string(long_option));
     }
     return std::string_view(arguments[++argument_index]);
 }
@@ -184,14 +179,16 @@ std::uint32_t parse_unsigned(std::string_view value, std::string_view option, bo
 {
     if (value.empty() || value.front() == '-')
     {
-        throw ArgumentError("invalid value for " + std::string(option) + ": " + std::string(value));
+        throw std::invalid_argument("invalid value for " + std::string(option) + ": " +
+                                    std::string(value));
     }
 
     std::uint32_t parsed_value = 0;
     const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), parsed_value);
     if (error != std::errc{} || end != value.data() + value.size() || (!allow_zero && parsed_value == 0))
     {
-        throw ArgumentError("invalid value for " + std::string(option) + ": " + std::string(value));
+        throw std::invalid_argument("invalid value for " + std::string(option) + ": " +
+                                    std::string(value));
     }
     return parsed_value;
 }
@@ -215,7 +212,7 @@ std::vector<KernelKind> parse_kernels(std::string_view value)
         }
         else
         {
-            throw ArgumentError("invalid kernel name: " + std::string(name));
+            throw std::invalid_argument("invalid kernel name: " + std::string(name));
         }
 
         if (end == std::string_view::npos)
@@ -321,13 +318,13 @@ Options parse_arguments(int argument_count, char* arguments[])
         }
         else
         {
-            throw ArgumentError("unknown argument: " + std::string(argument));
+            throw std::invalid_argument("unknown argument: " + std::string(argument));
         }
     }
 
     if (options.child_index && *options.child_index >= options.processes)
     {
-        throw ArgumentError("--child must be less than --processes");
+        throw std::invalid_argument("--child must be less than --processes");
     }
     return options;
 }
@@ -755,11 +752,11 @@ int main(int argument_count, char* arguments[])
         }
         return run_parent(options);
     }
-    catch (const ArgumentError& error)
+    catch (const std::invalid_argument& error)
     {
         std::cerr << "conjugate_gradient: " << error.what() << "\n\n";
         print_usage(std::cerr, arguments[0]);
-        return 2;
+        return EX_USAGE;
     }
     catch (const std::exception& error)
     {
