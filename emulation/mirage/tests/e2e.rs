@@ -1207,7 +1207,7 @@ fn a_declined_delete_changes_nothing_and_reports_that_it_did_not() {
     // byte `n` is not a person saying no, and treating it as one is what
     // let a cron job read its own input as a decline and carry on.
     let pty = nix::pty::openpty(None, None).unwrap();
-    let mut child = env
+    let child = env
         .mirage()
         .args(["--json", "profile", "delete", "survivor"])
         // The prompt needs a terminal on stdin to be offered at all; the

@@ -179,7 +179,7 @@ mod tests {
         let mut buf: Vec<u8> = Vec::new();
         buf.extend_from_slice(b"hel");
         assert!(
-            buf.iter().rposition(|b| *b == b'\n').is_none(),
+            !buf.contains(&b'\n'),
             "a chunk with no newline must not be emitted yet"
         );
         buf.extend_from_slice(b"lo\n");
