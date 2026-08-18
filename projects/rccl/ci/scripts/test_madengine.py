@@ -563,6 +563,16 @@ def generate_manifest(
     docker_mounts = dict(workload_config.get("docker_mounts", {}))
     docker_run_opts = workload_config.get("docker_run_options", "")
 
+    # Bind-mount host IB verbs libraries into the container so the userspace
+    # providers match the running kernel's RDMA drivers (e.g. bnxt_re on Ruby).
+    if cluster_config.get("mount_host_ib_libs"):
+        docker_mounts["/usr/lib64/libibverbs"] = "/host_ib_libs/libibverbs"
+        docker_mounts["/usr/lib64/libibverbs.so.1"] = "/host_ib_libs/libibverbs.so.1"
+        docker_mounts["/usr/lib64/librdmacm.so.1"] = "/host_ib_libs/librdmacm.so.1"
+        docker_mounts["/usr/lib64/libibumad.so.3"] = "/host_ib_libs/libibumad.so.3"
+        docker_run_opts += " -e LD_LIBRARY_PATH=/host_ib_libs:$LD_LIBRARY_PATH"
+        docker_run_opts += " -e LIBIBVERBS_DRIVER_PATH=/host_ib_libs/libibverbs"
+
     slurm_config = {
         "partition": cluster_config.get("slurm_partition", workload_config["slurm_partition"]),
         "qos": cluster_config.get("slurm_qos", ""),
