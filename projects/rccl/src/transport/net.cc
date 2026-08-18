@@ -1215,8 +1215,8 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
       // SendRecv uses LL128 (in place of LL) for latency-bound sizes; allocate its staging buffer too.
       // LL128 (unlike LL) lives in device memory when GDR is enabled, matching the collective net path
       // and the proxy's LL128 fast-path (ready = useGdr).
-      NCCL_NET_MAP_ADD_POINTER(map, 0, resources->useGdr ? 1 : 0, proxyState->buffSizes[NCCL_PROTO_LL128],
-                               buffs[NCCL_PROTO_LL128]);
+      NCCL_NET_MAP_ADD_POINTER(map, 0, resources->useGdr ? 1 : 0 /*devMem when GDR*/,
+                               proxyState->buffSizes[NCCL_PROTO_LL128], buffs[NCCL_PROTO_LL128]);
       resources->buffSizes[NCCL_PROTO_LL128] = proxyState->buffSizes[NCCL_PROTO_LL128];
     }
 
@@ -1484,8 +1484,8 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
     // SendRecv uses LL128 (in place of LL) for latency-bound sizes; allocate its staging buffer too.
     // LL128 (unlike LL) lives in device memory when GDR is enabled, matching the collective net path
     // and the proxy's LL128 fast-path (ready = useGdr).
-    NCCL_NET_MAP_ADD_POINTER(map, 0, resources->useGdr ? 1 : 0, proxyState->buffSizes[NCCL_PROTO_LL128],
-                             buffs[NCCL_PROTO_LL128]);
+    NCCL_NET_MAP_ADD_POINTER(map, 0, resources->useGdr ? 1 : 0 /*devMem when GDR*/,
+                             proxyState->buffSizes[NCCL_PROTO_LL128], buffs[NCCL_PROTO_LL128]);
     resources->buffSizes[NCCL_PROTO_LL128] = proxyState->buffSizes[NCCL_PROTO_LL128];
   }
 

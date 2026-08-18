@@ -1287,18 +1287,20 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     chunkDataSize[dir] = chunkSize[dir];
     // Convert wire chunk size to data (payload) chunk size. Legacy LL carries one flag word per
     // data word (half the wire is payload); LL128 carries one flag word per line.
-    if (protocol[dir] == NCCL_PROTO_LL)
+    if (protocol[dir] == NCCL_PROTO_LL) {
       chunkDataSize[dir] /= 2;
-    else if (protocol[dir] == NCCL_PROTO_LL128)
+    } else if (protocol[dir] == NCCL_PROTO_LL128) {
       chunkDataSize[dir] = (chunkDataSize[dir] / comm->ll128LineElems) * comm->ll128DataElems;
+    }
     chunkDataSize_u32fp8[dir] = u32fp8Encode(chunkDataSize[dir]);
     chunkDataSize[dir] = u32fp8Decode(chunkDataSize_u32fp8[dir]);
     chunkSize[dir] = chunkDataSize[dir];
     // Convert data chunk size back to wire chunk size (used for proxy chunk steps).
-    if (protocol[dir] == NCCL_PROTO_LL)
+    if (protocol[dir] == NCCL_PROTO_LL) {
       chunkSize[dir] *= 2;
-    else if (protocol[dir] == NCCL_PROTO_LL128)
+    } else if (protocol[dir] == NCCL_PROTO_LL128) {
       chunkSize[dir] = (chunkSize[dir] / comm->ll128DataElems) * comm->ll128LineElems;
+    }
 
     if (p2pTasks[dir] && p2pTasks[dir]->allowUB) {
       if (network[dir]) {
