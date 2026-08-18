@@ -52,9 +52,9 @@ set(TEST_SRC
     ${HRR_CLR_DIR}/playback/hrr_reader.cpp
 )
 
-# hrr_spt_workload_test.cc calls the ordinary hipMemset* names and relies on
-# this option to redirect them to the _spt entry points under test.  Per source,
-# not per target: the remaining workloads must keep the plain entry points.
+# hrr_spt_workload_test.cc calls the ordinary API names and relies on this option
+# to redirect them to the _spt entry points under test.  Per source, not per
+# target: the remaining workloads must keep the plain entry points.
 if(HIP_PLATFORM STREQUAL "amd")
   set_source_files_properties(hrr_spt_workload_test.cc PROPERTIES
                               COMPILE_OPTIONS "-fgpu-default-stream=per-thread")

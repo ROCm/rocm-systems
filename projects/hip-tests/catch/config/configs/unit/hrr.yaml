@@ -324,6 +324,30 @@ hrr:
   Unit_HRR_MemsetSptRoundtrip:
     <<: *level_2
     tags: [capture, memset, playback, roundtrip]
+  Unit_HRR_Memset3DSpt_Direct:
+    <<: *level_2
+    tags: [direct, memset]
+  Unit_HRR_Memset3DSptRoundtrip:
+    <<: *level_2
+    tags: [capture, memset, playback, roundtrip]
+  Unit_HRR_MemcpySpt_Direct:
+    <<: *level_2
+    tags: [direct, memcpy]
+  Unit_HRR_MemcpySptRoundtrip:
+    <<: *level_2
+    tags: [capture, memcpy, playback, roundtrip]
+  Unit_HRR_Memcpy3DSpt_Direct:
+    <<: *level_2
+    tags: [direct, memcpy]
+  Unit_HRR_Memcpy3DSptRoundtrip:
+    <<: *level_2
+    tags: [capture, memcpy, playback, roundtrip]
+  Unit_HRR_StreamQuerySpt_Direct:
+    <<: *level_2
+    tags: [direct, stream]
+  Unit_HRR_StreamQuerySptRoundtrip:
+    <<: *level_2
+    tags: [capture, stream, playback, roundtrip]
   Unit_HRR_MemsetVariants_Direct:
     <<: *level_2
     tags: [direct, memset]

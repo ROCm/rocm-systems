@@ -655,6 +655,32 @@ static std::pair<int, std::string> hrr_playback_env(
 }
 
 // ---------------------------------------------------------------------------
+// hrr_require_recorded_apis — assert the archive holds an event for every id.
+//
+// The workloads in hrr_spt_workload_test.cc call the ordinary API names and rely
+// on -fgpu-default-stream=per-thread to redirect them, so the source no longer
+// names the entry point under test.  Dropping that per-source option, or undoing
+// a redirect a workload still needs, leaves a capture that records the plain
+// entry points and replays perfectly well: the workload passes while testing
+// something already covered elsewhere.  This is the check that notices.
+// ---------------------------------------------------------------------------
+static void hrr_require_recorded_apis(const fs::path& cap_path,
+                                      const std::vector<hrr_api_id_t>& apis) {
+  if (apis.empty()) return;
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(cap_path.string(), arc));
+  for (hrr_api_id_t api : apis) {
+    bool found = std::any_of(arc.events.begin(), arc.events.end(),
+                             [api](const hrr::Event& e) {
+                               return e.header().event_type ==
+                                      static_cast<uint16_t>(api);
+                             });
+    INFO("API not recorded: " << hrr::event_type_name(static_cast<uint16_t>(api)));
+    REQUIRE(found);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Repro roundtrips — capture the micro-kernel workloads from
 // hrr_repro_workload.cc and validate the playback behaviours fixed in this area.
 // ---------------------------------------------------------------------------
@@ -872,10 +898,16 @@ HIP_TEST_CASE(Unit_HRR_StreamWriteValueRoundtrip) {
 // oracle: at the default atol=rtol=1e-3 it accepts any small float
 // interpretation, including an all-zero buffer against a small-magnitude
 // expectation.  HIP_HRR_D2H_EXACT=1 makes any byte difference a failure.
+//
+// expect_apis, when given, names the API ids the capture must contain.  The
+// per-thread-default-stream roundtrips pass it because their workloads no longer
+// name the entry point under test in the source; see hrr_require_recorded_apis.
 // ---------------------------------------------------------------------------
 static void hrr_run_exact_roundtrip(const std::string& direct_case,
-                                    const fs::path& cap_path) {
+                                    const fs::path& cap_path,
+                                    const std::vector<hrr_api_id_t>& expect_apis = {}) {
   hrr_capture_direct(direct_case, cap_path);
+  hrr_require_recorded_apis(cap_path, expect_apis);
 
   auto [ret, out] = hrr_playback_env(cap_path, {{"HIP_HRR_D2H_EXACT", "1"}});
   INFO("Playback stdout:\n" << out);
@@ -1003,6 +1035,69 @@ HIP_TEST_CASE(Unit_HRR_MemsetSptRoundtrip) {
   INFO("D2H pass=" << d2h_pass);
   CHECK(d2h_pass >= 4);  // one validated buffer per _spt memset API
 #endif
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_MemcpySpt_Direct: hipMemcpy_spt / hipMemcpyAsync_spt /
+ *     hipMemcpy2D_spt / hipMemcpy2DAsync_spt / hipMemcpyToSymbol_spt /
+ *     hipMemcpyToSymbolAsync_spt reached through their ordinary names.
+ *   - REQUIRE each of those ids in the archive.  All six have NOOP playback
+ *     handlers, so the recorded ids are the whole of what this proves about
+ *     them; the workload keeps them off the validated buffer for that reason and
+ *     the replay assertions below cover the driver-style oracle instead.
+ *   - REQUIRE a clean exact-mode replay, which is what rules out the redirect
+ *     having also swallowed the oracle.
+ */
+HIP_TEST_CASE(Unit_HRR_MemcpySptRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memcpyspt"};
+  hrr_run_exact_roundtrip("Unit_HRR_MemcpySpt_Direct", cap.path,
+                          {HRR_API_HIPMEMCPY_SPT,
+                           HRR_API_HIPMEMCPYASYNC_SPT,
+                           HRR_API_HIPMEMCPY2D_SPT,
+                           HRR_API_HIPMEMCPY2DASYNC_SPT,
+                           HRR_API_HIPMEMCPYTOSYMBOL_SPT,
+                           HRR_API_HIPMEMCPYTOSYMBOLASYNC_SPT,
+                           HRR_API_HIPMEMCPYHTOD,
+                           HRR_API_HIPMEMCPYDTOH});
+}
+
+HIP_TEST_CASE(Unit_HRR_Memset3DSptRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memset3dspt"};
+  // hipMemset3D_spt / hipMemset3DAsync_spt are NOOP on replay, as are the plain
+  // 3-D memsets, so this is capture-path coverage with the oracle written by
+  // hipMemsetD32 and read by the plain hipMemcpy.
+  hrr_run_exact_roundtrip("Unit_HRR_Memset3DSpt_Direct", cap.path,
+                          {HRR_API_HIPMEMSET3D_SPT,
+                           HRR_API_HIPMEMSET3DASYNC_SPT,
+                           HRR_API_HIPMEMCPY});
+}
+
+HIP_TEST_CASE(Unit_HRR_Memcpy3DSptRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memcpy3dspt"};
+  // Unlike the 1-D and 2-D per-thread copies these two have faithful handlers,
+  // so each destination is its own oracle: two validated buffers, and a handler
+  // that stopped copying leaves its destination holding the replayed pre-fill.
+  hrr_run_exact_roundtrip("Unit_HRR_Memcpy3DSpt_Direct", cap.path,
+                          {HRR_API_HIPMEMCPY3D_SPT,
+                           HRR_API_HIPMEMCPY3DASYNC_SPT,
+                           HRR_API_HIPMEMCPY});
+}
+
+HIP_TEST_CASE(Unit_HRR_StreamQuerySptRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_streamqueryspt"};
+  // The per-thread stream and event queries write no device memory, so the
+  // recorded ids plus a replay that runs to completion are what this proves;
+  // the validated buffer is there to give the replay an oracle at all.
+  hrr_run_exact_roundtrip("Unit_HRR_StreamQuerySpt_Direct", cap.path,
+                          {HRR_API_HIPSTREAMISCAPTURING_SPT,
+                           HRR_API_HIPSTREAMQUERY_SPT,
+                           HRR_API_HIPSTREAMSYNCHRONIZE_SPT,
+                           HRR_API_HIPSTREAMGETPRIORITY_SPT,
+                           HRR_API_HIPSTREAMGETFLAGS_SPT,
+                           HRR_API_HIPEVENTRECORD_SPT,
+                           HRR_API_HIPMEMCPY});
 }
 
 HIP_TEST_CASE(Unit_HRR_MemsetVariantsRoundtrip) {
@@ -1142,14 +1237,25 @@ HIP_TEST_CASE(Unit_HRR_ExtMallocRoundtrip) {
 
 HIP_TEST_CASE(Unit_HRR_StreamWaitEventSptRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_streamwaitspt"};
-  // Exercises hipStreamWaitEvent_spt (per-thread-stream cross-stream ordering).
-  hrr_run_roundtrip("Unit_HRR_StreamWaitEventSpt_Direct", cap.path);
+  // hipStreamWaitEvent_spt cross-stream ordering.  The readback stays on the
+  // driver-style D2H, which the per-thread header never redirects, so the
+  // oracle survives whatever the macro state is in that translation unit.
+  hrr_run_exact_roundtrip("Unit_HRR_StreamWaitEventSpt_Direct", cap.path,
+                          {HRR_API_HIPSTREAMWAITEVENT_SPT,
+                           HRR_API_HIPMEMCPYDTOHASYNC});
 }
 
 HIP_TEST_CASE(Unit_HRR_GraphLaunchSptRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_graphlaunchspt"};
-  // Exercises hipGraphLaunch_spt (per-thread-stream graph launch).
-  hrr_run_roundtrip("Unit_HRR_GraphLaunchSpt_Direct", cap.path);
+  // hipGraphLaunch_spt on a stream-capture graph.  The plain begin/end ids are
+  // asserted too: only the hand-written hipStreamEndCapture handler records a
+  // graph HRR can instantiate, so a frame that slipped over to the _spt names
+  // would leave nothing to replay.
+  hrr_run_exact_roundtrip("Unit_HRR_GraphLaunchSpt_Direct", cap.path,
+                          {HRR_API_HIPGRAPHLAUNCH_SPT,
+                           HRR_API_HIPSTREAMBEGINCAPTURE,
+                           HRR_API_HIPSTREAMENDCAPTURE,
+                           HRR_API_HIPMEMCPYDTOHASYNC});
 }
 
 HIP_TEST_CASE(Unit_HRR_ExtModuleLaunchKernelRoundtrip) {
@@ -1173,16 +1279,28 @@ HIP_TEST_CASE(Unit_HRR_LoggingRoundtrip) {
 
 HIP_TEST_CASE(Unit_HRR_StreamCaptureQuerySptRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_capturequeryspt"};
-  // Exercises hipStreamIsCapturing_spt + hipStreamGetCaptureInfo_spt inside a
-  // manual capture frame (graph executes -> D2H validates the whole path).
-  hrr_run_roundtrip("Unit_HRR_StreamCaptureQuerySpt_Direct", cap.path);
+  // hipStreamIsCapturing_spt + hipStreamGetCaptureInfo_spt inside a plain
+  // capture frame, so the captured memset replays as a graph and the D2H
+  // validates the whole path.
+  hrr_run_exact_roundtrip("Unit_HRR_StreamCaptureQuerySpt_Direct", cap.path,
+                          {HRR_API_HIPSTREAMISCAPTURING_SPT,
+                           HRR_API_HIPSTREAMGETCAPTUREINFO_SPT,
+                           HRR_API_HIPSTREAMBEGINCAPTURE,
+                           HRR_API_HIPSTREAMENDCAPTURE,
+                           HRR_API_HIPMEMCPYDTOHASYNC});
 }
 
 HIP_TEST_CASE(Unit_HRR_StreamCaptureBeginSptRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_capturebeginspt"};
-  // Validates hipStreamBeginCapture_spt on GPU (generated handler omits the
-  // ctx.in_graph_capture bookkeeping; safe for a memset-only capture region).
-  hrr_run_roundtrip("Unit_HRR_StreamCaptureBeginSpt_Direct", cap.path);
+  // hipStreamBeginCapture_spt opens the frame and the plain hipStreamEndCapture
+  // closes it, which is the pair the workload's macro ordering exists to get
+  // right; asserting both ids together is what proves it did.  The _spt handler
+  // omits the ctx.in_graph_capture bookkeeping, which is safe for a memset-only
+  // capture region with no allocation or kernel launch in it.
+  hrr_run_exact_roundtrip("Unit_HRR_StreamCaptureBeginSpt_Direct", cap.path,
+                          {HRR_API_HIPSTREAMBEGINCAPTURE_SPT,
+                           HRR_API_HIPSTREAMENDCAPTURE,
+                           HRR_API_HIPMEMCPYDTOHASYNC});
 }
 
 HIP_TEST_CASE(Unit_HRR_ConfigureCallRoundtrip) {
