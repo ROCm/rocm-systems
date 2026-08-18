@@ -33,6 +33,7 @@ rocprofiler_add_integration_execute_test(
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-cmd
+    ENVIRONMENT "${ROCPROFV3_TESTS_PC_SAMPLING_ENVIRONMENT}"
     TEST_PATHS validate.py
     COPY conftest.py input.json input.yml
     CONFIG pytest.ini
@@ -68,6 +69,7 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-json
     TEST_PATHS validate.py
+    ENVIRONMENT "${ROCPROFV3_TESTS_PC_SAMPLING_ENVIRONMENT}"
     COPY conftest.py input.json input.yml
     CONFIG pytest.ini
     DISCOVERY_ARGS -k test_validate_pc_sampling_exec_mask_manipulation_
@@ -102,6 +104,7 @@ rocprofiler_add_integration_validate_test(
     rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-yaml
     TEST_PATHS validate.py
     COPY conftest.py input.json input.yml
+    ENVIRONMENT "${ROCPROFV3_TESTS_PC_SAMPLING_ENVIRONMENT}"
     CONFIG pytest.ini
     DISCOVERY_ARGS -k test_validate_pc_sampling_exec_mask_manipulation_
     ARGS --input-csv

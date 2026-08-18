@@ -54,7 +54,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS transpose
     TIMEOUT 90
     LABELS "integration-tests;pc-sampling;stochastic"
-    ENVIRONMENT "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}" "${ROCPROFV3_TESTS_PC_SAMPLING_ENVIRONMENT}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP
         rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-cmd
@@ -92,7 +92,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS transpose
     TIMEOUT 90
     LABELS "integration-tests;pc-sampling;stochastic"
-    ENVIRONMENT "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}" "${ROCPROFV3_TESTS_PC_SAMPLING_ENVIRONMENT}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP
         rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-json
@@ -129,7 +129,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS transpose
     TIMEOUT 90
     LABELS "integration-tests;pc-sampling;stochastic"
-    ENVIRONMENT "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}" "${ROCPROFV3_TESTS_PC_SAMPLING_ENVIRONMENT}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP
         rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-yaml
