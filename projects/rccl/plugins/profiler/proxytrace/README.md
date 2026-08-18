@@ -34,14 +34,11 @@ export RCCL_ENABLE_PROXY_TRACE=1
 # NCCL_PROFILER_PLUGIN is unset.
 ```
 
-**Option C — short name (requires `libnccl-profiler-proxytrace.so` on `LD_LIBRARY_PATH`)**
+**Option C — short name (requires `librccl-profiler-proxytrace.so` on `LD_LIBRARY_PATH`)**
 
 ```bash
 export NCCL_PROFILER_PLUGIN=proxytrace
 ```
-
-Copy or symlink `librccl-profiler-proxytrace.so` to `libnccl-profiler-proxytrace.so`
-if you rely on this naming convention.
 
 ## Dump
 

@@ -35,10 +35,13 @@ target_include_directories(rccl-profiler-proxytrace PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${RCCL_ROOT}/src/include/plugin
     ${RCCL_ROOT}/src/include
+    ${CMAKE_BINARY_DIR}/include   # generated nccl.h
+    ${ROCM_PATH}/include
 )
 
 target_compile_definitions(rccl-profiler-proxytrace PRIVATE
     RCCL_PROXYTRACE_PLUGIN_BUILD
+    __HIP_PLATFORM_AMD__
 )
 
 target_compile_features(rccl-profiler-proxytrace PRIVATE cxx_std_17)
@@ -56,7 +59,8 @@ set_target_properties(rccl-profiler-proxytrace PROPERTIES
 )
 
 if(NOT PROXYTRACE_STANDALONE)
+    # ncclProfilerProxyTraceSiblingPath() looks for this plugin beside the library.
     set_target_properties(rccl-profiler-proxytrace PROPERTIES
-        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 endif()
