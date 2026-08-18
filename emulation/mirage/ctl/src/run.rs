@@ -152,7 +152,12 @@ fn check_run_args(a: &RunArgs, profile: &mirage_core::profile::ProfileDef) -> an
     // usable on its own.
     parse_envs(&a.envs)?;
     if let Some(nodes) = crate::profile_node_count(profile) {
-        crate::check_grid(nodes, a.nproc_per_node.unwrap_or(1))?;
+        let nproc = a.nproc_per_node.unwrap_or(1);
+        crate::check_grid(nodes, nproc)?;
+        // Before bring-up, for the same reason as the grid check above:
+        // a job that cannot open a pipe for every rank should not first
+        // create containers, a network and an emulator daemon.
+        crate::ensure_descriptors_for(u64::from(nodes) * u64::from(nproc))?;
     }
     // A containerised session's workdir is a path inside the container,
     // which this filesystem knows nothing about.
@@ -513,6 +518,12 @@ pub async fn exec_cmd(a: ExecArgsCli) -> anyhow::Result<ExitCode> {
         &id,
         mirage_supervisor::CallerStreams::probe(),
     )?;
+    // The same headroom, in the process that will actually hold the
+    // pipes: an exec spawns its ranks as its own children. Asked after
+    // `build_specs` because that is what settles how many there are —
+    // `--node` narrows the grid, and asking before would reserve for
+    // ranks this command is not going to start.
+    crate::ensure_descriptors_for(specs.len() as u64)?;
     let (exec, output) = Exec::start(id, def, specs);
 
     // Normally the run waits for us and the lease outlives the workload.

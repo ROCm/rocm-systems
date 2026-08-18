@@ -1896,6 +1896,97 @@ fn check_grid(num_nodes: u32, nproc_per_node: u32) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Descriptors mirage needs for itself, beside the workload's.
+///
+/// The control socket's listener and one connection per borrower, the
+/// emulator's socket, this process's own three streams, whatever the
+/// provider clients need while they are being spawned, and room to be
+/// wrong. A grid of any width measures twelve before its ranks are
+/// counted; this is that with room over. Generous rather than derived:
+/// getting it slightly high costs nothing, and getting it low
+/// reintroduces the failure it exists to prevent.
+const DESCRIPTOR_RESERVE: u64 = 64;
+
+/// Descriptors one captured rank costs the process that started it.
+///
+/// Measured rather than reasoned about, because reasoning about it gave
+/// the wrong answer. A captured rank has its stdout and stderr on pipes
+/// and mirage holds the read end of each, which suggests two — but
+/// counting `/proc/<mirage>/fd` against a live grid gives a slope of
+/// exactly three, on a base of twelve:
+///
+/// ```text
+/// ranks=8    fds=36
+/// ranks=32   fds=108
+/// ranks=128  fds=396
+/// ```
+///
+/// Three is the number to reserve for, and it is the direction that
+/// matters: an underestimate lets the check pass a grid that then runs
+/// out of descriptors anyway, which is the failure it exists to prevent.
+///
+/// A one-process job inherits mirage's own streams instead and costs
+/// nothing, which is why the check below skips it.
+const DESCRIPTORS_PER_RANK: u64 = 3;
+
+/// Make sure this process may open enough files to run a grid of `world`
+/// captured ranks, raising its own limit if that is allowed.
+///
+/// A wide grid runs into `RLIMIT_NOFILE` before it runs into anything
+/// mirage bounds. The symptom is bad in a specific way: the ranks that
+/// fit start, the rest fail one by one with `Too many open files`, and
+/// the run continues — an eight-rank job silently running five. The
+/// control socket's own accept loop hits the same wall from the other
+/// side, which is why it backs off on `EMFILE` rather than spinning.
+///
+/// A process may raise its own soft limit as far as the hard one without
+/// privilege, so the first answer to "not enough" is to ask for more
+/// rather than to refuse. Only the hard limit is somebody else's to
+/// grant, and only that is worth failing on — before bring-up, because a
+/// job that cannot start every rank should not first create containers,
+/// a network and an emulator daemon.
+///
+/// # Errors
+///
+/// Returns an error naming the grid, what it needs, and the ceiling.
+fn ensure_descriptors_for(world: u64) -> anyhow::Result<()> {
+    use nix::sys::resource::{Resource, getrlimit, setrlimit};
+
+    // One process inherits rather than being captured, so it opens
+    // nothing. Worth skipping explicitly: it is the overwhelmingly
+    // common shape, and it must not be refused on a machine with a
+    // miserly `nofile`.
+    if world < 2 {
+        return Ok(());
+    }
+    let need = world
+        .saturating_mul(DESCRIPTORS_PER_RANK)
+        .saturating_add(DESCRIPTOR_RESERVE);
+    let (soft, hard) = getrlimit(Resource::RLIMIT_NOFILE)
+        .map_err(|e| anyhow::anyhow!("could not read this process's file limit: {e}"))?;
+    if soft >= need {
+        return Ok(());
+    }
+    if hard >= need {
+        setrlimit(Resource::RLIMIT_NOFILE, need, hard).map_err(|e| {
+            anyhow::anyhow!(
+                "this job needs {need} open files and this process is limited to {soft}. \
+                 Raising it to {need}, which the hard limit of {hard} allows, failed: {e}"
+            )
+        })?;
+        tracing::debug!("raised RLIMIT_NOFILE from {soft} to {need} for {world} ranks");
+        return Ok(());
+    }
+    anyhow::bail!(
+        "{world} processes need about {need} open files ({DESCRIPTORS_PER_RANK} per rank for \
+         its captured output, plus {DESCRIPTOR_RESERVE} for mirage itself), and this process \
+         may not \
+         have more than {hard}. That ceiling is the hard `nofile` limit, which only an \
+         administrator can raise — check `ulimit -Hn`, or your container's or scheduler's \
+         limits. Until then, run a smaller grid."
+    )
+}
+
 /// How many nodes a resolved profile describes, if that can be answered
 /// from the filesystem.
 ///
@@ -4020,6 +4111,120 @@ exit 0
             "leaving an edited builtin alone is the outcome `--help` calls normal"
         );
     }
+    /// Serialises the tests that change this process's resource limits.
+    static CHANGING_LIMITS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// A one-process job is never refused for want of descriptors.
+    ///
+    /// It inherits mirage's own streams rather than being captured, so it
+    /// opens nothing — and it is the overwhelmingly common shape, so a
+    /// machine with a miserly `nofile` must not be told it cannot run
+    /// `mirage run -- ./app`.
+    #[test]
+    fn a_single_process_job_needs_no_headroom() {
+        ensure_descriptors_for(0).unwrap();
+        ensure_descriptors_for(1).unwrap();
+    }
+
+    /// A grid that fits under the current limit is left alone.
+    #[test]
+    fn a_grid_that_already_fits_changes_nothing() {
+        use nix::sys::resource::{Resource, getrlimit};
+        let (soft, _) = getrlimit(Resource::RLIMIT_NOFILE).unwrap();
+        // Whatever this machine allows, a grid needing well under it must
+        // pass without touching the limit.
+        let world = (soft.saturating_sub(DESCRIPTOR_RESERVE) / DESCRIPTORS_PER_RANK) / 4;
+        assert!(
+            world > 1,
+            "this machine's `nofile` is too small to test with"
+        );
+        ensure_descriptors_for(world).unwrap();
+        assert_eq!(
+            getrlimit(Resource::RLIMIT_NOFILE).unwrap().0,
+            soft,
+            "a grid that already fits must not move the limit"
+        );
+    }
+
+    /// A grid the soft limit cannot hold raises the soft limit, rather
+    /// than refusing a job the kernel would in fact allow.
+    ///
+    /// This is the half that keeps the check from being a new way to fail:
+    /// a process may raise its own soft limit as far as the hard one
+    /// without privilege, so "not enough right now" is a thing to fix and
+    /// not a thing to report.
+    #[test]
+    fn a_soft_limit_in_the_way_is_raised_rather_than_reported() {
+        use nix::sys::resource::{Resource, getrlimit, setrlimit};
+
+        // `RLIMIT_NOFILE` belongs to the process, not to a test, so two
+        // of these at once would each be measuring the other's edit —
+        // and every other test in this binary opens files under whatever
+        // they leave behind.
+        let _serialised = CHANGING_LIMITS.lock().unwrap_or_else(|e| e.into_inner());
+
+        let (soft, hard) = getrlimit(Resource::RLIMIT_NOFILE).unwrap();
+
+        // The soft limit has to be somewhere below the hard one for
+        // there to be a raise to observe, and on a machine where they
+        // are equal — this one, at 1048576 — the only way to get there
+        // is to lower it first. `PINCHED` is deliberately roomy rather
+        // than minimal: it is in force for the few syscalls below, and
+        // anything else in this binary that opens a file meanwhile has
+        // to keep working. The mutex above keeps it from overlapping
+        // another test that changes it.
+        const PINCHED: u64 = 512;
+        if hard < PINCHED * 4 {
+            return;
+        }
+        setrlimit(Resource::RLIMIT_NOFILE, PINCHED, hard).unwrap();
+
+        // A grid that does not fit under `PINCHED` but fits easily under
+        // the hard limit — which is the whole case: the kernel would
+        // allow this job, and only this process's own soft limit is in
+        // the way.
+        let world = (PINCHED - DESCRIPTOR_RESERVE) / DESCRIPTORS_PER_RANK + 16;
+        let need = world * DESCRIPTORS_PER_RANK + DESCRIPTOR_RESERVE;
+        assert!(need > PINCHED, "the grid has to be one that does not fit");
+
+        let result = ensure_descriptors_for(world);
+        let (after, _) = getrlimit(Resource::RLIMIT_NOFILE).unwrap();
+        // Put it back before asserting, so a failure here does not leave
+        // the rest of the suite running under a pinched limit.
+        setrlimit(Resource::RLIMIT_NOFILE, soft, hard).unwrap();
+
+        result.expect("a grid the hard limit allows must be made to fit");
+        assert!(
+            after >= need,
+            "the soft limit was not raised to fit {world} ranks: \
+             {PINCHED} -> {after}, needed {need}"
+        );
+    }
+
+    /// A grid the hard limit cannot hold is refused, saying whose limit
+    /// it is.
+    #[test]
+    fn a_grid_past_the_hard_limit_is_refused_before_anything_is_created() {
+        use nix::sys::resource::{Resource, getrlimit};
+
+        let (_, hard) = getrlimit(Resource::RLIMIT_NOFILE).unwrap();
+        // Nothing to refuse where the ceiling is effectively absent, and
+        // `RLIM_INFINITY` is a real configuration.
+        if hard > u64::MAX / 4 {
+            return;
+        }
+        // A grid nothing could hold. `MAX_WORLD_SIZE` bounds what the CLI
+        // accepts, so this asks directly.
+        let world = hard + 1;
+        let err = ensure_descriptors_for(world).expect_err("nothing can open that many files");
+        let msg = err.to_string();
+        assert!(msg.contains(&world.to_string()), "{msg}");
+        assert!(
+            msg.contains("hard") && msg.contains("ulimit -Hn"),
+            "the refusal must say whose limit this is and where to look: {msg}"
+        );
+    }
+
     /// The two `--help` pages must not carry notes to whoever maintains
     /// the flags.
     ///

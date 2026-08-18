@@ -147,6 +147,7 @@ nix = { version = "0.29", features = [
     "fs",
     "poll",
     "process",
+    "resource",
     "signal",
     "term",
     "user",
