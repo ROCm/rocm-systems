@@ -145,8 +145,7 @@ void AMOBitwiseTester<T>::verifyDestValues() {
       const int K = (args.addr_mode == AddrMode::PerBlock)
                      ? static_cast<int>(args.wg_size)
                      : static_cast<int>(args.num_wgs * args.wg_size);
-      const int total_K = args.numprocs * K;
-      const T expected = (total_K & 1) ? MASK : static_cast<T>(0);
+      const T expected = (K & 1) ? MASK : static_cast<T>(0);
       check_equal_all(expected);
       break;
     }
