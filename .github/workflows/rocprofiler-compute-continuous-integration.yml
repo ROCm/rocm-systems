@@ -14,6 +14,15 @@ on:
         options:
           - continuous
           - nightly
+      distro:
+        description: 'Target OS'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - ubuntu
+          - rhel
   push:
     branches: [ develop ]
     paths:
@@ -131,6 +140,12 @@ jobs:
                 '[.[] | if .arch == $arch then .runner = $runner else . end]')
             fi
           done
+
+          # On workflow_dispatch, filter to the selected distro if not 'all'
+          if [ '${{ inputs.distro }}' != '' ] && [ '${{ inputs.distro }}' != 'all' ]; then
+            COMBINED_MATRIX=$(echo "$COMBINED_MATRIX" | \
+              jq -c --arg distro '${{ inputs.distro }}' '[.[] | select(.distro == $distro)]')
+          fi
 
           echo "combined_matrix=${COMBINED_MATRIX}" >> $GITHUB_OUTPUT
 
