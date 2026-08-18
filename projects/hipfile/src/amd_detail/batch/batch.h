@@ -404,11 +404,9 @@ private:
     /// Shared as internally we can be more strategic about concurrent access.
     mutable std::shared_mutex context_mutex;
 
-    /// An outstanding operation is a BatchOperation that has been submitted
-    /// but is not yet complete or completed but not yet retrieved by the
-    /// application.
+    /// IO Operations that have been submitted, but not completed
     /// shared_ptr as it may need to be passed to a backend.
-    std::unordered_set<std::shared_ptr<IBatchOperation>> outstanding_ops;
+    std::unordered_set<std::shared_ptr<IBatchOperation>> submitted_ops;
 
     /// Task group used for all submitted operations owned by this context.
     std::unique_ptr<ITaskGroup> task_group;

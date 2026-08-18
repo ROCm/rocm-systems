@@ -313,14 +313,14 @@ BatchContext::submitOperations(BatchOperations pending_ops)
     {
         std::unique_lock<std::shared_mutex> context_lock{context_mutex};
 
-        if (pending_ops.size() > capacity - outstanding_ops.size()) {
+        if (pending_ops.size() > capacity - submitted_ops.size()) {
             throw BatchFull();
         }
 
         for (const auto &op : pending_ops) {
             op->markPending();
         }
-        outstanding_ops.insert(pending_ops.begin(), pending_ops.end());
+        submitted_ops.insert(pending_ops.begin(), pending_ops.end());
 
         for (const auto &op : pending_ops) {
             task_group->run([op]() { op->run(); });
