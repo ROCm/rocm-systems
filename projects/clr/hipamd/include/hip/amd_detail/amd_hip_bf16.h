@@ -1621,7 +1621,7 @@ __BF16_HOST_DEVICE_STATIC__ bool operator!=(const __hip_bfloat162& l, const __hi
  */
 __BF16_HOST_DEVICE_STATIC__ bool operator<(const __hip_bfloat162& l, const __hip_bfloat162& r) {
   float2 fl = l, fr = r;
-  return fl.x < fr.x && fl.x < fr.y;
+  return fl.x < fr.x && fl.y < fr.y;
 }
 
 /**
@@ -1630,7 +1630,7 @@ __BF16_HOST_DEVICE_STATIC__ bool operator<(const __hip_bfloat162& l, const __hip
  */
 __BF16_HOST_DEVICE_STATIC__ bool operator<=(const __hip_bfloat162& l, const __hip_bfloat162& r) {
   float2 fl = l, fr = r;
-  return fl.x <= fr.x && fl.x <= fr.y;
+  return fl.x <= fr.x && fl.y <= fr.y;
 }
 
 /**
@@ -1639,7 +1639,7 @@ __BF16_HOST_DEVICE_STATIC__ bool operator<=(const __hip_bfloat162& l, const __hi
  */
 __BF16_HOST_DEVICE_STATIC__ bool operator>(const __hip_bfloat162& l, const __hip_bfloat162& r) {
   float2 fl = l, fr = r;
-  return fl.x > fr.x && fl.x > fr.y;
+  return fl.x > fr.x && fl.y > fr.y;
 }
 
 /**
@@ -1648,7 +1648,7 @@ __BF16_HOST_DEVICE_STATIC__ bool operator>(const __hip_bfloat162& l, const __hip
  */
 __BF16_HOST_DEVICE_STATIC__ bool operator>=(const __hip_bfloat162& l, const __hip_bfloat162& r) {
   float2 fl = l, fr = r;
-  return fl.x >= fr.x && fl.x >= fr.y;
+  return fl.x >= fr.x && fl.y >= fr.y;
 }
 
 #if defined(__clang__) && defined(__HIP__)
