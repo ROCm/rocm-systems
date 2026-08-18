@@ -144,6 +144,31 @@ ordinary job control, and it is what makes `mirage run -- bash` behave
 like a shell. The handover is lazy, so a workload that never asks for
 the terminal never takes the interrupt either.
 
+### `SIGUSR1` and `SIGUSR2` are forwarded, and nothing else
+
+These two are application-defined: what they mean is whatever the
+workload decided, and what usually sends them is a scheduler saying
+"checkpoint now" — Slurm's `--signal=USR1@60` is the common spelling.
+Mirage catches them so that their default disposition cannot kill the run
+out from under a job, forwards them to the workload, and draws no
+conclusion of its own:
+
+```text
+mirage: SIGUSR1: forwarded to the workload
+```
+
+They are deliberately *not* in the ladder above. They used to be, and it
+cost a job two things. During bring-up any handled signal aborted the
+session, so a scheduler's checkpoint warning destroyed the job it was
+warning. And after startup they counted toward escalation, so a second
+one reached "not waiting any longer" and terminated the workload — which
+for a job checkpointing on a timer meant it killed itself on its second
+checkpoint. No number of them ends a run now.
+
+A signal that arrives during bring-up, when there is no workload to
+forward it to, is delivered as soon as there is one. Late, but delivered,
+which is the better of the two failures for a checkpoint request.
+
 ### Selecting what to emulate
 
 * `--profile NAME` picks the profile; it defaults to the `mi350x`

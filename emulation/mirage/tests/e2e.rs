@@ -2106,6 +2106,83 @@ fn exec_can_target_one_node_of_a_multi_node_session() {
     run.wait(Duration::from_secs(60));
 }
 
+/// A relayed signal reaches the workload without ending the run.
+///
+/// `SIGUSR1` and `SIGUSR2` are application-defined, and what usually
+/// sends them is a scheduler saying "checkpoint now" — Slurm's
+/// `--signal=USR1@60` is the common spelling. They used to sit in the
+/// same escalation ladder as Ctrl-C, which cost a job two things: during
+/// bring-up any of them aborted the session, so the warning destroyed
+/// what it was warning about; and after startup the *second* one reached
+/// "not waiting any longer" and terminated the workload — so a job
+/// checkpointing on a timer killed itself on its second checkpoint.
+///
+/// Two of them, deliberately. One proves forwarding; the second is the
+/// one that used to be fatal.
+#[test]
+fn an_application_defined_signal_is_forwarded_and_does_not_end_the_run() {
+    let env = Env::new();
+    if skip_without_emulator() {
+        return;
+    }
+    env.create_profile("p");
+
+    // Traps `USR1`, reports it, and keeps going. The sleep is short and
+    // repeated rather than one long one because a shell runs a trap
+    // between commands: with `sleep 300` the handler would not run until
+    // the sleep was over.
+    let mut run = env.spawn_run(
+        &["--profile", "p"],
+        &[
+            "/bin/sh",
+            "-c",
+            "trap 'echo CHECKPOINTED' USR1; \
+             trap 'echo ROTATED' USR2; \
+             i=0; while [ $i -lt 200 ]; do sleep 0.1; i=$((i+1)); done; \
+             echo FINISHED",
+        ],
+    );
+    let watch = run.watch_stderr();
+    run.await_ready(Duration::from_secs(90));
+
+    // Wait for the workload to be in its loop, so the signal lands on a
+    // run that is past bring-up rather than on one still starting.
+    wait_for("the workload to start", Duration::from_secs(60), || {
+        watch.contains("session")
+    });
+    std::thread::sleep(Duration::from_millis(500));
+
+    run.signal(Signal::SIGUSR1);
+    run.signal(Signal::SIGUSR2);
+
+    let out = run.wait(Duration::from_secs(120));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+
+    assert!(
+        stdout.contains("CHECKPOINTED"),
+        "SIGUSR1 did not reach the workload:\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    // The run ran to the end of its own accord. On the old ladder the
+    // second signal printed "not waiting any longer" and terminated the
+    // workload, so this line never appeared.
+    assert!(
+        stdout.contains("FINISHED"),
+        "the workload was stopped by a signal that only asked it to \
+         checkpoint:\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "the run must exit with the workload's own code:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("not waiting any longer"),
+        "an application-defined signal counted toward shutdown \
+         escalation:\n{stderr}"
+    );
+}
+
 /// `--node` and `--nproc-per-node` compose, and the count decides the
 /// streams.
 ///

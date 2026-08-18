@@ -44,7 +44,7 @@ const READY_TIMEOUT: Duration = Duration::from_secs(60);
 /// `mirage run`: own a session for the lifetime of one command.
 pub async fn run_cmd(a: RunArgs) -> anyhow::Result<ExitCode> {
     // Before anything that could need cleaning up. See [`Interrupts`].
-    let mut interrupts = Interrupts::install()?;
+    let (mut interrupts, mut relays) = install_signals()?;
 
     let mut profile = mirage_core::store::profile_get(&a.profile).map_err(profile_error)?;
     let profile_ref = apply_profile_overrides(&mut profile, &a)?;
@@ -91,7 +91,7 @@ pub async fn run_cmd(a: RunArgs) -> anyhow::Result<ExitCode> {
     // From here on every exit path must go through teardown, including
     // the error ones: a session whose bring-up half-succeeded still has
     // containers to remove.
-    let outcome = run_owned(&run, &a, &socket, &mut interrupts).await;
+    let outcome = run_owned(&run, &a, &socket, &mut interrupts, &mut relays).await;
     run.destroy().await;
     outcome
 }
@@ -147,6 +147,7 @@ async fn run_owned(
     a: &RunArgs,
     socket: &ControlSocket,
     interrupts: &mut Interrupts,
+    relays: &mut Relays,
 ) -> anyhow::Result<ExitCode> {
     // Answer clients from the first instant, bring-up included.
     //
@@ -245,7 +246,7 @@ async fn run_owned(
         // than a spawned task so the server stops when the workload does,
         // without a second thing to cancel.
         tokio::select! {
-            code = supervise_locally(exec, output, interrupts) => code,
+            code = supervise_locally(exec, output, interrupts, relays) => code,
             () = &mut serving => unreachable!("the control socket serves until dropped"),
         }
     }
@@ -442,7 +443,7 @@ async fn wait_for_borrowers(
 
 /// `mirage exec`: run a command inside a session someone else owns.
 pub async fn exec_cmd(a: ExecArgsCli) -> anyhow::Result<ExitCode> {
-    let mut interrupts = Interrupts::install()?;
+    let (mut interrupts, mut relays) = install_signals()?;
 
     let session = match a.session.clone() {
         Some(id) => id,
@@ -505,7 +506,7 @@ pub async fn exec_cmd(a: ExecArgsCli) -> anyhow::Result<ExitCode> {
         lease.closed().await;
         eprintln!("mirage: the run owning session {session} is shutting down");
     };
-    let supervised = supervise_locally(exec.clone(), output, &mut interrupts);
+    let supervised = supervise_locally(exec.clone(), output, &mut interrupts, &mut relays);
     tokio::pin!(supervised);
 
     tokio::select! {
@@ -584,6 +585,7 @@ async fn supervise_locally(
     exec: Arc<Exec>,
     output: mpsc::Receiver<mirage_supervisor::OutputChunk>,
     interrupts: &mut Interrupts,
+    relays: &mut Relays,
 ) -> anyhow::Result<ExitCode> {
     // Always drain the channel. For a multi-process exec this is what
     // prints the labelled output; for a single-process one it is empty
@@ -624,8 +626,23 @@ async fn supervise_locally(
         eprintln!("mirage: not waiting any longer; stopping the workload");
     };
 
+    // Forward the application-defined signals, forever, drawing no
+    // conclusion from any of them. A scheduler sending `SIGUSR1` every
+    // half hour to say "checkpoint now" must be able to do that all day
+    // without the run deciding it has been asked to stop; see
+    // [`RELAY_SIGNALS`].
+    let relaying = async {
+        loop {
+            let sig = relays.next().await;
+            eprintln!("mirage: {}: forwarded to the workload", signal_name(sig));
+            exec.signal(sig).await.ok();
+        }
+    };
+    tokio::pin!(relaying);
+
     tokio::select! {
         () = exec.wait_finished() => {}
+        () = &mut relaying => unreachable!("relayed signals are forwarded for the whole exec"),
         () = interrupted => {
             // `terminate` escalates SIGTERM to SIGKILL on its own, so it
             // ends — but for a containerised grid it is a provider round
@@ -951,29 +968,105 @@ struct Interrupts {
     signals: Vec<(i32, tokio::signal::unix::Signal)>,
 }
 
-impl Interrupts {
-    /// Arm the handlers.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the handlers cannot be registered, which is
-    /// worth failing on rather than continuing unprotected.
-    fn install() -> anyhow::Result<Self> {
-        use tokio::signal::unix::{SignalKind, signal};
-        let mut signals = Vec::new();
-        for number in [
-            libc::SIGINT,
-            libc::SIGQUIT,
-            libc::SIGTERM,
-            libc::SIGHUP,
-            libc::SIGUSR1,
-            libc::SIGUSR2,
-        ] {
-            signals.push((number, signal(SignalKind::from_raw(number))?));
-        }
-        Ok(Self { signals })
-    }
+/// The signals that mean "stop", and nothing else.
+///
+/// Every one of them is a request to end the job: a Ctrl-C, a `kill`, a
+/// `SIGHUP` from a closing terminal, a scheduler's `SIGTERM` before it
+/// takes the node back. That shared meaning is what makes the escalation
+/// ladder in [`supervise_locally`] coherent — a second one means the user
+/// has stopped waiting, a third means stop now — and it is why the ladder
+/// may count them interchangeably.
+const STOP_SIGNALS: [i32; 4] = [libc::SIGINT, libc::SIGQUIT, libc::SIGTERM, libc::SIGHUP];
 
+/// The signals that mean whatever the workload decided they mean.
+///
+/// `SIGUSR1` and `SIGUSR2` are application-defined. Schedulers use them
+/// to say "checkpoint now" -- Slurm's `--signal=USR1@60` is the common
+/// one -- and a training loop that catches `SIGUSR1` to write a
+/// checkpoint and carry on is doing exactly what its sender intended.
+///
+/// They used to sit in the same ladder as Ctrl-C, and being in it cost
+/// two things. During bring-up any of the six aborted the session, so a
+/// scheduler's checkpoint warning destroyed the job it was warning. After
+/// startup they counted toward escalation, so a job signalled twice --
+/// which for a periodic checkpoint is a matter of course -- reached "not
+/// waiting any longer" and had its workload terminated.
+///
+/// So they are forwarded and nothing else: the workload hears them,
+/// mirage draws no conclusion from them, and no number of them ends a
+/// run. See [`Relays`].
+const RELAY_SIGNALS: [i32; 2] = [libc::SIGUSR1, libc::SIGUSR2];
+
+/// The armed handlers for [`RELAY_SIGNALS`].
+///
+/// Separate from [`Interrupts`] rather than a flag on it, because the two
+/// are awaited concurrently by [`supervise_locally`] — one arm counting
+/// interrupts, one arm forwarding relays — and a single `&mut` could not
+/// be in both.
+struct Relays {
+    signals: Vec<(i32, tokio::signal::unix::Signal)>,
+}
+
+/// Arm every signal mirage handles, in both groups.
+///
+/// # Errors
+///
+/// Returns an error if the handlers cannot be registered, which is worth
+/// failing on rather than continuing unprotected.
+fn install_signals() -> anyhow::Result<(Interrupts, Relays)> {
+    use tokio::signal::unix::{SignalKind, signal};
+    let arm = |numbers: &[i32]| -> anyhow::Result<Vec<(i32, tokio::signal::unix::Signal)>> {
+        numbers
+            .iter()
+            .map(|number| Ok((*number, signal(SignalKind::from_raw(*number))?)))
+            .collect()
+    };
+    Ok((
+        Interrupts {
+            signals: arm(&STOP_SIGNALS)?,
+        },
+        Relays {
+            signals: arm(&RELAY_SIGNALS)?,
+        },
+    ))
+}
+
+/// Resolve on the next signal in `signals`, yielding its number.
+///
+/// Shared by both groups: the waiting is identical and only the meaning
+/// of the answer differs.
+async fn next_signal(signals: &mut [(i32, tokio::signal::unix::Signal)]) -> i32 {
+    // `select_all` rather than a `select!` arm per signal: the arms were
+    // identical and the list is long enough that adding one by hand is
+    // how a signal comes to be armed and then never waited for. Each
+    // future is boxed because `select_all` needs `Unpin`, and all of them
+    // are dropped when one wins — `Signal::recv` is cancel-safe, so a
+    // signal that arrives in that instant is still buffered for the next
+    // call.
+    let waits = signals.iter_mut().map(|(number, signal)| {
+        let number = *number;
+        Box::pin(async move {
+            signal.recv().await;
+            number
+        })
+    });
+    futures::future::select_all(waits).await.0
+}
+
+impl Relays {
+    /// Resolve on the next relayed signal, yielding its number.
+    ///
+    /// A signal that arrived before anything was waiting is not lost:
+    /// tokio buffers one per kind. So a `SIGUSR1` sent during bring-up,
+    /// when there is no workload to forward it to, reaches the workload
+    /// as soon as there is one — late, but delivered, which is the better
+    /// of the two failures for a checkpoint request.
+    async fn next(&mut self) -> i32 {
+        next_signal(&mut self.signals).await
+    }
+}
+
+impl Interrupts {
     /// Resolve on the next interrupt, yielding its signal number.
     ///
     /// A signal that arrived earlier is not lost: tokio buffers one per
@@ -982,26 +1075,14 @@ impl Interrupts {
     ///
     /// The number is the one that actually arrived, so the exit status
     /// mirage reports and the signal it forwards to the workload are
-    /// both the truth — a hangup is forwarded as a hangup, and a
-    /// scheduler's `SIGUSR1` reaches a workload that checkpoints on it,
-    /// which is what a workload that cares about the difference is
-    /// entitled to.
+    /// both the truth — a hangup is forwarded as a hangup rather than as
+    /// a generic stop.
+    ///
+    /// Only [`STOP_SIGNALS`] resolve here. `SIGUSR1` and `SIGUSR2` reach
+    /// the workload through [`Relays`] instead, and deliberately count
+    /// for nothing on the way.
     async fn next(&mut self) -> i32 {
-        // `select_all` rather than a `select!` arm per signal: the arms
-        // were identical and the list is now long enough that adding one
-        // by hand is how a signal comes to be armed and then never
-        // waited for. Each future is boxed because `select_all` needs
-        // `Unpin`, and all of them are dropped when one wins —
-        // `Signal::recv` is cancel-safe, so a signal that arrives in
-        // that instant is still buffered for the next call.
-        let waits = self.signals.iter_mut().map(|(number, signal)| {
-            let number = *number;
-            Box::pin(async move {
-                signal.recv().await;
-                number
-            })
-        });
-        futures::future::select_all(waits).await.0
+        next_signal(&mut self.signals).await
     }
 }
 
@@ -1587,19 +1668,17 @@ mod tests {
     async fn every_signal_that_means_stop_is_handled_rather_than_fatal() {
         let _serialised = RAISING_SIGNALS.lock().await;
         // `SIGQUIT` is Ctrl-\ — the same keyboard as Ctrl-C, and the same
-        // intent — and `SIGUSR1` is what a batch scheduler sends a job it
-        // is about to preempt. Unhandled, the default disposition of each
-        // ends mirage where it stands: no teardown, the workload still
-        // running, the socket still claiming a live session and the
-        // scratch directory still on disk. Like the hangup test below,
-        // this does not merely fail before the fix — it takes the test
-        // binary down with it, which is the same thing happening for the
-        // same reason.
-        let mut interrupts = Interrupts::install().unwrap();
+        // intent. Unhandled, the default disposition ends mirage where it
+        // stands: no teardown, the workload still running, the socket
+        // still claiming a live session and the scratch directory still
+        // on disk. Like the hangup test below, this does not merely fail
+        // before the fix — it takes the test binary down with it, which
+        // is the same thing happening for the same reason.
+        let (mut interrupts, _relays) = install_signals().unwrap();
         for signal in [
             nix::sys::signal::Signal::SIGQUIT,
-            nix::sys::signal::Signal::SIGUSR1,
-            nix::sys::signal::Signal::SIGUSR2,
+            nix::sys::signal::Signal::SIGTERM,
+            nix::sys::signal::Signal::SIGINT,
         ] {
             nix::sys::signal::kill(
                 nix::unistd::Pid::from_raw(std::process::id() as i32),
@@ -1617,6 +1696,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_application_defined_signals_are_handled_but_not_interrupts() {
+        let _serialised = RAISING_SIGNALS.lock().await;
+        // Both halves matter, and they used to be one.
+        //
+        // Handled: unhandled, `SIGUSR1`'s default disposition ends mirage
+        // where it stands — no teardown, workload still running — and a
+        // scheduler sending it to warn of preemption would be the thing
+        // that stranded the job.
+        //
+        // But *not* an interrupt: it is application-defined, and what
+        // sends it usually means "checkpoint now". In the same ladder as
+        // Ctrl-C it aborted bring-up, and after startup a second one
+        // reached "not waiting any longer" and terminated the workload —
+        // so a job checkpointing on a timer killed itself on the second
+        // checkpoint.
+        let (mut interrupts, mut relays) = install_signals().unwrap();
+        for signal in [
+            nix::sys::signal::Signal::SIGUSR1,
+            nix::sys::signal::Signal::SIGUSR2,
+        ] {
+            nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(std::process::id() as i32),
+                signal,
+            )
+            .unwrap();
+            let sig = tokio::time::timeout(Duration::from_secs(10), relays.next())
+                .await
+                .unwrap_or_else(|_| panic!("{signal:?} must be caught and forwarded"));
+            assert_eq!(sig, signal as i32);
+            assert_ne!(signal_name(sig), "signalled", "{signal:?}");
+        }
+
+        // And none of that reached the ladder. Checked after both, so a
+        // relay that leaked into the stop set has had every chance to
+        // arrive.
+        assert!(
+            tokio::time::timeout(Duration::from_millis(250), interrupts.next())
+                .await
+                .is_err(),
+            "an application-defined signal must not count as a request to stop"
+        );
+    }
+
+    #[tokio::test]
     async fn closing_the_terminal_is_an_interrupt_and_not_a_death() {
         // `SIGHUP` is what closing a terminal window sends, and closing
         // the window is how people end a run they have lost interest in.
@@ -1629,7 +1752,7 @@ mod tests {
         // the test binary down with it, which is the same thing happening
         // for the same reason.
         let _serialised = RAISING_SIGNALS.lock().await;
-        let mut interrupts = Interrupts::install().unwrap();
+        let (mut interrupts, _relays) = install_signals().unwrap();
         nix::sys::signal::kill(
             nix::unistd::Pid::from_raw(std::process::id() as i32),
             nix::sys::signal::Signal::SIGHUP,
