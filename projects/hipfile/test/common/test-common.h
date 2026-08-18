@@ -103,7 +103,7 @@ struct Tmpfile {
 
 /// @brief Round value to the next multiple of align. Align _must_ be a power of 2.
 /// @param value The value to round up.
-/// @param align Value will be rounded up to a multiple of align
+/// @param align Value will be rounded up to a multiple of align.
 /// @return Value rounded up to a multiple of align.
 static inline size_t
 align_up(size_t value, size_t align)

@@ -16,6 +16,7 @@
 
 * A KFD-based alternative check for P2P DMA support was added to `ais-check`. This inspects the `capability` property under `/sys/class/kfd/kfd/topology/nodes/*/properties`.
 * Added guides for setting up storage targets to the documentation
+* hipFileRead/hipFileWrite return -1 with errno set to EINVAL for negative offsets instead of returning -hipFileInternalError
 
 ### Changed
 
