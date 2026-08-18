@@ -294,26 +294,46 @@ fn captured_output_is_complete_for_a_process_that_writes_and_exits_immediately()
     // if the exit is observed before the last bytes are drained, the
     // command returns having printed nothing. Repeat, because it only
     // shows up when the printer is scheduled late.
+    //
+    // `--nproc-per-node`, and not the default shape, because the default
+    // shape does not have the bug. One node with one process *inherits*
+    // mirage's streams: the workload writes to this test's pipe itself
+    // and there is no pump, no channel and no printer between them, so
+    // the version of this test that ran `mirage run -- echo` asserted
+    // that a pipe works. The race lives in the captured path, and the
+    // captured path starts at two processes.
+    //
+    // Every rank asserted, not just one. The drain is per stream, so a
+    // printer that returns after flushing the first source it hears from
+    // loses the others and nothing else here would notice.
     let env = Env::new();
     if skip_without_emulator() {
         return;
     }
     env.create_profile("p");
 
+    const RANKS: u32 = 3;
     for i in 0..6 {
         let out = env.ok(&[
             "run",
             "--profile",
             "p",
+            "--nproc-per-node",
+            &RANKS.to_string(),
             "--",
             "/bin/sh",
             "-c",
-            &format!("echo quick-{i}"),
+            // Write and exit immediately, which is the whole point:
+            // the last bytes are in flight when the process is reaped.
+            &format!("echo quick-{i}-$RANK"),
         ]);
-        assert!(
-            out.contains(&format!("quick-{i}")),
-            "round {i}: output was lost; got {out:?}"
-        );
+        for rank in 0..RANKS {
+            assert!(
+                out.contains(&format!("[{rank}] quick-{i}-{rank}")),
+                "round {i}: rank {rank}'s output was lost or unlabelled; \
+                 got {out:?}"
+            );
+        }
     }
 }
 
