@@ -2,6 +2,8 @@
  * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  *
+ * Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
  * See LICENSE.txt for more license information
  *************************************************************************/
 
@@ -394,8 +396,8 @@ ncclResult_t ceProfilerStartCeCollEvent(struct context* ctx, void** eHandle, ncc
 
     // Create CUDA events with appropriate flags
     if (ceProfilerCtxt.timingMode == CE_TIMING_GPU) {
-      cudaEventCreate(&event->startEvent, 0);
-      cudaEventCreate(&event->stopEvent, 0);
+      cudaEventCreateWithFlags(&event->startEvent, 0);
+      cudaEventCreateWithFlags(&event->stopEvent, 0);
     } else {
       cudaEventCreateWithFlags(&event->startEvent, cudaEventDisableTiming);
       cudaEventCreateWithFlags(&event->stopEvent, cudaEventDisableTiming);
@@ -463,8 +465,8 @@ ncclResult_t ceProfilerStartCeSyncEvent(struct context* ctx, void** eHandle, ncc
 
     // Create CUDA events with appropriate flags
     if (ceProfilerCtxt.timingMode == CE_TIMING_GPU) {
-      cudaEventCreate(&event->startEvent, 0);
-      cudaEventCreate(&event->stopEvent, 0);
+      cudaEventCreateWithFlags(&event->startEvent, 0);
+      cudaEventCreateWithFlags(&event->stopEvent, 0);
     } else {
       cudaEventCreateWithFlags(&event->startEvent, cudaEventDisableTiming);
       cudaEventCreateWithFlags(&event->stopEvent, cudaEventDisableTiming);
@@ -532,8 +534,8 @@ ncclResult_t ceProfilerStartCeBatchEvent(struct context* ctx, void** eHandle, nc
 
     // Create CUDA events with appropriate flags
     if (ceProfilerCtxt.timingMode == CE_TIMING_GPU) {
-      cudaEventCreate(&event->startEvent, 0);
-      cudaEventCreate(&event->stopEvent, 0);
+      cudaEventCreateWithFlags(&event->startEvent, 0);
+      cudaEventCreateWithFlags(&event->stopEvent, 0);
     } else {
       cudaEventCreateWithFlags(&event->startEvent, cudaEventDisableTiming);
       cudaEventCreateWithFlags(&event->stopEvent, cudaEventDisableTiming);

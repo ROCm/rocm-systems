@@ -9,7 +9,7 @@ interface. Any NCCL user can write profiler plugins to extract performance data 
 use it for debugging and analysis.
 
 Similarly to other plugins (e.g., network plugin), the profiler plugins come as a shared library
-called `lirccl-profiler.so`. That shared library contains one or more implementations of the
+called `librccl-profiler.so`. That shared library contains one or more implementations of the
 NCCL PROFILER API, in the form of versioned structs, filled with pointers to all required
 functions.
 
