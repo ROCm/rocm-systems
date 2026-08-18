@@ -277,12 +277,6 @@ sdk_tracing_config<SdkBackend, Externals>::get_callback_domains()
 {
     using kind_t = typename SdkBackend::callback_tracing_kind_t;
 
-    const auto sdk_runtime_version = get_version();
-    if(sdk_runtime_version == common::version{})
-    {
-        LOG_WARNING("rocprofiler-sdk version not initialized");
-    }
-
     auto       callback_domains = std::unordered_set<kind_t>{};
     const auto domains_input =
         rocprofsys::delimit(Externals::get_rocm_domains(), " ,;:\t\n");
