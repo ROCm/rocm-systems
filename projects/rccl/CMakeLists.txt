@@ -676,6 +676,11 @@ file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/include/rccl")
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/rccl/rccl.h) # For external linking
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used by some internal files
 
+# Example plugins are C sources
+if(BUILD_TESTS AND BUILD_PLUGIN_EXAMPLES)
+  enable_language(C)
+endif()
+
 # Add subdirectories
 #==================================================================================================
 # Source directory contains library creation
@@ -812,6 +817,9 @@ if(BUILD_TESTS)
     add_subdirectory(plugins/profiler/example)
     add_subdirectory(plugins/profiler/proxytrace)
     add_subdirectory(plugins/profiler/accl)
+    add_subdirectory(plugins/env/example)
+    add_subdirectory(plugins/gin/example)
+    add_subdirectory(plugins/mixed/example)
   endif()
   add_subdirectory(test)
 
