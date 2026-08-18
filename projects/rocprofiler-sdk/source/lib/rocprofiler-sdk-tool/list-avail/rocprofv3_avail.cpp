@@ -32,6 +32,8 @@
 #include "lib/output/agent_info.hpp"
 #include "lib/output/counter_info.hpp"
 #include "lib/output/metadata.hpp"
+#include "lib/output/output_config.hpp"
+#include "lib/output/output_stream.hpp"
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -321,6 +323,31 @@ agent_info(uint64_t agent_handle, const char** agent_info_str)
         }
     }
     *agent_info_str = agent_json.at(rocprofiler_agent_id_t{agent_handle}).c_str();
+}
+
+int
+list_avail_output_filename(const char*  output_path,
+                           const char*  output_file,
+                           const char** filename) noexcept
+{
+    if(filename == nullptr) return 0;
+    *filename = nullptr;
+
+    try
+    {
+        static thread_local auto resolved = std::string{};
+
+        auto cfg = tool::output_config{};
+        if(output_path != nullptr && *output_path != '\0') cfg.output_path = output_path;
+        if(output_file != nullptr && *output_file != '\0') cfg.output_file = output_file;
+
+        resolved  = tool::get_output_filename(cfg, "list_avail", "txt");
+        *filename = resolved.c_str();
+        return 1;
+    } catch(...)
+    {
+        return 0;
+    }
 }
 
 ROCPROFILER_EXTERN_C_FINI
