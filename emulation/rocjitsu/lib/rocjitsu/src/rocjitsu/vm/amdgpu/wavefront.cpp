@@ -24,6 +24,24 @@ void Wavefront::write_gpu_memory(uint64_t addr, std::span<const uint8_t> src) {
   cu_.memory()->write_block(addr, src, process_id_);
 }
 
+void Wavefront::barrier_init(int32_t barrier_id, uint32_t member_count) {
+  cu_.named_barrier_init(*this, barrier_id, member_count);
+}
+
+void Wavefront::barrier_join(int32_t barrier_id) { cu_.named_barrier_join(*this, barrier_id); }
+
+bool Wavefront::barrier_signal(int32_t barrier_id, uint32_t member_count) {
+  return cu_.barrier_signal(*this, barrier_id, member_count);
+}
+
+uint32_t Wavefront::barrier_state(int32_t barrier_id) const {
+  return cu_.barrier_state(*this, barrier_id);
+}
+
+void Wavefront::barrier_wait(int32_t barrier_id) { cu_.barrier_wait(*this, barrier_id); }
+
+bool Wavefront::barrier_leave() { return cu_.named_barrier_leave(*this); }
+
 void Wavefront::halt() {
   // s_endpgm terminates the wave, frees its resources, and notifies the CP as one
   // action, mirroring hardware. Order matters:

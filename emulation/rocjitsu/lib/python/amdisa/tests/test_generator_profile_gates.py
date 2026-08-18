@@ -406,14 +406,9 @@ def test_generated_scc_accesses_match_mrisa(isa_name, profile_type):
     }
     assert set(mrisa_scc_accesses) == active_keys
     mismatches = []
-    excluded = {
-        'S_ALLOC_VGPR',
-        'S_BARRIER_LEAVE',
-        'S_BARRIER_SIGNAL_ISFIRST',
-    }
     expected_exclusions = {
         'rdna4': {'S_ALLOC_VGPR', 'S_BARRIER_SIGNAL_ISFIRST'},
-        'gfx1250': excluded,
+        'gfx1250': {'S_ALLOC_VGPR'},
     }
     checked_exclusions = set()
     checked = 0
@@ -428,7 +423,7 @@ def test_generated_scc_accesses_match_mrisa(isa_name, profile_type):
 
             mrisa_reads_scc, mrisa_writes_scc = mrisa_scc_accesses[key]
             sem = semantics.instructions.get(inst.name)
-            if inst.name in excluded:
+            if inst.name in expected_exclusions.get(isa_name, set()):
                 assert (
                     mrisa_writes_scc
                 ), f'{isa_name}: stale SCC exclusion for {inst.name}'
@@ -2235,6 +2230,17 @@ def test_generated_operand_validates_barrier_id_selectors(
 
     gfx1250_test_encodings = (gfx1250_generated_root / 'test_encodings.h').read_text()
     assert '"s_get_barrier_state", {0xBE805080U' in gfx1250_test_encodings
+
+
+def test_gfx1250_barrier_init_reads_member_count_from_implicit_m0(
+    gfx1250_generated_root: Path,
+):
+    sop1_exec = (gfx1250_generated_root / 'sop1_exec.cpp').read_text()
+    body = _generated_method_body(sop1_exec, 'SBarrierInitSop1', 'SBarrierJoinSop1')
+
+    assert 'read_scalar(ssrc0)' in body
+    assert 'uint32_t member_source = wf.m0();' in body
+    assert 'member_count = (member_source >> 16) & 0x7fu' in body
 
 
 def test_generated_operand_validates_direct_selector_namespaces(
