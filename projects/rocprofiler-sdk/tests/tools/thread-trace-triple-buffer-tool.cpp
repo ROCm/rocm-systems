@@ -313,7 +313,7 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 if(state.monotonicity_violation)
                     throw std::runtime_error("Realtime records were not monotonic");
 
-                current_byte = end_byte;
+                current_byte          = end_byte;
                 realtime_max_per_pass = std::max(realtime_max_per_pass, state.realtime_count);
             }
             total_size += output_size;
