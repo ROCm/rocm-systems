@@ -111,7 +111,7 @@ CLUSTER_CONFIGS = {
     "ruby": {
         "gpu_target": "gfx950",
         "slurm_partition": "meta64",
-        "slurm_qos": "vip_prio",
+        "slurm_qos": "",
         "slurm_no_gres": True,  # Ruby SLURM has no GPU GRES configured
         "mount_host_ib_libs": True,
         "nccl_env": {
@@ -490,7 +490,7 @@ ENV NCCL_DEBUG=WARN
 
         log.info("Building overlay image: %s", tag)
         subprocess.run(
-            ["docker", "build", "--network=none", "-t", tag,
+            ["docker", "build", "-t", tag,
              "-f", str(dockerfile), str(work_dir)],
             check=True,
         )
@@ -1082,7 +1082,7 @@ def main() -> None:
     # node that built it. Pin the SLURM job to that node so madengine can
     # find the image locally.
     nodelist = ""
-    if not args.registry:
+    if args.nodes == 1 and not args.registry:
         nodelist = os.environ.get("SLURM_NODELIST", "")
         if not nodelist:
             hostname = subprocess.run(
