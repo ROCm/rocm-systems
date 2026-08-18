@@ -306,7 +306,7 @@ TEST(thread_trace, timestamps_follow_buffer_boundaries)
         return aqlprofile_att_gpu_clock_t{100, 100 * (call + 1)};
     };
     auto userdata = rocprofiler_user_data_t{.ptr = &state};
-    auto threads  =
+    auto threads =
         rocprofiler::thread_trace::start_threads(fetch_cb, query_status, userdata, query_clock);
 
     while(state.data_callbacks.load() < 3)
