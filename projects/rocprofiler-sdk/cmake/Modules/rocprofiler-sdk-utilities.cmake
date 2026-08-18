@@ -102,6 +102,62 @@ function(rocprofiler_sdk_wsl_timeout_scale _VAR)
         PARENT_SCOPE)
 endfunction()
 
+# Reports whether the hsakmt headers this build compiles against can describe a WSL/DXG
+# KMT node. The enumerator needs the adapter LUID it matches DXCore adapters on, the
+# HsaStructureSizes handshake it validates the thunk's record layout with, and the gfx
+# version override the thunk reports. ROCm 6.2 through 6.4 declare neither the LUID pair
+# nor HsaStructureSizes, and 6.2 not the override either. Those releases ship no librocdxg
+# at all, so a header set this probe turns down is also one with no thunk for the
+# enumerator to read.
+#
+# Probed rather than derived from a version number on purpose: HsaNodeProperties has
+# changed without the ROCm version saying so, and the LUID pair postdates several 7.x
+# releases, so only the headers can answer this. The result is cached so the compile probe
+# runs once per configure.
+function(rocprofiler_sdk_dxg_topology_supported _VAR)
+    if(NOT DEFINED ROCPROFILER_SDK_DXG_TOPOLOGY_SUPPORTED)
+        include(CheckCXXSourceCompiles)
+
+        # find_package(hsakmt) may report its include directories as either ordinary or
+        # system includes, and only one of the two targets exists in a standalone
+        # configure, so collect whichever are present.
+        set(_DXG_PROBE_INCLUDES "${ROCM_PATH}/include")
+        foreach(_TARGET hsakmt::hsakmt rocprofiler-sdk-hsakmt-nolink)
+            if(TARGET ${_TARGET})
+                foreach(_PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+                                  INTERFACE_SYSTEM_INCLUDE_DIRECTORIES)
+                    get_target_property(_DIRS ${_TARGET} ${_PROPERTY})
+                    if(_DIRS)
+                        list(APPEND _DXG_PROBE_INCLUDES ${_DIRS})
+                    endif()
+                endforeach()
+            endif()
+        endforeach()
+        list(REMOVE_DUPLICATES _DXG_PROBE_INCLUDES)
+
+        set(CMAKE_REQUIRED_INCLUDES ${_DXG_PROBE_INCLUDES})
+        set(CMAKE_REQUIRED_QUIET ON)
+        check_cxx_source_compiles(
+            "
+#include <hsakmt/hsakmttypes.h>
+
+int main()
+{
+    HsaNodeProperties props = {};
+    HsaStructureSizes sizes = {};
+    sizes.StructureSizes          = sizeof(HsaStructureSizes);
+    sizes.SizeOfHsaNodeProperties = sizeof(HsaNodeProperties);
+    return (int) (props.LuidLowPart + props.LuidHighPart +
+                  props.OverrideEngineId.ui32.Major + sizes.SizeOfHsaNodeProperties);
+}
+"
+            ROCPROFILER_SDK_DXG_TOPOLOGY_SUPPORTED)
+    endif()
+    set(${_VAR}
+        "${ROCPROFILER_SDK_DXG_TOPOLOGY_SUPPORTED}"
+        PARENT_SCOPE)
+endfunction()
+
 # In case the underlying architecture does not support PC sampling, this function will
 # tell us whether the PC sampling is disabled
 function(rocprofiler_sdk_pc_sampling_disabled _VAR)

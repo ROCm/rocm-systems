@@ -32,6 +32,18 @@ rocprofiler_add_unit_test(
         "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
+# Everything below exercises the DXG (WSL) topology read, which is only compiled when the
+# hsakmt headers can describe a DXG KMT node - see platform/wsl/CMakeLists.txt. On the
+# ROCm releases where there is no enumerator to test, stop here rather than define suites
+# that cannot compile.
+include(rocprofiler-sdk-utilities)
+
+rocprofiler_sdk_dxg_topology_supported(ROCPROFILER_SDK_DXG_TOPOLOGY_SUPPORTED)
+
+if(NOT ROCPROFILER_SDK_DXG_TOPOLOGY_SUPPORTED)
+    return()
+endif()
+
 # Pure transforms of a DXG (WSL) KMT node record: no GPU, DXG thunk or HSA runtime is
 # involved, so this runs anywhere.
 set(ROCPROFILER_LIB_WSL_DXG_TEST_SOURCES wsl_dxg_topology.cpp)
