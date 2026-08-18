@@ -533,14 +533,6 @@ TEST_F(tracing_config_domains_test, get_callback_domains_aliases_expand_to_exact
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    EXPECT_CALL(*g_mock_wrapper, get_version)
-        .Times(1)
-        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
-            *major = 1;
-            *minor = 2;
-            *patch = 2;
-            return 0;
-        });
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
         .WillOnce(gtest::Return(std::string{ "hsa_api,hip_api,marker_api" }));
@@ -571,14 +563,6 @@ TEST_F(tracing_config_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    EXPECT_CALL(*g_mock_wrapper, get_version)
-        .Times(1)
-        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
-            *major = 1;
-            *minor = 2;
-            *patch = 2;
-            return 0;
-        });
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
         .WillOnce(gtest::Return(std::string{ "rccl_api" }));
@@ -602,14 +586,6 @@ TEST_F(tracing_config_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    EXPECT_CALL(*g_mock_wrapper, get_version)
-        .Times(1)
-        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
-            *major = 1;
-            *minor = 2;
-            *patch = 2;
-            return 0;
-        });
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
         .WillOnce(gtest::Return(std::string{}));
@@ -633,14 +609,6 @@ TEST_F(tracing_config_domains_test, get_callback_domains_invalid_domain)
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    EXPECT_CALL(*g_mock_wrapper, get_version)
-        .Times(1)
-        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
-            *major = 1;
-            *minor = 2;
-            *patch = 2;
-            return 0;
-        });
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
         .WillOnce(gtest::Return(std::string{ "invalid_domain" }));
@@ -671,14 +639,6 @@ TEST_F(tracing_config_domains_test,
         .Times(1)
         .WillOnce(gtest::Return(make_callback_name_info()));
 
-    EXPECT_CALL(*g_mock_wrapper, get_version)
-        .Times(1)
-        .WillOnce([](std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
-            *major = 1;
-            *minor = 3;
-            *patch = 5;
-            return 0;
-        });
     EXPECT_CALL(*g_mock_externals, get_rocm_domains)
         .Times(1)
         .WillOnce(gtest::Return(std::string{ "rocshmem_api,hipfile_api" }));
