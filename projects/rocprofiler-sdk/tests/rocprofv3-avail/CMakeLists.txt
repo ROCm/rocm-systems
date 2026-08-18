@@ -116,35 +116,17 @@ rocprofiler_add_integration_validate_test(
     LABELS "integration-tests"
     DISABLED "${IS_DISABLED}")
 
-# Python cannot dynamically load sanitizer libraries when static TLS is exhausted.
-set(CLI_IS_DISABLED OFF)
-if(ROCPROFILER_MEMCHECK)
-    set(CLI_IS_DISABLED ON)
-endif()
-
-set(CLI_DEPENDS
-    rocprofv3-list-avail rocprofiler-sdk-tool rocprofiler-sdk-tool-kokkosp
-    rocprofiler-sdk-shared-library rocprofiler-sdk-roctx-shared-library
-    rocprofiler-sdk-rocpd-shared-library transpose)
-add_custom_target(rocprofv3-avail-cli-dependencies)
-foreach(_TARGET IN LISTS CLI_DEPENDS)
-    if(TARGET ${_TARGET})
-        add_dependencies(rocprofv3-avail-cli-dependencies ${_TARGET})
-    endif()
-endforeach()
-
 rocprofiler_add_integration_validate_test(
     rocprofv3-avail-cli-test
-    TEST_PATHS test_validate_cli.py
+    TEST_PATHS validate_cli.py
     COPY conftest.py
     CONFIG pytest.ini
     BUNDLE_TESTS
-    ARGS --rocm-path ${rocprofiler-sdk_ROOT_DIR} --rocprofv3-avail
-         $<TARGET_FILE:rocprofiler-sdk::rocprofv3-avail> --rocprofv3
-         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --transpose $<TARGET_FILE:transpose>
+    ARGS --rocm-path ${rocprofiler-sdk_ROOT_DIR}
     TIMEOUT 300
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPROFILER_PC_SAMPLING_BETA_ENABLED=on"
-    DEPENDS rocprofv3-avail-cli-dependencies
+    TARGET_DEPENDS "rocprofiler-sdk::rocprofv3;rocprofiler-sdk::rocprofv3-avail"
     LABELS "integration-tests"
-    DISABLED "${CLI_IS_DISABLED}")
+    DISABLED_MEMCHECKS ".+"
+    DISABLED "${IS_DISABLED}")

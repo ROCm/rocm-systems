@@ -92,4 +92,9 @@ is_counter_set(const uint64_t* counter_handles,
 void
 agent_info(uint64_t agent_handle, const char** agent_info_str) ROCPROFILER_EXPORT;
 
+int
+list_avail_output_filename(const char*  output_path,
+                           const char*  output_file,
+                           const char** filename) noexcept ROCPROFILER_EXPORT;
+
 ROCPROFILER_EXTERN_C_FINI
