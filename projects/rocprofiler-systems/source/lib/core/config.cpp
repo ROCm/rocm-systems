@@ -1331,36 +1331,26 @@ configure_settings(bool _init)
         if(_fparanoid) _fparanoid >> _paranoid;
     }
 
-    auto  _cap_status   = timemory::linux::capability::cap_read(process::get_id());
-    auto* _cap_data     = &_cap_status.effective;
-    bool  _has_perf_cap = false;
-    for(auto itr : timemory::linux::capability::cap_decode(*_cap_data))
-    {
-        if(itr == CAP_SYS_ADMIN) _has_perf_cap = true;
-            // CAP_PERFMON is a narrower grant present since linux 5.8
-#    if defined(CAP_PERFMON)
-        if(itr == CAP_PERFMON) _has_perf_cap = true;
-#    endif
-    }
+    // Capability numbers are stable kernel ABI, but CAP_* macros come from the host
+    // Name the PERFMON bit here to keep it visible even where those headers predate it
+    constexpr unsigned _cap_sys_admin_bit = CAP_SYS_ADMIN;
+    constexpr unsigned _cap_perfmon_bit   = 38;  // linux 5.8+
+
+    // CAP_PERFMON is the narrower grant; either one permits perf_event_open
+    const auto _cap_effective =
+        timemory::linux::capability::cap_read(process::get_id()).effective;
+    const bool _has_perf_cap = ((_cap_effective >> _cap_sys_admin_bit) & 1ULL) != 0 ||
+                               ((_cap_effective >> _cap_perfmon_bit) & 1ULL) != 0;
 
     if(_paranoid > 2 && !_has_perf_cap)
     {
-        // Name only the capabilities the loop above was compiled to detect.
-#    if defined(CAP_PERFMON)
-        constexpr auto _perf_requirement = "a value <= 2, CAP_PERFMON, or CAP_SYS_ADMIN";
-        constexpr auto _perf_cap_hint    = "CAP_PERFMON (or CAP_SYS_ADMIN)";
-#    else
-        constexpr auto _perf_requirement = "a value <= 2, or CAP_SYS_ADMIN";
-        constexpr auto _perf_cap_hint    = "CAP_SYS_ADMIN";
-#    endif
-
         LOG_WARNING("/proc/sys/kernel/perf_event_paranoid has a value of {}. "
-                    "Disabling PAPI (requires {})",
-                    _paranoid, _perf_requirement);
+                    "Disabling PAPI (requires a value <= 2, CAP_PERFMON, or "
+                    "CAP_SYS_ADMIN)",
+                    _paranoid);
         LOG_WARNING("In order to enable PAPI support, run 'echo N | sudo tee "
                     "/proc/sys/kernel/perf_event_paranoid' where N is <= 2, or "
-                    "grant the process {}",
-                    _perf_cap_hint);
+                    "grant the process CAP_PERFMON (or CAP_SYS_ADMIN)");
         trait::runtime_enabled<comp::papi_config>::set(false);
         trait::runtime_enabled<comp::papi_common<void>>::set(false);
         trait::runtime_enabled<comp::papi_array_t>::set(false);
