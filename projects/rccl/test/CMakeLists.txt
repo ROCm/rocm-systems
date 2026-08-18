@@ -744,6 +744,11 @@ if(BUILD_TESTS)
     rocm_install(TARGETS ${test_executable} COMPONENT tests)
   endforeach()
 
+  # gdr_peermem.h lives in src/include. Add late so hipify-staged headers
+  # (e.g. debug.h) from RCCL_COMMON_INCLUDE_DIRS take precedence.
+  target_include_directories(rccl-UnitTestsGdr PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/include)
+
   # Suite H: shadow rocSHMEM sdma headers with no-op test stubs (higher-priority include path).
   if(ENABLE_ROCSHMEM_GIN AND (ENABLE_ROCSHMEM OR GIN_ANVIL_UNIT_TESTS))
     if(ROCSHMEM_SOURCE_DIR)
