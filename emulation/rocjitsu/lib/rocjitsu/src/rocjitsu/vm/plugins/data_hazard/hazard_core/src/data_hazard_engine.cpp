@@ -198,6 +198,28 @@ bool same_workgroup(const EngineGlobalAccessInfo &info, const EngineInstructionC
          info.workgroup_id == ctx.workgroup_id;
 }
 
+/// A retained reader that @p ctx would race with, or null when every reader of
+/// the address belongs to the accessing workgroup.
+const EngineGlobalAccessInfo *find_conflicting_reader(const EngineGlobalShadowEntry &entry,
+                                                      const EngineInstructionContext &ctx) {
+  for (const auto &reader : entry.readers) {
+    if (reader.valid && !same_workgroup(reader, ctx))
+      return &reader;
+  }
+  return nullptr;
+}
+
+/// Records a read while keeping the two slots on distinct workgroups: the first
+/// tracks the latest reader, and a reader from elsewhere displaces the second
+/// rather than the workgroup already held.
+void record_global_reader(EngineGlobalShadowEntry &entry, const EngineInstructionContext &ctx,
+                          const EngineGlobalAccessInfo &current) {
+  if (!entry.readers[0].valid || same_workgroup(entry.readers[0], ctx))
+    entry.readers[0] = current;
+  else
+    entry.readers[1] = current;
+}
+
 EngineWarning make_global_race_warning(const EngineInstructionContext &ctx,
                                        const ResourceAccessEvent &event, uint64_t address,
                                        const EngineGlobalAccessInfo &conflicting_access,
@@ -1162,8 +1184,8 @@ void DataHazardEngine::check_global_access_for_races(const EngineInstructionCont
           if (entry.writer.valid && !same_workgroup(entry.writer, ctx)) {
             conflicting_access = &entry.writer;
             conflict_type = "WAW";
-          } else if (entry.reader.valid && !same_workgroup(entry.reader, ctx)) {
-            conflicting_access = &entry.reader;
+          } else if (const auto *reader = find_conflicting_reader(entry, ctx)) {
+            conflicting_access = reader;
             conflict_type = "WAR";
           }
         } else if (event.is_read && !event.is_atomic) {
@@ -1188,7 +1210,7 @@ void DataHazardEngine::check_global_access_for_races(const EngineInstructionCont
       if (event.is_write && !event.is_atomic)
         entry.writer = current;
       if (event.is_read && !event.is_atomic && !same_workgroup(entry.writer, ctx))
-        entry.reader = current;
+        record_global_reader(entry, ctx, current);
 
       if (addr > max_address - kGlobalShadowAlignment)
         break;

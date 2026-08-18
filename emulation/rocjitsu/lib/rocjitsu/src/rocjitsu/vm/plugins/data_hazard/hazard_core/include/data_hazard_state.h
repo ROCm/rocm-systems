@@ -152,7 +152,12 @@ struct EngineGlobalAccessInfo {
 
 struct EngineGlobalShadowEntry {
   EngineGlobalAccessInfo writer;
-  EngineGlobalAccessInfo reader;
+  /// Readers held for two distinct workgroups, which is all a write needs: if
+  /// its own workgroup fills the first slot, the second is by construction a
+  /// different one. A single slot would let the workgroup that read last
+  /// overwrite the others and hide its own conflict with them. One entry exists
+  /// per four bytes of a dispatch, so readers are not retained per workgroup.
+  std::array<EngineGlobalAccessInfo, 2> readers;
   bool race_reported = false;
 };
 

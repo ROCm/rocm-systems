@@ -1521,6 +1521,54 @@ TEST(GenericDataHazardEngineTest, DetectsCrossWorkgroupGlobalRace) {
   EXPECT_EQ(warnings[0].source_raw_isa[0], 0xABCDEF01);
 }
 
+// Later readers must not displace every earlier one: whichever workgroup writes
+// next still races with a read from a different workgroup, including the
+// workgroup that read most recently.
+TEST(GenericDataHazardEngineTest, GlobalWarSurvivesReadsFromOtherWorkgroups) {
+  constexpr EntityId kReadingWorkgroups = 3;
+
+  for (EntityId writing_workgroup = 0; writing_workgroup < kReadingWorkgroups;
+       ++writing_workgroup) {
+    FakeFormatter formatter;
+    auto &engine = reset_generic_engine(formatter);
+    for (EntityId workgroup = 0; workgroup < kReadingWorkgroups; ++workgroup) {
+      engine.on_workgroup_begin(1, 0, workgroup);
+      engine.on_wave_begin(ExecutionKey{1, 0, workgroup, 0, 0});
+    }
+
+    auto access = [&](EntityId instruction_id, EntityId workgroup, bool is_write) {
+      InstructionEvent instruction;
+      instruction.instruction = make_instruction(instruction_id, 0x100 + instruction_id * 4);
+      instruction.instruction.execution = ExecutionKey{1, 0, workgroup, 0, 0};
+      engine.on_instruction(instruction);
+
+      ResourceAccessEvent event;
+      event.instruction = instruction.instruction;
+      event.resource_kind = ResourceKind::GlobalMemory;
+      event.address = 0x1000;
+      event.size_bytes = 4;
+      event.is_read = !is_write;
+      event.is_write = is_write;
+      engine.on_resource_access(event);
+    };
+
+    for (EntityId workgroup = 0; workgroup < kReadingWorkgroups; ++workgroup)
+      access(1 + workgroup, workgroup, /*is_write=*/false);
+    ASSERT_TRUE(engine.warning_snapshot().empty()) << "concurrent reads do not conflict";
+
+    access(100, writing_workgroup, /*is_write=*/true);
+
+    const auto warnings = engine.warning_snapshot();
+    ASSERT_EQ(warnings.size(), 1u)
+        << "a write by workgroup " << writing_workgroup << " races with the other reads";
+    EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+    EXPECT_NE(warnings[0].message.find("Global memory WAR data race at address 0x1000"),
+              std::string::npos);
+    EXPECT_NE(warnings[0].finding.source_instruction.execution.workgroup_id, writing_workgroup)
+        << "the conflicting read must come from another workgroup";
+  }
+}
+
 TEST(GenericDataHazardEngineTest, GlobalRaceSourceInstructionUsesConflictingExecutionKey) {
   FakeFormatter formatter;
   auto &engine = reset_generic_engine(formatter);
