@@ -612,17 +612,6 @@ rocprofiler-sdk:
             - gfx1153
           block: GL1C
           event: 24
-    - name: GRBM_TCP_BUSY
-      description: "Any of the Texture Cache Blocks TCP are busy."
-      properties: []
-      definitions:
-        - architectures:
-            - gfx1150
-            - gfx1151
-            - gfx1152
-            - gfx1153
-          block: GRBM
-          event: 28
     - name: SIMD_NUM
       description: SIMD Number
       properties: []
@@ -1868,6 +1857,10 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
             - gfx1250
           block: GRBM
           event: 28
@@ -7310,7 +7303,7 @@ rocprofiler-sdk:
             - gfx90a
           expression: 100*reduce(GRBM_SPI_BUSY,max)/reduce(GRBM_GUI_ACTIVE,max)
     - name: TA_ADDRESSER_BUSY
-      description: "Cycles addresser subblock is busy. Perf_windowing not supported for this counter."
+      description: "Cycles addresser subblock is busy. Perf_Windowing not supported for this counter."
       properties: []
       definitions:
         - architectures:
@@ -7322,7 +7315,7 @@ rocprofiler-sdk:
           event: 11
     - name: TA_ADDRESSER_FIFO_BUSY
       description: "Cycles sampler addresser ping-ping buffer, non-sampler balancing RAM, or aligner state
-        machine are busy. Perf_windowing not supported for this counter."
+        machine are busy. Perf_Windowing not supported for this counter."
       properties: []
       definitions:
         - architectures:
@@ -7333,7 +7326,7 @@ rocprofiler-sdk:
           block: TA
           event: 12
     - name: TA_ADDRESSER_STALLED_CYCLES
-      description: "Cycles Addresser stalled. Perf_windowing not supported for this counter."
+      description: "Cycles Addresser stalled. Perf_Windowing not supported for this counter."
       properties: []
       definitions:
         - architectures:
@@ -7412,7 +7405,7 @@ rocprofiler-sdk:
             - gfx950
           expression: reduce(TA_ADDR_STALLED_BY_TD_CYCLES,sum)
     - name: TA_ALIGNER_BUSY
-      description: "Cycles aligner subblock is busy. Perf_windowing not supported for this counter."
+      description: "Cycles aligner subblock is busy. Perf_Windowing not supported for this counter."
       properties: []
       definitions:
         - architectures:
@@ -8169,7 +8162,7 @@ rocprofiler-sdk:
             - gfx950
           expression: reduce(TA_FLAT_COALESCEABLE_WAVEFRONTS, sum)
     - name: TA_VMEMCMD_CYCLES
-      description: "Vmemcmd cycles destined for TA. Perf_windowing not supported for this counter."
+      description: "Vmemcmd cycles destined for TA. Perf_Windowing not supported for this counter."
       properties: []
       definitions:
         - architectures:
@@ -8180,7 +8173,7 @@ rocprofiler-sdk:
           block: TA
           event: 144
     - name: TA_VMEMREQ_CYCLES
-      description: "Vmemreq cycles destined for TA. Perf_windowing not supported for this counter."
+      description: "Vmemreq cycles destined for TA. Perf_Windowing not supported for this counter."
       properties: []
       definitions:
         - architectures:
@@ -8191,7 +8184,7 @@ rocprofiler-sdk:
           block: TA
           event: 145
     - name: TA_WRITE_PATH_BUSY
-      description: "Cycles write datapath subblock is busy. Perf_windowing not supported for this counter."
+      description: "Cycles write datapath subblock is busy. Perf_Windowing not supported for this counter."
       properties: []
       definitions:
         - architectures:
