@@ -12,7 +12,7 @@ target_include_directories(nccl-net-example PRIVATE
 
 # Set output name to match Makefile
 set_target_properties(nccl-net-example PROPERTIES
-    OUTPUT_NAME "nccl-net-example"
+    OUTPUT_NAME "rccl-net-example"
     PREFIX "lib"
     POSITION_INDEPENDENT_CODE ON
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/test/unit/plugins
