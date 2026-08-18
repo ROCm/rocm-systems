@@ -33,24 +33,6 @@ def pytest_addoption(parser):
         default="scratch-memory-tracing-test.json",
         help="Input JSON",
     )
-    parser.addoption(
-        "--rocprofv3-avail",
-        action="store",
-        default=None,
-        help="Path to the rocprofv3-avail executable",
-    )
-    parser.addoption(
-        "--rocprofv3",
-        action="store",
-        default=None,
-        help="Path to the rocprofv3 executable",
-    )
-    parser.addoption(
-        "--transpose",
-        action="store",
-        default=None,
-        help="Path to the transpose application used for the tracing case",
-    )
 
 
 @pytest.fixture
