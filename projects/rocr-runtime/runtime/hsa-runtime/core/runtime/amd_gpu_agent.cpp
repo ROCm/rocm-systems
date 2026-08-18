@@ -4110,6 +4110,22 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
 
   // Allocate contiguous device memory for all XCCs, each XCC gets deviceAllocSize bytes
   size_t deviceAllocSize = AlignUp(sizeof(pcs_sampling_data_t) + (2 * trap_buffer_size), 256);
+
+  // TMA2 holds one per-XCC stride shared by the hosttrap and stochastic buffer arrays, so an
+  // active session of the other method with a different stride would index past its allocation.
+  // Reading the other method's session without a lock is safe: PcsRuntime serializes create,
+  // destroy and start under pc_sampling_lock_, so it cannot change underneath this check.
+  const pcs_data_t& other_pcs_data = (sampling_method == HSA_VEN_AMD_PCS_METHOD_HOSTTRAP_V1)
+      ? pcs_stochastic_data_
+      : pcs_hosttrap_data_;
+  if (other_pcs_data.session && other_pcs_data.per_xcc_device_stride != deviceAllocSize) {
+    debug_print(
+        "PC Sampling: cannot start session, active session uses per-XCC stride %zu but this "
+        "session needs %zu\n",
+        other_pcs_data.per_xcc_device_stride, deviceAllocSize);
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
   size_t totalDeviceAllocSize = deviceAllocSize * pcs_data->num_xcc;
   pcs_data->per_xcc_device_stride = deviceAllocSize;  // Cache for trap handler update in Destroy
 
