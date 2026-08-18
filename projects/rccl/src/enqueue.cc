@@ -1171,7 +1171,9 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   // recv: dir=0, send: dir=1
   void* addrs[2] = {recvAddr, sendAddr};
   ssize_t bytes[2] = {recvBytes, sendBytes};
-  bool protoLL128[2] = {!selfSend, !selfSend};
+  // "Latency-bound" flag per dir: the op is small enough to use an LL-family protocol
+  // (legacy LL or LL128) instead of SIMPLE. The actual protocol is chosen below.
+  bool protoLatency[2] = {!selfSend, !selfSend};
   bool network[2] = {false, false};
   bool proxySameProcess[2] = {true, true};
   void** handles[2] = {NULL, NULL};
@@ -1189,6 +1191,16 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   uint8_t base = ncclP2pChannelBaseForRound(comm, p2pRound, batchP2PEnableEnv);
   struct ncclProxyOp proxyOps[2] = {};
   int nProxyOps = selfSend ? 0 : 2;
+  // Latency-bound send/recv uses one of two separately-generated kernel variants:
+  //   - LL128 kernel: only generated for gfx942/gfx950 (see reg_values_of() in the device
+  //     codegen), and only activated when NCCL_ALLOC_P2P_NET_LL_BUFFERS=1 (which is also what
+  //     makes the LL128 staging buffer available on network connections).
+  //   - legacy LL kernel: every other arch, or when NCCL_ALLOC_P2P_NET_LL_BUFFERS=0.
+  // The choice is per-communicator, so all P2P ops in a plan agree on the kernel variant.
+  // cudaArch is 100*major + 10*minor: 940 = gfx942, 950 = gfx950 -- the only archs whose LL128
+  // send/recv kernel is generated (see reg_values_of("SendRecv") in the device codegen).
+  bool useLL128SendRecv = comm->allocP2pNetLLBuffers &&
+                          (comm->cudaArch == 940 || comm->cudaArch == 950);
   if (comm->p2pNet) {
     for (int dir = 0; dir <= 1; dir++) {
       if (bytes[dir] > rcclParamP2pNetThreshold()) connIndex[dir] = NCCL_CONN_IDX_P2P_NET;
@@ -1204,12 +1216,10 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
         int peerRank = dir ? sendRank : recvRank;
         struct ncclConnector* conn =
           dir ? &channelPeers[peerRank]->send[connIndex[dir]] : &channelPeers[peerRank]->recv[connIndex[dir]];
-        // SendRecv uses LL128 (in place of LL) for latency-bound sizes on both the intranode and
-        // internode paths. It requires the LL128 staging buffer to exist on the connection. For
-        // intranode P2P these are always allocated; for network connections they are allocated when
-        // NCCL_ALLOC_P2P_NET_LL_BUFFERS is enabled.
-        protoLL128[dir] &= conn->conn.buffs[NCCL_PROTO_LL128] != nullptr &&
-                           !IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx12");
+        // The latency path needs the staging buffer for the protocol its kernel variant uses:
+        // the LL128 buffer when the LL128 kernel is active, otherwise the legacy LL buffer.
+        int latencyProto = useLL128SendRecv ? NCCL_PROTO_LL128 : NCCL_PROTO_LL;
+        protoLatency[dir] &= conn->conn.buffs[latencyProto] != nullptr;
         network[dir] |= conn->transportComm == (dir ? &netTransport.send : &netTransport.recv);
         proxySameProcess[dir] &= conn->proxyConn.sameProcess;
       }
@@ -1251,9 +1261,17 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     // Update number of channels propagated to the profiler
     if (p2pTasks[dir]) p2pTasks[dir]->nChannels = nChannels[dir];
 
-    // Select protocol based on per-channel payload: <= P2P_LL_THRESHOLD uses LL128, else SIMPLE.
-    if (bytes[dir] != -1) protoLL128[dir] &= bytes[dir] <= nChannels[dir] * ncclParamP2pLLThreshold();
-    protocol[dir] = protoLL128[dir] ? NCCL_PROTO_LL128 : NCCL_PROTO_SIMPLE;
+    // Select protocol based on per-channel payload: <= P2P_LL_THRESHOLD uses the latency
+    // protocol (LL128 on gfx942/gfx950 with NCCL_ALLOC_P2P_NET_LL_BUFFERS=1, else legacy LL),
+    // above it SIMPLE.
+    if (bytes[dir] != -1) protoLatency[dir] &= bytes[dir] <= nChannels[dir] * ncclParamP2pLLThreshold();
+    protocol[dir] = protoLatency[dir] ? (useLL128SendRecv ? NCCL_PROTO_LL128 : NCCL_PROTO_LL) : NCCL_PROTO_SIMPLE;
+
+    // Emit the selected protocol so tests (and NCCL_DEBUG=INFO) can confirm the latency protocol
+    // was actually chosen rather than silently falling back to SIMPLE.
+    if (bytes[dir] != -1)
+      INFO(NCCL_INIT, "RCCL P2P SendRecv protocol=%s dir=%s bytes=%ld nChannels=%d",
+           ncclProtoStr[protocol[dir]], dir ? "send" : "recv", (long)bytes[dir], nChannels[dir]);
 
     stepSize[dir] = comm->buffSizes[protocol[dir]] / NCCL_STEPS;
     if (protocol[dir] == NCCL_PROTO_SIMPLE) stepSize[dir] = comm->p2pChunkSize;
@@ -1267,14 +1285,19 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     }
 
     chunkDataSize[dir] = chunkSize[dir];
-    // Convert wire chunk size to data (payload) chunk size for LL128 (data lines carry a flag word).
-    if (protocol[dir] == NCCL_PROTO_LL128)
+    // Convert wire chunk size to data (payload) chunk size. Legacy LL carries one flag word per
+    // data word (half the wire is payload); LL128 carries one flag word per line.
+    if (protocol[dir] == NCCL_PROTO_LL)
+      chunkDataSize[dir] /= 2;
+    else if (protocol[dir] == NCCL_PROTO_LL128)
       chunkDataSize[dir] = (chunkDataSize[dir] / comm->ll128LineElems) * comm->ll128DataElems;
     chunkDataSize_u32fp8[dir] = u32fp8Encode(chunkDataSize[dir]);
     chunkDataSize[dir] = u32fp8Decode(chunkDataSize_u32fp8[dir]);
     chunkSize[dir] = chunkDataSize[dir];
     // Convert data chunk size back to wire chunk size (used for proxy chunk steps).
-    if (protocol[dir] == NCCL_PROTO_LL128)
+    if (protocol[dir] == NCCL_PROTO_LL)
+      chunkSize[dir] *= 2;
+    else if (protocol[dir] == NCCL_PROTO_LL128)
       chunkSize[dir] = (chunkSize[dir] / comm->ll128DataElems) * comm->ll128LineElems;
 
     if (p2pTasks[dir] && p2pTasks[dir]->allowUB) {
@@ -1355,7 +1378,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   work->nP2pChannels = comm->p2pnChannels;
   work->channelBase = base;
   work->nSendChannels = nChannels[1];
-  work->sendProtoLL128 = protoLL128[1];
+  work->sendProtoLL = protoLatency[1];
   work->sendNetReg = netRegistered[1];
   work->sendIpcReg = ipcRegistered[1];
   work->sendChunkSize_u32fp8 = chunkDataSize_u32fp8[1];
@@ -1365,7 +1388,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   work->sendConnIndex = connIndex[1];
   work->sendOpCount = sendOpCount;
   work->nRecvChannels = nChannels[0];
-  work->recvProtoLL128 = protoLL128[0];
+  work->recvProtoLL = protoLatency[0];
   work->recvNetReg = netRegistered[0];
   work->recvIpcReg = ipcRegistered[0];
   work->recvChunkSize_u32fp8 = chunkDataSize_u32fp8[0];
@@ -1417,7 +1440,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
                                           comm->p2pChannelShiftSize);
     plan->channelMask.masks[channelId / 64] |= uint64_t(1) << (channelId % 64);
     // Add batch first.
-    int funcIdx = ncclDevFuncId_P2p();
+    int funcIdx = ncclDevFuncId_P2p(useLL128SendRecv);
     addWorkBatchToPlan(comm, plan, channelId, ncclDevWorkTypeP2p, funcIdx, workOffset, p2pRound, batchP2P);
     if (funcIdx < 0) {
       WARN("%s: unsupported collective. Please ensure the collective has been enabled in build.", __func__);
@@ -1451,8 +1474,12 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
           proxyOps[dir].nsteps = divUp(partEnd - partBeg, chunkDataSize);
           proxyOps[dir].nbytes = std::min(partEnd - partBeg, chunkDataSize);
         }
-        if (proxyOps[dir].protocol == NCCL_PROTO_LL128) {
-          // Convert data bytes to wire bytes (data lines carry an extra flag word).
+        if (proxyOps[dir].protocol == NCCL_PROTO_LL) {
+          // Convert data bytes to wire bytes (legacy LL carries one flag word per data word).
+          proxyOps[dir].nbytes *= 2;
+          proxyOps[dir].nbytes = roundUp(proxyOps[dir].nbytes, sizeof(union ncclLLFifoLine));
+        } else if (proxyOps[dir].protocol == NCCL_PROTO_LL128) {
+          // Convert data bytes to wire bytes (LL128 data lines carry an extra flag word).
           proxyOps[dir].nbytes = divUp(proxyOps[dir].nbytes, comm->ll128DataElems * sizeof(uint64_t)) *
                                  comm->ll128LineElems * sizeof(uint64_t);
         }
