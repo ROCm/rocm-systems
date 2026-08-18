@@ -25,7 +25,12 @@ from packaging.version import Version as _Version
 
 from nccl._version import __version__
 from nccl.bindings import nccl as _nccl_bindings
-from nccl.bindings import nccl_ep as _ep_bindings
+
+# nccl_ep is not built on ROCm; version reporting already treats it as optional.
+try:
+    from nccl.bindings import nccl_ep as _ep_bindings
+except ImportError:  # pragma: no cover
+    _ep_bindings = None
 
 __all__ = ["LibraryInfo", "VersionInfo", "get_version", "show_versions"]
 
@@ -150,6 +155,8 @@ def _nccl_ep_importable() -> bool:
     CUDA major. Extracted as a separate function so tests can monkey-patch it
     directly instead of manipulating ``sys.modules``.
     """
+    if _ep_bindings is None:
+        return False
     try:
         import nccl.ep  # noqa: F401
     except ImportError:
