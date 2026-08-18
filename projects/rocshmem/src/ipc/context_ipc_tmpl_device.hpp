@@ -300,6 +300,7 @@ __device__ int IPCContext::reduce_wave(rocshmem_team_t team, T *dest,
         int p_count = nreduce - (n_seg * seg_size);
         int p_chunk = p_count / PE_size;
         if (p_chunk > 0) {
+          barrier_wave(team);
           internal_ring_allreduce_wave<T, Op>(p_dst, p_src,
                                               (p_chunk * PE_size), team_obj, 1,
                                               (p_chunk * PE_size), p_chunk);
@@ -309,6 +310,7 @@ __device__ int IPCContext::reduce_wave(rocshmem_team_t team, T *dest,
           p_count -= (p_chunk * PE_size);
           p_dst += (p_chunk * PE_size);
           const T *p_src2 = p_src + (p_chunk * PE_size);
+          barrier_wave(team);
           internal_direct_allreduce_wave<T, Op>(p_dst, p_src2, p_count, team_obj);
         }
       }
