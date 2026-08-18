@@ -24,6 +24,7 @@
 #include "device.h"
 #include "graph.h"
 #include "graph/topo.h"
+#include "nccl.h"
 
 namespace RcclUnitTesting
 {
@@ -33,67 +34,80 @@ namespace
 
 constexpr int kDefaultP2pUpper = 4 * CHANNEL_LIMIT;  // 64
 
+// Minimal stand-in communicator for ncclTopoComputeP2pChannels(). ncclComm is
+// several MB (channels[MAXCHANNELS] plus planner.wipPlan.channels[MAXCHANNELS]),
+// so heap-allocate it: stack-allocating inside the isolated-test thread was
+// tripping SIGSEGV. Mirrors MockComm in TopoEnvPolicyTests / NetDevsPolicyP2pNetTests.
 struct P2pChannelsComm
 {
-    ncclComm            comm{};
-    ncclTopoSystem      topo{};
-    ncclSharedResources sharedRes{};
+    ncclComm*            comm     = nullptr;
+    ncclTopoSystem*      topo     = nullptr;
+    ncclSharedResources* sharedRes = nullptr;
 
-    void initSingleNode(const char* gcn, int nRanks, int nChannels, int seedP2pPerPeer)
+    P2pChannelsComm()
+    {
+        comm      = new ncclComm();
+        topo      = new ncclTopoSystem();
+        sharedRes = new ncclSharedResources();
+    }
+
+    ~P2pChannelsComm()
+    {
+        delete sharedRes;
+        delete topo;
+        delete comm;
+    }
+
+    P2pChannelsComm(const P2pChannelsComm&)            = delete;
+    P2pChannelsComm& operator=(const P2pChannelsComm&) = delete;
+
+    void initCommon(const char* gcn, int nRanks, int nNodes, int localGpus, int nChannels,
+                    int seedP2pPerPeer)
     {
         ncclTopoNode gpuNode{};
-        memset(&comm, 0, sizeof(comm));
-        memset(&topo, 0, sizeof(topo));
-        memset(&sharedRes, 0, sizeof(sharedRes));
+        memset(comm, 0, sizeof(*comm));
+        memset(topo, 0, sizeof(*topo));
+        memset(sharedRes, 0, sizeof(*sharedRes));
         memset(&gpuNode, 0, sizeof(gpuNode));
+
+        for(int c = 0; c < MAXCHANNELS; c++) comm->channels[c].id = -1;
 
         strncpy(gpuNode.gpu.gcn, gcn, GCN_ARCH_NAME_LEN - 1);
         gpuNode.gpu.gcn[GCN_ARCH_NAME_LEN - 1] = '\0';
 
-        topo.nodes[GPU].count = nRanks;
-        topo.nRanks           = nRanks;
-        topo.type             = RCCL_TOPO_XGMI_ALL;
-        topo.nodes[GPU].nodes[0] = gpuNode;
+        topo->nodes[GPU].count      = localGpus;
+        topo->nRanks                = nRanks;
+        topo->type                  = RCCL_TOPO_XGMI_ALL;
+        topo->nodes[GPU].nodes[0]   = gpuNode;
+        topo->nodes[CPU].count      = 1;
+        topo->nodes[CPU].nodes[0].cpu.vendor = NCCL_TOPO_CPU_VENDOR_AMD;
+        topo->nodes[CPU].nodes[0].cpu.arch   = NCCL_TOPO_CPU_ARCH_X86;
 
-        comm.topo                = &topo;
-        comm.sharedRes           = &sharedRes;
-        sharedRes.owner            = &comm;
-        comm.nRanks                = nRanks;
-        comm.nNodes                = 1;
-        comm.nChannels             = nChannels;
-        comm.p2pnChannelsPerPeer   = seedP2pPerPeer;
+        comm->topo                      = topo;
+        comm->sharedRes                 = sharedRes;
+        sharedRes->owner                = comm;
+        comm->nRanks                    = nRanks;
+        comm->nNodes                    = nNodes;
+        comm->nChannels                 = nChannels;
+        comm->p2pnChannelsPerPeer       = seedP2pPerPeer;
+        comm->config.nChannelsPerNetPeer = NCCL_CONFIG_UNDEF_INT;
+    }
+
+    void initSingleNode(const char* gcn, int nRanks, int nChannels, int seedP2pPerPeer)
+    {
+        initCommon(gcn, nRanks, /*nNodes=*/1, /*localGpus=*/nRanks, nChannels, seedP2pPerPeer);
     }
 
     void initMultiNode(const char* gcn, int nNodes, int nRanks, int localGpus, int nChannels,
                        int seedP2pPerPeer)
     {
-        ncclTopoNode gpuNode{};
-        memset(&comm, 0, sizeof(comm));
-        memset(&topo, 0, sizeof(topo));
-        memset(&sharedRes, 0, sizeof(sharedRes));
-        memset(&gpuNode, 0, sizeof(gpuNode));
-
-        strncpy(gpuNode.gpu.gcn, gcn, GCN_ARCH_NAME_LEN - 1);
-        gpuNode.gpu.gcn[GCN_ARCH_NAME_LEN - 1] = '\0';
-
-        topo.nodes[GPU].count = localGpus;
-        topo.nRanks           = nRanks;
-        topo.type             = RCCL_TOPO_XGMI_ALL;
-        topo.nodes[GPU].nodes[0] = gpuNode;
-
-        comm.topo                = &topo;
-        comm.sharedRes           = &sharedRes;
-        sharedRes.owner            = &comm;
-        comm.nRanks                = nRanks;
-        comm.nNodes                = nNodes;
-        comm.nChannels             = nChannels;
-        comm.p2pnChannelsPerPeer   = seedP2pPerPeer;
+        initCommon(gcn, nRanks, nNodes, localGpus, nChannels, seedP2pPerPeer);
     }
 
     ncclResult_t computeP2pChannels(int* outP2pChannels)
     {
-        ncclResult_t res = ncclTopoComputeP2pChannels(&comm);
-        if(res == ncclSuccess) *outP2pChannels = comm.p2pnChannels;
+        ncclResult_t res = ncclTopoComputeP2pChannels(comm);
+        if(res == ncclSuccess) *outP2pChannels = comm->p2pnChannels;
         return res;
     }
 };
