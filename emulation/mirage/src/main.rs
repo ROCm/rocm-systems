@@ -238,21 +238,6 @@ const RUN: &str = "run";
 /// The one-line shape shown by every usage error [`dropin_argv`] raises.
 const DROPIN_USAGE: &str = "Usage: mirage [OPTIONS] -- <COMMAND> [ARGS]...";
 
-/// Whether `arg` looks like a flag rather than a value.
-///
-/// Deliberately stricter than "starts with `-`": a negative number is a
-/// value (`--num-nodes -1`), and rejecting it here would replace clap's
-/// "invalid value" — which says what the range is — with a worse message
-/// about an unknown flag. A short flag is a letter, so that is the test.
-fn is_flag_token(arg: &str) -> bool {
-    if let Some(long) = arg.strip_prefix("--") {
-        return !long.is_empty();
-    }
-    arg.strip_prefix('-')
-        .and_then(|rest| rest.chars().next())
-        .is_some_and(char::is_alphabetic)
-}
-
 /// Whether `arg` is plausibly a program the user meant to run rather
 /// than a mistyped subcommand.
 ///
@@ -264,90 +249,50 @@ fn looks_like_a_program(arg: &str) -> bool {
     arg.contains(std::path::MAIN_SEPARATOR) || std::path::Path::new(arg).is_file()
 }
 
-/// The flag spellings that may appear before the `--` of a drop-in
-/// invocation: [`Cli`]'s global flags, everything `mirage run` accepts,
-/// and [`ATTACH`].
+/// The subcommands that end in a workload, and so have a `--` and a span
+/// of mirage's own flags in front of it.
 ///
-/// Asked of clap rather than listed here, for the same reason
-/// [`is_subcommand`] is: a flag added to `RunArgs` is accepted the moment
-/// it is declared, and one removed stops being accepted, with no second
-/// copy of the list to forget. Aliases count — `run` gives
-/// `--nproc-per-node` a second spelling, and rejecting it would be
-/// exactly the bug this guard exists to prevent.
-#[derive(Debug)]
-struct DropinFlags {
-    /// Long flag names without their `--`, sorted, so a suggestion is
-    /// deterministic when several are equally close.
-    longs: Vec<String>,
-    /// Short flag letters.
-    shorts: Vec<char>,
-}
+/// Every other subcommand is an ordinary clap parse: it has no
+/// `trailing_var_arg` positional, so an unknown flag is reported by clap
+/// as an unknown flag and never becomes anything else.
+const TAKE_A_WORKLOAD: [&str; 2] = [RUN, "exec"];
 
-impl DropinFlags {
-    fn collect() -> Self {
-        use clap::CommandFactory as _;
-        let cmd = Cli::command();
-        // `help` and `version` are clap's own and are not in the
-        // declared argument list of an unbuilt `Command`, but they are
-        // accepted everywhere, so a drop-in may carry them too.
-        let mut longs = vec!["help".to_string(), "version".to_string()];
-        let mut shorts = vec!['h', 'V'];
-        let globals = cmd.get_arguments().filter(|a| a.is_global_set());
-        let run = cmd
-            .find_subcommand(RUN)
-            .into_iter()
-            .flat_map(clap::Command::get_arguments);
-        for arg in globals.chain(run) {
-            longs.extend(arg.get_long().map(str::to_string));
-            longs.extend(
-                arg.get_all_aliases()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(str::to_string),
-            );
-            shorts.extend(arg.get_short());
-            shorts.extend(arg.get_all_short_aliases().unwrap_or_default());
-        }
-        longs.sort();
-        longs.dedup();
-        Self { longs, shorts }
-    }
+/// Check the span of `args` that belongs to mirage rather than to the
+/// workload, and turn the first mistyped flag in it into a usage error.
+///
+/// `from` is where mirage's own flags start — after the subcommand, or
+/// after the program name for a drop-in — and `sep` is the index of the
+/// `--`, when there is one. Which there is decides how far the scan goes;
+/// see [`mirage_ctl::usage::Span`].
+///
+/// # Errors
+///
+/// Returns the message to print for the first flag-shaped token mirage
+/// does not accept.
+fn check_flags(args: &[String], from: usize, sep: Option<usize>, sub: &str) -> Result<(), String> {
+    use clap::CommandFactory as _;
+    use mirage_ctl::usage::{AcceptedFlags, Span, misplaced_flag, unknown_flag_error};
 
-    /// Whether `token` is one of these flags, in any of the spellings
-    /// clap itself would accept (`--long`, `--long=value`, `-s`,
-    /// `-svalue`, and `-v` bundled to any depth).
-    fn accepts(&self, token: &str) -> bool {
-        if is_global_flag(token) {
-            return true;
-        }
-        if let Some(long) = token.strip_prefix("--") {
-            let name = long.split('=').next().unwrap_or(long);
-            return self.longs.iter().any(|known| known == name);
-        }
-        token
-            .strip_prefix('-')
-            .and_then(|rest| rest.chars().next())
-            .is_some_and(|c| self.shorts.contains(&c))
-    }
-
-    /// The accepted flag closest to `token`, for a "did you mean".
-    ///
-    /// Containment in either direction, which is what a dropped or
-    /// mis-remembered word looks like: `--nodes` for `--num-nodes`,
-    /// `--profil` for `--profile`. Short names are excluded because at
-    /// two characters almost anything contains almost anything.
-    fn nearest(&self, token: &str) -> Option<String> {
-        let name = token.trim_start_matches('-');
-        let name = name.split('=').next().unwrap_or(name);
-        if name.len() < 3 {
-            return None;
-        }
-        self.longs
-            .iter()
-            .filter(|known| known.contains(name) || name.contains(known.as_str()))
-            .min_by_key(|known| known.len().abs_diff(name.len()))
-            .map(|known| format!("--{known}"))
-    }
+    let known = AcceptedFlags::of(&Cli::command(), sub);
+    let (span, stop) = match sep {
+        Some(sep) => (&args[from.min(sep)..sep], Span::BeforeSeparator),
+        None => (&args[from.min(args.len())..], Span::UntilTheCommand),
+    };
+    let Some(bad) = misplaced_flag(span, &known, stop) else {
+        return Ok(());
+    };
+    // The drop-in spelling has no subcommand to name, so its usage line
+    // and help pointer are the bare ones; everything else about the
+    // message is identical, and deliberately so.
+    let (usage, help) = if args.get(from.saturating_sub(1)).map(String::as_str) == Some(sub) {
+        (
+            format!("Usage: mirage {sub} [OPTIONS] -- <COMMAND> [ARGS]..."),
+            format!("mirage {sub} --help"),
+        )
+    } else {
+        (DROPIN_USAGE.to_string(), "mirage run --help".to_string())
+    };
+    Err(unknown_flag_error(bad, &known, &usage, &help))
 }
 
 /// Make `mirage` a drop-in replacement for the `rocjitsu` CLI by routing
@@ -395,11 +340,21 @@ fn dropin_argv(args: Vec<String>) -> Result<Vec<String>, String> {
         head_idx = i;
         break;
     }
-    // A recognised subcommand means this is a normal mirage call, so
-    // leave it alone. That includes `run --attach`: `--attach` is a clap
-    // alias of `--daemon` on `run` itself now, so there is nothing here
-    // to translate.
-    if head.is_some_and(is_subcommand) {
+    // A recognised subcommand means this is a normal mirage call, so it
+    // is not rewritten. That includes `run --attach`: `--attach` is a
+    // clap alias of `--daemon` on `run` itself now, so there is nothing
+    // here to translate.
+    //
+    // It still gets the flag guard, though, and that is the point of
+    // doing it here. `mirage run --nodes 2 -- ./app` is the same mistake
+    // as `mirage --nodes 2 -- ./app` in the spelling people actually use,
+    // and it was checked in a different place, by a different copy of the
+    // rules, after clap had already thrown away the position that makes
+    // it decidable. Same rules, same message, one implementation.
+    if let Some(name) = head.filter(|h| is_subcommand(h)) {
+        if TAKE_A_WORKLOAD.contains(&name) {
+            check_flags(&args, head_idx + 1, sep, name)?;
+        }
         return Ok(args);
     }
     // A bare `--help`/`--version` is not a drop-in either.
@@ -421,13 +376,7 @@ fn dropin_argv(args: Vec<String>) -> Result<Vec<String>, String> {
     };
     // Everything before the separator is mirage's own; a flag there that
     // mirage does not take is a typo, not a workload.
-    let known = DropinFlags::collect();
-    if let Some(bad) = args[1..sep]
-        .iter()
-        .find(|a| is_flag_token(a) && !known.accepts(a))
-    {
-        return Err(unknown_flag_error(bad, &known));
-    }
+    check_flags(&args, 1, Some(sep), RUN)?;
     if sep + 1 == args.len() {
         return Err(empty_separator_error());
     }
@@ -437,24 +386,6 @@ fn dropin_argv(args: Vec<String>) -> Result<Vec<String>, String> {
     out.push(RUN.to_string());
     out.extend(args[head_idx..].iter().cloned());
     Ok(out)
-}
-
-/// The message for a flag-shaped token before `--` that mirage does not
-/// accept.
-fn unknown_flag_error(flag: &str, known: &DropinFlags) -> String {
-    let mut msg = format!(
-        "error: unexpected argument '{flag}' found\n\n\
-         Everything before `--` is read as mirage's own flags and everything \
-         after it as the\ncommand to run, so '{flag}' is a mistyped flag \
-         rather than part of the workload.\n"
-    );
-    if let Some(nearest) = known.nearest(flag) {
-        msg.push_str(&format!("\n  tip: a similar flag exists: '{nearest}'\n"));
-    }
-    msg.push_str(&format!(
-        "\n{DROPIN_USAGE}\n\nFor more information, try 'mirage run --help'."
-    ));
-    msg
 }
 
 /// The message for a `--` with nothing after it.
@@ -519,7 +450,9 @@ fn dispatch(cli: Cli) -> anyhow::Result<ExitCode> {
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-    use super::{Cli, DropinFlags, dropin_argv, is_global_flag, is_subcommand};
+    use mirage_ctl::usage::AcceptedFlags;
+
+    use super::{Cli, dropin_argv, is_global_flag, is_subcommand};
 
     fn v_args(args: &[&str]) -> Vec<String> {
         args.iter().map(|s| s.to_string()).collect()
@@ -535,6 +468,114 @@ mod tests {
         match dropin_argv(v_args(args)) {
             Err(usage) => usage,
             Ok(out) => panic!("{args:?} should have been refused, but became {out:?}"),
+        }
+    }
+
+    /// The two spellings of the same mistake give the same answer.
+    ///
+    /// This is the property the guard exists for, and it is the one that
+    /// was false. `mirage --nodes 2 -- ./app` was refused by the drop-in
+    /// rewriter; `mirage run --nodes 2 -- ./app` — the commoner spelling
+    /// of the same typo — was checked somewhere else, by a second copy of
+    /// the rules, and `mirage run --nodes 2 ./app` was not checked at all
+    /// and brought a whole emulated machine up to run a program called
+    /// `--nodes`.
+    #[test]
+    fn both_spellings_of_a_mistyped_flag_are_refused_alike() {
+        let dropin = refuse(&["mirage", "--nodes", "2", "--", "./app"]);
+        let explicit = refuse(&["mirage", "run", "--nodes", "2", "--", "./app"]);
+
+        for msg in [&dropin, &explicit] {
+            assert!(msg.contains("unexpected argument '--nodes'"), "{msg}");
+            assert!(
+                msg.contains("tip: a similar flag exists: '--num-nodes'"),
+                "{msg}"
+            );
+        }
+        // Identical but for the usage line and the help pointer, which
+        // name the subcommand the user actually typed.
+        assert!(explicit.contains("Usage: mirage run [OPTIONS] -- <COMMAND> [ARGS]..."));
+        assert!(explicit.contains("try 'mirage run --help'"));
+        assert!(dropin.contains("Usage: mirage [OPTIONS] -- <COMMAND> [ARGS]..."));
+        let body = |m: &str| m.split("\nUsage:").next().unwrap_or_default().to_string();
+        assert_eq!(
+            body(&dropin),
+            body(&explicit),
+            "the two spellings must not disagree about the same mistake"
+        );
+    }
+
+    /// The typo with no separator at all, which is the one that used to
+    /// start a session.
+    #[test]
+    fn a_mistyped_flag_is_refused_even_with_no_separator() {
+        // Nothing in the parsed `argv` distinguishes this from
+        // `mirage run -- --nodes 2 /bin/true`, which is why the check
+        // cannot live after the parse.
+        let msg = refuse(&["mirage", "run", "--nodes", "2", "/bin/true"]);
+        assert!(msg.contains("unexpected argument '--nodes'"), "{msg}");
+
+        // And a valued flag in front of it does not hide it: a scan that
+        // did not know `--profile` takes a value would stop at `p` and
+        // call it the command.
+        let msg = refuse(&[
+            "mirage",
+            "run",
+            "--profile",
+            "p",
+            "--nodes",
+            "2",
+            "/bin/true",
+        ]);
+        assert!(msg.contains("unexpected argument '--nodes'"), "{msg}");
+    }
+
+    /// `exec` is judged against `exec`'s flags.
+    #[test]
+    fn exec_is_checked_against_its_own_flags() {
+        let msg = refuse(&["mirage", "exec", "--nodes", "2", "--", "./app"]);
+        assert!(msg.contains("Usage: mirage exec [OPTIONS] -- <COMMAND> [ARGS]..."));
+        assert!(msg.contains("try 'mirage exec --help'"), "{msg}");
+
+        // `--session` is `exec`'s own and must pass, where the drop-in
+        // list (which is `run`'s) has no such flag.
+        assert_eq!(
+            rewrite(&["mirage", "exec", "--session", "s", "--", "./app"]),
+            v_args(&["mirage", "exec", "--session", "s", "--", "./app"]),
+        );
+    }
+
+    /// What the guard must not touch.
+    #[test]
+    fn a_workloads_own_flags_and_separators_still_pass_through() {
+        for case in [
+            // The whole point of `allow_hyphen_values`: everything after
+            // `--` is the workload's, flags included.
+            vec![
+                "mirage",
+                "run",
+                "--",
+                "./app",
+                "--verbose",
+                "--num-nodes",
+                "4",
+            ],
+            // A program that really is named like a flag, spelled the
+            // only way it can be — after mirage's own separator.
+            vec!["mirage", "run", "--", "--weird"],
+            // `git log -- path`: a separator the workload owns.
+            vec!["mirage", "run", "--", "git", "log", "--", "path"],
+            // No separator, and the workload has flags of its own. This
+            // spelling works today and must keep working.
+            vec!["mirage", "run", "./app", "--verbose", "--anything"],
+            // A negative value is a value, not a flag.
+            vec!["mirage", "run", "--num-nodes", "-1", "--", "./app"],
+        ] {
+            assert_eq!(
+                rewrite(&case),
+                v_args(&case),
+                "{case:?} is a workload, not a usage error"
+            );
         }
     }
 
@@ -607,11 +648,21 @@ mod tests {
         );
     }
 
-    /// Only `run` takes `--attach`; on any other subcommand it is that
-    /// subcommand's business (and, today, its error).
+    /// Only `run` takes `--attach`, and on any other subcommand it is a
+    /// mistyped flag like any other.
+    ///
+    /// This used to be left to clap, because the guard did not look at
+    /// explicit subcommands at all. Now that it does, `exec` is judged
+    /// against `exec`'s flags and says so itself — which is the same
+    /// answer, arrived at before a session could be started for it.
     #[test]
-    fn attach_is_left_alone_on_other_subcommands() {
-        let args = v_args(&["mirage", "exec", "--attach", "--", "cmd"]);
+    fn attach_is_not_an_exec_flag() {
+        let msg = refuse(&["mirage", "exec", "--attach", "--", "cmd"]);
+        assert!(msg.contains("unexpected argument '--attach'"), "{msg}");
+        assert!(msg.contains("try 'mirage exec --help'"), "{msg}");
+
+        // And it is still `run`'s, in both spellings of `run`.
+        let args = v_args(&["mirage", "run", "--attach", "--", "cmd"]);
         assert_eq!(dropin_argv(args.clone()).unwrap(), args);
     }
 
@@ -653,7 +704,7 @@ mod tests {
         use clap::CommandFactory as _;
         let cmd = Cli::command();
         let run = cmd.find_subcommand("run").expect("`run` is a subcommand");
-        let known = DropinFlags::collect();
+        let known = AcceptedFlags::of(&cmd, "run");
         for arg in run.get_arguments() {
             // `--help`/`--version` are clap's, and are answered before
             // the rewriter ever considers routing to `run`.

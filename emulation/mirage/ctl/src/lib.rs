@@ -21,6 +21,7 @@
 //! All commands are documented in `docs/cli.md`.
 
 pub mod run;
+pub mod usage;
 
 use std::io::IsTerminal;
 use std::process::ExitCode;
@@ -891,146 +892,6 @@ impl Default for RunArgs {
 // A mistyped mirage flag is not a workload
 // =============================================================================
 
-/// The status clap exits with on a usage error, and therefore the one a
-/// usage error mirage diagnoses for itself must use too.
-const USAGE_EXIT: u8 = 2;
-
-/// Whether `arg` looks like a flag rather than a value.
-///
-/// Deliberately stricter than "starts with `-`": a negative number is a
-/// value, and a lone `-` is the conventional name for standard input.
-/// Neither is a mistyped flag, and reading them as one would replace a
-/// message about the real problem with a message about this one. A short
-/// flag is a letter, so that is the test.
-fn is_flag_token(arg: &str) -> bool {
-    if let Some(long) = arg.strip_prefix("--") {
-        return !long.is_empty();
-    }
-    arg.strip_prefix('-')
-        .and_then(|rest| rest.chars().next())
-        .is_some_and(char::is_alphabetic)
-}
-
-/// The mirage flag that ended up inside a workload's `argv`, if one did.
-///
-/// `run` and `exec` declare `argv` as `trailing_var_arg` +
-/// `allow_hyphen_values`, which is what lets a *workload's* own flags
-/// through untouched: `mirage run -- ./app --verbose` runs `./app
-/// --verbose` rather than raising mirage's `--verbose`. The same setting
-/// is what lets a mirage flag mirage does not have become the command.
-/// Clap cannot match `--nodes`, so the positional starts there, and
-/// `mirage run --nodes 2 -- ./app` brought a whole emulated machine up
-/// and then ran a program called `--nodes` in it — with the program the
-/// user actually named discarded into its arguments.
-///
-/// The rule is the one the drop-in spelling of the same invocation
-/// already applies: everything after `--` is the workload's and
-/// everything before it is mirage's, so a flag-shaped token before the
-/// separator is a usage error. What makes it detectable after the parse
-/// is that clap consumes the separator only when it reaches one before
-/// the positional has begun — so a `--` still *in* `argv` is one the
-/// parse never got to, which is exactly the case where a token before it
-/// was read as the command. `mirage run -- git log -- path` keeps its
-/// separator too, and is not this: the first token is a program name.
-fn misplaced_flag(argv: &[String]) -> Option<&str> {
-    let first = argv.first()?;
-    if !is_flag_token(first) {
-        return None;
-    }
-    argv.iter().any(|a| a == "--").then_some(first.as_str())
-}
-
-/// Every long flag `spec` accepts, without its `--`, sorted so that a
-/// suggestion is deterministic when several are equally close.
-///
-/// Asked of clap rather than listed, so a flag added to `RunArgs` or
-/// `ExecArgsCli` is suggestible the moment it is declared. Aliases count:
-/// `--nproc_per_node` is a real spelling of a real flag, and a "did you
-/// mean" that could not name it would be pointing at the wrong list.
-///
-/// The root command's global flags (`--json`, `--verbose`) are not here.
-/// They are declared in the binary crate, which this one cannot see —
-/// and clap accepts them after the subcommand, so a correctly spelled
-/// one never reaches this path at all.
-fn long_flags(spec: &clap::Command) -> Vec<String> {
-    // `help` and `version` are clap's own: accepted everywhere, and not
-    // in the declared argument list of a `Command` that has not been
-    // built yet.
-    let mut longs = vec!["help".to_string(), "version".to_string()];
-    for arg in spec.get_arguments() {
-        longs.extend(arg.get_long().map(str::to_string));
-        longs.extend(
-            arg.get_all_aliases()
-                .unwrap_or_default()
-                .into_iter()
-                .map(str::to_string),
-        );
-    }
-    longs.sort();
-    longs.dedup();
-    longs
-}
-
-/// The accepted flag closest to `token`, for a "did you mean".
-///
-/// Containment in either direction, which is what a dropped or
-/// mis-remembered word looks like: `--nodes` for `--num-nodes`,
-/// `--profil` for `--profile`. Anything shorter than three characters is
-/// left alone, because at that length almost everything contains almost
-/// everything.
-fn nearest_flag(token: &str, known: &[String]) -> Option<String> {
-    let name = token.trim_start_matches('-');
-    let name = name.split('=').next().unwrap_or(name);
-    if name.len() < 3 {
-        return None;
-    }
-    known
-        .iter()
-        .filter(|candidate| candidate.contains(name) || name.contains(candidate.as_str()))
-        .min_by_key(|candidate| candidate.len().abs_diff(name.len()))
-        .map(|candidate| format!("--{candidate}"))
-}
-
-/// The usage message for an invocation whose workload starts with a
-/// mirage flag, or `None` when it does not.
-///
-/// Word for word the message the drop-in path prints for
-/// `mirage --nodes 2 -- ./app`, because `mirage run --nodes 2 -- ./app`
-/// is the same mistake in the more common spelling and the two must not
-/// disagree about it. Only the usage line and the `--help` pointer name
-/// the subcommand, since that is the part that differs.
-fn misplaced_flag_error(argv: &[String], spec: &clap::Command) -> Option<String> {
-    let flag = misplaced_flag(argv)?;
-    let name = spec.get_name();
-    let mut msg = format!(
-        "error: unexpected argument '{flag}' found\n\n\
-         Everything before `--` is read as mirage's own flags and everything \
-         after it as the\ncommand to run, so '{flag}' is a mistyped flag \
-         rather than part of the workload.\n"
-    );
-    if let Some(nearest) = nearest_flag(flag, &long_flags(spec)) {
-        msg.push_str(&format!("\n  tip: a similar flag exists: '{nearest}'\n"));
-    }
-    msg.push_str(&format!(
-        "\nUsage: mirage {name} [OPTIONS] -- <COMMAND> [ARGS]...\n\n\
-         For more information, try 'mirage {name} --help'."
-    ));
-    Some(msg)
-}
-
-/// Print that message and the code to exit with, for the invocations
-/// that have one.
-///
-/// On stderr and as plain text even under `--json`, which is how clap
-/// reports a usage error and how the drop-in path reports this one: the
-/// argument list never parsed into a request, so there is no result
-/// document for the failure to belong to.
-fn refuse_misplaced_flag(argv: &[String], spec: &clap::Command) -> Option<ExitCode> {
-    let usage = misplaced_flag_error(argv, spec)?;
-    eprintln!("{usage}");
-    Some(ExitCode::from(USAGE_EXIT))
-}
-
 // =============================================================================
 // Dispatch
 // =============================================================================
@@ -1093,13 +954,7 @@ async fn dispatch_inner(cmd: CtlCmd, json: bool) -> anyhow::Result<ExitCode> {
             emulators_cmd(long, json);
             Ok(ExitCode::from(0))
         }
-        CtlCmd::Exec(a) => {
-            let spec = ExecArgsCli::augment_args(clap::Command::new("exec"));
-            match refuse_misplaced_flag(&a.argv, &spec) {
-                Some(code) => Ok(code),
-                None => run::exec_cmd(a).await,
-            }
-        }
+        CtlCmd::Exec(a) => run::exec_cmd(a).await,
         CtlCmd::State(c) => state_cmd(c, json).await,
         CtlCmd::Cleanup { dry_run } => {
             let reclaimed = cleanup(dry_run).await;
@@ -1109,13 +964,7 @@ async fn dispatch_inner(cmd: CtlCmd, json: bool) -> anyhow::Result<ExitCode> {
             // out to remove is still there.
             Ok(ExitCode::from(u8::from(unfinished > 0)))
         }
-        CtlCmd::Run(a) => {
-            let spec = RunArgs::augment_args(clap::Command::new("run"));
-            match refuse_misplaced_flag(&a.argv, &spec) {
-                Some(code) => Ok(code),
-                None => run::run_cmd(a).await,
-            }
-        }
+        CtlCmd::Run(a) => run::run_cmd(a).await,
         CtlCmd::Paths => {
             print_paths(json);
             Ok(ExitCode::from(0))
@@ -3466,11 +3315,6 @@ mod tests {
     }
 
     /// Parse `mirage run`'s arguments exactly as the real command does.
-    /// A workload `argv`, written the way it is typed.
-    fn v(argv: &str) -> Vec<String> {
-        argv.split_whitespace().map(str::to_string).collect()
-    }
-
     fn parse_run(args: &[&str]) -> Result<RunArgs, clap::Error> {
         use clap::Parser;
         #[derive(Parser)]
@@ -4176,93 +4020,6 @@ exit 0
             "leaving an edited builtin alone is the outcome `--help` calls normal"
         );
     }
-
-    /// `RunArgs::default()` is hand-written to reproduce clap's own
-    /// defaults, so that a test constructing one with `..Default::default()`
-    /// is testing the same starting point a user gets from the command
-    /// line. `profile` is the only field where the two could disagree —
-    /// every other one defaults to `None`, an empty `Vec`, or `false` in
-    /// both — so it is the only one worth pinning here.
-    /// A mistyped mirage flag is refused rather than executed, in the
-    /// spelling that names the subcommand as well as the one that does
-    /// not.
-    ///
-    /// `mirage --nodes 2 -- ./app` was already refused by the drop-in
-    /// rewriter, before clap saw it. `mirage run --nodes 2 -- ./app` —
-    /// the commoner spelling of the same mistake — brought a whole
-    /// emulated machine up and ran a program called `--nodes` inside it,
-    /// with `./app` handed to it as an argument.
-    #[test]
-    fn a_mistyped_flag_before_the_separator_is_not_the_workload() {
-        use clap::Args as _;
-
-        let run = RunArgs::augment_args(clap::Command::new("run"));
-        let argv = parse_run(&["--nodes", "2", "--", "./app"]).unwrap().argv;
-        assert_eq!(
-            argv,
-            vec!["--nodes", "2", "--", "./app"],
-            "clap reads the whole line as the workload, which is the bug"
-        );
-        let msg = misplaced_flag_error(&argv, &run).expect("`--nodes` is not a `run` flag");
-        assert!(msg.contains("unexpected argument '--nodes'"), "{msg}");
-        assert!(
-            msg.contains("tip: a similar flag exists: '--num-nodes'"),
-            "{msg}"
-        );
-        assert!(
-            msg.contains("Usage: mirage run [OPTIONS] -- <COMMAND> [ARGS]..."),
-            "{msg}"
-        );
-        assert!(msg.contains("try 'mirage run --help'"), "{msg}");
-
-        // `exec` parses its workload by the same rules and must answer
-        // the same way, naming its own page.
-        let exec = ExecArgsCli::augment_args(clap::Command::new("exec"));
-        let msg = misplaced_flag_error(&v("--nodes 2 -- ./app"), &exec)
-            .expect("`--nodes` is not an `exec` flag either");
-        assert!(
-            msg.contains("Usage: mirage exec [OPTIONS] -- <COMMAND> [ARGS]..."),
-            "{msg}"
-        );
-
-        // A flag `run` does accept never reaches this path: clap matched
-        // it, so it is not in `argv` at all.
-        assert_eq!(
-            parse_run(&["--num-nodes", "2", "--", "./app"])
-                .unwrap()
-                .argv,
-            vec!["./app"]
-        );
-    }
-
-    /// The refusal must not fire on a workload that is merely
-    /// flag-shaped, or on one carrying a `--` of its own.
-    #[test]
-    fn a_workloads_own_flags_and_separators_still_pass_through() {
-        use clap::Args as _;
-        let run = RunArgs::augment_args(clap::Command::new("run"));
-        let cases = [
-            // The whole point of `allow_hyphen_values`.
-            "./app --verbose --num-nodes 4",
-            // `git log -- path`: a separator the workload owns, with no
-            // flag before it.
-            "git log -- path",
-            // A program that really is named like a flag, spelled the
-            // only way that can be: after mirage's own separator, which
-            // clap consumes.
-            "--weird",
-            // Nothing at all is `required`'s problem, not this one.
-            "",
-        ];
-        for case in cases {
-            let argv = v(case);
-            assert!(
-                misplaced_flag_error(&argv, &run).is_none(),
-                "{case:?} is a workload, not a usage error"
-            );
-        }
-    }
-
     /// The two `--help` pages must not carry notes to whoever maintains
     /// the flags.
     ///
