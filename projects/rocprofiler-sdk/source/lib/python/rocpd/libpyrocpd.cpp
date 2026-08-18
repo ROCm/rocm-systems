@@ -412,11 +412,11 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
             };
 
             // ORDER BY expression for kernel dispatches
-            constexpr auto kernels_order_by =
-                "agent_absolute_index ASC, stream_id ASC, queue_id ASC, start ASC, end DESC";
-
-            constexpr auto region_order_by = "start ASC, end DESC";
-            constexpr auto sample_order_by = "timestamp ASC";
+            constexpr auto region_order_by   = "start ASC, end ASC";
+            constexpr auto sample_order_by   = "timestamp ASC";
+            constexpr auto kernels_order_by  = "stream_id ASC, queue_id ASC, start ASC, end ASC";
+            constexpr auto memcpy_order_by   = "stream_id ASC, queue_id ASC, start ASC, end ASC";
+            constexpr auto memalloc_order_by = "stream_id ASC, queue_id ASC, start ASC, end ASC";
 
             auto* conn             = rocpd::interop::get_connection(std::move(data.connection));
             auto  perfetto_session = rocpd::output::PerfettoSession{output_cfg, conn};
@@ -425,11 +425,10 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
 
             for(auto obj : {data.connection})
             {
-                auto  nodes = rocpd::read<rocpd::types::node>(conn);
+                auto nodes = rocpd::read<rocpd::types::node>(conn);
 
                 for(const auto& nitr : nodes)
                 {
-                
                     auto agents = rocpd::read<rocpd::types::agent>(
                         conn, fmt::format("WHERE guid = '{}' AND nid = {}", nitr.guid, nitr.id));
                     auto processes = rocpd::read<rocpd::types::process>(
@@ -439,18 +438,18 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                     {
                         ROCP_FATAL_IF(pitr.nid != nitr.id || pitr.guid != nitr.guid)
                             << fmt::format("Found process with a mismatched nid/guid. process: "
-                                        "{}/{} vs. node: {}/{}",
-                                        pitr.nid,
-                                        pitr.guid,
-                                        nitr.id,
-                                        nitr.guid);
+                                           "{}/{} vs. node: {}/{}",
+                                           pitr.nid,
+                                           pitr.guid,
+                                           nitr.id,
+                                           nitr.guid);
                         auto select_guid_nid_pid = [&nitr, &pitr](std::string_view tbl) {
                             return fmt::format("SELECT * FROM {} WHERE guid = '{}' AND nid "
-                                            "= {} AND pid = {}",
-                                            tbl,
-                                            pitr.guid,
-                                            nitr.id,
-                                            pitr.pid);
+                                               "= {} AND pid = {}",
+                                               tbl,
+                                               pitr.guid,
+                                               nitr.id,
+                                               pitr.pid);
                         };
 
                         auto _sqlgen_perft = common::simple_timer{fmt::format(
@@ -459,11 +458,12 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                         auto kernels = rocpd::sql_generator<rocpd::types::kernel_dispatch>{
                             conn, select_guid_nid_pid("kernels"), kernels_order_by};
 
-                        auto memory_allocations = rocpd::sql_generator<rocpd::types::memory_allocation>{
-                            conn, select_guid_nid_pid("memory_allocations")};
+                        auto memory_allocations =
+                            rocpd::sql_generator<rocpd::types::memory_allocation>{
+                                conn, select_guid_nid_pid("memory_allocations"), memalloc_order_by};
 
                         auto memory_copies = rocpd::sql_generator<rocpd::types::memory_copies>{
-                            conn, select_guid_nid_pid("memory_copies")};
+                            conn, select_guid_nid_pid("memory_copies"), memcpy_order_by};
 
                         auto scratch_memory = rocpd::sql_generator<rocpd::types::scratch_memory>{
                             conn, select_guid_nid_pid("scratch_memory")};
@@ -491,20 +491,21 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                             agents_map.emplace(itr.absolute_index, std::make_pair(itr, new_index));
                         }
 
-                        ROCP_TRACE << "Starting Perfetto generation from SQL for process " << pitr.pid;
+                        ROCP_TRACE << "Starting Perfetto generation from SQL for process "
+                                   << pitr.pid;
                         auto _sqlgen_perfw = common::simple_timer{fmt::format(
                             "Perfetto generation from SQL for process {} (write)", pitr.pid)};
                         rocpd::output::write_perfetto(perfetto_session,
-                                                    pitr,
-                                                    agents_map,
-                                                    threads,
-                                                    regions,
-                                                    samples,
-                                                    kernels,
-                                                    memory_copies,
-                                                    scratch_memory,
-                                                    memory_allocations,
-                                                    counters);
+                                                      pitr,
+                                                      agents_map,
+                                                      threads,
+                                                      regions,
+                                                      samples,
+                                                      kernels,
+                                                      memory_copies,
+                                                      scratch_memory,
+                                                      memory_allocations,
+                                                      counters);
                     }
                 }
             }

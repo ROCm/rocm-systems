@@ -129,6 +129,7 @@ PerfettoSession::PerfettoSession(const tool::output_config& output_cfg, sqlite3*
 
 PerfettoSession::~PerfettoSession()
 {
+    tracing_session->FlushBlocking();
     tracing_session->StopBlocking();
     auto filename = std::string{"results"};
     auto ofs      = tool::get_output_stream(config, filename, ".pftrace", std::ios::binary);
@@ -175,13 +176,13 @@ write_perfetto(
     const PerfettoSession& perfetto_session,
     const types::process&  process,
     const std::unordered_map<uint64_t, std::pair<rocpd::types::agent, tool::agent_index>>&
-                                                     agent_data,
-    const tool::generator<types::thread>&            thread_gen,
-    const tool::generator<types::region>&            region_gen,
-    const tool::generator<types::sample>&            sample_gen,
-    const tool::generator<types::kernel_dispatch>&   kernel_dispatch_gen,
-    const tool::generator<types::memory_copies>&     memory_copy_gen,
-    const tool::generator<types::scratch_memory>&    scratch_memory_gen,
+                                                   agent_data,
+    const tool::generator<types::thread>&          thread_gen,
+    const tool::generator<types::region>&          region_gen,
+    const tool::generator<types::sample>&          sample_gen,
+    const tool::generator<types::kernel_dispatch>& kernel_dispatch_gen,
+    const tool::generator<types::memory_copies>&   memory_copy_gen,
+    const tool::generator<types::scratch_memory>& /*scratch_memory_gen*/,
     const tool::generator<types::memory_allocation>& memory_allocation_gen,
     const tool::generator<types::counter>&           counter_collection_gen)
 {
@@ -221,7 +222,7 @@ write_perfetto(
     auto agent_thread_ids_alloc = std::unordered_map<uint64_t, std::set<uint64_t>>{};
     auto agent_queue_ids =
         std::unordered_map<uint64_t, std::unordered_set<rocprofiler_queue_id_t>>{};
-    auto agent_stream_ids = std::unordered_map<rocprofiler_stream_id_t, uint64_t>{};
+    auto agent_stream_ids = std::unordered_set<rocprofiler_stream_id_t>{};
     auto thread_indexes   = std::unordered_map<uint64_t, uint64_t>{};
 
     auto thread_tracks = std::unordered_map<uint64_t, ::perfetto::Track>{};
@@ -280,13 +281,13 @@ write_perfetto(
         return &pmc_info.at(pmc_id);
     };
 
-    auto read_region_args = [&conn, &process, &ocfg](uint64_t region_id) {
+    auto read_region_args = [&conn, &process, &ocfg](uint64_t event_id) {
         if(!ocfg.annotate_args) return std::vector<types::argument>{};
 
         return rocpd::read_sql_query<types::argument>(
             conn,
             fmt::format(
-                "SELECT * FROM rocpd_arg WHERE guid='{}' AND id={}", process.guid, region_id));
+                "SELECT * FROM rocpd_arg WHERE guid='{}' AND event_id={}", process.guid, event_id));
     };
 
     {
@@ -294,7 +295,7 @@ write_perfetto(
             for(const auto& itr : memory_copy_gen.get(ditr))
             {
                 auto stream_id = rocprofiler_stream_id_t{.handle = itr.stream_id};
-                agent_stream_ids.emplace(stream_id, itr.dst_agent_absolute_index);
+                agent_stream_ids.emplace(stream_id);
                 if(ocfg.group_by_queue)
                 {
                     agent_thread_ids[itr.dst_agent_absolute_index].emplace(itr.tid);
@@ -307,6 +308,20 @@ write_perfetto(
         {
             agent_thread_ids_alloc[itr.agent_absolute_index].emplace(itr.tid);
         }
+
+    {
+        for(auto ditr : kernel_dispatch_gen)
+            for(const auto& itr : kernel_dispatch_gen.get(ditr))
+            {
+                auto stream_id = rocprofiler_stream_id_t{.handle = itr.stream_id};
+                auto queue_id  = rocprofiler_queue_id_t{.handle = itr.queue_id};
+                agent_stream_ids.emplace(stream_id);
+                if(ocfg.group_by_queue)
+                {
+                    agent_queue_ids[itr.agent_absolute_index].emplace(queue_id);
+                }
+            }
+    }
 
     uint64_t nthrn = 0;
     for(auto ditr : thread_gen)
@@ -352,7 +367,8 @@ write_perfetto(
             else
                 _namess << "(UNK)";
 
-            auto _track = ::perfetto::Track{static_cast<uint64_t>(get_hash_id(_namess.str())), this_pid_track};
+            auto _track = ::perfetto::Track{static_cast<uint64_t>(get_hash_id(_namess.str())),
+                                            this_pid_track};
             auto _desc  = _track.Serialize();
             _desc.set_name(_namess.str());
 
@@ -376,7 +392,8 @@ write_perfetto(
                     << "] QUEUE [" << nqueue++ << "] ";
             _namess << agent_index_info.type;
 
-            auto _track = ::perfetto::Track{static_cast<uint64_t>(get_hash_id(_namess.str())), this_pid_track};
+            auto _track = ::perfetto::Track{static_cast<uint64_t>(get_hash_id(_namess.str())),
+                                            this_pid_track};
             auto _desc  = _track.Serialize();
             _desc.set_name(_namess.str());
 
@@ -386,20 +403,29 @@ write_perfetto(
         }
     }
 
-    for(const auto& [stream_id_value, agent_absolute_index] : agent_stream_ids)
+    for(const auto& sitr : agent_stream_ids)
     {
-        const auto _agent      = agent_data.at(agent_absolute_index).first;
-        auto       _index_info = agent_data.at(agent_absolute_index).second;
-        auto       _name       = fmt::format(
-            "COMPUTE {} [{}] STREAM [{}]", _index_info.label, _index_info.index, stream_id_value.handle);
+        const auto stream_id = sitr.handle;
+        auto       _name     = fmt::format("STREAM [{}]", stream_id);
         auto _track = ::perfetto::Track{static_cast<uint64_t>(get_hash_id(_name)), this_pid_track};
         auto _desc  = _track.Serialize();
         _desc.set_name(_name);
 
         ::perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
 
-        stream_tracks.emplace(rocprofiler_stream_id_t{stream_id_value}, _track);
+        stream_tracks.emplace(sitr, _track);
     }
+
+    // Fetch counter values
+    auto counter_id_value = std::map<uint32_t, double>{};
+    auto counter_id_name  = std::map<uint32_t, std::string>{};
+    for(auto ditr : counter_collection_gen)
+        for(const auto& record : counter_collection_gen.get(ditr))
+        {
+            // Accumulate counters based on ID
+            counter_id_value[record.pmc_id] += record.pmc_value;
+            counter_id_name[record.pmc_id] = std::string{record.pmc_name};
+        }
 
     // trace events
     {
@@ -410,7 +436,9 @@ write_perfetto(
             {
                 if(_category == citr.name) _category_idx = citr.value;
             }
-            return sdk::get_perfetto_category(_category_idx);
+            return (_category_idx != ROCPROFILER_BUFFER_TRACING_NONE)
+                       ? sdk::get_perfetto_category(_category_idx)
+                       : _category.data();
         };
 
         ROCP_WARNING << "generating regions...";
@@ -419,26 +447,26 @@ write_perfetto(
             for(auto itr : region_gen.get(ditr))
             {
                 auto& track      = thread_tracks.at(itr.tid);
-                auto  _name      = itr.name;
                 auto  _operation = itr.name;
+                auto  _func      = std::string{};
 
                 if(itr.has_extdata())
                 {
                     auto _extdata = itr.get_extdata();
                     if(_extdata.message && !_extdata.message->empty())
-                        _name = _extdata.message.value();
+                        _func = _extdata.message.value();
                     if(_extdata.operation && !_extdata.operation->empty())
                         _operation = _extdata.operation.value();
                 }
 
                 auto _pmc_events = read_pmc_events(itr.event_id);
                 auto _event      = (ocfg.annotate_kfd) ? read_event(itr.event_id) : types::event{};
-                auto _args       = read_region_args(itr.id);
+                auto _args       = read_region_args(itr.event_id);
 
                 auto _category = ::perfetto::DynamicCategory{get_category_string(itr.category)};
                 TRACE_EVENT_BEGIN(
                     _category,
-                    ::perfetto::DynamicString{_name},
+                    ::perfetto::DynamicString{itr.name},
                     track,
                     itr.start,
                     ::perfetto::Flow::Global(itr.stack_id ^ uuid_pid),
@@ -453,7 +481,7 @@ write_perfetto(
                     "kind",
                     itr.category,
                     "operation",
-                    _operation,
+                    _func.empty() ? _operation : _func,
                     "corr_id",
                     itr.stack_id,
                     "ancestor_id",
@@ -513,57 +541,58 @@ write_perfetto(
             for(auto itr : sample_gen.get(ditr))
             {
                 auto& track      = thread_tracks.at(itr.tid);
-                auto  _name      = itr.name;
+                auto  _func      = std::string{};
                 auto  _operation = itr.name;
 
                 if(itr.has_extdata())
                 {
                     auto _extdata = itr.get_extdata();
                     if(_extdata.message && !_extdata.message->empty())
-                        _name = _extdata.message.value();
+                        _func = _extdata.message.value();
                     if(_extdata.operation && !_extdata.operation->empty())
                         _operation = _extdata.operation.value();
                 }
 
                 auto _pmc_events = read_pmc_events(itr.event_id);
-                auto _args       = read_region_args(itr.id);
-                auto _category = ::perfetto::DynamicCategory{get_category_string(itr.category)};
-                TRACE_EVENT_INSTANT(_category,
-                                    ::perfetto::DynamicString{_name},
-                                    track,
-                                    itr.timestamp,
-                                    ::perfetto::Flow::Global(itr.stack_id ^ uuid_pid),
-                                    "begin_ns",
-                                    itr.timestamp,
-                                    "end_ns",
-                                    itr.timestamp,
-                                    "delta_ns",
-                                    0,
-                                    "tid",
-                                    itr.tid,
-                                    "kind",
-                                    itr.category,
-                                    "operation",
-                                    _operation,
-                                    "corr_id",
-                                    itr.stack_id,
-                                    "ancestor_id",
-                                    itr.parent_stack_id,
-                                    [&](::perfetto::EventContext ctx) {
-                                        for(const auto& pevt : _pmc_events)
-                                        {
-                                            if(const auto* pinfo = read_pmc_info(pevt.pmc_id); pinfo)
-                                            {
-                                                rocprofiler::sdk::add_perfetto_annotation(
-                                                    ctx, pinfo->name, pevt.value);
-                                            }
-                                        }
+                auto _args       = read_region_args(itr.event_id);
+                auto _category   = ::perfetto::DynamicCategory{get_category_string(itr.category)};
+                TRACE_EVENT_INSTANT(
+                    _category,
+                    ::perfetto::DynamicString{itr.name},
+                    track,
+                    itr.timestamp,
+                    ::perfetto::Flow::Global(itr.stack_id ^ uuid_pid),
+                    "begin_ns",
+                    itr.timestamp,
+                    "end_ns",
+                    itr.timestamp,
+                    "delta_ns",
+                    0,
+                    "tid",
+                    itr.tid,
+                    "kind",
+                    itr.category,
+                    "operation",
+                    _func.empty() ? _operation : _func,
+                    "corr_id",
+                    itr.stack_id,
+                    "ancestor_id",
+                    itr.parent_stack_id,
+                    [&](::perfetto::EventContext ctx) {
+                        for(const auto& pevt : _pmc_events)
+                        {
+                            if(const auto* pinfo = read_pmc_info(pevt.pmc_id); pinfo)
+                            {
+                                rocprofiler::sdk::add_perfetto_annotation(
+                                    ctx, pinfo->name, pevt.value);
+                            }
+                        }
 
-                                        for(const auto& a : _args)
-                                        {
-                                            rocprofiler::sdk::add_perfetto_annotation(ctx, a.name, a.value);
-                                        }
-                                     });
+                        for(const auto& a : _args)
+                        {
+                            rocprofiler::sdk::add_perfetto_annotation(ctx, a.name, a.value);
+                        }
+                    });
 
                 tracing_session->FlushBlocking();
             }
@@ -629,8 +658,9 @@ write_perfetto(
                                   });
                 TRACE_EVENT_END(
                     sdk::perfetto_category<sdk::category::memory_copy>::name, *_track, itr.end);
+
+                tracing_session->FlushBlocking();
             }
-            tracing_session->FlushBlocking();
         }
 
         ROCP_WARNING << "generating kernel dispatches...";
@@ -824,8 +854,9 @@ write_perfetto(
                 TRACE_EVENT_END(sdk::perfetto_category<sdk::category::kernel_dispatch>::name,
                                 *_track,
                                 current.end);
+
+                tracing_session->FlushBlocking();
             }
-            tracing_session->FlushBlocking();
         }
     }
 

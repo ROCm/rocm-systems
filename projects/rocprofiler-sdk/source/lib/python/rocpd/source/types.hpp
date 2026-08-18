@@ -263,8 +263,6 @@ struct event
     uint64_t    stack_id        = 0;
     uint64_t    parent_stack_id = 0;
     uint64_t    correlation_id  = 0;
-    std::string call_stack      = {};
-    std::string line_info       = {};
     std::string extdata         = {};
 
     bool            has_extdata() const { return (extdata.length() > 2); }
@@ -315,7 +313,7 @@ struct kernel_dispatch
     uint64_t                parent_stack_id      = 0;
     uint64_t                correlation_id       = 0;
     uint64_t                event_id             = 0;
-    uint64_t                vgpr_count           = 0;
+    uint64_t                arch_vgpr_count      = 0;
     uint64_t                accum_vgpr_count     = 0;
     uint64_t                sgpr_count           = 0;
 };
@@ -468,34 +466,39 @@ struct counter
     uint64_t                agent_type_index     = 0;
     std::string             agent_type           = {};
     uint64_t                queue_id             = 0;
-    uint32_t                grid_size_x          = 0;
-    uint32_t                grid_size_y          = 0;
-    uint32_t                grid_size_z          = 0;
-    uint64_t                grid_size            = 0;
-    std::string             kernel_name          = {};
-    std::string             kernel_region        = {};
-    uint32_t                workgroup_size_x     = 0;
-    uint32_t                workgroup_size_y     = 0;
-    uint32_t                workgroup_size_z     = 0;
-    uint32_t                workgroup_size       = 0;
-    uint32_t                lds_block_size       = 0;
-    uint32_t                scratch_size         = 0;
-    uint32_t                vgpr_count           = 0;
-    uint32_t                accum_vgpr_count     = 0;
+    uint64_t                stream_id            = 0;
+    uint32_t                grid_x               = 0;
+    uint32_t                grid_y               = 0;
+    uint32_t                grid_z               = 0;
+    std::string             name                 = {};
+    std::string             region               = {};
+    uint32_t                workgroup_x          = 0;
+    uint32_t                workgroup_y          = 0;
+    uint32_t                workgroup_z          = 0;
+    uint64_t                lds_size             = 0;
+    uint64_t                scratch_size         = 0;
+    uint64_t                static_lds_size      = 0;
+    uint64_t                static_scratch_size  = 0;
     uint32_t                sgpr_count           = 0;
-    std::string             counter_name         = {};
-    std::string             counter_symbol       = {};
-    std::string             component            = {};
-    std::string             description          = {};
-    std::string             block                = {};
-    std::string             expression           = {};
-    std::string             value_type           = {};
-    uint32_t                counter_id           = 0;
-    double                  value                = 0;
+    uint32_t                arch_vgpr_count      = 0;
+    uint32_t                accum_vgpr_count     = 0;
+    std::string             pmc_name             = {};
+    std::string             pmc_symbol           = {};
+    std::string             pmc_component        = {};
+    std::string             pmc_description      = {};
+    std::string             pmc_block            = {};
+    std::string             pmc_expression       = {};
+    std::string             pmc_value_type       = {};
+    uint32_t                pmc_id               = 0;
+    double                  pmc_value            = 0;
     rocprofiler_timestamp_t start                = 0;
     rocprofiler_timestamp_t end                  = 0;
-    bool                    is_constant          = false;
-    bool                    is_derived           = false;
+    bool                    pmc_is_constant      = false;
+    bool                    pmc_is_derived       = false;
+
+    // computed
+    uint64_t grid_size      = 0;
+    uint64_t workgroup_size = 0;
 };
 
 struct pmc_info
@@ -523,6 +526,7 @@ struct pmc_info
 #define DEFINE_GROUP_BY_OPERATORS(TYPE, ...)                                                       \
     auto        get_tie() const { return std::tie(__VA_ARGS__); }                                  \
     static auto get_group_by() { return std::string_view{#__VA_ARGS__}; }                          \
+    static auto name() { return std::string_view{#TYPE}; }                                         \
     friend bool operator==(const TYPE& lhs, const TYPE& rhs)                                       \
     {                                                                                              \
         return (lhs.get_tie() == rhs.get_tie());                                                   \
@@ -798,8 +802,6 @@ load(ArchiveT& ar, rocpd::types::event& data)
     LOAD_DATA_FIELD(stack_id);
     LOAD_DATA_FIELD(parent_stack_id);
     LOAD_DATA_FIELD(correlation_id);
-    LOAD_DATA_FIELD(call_stack);
-    LOAD_DATA_FIELD(line_info);
     LOAD_DATA_FIELD(extdata);
 }
 
@@ -859,7 +861,7 @@ load(ArchiveT& ar, rocpd::types::kernel_dispatch& data)
     load_dim3("grid", data.grid_size);
     LOAD_DATA_FIELD(lds_size);
     LOAD_DATA_FIELD(scratch_size);
-    LOAD_DATA_FIELD(vgpr_count);
+    LOAD_DATA_FIELD(arch_vgpr_count);
     LOAD_DATA_FIELD(accum_vgpr_count);
     LOAD_DATA_FIELD(sgpr_count);
     LOAD_DATA_FIELD(static_lds_size);
@@ -1029,34 +1031,42 @@ load(ArchiveT& ar, rocpd::types::counter& data)
     LOAD_DATA_FIELD(agent_type_index);
     LOAD_DATA_FIELD(agent_type);
     LOAD_DATA_FIELD(queue_id);
-    LOAD_DATA_FIELD(grid_size_x);
-    LOAD_DATA_FIELD(grid_size_y);
-    LOAD_DATA_FIELD(grid_size_z);
-    LOAD_DATA_FIELD(grid_size);
-    LOAD_DATA_FIELD(kernel_name);
-    LOAD_DATA_FIELD(kernel_region);
-    LOAD_DATA_FIELD(workgroup_size_x);
-    LOAD_DATA_FIELD(workgroup_size_y);
-    LOAD_DATA_FIELD(workgroup_size_z);
-    LOAD_DATA_FIELD(workgroup_size);
-    LOAD_DATA_FIELD(lds_block_size);
+    LOAD_DATA_FIELD(stream_id);
+    LOAD_DATA_FIELD(name);
+    LOAD_DATA_FIELD(region);
+    LOAD_DATA_FIELD(grid_x);
+    LOAD_DATA_FIELD(grid_y);
+    LOAD_DATA_FIELD(grid_z);
+    LOAD_DATA_FIELD(workgroup_x);
+    LOAD_DATA_FIELD(workgroup_y);
+    LOAD_DATA_FIELD(workgroup_z);
+    LOAD_DATA_FIELD(lds_size);
     LOAD_DATA_FIELD(scratch_size);
-    LOAD_DATA_FIELD(vgpr_count);
-    LOAD_DATA_FIELD(accum_vgpr_count);
+    LOAD_DATA_FIELD(static_lds_size);
+    LOAD_DATA_FIELD(static_scratch_size);
     LOAD_DATA_FIELD(sgpr_count);
-    LOAD_DATA_FIELD(counter_name);
-    LOAD_DATA_FIELD(counter_symbol);
-    LOAD_DATA_FIELD(component);
-    LOAD_DATA_FIELD(description);
-    LOAD_DATA_FIELD(block);
-    LOAD_DATA_FIELD(expression);
-    LOAD_DATA_FIELD(value_type);
-    LOAD_DATA_FIELD(counter_id);
-    LOAD_DATA_FIELD(value);
+    LOAD_DATA_FIELD(arch_vgpr_count);
+    LOAD_DATA_FIELD(accum_vgpr_count);
+    LOAD_DATA_FIELD(pmc_name);
+    LOAD_DATA_FIELD(pmc_symbol);
+    LOAD_DATA_FIELD(pmc_component);
+    LOAD_DATA_FIELD(pmc_description);
+    LOAD_DATA_FIELD(pmc_block);
+    LOAD_DATA_FIELD(pmc_expression);
+    LOAD_DATA_FIELD(pmc_value_type);
+    LOAD_DATA_FIELD(pmc_id);
+    LOAD_DATA_FIELD(pmc_value);
     LOAD_DATA_FIELD(start);
     LOAD_DATA_FIELD(end);
-    LOAD_DATA_FIELD(is_constant);
-    LOAD_DATA_FIELD(is_derived);
+    LOAD_DATA_FIELD(pmc_is_constant);
+    LOAD_DATA_FIELD(pmc_is_derived);
+
+    auto dotproduct = [](uint32_t x, uint32_t y, uint32_t z) -> uint64_t {
+        return (static_cast<uint64_t>(x) * y * z);
+    };
+
+    data.grid_size      = dotproduct(data.grid_x, data.grid_y, data.grid_z);
+    data.workgroup_size = dotproduct(data.workgroup_x, data.workgroup_y, data.workgroup_z);
 }
 
 template <typename ArchiveT>
