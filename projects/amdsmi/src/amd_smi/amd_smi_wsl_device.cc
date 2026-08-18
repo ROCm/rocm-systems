@@ -47,10 +47,10 @@ namespace {
 
 static amdsmi_bdf_t make_bdf(const rocdxg_smi_bdf_info_t& src) {
   amdsmi_bdf_t bdf = {};
-  bdf.bdf.domain_number = src.domain_number;
-  bdf.bdf.bus_number = src.bus_number;
-  bdf.bdf.device_number = src.device_number;
-  bdf.bdf.function_number = src.function_number;
+  bdf.bdf.domain_number = src.domain_number & 0xffffffffffffULL;
+  bdf.bdf.bus_number = src.bus_number & 0xffU;
+  bdf.bdf.device_number = src.device_number & 0x1fU;
+  bdf.bdf.function_number = src.function_number & 0x7U;
   return bdf;
 }
 
@@ -592,7 +592,8 @@ amdsmi_status_t WSLGPUBackend::get_uuid(unsigned int* uuid_length, char* uuid) {
     return AMDSMI_STATUS_INVAL;
 
   const uint64_t id = unique_id_ ? unique_id_ : bdf_.as_uint;
-  amdsmi_status_t status = amdsmi_uuid_gen(uuid, id, device_id_, 0xff);
+  amdsmi_status_t status =
+      amdsmi_uuid_gen(uuid, id, static_cast<uint16_t>(device_id_ & 0xffffU), 0xff);
   if (status == AMDSMI_STATUS_SUCCESS) *uuid_length = AMDSMI_GPU_UUID_SIZE;
   return status;
 }

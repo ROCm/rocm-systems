@@ -281,7 +281,9 @@ TEST_F(WslFunctionalReadOnly, LiveClockInfoSuccessOrNotSupported) {
   HSAKMT_STATUS r = syms_.rocdxg_smi_get_clock_info(0, 0, &clk);
   if (r == HSAKMT_STATUS_NOT_SUPPORTED) GTEST_SKIP() << "clock info unsupported";
   ASSERT_EQ(r, HSAKMT_STATUS_SUCCESS);
-  if (clk.clk != UINT32_MAX && clk.max_clk != UINT32_MAX) EXPECT_LE(clk.clk, clk.max_clk);
+  if (clk.clk != UINT32_MAX && clk.max_clk != UINT32_MAX) {
+    EXPECT_LE(clk.clk, clk.max_clk);
+  }
 }
 
 TEST_F(WslFunctionalReadOnly, LivePcieInfoSuccessOrNotSupported) {
@@ -307,10 +309,15 @@ TEST_F(WslFunctionalReadOnly, LiveGpuMetricsInfoSuccessOrNotSupported) {
               metrics.current_socket_power != unset || metrics.current_fan_speed_percent != unset)
       << "gpu metrics returned SUCCESS with every sensor unset";
 
-  if (metrics.average_gfx_activity != unset) EXPECT_LE(metrics.average_gfx_activity, 100u);
-  if (metrics.average_umc_activity != unset) EXPECT_LE(metrics.average_umc_activity, 100u);
-  if (metrics.current_fan_speed_percent != unset)
+  if (metrics.average_gfx_activity != unset) {
+    EXPECT_LE(metrics.average_gfx_activity, 100u);
+  }
+  if (metrics.average_umc_activity != unset) {
+    EXPECT_LE(metrics.average_umc_activity, 100u);
+  }
+  if (metrics.current_fan_speed_percent != unset) {
     EXPECT_LE(metrics.current_fan_speed_percent, 100u);
+  }
 }
 
 TEST_F(WslFunctionalReadOnly, LiveProcessEnumSizingProbe) {
