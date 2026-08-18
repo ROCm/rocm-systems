@@ -163,36 +163,11 @@ configure_nic_profiling(const std::shared_ptr<provider_t>& provider)
 {
     using namespace collectors::nic;
 
-    // If the user set SAMPLING_AINICS (--ai-nics) directly, warn and — when
-    // SAMPLING_NICS is also configured — clear it so --nics has full control.
-    const auto _ainics_direct   = config::get_sampling_ainics();
-    const bool _ainics_user_set = !_ainics_direct.empty() && _ainics_direct != "none";
-
+    // Deprecation warnings for --ai-nics / ROCPROFSYS_SAMPLING_AINICS and the
+    // --nics override are emitted in config.cpp configure() so they always appear
+    // even when process sampling is disabled. Here we only need the current values.
     const auto _nics_val        = config::get_sampling_nics();
     const bool _nics_configured = !_nics_val.empty() && _nics_val != "none";
-
-    if(_ainics_user_set)
-    {
-        if(_nics_configured)
-        {
-            // Both options active: --nics takes full control; discard --ai-nics value.
-            LOG_WARNING("Both ROCPROFSYS_SAMPLING_NICS and ROCPROFSYS_SAMPLING_AINICS "
-                        "are set. ROCPROFSYS_SAMPLING_AINICS (--ai-nics) is deprecated "
-                        "and will be ignored; ROCPROFSYS_SAMPLING_NICS (--nics) takes "
-                        "full control and determines AI NIC routing automatically.");
-            config::set_setting_value(std::string{ env_vars::SAMPLING_AINICS },
-                                      std::string{ "none" });
-        }
-        else
-        {
-            // Only --ai-nics set: warn, but honour it for backward compatibility.
-            // We return below without touching SAMPLING_AINICS, so the nic_collector
-            // reads it as-is via get_sampling_ainics() when it calls enumerate_devices().
-            LOG_WARNING("ROCPROFSYS_SAMPLING_AINICS / --ai-nics is deprecated. "
-                        "Use ROCPROFSYS_SAMPLING_NICS / --nics instead; AI NIC "
-                        "classification is automatic.");
-        }
-    }
 
     if(!_nics_configured) return;
 

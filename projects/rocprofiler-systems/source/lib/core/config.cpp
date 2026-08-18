@@ -1615,6 +1615,40 @@ configure_settings(bool _init)
         }
     }
 
+    // Emit deprecation warning for --ai-nics / ROCPROFSYS_SAMPLING_AINICS at
+    // config time so it always appears, even when process sampling is disabled.
+    {
+        auto _ainics_it = _config->find(std::string{ env_vars::SAMPLING_AINICS });
+        auto _nics_it   = _config->find(std::string{ env_vars::SAMPLING_NICS });
+        if(_ainics_it != _config->end() && _nics_it != _config->end())
+        {
+            const auto& _ainics_val = static_cast<tim::tsettings<std::string>&>(
+                *_ainics_it->second).get();
+            const auto& _nics_val = static_cast<tim::tsettings<std::string>&>(
+                *_nics_it->second).get();
+            const bool _ainics_set = !_ainics_val.empty() && _ainics_val != "none";
+            const bool _nics_set   = !_nics_val.empty() && _nics_val != "none";
+            if(_ainics_set)
+            {
+                if(_nics_set)
+                {
+                    LOG_WARNING("Both ROCPROFSYS_SAMPLING_NICS and ROCPROFSYS_SAMPLING_AINICS "
+                                "are set. ROCPROFSYS_SAMPLING_AINICS (--ai-nics) is deprecated "
+                                "and will be ignored; ROCPROFSYS_SAMPLING_NICS (--nics) takes "
+                                "full control and determines AI NIC routing automatically.");
+                    config::set_setting_value(std::string{ env_vars::SAMPLING_AINICS },
+                                             std::string{ "none" });
+                }
+                else
+                {
+                    LOG_WARNING("ROCPROFSYS_SAMPLING_AINICS / --ai-nics is deprecated. "
+                                "Use ROCPROFSYS_SAMPLING_NICS / --nics instead; AI NIC "
+                                "classification is automatic.");
+                }
+            }
+        }
+    }
+
     configure_mode_settings(_config);
     configure_signal_handler(_config);
     configure_disabled_settings(_config);

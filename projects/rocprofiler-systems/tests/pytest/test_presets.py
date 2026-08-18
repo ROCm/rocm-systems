@@ -548,6 +548,36 @@ class TestSamplingTargetFlags(RocprofsysTest):
         )
         self.assert_regex(result, pass_regex=["ROCPROFSYS_SAMPLING_AINICS=nic0"])
 
+    def test_ai_nics_deprecation_warning(self, target):
+        """--ai-nics alone must print a deprecation warning."""
+        result = self.run_test(
+            "baseline",
+            target=target,
+            run_args=["--ai-nics=nic0", "-v", "2", "--", "ls"],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[
+                r"ROCPROFSYS_SAMPLING_AINICS / --ai-nics is deprecated",
+            ],
+        )
+
+    def test_nics_overrides_ai_nics(self, target):
+        """When both --nics and --ai-nics are given, --nics wins and --ai-nics is discarded."""
+        result = self.run_test(
+            "baseline",
+            target=target,
+            run_args=["--nics=eth0", "--ai-nics=nic0", "-v", "2", "--", "ls"],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[
+                r"ROCPROFSYS_SAMPLING_AINICS.*--ai-nics.*is deprecated.*will be ignored",
+            ],
+        )
+
     @pytest.mark.parametrize("preset", ["trace-hpc", "trace-gpu"])
     def test_preset_plus_gpus(self, target, preset):
         result = self.run_test(
