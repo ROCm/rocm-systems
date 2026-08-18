@@ -30,10 +30,10 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     if not reports:
         return
 
-    from mutate_and_test import write_json_report, write_markdown_report
+    from mutate_and_test import DEFAULT_ARCH, write_json_report, write_markdown_report
     from mutate_and_test.report_writer import extract_summary_section_markdown
 
-    arch = os.environ.get("TARGET_ARCH", "gfx950")
+    arch = os.environ.get("TARGET_ARCH", DEFAULT_ARCH)
     root = Path(session.config.rootpath)
     json_path = root / "mutation_report.json"
     md_path = root / "mutation_report.md"
