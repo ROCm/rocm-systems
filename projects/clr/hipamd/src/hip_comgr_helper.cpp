@@ -5,8 +5,11 @@
  */
 
 #include "hip_comgr_helper.hpp"
+#include <atomic>
 #if defined(_WIN32)
-#include <io.h>
+#include <process.h>
+#else
+#include <unistd.h>
 #endif
 #include "../src/amd_hsa_elf.hpp"
 
@@ -548,20 +551,22 @@ bool createExecutable(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
 }
 
 void GenerateUniqueFileName(std::string& name) {
-#if !defined(_WIN32)
-  char* name_template = const_cast<char*>(name.c_str());
-  int temp_fd = mkstemp(name_template);
+  // Generate the unique Comgr label in memory (pid + atomic counter) instead of
+  // mkstemp, which created/unlinked a temp file in the CWD at scale (ROCM-29636).
+  static std::atomic<uint64_t> counter{0};
+#if defined(_WIN32)
+  const auto pid = _getpid();
 #else
-  char* name_template = new char[name.length() + 1];
-  strcpy_s(name_template, name.length() + 1, name.data());
-  int sizeinchars = strnlen(name_template, 20) + 1;
-  _mktemp_s(name_template, sizeinchars);
+  const auto pid = getpid();
 #endif
-  name = name_template;
-#if !defined(_WIN32)
-  unlink(name_template);
-  close(temp_fd);
-#endif
+  // Strip a trailing mkstemp-style "XXXXXX" template if present, then append a
+  // process-unique suffix (e.g. "CompileSourceXXXXXX" -> "CompileSource1234_0").
+  const size_t last_non_x = name.find_last_not_of('X');
+  if (last_non_x != std::string::npos) {
+    name.resize(last_non_x + 1);
+  }
+  name += std::to_string(static_cast<int64_t>(pid)) + "_" +
+          std::to_string(counter.fetch_add(1, std::memory_order_relaxed));
 }
 
 bool demangleName(const std::string& mangledName, std::string& demangledName) {
