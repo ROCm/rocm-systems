@@ -268,9 +268,15 @@ __device__ __forceinline__ void loadWorkBatchToShmem(int tid, int tn, struct ncc
     //   packInWork = tid%(workSize/16);
     //   dstWork = tid/(workSize/16);
 
-    // We can only assume we have 64 threads, which means we can read at most 1024 bytes
-    // here which is the per batch maximum.
-    if (tid < nPacks) {
+    // AGV bcast fuses up to 64 works/batch (192 packs) and can exceed the loader subgroup size
+    // tn, so bcast strides while coll/P2P break after one pass. tid (not pk) is preserved so
+    // the nextExtends warp rotation stays correct. alignas(16) keeps bcastPacks >= 1.
+    static_assert(sizeof(struct ncclDevWorkBcast) % 16 == 0 && sizeof(struct ncclDevWorkBcast) >= 16,
+                  "ncclDevWorkBcast must be a non-zero multiple of the 16B pack size");
+    constexpr int bcastPacks = sizeof(struct ncclDevWorkBcast)/16; // 3 packs/work
+    bool isBcast = batch.workType == (int)ncclDevWorkTypeBcast;
+    for (int pk = tid; pk < nPacks; pk += tn) {
+      if (isBcast) { dstWork = pk/bcastPacks; packInWork = pk - dstWork*bcastPacks; }
       int srcWork = fnsOfBitset[dstWork]; // find n'th set bit in batch.offsetBitset
       ulonglong2 tmp;
       // The loads done in these two cases must be kept separate since we are
@@ -303,12 +309,13 @@ __device__ __forceinline__ void loadWorkBatchToShmem(int tid, int tn, struct ncc
       char* dst = ncclShmem.workStorage;
       dst += (workCursor + dstWork) * workSize + packInWork * 16;
       *(ulonglong2*)dst = tmp;
+      if (!isBcast) break; // coll/P2P fit in one pass; only AGV-fused bcast strides
     }
     workCursor += nWorks;
 
     if (batch.nextExtends) {
       batchIx += batch.nextJump;
-      tid -= 64; // Rotate threads so we use the next two warps for next batch struct.
+      tid -= 2*WARP_SIZE; // Rotate threads so we use the next two warps for next batch struct.
       if (tid < 0) tid += tn;
     } else {
       if (tid == 0) {
@@ -333,14 +340,16 @@ __device__ __forceinline__ unsigned long long int globaltimer() {
 #endif
 }
 
-template <ncclFunc_t Fn, typename T, typename RedOp, int Algo, int Proto, int USE_ACC, int COLL_UNROLL, int Pipeline>
+template <ncclFunc_t Fn, typename T, typename RedOp, int Algo, int Proto, int USE_ACC, int COLL_UNROLL, int Pipeline,
+          int UserRegMode = 0>
 struct RunWorkColl {
   __device__ void run(int tid, int tn, struct ncclDevWorkColl* work) {
     // Put NOT IMPLEMENTED behavior here.
   }
 };
 
-template <ncclFunc_t Fn, typename T, typename RedOp, int Algo, int Proto, int USE_ACC, int COLL_UNROLL, int Pipeline>
+template <ncclFunc_t Fn, typename T, typename RedOp, int Algo, int Proto, int USE_ACC, int COLL_UNROLL, int Pipeline,
+          int UserRegMode = 0>
 struct RunWorkBatch;
 
 // Specialized for P2p in sendrecv.h
@@ -351,7 +360,8 @@ template <typename T, typename RedOp, int Proto>
 struct RunWorkBatch<ncclFuncAllGatherV, T, RedOp, NCCL_ALGO_RING, Proto>;
 
 // Specialized here for non-P2p (Coll and CollReg)
-template <ncclFunc_t Fn, typename T, typename RedOp, int Algo, int Proto, int USE_ACC, int COLL_UNROLL, int Pipeline>
+template <ncclFunc_t Fn, typename T, typename RedOp, int Algo, int Proto, int USE_ACC, int COLL_UNROLL, int Pipeline,
+          int UserRegMode>
 struct RunWorkBatch {
   // This __forceinline__ is necessary. The compiler was inserting a function call
   // here from the LL ncclKernel.
@@ -650,14 +660,14 @@ __global__ void ncclDevKernel_Generic_32(ncclDevKernelArgsDefaultStorage NCCL_GR
 
 // noinline iff RCCL_DEVICE_LINKER (each devfunc is a standalone shard).
 #ifdef RCCL_DEVICE_LINKER
-#define DEFINE_ncclDevFunc(suffix, coll, redop, ty, algo, proto, acc, pipeline, unroll) \
+#define DEFINE_ncclDevFunc(suffix, coll, redop, ty, algo, proto, acc, pipeline, unroll, userreg) \
   __device__ __attribute__((noinline)) void ncclDevFunc_##suffix() { \
-    RunWorkBatch<coll, ty, redop<ty>, algo, proto, acc, unroll, pipeline>().run(); \
+    RunWorkBatch<coll, ty, redop<ty>, algo, proto, acc, unroll, pipeline, userreg>().run(); \
   }
 #else
-#define DEFINE_ncclDevFunc(suffix, coll, redop, ty, algo, proto, acc, pipeline, unroll) \
+#define DEFINE_ncclDevFunc(suffix, coll, redop, ty, algo, proto, acc, pipeline, unroll, userreg) \
   __device__ void ncclDevFunc_##suffix() { \
-    RunWorkBatch<coll, ty, redop<ty>, algo, proto, acc, unroll, pipeline>().run(); \
+    RunWorkBatch<coll, ty, redop<ty>, algo, proto, acc, unroll, pipeline, userreg>().run(); \
   }
 #endif
 

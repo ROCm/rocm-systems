@@ -32,6 +32,8 @@ subtrees:
     title: AI NIC integration
   - file: how-to/setup-docker-container.md
     title: Use AMD SMI in a Docker container
+  - file: how-to/amdsmi-wsl-mode.md
+    title: Using AMD SMI under WSL (experimental)
 
 - caption: Reference
   entries:

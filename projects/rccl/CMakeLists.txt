@@ -166,10 +166,23 @@ set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGE
 
 # Modify GPU architectures for Address Sanitizer builds by appending "xnack+"
 if (BUILD_ADDRESS_SANITIZER)
-  execute_process(
-    COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libclang_rt.asan-x86_64.so
-    OUTPUT_VARIABLE ASAN_RUNTIME_PATH OUTPUT_STRIP_TRAILING_WHITESPACE)
-  get_filename_component(ASAN_RUNTIME_DIR "${ASAN_RUNTIME_PATH}" DIRECTORY)
+  set(_suffix "asan")
+  set(_clang_rt_names "libclang_rt.${_suffix}.so" "libclang_rt.${_suffix}-x86_64.so")
+  foreach(_clang_rt_name ${_clang_rt_names})
+    execute_process(
+      COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=${_clang_rt_name}
+      OUTPUT_VARIABLE _clang_rt_path OUTPUT_STRIP_TRAILING_WHITESPACE)
+    # If _clang_rt_path is libclang_rt.asan-x86_64.so
+    # rather than /path/to/libclang_rt.asan-x86_64.so then
+    # we failed to locate it.
+    if(IS_ABSOLUTE "${_clang_rt_path}" AND EXISTS "${_clang_rt_path}")
+      get_filename_component(ASAN_RUNTIME_DIR "${_clang_rt_path}" DIRECTORY)
+      break()
+    endif()
+  endforeach()
+  if(NOT ASAN_RUNTIME_DIR)
+    message(FATAL_ERROR "Failed to locate libclang_rt.asan-x86_64.so or libclang_rt.asan.so")
+  endif()
   message(STATUS "ASAN runtime directory: ${ASAN_RUNTIME_DIR}")
 
   SET(amdgpu_targets "")
@@ -360,16 +373,6 @@ check_symbol_exists("hipMemcpyBatchAsync" "hip/hip_runtime_api.h" HIP_MEMCPY_BAT
 
 ### Check for cuMem VMM DMA-BUF export support (driver-level dmabuf export).
 check_symbol_exists("hipMemGetHandleForAddressRange" "hip/hip_runtime_api.h" HIP_MEM_GET_HANDLE_FOR_ADDR_RANGE)
-
-### Check for hipMemLocationTypeHost (host-NUMA VMM location type).
-check_cxx_source_compiles("
-  #include <hip/hip_runtime_api.h>
-  int main() {
-    hipMemLocationType t = hipMemLocationTypeHost;
-    (void)t;
-    return 0;
-  }
-" HIP_MEM_LOCATION_TYPE_HOST)
 
 ### Check for uncached VMM allocation type (hipMemAllocationTypeUncached).
 check_cxx_source_compiles("
@@ -672,7 +675,9 @@ if(EMIT_LLVM_IR)
   add_subdirectory(bindings/ir)
   # bindings/ir/ reads headers out of ${PROJECT_BINARY_DIR}/hipify, which is
   # populated by the copy_nccl_device_headers target defined in src/CMakeLists.txt.
-  add_dependencies(llvm_ir copy_nccl_device_headers)
+  # nccl_device_header_symlinks provides the un-suffixed core.h/comm.h/gin.h
+  # aliases (hipify renames them to *_tmp.h) that the verbatim IR wrapper needs.
+  add_dependencies(llvm_ir copy_nccl_device_headers nccl_device_header_symlinks)
   # Convenience aggregate target: builds librccl.so together with the bitcode.
   add_custom_target(rccl_with_ir ALL DEPENDS rccl llvm_ir)
 endif()
@@ -786,21 +791,6 @@ if(BUILD_TESTS)
     add_subdirectory(plugins/profiler/proxytrace)
   endif()
   add_subdirectory(test)
-
-  if(BUILD_SHARED_LIBS)
-    # rccl is defined in src/, so avoid TARGET-signature command here.
-    # Use an output-stamp command plus a local custom target dependency.
-    set(extract_metadata_stamp "${CMAKE_BINARY_DIR}/extract_metadata.stamp")
-    add_custom_command(
-      OUTPUT "${extract_metadata_stamp}"
-      COMMENT "Extracting metadata from librccl.so"
-      COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/scripts/extract_metadata.cmake
-      COMMAND ${CMAKE_COMMAND} -E touch "${extract_metadata_stamp}"
-      DEPENDS rccl
-      VERBATIM
-    )
-    add_custom_target(extract_rccl_metadata ALL DEPENDS "${extract_metadata_stamp}")
-  endif()
 
 endif()
 

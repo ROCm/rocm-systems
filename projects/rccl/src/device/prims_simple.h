@@ -17,10 +17,11 @@ enum primsMode {
 };
 
 template <typename T, typename RedOp, typename Fan, int Direct, int SlicePerChunk, int StepPerSlice, int Unroll,
-          int P2p, int MultimemSrcs, int MultimemDsts, bool isNetOffload, int Metadata, int Pipeline, int useAcc>
+          int P2p, int MultimemSrcs, int MultimemDsts, bool isNetOffload, int Metadata, int Pipeline, int useAcc,
+          int UserRegMode>
 class Primitives<T, RedOp, Fan, Direct,
                  ProtoSimple<SlicePerChunk, StepPerSlice, useAcc, Unroll, MultimemSrcs, MultimemDsts>, P2p,
-                 isNetOffload, Metadata, Pipeline, useAcc> {
+                 isNetOffload, Metadata, Pipeline, useAcc, UserRegMode> {
   static constexpr int MaxRecv = Fan::MaxRecv, MaxSend = Fan::MaxSend;
   static constexpr int Input = 0, Output = 1;
   static constexpr int RoleInput = 0x01, RoleOutput = 0x02, RoleWaitRecv = 0x04, RoleWaitSend = 0x08,
