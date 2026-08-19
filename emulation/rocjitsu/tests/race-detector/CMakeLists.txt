@@ -3,7 +3,7 @@
 
 # --- Race detection HIP tests ---
 # Uses a lightweight config (race_test_config.json) with 1 XCD and 4 CUs
-# instead of the full MI350X topology (8 XCDs, 256 CUs). Each race test
+# instead of the full MI350X topology (8 XCDs, 288 physical / 256 active CUs). Each race test
 # spawns a complete simulation engine, and with ctest -j the full config
 # causes OOM kills at moderate parallelism (~15+ concurrent tests). The
 # race detector only needs a few CUs to exercise cross-wave and

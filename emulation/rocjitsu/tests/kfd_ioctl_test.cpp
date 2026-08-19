@@ -45,7 +45,7 @@
 
 namespace {
 
-const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_cdna4.json";
+const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x.json";
 constexpr uint32_t kGpuId = 38144;
 
 // A part with no modelled CWSR record layout. gfx1100 is not a debug target:

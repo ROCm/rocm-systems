@@ -504,22 +504,23 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   const uint32_t stride = d.scratch_addr_stride;
 
   if (d.is_load) {
-    d.response_data.resize(d.wf_size * d.num_elems * d.elem_size);
+    d.response_data.assign(d.wf_size * d.num_elems * d.elem_size, 0);
     if (scratch_lanes)
       l1_->load(d.per_lane_addr.data(), scratch_lanes, d.elem_size, d.num_elems,
                 d.response_data.data(), d.mtype, d.non_temporal, d.request_force_l1_bypass,
-                d.wf_size, wf.process_id(), stride);
+                d.wf_size, wf.process_id(), stride, d.element_lane_masks);
     if (plain_lanes)
       l1_->load(d.per_lane_addr.data(), plain_lanes, d.elem_size, d.num_elems,
                 d.response_data.data(), d.mtype, d.non_temporal, d.request_force_l1_bypass,
-                d.wf_size, wf.process_id(), 0);
+                d.wf_size, wf.process_id(), 0, d.element_lane_masks);
   } else {
     if (scratch_lanes)
       l1_->store(d.per_lane_addr.data(), scratch_lanes, d.elem_size, d.num_elems,
-                 d.store_data.data(), d.mtype, d.non_temporal, d.wf_size, wf.process_id(), stride);
+                 d.store_data.data(), d.mtype, d.non_temporal, d.wf_size, wf.process_id(), stride,
+                 d.element_lane_masks);
     if (plain_lanes)
       l1_->store(d.per_lane_addr.data(), plain_lanes, d.elem_size, d.num_elems, d.store_data.data(),
-                 d.mtype, d.non_temporal, d.wf_size, wf.process_id(), 0);
+                 d.mtype, d.non_temporal, d.wf_size, wf.process_id(), 0, d.element_lane_masks);
   }
 }
 
