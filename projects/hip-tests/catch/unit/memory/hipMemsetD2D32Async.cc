@@ -119,7 +119,7 @@ HIP_TEST_CASE(Unit_hipMemsetD2D32Async_NegTsts) {
   HIP_CHECK(hipStreamCreate(&stream))
   HIP_CHECK(hipMemAllocPitch(&A_d, &devPitch, width, numH, sizeof(int)))
   SECTION("nullptr destination") {
-    HIP_CHECK_ERROR(hipMemsetD2D32Async(nullptr, devPitch, memsetval, numW, numH, stream),
+    HIP_CHECK_ERROR(hipMemsetD2D32Async(reinterpret_cast<hipDeviceptr_t>(nullptr), devPitch, memsetval, numW, numH, stream),
                     hipErrorInvalidValue);
   }
   SECTION("OutOfBound destination") {

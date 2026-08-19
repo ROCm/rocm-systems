@@ -49,7 +49,7 @@ HIP_TEST_CASE(Unit_hipCreateTextureObject_tex1DfetchVerification) {
   texDesc.readMode = hipReadModeElementType;
 
   // Creating texture object
-  hipTextureObject_t texObj = nullptr;
+  hipTextureObject_t texObj = reinterpret_cast<hipDeviceptr_t>(nullptr);
   HIP_CHECK(hipCreateTextureObject(&texObj, &resDescLinear, &texDesc, nullptr))
 
   dim3 dimBlock(64, 1, 1);

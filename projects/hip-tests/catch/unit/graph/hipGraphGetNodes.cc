@@ -186,10 +186,6 @@ HIP_TEST_CASE(Unit_hipGraphGetNodes_Positive_CapturedStream) {
       case hipGraphNodeTypeEventRecord:
       case hipGraphNodeTypeExtSemaphoreSignal:
       case hipGraphNodeTypeExtSemaphoreWait:
-      case hipGraphNodeTypeMemAlloc:
-      case hipGraphNodeTypeMemFree:
-      case hipGraphNodeTypeMemcpyFromSymbol:
-      case hipGraphNodeTypeMemcpyToSymbol:
       case hipGraphNodeTypeCount:
       default:
         INFO("Unexpected nodetype returned : " << nodeType);

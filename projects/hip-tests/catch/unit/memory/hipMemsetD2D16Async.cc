@@ -123,7 +123,7 @@ HIP_TEST_CASE(Unit_hipMemsetD2D16Async_NegTsts) {
   HIP_CHECK(hipMemAllocPitch(&A_d, &devPitch, width, numH,
                              2 * sizeof(uint16_t)));
   SECTION("nullptr destination") {
-    HIP_CHECK_ERROR(hipMemsetD2D16Async(nullptr, devPitch, memsetval, numW, numH, stream),
+    HIP_CHECK_ERROR(hipMemsetD2D16Async(reinterpret_cast<hipDeviceptr_t>(nullptr), devPitch, memsetval, numW, numH, stream),
                     hipErrorInvalidValue);
   }
   SECTION("Dst pointer points to Source Memory") {

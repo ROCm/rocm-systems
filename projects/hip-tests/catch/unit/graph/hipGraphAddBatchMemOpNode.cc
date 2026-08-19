@@ -45,7 +45,7 @@ HIP_TEST_CASE(Unit_hipGraphAddBatchMemOpNode_NegativeTsts) {
   paramArray[0].writeValue.address = opsArray[0];
   paramArray[0].writeValue.value = 1000;
   paramArray[0].writeValue.flags = 0x0;
-  paramArray[0].writeValue.alias = nullptr;
+  paramArray[0].writeValue.alias = reinterpret_cast<hipDeviceptr_t>(nullptr);
 
   paramArray[1].operation = hipStreamMemOpWaitValue32;
   paramArray[1].waitValue.address = opsArray[0];

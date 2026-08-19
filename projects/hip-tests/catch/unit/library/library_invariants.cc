@@ -124,7 +124,7 @@ HIP_TEST_CASE(Unit_hipLibraryGetGlobal_MatchesModuleGetGlobal) {
   CTX_CREATE();
   hipModule_t mod = nullptr;
   HIP_CHECK(hipModuleLoad(&mod, kCodeFile.c_str()))
-  hipDeviceptr_t mod_dptr = nullptr;
+  hipDeviceptr_t mod_dptr = reinterpret_cast<hipDeviceptr_t>(nullptr);
   size_t mod_bytes = 0;
   HIP_CHECK(hipModuleGetGlobal(&mod_dptr, &mod_bytes, mod, "d_var"))
 
@@ -135,7 +135,7 @@ HIP_TEST_CASE(Unit_hipLibraryGetGlobal_MatchesModuleGetGlobal) {
   size_t lib_bytes = 0;
   HIP_CHECK(hipLibraryGetGlobal(&lib_dptr, &lib_bytes, lib, "d_var"))
 
-  REQUIRE(mod_dptr != nullptr);
+  REQUIRE(mod_dptr != reinterpret_cast<hipDeviceptr_t>(nullptr));
   REQUIRE(lib_dptr != nullptr);
   REQUIRE(mod_bytes == lib_bytes);
   REQUIRE(mod_bytes == sizeof(float) * 32);

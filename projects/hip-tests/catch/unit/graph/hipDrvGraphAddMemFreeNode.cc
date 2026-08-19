@@ -69,7 +69,7 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemFreeNode_Negative_Params) {
   }
 
   SECTION("Passing nullptr to dev_ptr") {
-    HIP_CHECK_ERROR(hipDrvGraphAddMemFreeNode(&alloc_node, graph, &alloc_node, 1, nullptr),
+    HIP_CHECK_ERROR(hipDrvGraphAddMemFreeNode(&alloc_node, graph, &alloc_node, 1, reinterpret_cast<hipDeviceptr_t>(nullptr)),
                     hipErrorInvalidValue);
   }
 
