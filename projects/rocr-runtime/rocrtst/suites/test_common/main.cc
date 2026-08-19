@@ -495,21 +495,21 @@ TEST(rocrtstFunc, DISABLED_DebugBasicTests) {
 // Trap Handler Tests (SWDEV-209233)
 // Tests s_trap instruction handling and queue error callbacks.
 
-TEST(rocrtstFunc, DISABLED_TrapHandler_NoTrap) {
+TEST(rocrtstFunc, TrapHandler_NoTrap) {
     TrapHandlerTest th;
     if (!RunCustomTestProlog(&th)) return;
     th.TestNoTrap();
     RunCustomTestEpilog(&th);
 }
 
-TEST(rocrtstFunc, DISABLED_TrapHandler_Abort) {
+TEST(rocrtstFunc, TrapHandler_Abort) {
     TrapHandlerTest th;
     if (!RunCustomTestProlog(&th)) return;
     th.TestTrapAbort();
     RunCustomTestEpilog(&th);
 }
 
-TEST(rocrtstFunc, DISABLED_TrapHandler_Generic) {
+TEST(rocrtstFunc, TrapHandler_Generic) {
     TrapHandlerTest th;
     if (!RunCustomTestProlog(&th)) return;
     th.TestTrapGeneric();
