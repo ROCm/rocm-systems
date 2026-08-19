@@ -84,7 +84,7 @@ HIP_TEST_CASE(Unit_hipMemMapArrayAsync_Positive_Basic) {
   HIP_CHECK(hipStreamSynchronize(stream.stream()))
 
   map_info_list.memOperationType = hipMemOperationTypeUnmap;
-  map_info_list.memHandle.memHandle = nullptr;
+  map_info_list.memHandle.memHandle = reinterpret_cast<CUmemGenericAllocationHandle>(nullptr);
   HIP_CHECK(hipMemMapArrayAsync(&map_info_list, 1, stream.stream()))
   HIP_CHECK(hipStreamSynchronize(stream.stream()))
 

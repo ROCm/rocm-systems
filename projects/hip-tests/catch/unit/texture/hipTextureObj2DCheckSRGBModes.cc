@@ -64,7 +64,7 @@ static void runTest(const int width, const int height, const float offsetX, cons
   texDesc.sRGB = sRGB ? 1 : 0;
 
   // Create texture object
-  hipTextureObject_t textureObject = nullptr;
+  hipTextureObject_t textureObject = reinterpret_cast<hipTextureObject_t>(nullptr);
   HIP_CHECK(hipCreateTextureObject(&textureObject, &resDesc, &texDesc, nullptr))
 
   float4* dData = nullptr;

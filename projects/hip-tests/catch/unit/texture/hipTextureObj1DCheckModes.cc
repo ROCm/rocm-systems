@@ -58,7 +58,7 @@ static void runTest(const int width, const float offsetX) {
   texDesc.normalizedCoords = normalizedCoords;
 
   // Create texture object
-  hipTextureObject_t textureObject = nullptr;
+  hipTextureObject_t textureObject = reinterpret_cast<hipDeviceptr_t>(nullptr);
   HIP_CHECK(hipCreateTextureObject(&textureObject, &resDesc, &texDesc, nullptr))
 
   float* dData = nullptr;

@@ -27,7 +27,7 @@ HIP_TEST_CASE(Unit_hipDestroySurfaceObject_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
 
   SECTION("surfObject is nullptr") {
-    HIP_CHECK(hipDestroySurfaceObject(static_cast<hipSurfaceObject_t>(nullptr)))
+    HIP_CHECK(hipDestroySurfaceObject(reinterpret_cast<hipSurfaceObject_t>(nullptr)))
   }
 
   SECTION("double free") {

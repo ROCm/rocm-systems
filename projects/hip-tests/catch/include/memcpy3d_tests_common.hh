@@ -25,7 +25,6 @@ static inline hipMemcpyKind ReverseMemcpyDirection(const hipMemcpyKind direction
       return hipMemcpyHostToDevice;
     case hipMemcpyHostToHost:
     case hipMemcpyDeviceToDevice:
-    case hipMemcpyDeviceToDeviceNoCU:
     case hipMemcpyDefault:
     default:
       return direction;
@@ -639,7 +638,6 @@ static inline HIP_MEMCPY3D GetDrvMemcpy3DParms(DrvPtrVariant dst_ptr, hipPos dst
         parms.dstHost = ptr.ptr;
         break;
       case hipMemcpyDeviceToDevice:
-      case hipMemcpyDeviceToDeviceNoCU:
       case hipMemcpyHostToDevice:
         parms.dstMemoryType = hipMemoryTypeDevice;
         parms.dstDevice = reinterpret_cast<hipDeviceptr_t>(ptr.ptr);
@@ -662,7 +660,6 @@ static inline HIP_MEMCPY3D GetDrvMemcpy3DParms(DrvPtrVariant dst_ptr, hipPos dst
     switch (kind) {
       case hipMemcpyDeviceToHost:
       case hipMemcpyDeviceToDevice:
-      case hipMemcpyDeviceToDeviceNoCU:
         parms.srcMemoryType = hipMemoryTypeDevice;
         parms.srcDevice = reinterpret_cast<hipDeviceptr_t>(ptr.ptr);
         break;

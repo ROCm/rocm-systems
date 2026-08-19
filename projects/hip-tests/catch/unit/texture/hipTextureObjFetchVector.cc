@@ -84,7 +84,7 @@ template <typename T> bool runTest() {
   texDesc.addressMode[0] = hipAddressModeClamp;
 
   // Creating texture object
-  hipTextureObject_t texObj = nullptr;
+  hipTextureObject_t texObj = reinterpret_cast<hipDeviceptr_t>(nullptr);
   HIP_CHECK(hipCreateTextureObject(&texObj, &resDescLinear, &texDesc, nullptr))
 
   dim3 dimBlock(64, 1, 1);
