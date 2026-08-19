@@ -48,6 +48,13 @@ std::unordered_map<std::string, uint64_t> read_properties(const std::string &pat
   return props;
 }
 
+std::string read_text(const std::string &path) {
+  std::ifstream f(path);
+  std::ostringstream contents;
+  contents << f.rdbuf();
+  return contents.str();
+}
+
 Sysfs::GpuInfo make_gpu_info(uint32_t gfx_target_version) {
   Sysfs::GpuInfo gpu{};
   gpu.gpu_id = 1;
@@ -58,6 +65,15 @@ Sysfs::GpuInfo make_gpu_info(uint32_t gfx_target_version) {
   gpu.num_cu_per_sh = 4;
   gpu.local_mem_size = 1ull << 34;
   return gpu;
+}
+
+TEST(SysfsTopologyCompatibilityTest, EveryNodePublishesName) {
+  Sysfs sysfs;
+  std::string topology_dir = sysfs.generate(make_gpu_info(120500u /* gfx1250 */));
+  ASSERT_FALSE(topology_dir.empty());
+
+  EXPECT_EQ(read_text(topology_dir + "/nodes/0/name"), "CPU\n");
+  EXPECT_EQ(read_text(topology_dir + "/nodes/1/name"), "Test GPU\n");
 }
 
 // Golden per-GFXIP expectations. Each row mirrors what

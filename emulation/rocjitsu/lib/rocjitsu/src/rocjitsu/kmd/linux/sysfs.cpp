@@ -191,6 +191,10 @@ void Sysfs::write_cpu_node(const std::string &nodes_dir, uint32_t num_gpu_links)
     make_dir(node_dir + "/io_links/" + std::to_string(i));
 
   write_file(node_dir + "/gpu_id", "0\n");
+  // Newer HSA runtimes read the topology name for every node, including the
+  // synthetic CPU node.  A missing file is fatal during agent discovery and
+  // prevents the runtime from reaching the simulated GPU at all.
+  write_file(node_dir + "/name", "CPU\n");
 
   long nproc = sysconf(_SC_NPROCESSORS_ONLN);
   if (nproc < 1)
