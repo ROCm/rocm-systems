@@ -2854,7 +2854,7 @@ TEST(RaceDetectorPluginOutputTest, DispatchLineUsesReadableNameAndExactSymbol) {
 }
 
 TEST(RaceDetectorPluginTest, DroppedAsyncLdsLaneDoesNotCreateLowAddressRace) {
-  PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"gfx1250", /*wavefront_size=*/32);
+  PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"cdna5", /*wavefront_size=*/32);
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
