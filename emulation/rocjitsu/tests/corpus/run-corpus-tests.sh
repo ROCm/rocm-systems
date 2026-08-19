@@ -45,7 +45,7 @@ targets=(
   "gfx950 gfx950_cdna4.json gfx950_skip_tests.json"
   "gfx1100 gfx1100_w7900.json gfx1100_skip_tests.json"
   "gfx1201 gfx1201_r9700.json gfx1201_skip_tests.json"
-  "gfx1250 gfx1250_cdna5.json gfx1250_skip_tests.json"
+  "gfx1250 gfx1250_mi455x.json gfx1250_skip_tests.json"
 )
 
 while (( $# )); do
