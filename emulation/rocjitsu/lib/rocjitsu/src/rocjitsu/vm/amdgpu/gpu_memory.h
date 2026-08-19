@@ -1009,34 +1009,33 @@ private:
     if (size == 0 || (addr & PAGE_MASK) + size > PAGE_SIZE)
       return false;
     bool copied = false;
-    with_page_mapping(
-        addr, vmid, [&](const KfdProcess::PageTableEntry *pte, uint8_t *passthrough_page) {
-          const size_t page_offset = addr & PAGE_MASK;
-          uint8_t *candidate = nullptr;
-          if (pte) {
-            const auto *extent = host_extent_at(*pte, page_offset);
-            if (!extent ||
-                size > extent->host_backed_bytes - (page_offset - extent->gpu_page_offset))
-              return;
-            candidate = extent->host_ptr + (page_offset - extent->gpu_page_offset);
-          } else {
-            if (addr >= kUserSpaceLimit || size > kUserSpaceLimit - addr)
-              return;
-            candidate = passthrough_page + page_offset;
-          }
-          if (addressable_prefix(candidate, size) != size)
-            return;
-          fn(candidate);
-          copied = true;
-        });
+    with_page_mapping(addr, vmid,
+                      [&](const KfdProcess::PageTableEntry *pte, uint8_t *passthrough_page) {
+                        const size_t page_offset = addr & PAGE_MASK;
+                        uint8_t *candidate = nullptr;
+                        if (pte) {
+                          const auto *extent = host_extent_at(*pte, page_offset);
+                          if (!extent || size > extent->host_backed_bytes -
+                                                    (page_offset - extent->gpu_page_offset))
+                            return;
+                          candidate = extent->host_ptr + (page_offset - extent->gpu_page_offset);
+                        } else {
+                          if (addr >= kUserSpaceLimit || size > kUserSpaceLimit - addr)
+                            return;
+                          candidate = passthrough_page + page_offset;
+                        }
+                        if (addressable_prefix(candidate, size) != size)
+                          return;
+                        fn(candidate);
+                        copied = true;
+                      });
     return copied;
   }
 
   /// @brief Read a mapped span into @p dst without ever exposing a bare pointer.
   bool copy_from_mapped(uint64_t addr, void *dst, size_t size, uint32_t vmid) const {
-    return with_translated_span(addr, vmid, size, [&](const uint8_t *host_ptr) {
-      std::memcpy(dst, host_ptr, size);
-    });
+    return with_translated_span(addr, vmid, size,
+                                [&](const uint8_t *host_ptr) { std::memcpy(dst, host_ptr, size); });
   }
 
   /// @brief Write @p src into a mapped span without ever exposing a bare pointer.

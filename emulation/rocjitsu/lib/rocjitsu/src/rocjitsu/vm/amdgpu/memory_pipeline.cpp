@@ -518,8 +518,8 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
       l1_->store(d.per_lane_addr.data(), scratch_lanes, d.elem_size, d.num_elems,
                  d.store_data.data(), d.mtype, d.non_temporal, d.wf_size, wf.process_id(), stride);
     if (plain_lanes)
-      l1_->store(d.per_lane_addr.data(), plain_lanes, d.elem_size, d.num_elems,
-                 d.store_data.data(), d.mtype, d.non_temporal, d.wf_size, wf.process_id(), 0);
+      l1_->store(d.per_lane_addr.data(), plain_lanes, d.elem_size, d.num_elems, d.store_data.data(),
+                 d.mtype, d.non_temporal, d.wf_size, wf.process_id(), 0);
   }
 }
 

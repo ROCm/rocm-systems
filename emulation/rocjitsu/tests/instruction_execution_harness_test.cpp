@@ -6183,8 +6183,7 @@ TEST(Cdna4FlatMixedApertureTest, ScratchSwizzleDoesNotStrideGlobalLanes) {
 
   const uint32_t vb = wf->vgpr_alloc().base;
   const uint64_t lane_addr[2] = {kPrivateBase, kGlobalAddr};
-  const uint32_t lane_data[2][2] = {{kScratchWord0, kScratchWord1},
-                                    {kGlobalWord0, kGlobalWord1}};
+  const uint32_t lane_data[2][2] = {{kScratchWord0, kScratchWord1}, {kGlobalWord0, kGlobalWord1}};
   for (uint32_t lane = 0; lane < 2; ++lane) {
     cu.write_vgpr(vb + 0, lane, static_cast<uint32_t>(lane_addr[lane]));
     cu.write_vgpr(vb + 1, lane, static_cast<uint32_t>(lane_addr[lane] >> 32));
