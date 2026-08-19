@@ -3189,7 +3189,11 @@ void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWa
   const bool single_step = !state.wave_stopped && (state.mode & kModeDebugEnMask) != 0;
   wave.set_debug_single_step(single_step);
   wave.set_debug_halted(state.wave_stopped);
-  wave.set_debug_suspended(false);
+  // debug_suspended is deliberately left set here. Clearing it per wave made
+  // each wave runnable the moment its own record was applied, so the engine
+  // could execute it while its queue-mates -- and their LDS images -- were
+  // still being restored. resume_debug_queues() commits the bit for every wave
+  // in the queue in one pass once the whole restore has succeeded.
 }
 
 int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uint32_t num_queues) {
@@ -3331,6 +3335,10 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
         }
       }
     }
+    // This is the single commit point for debug_suspended: apply_cwsr_to_wave()
+    // leaves every wave suspended, so none of them runs until the whole queue's
+    // CWSR state and LDS have been restored above.
+    //
     // Accumulated inside the locked loop below rather than read afterwards.
     // The loop clears debug_suspended, which makes these waves runnable, so
     // from that point the engine thread can be writing debug_halted_ -- a plain
