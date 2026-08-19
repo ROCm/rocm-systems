@@ -363,8 +363,8 @@ void ResetHipFakes()
 // Host-memory-backed HIP VMM/stream profile.
 //
 // Sets the seams above to behaviour that lets code driving the driver VMM API
-// run to completion on a plain CPU (no GPU). Mirrors the fakes that lived in
-// test/DevRuntimeTestsStubs.cc. Opt in per test via InstallHostBackedVmm().
+// run to completion on a plain CPU (no GPU). Opt in per test via
+// InstallHostBackedVmm() (see the DevRuntime host tests).
 // ===========================================================================
 void InstallHostBackedVmm()
 {
