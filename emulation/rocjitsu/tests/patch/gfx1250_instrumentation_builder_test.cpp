@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "decode_test_util.h"
 #include "rocjitsu/code/patch/gfx1250_instrumentation_builder.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -34,7 +35,7 @@ TEST(Gfx1250InstructionBuilder, BuildSCallI64) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(&*word));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, &*word));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(std::string_view(inst->mnemonic()), "s_call_i64");
   EXPECT_EQ(inst->branch_offset_bytes(), -12);
@@ -51,7 +52,7 @@ TEST(Gfx1250InstructionBuilder, BuildVCmpNeU16Vcc) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(&*word));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, &*word));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(std::string_view(inst->mnemonic()), "v_cmp_ne_u16_e32");
 
@@ -75,8 +76,8 @@ TEST(Gfx1250InstructionBuilder, BuildFixedLaneScalarTransfers) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> write_inst(decoder->decode(write->data()));
-  std::unique_ptr<Instruction> read_inst(decoder->decode(read->data()));
+  std::unique_ptr<Instruction> write_inst(decode_valid(*decoder, write->data()));
+  std::unique_ptr<Instruction> read_inst(decode_valid(*decoder, read->data()));
   ASSERT_NE(write_inst, nullptr);
   ASSERT_NE(read_inst, nullptr);
   EXPECT_EQ(std::string_view(write_inst->mnemonic()), "v_writelane_b32");

@@ -1,5 +1,14 @@
 namespace {
 
+[[nodiscard]] std::unique_ptr<Instruction>
+decode_bounded_instruction(Decoder &decoder, std::span<const uint32_t> words,
+                           uint64_t source_offset) {
+  DecodeResult decoded = decoder.decode_window(words, source_offset, DecodeErrorEmitter{});
+  if (decoded.failed())
+    return {};
+  return std::move(decoded).value();
+}
+
 inline constexpr uint16_t kRdna4ExecLo = 126;
 inline constexpr uint16_t kRdna4ExecHi = 127;
 inline constexpr uint16_t kRdna4VccLo = 106;
@@ -233,12 +242,11 @@ decode_relocatable_entry_instruction(std::span<const uint8_t> text, uint64_t off
     const size_t available =
         std::min<size_t>(sizeof(decode_words), text.size() - instruction_offset);
     std::memcpy(decode_words.data(), text.data() + instruction_offset, available);
-    std::unique_ptr<Instruction> instruction;
-    try {
-      instruction.reset(decoder->decode(decode_words.data(), instruction_offset));
-    } catch (const std::exception &exception) {
-      errors.emplace_back("ConSan MOI could not decode the kernel entry instruction: " +
-                          std::string(exception.what()));
+    std::unique_ptr<Instruction> instruction = decode_bounded_instruction(
+        *decoder, std::span<const uint32_t>(decode_words).first(available / sizeof(uint32_t)),
+        instruction_offset);
+    if (!instruction) {
+      errors.emplace_back("ConSan MOI could not decode the kernel entry instruction");
       return std::nullopt;
     }
     if (!instruction || instruction->size() <= 0 || instruction->size() % sizeof(uint32_t) != 0 ||

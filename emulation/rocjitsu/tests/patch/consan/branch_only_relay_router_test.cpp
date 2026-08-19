@@ -90,12 +90,15 @@ constexpr BranchOnlyRelayOwnerIdentity direct_relay_owner(uint64_t value) {
 
 class RelayTestDecoder : public Decoder {
 public:
-  Instruction *decode(const rj_code_binary_inst_t *word) override {
+  std::size_t max_instruction_words() const override { return 1; }
+
+  DecodeResult decode(const rj_code_binary_inst_t *word, const DecodeErrorEmitter &) override {
     if (*word == kRelayTestEnd)
-      return new RelayTestInstruction("s_endpgm", 4, PROGRAM_TERMINATOR, std::nullopt, word);
+      return std::make_unique<RelayTestInstruction>("s_endpgm", 4, PROGRAM_TERMINATOR, std::nullopt,
+                                                    word);
     if (*word == kRelayTestClauseTwo)
-      return new RelayTestInstruction("s_clause", 4, 0u, std::nullopt, word);
-    return new RelayTestInstruction("s_mov_b32", 4, 0u, std::nullopt, word);
+      return std::make_unique<RelayTestInstruction>("s_clause", 4, 0u, std::nullopt, word);
+    return std::make_unique<RelayTestInstruction>("s_mov_b32", 4, 0u, std::nullopt, word);
   }
 };
 
@@ -3096,10 +3099,11 @@ TEST(ConSanBranchOnlyRelayRouter, PreplannedDirectReservoirIsZeroCostRoutingCapa
   RelayTestCodeObject object(std::move(words));
   class ExcludedRelayTestDecoder : public RelayTestDecoder {
   public:
-    Instruction *decode(const rj_code_binary_inst_t *word) override {
+    DecodeResult decode(const rj_code_binary_inst_t *word,
+                        const DecodeErrorEmitter &emit_error) override {
       if (*word == kRelayTestExcluded)
-        return new RelayTestInstruction("ds_read_b32", 4, 0u, std::nullopt, word);
-      return RelayTestDecoder::decode(word);
+        return std::make_unique<RelayTestInstruction>("ds_read_b32", 4, 0u, std::nullopt, word);
+      return RelayTestDecoder::decode(word, emit_error);
     }
   } decoder;
   auto blocks = BasicBlock::build(object, decoder, kArch);

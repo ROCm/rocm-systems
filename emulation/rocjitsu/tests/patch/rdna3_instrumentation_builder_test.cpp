@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "decode_test_util.h"
 #include "rocjitsu/code/patch/rdna3_instrumentation_builder.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -88,7 +89,7 @@ TEST(Rdna3InstrumentationBuilder, MemoryAndAtomicEncodingsMatchLlvmAndDecoder) {
            {cmp_swap->data(), "flat_atomic_cmpswap_b32"},
            {add64->data(), "flat_atomic_add_u64"},
        }}) {
-    std::unique_ptr<Instruction> instruction(decoder->decode(words));
+    std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words));
     ASSERT_NE(instruction, nullptr);
     EXPECT_EQ(std::string_view(instruction->mnemonic()), mnemonic);
   }

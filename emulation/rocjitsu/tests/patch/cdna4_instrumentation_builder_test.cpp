@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "decode_test_util.h"
 #include "rocjitsu/code/patch/cdna4_instrumentation_builder.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -62,7 +63,7 @@ TEST(Cdna4InstrumentationBuilder, ScalarControlMatchesLlvmAndDecoder) {
   ASSERT_NE(decoder, nullptr);
   for (size_t i = 0; i < cases.size(); ++i) {
     EXPECT_EQ(cases[i].first, llvm_words[i]);
-    std::unique_ptr<Instruction> inst(decoder->decode(&cases[i].first));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, &cases[i].first));
     ASSERT_NE(inst, nullptr);
     EXPECT_EQ(std::string_view(inst->mnemonic()), cases[i].second);
   }
@@ -108,7 +109,7 @@ TEST(Cdna4InstrumentationBuilder, VectorArithmeticMatchesLlvmAndDecoder) {
   auto decoder = Decoder::create(kArch);
   ASSERT_NE(decoder, nullptr);
   const auto expect_decode = [&](const uint32_t *words, std::string_view mnemonic) {
-    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     EXPECT_EQ(std::string_view(inst->mnemonic()), mnemonic);
   };
@@ -156,7 +157,7 @@ TEST(Cdna4InstrumentationBuilder, VectorIdentityMatchesLlvmAndDecoder) {
            {&*cmp_ne, "v_cmp_ne_u32_e32"},
            {&*cmp_gt, "v_cmp_gt_u32_e32"},
        }}) {
-    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     EXPECT_EQ(std::string_view(inst->mnemonic()), mnemonic);
   }
@@ -220,7 +221,7 @@ TEST(Cdna4InstrumentationBuilder, SmemAndFlatPublicationMatchLlvmAndDecoder) {
            {store->data(), "flat_store_dword"},
            {load->data(), "flat_load_dword"},
        }}) {
-    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     EXPECT_EQ(std::string_view(inst->mnemonic()), mnemonic);
   }
@@ -271,7 +272,7 @@ TEST(Cdna4InstrumentationBuilder, DsAndFlatAtomicsMatchLlvmAndDecoder) {
            {swap64->data(), "flat_atomic_swap_x2"},
            {add64->data(), "flat_atomic_add_x2"},
        }}) {
-    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     EXPECT_EQ(std::string_view(inst->mnemonic()), mnemonic);
   }
@@ -301,8 +302,8 @@ TEST(Cdna4InstrumentationBuilder, BuildAddressFreeScratchB32) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> store_inst(decoder->decode(store->data()));
-  std::unique_ptr<Instruction> load_inst(decoder->decode(load->data()));
+  std::unique_ptr<Instruction> store_inst(decode_valid(*decoder, store->data()));
+  std::unique_ptr<Instruction> load_inst(decode_valid(*decoder, load->data()));
   ASSERT_NE(store_inst, nullptr);
   ASSERT_NE(load_inst, nullptr);
   EXPECT_EQ(store_inst->mnemonic(), "scratch_store_dword");
@@ -365,7 +366,7 @@ TEST(Cdna4InstrumentationBuilder, WaitBarrierAndCacheControlMatchLlvmAndDecoder)
   auto decoder = Decoder::create(kArch);
   ASSERT_NE(decoder, nullptr);
   const auto expect_decode = [&](const uint32_t *words, std::string_view mnemonic, uint32_t size) {
-    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     EXPECT_EQ(std::string_view(inst->mnemonic()), mnemonic);
     EXPECT_EQ(inst->size(), size);

@@ -2862,13 +2862,12 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
       }
     } else {
       std::unique_ptr<Instruction> original;
-      try {
-        std::unique_ptr<Decoder> decoder = Decoder::create(arch);
-        if (decoder)
-          original.reset(decoder->decode(original_words.data(), plan.anchor_text_offset));
-      } catch (...) {
-        original.reset();
-      }
+      std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+      if (decoder)
+        original = decode_bounded_instruction(
+            *decoder,
+            std::span<const uint32_t>(original_words).first(plan.anchor_size / sizeof(uint32_t)),
+            plan.anchor_text_offset);
       std::string relocatable_error;
       if (!original || static_cast<uint32_t>(original->size()) != plan.anchor_size ||
           !is_relocatable_barrier_move_destination(*original, plan.anchor_text_offset, text, arch,

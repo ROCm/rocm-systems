@@ -576,7 +576,7 @@ TEST(Gfx1250MemoryExecutionHarness, ExecutesInstrumentedNoSaddrFlatOperations) {
   auto execute = [&](const std::vector<uint32_t> &words, std::string_view mnemonic) {
     ASSERT_EQ(words.size(), 3u);
     EXPECT_EQ(words.front() & 0x7fu, static_cast<uint32_t>(cdna5::OPR_SREG_NULL));
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic);
     cu.execute_and_route(inst.release(), *wf);

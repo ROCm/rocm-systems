@@ -138,27 +138,25 @@ rj_status_t rj_code_inst_list_create(rj_code_object_t *obj, rj_code_target_id_t 
       // at word zero for each section.
       std::size_t word_index = 0;
       while (word_index < inst_data_size) {
-        DecodeResult decoded = decoder->decode_window(words.subspan(word_index),
-                                                      word_index * sizeof(uint32_t), {});
+        DecodeResult decoded =
+            decoder->decode_window(words.subspan(word_index), word_index * sizeof(uint32_t), {});
         if (decoded.failed())
           return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
         std::unique_ptr<Instruction> inst = std::move(decoded).value();
-      const int inst_size = inst->size();
-      if (inst_size <= 0 || inst_size % static_cast<int>(sizeof(uint32_t)) != 0)
-        return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
-      const std::size_t inst_words = static_cast<std::size_t>(inst_size) / sizeof(uint32_t);
-      if (inst_words > inst_data_size - word_index)
-        return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
+        const int inst_size = inst->size();
+        if (inst_size <= 0 || inst_size % static_cast<int>(sizeof(uint32_t)) != 0)
+          return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
+        const std::size_t inst_words = static_cast<std::size_t>(inst_size) / sizeof(uint32_t);
+        if (inst_words > inst_data_size - word_index)
+          return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
 
-      owned->list.push_back(*inst);
-      word_index += inst_words;
-      owned->storage.push_back(std::move(inst));
-    }
+        owned->list.push_back(*inst);
+        word_index += inst_words;
+        owned->storage.push_back(std::move(inst));
+      }
     }
     *inst_list = owned.release();
     return ROCJITSU_STATUS_SUCCESS;
-  } catch (const util::InvalidInst &) {
-    return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
   } catch (const std::bad_alloc &) {
     return ROCJITSU_STATUS_OUT_OF_RESOURCES;
   } catch (...) {
@@ -212,8 +210,6 @@ rj_status_t rj_code_basic_block_list_create(rj_code_object_t *obj, rj_code_targe
     owned->blocks = std::move(blocks).value();
     *list = owned.release();
     return ROCJITSU_STATUS_SUCCESS;
-  } catch (const util::InvalidInst &) {
-    return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
   } catch (const std::bad_alloc &) {
     return ROCJITSU_STATUS_OUT_OF_RESOURCES;
   } catch (...) {

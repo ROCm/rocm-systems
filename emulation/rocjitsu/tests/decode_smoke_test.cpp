@@ -237,7 +237,7 @@ TEST(DecoderSmokeTest, CodeEndIsCfgTerminator) {
     SCOPED_TRACE(static_cast<int>(arch));
     auto decoder = Decoder::create(arch);
     ASSERT_NE(decoder, nullptr);
-    std::unique_ptr<Instruction> inst(decoder->decode(&S_CODE_END));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, &S_CODE_END));
     ASSERT_NE(inst, nullptr);
     EXPECT_EQ(inst->mnemonic(), "s_code_end");
     EXPECT_NE(inst->flags() & PROGRAM_TERMINATOR, 0u);
@@ -706,9 +706,10 @@ TEST(CdnaVop3DecodeTest, WritelaneSrc0Encoding255IsRejectedWithoutConsumingTrail
     auto decoder = Decoder::create(tc.arch);
     ASSERT_NE(decoder, nullptr);
 
-    EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words.data())), util::InvalidInst);
+    EXPECT_TRUE(decode_fails(*decoder, words.data()));
 
-    std::unique_ptr<Instruction> trailing(decoder->decode(words.data() + 2, 2 * sizeof(uint32_t)));
+    std::unique_ptr<Instruction> trailing(
+        decode_valid(*decoder, words.data() + 2, 2 * sizeof(uint32_t)));
     ASSERT_NE(trailing, nullptr);
     EXPECT_EQ(trailing->mnemonic(), "s_nop");
     EXPECT_EQ(trailing->size(), static_cast<int>(sizeof(uint32_t)));
@@ -1749,7 +1750,7 @@ TEST(Rdna4DecodeTest, VopdXyConsumesThreeDwords) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "v_dual_mov_b32 :: v_dual_and_b32");
   EXPECT_EQ(inst->size(), sizeof(words));
@@ -1772,7 +1773,7 @@ TEST(Rdna4DecodeTest, GlobalCacheMaintenanceConsumesThreeDwords) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
   for (const auto &tc : cases) {
-    std::unique_ptr<Instruction> inst(decoder->decode(tc.words));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, tc.words));
     ASSERT_NE(inst, nullptr) << tc.mnemonic;
     EXPECT_EQ(inst->mnemonic(), tc.mnemonic);
     EXPECT_EQ(inst->size(), sizeof(tc.words));
@@ -1787,7 +1788,7 @@ TEST(Rdna4DecodeTest, Vop3CompareRetainsWave64ScalarMaskPair) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "v_cmp_gt_u32");
   EXPECT_EQ(inst->size(), sizeof(words));
@@ -1810,7 +1811,7 @@ TEST(Gfx1250DecodeTest, WmmaScaleF8f6f4ConsumesFourDwords) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "v_wmma_scale_f32_16x16x128_f8f6f4");
   EXPECT_EQ(inst->size(), sizeof(words));

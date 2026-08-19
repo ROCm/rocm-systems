@@ -376,7 +376,7 @@ TEST(Vop3CarrySimdCorrectness, RdnaWave32CarryInIgnoresAdjacentSgpr) {
   uint32_t words[2] = {0u, 0u};
   vop3_sdstenc_encode(/*op=*/288, /*vdst=*/2, /*sdst=*/sb,
                       /*src0=*/256, /*src1=*/257, /*src2=*/cin, kRdna3Encoding, words);
-  std::unique_ptr<Instruction> inst(fx.decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*fx.decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_NE(inst->src_operand(2), nullptr);
   ASSERT_EQ(inst->src_operand(2)->size_bits(), 64u);

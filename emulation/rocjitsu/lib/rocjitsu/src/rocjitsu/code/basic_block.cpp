@@ -9,6 +9,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
+#include "util/diagnostic.h"
 #include "util/except.h"
 
 #include <algorithm>
@@ -168,13 +169,11 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
                     extra_split_points, code_ranges, {});
 }
 
-FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
-BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
-                       DecodeErrorEmitter emit_error, std::span<const uint64_t> extra_leaders,
-                       ExternalEntryPolicy entry_policy,
-                       std::span<const uint64_t> extra_split_points,
-                       std::span<const CodeRange> code_ranges,
-                       std::span<const IndirectCallFixup> retained_indirect_targets) {
+FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_impl(
+    const CodeObject &co, Decoder &decoder, rj_code_arch_t arch, DecodeErrorEmitter emit_error,
+    std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
+    std::span<const uint64_t> extra_split_points, std::span<const CodeRange> code_ranges,
+    std::span<const IndirectCallFixup> retained_indirect_targets) {
   std::vector<std::unique_ptr<BasicBlock>> blocks;
 
   for (const auto *sec : co.text_sections()) {
@@ -227,14 +226,16 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
         auto emit_at_offset = [&](std::string_view message) {
           emit_error.emit() << message << " at .text byte offset " << byte_offset;
         };
-        const DecodeErrorEmitter decode_error =
-            emit_error.ignores_messages() ? DecodeErrorEmitter{} : DecodeErrorEmitter(emit_at_offset);
+        const DecodeErrorEmitter decode_error = emit_error.ignores_messages()
+                                                    ? DecodeErrorEmitter{}
+                                                    : DecodeErrorEmitter(emit_at_offset);
         DecodeResult decode_result = Result::failure();
         try {
           const std::size_t remaining_words =
               static_cast<std::size_t>((range_end - byte_offset) / sizeof(uint32_t));
-          decode_result = decoder.decode_window(
-              std::span<const uint32_t>(&inst_data[pc], remaining_words), byte_offset, decode_error);
+          decode_result =
+              decoder.decode_window(std::span<const uint32_t>(&inst_data[pc], remaining_words),
+                                    byte_offset, decode_error);
         } catch (const util::InvalidInst &error) {
           emit_at_offset(error.what());
           return Result::failure();
@@ -728,6 +729,7 @@ BasicBlock::build_reachable(const CodeObject &co, Decoder &decoder, rj_code_arch
 
   std::vector<CodeRange> reachable_ranges;
   std::vector<IndirectCallFixup> retained_indirect_targets;
+  util::StringDiagnostic decode_error;
 
   for (const auto *sec : co.text_sections()) {
     const auto text =
@@ -787,9 +789,12 @@ BasicBlock::build_reachable(const CodeObject &co, Decoder &decoder, rj_code_arch
             const auto *words = reinterpret_cast<const uint32_t *>(text.data() + offset);
             const size_t available_words =
                 static_cast<size_t>((decode_end - offset) / sizeof(uint32_t));
-            std::unique_ptr<Instruction> inst(
-                decoder.decode_window(std::span<const uint32_t>(words, available_words), offset));
-            if (!inst || inst->size() <= 0)
+            DecodeResult decoded_result = decoder.decode_window(
+                std::span<const uint32_t>(words, available_words), offset, decode_error.emitter());
+            if (decoded_result.failed())
+              throw util::InvalidInst(decode_error.message(), "");
+            std::unique_ptr<Instruction> inst = std::move(decoded_result).value();
+            if (inst->size() <= 0)
               throw util::InvalidInst("zero-sized instruction", "Invalid CFG: ");
             if (offset + static_cast<uint64_t>(inst->size()) > decode_end)
               throw util::InvalidInst("truncated instruction", "Invalid CFG: ");
@@ -900,11 +905,11 @@ BasicBlock::build_reachable(const CodeObject &co, Decoder &decoder, rj_code_arch
                                      recovered_indirect_targets.end());
   }
 
-  auto result = build_impl(co, decoder, arch, DecodeErrorEmitter{}, entry_offsets,
+  auto result = build_impl(co, decoder, arch, decode_error.emitter(), entry_offsets,
                            ExternalEntryPolicy::ExplicitOnly, {}, reachable_ranges,
                            retained_indirect_targets);
   if (result.failed())
-    throw util::InvalidInst("instruction decode failed", "Invalid CFG: ");
+    throw util::InvalidInst(decode_error.message(), "");
   return std::move(result).value();
 }
 

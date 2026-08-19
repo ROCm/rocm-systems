@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "../tools/waitcheck_fixture.h"
+#include "decode_test_util.h"
 #include "rocjitsu/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/analysis/waitcheck.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -63,7 +64,9 @@ template <typename T> void append_inst(std::vector<uint32_t> &words, const T &in
   static_assert(sizeof(T) % sizeof(uint32_t) == 0);
   std::array<uint32_t, sizeof(T) / sizeof(uint32_t)> encoded =
       std::bit_cast<std::array<uint32_t, sizeof(T) / sizeof(uint32_t)>>(inst);
-  words.insert(words.end(), encoded.begin(), encoded.end());
+  words.reserve(words.size() + encoded.size());
+  for (uint32_t word : encoded)
+    words.push_back(word);
 }
 
 [[nodiscard]] rdna4::SoppMachineInst sopp(uint32_t op, uint32_t simm16 = 0) {
@@ -1080,7 +1083,7 @@ TEST(WaitcheckTest, DecodesRdna4CombinedStoreDsWait) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(program.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, program.data()));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "s_wait_storecnt_dscnt");
   EXPECT_TRUE(inst->is_waitcnt());
@@ -1108,7 +1111,7 @@ TEST(WaitcheckTest, DecodesCombinedStoreDsWaitSequenceAtExpectedOffset) {
 
   size_t word_index = 0;
   for (const auto &tc : expected) {
-    std::unique_ptr<Instruction> inst(decoder->decode(&program[word_index]));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, &program[word_index]));
     ASSERT_NE(inst, nullptr);
     EXPECT_EQ(std::string(inst->mnemonic()), tc.mnemonic);
     EXPECT_EQ(inst->size(), tc.size) << inst->mnemonic();
@@ -1387,7 +1390,7 @@ TEST(WaitcheckTest, Gfx1100DecodesLegacyAndSopkWaitcnts) {
       "s_waitcnt", "s_waitcnt_vscnt", "s_waitcnt_vmcnt", "s_waitcnt_expcnt", "s_waitcnt_lgkmcnt"};
   size_t word_index = 0;
   for (const std::string_view mnemonic : expected) {
-    std::unique_ptr<Instruction> inst(decoder->decode(&program[word_index]));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, &program[word_index]));
     ASSERT_NE(inst, nullptr);
     EXPECT_EQ(inst->mnemonic(), mnemonic);
     EXPECT_TRUE(inst->is_waitcnt());
@@ -7312,7 +7315,7 @@ TEST(WaitcheckTest, Gfx1250ResolvedSwappcLiteral64HelperWaitAppliesBeforeContinu
                                         kReturnSreg)); // 0x2c return.
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
-  std::unique_ptr<Instruction> add_inst(decoder->decode(&program[4], 0x10));
+  std::unique_ptr<Instruction> add_inst(decode_valid(*decoder, &program[4], 0x10));
   ASSERT_NE(add_inst, nullptr);
   EXPECT_EQ(add_inst->mnemonic(), "s_add_nc_u64");
   ASSERT_EQ(add_inst->num_dst_operands(), 1);
@@ -7326,7 +7329,8 @@ TEST(WaitcheckTest, Gfx1250ResolvedSwappcLiteral64HelperWaitAppliesBeforeContinu
   std::vector<std::unique_ptr<Instruction>> decoded;
   std::vector<const Instruction *> decoded_ptrs;
   for (uint64_t offset = 0; offset < program.size() * sizeof(uint32_t);) {
-    std::unique_ptr<Instruction> inst(decoder->decode(&program[offset / sizeof(uint32_t)], offset));
+    std::unique_ptr<Instruction> inst(
+        decode_valid(*decoder, &program[offset / sizeof(uint32_t)], offset));
     ASSERT_NE(inst, nullptr);
     offset += static_cast<uint64_t>(inst->size());
     decoded_ptrs.push_back(inst.get());
@@ -7371,7 +7375,7 @@ TEST(WaitcheckTest, Gfx1250Wave32VopcDoesNotClobberAdjacentSwappcTarget) {
                                         kReturnSreg)); // 0x34 return.
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
-  std::unique_ptr<Instruction> cmp_inst(decoder->decode(&program[7], 0x1c));
+  std::unique_ptr<Instruction> cmp_inst(decode_valid(*decoder, &program[7], 0x1c));
   ASSERT_NE(cmp_inst, nullptr);
   EXPECT_EQ(cmp_inst->mnemonic(), "v_cmp_lt_i32");
   ASSERT_EQ(cmp_inst->num_dst_operands(), 1);
@@ -7380,7 +7384,8 @@ TEST(WaitcheckTest, Gfx1250Wave32VopcDoesNotClobberAdjacentSwappcTarget) {
   std::vector<std::unique_ptr<Instruction>> decoded;
   std::vector<const Instruction *> decoded_ptrs;
   for (uint64_t offset = 0; offset < program.size() * sizeof(uint32_t);) {
-    std::unique_ptr<Instruction> inst(decoder->decode(&program[offset / sizeof(uint32_t)], offset));
+    std::unique_ptr<Instruction> inst(
+        decode_valid(*decoder, &program[offset / sizeof(uint32_t)], offset));
     ASSERT_NE(inst, nullptr);
     offset += static_cast<uint64_t>(inst->size());
     decoded_ptrs.push_back(inst.get());

@@ -432,15 +432,11 @@ validate_patch_byte_accounting(const AmdGpuCodeObject &original,
     std::array<uint32_t, 4> words{};
     std::memcpy(words.data(), range.data() + offset,
                 std::min(remaining, words.size() * sizeof(uint32_t)));
-    std::unique_ptr<Instruction> instruction;
-    try {
-      instruction.reset(decoder.decode(words.data(), begin + offset));
-    } catch (const std::exception &exception) {
-      error = "decoder rejected instruction: " + std::string(exception.what());
-      return false;
-    }
+    std::unique_ptr<Instruction> instruction = decode_bounded_instruction(
+        decoder, std::span<const uint32_t>(words).first(std::min(words.size(), remaining / 4u)),
+        begin + offset);
     if (!instruction) {
-      error = "decoder returned null";
+      error = "decoder rejected instruction";
       return false;
     }
     const int instruction_size = instruction->size();
@@ -1066,14 +1062,12 @@ validate_branch_relay_donor_semantics(const AmdGpuCodeObject &original,
     }
 
     std::array<uint32_t, 4> anchor_words{};
-    std::unique_ptr<Instruction> anchor_instruction;
-    try {
-      std::memcpy(anchor_words.data(), original_text.data() + anchor->anchor_offset,
-                  anchor->original_size);
-      anchor_instruction.reset(decoder->decode(anchor_words.data(), anchor->anchor_offset));
-    } catch (...) {
-      anchor_instruction.reset();
-    }
+    std::memcpy(anchor_words.data(), original_text.data() + anchor->anchor_offset,
+                anchor->original_size);
+    std::unique_ptr<Instruction> anchor_instruction = decode_bounded_instruction(
+        *decoder,
+        std::span<const uint32_t>(anchor_words).first(anchor->original_size / sizeof(uint32_t)),
+        anchor->anchor_offset);
     if (!anchor_instruction ||
         anchor_instruction->size() != static_cast<int>(anchor->original_size) ||
         std::string_view(anchor_instruction->mnemonic()).starts_with("ds_") ||
@@ -1084,15 +1078,14 @@ validate_branch_relay_donor_semantics(const AmdGpuCodeObject &original,
     uint32_t host_cursor = 0;
     while (host_cursor < host.original_size) {
       std::array<uint32_t, 4> words{};
-      std::unique_ptr<Instruction> instruction;
-      try {
-        const uint32_t remaining = host.original_size - host_cursor;
-        std::memcpy(words.data(), original_text.data() + host.anchor_offset + host_cursor,
-                    std::min<uint32_t>(remaining, words.size() * sizeof(uint32_t)));
-        instruction.reset(decoder->decode(words.data(), host.anchor_offset + host_cursor));
-      } catch (...) {
-        instruction.reset();
-      }
+      const uint32_t remaining = host.original_size - host_cursor;
+      std::memcpy(words.data(), original_text.data() + host.anchor_offset + host_cursor,
+                  std::min<uint32_t>(remaining, words.size() * sizeof(uint32_t)));
+      std::unique_ptr<Instruction> instruction =
+          decode_bounded_instruction(*decoder,
+                                     std::span<const uint32_t>(words).first(std::min<size_t>(
+                                         words.size(), remaining / sizeof(uint32_t))),
+                                     host.anchor_offset + host_cursor);
       if (!instruction || instruction->size() <= 0 ||
           static_cast<uint32_t>(instruction->size()) > host.original_size - host_cursor) {
         errors.emplace_back("ConSan relay donor proof could not decode its pristine host");
@@ -1557,12 +1550,11 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
   std::array<uint32_t, 4> words{};
   std::memcpy(words.data(), text.data() + offset,
               std::min(words.size() * sizeof(uint32_t), text.size() - offset));
-  std::unique_ptr<Instruction> instruction;
-  try {
-    instruction.reset(decoder.decode(words.data(), offset));
-  } catch (...) {
-    return false;
-  }
+  std::unique_ptr<Instruction> instruction =
+      decode_bounded_instruction(decoder,
+                                 std::span<const uint32_t>(words).first(std::min(
+                                     words.size(), (text.size() - offset) / sizeof(uint32_t))),
+                                 offset);
   return instruction != nullptr && instruction->size() == static_cast<int>(sizeof(uint32_t)) &&
          is_barrier_instruction(*instruction);
 }
@@ -1930,15 +1922,15 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       const uint64_t init_offset = patch.anchor_offset + patch.original_size;
       std::unique_ptr<Instruction> setup_instruction;
       std::unique_ptr<Instruction> init_instruction;
-      try {
-        std::array<uint32_t, 2> setup_words{before_setup, before_literal};
-        setup_instruction.reset(decoder->decode(setup_words.data(), patch.anchor_offset));
-        if (init_offset + sizeof(uint32_t) <= original_text.size()) {
-          uint32_t init_word = 0;
-          std::memcpy(&init_word, original_text.data() + init_offset, sizeof(init_word));
-          init_instruction.reset(decoder->decode(&init_word, init_offset));
-        }
-      } catch (...) {
+      std::array<uint32_t, 2> setup_words{before_setup, before_literal};
+      setup_instruction = decode_bounded_instruction(*decoder, setup_words, patch.anchor_offset);
+      if (init_offset + sizeof(uint32_t) <= original_text.size()) {
+        uint32_t init_word = 0;
+        std::memcpy(&init_word, original_text.data() + init_offset, sizeof(init_word));
+        init_instruction = decode_bounded_instruction(
+            *decoder, std::span<const uint32_t>(&init_word, 1), init_offset);
+      }
+      if (!setup_instruction || !init_instruction) {
         errors.emplace_back("ConSan mutation proof could not decode participant-count setup");
         continue;
       }
@@ -1962,11 +1954,12 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
                   patch.original_size);
       std::memcpy(after_words.data(), replacement_text.data() + patch.anchor_offset,
                   patch.original_size);
-      std::unique_ptr<Instruction> before_instruction;
+      std::unique_ptr<Instruction> before_instruction = decode_bounded_instruction(
+          *decoder,
+          std::span<const uint32_t>(before_words).first(patch.original_size / sizeof(uint32_t)),
+          patch.anchor_offset);
       std::unique_ptr<Instruction> after_instruction;
-      try {
-        before_instruction.reset(decoder->decode(before_words.data(), patch.anchor_offset));
-      } catch (...) {
+      if (!before_instruction) {
         errors.emplace_back("ConSan mutation proof could not decode a barrier ID/scope rewrite");
         continue;
       }
@@ -2001,9 +1994,11 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
         barrier_id_scope_reinstrumented = true;
         continue;
       }
-      try {
-        after_instruction.reset(decoder->decode(after_words.data(), patch.anchor_offset));
-      } catch (...) {
+      after_instruction = decode_bounded_instruction(
+          *decoder,
+          std::span<const uint32_t>(after_words).first(patch.original_size / sizeof(uint32_t)),
+          patch.anchor_offset);
+      if (!after_instruction) {
         errors.emplace_back("ConSan mutation proof could not decode a barrier ID/scope rewrite");
         continue;
       }
@@ -2199,11 +2194,8 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
         } else {
           std::array<uint32_t, 4> leave_words{};
           std::memcpy(leave_words.data(), original_text.data() + leave_offset, sizeof(uint32_t));
-          std::unique_ptr<Instruction> leave_instruction;
-          try {
-            leave_instruction.reset(decoder->decode(leave_words.data(), leave_offset));
-          } catch (...) {
-          }
+          std::unique_ptr<Instruction> leave_instruction = decode_bounded_instruction(
+              *decoder, std::span<const uint32_t>(leave_words).first(1), leave_offset);
           uint32_t original_leave = 0;
           uint32_t replacement_leave = 0;
           std::memcpy(&original_leave, original_text.data() + leave_offset, sizeof(original_leave));
@@ -3002,8 +2994,7 @@ validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
       return;
     }
     const uint64_t required_suffix_words =
-        capture_prefix.size() + 2u * (restore_count + system_restore_count) +
-        reload_words;
+        capture_prefix.size() + 2u * (restore_count + system_restore_count) + reload_words;
     if (required_suffix_words > static_cast<uint64_t>(entry_words.end() - capture)) {
       errors.emplace_back(
           "ConSan final validation found a truncated dispatch-ID entry prologue for kernel '" +
@@ -3147,10 +3138,12 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
       std::array<uint32_t, 4> words{};
       std::memcpy(words.data(), body.data() + cursor,
                   std::min(words.size() * sizeof(uint32_t), body.size() - cursor));
-      std::unique_ptr<Instruction> instruction;
-      try {
-        instruction.reset(decoder->decode(words.data(), body_offset + cursor));
-      } catch (...) {
+      std::unique_ptr<Instruction> instruction =
+          decode_bounded_instruction(*decoder,
+                                     std::span<const uint32_t>(words).first(std::min(
+                                         words.size(), (body.size() - cursor) / sizeof(uint32_t))),
+                                     body_offset + cursor);
+      if (!instruction) {
         errors.emplace_back(
             "ConSan final validation could not re-decode exact-shadow generated body");
         break;
@@ -3422,12 +3415,13 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
       std::array<uint32_t, 4> words{};
       std::memcpy(words.data(), body.data() + cursor,
                   std::min(words.size() * sizeof(uint32_t), body.size() - cursor));
-      std::unique_ptr<Instruction> instruction;
-      try {
-        instruction.reset(decoder->decode(words.data(), patch.trampoline_offset + cursor));
-      } catch (...) {
+      std::unique_ptr<Instruction> instruction =
+          decode_bounded_instruction(*decoder,
+                                     std::span<const uint32_t>(words).first(std::min(
+                                         words.size(), (body.size() - cursor) / sizeof(uint32_t))),
+                                     patch.trampoline_offset + cursor);
+      if (!instruction) {
         decode_failed = true;
-        break;
       }
       if (!instruction || instruction->size() <= 0 ||
           static_cast<size_t>(instruction->size()) > body.size() - cursor) {

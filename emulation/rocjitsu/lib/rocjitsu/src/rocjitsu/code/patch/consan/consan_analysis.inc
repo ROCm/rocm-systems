@@ -3,6 +3,15 @@ namespace {
 using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
 namespace kd = rocr::llvm::amdhsa;
 
+[[nodiscard]] std::unique_ptr<Instruction>
+decode_bounded_instruction(Decoder &decoder, std::span<const uint32_t> words,
+                           uint64_t source_offset) {
+  DecodeResult decoded = decoder.decode_window(words, source_offset, DecodeErrorEmitter{});
+  if (decoded.failed())
+    return {};
+  return std::move(decoded).value();
+}
+
 [[nodiscard]] bool is_cdna_arch(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
          arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
@@ -2198,22 +2207,15 @@ void decode_kernel_stats(std::span<const uint8_t> code_object_bytes, Decoder &de
     std::memcpy(words.data(), text.data() + offset,
                 std::min(words.size() * sizeof(uint32_t), remaining));
 
-    std::unique_ptr<Instruction> inst;
-    try {
-      inst.reset(
-          decoder.decode(words.data(), kernel.entry_text_offset + static_cast<uint64_t>(offset)));
-    } catch (const std::exception &error) {
+    std::unique_ptr<Instruction> inst = decode_bounded_instruction(
+        decoder, std::span<const uint32_t>(words).first(std::min(words.size(), remaining / 4u)),
+        kernel.entry_text_offset + static_cast<uint64_t>(offset));
+    if (!inst) {
       ++kernel.stats.decode_error_count;
       warnings.emplace_back(
           "ConSan stopped decoding kernel '" + kernel.name + "' at text offset " +
-          std::to_string(kernel.entry_text_offset + static_cast<uint64_t>(offset)) + ": " +
-          error.what());
-      break;
-    }
-    if (!inst) {
-      ++kernel.stats.decode_error_count;
-      warnings.emplace_back("ConSan stopped decoding kernel '" + kernel.name +
-                            "': decoder returned null");
+          std::to_string(kernel.entry_text_offset + static_cast<uint64_t>(offset)) +
+          ": decoder rejected instruction");
       break;
     }
 

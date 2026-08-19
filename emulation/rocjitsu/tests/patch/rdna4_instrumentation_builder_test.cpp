@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "decode_test_util.h"
 #include "rocjitsu/code/patch/rdna4_instrumentation_builder.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -26,8 +27,8 @@ TEST(InstructionBuilder, BuildAddressFreeScratchB32) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> store_inst(decoder->decode(store->data()));
-  std::unique_ptr<Instruction> load_inst(decoder->decode(load->data()));
+  std::unique_ptr<Instruction> store_inst(decode_valid(*decoder, store->data()));
+  std::unique_ptr<Instruction> load_inst(decode_valid(*decoder, load->data()));
   ASSERT_NE(store_inst, nullptr);
   ASSERT_NE(load_inst, nullptr);
   EXPECT_EQ(store_inst->mnemonic(), "scratch_store_b32");
@@ -48,8 +49,8 @@ TEST(InstructionBuilder, BuildGfx1250AddressFreeScratchB32) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> store_inst(decoder->decode(store->data()));
-  std::unique_ptr<Instruction> load_inst(decoder->decode(load->data()));
+  std::unique_ptr<Instruction> store_inst(decode_valid(*decoder, store->data()));
+  std::unique_ptr<Instruction> load_inst(decode_valid(*decoder, load->data()));
   ASSERT_NE(store_inst, nullptr);
   ASSERT_NE(load_inst, nullptr);
   EXPECT_EQ(store_inst->mnemonic(), "scratch_store_b32");
@@ -158,7 +159,7 @@ TEST(InstructionBuilder, BuildVReadfirstlaneB32) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(&*word));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, &*word));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(std::string_view(inst->mnemonic()), "v_readfirstlane_b32_e32");
 
@@ -179,8 +180,8 @@ TEST(InstructionBuilder, BuildRdna4FixedLaneScalarTransfers) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> write_inst(decoder->decode(write->data()));
-  std::unique_ptr<Instruction> read_inst(decoder->decode(read->data()));
+  std::unique_ptr<Instruction> write_inst(decode_valid(*decoder, write->data()));
+  std::unique_ptr<Instruction> read_inst(decode_valid(*decoder, read->data()));
   ASSERT_NE(write_inst, nullptr);
   ASSERT_NE(read_inst, nullptr);
   EXPECT_EQ(std::string_view(write_inst->mnemonic()), "v_writelane_b32");
@@ -215,7 +216,7 @@ TEST(InstructionBuilder, BuildSGetregB32) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(&*word));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, &*word));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(std::string_view(inst->mnemonic()), "s_getreg_b32");
 
@@ -243,10 +244,10 @@ TEST(InstructionBuilder, BuildVMbcntLaneIdSequence) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> low_inst(decoder->decode(low->data()));
+  std::unique_ptr<Instruction> low_inst(decode_valid(*decoder, low->data()));
   ASSERT_NE(low_inst, nullptr);
   EXPECT_EQ(std::string_view(low_inst->mnemonic()), "v_mbcnt_lo_u32_b32");
-  std::unique_ptr<Instruction> high_inst(decoder->decode(high->data()));
+  std::unique_ptr<Instruction> high_inst(decode_valid(*decoder, high->data()));
   ASSERT_NE(high_inst, nullptr);
   EXPECT_EQ(std::string_view(high_inst->mnemonic()), "v_mbcnt_hi_u32_b32");
 
@@ -268,7 +269,7 @@ TEST(InstructionBuilder, BuildVCmpEqU32E32Vcc) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(&*word));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, &*word));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(std::string_view(inst->mnemonic()), "v_cmp_eq_u32_e32");
 
@@ -287,7 +288,7 @@ TEST(InstructionBuilder, BuildVAddNcU32E32) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(&*word));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, &*word));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(std::string_view(inst->mnemonic()), "v_add_nc_u32_e32");
 
@@ -315,10 +316,10 @@ TEST(InstructionBuilder, BuildVAndB32E32) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(&*word));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, &*word));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(std::string_view(inst->mnemonic()), "v_and_b32_e32");
-  std::unique_ptr<Instruction> literal_inst(decoder->decode(literal->data()));
+  std::unique_ptr<Instruction> literal_inst(decode_valid(*decoder, literal->data()));
   ASSERT_NE(literal_inst, nullptr);
   EXPECT_EQ(std::string_view(literal_inst->mnemonic()), "v_and_b32_e32");
 
@@ -346,7 +347,7 @@ TEST(InstructionBuilder, BuildVCmpGtU32E32Vcc) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(&*word));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, &*word));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(std::string_view(inst->mnemonic()), "v_cmp_gt_u32_e32");
 
@@ -365,7 +366,7 @@ TEST(InstructionBuilder, BuildVCmpNeU32E32Vcc) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(&*word));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, &*word));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(std::string_view(inst->mnemonic()), "v_cmp_ne_u32_e32");
 
@@ -384,7 +385,7 @@ TEST(InstructionBuilder, BuildVCmpNeU16E32Vcc) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(&*word));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, &*word));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(std::string_view(inst->mnemonic()), "v_cmp_ne_u16_e32");
 
@@ -407,10 +408,10 @@ TEST(InstructionBuilder, BuildExecNarrowingScalarOps) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> save_inst(decoder->decode(&*save_exec));
+  std::unique_ptr<Instruction> save_inst(decode_valid(*decoder, &*save_exec));
   ASSERT_NE(save_inst, nullptr);
   EXPECT_EQ(std::string_view(save_inst->mnemonic()), "s_and_saveexec_b64");
-  std::unique_ptr<Instruction> restore_inst(decoder->decode(&*restore_exec));
+  std::unique_ptr<Instruction> restore_inst(decode_valid(*decoder, &*restore_exec));
   ASSERT_NE(restore_inst, nullptr);
   EXPECT_EQ(std::string_view(restore_inst->mnemonic()), "s_mov_b64");
 
@@ -430,7 +431,7 @@ TEST(InstructionBuilder, BuildWavePartitionMaskRemoval) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(&*remaining));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, &*remaining));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(std::string_view(inst->mnemonic()), "s_xor_b64");
 
@@ -442,7 +443,7 @@ TEST(InstructionBuilder, BuildWavePartitionMaskRemoval) {
   const auto repeat = build_s_cbranch_execnz(/*offset_dwords=*/-4, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(repeat);
   EXPECT_EQ(*repeat, 0xBFA6FFFCu);
-  std::unique_ptr<Instruction> branch_inst(decoder->decode(&*repeat));
+  std::unique_ptr<Instruction> branch_inst(decode_valid(*decoder, &*repeat));
   ASSERT_NE(branch_inst, nullptr);
   EXPECT_EQ(std::string_view(branch_inst->mnemonic()), "s_cbranch_execnz");
   EXPECT_FALSE(build_s_cbranch_execnz(/*offset_dwords=*/-4, ROCJITSU_CODE_ARCH_CDNA4));
@@ -462,10 +463,10 @@ TEST(InstructionBuilder, BuildSccSnapshotAndRestoreOps) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> save_inst(decoder->decode(&*save_scc));
+  std::unique_ptr<Instruction> save_inst(decode_valid(*decoder, &*save_scc));
   ASSERT_NE(save_inst, nullptr);
   EXPECT_EQ(std::string_view(save_inst->mnemonic()), "s_cselect_b32");
-  std::unique_ptr<Instruction> restore_inst(decoder->decode(&*restore_scc));
+  std::unique_ptr<Instruction> restore_inst(decode_valid(*decoder, &*restore_scc));
   ASSERT_NE(restore_inst, nullptr);
   EXPECT_EQ(std::string_view(restore_inst->mnemonic()), "s_cmp_lg_u32");
 
@@ -490,7 +491,7 @@ TEST(InstructionBuilder, BuildSCbranchVccz) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(&*word));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, &*word));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(std::string_view(inst->mnemonic()), "s_cbranch_vccz");
 
@@ -507,7 +508,7 @@ TEST(InstructionBuilder, BuildSCbranchVccnz) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(&*word));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, &*word));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(std::string_view(inst->mnemonic()), "s_cbranch_vccnz");
 
@@ -591,10 +592,10 @@ TEST(InstructionBuilder, BuildGfx1250MoiBarrierRecordRecipeEncodings) {
 
   auto decoder = Decoder::create(kArch);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> save_exec_inst(decoder->decode(&*save_exec));
-  std::unique_ptr<Instruction> mbcnt_inst(decoder->decode(mbcnt_low->data()));
-  std::unique_ptr<Instruction> store_inst(decoder->decode(flat_store->data()));
-  std::unique_ptr<Instruction> atomic_inst(decoder->decode(atomic_add->data()));
+  std::unique_ptr<Instruction> save_exec_inst(decode_valid(*decoder, &*save_exec));
+  std::unique_ptr<Instruction> mbcnt_inst(decode_valid(*decoder, mbcnt_low->data()));
+  std::unique_ptr<Instruction> store_inst(decode_valid(*decoder, flat_store->data()));
+  std::unique_ptr<Instruction> atomic_inst(decode_valid(*decoder, atomic_add->data()));
   ASSERT_NE(save_exec_inst, nullptr);
   ASSERT_NE(mbcnt_inst, nullptr);
   ASSERT_NE(store_inst, nullptr);
@@ -616,7 +617,7 @@ TEST(InstructionBuilder, BuildFlatStoreB32) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words->data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words->data()));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(std::string_view(inst->mnemonic()), "flat_store_b32");
 
@@ -641,9 +642,9 @@ TEST(InstructionBuilder, BuildWideLdsStoreAndLiteralBoundsCompare) {
 
     auto decoder = Decoder::create(arch);
     ASSERT_NE(decoder, nullptr);
-    std::unique_ptr<Instruction> store_inst(decoder->decode(store->data()));
-    std::unique_ptr<Instruction> store_quad_inst(decoder->decode(store_quad->data()));
-    std::unique_ptr<Instruction> compare_inst(decoder->decode(compare->data()));
+    std::unique_ptr<Instruction> store_inst(decode_valid(*decoder, store->data()));
+    std::unique_ptr<Instruction> store_quad_inst(decode_valid(*decoder, store_quad->data()));
+    std::unique_ptr<Instruction> compare_inst(decode_valid(*decoder, compare->data()));
     ASSERT_NE(store_inst, nullptr);
     ASSERT_NE(store_quad_inst, nullptr);
     ASSERT_NE(compare_inst, nullptr);
@@ -678,7 +679,7 @@ TEST(InstructionBuilder, BuildFlatLoadB32) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words->data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words->data()));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(std::string_view(inst->mnemonic()), "flat_load_b32");
 
@@ -696,7 +697,7 @@ TEST(InstructionBuilder, BuildGfx1250FlatLoadB32) {
   EXPECT_EQ(*words, (std::array<uint32_t, 3>{0xEC05007Cu, 0x0000000Au, 0x00000008u}));
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words->data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words->data()));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(std::string_view(inst->mnemonic()), "flat_load_b32");
   EXPECT_EQ(inst->size(), 12u);
@@ -740,9 +741,9 @@ TEST(InstructionBuilder, BuildGfx1250SampledPublicationOperations) {
   ASSERT_TRUE(address_add);
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> low(decoder->decode(address_add->data()));
-  std::unique_ptr<Instruction> wait(decoder->decode(address_add->data() + 2));
-  std::unique_ptr<Instruction> high(decoder->decode(address_add->data() + 3));
+  std::unique_ptr<Instruction> low(decode_valid(*decoder, address_add->data()));
+  std::unique_ptr<Instruction> wait(decode_valid(*decoder, address_add->data() + 2));
+  std::unique_ptr<Instruction> high(decode_valid(*decoder, address_add->data() + 3));
   ASSERT_NE(low, nullptr);
   ASSERT_NE(wait, nullptr);
   ASSERT_NE(high, nullptr);
@@ -762,9 +763,9 @@ TEST(InstructionBuilder, BuildGfx1250SampledPublicationOperations) {
   const auto cell_offset = build_v_add_u64_signed_i24(/*address_vgpr=*/8, /*displacement=*/16,
                                                       ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_TRUE(cell_offset);
-  std::unique_ptr<Instruction> offset_low(decoder->decode(cell_offset->data()));
-  std::unique_ptr<Instruction> offset_wait(decoder->decode(cell_offset->data() + 3));
-  std::unique_ptr<Instruction> offset_high(decoder->decode(cell_offset->data() + 4));
+  std::unique_ptr<Instruction> offset_low(decode_valid(*decoder, cell_offset->data()));
+  std::unique_ptr<Instruction> offset_wait(decode_valid(*decoder, cell_offset->data() + 3));
+  std::unique_ptr<Instruction> offset_high(decode_valid(*decoder, cell_offset->data() + 4));
   ASSERT_NE(offset_low, nullptr);
   ASSERT_NE(offset_wait, nullptr);
   ASSERT_NE(offset_high, nullptr);
@@ -841,9 +842,9 @@ TEST(InstructionBuilder, BuildGfx1250SignedI24AddPinsInlineAndLiteralBoundaries)
     EXPECT_EQ((*words)[1] & 0x1ffu, test_case.low_source);
     EXPECT_EQ((*words)[5] & 0x1ffu, test_case.high_source);
 
-    std::unique_ptr<Instruction> low(decoder->decode(words->data()));
-    std::unique_ptr<Instruction> wait(decoder->decode(words->data() + 3));
-    std::unique_ptr<Instruction> high(decoder->decode(words->data() + 4));
+    std::unique_ptr<Instruction> low(decode_valid(*decoder, words->data()));
+    std::unique_ptr<Instruction> wait(decode_valid(*decoder, words->data() + 3));
+    std::unique_ptr<Instruction> high(decode_valid(*decoder, words->data() + 4));
     ASSERT_NE(low, nullptr);
     ASSERT_NE(wait, nullptr);
     ASSERT_NE(high, nullptr);
@@ -865,7 +866,7 @@ TEST(InstructionBuilder, BuildFlatAtomicAddU32ReturnDeviceScope) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words->data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words->data()));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(std::string_view(inst->mnemonic()), "flat_atomic_add_u32");
 
@@ -895,7 +896,7 @@ TEST(InstructionBuilder, BuildFlatAtomicOrU32ReturnDeviceScope) {
 
   std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(decoder);
-  std::unique_ptr<Instruction> inst(decoder->decode(words->data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words->data()));
   ASSERT_TRUE(inst);
   EXPECT_EQ(std::string_view(inst->mnemonic()), "flat_atomic_or_b32");
 
@@ -914,7 +915,7 @@ TEST(InstructionBuilder, BuildFlatAtomicCompareSwapB64ReturnDeviceScope) {
 
   std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(decoder);
-  std::unique_ptr<Instruction> inst(decoder->decode(words->data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words->data()));
   ASSERT_TRUE(inst);
   EXPECT_EQ(std::string_view(inst->mnemonic()), "flat_atomic_cmpswap_b64");
 
@@ -936,7 +937,7 @@ TEST(InstructionBuilder, BuildFlatAtomicSwapB64ReturnDeviceScope) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words->data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words->data()));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(std::string_view(inst->mnemonic()), "flat_atomic_swap_b64");
 
