@@ -71,9 +71,9 @@ TEST(ConfigLoaderTest, LoadCdna4Config) {
   EXPECT_EQ(xcd->num_shader_engines(), 4u);
   EXPECT_EQ(xcd->shader_engine(0)->num_compute_units(), 9u);
   EXPECT_EQ(kmd::drm_cu_active_number(loaded.device.simd_count, loaded.device.simd_per_cu), 256u);
-  EXPECT_EQ(soc->assign_queue_cp(0), soc->xcd(0)->command_processor());
-  EXPECT_EQ(soc->assign_queue_cp(1), soc->xcd(1)->command_processor());
-  EXPECT_EQ(soc->assign_queue_cp(soc->num_xcds()), soc->xcd(0)->command_processor());
+  EXPECT_EQ(soc->assign_queue_owner_cp(0), soc->xcd(0)->command_processor());
+  EXPECT_EQ(soc->assign_queue_owner_cp(1), soc->xcd(1)->command_processor());
+  EXPECT_EQ(soc->assign_queue_owner_cp(soc->num_xcds()), soc->xcd(0)->command_processor());
 }
 
 TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {

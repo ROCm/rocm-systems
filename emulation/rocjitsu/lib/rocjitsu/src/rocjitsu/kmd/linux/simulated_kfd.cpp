@@ -2128,7 +2128,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
   // Queue IDs are process-local and start at one. Equivalent runtime queues in
   // different processes therefore share XCD resources while each process still
   // distributes additional queues across the device.
-  auto *target_cp = gpu->soc->assign_queue_cp(proc.next_queue_id_ - 1);
+  auto *target_cp = gpu->soc->assign_queue_owner_cp(proc.next_queue_id_ - 1);
   if (!target_cp)
     return -EINVAL;
 
