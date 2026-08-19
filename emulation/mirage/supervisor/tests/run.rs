@@ -179,6 +179,83 @@ inventory::submit! {
     }
 }
 
+/// A stub that knows in advance it cannot host a daemon.
+///
+/// The complement of [`NoDaemonStub`], and the distinction is the whole
+/// point of `daemon_capability`: this one is not a daemon that fails when
+/// started, it is a runtime that can be *asked* before anything is
+/// created. Its `start_daemon` panics rather than erroring, so a test can
+/// tell the two apart — if bring-up ever reaches it, the pre-flight did
+/// not do its job and the test fails loudly instead of passing on the
+/// late error that looks the same from outside.
+#[derive(Debug)]
+struct NoCapabilityStub;
+
+impl EmulatorBackend for NoCapabilityStub {
+    fn description(&self) -> EmulatorDescription {
+        EmulatorDescription {
+            name: "nocapability".to_string(),
+            version: "0".to_string(),
+            description: "test-only emulator that cannot host a daemon here".to_string(),
+            options_schema: Vec::new(),
+        }
+    }
+
+    fn boot(&self, _def: &ProfileDef) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn options(&self) -> Vec<OptionDef> {
+        Vec::new()
+    }
+
+    fn shutdown(&self, _ctx: &SessionContext) {}
+
+    fn validate_profile(&self, _def: &ProfileDef) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn runtime(&self) -> RuntimeStatus {
+        RuntimeStatus::new(true, RuntimeLocation::Unknown)
+    }
+
+    fn supported(&self) -> SupportStatus {
+        SupportStatus::supported("stub emulator needs nothing".to_string())
+    }
+
+    fn discover_plugins(&self) -> Vec<PluginsDef> {
+        Vec::new()
+    }
+
+    fn health(&self, _ctx: &SessionContext) -> SessionHealth {
+        SessionHealth::phase(true, "ready", None)
+    }
+
+    fn injection_def(&self, _ctx: &SessionContext) -> mirage_core::error::Result<InjectionDef> {
+        Ok(InjectionDef::default())
+    }
+
+    fn daemon_capability(&self) -> mirage_core::error::Result<()> {
+        Err(mirage_core::error::MirageError::other(
+            "this runtime predates the daemon API".to_string(),
+        ))
+    }
+
+    fn start_daemon(
+        &self,
+        _ctx: &SessionContext,
+    ) -> mirage_core::error::Result<Option<Box<dyn mirage_core::emulator::EmulatorDaemon>>> {
+        panic!("bring-up reached start_daemon despite the capability check refusing it")
+    }
+}
+
+inventory::submit! {
+    EmulatorBackendDef {
+        kind: "nocapability",
+        backend: &NoCapabilityStub,
+    }
+}
+
 // ---------------------------------------------------------------------
 // Harness
 // ---------------------------------------------------------------------
@@ -1741,4 +1818,92 @@ async fn a_daemon_that_will_not_start_fails_the_session() {
         reason.contains("--in-process"),
         "the error does not say how to proceed: {reason}"
     );
+}
+
+/// A runtime that cannot host a daemon is refused before anything is
+/// created, not after everything is.
+///
+/// The complement of the test above, and the reason
+/// `EmulatorBackend::daemon_capability` exists. Both sessions fail, and
+/// from outside the two failures look alike — but one fails at the *end*
+/// of bring-up, and for a containerised session that is after the image
+/// pull, the network and every node container, all of which are then
+/// removed again, for a fact about a file that was knowable at the start.
+///
+/// What makes this a real assertion rather than a restatement is
+/// [`NoCapabilityStub::start_daemon`]: it panics. A bring-up that reaches
+/// it has done the expensive work first, and the test fails there instead
+/// of passing on an error message that would have been identical.
+#[tokio::test]
+async fn a_runtime_that_cannot_host_a_daemon_is_refused_before_bring_up() {
+    isolate();
+    let mut p = profile(1);
+    p.emulator.emulator = "nocapability".to_string();
+
+    let run = Arc::new(
+        Run::start(CreateSessionRequest {
+            id: None,
+            profile: MaybeRef::Owned(p),
+            workdir: "/tmp".to_string(),
+            daemon: true,
+        })
+        .expect("run starts"),
+    );
+
+    let health = run
+        .wait_ready(Duration::from_secs(30))
+        .await
+        .expect("bring-up settles");
+    assert!(
+        !health.healthy,
+        "a session was reported healthy on a runtime that cannot host the \
+         daemon it asked for: {health:?}"
+    );
+
+    // The backend's own reason has to reach the user: it is the whole
+    // value of asking early rather than late.
+    let reason = format!("{health:?}");
+    assert!(
+        reason.contains("predates the daemon API"),
+        "the capability check's reason was lost: {reason}"
+    );
+
+    run.destroy().await;
+}
+
+/// The other half of the contract: a session that wants no daemon is not
+/// refused by a capability it never needed.
+///
+/// `--in-process` emulation needs none of the daemon API, so gating the
+/// check on anything broader than "this session asked for a daemon" would
+/// refuse a mode that works. [`NoCapabilityStub`] refuses the capability
+/// and panics if its daemon is started, so this session must both start
+/// and never ask.
+#[tokio::test]
+async fn an_in_process_session_is_not_refused_by_a_daemon_capability() {
+    isolate();
+    let mut p = profile(1);
+    p.emulator.emulator = "nocapability".to_string();
+
+    let run = Arc::new(
+        Run::start(CreateSessionRequest {
+            id: None,
+            profile: MaybeRef::Owned(p),
+            workdir: "/tmp".to_string(),
+            daemon: false,
+        })
+        .expect("run starts"),
+    );
+
+    let health = run
+        .wait_ready(Duration::from_secs(30))
+        .await
+        .expect("bring-up settles");
+    assert!(
+        health.healthy,
+        "an in-process session was refused for a daemon it never wanted: \
+         {health:?}"
+    );
+
+    run.destroy().await;
 }
