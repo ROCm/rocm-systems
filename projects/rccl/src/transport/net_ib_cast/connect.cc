@@ -106,6 +106,12 @@ ncclResult_t IbCastInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base
     base->pd = ibDev->pd;
   }
 
+  if (ibDev->maxCqe > 0 && cqSize > ibDev->maxCqe) {
+    WARN("NET/IB: %s: requested CQ size %d exceeds device %s max_cqe %d, clamping",
+         __func__, cqSize, ibDev->devName, ibDev->maxCqe);
+    cqSize = ibDev->maxCqe;
+  }
+
   NCCLCHECK(wrap_ibv_create_cq(&base->cq, ibDev->context, cqSize, cq_context, NULL, 0));
 
   return ncclSuccess;
@@ -795,9 +801,13 @@ fail:
 // is updated accordingly. The meta data structure is then expected to be
 // delivered to the remote side (receiver) as part of the connection
 // establishment process.
-static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbConnectionMetadata* meta, int channelId) {
+// depthMult is the sizing already applied to this comm's CQs (IbCastInitCommDevBase),
+// clamped to what the device's max_cqe could actually support -- QP send/recv WR
+// depth must scale by that same, possibly-reduced, value or the QP can post more
+// work than its CQ can record completions for.
+static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbConnectionMetadata* meta, int channelId,
+                                          int depthMult) {
   uint nqps = comm->base.nqps;
-  int depthMult;
   struct ncclIbQpCreateAttr qpCreateAttrs;
   memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
   qpCreateAttrs.type = IBV_QPT_RC;
@@ -806,7 +816,6 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
   qpCreateAttrs.maxSendWorkRequest = 2 * NET_IB_MAX_REQUESTS;
   qpCreateAttrs.isQpSharingEnabled = (rcclParamIbCastCommNGroups() > 0) ? true : false;
   qpCreateAttrs.qpSharingGroupIdx = meta->sharedGroupIdx;
-  depthMult = (rcclParamIbCastCommNGroups() > 0) ? std::max((int64_t)1, rcclParamIbCastQpDepthMultiplier()) : 1;
   qpCreateAttrs.cqDepthMultiplier = depthMult;
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     // The QPs are created in a "striped" manner across the available devices.
@@ -1124,6 +1133,13 @@ ib_recv_dev_list:
       cqSize = std::min(IbCastDevs[ibDevN].maxCqe, cqSize);
     }
     NCCLCHECKGOTO(IbCastInitCommDevBase(ibDevN, &comm->devs[i].base, &comm->base.stats, (cqSize * depthMult)), ret, fail);
+    if (depthMult > 1) {
+      // IbCastInitCommDevBase clamps the CQ to the device's max_cqe; if that clamped
+      // us below what depthMult asked for, shrink depthMult to match so QP WR depth
+      // and this group's shared-QP capacityUnits never exceed what the CQ can record.
+      int achievedMult = comm->devs[i].base.cq->cqe / cqSize;
+      if (achievedMult < depthMult) depthMult = std::max(1, achievedMult);
+    }
     comm->ar = comm->ar && IbCastDevs[ibDevN].ar; // ADAPTIVE_ROUTING - if all merged devs have it enabled
     if (comm->base.resiliency) {
       NCCLCHECKGOTO(IbCastResiliencyDevInit(comm->base.resiliency, i, &IbCastDevs[ibDevN]), ret, fail);
@@ -1261,7 +1277,7 @@ ib_recv_dev_list:
 
 qp_sharing_skip_sender:
   // Create QPs on the sender side
-  NCCLCHECKGOTO(IbCastSenderQpsCreate(comm, &meta, channelId), ret, fail);
+  NCCLCHECKGOTO(IbCastSenderQpsCreate(comm, &meta, channelId, depthMult), ret, fail);
 
   comm->telChId = channelId;
   comm->telChStats = NULL;
@@ -1564,10 +1580,14 @@ ncclResult_t IbCastCheckVProps(ncclNetVDeviceProps_t* vProps1, ncclNetVDevicePro
 // the remote metadata structure, provided to the function (remMeta), with the
 // QPs' information so that data structure could be delivered to the remote
 // side (sender) as part of the connection establishment process.
+// depthMult is the sizing already applied to this comm's CQs (IbCastInitCommDevBase),
+// clamped to what the device's max_cqe could actually support -- QP send/recv WR
+// depth must scale by that same, possibly-reduced, value or the QP can post more
+// work than its CQ can record completions for.
 static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct ncclIbConnectionMetadata* remMeta,
-                                                 struct ncclIbConnectionMetadata* meta, int channelId) {
+                                                 struct ncclIbConnectionMetadata* meta, int channelId,
+                                                 int depthMult) {
   uint nqps = rComm->base.nqps;
-  int depthMult;
   struct ncclIbQpCreateAttr qpCreateAttrs;
   memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
   qpCreateAttrs.type = IBV_QPT_RC;
@@ -1581,7 +1601,6 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
 
   qpCreateAttrs.isQpSharingEnabled = (rcclParamIbCastCommNGroups() > 0) ? true : false;
   qpCreateAttrs.qpSharingGroupIdx = remMeta->sharedGroupIdx;
-  depthMult = (rcclParamIbCastCommNGroups() > 0) ? std::max((int64_t)1, rcclParamIbCastQpDepthMultiplier()) : 1;
   qpCreateAttrs.cqDepthMultiplier = depthMult;
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     // The QPs are created in a "striped" manner across the available devices.
@@ -1977,6 +1996,13 @@ ib_recv:
       cqSize = std::min(IbCastDevs[ibDevN].maxCqe, cqSize);
     }
     NCCLCHECKGOTO(IbCastInitCommDevBase(ibDevN, &rCommDev->base, &rComm->base.stats, (cqSize * recvDepthMult)), ret, fail);
+    if (recvDepthMult > 1) {
+      // IbCastInitCommDevBase clamps the CQ to the device's max_cqe; if that clamped
+      // us below what recvDepthMult asked for, shrink it to match so QP WR depth and
+      // this group's shared-QP capacityUnits never exceed what the CQ can record.
+      int achievedMult = rCommDev->base.cq->cqe / cqSize;
+      if (achievedMult < recvDepthMult) recvDepthMult = std::max(1, achievedMult);
+    }
     if (rComm->base.resiliency) {
       NCCLCHECKGOTO(IbCastResiliencyDevInit(rComm->base.resiliency, i, &IbCastDevs[ibDevN]), ret, fail);
     }
@@ -2162,7 +2188,7 @@ ib_recv:
   }
 
 qp_sharing_skip_recv:
-  NCCLCHECKGOTO(IbCastReceiverQpsCreateToRts(rComm, &remMeta, &meta, channelId), ret, fail);
+  NCCLCHECKGOTO(IbCastReceiverQpsCreateToRts(rComm, &remMeta, &meta, channelId, recvDepthMult), ret, fail);
 
   // If primary receiver, register QPs in shared pool
   if (rComm->base.commId != 0 && rComm->base.isSharedQpPrimary) {
