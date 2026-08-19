@@ -1084,6 +1084,24 @@ def test_gfx1250_wmma_f32_passes_c_modifier_to_accumulator_helper():
     assert 'amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi)' in body
 
 
+@pytest.mark.parametrize(
+    ('arch_name', 'expected'),
+    [('cdna5', True), ('gfx1250', False)],
+)
+def test_generic_wmma_accumulator_selector_uses_cdna5_logical_key(
+    arch_name: str, expected: bool
+) -> None:
+    generator = CodeGenerator(SimpleNamespace(arch_name=arch_name), '')
+    inst_sem = InstructionSemantics('V_WMMA_F32_16X16X128_FP8_FP8', 'vector_wmma')
+    operand = Operand(
+        'src2', 256, 'OPR_SRC_VGPR_OR_INLINE', True, False, False, False, 3
+    )
+
+    assert (
+        generator._uses_generic_wmma_accumulator_selector(inst_sem, operand) is expected
+    )
+
+
 @pytest.mark.parametrize('k', [64, 128])
 @pytest.mark.parametrize(
     ('input_type', 'a_fp8', 'b_fp8'),

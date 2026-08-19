@@ -847,7 +847,7 @@ class CodeGenerator:
         self, inst_sem: InstructionSemantics | None, opnd: Operand
     ) -> bool:
         return (
-            getattr(self.isa_spec, 'arch_name', None) == 'gfx1250'
+            getattr(self.isa_spec, 'arch_name', None) == 'cdna5'
             and inst_sem is not None
             and inst_sem.name in self._GENERIC_WMMA_ACCUMULATOR_INSTRUCTIONS
             and opnd.name == 'src2'
