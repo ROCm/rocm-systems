@@ -472,6 +472,21 @@ else()
   set(HIP_FABRIC_API OFF)
 endif()
 
+# --- Common compile definitions shared by every host-only binary ---
+# The five defines below are identical across rccl-source-wrappers,
+# rccl-HostUnitTests, rccl-UnitTestsMicro and rccl-UnitTestsDevRuntime.
+# AMDSMI_FABRIC_DIRECT / HIP_FABRIC_API guard fallback-vs-runtime type and
+# enumerator conflicts on newer HIP/amdsmi (e.g. ROCm 7.14+). Per-target
+# defines (RCCL_EXPOSE_STATIC, P2P_CC_PATH, DEV_RUNTIME_CC_PATH, ...) are
+# still added alongside this variable at each target below.
+set(RCCL_HOST_TEST_DEFS
+  __HIP_PLATFORM_AMD__
+  NCCL_OS_LINUX
+  ROCM_VERSION=70000
+  $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+  $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
+)
+
 # --- Common include paths for hipified RCCL headers ---
 set(RCCL_INCLUDE_DIRS
   ${RCCL_HIPIFY_DIR}/src/include
@@ -493,13 +508,7 @@ add_library(rccl-source-wrappers STATIC
   wrapper_link_stubs.cpp
 )
 target_include_directories(rccl-source-wrappers PRIVATE ${RCCL_INCLUDE_DIRS})
-target_compile_definitions(rccl-source-wrappers PRIVATE
-  __HIP_PLATFORM_AMD__
-  NCCL_OS_LINUX
-  ROCM_VERSION=70000
-  $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
-  $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
-)
+target_compile_definitions(rccl-source-wrappers PRIVATE ${RCCL_HOST_TEST_DEFS})
 target_link_libraries(rccl-source-wrappers PRIVATE
   GTest::GTest
   fmt::fmt-header-only
@@ -529,13 +538,9 @@ add_executable(rccl-HostUnitTests
 target_include_directories(rccl-HostUnitTests PRIVATE ${RCCL_INCLUDE_DIRS})
 
 target_compile_definitions(rccl-HostUnitTests PRIVATE
-  __HIP_PLATFORM_AMD__
-  NCCL_OS_LINUX
-  ROCM_VERSION=70000
+  ${RCCL_HOST_TEST_DEFS}
   RCCL_EXPOSE_STATIC
   ARSMI_TEST_BUILD
-  $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
-  $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 
 # llvm source-based coverage (host-only build: no -Xarch_device split needed
@@ -597,9 +602,7 @@ target_include_directories(rccl-UnitTestsMicro PRIVATE
 )
 
 target_compile_definitions(rccl-UnitTestsMicro PRIVATE
-  __HIP_PLATFORM_AMD__
-  NCCL_OS_LINUX
-  ROCM_VERSION=70000
+  ${RCCL_HOST_TEST_DEFS}
   P2P_CC_PATH="${RCCL_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
   RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
   GROUP_CC_PATH="${RCCL_HIPIFY_DIR}/src/group.cc"
@@ -649,14 +652,8 @@ target_include_directories(rccl-UnitTestsDevRuntime PRIVATE
 )
 
 target_compile_definitions(rccl-UnitTestsDevRuntime PRIVATE
-  __HIP_PLATFORM_AMD__
-  NCCL_OS_LINUX
-  ROCM_VERSION=70000
+  ${RCCL_HOST_TEST_DEFS}
   DEV_RUNTIME_CC_PATH="${RCCL_HIPIFY_DIR}/src/dev_runtime.cc"
-  # Same fallback-vs-runtime conflicts the host target guards against on
-  # ROCm 7.14+ (hipMemFabricHandle_st redefinition, amdsmi fabric enumerators).
-  $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
-  $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 
 # -no-pie: the RCCL-vendored libgtest.a used by this standalone path is built
