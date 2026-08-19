@@ -34,6 +34,7 @@
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "test_encodings_util.h"
 #include "util/data_types.h"
 #include "util/except.h"
 #include "util/simd.h"
@@ -73,12 +74,6 @@
 namespace {
 
 using namespace rocjitsu;
-
-/// @brief Common test encoding entry (matches all ISA test_encodings.h).
-struct TestEncEntry {
-  std::string_view mnemonic;
-  std::array<uint32_t, 2> words;
-};
 
 constexpr uint32_t pack16(uint16_t lo, uint16_t hi) {
   return static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 16);
@@ -237,10 +232,7 @@ inline bool should_skip_inst(std::string_view mn) {
       "s_setreg",
       "s_rfe",
   };
-  for (auto p : SKIP_PREFIXES)
-    if (mn.substr(0, p.size()) == p)
-      return true;
-  return false;
+  return mnemonic_has_any_prefix(mn, SKIP_PREFIXES);
 }
 
 constexpr std::array<std::string_view, 1> EXPECTED_CDNA_UNIMPLEMENTED = {"s_setvskip"};
@@ -271,8 +263,9 @@ const HarnessExpectation *harness_expectation(std::string_view arch_name) {
 }
 
 /// @brief Helper to run all test encodings for a given ISA.
+template <typename Encoding>
 void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
-                           const TestEncEntry *encodings, size_t num_encodings) {
+                           const Encoding *encodings, size_t num_encodings) {
   // Set up minimal CU with zeroed memory.
   amdgpu::GpuMemory gpu_mem(std::string(arch_name) + "_mem");
   amdgpu::L2Cache l2(std::string(arch_name) + "_l2");
@@ -387,11 +380,8 @@ void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
 
 // --- Parameterized tests per ISA ---
 
-// Helper macro: cast the ISA-specific TestEncoding array to the common layout.
-// The struct layout (string_view + array<uint32_t,2>) is identical across all ISAs.
 #define RUN_HARNESS(ISA_NS, ARCH_ENUM, ARCH_STR)                                                   \
-  run_execution_harness(ARCH_ENUM, ARCH_STR,                                                       \
-                        reinterpret_cast<const TestEncEntry *>(ISA_NS::test_data::ENCODINGS),      \
+  run_execution_harness(ARCH_ENUM, ARCH_STR, ISA_NS::test_data::ENCODINGS,                         \
                         ISA_NS::test_data::NUM_ENCODINGS)
 
 TEST(InstructionExecutionHarness, Cdna1) { RUN_HARNESS(cdna1, ROCJITSU_CODE_ARCH_CDNA1, "cdna1"); }
