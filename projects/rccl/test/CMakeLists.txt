@@ -447,6 +447,7 @@ if(BUILD_TESTS)
       ParameterApiTests.cpp
       ArgCheckTests.cpp
       BootstrapBidirTests.cpp
+      ChannelDefaultsTests.cpp
       DdaAlltoAllThresholdTests.cpp
       DdaIpcEligibilityTests.cpp
       DdaFabricEligibilityTests.cpp

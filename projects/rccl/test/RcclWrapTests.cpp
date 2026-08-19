@@ -13,6 +13,7 @@
 
 #include "comm.h"
 #include "common/ErrCode.hpp"
+#include "common/MockComm.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "debug.h"
 #include "graph/topo.h"
@@ -88,55 +89,8 @@ ncclResult_t testStaticExposeCheck()
     return ncclSuccess;
 }
 
-// Helper function to create and initialize mock communicator
-static void CreateMockComm(
-    ncclComm_t&            mockComm,
-    struct ncclTopoSystem& mockTopo,
-    struct ncclTopoNode&   mockGpuNode,
-    const char*            arch,
-    int                    nRanks
-)
-{
-    // Allocate memory for the communicator
-    mockComm = new ncclComm();
-    memset(mockComm, 0, sizeof(ncclComm));
-
-    // Initialize basic communicator fields
-    mockComm->nRanks = nRanks;
-    mockComm->nNodes = 1; // Default to single node for P2P tests
-    mockComm->rank   = 0; // Default rank
-
-    mockComm->pxnDisable      = RCCL_VALUE_UNSET;
-    mockComm->p2pNetChunkSize = RCCL_VALUE_UNSET;
-
-    // Initialize topology
-    memset(&mockTopo, 0, sizeof(mockTopo));
-    mockComm->topo = &mockTopo;
-
-    // Initialize GPU node
-    mockTopo.nodes[GPU].count = 1;
-    memset(&mockGpuNode, 0, sizeof(mockGpuNode));
-
-    // Set GPU architecture
-    strncpy(mockGpuNode.gpu.gcn, arch, sizeof(mockGpuNode.gpu.gcn) - 1);
-    mockGpuNode.gpu.gcn[sizeof(mockGpuNode.gpu.gcn) - 1] = '\0';
-
-    // Copy the node into the topology array
-    mockTopo.nodes[GPU].nodes[0] = mockGpuNode;
-
-    // Initialize other required fields for tests
-    memset(mockComm->minMaxLLRange, 0, sizeof(mockComm->minMaxLLRange));
-}
-
-// Helper function to cleanup mock communicator
-static void CleanupMockComm(ncclComm_t& mockComm)
-{
-    if(mockComm)
-    {
-        delete mockComm;
-        mockComm = nullptr;
-    }
-}
+// CreateMockComm / CleanupMockComm moved to common/MockComm.hpp so other fixtures
+// can reuse them.
 
 // Helper function to determine if rcclSetPipelining test should be skipped
 static bool ShouldSkipRcclSetPipeliningTests()
