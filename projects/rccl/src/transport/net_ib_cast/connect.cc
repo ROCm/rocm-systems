@@ -2420,12 +2420,6 @@ ncclResult_t IbCastCloseSend(void* sendComm) {
           }
         }
       }
-      if (slot0) {
-        slot0->cqRefcount--;
-        if (slot0->cqRefcount <= 0) {
-          IbCastCleanupGroupCqs(slot0);
-        }
-      }
 
       if (comm->base.resiliency) {
         NCCLCHECK(IbCastResiliencyClose(comm->base.resiliency));
@@ -2443,6 +2437,15 @@ ncclResult_t IbCastCloseSend(void* sendComm) {
           NCCLCHECK(IbCastResiliencyDevDestroy(comm->base.resiliency, i));
         }
         // Skip IbCastDestroyBase for shared comms -- CQ/PD managed by pool
+      }
+
+      // Group CQs are torn down last: they must outlive every QP still bound
+      // to them, or ibv_destroy_cq fails with EBUSY.
+      if (slot0) {
+        slot0->cqRefcount--;
+        if (slot0->cqRefcount <= 0) {
+          IbCastCleanupGroupCqs(slot0);
+        }
       }
     } else {
       // Non-shared: original teardown
@@ -2504,12 +2507,6 @@ ncclResult_t IbCastCloseRecv(void* recvComm) {
       if (comm->base.resiliency) {
         NCCLCHECK(IbCastResiliencyClose(comm->base.resiliency));
       }
-      if (slot0) {
-        slot0->cqRefcount--;
-        if (slot0->cqRefcount <= 0) {
-          IbCastCleanupGroupCqs(slot0);
-        }
-      }
       IbCastFreeCommIdLocked(comm->base.commId);  // caller holds g_IbCastSharedQpMutex
 
       // GPU flush cleanup — flush QP is shared, memory resources are per-comm
@@ -2551,6 +2548,16 @@ ncclResult_t IbCastCloseRecv(void* recvComm) {
           IbCastResiliencyDevDestroy(comm->base.resiliency, i);
         }
         // Skip IbCastDestroyBase for shared comms -- CQ/PD managed by pool
+      }
+
+      // Group CQs are torn down last: they must outlive every QP still bound
+      // to them (data QPs above, this comm's own flush QP just above), or
+      // ibv_destroy_cq fails with EBUSY.
+      if (slot0) {
+        slot0->cqRefcount--;
+        if (slot0->cqRefcount <= 0) {
+          IbCastCleanupGroupCqs(slot0);
+        }
       }
     } else {
       // Non-shared: original teardown
