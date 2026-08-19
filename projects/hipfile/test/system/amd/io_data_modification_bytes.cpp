@@ -40,19 +40,20 @@ HIPFILE_WARN_NO_GLOBAL_CTOR_OFF
 // ---------------------------------------------------------------------------
 struct HipFileVerifyBytes : public testing::TestWithParam<std::tuple<IoTestParam, SizeParam>> {
 
+    const IoTestBackend backend{std::get<0>(GetParam()).backend}; // backend fulfilling the I/O request
+    const size_t        io_bytes{std::get<1>(GetParam()).bytes};  // bytes transferred using the hipFile API
+    // The data modification kernel will also verify that the sentinel regions of the device buffer are
+    // unmodified. Device layout (each sentinel region 4_KiB, data io_bytes):
+    // [head device sentinel region][data][tail device sentinel region]
+    const size_t buffer_bytes{io_bytes + 2 * 4_KiB}; // total device buffer size
+
     Tmpfile         tmpfile;
     hipFileHandle_t tmpfile_handle{nullptr};
-    void           *device_buffer{nullptr};
-    size_t          io_bytes{0};     // bytes transferred using the hipFile API
-    size_t          buffer_bytes{0}; // total device buffer size
+    void           *device_buffer{nullptr}; // allocated by SetUp
+    uint8_t        *buffer_start{nullptr};  // typed view of device_buffer
 
     HipFileVerifyBytes() : tmpfile{test_env.ais_capable_dir}
     {
-    }
-
-    IoTestBackend backend() const
-    {
-        return std::get<0>(GetParam()).backend;
     }
 
     void SetUp() override
@@ -60,7 +61,7 @@ struct HipFileVerifyBytes : public testing::TestWithParam<std::tuple<IoTestParam
         Context<Configuration>::get()->fastpath(false);
         Context<Configuration>::get()->fallback(false);
 
-        switch (backend()) {
+        switch (backend) {
             case IoTestBackend::Fastpath:
                 Context<Configuration>::get()->fastpath(true);
                 break;
@@ -70,12 +71,6 @@ struct HipFileVerifyBytes : public testing::TestWithParam<std::tuple<IoTestParam
             default:
                 FAIL() << "Unsupported IoTestBackend";
         }
-
-        io_bytes = std::get<1>(GetParam()).bytes;
-        // The data modification kernel will also verify that the sentinel regions of the device buffer are
-        // unmodified. Device layout (each sentinel region 4_KiB, data io_bytes):
-        // [head device sentinel region][data][tail device sentinel region]
-        buffer_bytes = io_bytes + 2 * 4_KiB;
 
         // File layout (each sentinel region 4_KiB, data io_bytes; data begins at file
         // offset kCombinedFileOff):
@@ -89,6 +84,7 @@ struct HipFileVerifyBytes : public testing::TestWithParam<std::tuple<IoTestParam
         ASSERT_EQ(HIPFILE_SUCCESS, hipFileHandleRegister(&tmpfile_handle, &descr));
 
         ASSERT_EQ(hipSuccess, hipMalloc(&device_buffer, buffer_bytes));
+        buffer_start = static_cast<uint8_t *>(device_buffer);
         ASSERT_EQ(hipSuccess, hipMemset(device_buffer, kByteDevSlack, buffer_bytes));
         // hipMemset is not synchronous w.r.t. the host, and hipFileRead is not ordered w.r.t. the stream.
         ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
@@ -104,11 +100,6 @@ struct HipFileVerifyBytes : public testing::TestWithParam<std::tuple<IoTestParam
             ASSERT_EQ(hipSuccess, hipFree(device_buffer));
         }
         hipFileHandleDeregister(tmpfile_handle);
-    }
-
-    uint8_t *bufferStart() const
-    {
-        return static_cast<uint8_t *>(device_buffer);
     }
 };
 
@@ -136,8 +127,8 @@ TEST_P(HipFileVerifyBytes, RoundTripGuardsAllRegions)
     // Device layout (each sentinel region 4_KiB, data n bytes; data begins at buffer
     // offset buf_off = 4_KiB):
     // [head device sentinel region][data][tail device sentinel region]
-    uint8_t *data = bufferStart() + 4_KiB;
-    assertVerifyAndModifyBytes(bufferStart(), buffer_bytes, data, n, defaultGrid(n),
+    uint8_t *data = buffer_start + 4_KiB;
+    assertVerifyAndModifyBytes(buffer_start, buffer_bytes, data, n, defaultGrid(n),
                                dim3(kDefaultWorkgroupSize), kStride);
 
     ASSERT_EQ(static_cast<ssize_t>(io_bytes),
