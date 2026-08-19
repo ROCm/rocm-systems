@@ -101,6 +101,11 @@ def is_fat_binary(file_path: Path, toolchain: Toolchain) -> bool:
     For ELF binaries, checks for .hip_fatbin section.
     For PE/COFF binaries, checks for .hip_fat section.
 
+    An ELF whose .hip_fatbin section is SHT_NOBITS is *not* a fat binary: the
+    section header survives but the contents do not live in the file. This is
+    the shape of a separated debug file produced by `objcopy --only-keep-debug`
+    (TheRock's `*_dbg` artifacts), which carries no device code to split.
+
     Args:
         file_path: Path to the file to check
         toolchain: Toolchain instance with readelf path
@@ -128,7 +133,10 @@ def is_fat_binary(file_path: Path, toolchain: Toolchain) -> bool:
 
     if fmt == "elf":
         surgery = ElfSurgery.load(file_path)
-        return surgery.find_section(".hip_fatbin") is not None
+        section = surgery.find_section(".hip_fatbin")
+        if section is None:
+            return False
+        return not section.header.is_nobits
     else:
         surgery = CoffSurgery.load(file_path)
         return surgery.find_section(".hip_fat") is not None
