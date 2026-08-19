@@ -27,9 +27,10 @@
 #                   llvm source-based coverage profiles (*.profraw) into
 #                   COVERAGE_DIR (requires the host tests to be built with
 #                   -DMICRO_COVERAGE=ON, the default)
-#   coverage        assemble the *.profraw profiles produced by `run` into a
-#                   merged profile and emit text + HTML coverage reports
-#                   (does not run any binaries -- run the `run` phase first)
+#   coverage        turn the per-binary *.profraw profiles from `run` into
+#                   reports: a per-binary text/HTML report + lcov tracefile
+#                   (clean, no hash mismatch), plus an overall line/branch union
+#                   across all binaries via lcov (the CI metric).
 #   all             rccl-configure -> hipify -> configure -> build -> run -> coverage
 #
 # Knobs (environment variables, all optional):
@@ -72,16 +73,18 @@ PHASE="${1:-all}"
 [ $# -gt 0 ] && shift || true   # remaining args ($@) are forwarded to the binary
 
 # Install everything the host-test pipeline needs that the base ROCm dev image
-# lacks: cmake + host toolchain, gtest/fmt, moreutils (ts), and python3-venv
-# (the guards phase creates a venv + pip-installs pytest). Uses sudo when not
-# already root so it works both in the root CI container and locally.
+# lacks: cmake + host toolchain, gtest/fmt, moreutils (ts), python3-venv (the
+# guards phase creates a venv + pip-installs pytest), and lcov/genhtml (the
+# coverage phase merges per-binary lcov tracefiles into one overall report).
+# Uses sudo when not already root so it works both in the root CI container and
+# locally.
 do_deps() {
   echo "==> Install host-test dependencies (apt)"
   local sudo=""
   [ "$(id -u)" -eq 0 ] || sudo="sudo"
   $sudo apt-get update
   $sudo apt-get install -y cmake git python3 python3-venv build-essential rocm-cmake \
-    moreutils libgtest-dev libgmock-dev libfmt-dev
+    moreutils libgtest-dev libgmock-dev libfmt-dev lcov
 }
 
 do_rccl_configure() {
@@ -109,13 +112,18 @@ do_build() {
 do_host_tests() {
   echo "==> Run  (filter: $GTEST_FILTER)"
 
-  # Always emit source-based coverage profiles: instrumented binaries (built with
-  # -DMICRO_COVERAGE=ON, the default) write a .profraw into COVERAGE_DIR via
-  # LLVM_PROFILE_FILE. The `coverage` phase later merges these into reports
-  # without re-running anything. Start from a clean profraw set each run.
+  # Always emit source-based coverage profiles: instrumented binaries write
+  # .profraw files that the `coverage` phase turns into reports without
+  # re-running anything.
+  #
+  # Each binary writes into its OWN profraw subdir ($COVERAGE_DIR/<binary>/).
+  # The host-test binaries compile some of the same source under different
+  # #defines, so a shared function has a different coverage-mapping hash in each.
+  # Keeping profiles isolated lets `coverage` emit a clean per-binary report and
+  # a clean per-binary lcov tracefile; the tracefiles are then unioned at the
+  # line/branch level into one overall report (hash-agnostic). Start clean.
   mkdir -p "$COVERAGE_DIR"
-  rm -f "$COVERAGE_DIR"/*.profraw
-  export LLVM_PROFILE_FILE="$COVERAGE_DIR/%m-%p.profraw"
+  rm -rf "$COVERAGE_DIR"/*
 
   # Prepend a real-UTC timestamp to each line via `ts` (moreutils) when available,
   # tee the full stdout+stderr to LOG_FILE, and preserve each binary's exit code
@@ -187,19 +195,20 @@ do_guards() {
   "$venv/bin/python" -m pytest "$gd/tests" -v
 }
 
-# Assemble the coverage profiles produced by the `run` phase into a merged
-# profile and emit both a text summary and a browsable HTML report. Does NOT run
-# any binaries -- the .profraw files are produced by `run` (see do_host_tests).
-# Requires the host tests to have been built with -DMICRO_COVERAGE=ON (the
-# default), which instruments every host-only test binary with
-# -fprofile-instr-generate -fcoverage-mapping.
+# Turn the per-binary profraw sets produced by the `run` phase into coverage
+# reports. Two levels of output:
+#
+#   1. Per binary ($COVERAGE_DIR/<binary>/): a text + HTML report and an lcov
+#      tracefile, each built against ONLY that binary's own profile so llvm-cov
+#      never warns about "mismatched data". This is what the inner dev loop wants
+#      (focused on one binary / one file under test).
+#
+#   2. Overall ($COVERAGE_DIR/overall/): the per-binary lcov tracefiles unioned
+#      at the line/branch level via `lcov`. A line/branch counts as covered if
+#      ANY binary covered it, so source that is exercised in different binaries
+#      under different #defines is credited correctly.
 do_coverage() {
   echo "==> Coverage  (out: $COVERAGE_DIR)"
-
-  if ! compgen -G "$COVERAGE_DIR/*.profraw" >/dev/null; then
-    echo "error: no .profraw files in $COVERAGE_DIR -- run the 'run' phase first" >&2
-    exit 1
-  fi
 
   local test_bins
   mapfile -t test_bins < <(find "$BUILD_DIR" -maxdepth 1 -type f -executable)
@@ -208,31 +217,88 @@ do_coverage() {
     exit 1
   fi
 
-  llvm-profdata merge -sparse "$COVERAGE_DIR"/*.profraw \
-    -o "$COVERAGE_DIR/merged.profdata"
+  local exe name dir
+  local tracefiles=()
+  for exe in "${test_bins[@]}"; do
+    name="$(basename "$exe")"
+    dir="$COVERAGE_DIR/$name"
+    if ! compgen -G "$dir/*.profraw" >/dev/null; then
+      echo "    skip $name -- no profraw (run the 'run' phase first)" >&2
+      continue
+    fi
 
-  # -object args for every binary beyond the first (llvm-cov takes the first
-  # positional binary, then -object for each additional one).
-  local object_args=()
-  local bin
-  for bin in "${test_bins[@]:1}"; do
-    object_args+=(-object "$bin")
+    # Per-binary: merge its own profraw and report against its own object only.
+    llvm-profdata merge -sparse "$dir"/*.profraw -o "$dir/merged.profdata"
+
+    llvm-cov report "$exe" \
+      -instr-profile="$dir/merged.profdata" \
+      --show-branch-summary --show-region-summary \
+      > "$dir/coverage.txt"
+
+    llvm-cov show "$exe" \
+      -instr-profile="$dir/merged.profdata" \
+      -format=html -output-dir="$dir/html" \
+      --show-branches=count
+
+    # Per-binary lcov tracefile -- the hash-agnostic, line/branch-keyed form that
+    # can be unioned across binaries. Tag it with the binary name so genhtml and
+    # lcov diagnostics are legible.
+    llvm-cov export "$exe" \
+      -instr-profile="$dir/merged.profdata" \
+      -format=lcov > "$dir/coverage.lcov"
+
+    echo "    $name text report: $dir/coverage.txt"
+    echo "    $name html report: $dir/html/index.html"
+    tracefiles+=("$dir/coverage.lcov")
   done
 
-  llvm-cov report \
-    "${test_bins[0]}" "${object_args[@]}" \
-    -instr-profile="$COVERAGE_DIR/merged.profdata" \
-    --show-branch-summary --show-region-summary \
-    > "$COVERAGE_DIR/coverage.txt"
+  if [ "${#tracefiles[@]}" -eq 0 ]; then
+    echo "error: no .profraw files found under $COVERAGE_DIR -- run the 'run' phase first" >&2
+    exit 1
+  fi
 
-  llvm-cov show \
-    "${test_bins[0]}" "${object_args[@]}" \
-    -instr-profile="$COVERAGE_DIR/merged.profdata" \
-    -format=html -output-dir="$COVERAGE_DIR/html" \
-    --show-branches=count
+  # --- Overall union across all binaries (the CI metric) -------------------
+  if ! command -v lcov >/dev/null 2>&1; then
+    echo "    note: lcov not installed -- skipping overall union report (run the 'deps' phase)" >&2
+    return 0
+  fi
 
-  echo "    text report: $COVERAGE_DIR/coverage.txt"
-  echo "    html report: $COVERAGE_DIR/html/index.html"
+  local odir="$COVERAGE_DIR/overall"
+  mkdir -p "$odir"
+
+  # Common lcov flags. lcov 2.x enforces strict consistency checks that reject
+  # llvm-cov's tracefiles (e.g. "line is hit but no branches evaluated"); disable
+  # them and tolerate the format quirks. lcov 1.x has neither the checks nor the
+  # error categories, so only pass these on >= 2.
+  local lcov_args=(--rc branch_coverage=1)
+  local lcov_major
+  lcov_major="$(lcov --version 2>/dev/null | grep -oE '[0-9]+' | head -1)"
+  if [ "${lcov_major:-0}" -ge 2 ]; then
+    lcov_args+=(--rc check_data_consistency=0
+               --ignore-errors inconsistent,unsupported,corrupt,format)
+  fi
+
+  # lcov merges tracefiles by taking the union per line/branch: a line/branch is
+  # covered if ANY input covered it.
+  local add_args=()
+  local tf
+  for tf in "${tracefiles[@]}"; do
+    add_args+=(--add-tracefile "$tf")
+  done
+  lcov "${lcov_args[@]}" "${add_args[@]}" -o "$odir/combined.lcov"
+
+  # Machine-readable-ish overall summary (line + branch %) and a browsable HTML.
+  lcov "${lcov_args[@]}" --summary "$odir/combined.lcov" \
+    2>&1 | tee "$odir/summary.txt"
+  if command -v genhtml >/dev/null 2>&1; then
+    local genhtml_args=(--branch-coverage)
+    [ "${lcov_major:-0}" -ge 2 ] && genhtml_args+=(--ignore-errors inconsistent,unsupported,corrupt,format)
+    genhtml "${genhtml_args[@]}" "$odir/combined.lcov" -o "$odir/html" \
+      >/dev/null 2>&1 || true
+    echo "    overall html report: $odir/html/index.html"
+  fi
+  echo "    overall tracefile:   $odir/combined.lcov"
+  echo "    overall summary:     $odir/summary.txt"
 }
 
 # The `run` phase aggregates every check the host-test pipeline executes: the
