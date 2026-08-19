@@ -15,9 +15,8 @@
 
 #include <gtest/gtest.h>
 
-// System headers that declare symbols we macro-shim below (getenv) MUST be
-// included before the shim so their declarations aren't corrupted by the
-// function-like macro; their include guards make init.cc's re-includes no-ops.
+// Standard headers used by the test body; their include guards make init.cc's
+// transitive re-includes no-ops.
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -78,20 +77,16 @@
 #endif
 #endif
 
-// getenv seam: active ONLY around the UUT include. init.cc's direct
-// getenv("HSA_NO_SCRATCH_RECLAIM")/("HSA_FORCE_FINE_GRAIN_PCIE") reads route
-// through micro_getenv (defined in init_fakes.cc, where this macro is inactive).
-// The const_cast matches libc's char* return so init.cc's `char* env = getenv(...)`
-// call sites compile; micro_getenv keeps an honest const char* signature.
-#define getenv(n) const_cast<char*>(micro_getenv(n))
+// getenv seam: init.cc's direct getenv()/std::getenv() reads are intercepted at
+// link time by the extern "C" getenv() override in init_fakes.cc (routes through
+// the controllable microEnvMap; unmapped names hit the real libc getenv). No
+// per-call-site macro, so both getenv() and std::getenv() spellings are caught.
 
 // Pull in the hipified copy of init.cc (cudaXxx -> hipXxx already applied by
 // the hipify pass in the main RCCL build). INIT_CC_PATH is defined by this
 // target's CMakeLists.txt as ${PROJECT_BINARY_DIR}/hipify/src/init.cc
 // (NOT init_tmp.cc -- src/init.cc is the first of the duplicate basenames).
 #include INIT_CC_PATH
-
-#undef getenv
 
 // -------------------------------------------------------------------------
 // ncclNetInit()/ncclNetInitFromParent() fakes. Defined HERE (not in

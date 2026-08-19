@@ -4,9 +4,17 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Implementation of the init-only fake seams. See init_fakes.h. The macro
-// `getenv` is NOT active in this translation unit, so micro_getenv() can call
-// the real libc getenv() as its default.
+// Implementation of the init-only fake seams. See init_fakes.h.
+//
+// This TU interposes libc getenv() (see the extern "C" getenv below) so BOTH
+// getenv() and std::getenv() in the unit-under-test route through the
+// controllable microEnvMap; real_getenv() reaches the actual libc getenv via
+// RTLD_NEXT for anything not scripted.
+
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE   // RTLD_NEXT
+#endif
+#include <dlfcn.h>
 
 #include "init_fakes.h"
 
@@ -26,6 +34,13 @@ std::unordered_map<std::string, std::string>& microEnvMap() {
   static std::unordered_map<std::string, std::string> m;
   return m;
 }
+// The real libc getenv, resolved past our interposing definition below so the
+// map-miss fallback doesn't recurse into ourselves.
+char* real_getenv(const char* name) {
+  using Fn = char* (*)(const char*);
+  static Fn next = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "getenv"));
+  return next ? next(name) : nullptr;
+}
 }  // namespace
 
 const char* micro_getenv(const char* name) {
@@ -36,7 +51,16 @@ const char* micro_getenv(const char* name) {
       return it->second.c_str();
     }
   }
-  return std::getenv(name);
+  return real_getenv(name);
+}
+
+// Interpose libc getenv for the whole init binary. init.cc reads a few env vars
+// via getenv()/std::getenv() directly; a link-level override (vs a scoped macro)
+// catches both spellings -- including std::getenv under ENABLE_ROCSHMEM -- with
+// no per-call-site macro. Unmapped names fall through to the real libc getenv,
+// so gtest and other harness reads are unaffected. Tests script via SetMicroEnv().
+extern "C" char* getenv(const char* name) {
+  return const_cast<char*>(micro_getenv(name));
 }
 
 void SetMicroEnv(const char* name, const char* value) {
