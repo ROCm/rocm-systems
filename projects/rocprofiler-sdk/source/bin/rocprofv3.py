@@ -758,6 +758,18 @@ For attachment profiling of running processes:
         action="append",
     )
 
+    add_parser_bool_argument(
+        counter_collection_options,
+        "--kernel-replay-beta-enabled",
+        help=(
+            "Collect all --pmc counter groups within a single application run via in-process "
+            "kernel replay: each dispatch is replayed once per counter group, with device-memory "
+            "snapshot/restore between passes, instead of re-running the whole application per "
+            "group. Without this flag, multiple --pmc groups use application replay (the app is "
+            "re-run once per group) as usual. Requires --pmc. (beta)"
+        ),
+    )
+
     spm_options = parser.add_argument_group("Streaming Performance Monitor(SPM) options")
 
     add_parser_bool_argument(
@@ -2144,6 +2156,18 @@ def run(app_args, args, **kwargs):
     if args.pmc and args.pmc_groups:
         fatal_error("Cannot specify both --pmc and (input file) pmc_groups")
 
+    if getattr(args, "kernel_replay_beta_enabled", None) and not args.pmc:
+        fatal_error(
+            "--kernel-replay-beta-enabled requires --pmc "
+            "(it routes counter collection through replay)"
+        )
+
+    if getattr(args, "kernel_replay_beta_enabled", None):
+        # Route counter collection through the in-process kernel-replay service (config.hpp:
+        # ROCPROF_KERNEL_REPLAY). The SDK derives the pass count from the number of counter groups
+        # via the tool's pass-count callback, so no pass-count env is needed.
+        update_env("ROCPROF_KERNEL_REPLAY", True, overwrite_if_true=True)
+
     if args.pmc:
         update_env("ROCPROF_COUNTER_COLLECTION", True, overwrite=True)
 
@@ -2486,6 +2510,29 @@ def main(argv=None):
     # 3. CLI has --pmc AND input file has pmc (combine them as separate passes)
     cli_has_pmc = hasattr(cmd_args, "pmc") and cmd_args.pmc is not None
     input_has_pmc = len(inp_args) > 0 and has_set_attr(inp_args[0], "pmc")
+
+    # Kernel replay collects all counter groups within a SINGLE application run (the SDK replays
+    # each dispatch once per group), so it must not use the per-group child-process relaunch. Merge
+    # every counter group (from CLI --pmc and/or input-file pmc lines) into cmd_args.pmc as a
+    # list-of-lists; process_args then emits ROCPROF_COUNTER_GROUPS and the app runs once.
+    if getattr(cmd_args, "kernel_replay_beta_enabled", None):
+        replay_groups = []
+        if cli_has_pmc:
+            for g in cmd_args.pmc:
+                replay_groups.append(g if isinstance(g, list) else [g])
+        for inp_arg in inp_args:
+            if has_set_attr(inp_arg, "pmc"):
+                pmc = inp_arg.pmc
+                replay_groups.append(pmc if isinstance(pmc, list) else [pmc])
+        if replay_groups:
+            cmd_args.pmc = replay_groups
+            inp_args = inp_args[:1] if inp_args else [dotdict({})]
+            if has_set_attr(inp_args[0], "pmc"):
+                inp_args[0].pmc = None
+        cli_has_pmc = cmd_args.pmc is not None
+        input_has_pmc = False
+        cli_multipass = False
+
     use_multipass = cli_multipass or len(inp_args) > 1 or (cli_has_pmc and input_has_pmc)
 
     if not use_multipass:
