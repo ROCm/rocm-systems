@@ -80,18 +80,12 @@ GFX_MAP = {"gfx90a": "MI250X", "gfx1100": "Navi31", "gfx1201": "Navi48"}
 
 
 def find_tool(name):
-    """Locate a ROCm tool on PATH, then $ROCM_PATH/bin, then TheRock's bin."""
+    """Locate a ROCm tool on PATH, then under $ROCM_PATH/bin."""
     p = shutil.which(name)
     if p:
         return p
-    candidates = [
-        Path(os.environ.get("ROCM_PATH", "/opt/rocm")) / "bin" / name,
-        Path.home() / "TheRock_0724" / "bin" / name,
-    ]
-    for c in candidates:
-        if c.is_file():
-            return str(c)
-    return None
+    candidate = Path(os.environ.get("ROCM_PATH", "/opt/rocm")) / "bin" / name
+    return str(candidate) if candidate.is_file() else None
 
 
 def check_rocm():
