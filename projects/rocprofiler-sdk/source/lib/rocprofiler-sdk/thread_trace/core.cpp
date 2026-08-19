@@ -32,6 +32,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
@@ -468,17 +469,21 @@ DispatchThreadTracer::post_kernel_call(DispatchThreadTracer::inst_pkt_t& aql,
 
     for(auto& aql_pkt : aql)
     {
+        if(aql_pkt.second != hsa::queue_hooks::THREAD_TRACE_CLIENT_ID) continue;
+
         auto* pkt = dynamic_cast<hsa::TraceControlAQLPacket*>(aql_pkt.first.get());
         if(!pkt) continue;
 
         std::shared_lock<std::shared_mutex> lk(agents_map_mut);
+
+        auto it = agents.find(pkt->GetAgent());
+        if(it == agents.end() || it->second == nullptr) continue;
+
         post_move_data.fetch_sub(1);
 
         if(pkt->after_krn_pkt.empty()) continue;
 
-        auto it = agents.find(pkt->GetAgent());
-        if(it != agents.end() && it->second != nullptr)
-            it->second->iterate_data(pkt->GetHandle(), packet_data.user_data);
+        it->second->iterate_data(pkt->GetHandle(), packet_data.user_data);
     }
 }
 
@@ -527,6 +532,10 @@ DispatchThreadTracer::stop_context()  // NOLINT(readability-convert-member-funct
 {
     auto* controller = hsa::get_queue_controller();
     if(!controller) return;
+
+    // Drain in-flight dispatches before tearing down serialization so post_kernel_call can
+    // still run while the context remains registered.
+    hsa::queue_controller_sync();
 
     const auto serialization_agents = configured_agents();
     controller->disable_serialization(serialization_agents);

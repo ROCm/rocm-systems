@@ -375,24 +375,25 @@ stop_context(rocprofiler_context_id_t idx)
         const context* _expected = itr.load(std::memory_order_acquire);
         if(_expected && _expected->context_idx == idx.handle)
         {
+            // Stop queue-interposed services before clearing the active slot so
+            // disable_serialization() always runs before dispatches stop being instrumented.
+            if(_expected->dispatch_counter_collection)
+            {
+                rocprofiler::counters::stop_context(const_cast<context*>(_expected));
+            }
+
+            if(_expected->dispatch_spm)
+                rocprofiler::spm::stop_context(const_cast<context*>(_expected));
+
+            if(_expected->device_thread_trace) _expected->device_thread_trace->stop_context();
+            if(_expected->dispatch_thread_trace) _expected->dispatch_thread_trace->stop_context();
+
             bool success = itr.compare_exchange_strong(_expected, nullptr);
 
             if(success)
             {
                 auto nactive = get_num_active_contexts().load(std::memory_order_acquire);
                 if(nactive > 0) get_num_active_contexts().fetch_sub(1, std::memory_order_release);
-
-                if(_expected->dispatch_counter_collection)
-                {
-                    rocprofiler::counters::stop_context(const_cast<context*>(_expected));
-                }
-
-                if(_expected->dispatch_spm)
-                    rocprofiler::spm::stop_context(const_cast<context*>(_expected));
-
-                if(_expected->device_thread_trace) _expected->device_thread_trace->stop_context();
-                if(_expected->dispatch_thread_trace)
-                    _expected->dispatch_thread_trace->stop_context();
 
                 rocprofiler::hsa::queue_interposition::
                     notify_queue_interposition_consumer_context_stopped(_expected);

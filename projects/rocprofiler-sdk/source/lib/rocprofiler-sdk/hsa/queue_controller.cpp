@@ -443,10 +443,12 @@ QueueController::update_serialization(const agent_handle_set_t& agents, bool ena
     _queues.rlock([&](const queue_map_t& _queues_v) {
         auto pd_map = per_dev_map(_queues_v);
 
-        // Agents whose effective refcount crossed zero in this call; only those get their
-        // serializer toggled. Collected under the refcount lock, applied under the serializer
-        // lock.
-        auto transitioned = std::vector<rocprofiler_agent_id_t>{};
+        // Agents whose effective state changed in this call; only those get their serializer
+        // toggled. Each entry stores the agent id together with its new effective state so
+        // that the serializer action is derived from the post-update refcount rather than
+        // from the caller's `enable` flag (which could be stale if another thread races
+        // between the refcount unlock and the serializer lock).
+        auto transitioned = std::vector<std::pair<rocprofiler_agent_id_t, bool>>{};
         bool any_enabled  = false;
 
         _serialization_refcount.wlock([&](auto& state) {
@@ -483,7 +485,9 @@ QueueController::update_serialization(const agent_handle_set_t& agents, bool ena
                 {
                     auto itr = was_enabled.find(agent_id);
                     if(itr == was_enabled.end()) continue;
-                    if(itr->second != state.enabled(agent_id)) transitioned.emplace_back(agent_id);
+                    bool now_enabled = state.enabled(agent_id);
+                    if(itr->second != now_enabled)
+                        transitioned.emplace_back(agent_id, now_enabled);
                 }
             });
 
@@ -495,7 +499,7 @@ QueueController::update_serialization(const agent_handle_set_t& agents, bool ena
         if(transitioned.empty()) return;
 
         _profiler_serializer.wlock([&](auto& m) {
-            for(const auto& agent_id : transitioned)
+            for(const auto& [agent_id, now_enabled] : transitioned)
             {
                 auto itr = m.find(agent_id);
                 if(itr == m.end() || !itr->second) continue;
@@ -504,7 +508,7 @@ QueueController::update_serialization(const agent_handle_set_t& agents, bool ena
                 if(auto it = pd_map.find(agent_id); it != pd_map.end()) queues = it->second;
 
                 itr->second->wlock([&](auto& serializer) {
-                    if(enable)
+                    if(now_enabled)
                         serializer.enable(queues);
                     else
                         serializer.disable(queues);
