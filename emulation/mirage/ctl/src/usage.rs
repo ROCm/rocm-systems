@@ -83,6 +83,26 @@ pub struct AcceptedFlags {
     valued_shorts: Vec<char>,
 }
 
+/// How a short-option token ends, once it has been read clap's way.
+///
+/// The distinction that matters to the scan is not "is this a flag" but
+/// "where does the next token begin", and only the value-taking letter
+/// answers it — see [`AcceptedFlags::cluster`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Cluster {
+    /// Every letter is one mirage takes and none of them takes a value:
+    /// `-v`, `-vvv`.
+    AllFlags,
+    /// The bundle reached a value-taking letter with its value attached:
+    /// `-okey=value`, `-vokey=value`. Self-contained.
+    ValueAttached,
+    /// The bundle ended on a value-taking letter, so the value is the
+    /// next token: `-o key=value`, `-vo key=value`.
+    ValueNext,
+    /// A letter mirage does not take, before any value-taking one.
+    Unknown,
+}
+
 impl AcceptedFlags {
     /// Every flag `root`'s globals and its `subcommand` accept.
     ///
@@ -158,32 +178,15 @@ impl AcceptedFlags {
     }
 
     /// Whether `token` is one of these, in any spelling clap would accept
-    /// (`--long`, `--long=value`, `-s`, `-svalue`, and `-v` bundled to
-    /// any depth).
+    /// (`--long`, `--long=value`, `-s`, `-svalue`, `-v` bundled to any
+    /// depth, and a bundle ending in a valued letter — `-vokey=value`).
     #[must_use]
     pub fn accepts(&self, token: &str) -> bool {
         if let Some(long) = token.strip_prefix("--") {
             let name = long.split('=').next().unwrap_or(long);
             return self.longs.iter().any(|known| known == name);
         }
-        let Some(rest) = token.strip_prefix('-') else {
-            return false;
-        };
-        let mut chars = rest.chars();
-        let Some(first) = chars.next() else {
-            return false;
-        };
-        if !self.shorts.contains(&first) {
-            return false;
-        }
-        // `-okey=value` is one flag carrying its own value, so whatever
-        // follows the letter is data and not more flags.
-        if self.valued_shorts.contains(&first) {
-            return true;
-        }
-        // Otherwise every letter has to be one: `-vvv` is three `-v`s and
-        // clap accepts it bundled, but `-vqv` is not three of anything.
-        chars.all(|c| self.shorts.contains(&c))
+        !matches!(self.cluster(token), Cluster::Unknown)
     }
 
     /// Whether `token` consumes the argument after it.
@@ -192,21 +195,50 @@ impl AcceptedFlags {
     /// not know it would read `mi350x` as the start of the workload —
     /// which is how a mistyped flag *after* a valued one goes unnoticed.
     /// `--profile=mi350x` and `-pmi350x` carry their own value and
-    /// consume nothing.
+    /// consume nothing. `-vo key=value` does, because the bundle ends on
+    /// the valued letter with nothing attached to it.
     #[must_use]
     fn consumes_next(&self, token: &str) -> bool {
         if let Some(long) = token.strip_prefix("--") {
             return !long.contains('=') && self.valued_longs.iter().any(|known| known == long);
         }
+        matches!(self.cluster(token), Cluster::ValueNext)
+    }
+
+    /// Read a short-option token the way clap does, and say how it ends.
+    ///
+    /// Clap bundles short options — `-vvv` is three `-v`s — and the
+    /// bundle runs *until a letter that takes a value*, after which
+    /// everything left is that letter's value rather than more letters.
+    /// So `-vokey=value` is `-v` plus `-o key=value`, and the scan has to
+    /// stop at `o`. Both halves of this were wrong in different
+    /// directions: `accepts` kept reading `key=value` as flag letters and
+    /// rejected a spelling clap takes, and `consumes_next` looked only at
+    /// the first letter, so `-vo key=value` was read as consuming
+    /// nothing — the scan then stopped at `key=value`, taking it for the
+    /// command, and never reached a typo such as `--nodes` behind it.
+    fn cluster(&self, token: &str) -> Cluster {
         let Some(rest) = token.strip_prefix('-') else {
-            return false;
+            return Cluster::Unknown;
         };
-        // Only when the value is not already attached: `-p mi350x` takes
-        // the next token, `-pmi350x` does not.
+        if rest.is_empty() || rest.starts_with('-') {
+            return Cluster::Unknown;
+        }
         let mut chars = rest.chars();
-        chars
-            .next()
-            .is_some_and(|c| self.valued_shorts.contains(&c) && chars.next().is_none())
+        while let Some(letter) = chars.next() {
+            if !self.shorts.contains(&letter) {
+                // `-vqv` is not three of anything.
+                return Cluster::Unknown;
+            }
+            if self.valued_shorts.contains(&letter) {
+                return if chars.as_str().is_empty() {
+                    Cluster::ValueNext
+                } else {
+                    Cluster::ValueAttached
+                };
+            }
+        }
+        Cluster::AllFlags
     }
 
     /// The accepted flag closest to `token`, for a "did you mean".
@@ -442,6 +474,87 @@ mod tests {
         // A short flag that carries its own value: everything after the
         // letter is data, not more flags.
         assert!(flags.accepts("-okey=value"), "`-o` takes a value");
+    }
+
+    /// The root command the two clustered-form tests below share.
+    ///
+    /// The same stand-in as `bundled_short_flags_and_root_globals_are_accepted`
+    /// builds: a repeatable short global (`-v`) and, from `run` itself, a
+    /// short that takes a value (`-o`).
+    fn root_with_a_short_global() -> clap::Command {
+        clap::Command::new("mirage")
+            .arg(
+                clap::Arg::new("verbose")
+                    .short('v')
+                    .long("verbose")
+                    .global(true)
+                    .action(clap::ArgAction::Count),
+            )
+            .subcommand(RunArgs::augment_args(clap::Command::new("run")))
+    }
+
+    #[test]
+    fn a_bundle_ending_in_a_valued_short_is_accepted_in_both_forms() {
+        // Clap's rule is that a short bundle runs until a letter that
+        // takes a value, and everything after that letter is its value.
+        // So `-vokey=value` is `-v` plus `-o key=value` — a spelling clap
+        // accepts and this guard used to reject, because it went on
+        // reading `key=value` as more flag letters and found `k`.
+        let root = root_with_a_short_global();
+        let flags = AcceptedFlags::of(&root, "run");
+
+        assert!(flags.accepts("-vokey=value"), "`-v` then `-o` with a value");
+        assert!(
+            flags.accepts("-vo"),
+            "`-v` then `-o`, value in the next token"
+        );
+        assert!(
+            flags.accepts("-vvokey=value"),
+            "and the bundle may be deeper"
+        );
+        // The letter that takes the value ends the scan, so nothing after
+        // it has to be a flag — but everything before it does.
+        assert!(
+            !flags.accepts("-qokey=value"),
+            "`q` is not a flag mirage has"
+        );
+
+        // Clap's own verdict on the same tokens, so this cannot drift
+        // from the parser it is guarding.
+        for argv in [
+            vec!["mirage", "run", "-vokey=value", "--", "./app"],
+            vec!["mirage", "run", "-vo", "key=value", "--", "./app"],
+        ] {
+            assert!(
+                root.clone().try_get_matches_from(&argv).is_ok(),
+                "clap accepts {argv:?}, so the guard must too"
+            );
+        }
+    }
+
+    #[test]
+    fn a_valued_short_at_the_end_of_a_bundle_still_hides_the_typo_after_it() {
+        // The other half, and the one that let a typo through. `-vo`
+        // consumes `key=value`, and a scan that checked only the bundle's
+        // *first* letter did not know it: it read `key=value` as the
+        // command, stopped there, and never reached `--nodes`.
+        let flags = AcceptedFlags::of(&root_with_a_short_global(), "run");
+        assert_eq!(
+            misplaced_flag(&v("-vo key=value --nodes 2"), &flags, Span::UntilTheCommand),
+            Some("--nodes")
+        );
+        // With the value attached there is no next token to skip, and the
+        // typo is still found.
+        assert_eq!(
+            misplaced_flag(&v("-vokey=value --nodes 2"), &flags, Span::UntilTheCommand),
+            Some("--nodes")
+        );
+        // And a workload really named `key=value` after a bundle that
+        // does *not* end on a valued letter is still the command.
+        assert_eq!(
+            misplaced_flag(&v("-vv key=value --nodes 2"), &flags, Span::UntilTheCommand),
+            None
+        );
     }
 
     #[test]
