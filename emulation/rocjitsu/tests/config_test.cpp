@@ -275,7 +275,7 @@ TEST(ConfigLoaderTest, LoadFourGpuMi455xKmdConfig) {
 
 TEST(ConfigLoaderTest, DispatchPoolBudgetIsSharedAcrossProductionTopology) {
   auto loaded =
-      config::load_config(CONFIG_DIR_PATH + "/gfx950_cdna4.json", rocjitsu::kEmbeddedSchema);
+      config::load_config(CONFIG_DIR_PATH + "/gfx950_mi355x.json", rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
 
   soc->set_dispatch_threads(8);
@@ -289,7 +289,7 @@ TEST(ConfigLoaderTest, DispatchPoolBudgetIsSharedAcrossProductionTopology) {
 
 TEST(ConfigLoaderTest, SerialPluginRemovesSharedPoolAcrossProductionTopology) {
   auto loaded =
-      config::load_config(CONFIG_DIR_PATH + "/gfx950_cdna4.json", rocjitsu::kEmbeddedSchema);
+      config::load_config(CONFIG_DIR_PATH + "/gfx950_mi355x.json", rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
   soc->set_dispatch_threads(8);
 

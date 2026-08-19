@@ -282,8 +282,11 @@ CommandProcessor::CommandProcessor(std::string name, simdojo::ExecMode exec_mode
   // event must already have a handler when the queue becomes visible.
   doorbell_event_.set_handler(
       [this](simdojo::Tick ts, simdojo::Message *) { handle_doorbell(ts); });
-  dispatch_continuation_event_.set_handler([this](simdojo::Tick ts, simdojo::Message *) {
+  dispatch_continuation_event_.set_handler([this](simdojo::Tick ts, simdojo::Message *message) {
+    if (!message || message->payload() != dispatch_continuation_generation_)
+      return;
     dispatch_continuation_pending_ = false;
+    dispatch_continuation_tick_ = simdojo::TICK_MAX;
     handle_doorbell_sync(ts);
   });
 }
@@ -300,16 +303,73 @@ void CommandProcessor::set_dispatch_threads(uint32_t threads) {
   threads = std::max(threads, 1u);
   if (exec_mode_ != simdojo::ExecMode::FUNCTIONAL || plugin_group_->requires_serial_hot_hooks())
     threads = 1;
-  const bool pool_driven = threads > 1;
-  for (auto *cu : cus_)
-    cu->set_pool_driven(pool_driven);
   if (dispatch_threads_ == threads)
     return;
+
+  const bool was_pool_driven = dispatch_threads_ > 1;
+  const bool pool_driven = threads > 1;
   dispatch_threads_ = threads;
   local_dispatch_pool_.reset();
-  if (!pool_driven)
+
+  if (was_pool_driven == pool_driven) {
     for (auto *cu : cus_)
-      cu->schedule_work();
+      cu->set_pool_driven(pool_driven);
+    return;
+  }
+
+  simdojo::Tick now = 0;
+  if (engine())
+    now = engine()->context(partition_id()).current_tick();
+
+  if (pool_driven) {
+    pooled_due_ticks_.clear();
+    for (auto *cu : cus_) {
+      const simdojo::Tick serial_due = cu->suspend_scheduled_work();
+      cu->set_pool_driven(true);
+      if (cu->has_active_wfs()) {
+        simdojo::Tick tick = serial_due == simdojo::TICK_MAX ? now + 1 : serial_due;
+        if (tick < now)
+          tick = now + 1;
+        pooled_due_ticks_[cu] = tick;
+      }
+    }
+    const simdojo::Tick next = next_pooled_due_tick(now);
+    if (next != simdojo::TICK_MAX)
+      arm_dispatch_continuation(next);
+    return;
+  }
+
+  cancel_dispatch_continuation();
+  for (auto *cu : cus_) {
+    cu->set_pool_driven(false);
+    if (!cu->has_active_wfs())
+      continue;
+    auto due = pooled_due_ticks_.find(cu);
+    simdojo::Tick tick = due == pooled_due_ticks_.end() ? now + 1 : due->second;
+    if (tick < now)
+      tick = now + 1;
+    cu->schedule_work_at(tick);
+  }
+  pooled_due_ticks_.clear();
+}
+
+void CommandProcessor::arm_dispatch_continuation(simdojo::Tick tick) {
+  if (!engine())
+    return;
+  if (dispatch_continuation_pending_ && dispatch_continuation_tick_ <= tick)
+    return;
+
+  dispatch_continuation_pending_ = true;
+  dispatch_continuation_tick_ = tick;
+  const uintptr_t generation = ++dispatch_continuation_generation_;
+  schedule_event(&dispatch_continuation_event_, tick,
+                 std::make_unique<simdojo::Message>(simdojo::MessageHeader{}, generation));
+}
+
+void CommandProcessor::cancel_dispatch_continuation() {
+  dispatch_continuation_pending_ = false;
+  dispatch_continuation_tick_ = simdojo::TICK_MAX;
+  ++dispatch_continuation_generation_;
 }
 
 void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
@@ -984,8 +1044,8 @@ void CommandProcessor::set_queue_debug_suspended(uint32_t queue_id, uint32_t pro
           // neither resume path with anything to release.
           if (state.next_dispatch_idx < state.entries.size()) {
             const auto &entry = state.entries[state.next_dispatch_idx];
-            const bool barrier_ready =
-                !entry.wait_for_predecessors || barrier_satisfied(state, state.next_dispatch_idx);
+            const bool barrier_ready = !entry.wait_for_predecessors ||
+                                       barrier_satisfied(state, state.next_dispatch_idx);
             q.debug_work_deferred |=
                 barrier_ready && (entry.is_non_kernel() || !entry.fully_dispatched());
           }
@@ -1882,7 +1942,28 @@ bool CommandProcessor::has_active_cus() const {
   return false;
 }
 
-FunctionalQuantumResult CommandProcessor::run_active_cus_once() {
+void CommandProcessor::refresh_pooled_due_ticks(simdojo::Tick now) {
+  for (auto it = pooled_due_ticks_.begin(); it != pooled_due_ticks_.end();) {
+    if (!it->first->has_active_wfs())
+      it = pooled_due_ticks_.erase(it);
+    else
+      ++it;
+  }
+  for (auto *cu : cus_)
+    if (cu->has_active_wfs())
+      pooled_due_ticks_.try_emplace(cu, now + 1);
+}
+
+simdojo::Tick CommandProcessor::next_pooled_due_tick(simdojo::Tick now) {
+  refresh_pooled_due_ticks(now);
+  simdojo::Tick next = simdojo::TICK_MAX;
+  for (const auto &[_, tick] : pooled_due_ticks_)
+    next = std::min(next, tick);
+  return next;
+}
+
+FunctionalQuantumResult CommandProcessor::run_active_cus_once(simdojo::Tick now) {
+  refresh_pooled_due_ticks(now);
   active_cu_scratch_.clear();
   if (!spis_.empty()) {
     for (auto *spi : spis_)
@@ -1893,23 +1974,38 @@ FunctionalQuantumResult CommandProcessor::run_active_cus_once() {
         active_cu_scratch_.push_back(cu);
     }
   }
+  std::erase_if(active_cu_scratch_, [&](ComputeUnitCore *cu) {
+    auto due = pooled_due_ticks_.find(cu);
+    return due == pooled_due_ticks_.end() || due->second > now;
+  });
 
   if (active_cu_scratch_.empty())
     return {};
 
+  quantum_result_scratch_.resize(active_cu_scratch_.size());
   uint32_t effective_threads =
       std::min<uint32_t>(dispatch_threads_, static_cast<uint32_t>(active_cu_scratch_.size()));
+  FunctionalQuantumResult result;
   if (shared_dispatch_pool_)
-    return shared_dispatch_pool_->run(active_cu_scratch_, effective_threads);
-  if (effective_threads > 1) {
+    result =
+        shared_dispatch_pool_->run(active_cu_scratch_, effective_threads, quantum_result_scratch_);
+  else if (effective_threads > 1) {
     if (!local_dispatch_pool_ || local_dispatch_pool_->thread_count() < effective_threads)
       local_dispatch_pool_ = std::make_unique<CpuDispatchPool>(effective_threads);
-    return local_dispatch_pool_->run(active_cu_scratch_, effective_threads);
+    result =
+        local_dispatch_pool_->run(active_cu_scratch_, effective_threads, quantum_result_scratch_);
+  } else {
+    quantum_result_scratch_.front() = active_cu_scratch_.front()->run_quantum();
+    result = quantum_result_scratch_.front();
   }
 
-  FunctionalQuantumResult result;
-  for (auto *cu : active_cu_scratch_)
-    result.merge(cu->run_quantum());
+  for (size_t i = 0; i < active_cu_scratch_.size(); ++i) {
+    auto *cu = active_cu_scratch_[i];
+    if (cu->has_active_wfs())
+      pooled_due_ticks_[cu] = now + std::max<uint64_t>(1, quantum_result_scratch_[i].iterations);
+    else
+      pooled_due_ticks_.erase(cu);
+  }
   return result;
 }
 
@@ -2676,7 +2772,7 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
     lock.unlock();
     // One shared pool and thread budget covers the CP's complete active-CU
     // batch instead of retaining a separate pool for every SPI.
-    FunctionalQuantumResult result = run_active_cus_once();
+    FunctionalQuantumResult result = run_active_cus_once(now);
     lock.lock();
     drain_pending_wg_completions();
     if (completion_)
@@ -2873,11 +2969,11 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
   }
 
   if (dispatch_threads_ > 1) {
-    if (yield_to_event_loop && (has_active_cus() || pending_entries() > 0) &&
-        !dispatch_continuation_pending_) {
-      dispatch_continuation_pending_ = true;
-      schedule_event(&dispatch_continuation_event_, now + 1);
-    }
+    const simdojo::Tick next = next_pooled_due_tick(now);
+    if (next != simdojo::TICK_MAX)
+      arm_dispatch_continuation(next);
+    else
+      cancel_dispatch_continuation();
   } else {
     for (size_t i = 0; i < cus_.size(); ++i) {
       if (!cus_[i]->is_idle()) {

@@ -3837,8 +3837,8 @@ TEST(ClusterDispatchTest, AccountsForPerWorkgroupLdsAlignmentWhenPlanningCluster
   EXPECT_FALSE(f.cu()->has_active_wfs());
 }
 
-TEST(ClusterDispatchTest, ParallelGfx1250RetiresClusterAfterWorkersRejoin) {
-  VmFixture f("gfx1250", /*num_cus=*/2, /*num_wf_slots=*/1, /*lds_size_kb=*/64,
+TEST(ClusterDispatchTest, ParallelCdna5RetiresClusterAfterWorkersRejoin) {
+  VmFixture f("cdna5", /*num_cus=*/2, /*num_wf_slots=*/1, /*lds_size_kb=*/64,
               /*sgprs_per_wf=*/128);
   f.cp()->set_dispatch_threads(2);
 
@@ -4384,6 +4384,9 @@ void run_deferred_rescan_late_completion_test(uint32_t dispatch_threads, SubmitT
   queue.submit(packet_a);
 
   ASSERT_TRUE(f.engine->step());
+  if (!submitter->submitted()) {
+    ASSERT_TRUE(f.engine->step());
+  }
   EXPECT_TRUE(submitter->submitted());
 
   for (uint32_t i = 0; i < 10000 && (completion_signal_value(f.mem(), sig_a) != 0 ||
@@ -5648,6 +5651,147 @@ TEST(L1ScalarCacheVmidTest, WriteThroughStoreUsesStoreVmid) {
   mem.unregister_process(kVmidB);
 }
 
+std::vector<uint32_t> make_multi_quantum_nop_kernel() {
+  std::vector<uint32_t> code(2048, SOPP_S_NOP);
+  code.push_back(SOPP_S_ENDPGM);
+  return code;
+}
+
+void step_until_first_quantum(VmFixture &fixture, amdgpu::ComputeUnitCore *cu) {
+  for (uint32_t i = 0; i < 16 && cu->wf(0)->trace_inst_count_ < cu->functional_quantum(); ++i)
+    ASSERT_TRUE(fixture.engine->step());
+  ASSERT_EQ(cu->wf(0)->trace_inst_count_, cu->functional_quantum());
+  ASSERT_TRUE(cu->has_active_wfs());
+}
+
+class LiveSerialDispatchPlugin final : public ExecutionPlugin {
+public:
+  LiveSerialDispatchPlugin() : ExecutionPlugin("live_serial_dispatch") {}
+  bool requires_serial_hot_hooks() const override { return true; }
+};
+
+class LiveParallelDispatchPlugin final : public ExecutionPlugin {
+public:
+  LiveParallelDispatchPlugin() : ExecutionPlugin("live_parallel_dispatch") {}
+  bool requires_serial_hot_hooks() const override { return false; }
+};
+
+TEST(AqlDispatchTest, ActiveDispatchSurvivesSerialToPoolTransition) {
+  VmFixture f("cdna4", /*num_cus=*/1, /*num_wf_slots=*/1);
+  auto code = make_multi_quantum_nop_kernel();
+  uint64_t kernel = f.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(kernel, /*grid_size=*/64, /*workgroup_size=*/64);
+
+  step_until_first_quantum(f, f.cu());
+  f.cp()->set_dispatch_threads(2);
+  EXPECT_EQ(f.cp()->dispatch_threads(), 2u);
+
+  f.engine->run();
+  EXPECT_TRUE(f.cu()->is_idle());
+}
+
+TEST(AqlDispatchTest, ActiveDispatchSurvivesPoolToSerialTransition) {
+  VmFixture f("cdna4", /*num_cus=*/1, /*num_wf_slots=*/1);
+  f.cp()->set_dispatch_threads(2);
+  auto code = make_multi_quantum_nop_kernel();
+  uint64_t kernel = f.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(kernel, /*grid_size=*/64, /*workgroup_size=*/64);
+
+  step_until_first_quantum(f, f.cu());
+  f.cp()->set_dispatch_threads(1);
+  EXPECT_EQ(f.cp()->dispatch_threads(), 1u);
+
+  f.engine->run();
+  EXPECT_TRUE(f.cu()->is_idle());
+}
+
+TEST(AqlDispatchTest, LivePluginReplacementRestoresPoolDuringActiveDispatch) {
+  VmFixture f("cdna4", /*num_cus=*/1, /*num_wf_slots=*/1);
+  f.soc_ptr->set_dispatch_threads(2);
+  auto serial_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(serial_group->add(std::make_unique<LiveSerialDispatchPlugin>()));
+  f.soc_ptr->set_plugin_group(serial_group);
+  ASSERT_EQ(f.cp()->dispatch_threads(), 1u);
+
+  auto code = make_multi_quantum_nop_kernel();
+  uint64_t kernel = f.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(kernel, /*grid_size=*/64, /*workgroup_size=*/64);
+  step_until_first_quantum(f, f.cu());
+
+  auto parallel_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(parallel_group->add(std::make_unique<LiveParallelDispatchPlugin>()));
+  f.soc_ptr->set_plugin_group(parallel_group);
+  EXPECT_EQ(f.soc_ptr->dispatch_threads(), 2u);
+  EXPECT_EQ(f.cp()->dispatch_threads(), 2u);
+
+  f.engine->run();
+  EXPECT_TRUE(f.cu()->is_idle());
+}
+
+uint64_t instructions_visible_at_tick_ten(uint32_t dispatch_threads) {
+  VmFixture f("cdna4", /*num_cus=*/1, /*num_wf_slots=*/1);
+  f.cp()->set_dispatch_threads(dispatch_threads);
+  auto code = make_multi_quantum_nop_kernel();
+  uint64_t kernel = f.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(kernel, /*grid_size=*/64, /*workgroup_size=*/64);
+
+  uint64_t observed = 0;
+  simdojo::Event producer_event{
+      f.cp(), simdojo::EventType::TIMER_CALLBACK,
+      [&](simdojo::Tick, simdojo::Message *) { observed = f.cu()->wf(0)->trace_inst_count_; }};
+  f.engine->schedule_event_async(&producer_event, 10);
+  f.engine->run();
+  return observed;
+}
+
+TEST(AqlDispatchTest, PoolPreservesSerialQuantumSpacingAroundPeerEvent) {
+  EXPECT_EQ(instructions_visible_at_tick_ten(/*dispatch_threads=*/1), 1024u);
+  EXPECT_EQ(instructions_visible_at_tick_ten(/*dispatch_threads=*/2), 1024u);
+}
+
+TEST(AqlDispatchTest, PoolTracksIndependentCuDueTicks) {
+  constexpr uint32_t kSSleep = 0xBF8E0001u;
+  VmFixture f("cdna4", /*num_cus=*/2, /*num_wf_slots=*/1);
+  f.cp()->set_dispatch_threads(2);
+
+  const uint32_t short_code[] = {kSSleep, SOPP_S_ENDPGM};
+  auto long_code = make_multi_quantum_nop_kernel();
+  uint64_t short_kernel = f.write_kernel(0x1000, short_code, sizeof(short_code));
+  uint64_t long_kernel =
+      f.write_kernel(0x4000, long_code.data(), long_code.size() * sizeof(uint32_t));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(short_kernel, /*grid_size=*/64, /*workgroup_size=*/64);
+  queue.dispatch(long_kernel, /*grid_size=*/64, /*workgroup_size=*/64);
+
+  uint32_t idle_cus = 0;
+  uint32_t active_cus = 0;
+  uint64_t active_instructions = 0;
+  simdojo::Event observer_event{f.cp(), simdojo::EventType::TIMER_CALLBACK,
+                                [&](simdojo::Tick, simdojo::Message *) {
+                                  for (uint32_t i = 0; i < 2; ++i) {
+                                    auto *cu = f.cu(i);
+                                    if (cu->is_idle())
+                                      ++idle_cus;
+                                    else {
+                                      ++active_cus;
+                                      active_instructions = cu->wf(0)->trace_inst_count_;
+                                    }
+                                  }
+                                }};
+  f.engine->schedule_event_async(&observer_event, 3);
+  f.engine->run();
+
+  EXPECT_EQ(idle_cus, 1u);
+  EXPECT_EQ(active_cus, 1u);
+  EXPECT_EQ(active_instructions, 1024u);
+  EXPECT_TRUE(f.cu(0)->is_idle());
+  EXPECT_TRUE(f.cu(1)->is_idle());
+}
+
 class BlockingInstructionPlugin final : public ExecutionPlugin {
 public:
   BlockingInstructionPlugin() : ExecutionPlugin("blocking_instruction") {}
@@ -5689,6 +5833,7 @@ TEST(AqlDispatchTest, WorkerExceptionPropagatesThroughEngineStep) {
   test::AqlQueue queue(f.mem(), f.cp());
   queue.dispatch(kernel, /*grid_size=*/128, /*workgroup_size=*/64);
 
+  ASSERT_TRUE(f.engine->step()); // Doorbell dispatches work for tick 1.
   EXPECT_THROW((void)f.engine->step(), std::exception);
 }
 
@@ -5712,11 +5857,13 @@ TEST(AqlDispatchTest, WorkerYieldReturnsToEventLoopBeforeResuming) {
                               peer_saw_yielded_waves = wf0 && wf1 && wf0->trace_inst_count_ == 1 &&
                                                        wf1->trace_inst_count_ == 1;
                             }};
-  f.engine->schedule_event_async(&peer_event, 1);
+  f.engine->schedule_event_async(&peer_event, 2);
 
-  ASSERT_TRUE(f.engine->step()); // Doorbell: both CUs stop after s_sleep.
+  ASSERT_TRUE(f.engine->step()); // Doorbell schedules both CUs for tick 1.
   EXPECT_FALSE(peer_event_ran);
-  ASSERT_TRUE(f.engine->step()); // Peer event runs before the CU resume events.
+  ASSERT_TRUE(f.engine->step()); // Both CUs stop after s_sleep.
+  EXPECT_FALSE(peer_event_ran);
+  ASSERT_TRUE(f.engine->step()); // Peer event runs before the tick-2 CU resume.
   EXPECT_TRUE(peer_event_ran);
   EXPECT_TRUE(peer_saw_yielded_waves);
 
@@ -5746,6 +5893,7 @@ TEST(AqlDispatchTest, QueueMutationWaitsForDispatchWorkerWindow) {
   f.cp()->register_queue(removable_queue);
   dispatch_queue.dispatch(kernel, /*grid_size=*/128, /*workgroup_size=*/64);
 
+  ASSERT_TRUE(f.engine->step()); // Doorbell schedules the worker batch.
   auto step = std::async(std::launch::async, [&]() { return f.engine->step(); });
   const bool entered = blocker->wait_until_entered(2s);
   EXPECT_TRUE(entered) << "CU execution did not reach the blocking plugin";

@@ -103,6 +103,7 @@ TEST(CpuDispatchPoolTest, ZeroFunctionalQuantumRunsUntilWavefrontHalts) {
   auto result = fixture.cus.front()->run_quantum();
 
   EXPECT_TRUE(result.ran);
+  EXPECT_EQ(result.iterations, 2u);
   EXPECT_TRUE(fixture.cus.front()->is_idle());
 }
 
