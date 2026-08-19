@@ -594,15 +594,21 @@ impl Session {
         // give up was registered as nothing at all, so the exec id it
         // *had* supplied protected nothing and the next borrower to
         // disconnect swept its live workload.
-        if borrower.is_some() || exec.is_some() {
-            lock(&self.borrowers).insert(
-                entry,
-                Borrower {
-                    pid: borrower,
-                    exec,
-                },
-            );
-        }
+        //
+        // Recorded unconditionally, including the borrower with neither
+        // handle. Skipping that one saved a map node and cost the map its
+        // meaning: the lease count below is incremented for every
+        // borrower, so a borrower absent from the map was one `mirage
+        // run` waited for and the sweep could not see. One entry per
+        // lease, and the two reads below — both `filter_map` — already
+        // ignore a handle that is not there.
+        lock(&self.borrowers).insert(
+            entry,
+            Borrower {
+                pid: borrower,
+                exec,
+            },
+        );
         // Under the lock, so the increment cannot land between another
         // thread setting `tearing_down` and teardown reading the count.
         self.leases.send_modify(|n| *n += 1);
@@ -1414,11 +1420,15 @@ impl Session {
 ///
 /// Both are optional and for the same reason: the two protections are
 /// independent, so the absence of one must not withdraw the other. A
-/// `getsockopt(SO_PEERCRED)` that fails — or a pid the kernel reports
-/// from a namespace this process cannot resolve — leaves a borrower with
-/// only its exec id, and that borrower's workload is no less live for
-/// it. A value is only ever added to this map when at least one of the
-/// two is present; see [`Session::attach`].
+/// `getsockopt(SO_PEERCRED)` that fails — or a peer in a namespace this
+/// process cannot resolve, which the kernel answers with a pid of `0`
+/// that the socket discards rather than believing — leaves a borrower
+/// with only its exec id, and that borrower's workload is no less live
+/// for it. Both may be absent, and such a borrower is still recorded — one
+/// entry per lease, so the map and the lease count cannot disagree about
+/// who is here; see [`Session::attach`]. It simply protects nothing,
+/// which the `filter_map`s in [`Session::reap_departed_borrowers`]
+/// express without needing a special case.
 #[derive(Debug, Clone)]
 struct Borrower {
     /// The client process holding the lease, when the kernel said.

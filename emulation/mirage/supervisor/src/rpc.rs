@@ -376,11 +376,21 @@ async fn handle(stream: UnixStream, run: Arc<Run>) {
     // that distinguishes one borrower's live processes from another
     // borrower's leftovers once a lease has ended — see
     // [`Session::reap_departed_borrowers`](mirage_supervisor::session::Session::reap_departed_borrowers).
+    //
+    // A pid of zero is not a pid. `SO_PEERCRED` does not fail for a peer
+    // in a namespace this process cannot resolve — the kernel reports `0`
+    // — so taking the number at face value records the placeholder the
+    // `Borrower` doc says is never stored, and a meaningless `0` then
+    // rides along in every ancestry check. Dropped here, at the one place
+    // that knows the number came from the kernel, so the borrower falls
+    // back to its exec mark exactly as one whose credentials were refused
+    // outright does.
     let borrower = stream
         .peer_cred()
         .ok()
         .and_then(|cred| cred.pid())
-        .and_then(|pid| u32::try_from(pid).ok());
+        .and_then(|pid| u32::try_from(pid).ok())
+        .filter(|pid| *pid > 0);
     let mut framed = Framed::new(stream, codec());
 
     let Some(frame) = first_request(&mut framed).await else {
