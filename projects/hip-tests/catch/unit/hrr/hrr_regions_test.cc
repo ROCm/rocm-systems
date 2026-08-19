@@ -351,10 +351,18 @@ TEST_CASE("Unit_HRR_Regions_StreamFraming", "[hrr]") {
     fclose(f);
 
     REQUIRE(all.size() == 3);
+    CHECK(all[0].op == HRR_REGION_ADD);
     CHECK(all[0].kind == HRR_REGION_SEGMENT);
+    CHECK(all[0].base == 0x700000000000ull);
     CHECK(all[0].size == kSegBytes);
+    CHECK(all[1].op == HRR_REGION_ADD);
     CHECK(all[1].kind == HRR_REGION_BLOCK);
+    CHECK(all[1].base == 0x700000000000ull);
+    CHECK(all[1].size == kBlockBytes);
+    CHECK(all[2].op == HRR_REGION_ADD);
+    CHECK(all[2].kind == HRR_REGION_BLOCK);
     CHECK(all[2].base == 0x700000010000ull);
+    CHECK(all[2].size == kBlockBytes);
   }
 
   SECTION("a torn tail costs only the torn batch") {
@@ -374,6 +382,27 @@ TEST_CASE("Unit_HRR_Regions_StreamFraming", "[hrr]") {
     fclose(f);
     CHECK(st == hrr::RecordStatus::Torn);
     CHECK(complete == 1);
+  }
+
+  SECTION("an implausible payload_length is torn, not allocated") {
+    const fs::path bad = dir.path / "pid-huge" / "regions" / "huge.hrrr";
+    fs::create_directories(bad.parent_path());
+    FILE* wf = fopen(bad.string().c_str(), "wb");
+    REQUIRE(wf != nullptr);
+    const hrr_file_header fh = hrr_make_region_file_header();
+    REQUIRE(fwrite(&fh, sizeof(fh), 1, wf) == 1);
+    hrr_event_header hdr{};
+    hdr.event_type = HRR_REGION_EVENT;
+    hdr.payload_length = 0xFFFFFFF0u;
+    REQUIRE(fwrite(&hdr, sizeof(hdr), 1, wf) == 1);
+    fclose(wf);
+
+    FILE* f = hrr::open_record_stream(bad.string(), HRR_REGION_MAGIC,
+                                      HRR_REGION_VERSION, nullptr);
+    REQUIRE(f != nullptr);
+    std::vector<uint8_t> raw;
+    CHECK(hrr::read_raw_record(f, raw) == hrr::RecordStatus::Torn);
+    fclose(f);
   }
 
   SECTION("an events.bin is not a region stream") {
@@ -439,7 +468,8 @@ TEST_CASE("Unit_HRR_Regions_Roundtrip", "[hrr]") {
     CHECK(out.find("region OOB") != std::string::npos);
     CHECK(out.find("intra-segment out-of-bounds/stale") != std::string::npos);
     // The gap launch is the one pointer of the four that is in no block.
-    CHECK(out.find(": 0 intra-segment") == std::string::npos);
+    // Summary line is "... checked, N intra-segment out-of-bounds/stale".
+    CHECK(out.find(", 0 intra-segment") == std::string::npos);
   }
 
   SECTION("--regions-strict turns the finding into a failure") {

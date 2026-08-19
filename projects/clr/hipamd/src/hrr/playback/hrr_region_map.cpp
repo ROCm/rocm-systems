@@ -140,13 +140,26 @@ void RegionMap::advance_to(PlaybackContext& ctx, int64_t ts) {
     if (records_.empty()) return;
     // Monotonic only. Events are dispatched in sequence order, which is the
     // capture's call order, so a timestamp going backwards means clock jitter
-    // between threads rather than a genuine rewind.
+    // between threads rather than a genuine rewind. Call rewind() to start a
+    // second pass over the same timeline.
     if (ts < last_ts_) return;
     last_ts_ = ts;
     while (cursor_ < records_.size() && records_[cursor_].mono_ns <= ts) {
         apply(ctx, records_[cursor_]);
         ++cursor_;
     }
+}
+
+void RegionMap::rewind() {
+    cursor_  = 0;
+    last_ts_ = INT64_MIN;
+    blocks_.clear();
+    segments_.clear();
+    // Keep materialized_ / materialize_failed_ / materialized_total_: a warm-up
+    // pass may already have allocated stand-in buffers and registered them in
+    // alloc_map. Clearing those would leak the GPU allocations or double-malloc
+    // on the timed pass. apply() on SEGMENT DEL still releases a buffer the
+    // producer freed mid-run, as on the first pass.
 }
 
 void* RegionMap::materialize_for(PlaybackContext& ctx, uint64_t rec_addr) {

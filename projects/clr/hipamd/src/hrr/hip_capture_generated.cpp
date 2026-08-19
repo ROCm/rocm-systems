@@ -60,106 +60,6 @@ const HipCompilerDispatchTable* GetHipCompilerDispatchTable();
 // ============================================================
 
 // Generated shim
-static hipError_t capture___hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem, hipStream_t* stream) {
-  hipError_t r = g_real_compiler_table.__hipPopCallConfiguration_fn(gridDim, blockDim, sharedMem, stream);
-  if (r == hipSuccess) {
-    hrr_args___hipPopCallConfiguration a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.gridDim = reinterpret_cast<uint64_t>(gridDim);
-    a.blockDim = reinterpret_cast<uint64_t>(blockDim);
-    a.sharedMem = reinterpret_cast<uint64_t>(sharedMem);
-    if (stream) a.stream = reinterpret_cast<uint64_t>(*stream);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPPOPCALLCONFIGURATION, &a.hdr, sizeof(a));
-  }
-  return r;
-}
-
-
-
-// Generated shim
-static void capture___hipRegisterFunction(void** modules, const void* hostFunction, char* deviceFunction, const char* deviceName, unsigned int threadLimit, uint3* tid, uint3* bid, dim3* blockDim, dim3* gridDim, int* wSize) {
-  g_real_compiler_table.__hipRegisterFunction_fn(modules, hostFunction, deviceFunction, deviceName, threadLimit, tid, bid, blockDim, gridDim, wSize);
-  {
-    hrr_args___hipRegisterFunction a{};
-    a.hostFunction = reinterpret_cast<uint64_t>(hostFunction);
-    a.deviceFunction = reinterpret_cast<uint64_t>(deviceFunction);
-    a.deviceName = reinterpret_cast<uint64_t>(deviceName);
-    a.threadLimit = static_cast<decltype(a.threadLimit)>(threadLimit);
-    a.tid = reinterpret_cast<uint64_t>(tid);
-    a.bid = reinterpret_cast<uint64_t>(bid);
-    a.blockDim = reinterpret_cast<uint64_t>(blockDim);
-    a.gridDim = reinterpret_cast<uint64_t>(gridDim);
-    a.wSize = reinterpret_cast<uint64_t>(wSize);
-    if (modules) a.modules = reinterpret_cast<uint64_t>(*modules);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERFUNCTION, &a.hdr, sizeof(a));
-  }
-}
-
-// Generated shim
-static void capture___hipRegisterManagedVar(void* hipModule, void** pointer, void* init_value, const char* name, size_t size, unsigned align) {
-  g_real_compiler_table.__hipRegisterManagedVar_fn(hipModule, pointer, init_value, name, size, align);
-  {
-    hrr_args___hipRegisterManagedVar a{};
-    a.hipModule = reinterpret_cast<uint64_t>(hipModule);
-    a.init_value = reinterpret_cast<uint64_t>(init_value);
-    a.name = reinterpret_cast<uint64_t>(name);
-    a.size = static_cast<decltype(a.size)>(size);
-    a.align = static_cast<decltype(a.align)>(align);
-    if (pointer) a.pointer = reinterpret_cast<uint64_t>(*pointer);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERMANAGEDVAR, &a.hdr, sizeof(a));
-  }
-}
-
-// Generated shim
-static void capture___hipRegisterSurface(void** modules, void* var, char* hostVar, char* deviceVar, int type, int ext) {
-  g_real_compiler_table.__hipRegisterSurface_fn(modules, var, hostVar, deviceVar, type, ext);
-  {
-    hrr_args___hipRegisterSurface a{};
-    a.var = reinterpret_cast<uint64_t>(var);
-    a.hostVar = reinterpret_cast<uint64_t>(hostVar);
-    a.deviceVar = reinterpret_cast<uint64_t>(deviceVar);
-    a.type = static_cast<decltype(a.type)>(type);
-    a.ext = static_cast<decltype(a.ext)>(ext);
-    if (modules) a.modules = reinterpret_cast<uint64_t>(*modules);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERSURFACE, &a.hdr, sizeof(a));
-  }
-}
-
-// Generated shim
-static void capture___hipRegisterTexture(void** modules, void* var, char* hostVar, char* deviceVar, int type, int norm, int ext) {
-  g_real_compiler_table.__hipRegisterTexture_fn(modules, var, hostVar, deviceVar, type, norm, ext);
-  {
-    hrr_args___hipRegisterTexture a{};
-    a.var = reinterpret_cast<uint64_t>(var);
-    a.hostVar = reinterpret_cast<uint64_t>(hostVar);
-    a.deviceVar = reinterpret_cast<uint64_t>(deviceVar);
-    a.type = static_cast<decltype(a.type)>(type);
-    a.norm = static_cast<decltype(a.norm)>(norm);
-    a.ext = static_cast<decltype(a.ext)>(ext);
-    if (modules) a.modules = reinterpret_cast<uint64_t>(*modules);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERTEXTURE, &a.hdr, sizeof(a));
-  }
-}
-
-// Generated shim
-static void capture___hipRegisterVar(void** modules, void* var, char* hostVar, char* deviceVar, int ext, size_t size, int constant, int global) {
-  g_real_compiler_table.__hipRegisterVar_fn(modules, var, hostVar, deviceVar, ext, size, constant, global);
-  {
-    hrr_args___hipRegisterVar a{};
-    a.var = reinterpret_cast<uint64_t>(var);
-    a.hostVar = reinterpret_cast<uint64_t>(hostVar);
-    a.deviceVar = reinterpret_cast<uint64_t>(deviceVar);
-    a.ext = static_cast<decltype(a.ext)>(ext);
-    a.size = static_cast<decltype(a.size)>(size);
-    a.constant = static_cast<decltype(a.constant)>(constant);
-    a.global = static_cast<decltype(a.global)>(global);
-    if (modules) a.modules = reinterpret_cast<uint64_t>(*modules);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERVAR, &a.hdr, sizeof(a));
-  }
-}
-
-
-// Generated shim
 static const char* capture_hipApiName(uint32_t id) {
   const char* r = g_real_table.hipApiName_fn(id);
   {
@@ -7419,6 +7319,106 @@ static hipError_t capture_hipDeviceGetLuid(char* luid, unsigned int* deviceNodeM
   }
   return r;
 }
+
+// Generated shim
+static hipError_t capture___hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem, hipStream_t* stream) {
+  hipError_t r = g_real_compiler_table.__hipPopCallConfiguration_fn(gridDim, blockDim, sharedMem, stream);
+  if (r == hipSuccess) {
+    hrr_args___hipPopCallConfiguration a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.gridDim = reinterpret_cast<uint64_t>(gridDim);
+    a.blockDim = reinterpret_cast<uint64_t>(blockDim);
+    a.sharedMem = reinterpret_cast<uint64_t>(sharedMem);
+    if (stream) a.stream = reinterpret_cast<uint64_t>(*stream);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPPOPCALLCONFIGURATION, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+
+
+// Generated shim
+static void capture___hipRegisterFunction(void** modules, const void* hostFunction, char* deviceFunction, const char* deviceName, unsigned int threadLimit, uint3* tid, uint3* bid, dim3* blockDim, dim3* gridDim, int* wSize) {
+  g_real_compiler_table.__hipRegisterFunction_fn(modules, hostFunction, deviceFunction, deviceName, threadLimit, tid, bid, blockDim, gridDim, wSize);
+  {
+    hrr_args___hipRegisterFunction a{};
+    a.hostFunction = reinterpret_cast<uint64_t>(hostFunction);
+    a.deviceFunction = reinterpret_cast<uint64_t>(deviceFunction);
+    a.deviceName = reinterpret_cast<uint64_t>(deviceName);
+    a.threadLimit = static_cast<decltype(a.threadLimit)>(threadLimit);
+    a.tid = reinterpret_cast<uint64_t>(tid);
+    a.bid = reinterpret_cast<uint64_t>(bid);
+    a.blockDim = reinterpret_cast<uint64_t>(blockDim);
+    a.gridDim = reinterpret_cast<uint64_t>(gridDim);
+    a.wSize = reinterpret_cast<uint64_t>(wSize);
+    if (modules) a.modules = reinterpret_cast<uint64_t>(*modules);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERFUNCTION, &a.hdr, sizeof(a));
+  }
+}
+
+// Generated shim
+static void capture___hipRegisterManagedVar(void* hipModule, void** pointer, void* init_value, const char* name, size_t size, unsigned align) {
+  g_real_compiler_table.__hipRegisterManagedVar_fn(hipModule, pointer, init_value, name, size, align);
+  {
+    hrr_args___hipRegisterManagedVar a{};
+    a.hipModule = reinterpret_cast<uint64_t>(hipModule);
+    a.init_value = reinterpret_cast<uint64_t>(init_value);
+    a.name = reinterpret_cast<uint64_t>(name);
+    a.size = static_cast<decltype(a.size)>(size);
+    a.align = static_cast<decltype(a.align)>(align);
+    if (pointer) a.pointer = reinterpret_cast<uint64_t>(*pointer);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERMANAGEDVAR, &a.hdr, sizeof(a));
+  }
+}
+
+// Generated shim
+static void capture___hipRegisterSurface(void** modules, void* var, char* hostVar, char* deviceVar, int type, int ext) {
+  g_real_compiler_table.__hipRegisterSurface_fn(modules, var, hostVar, deviceVar, type, ext);
+  {
+    hrr_args___hipRegisterSurface a{};
+    a.var = reinterpret_cast<uint64_t>(var);
+    a.hostVar = reinterpret_cast<uint64_t>(hostVar);
+    a.deviceVar = reinterpret_cast<uint64_t>(deviceVar);
+    a.type = static_cast<decltype(a.type)>(type);
+    a.ext = static_cast<decltype(a.ext)>(ext);
+    if (modules) a.modules = reinterpret_cast<uint64_t>(*modules);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERSURFACE, &a.hdr, sizeof(a));
+  }
+}
+
+// Generated shim
+static void capture___hipRegisterTexture(void** modules, void* var, char* hostVar, char* deviceVar, int type, int norm, int ext) {
+  g_real_compiler_table.__hipRegisterTexture_fn(modules, var, hostVar, deviceVar, type, norm, ext);
+  {
+    hrr_args___hipRegisterTexture a{};
+    a.var = reinterpret_cast<uint64_t>(var);
+    a.hostVar = reinterpret_cast<uint64_t>(hostVar);
+    a.deviceVar = reinterpret_cast<uint64_t>(deviceVar);
+    a.type = static_cast<decltype(a.type)>(type);
+    a.norm = static_cast<decltype(a.norm)>(norm);
+    a.ext = static_cast<decltype(a.ext)>(ext);
+    if (modules) a.modules = reinterpret_cast<uint64_t>(*modules);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERTEXTURE, &a.hdr, sizeof(a));
+  }
+}
+
+// Generated shim
+static void capture___hipRegisterVar(void** modules, void* var, char* hostVar, char* deviceVar, int ext, size_t size, int constant, int global) {
+  g_real_compiler_table.__hipRegisterVar_fn(modules, var, hostVar, deviceVar, ext, size, constant, global);
+  {
+    hrr_args___hipRegisterVar a{};
+    a.var = reinterpret_cast<uint64_t>(var);
+    a.hostVar = reinterpret_cast<uint64_t>(hostVar);
+    a.deviceVar = reinterpret_cast<uint64_t>(deviceVar);
+    a.ext = static_cast<decltype(a.ext)>(ext);
+    a.size = static_cast<decltype(a.size)>(size);
+    a.constant = static_cast<decltype(a.constant)>(constant);
+    a.global = static_cast<decltype(a.global)>(global);
+    if (modules) a.modules = reinterpret_cast<uint64_t>(*modules);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERVAR, &a.hdr, sizeof(a));
+  }
+}
+
 
 // ============================================================
 // Table builders

@@ -18,6 +18,12 @@ namespace fs = std::filesystem;
 
 namespace hrr {
 
+// payload_length is file-supplied. Without a ceiling, a corrupt header can ask
+// resize() for ~4 GiB and OOM the process. Captured kernel launches are far
+// smaller (the writer buffers 256 KiB and spills larger records to a direct
+// write); 64 MiB is well above any legitimate record.
+static constexpr uint32_t kMaxRecordBytes = 64u * 1024u * 1024u;
+
 // ---------------------------------------------------------------------------
 // Event move semantics
 // ---------------------------------------------------------------------------
@@ -114,6 +120,12 @@ RecordStatus read_raw_record(FILE* f, std::vector<uint8_t>& out) {
   if (total < hdr_size) {
     fprintf(stderr, "[HRR] Torn trailing record (payload_length %u < %u)\n",
             total, hdr_size);
+    return RecordStatus::Torn;
+  }
+  if (total > kMaxRecordBytes) {
+    fprintf(stderr,
+            "[HRR] Implausible payload_length %u (max %u) — treating as torn\n",
+            total, kMaxRecordBytes);
     return RecordStatus::Torn;
   }
   if (total > hdr_size) {

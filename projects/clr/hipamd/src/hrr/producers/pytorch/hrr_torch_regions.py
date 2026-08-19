@@ -88,12 +88,17 @@ class _Stream:
         self._pid = None
 
     def write(self, records):
-        """Append one batch. Single write() so a crash can only tear the tail."""
+        """Append one batch. Single write() so a crash can only tear the tail.
+
+        Returns True if the batch was written. False if there was nothing to
+        write or capture is not active yet — the caller must not advance its
+        watermark in that case.
+        """
         if not records:
-            return
+            return False
         d = _archive_dir()
         if d is None:
-            return
+            return False
         if self._fh is None or self._pid != os.getpid():
             self.close()
             regions = os.path.join(d, "regions")
@@ -110,6 +115,7 @@ class _Stream:
         for op, kind, device, base, size, mono_ns in records:
             buf += struct.pack(_REC, op, kind, device, 0, 0, base, size, mono_ns)
         self._fh.write(bytes(buf))
+        return True
 
     def close(self):
         if self._fh is not None:
@@ -144,8 +150,16 @@ def _baseline(snap):
     return out
 
 
-def _delta(snap, watermark):
-    """Trace entries newer than `watermark`, as records. Returns (recs, mark).
+def _delta(snap, watermark, seen_at_mark):
+    """Trace entries newer than `watermark`, as records.
+
+    Returns (recs, mark, seen_at_mark) where `mark` is the newest time_us
+    consumed and `seen_at_mark` is the set of keys already written at that
+    tick. PyTorch stamps many alloc/free events with the same microsecond;
+    treating watermark as inclusive (`<=`) dropped any later entry that landed
+    on the same tick as the last one written. Keys at the current mark are
+    remembered so a later poll can pick up new same-tick entries without
+    rewriting the sidecar while the process is idle.
 
     PyTorch stamps trace entries with CLOCK_REALTIME microseconds; HRR event
     headers use CLOCK_MONOTONIC nanoseconds. Sampling both clocks here and
@@ -156,20 +170,30 @@ def _delta(snap, watermark):
                  - time.clock_gettime_ns(time.CLOCK_REALTIME))
     recs = []
     mark = watermark
+    seen = set()
     for device, entries in enumerate(snap.get("device_traces", []) or []):
         for e in entries:
             tu = int(e.get("time_us", 0))
-            if tu <= watermark:
+            if tu < watermark:
                 continue
             action = _ACTIONS.get(e.get("action"))
             if action is None:
                 continue
             op, kind = action
-            recs.append((op, kind, device, int(e.get("addr", 0)),
-                         int(e.get("size", 0)), tu * 1000 + offset_ns))
-            mark = max(mark, tu)
+            addr = int(e.get("addr", 0))
+            size = int(e.get("size", 0))
+            key = (device, op, kind, addr, size, tu)
+            already = tu == watermark and key in seen_at_mark
+            if not already:
+                recs.append((op, kind, device, addr, size,
+                             tu * 1000 + offset_ns))
+            if tu > mark:
+                mark = tu
+                seen = {key}
+            elif tu == mark:
+                seen.add(key)
     recs.sort(key=lambda r: r[5])
-    return recs, mark
+    return recs, mark, seen
 
 
 def _worker():
@@ -207,6 +231,7 @@ def _worker():
 
     _log("capture active; polling every %ss" % _INTERVAL_S)
     watermark = 0
+    seen_at_mark = set()
     seeded = False
     total = 0
     while True:
@@ -214,15 +239,22 @@ def _worker():
             snap = torch.cuda.memory._snapshot()
             if not seeded:
                 base = _baseline(snap)
-                stream.write(base)
-                total += len(base)
+                if not stream.write(base) and base:
+                    raise IOError("baseline write skipped (no archive yet)")
+                if base:
+                    total += len(base)
                 seeded = True
                 _log("baseline: %d records" % len(base))
-            recs, watermark = _delta(snap, watermark)
+            recs, new_mark, new_seen = _delta(snap, watermark, seen_at_mark)
             if recs:
-                stream.write(recs)
+                if not stream.write(recs):
+                    raise IOError("region write skipped")
                 total += len(recs)
                 _log("wrote %d records (%d total)" % (len(recs), total))
+            # Advance only after a successful write so a failed poll retries
+            # the same records. Empty recs still updates the de-dup set.
+            watermark = new_mark
+            seen_at_mark = new_seen
         except Exception as e:  # never let the producer kill the workload
             _log("poll error: %r" % e)
         time.sleep(_INTERVAL_S)

@@ -1234,6 +1234,14 @@ int main(int argc, char** argv) {
     ctx.kernel_filter    = filter;
     ctx.kernels_launched = 0;
     ctx.total_kernel_ms  = 0.0;
+    // Warm-up drained the region cursor. advance_to is monotonic and would
+    // leave the timed pass classifying against an empty live-set (--regions-strict
+    // phantom failures, --guard-blocks guarding nothing).
+    ctx.regions.rewind();
+    ctx.region_ptrs_checked.store(0, std::memory_order_relaxed);
+    ctx.region_oob_ptrs.store(0, std::memory_order_relaxed);
+    ctx.guard_blocks_relocated.store(0, std::memory_order_relaxed);
+    ctx.guard_blind_max.store(0, std::memory_order_relaxed);
     printf("[HRR] Warm-up done. Running filtered pass...\n");
   }
 
