@@ -53,6 +53,33 @@ function(apply_hip_compile_only tgt)
   endforeach()
 endfunction()
 
+# apply_host_only_coverage_asan(<target>)
+#
+# Apply the shared host-only build model used by the in-RCCL-build micro/devr
+# binaries:
+#  * --offload-host-only + -no-hip-rt: no amdgcn device pass and no HIP runtime
+#    link. Host-only keeps llvm coverage instrumentation off the device pass,
+#    where it would pull in profiling-runtime symbols that do not exist on
+#    device and make amdgcn-link fail.
+#  * llvm source-based coverage (-fprofile-instr-generate -fcoverage-mapping).
+#  * AddressSanitizer when BUILD_ADDRESS_SANITIZER is set, with an rpath to
+#    ASAN_RUNTIME_DIR when provided.
+function(apply_host_only_coverage_asan tgt)
+  target_compile_options(${tgt} PRIVATE --offload-host-only)
+  target_link_options(${tgt} PRIVATE -no-hip-rt)
+
+  target_compile_options(${tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+  target_link_options(${tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+
+  if(BUILD_ADDRESS_SANITIZER)
+    target_compile_options(${tgt} PRIVATE -fsanitize=address)
+    target_link_options(${tgt} PRIVATE -fsanitize=address -shared-libasan)
+    if(DEFINED ASAN_RUNTIME_DIR)
+      target_link_options(${tgt} PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
+    endif()
+  endif()
+endfunction()
+
 if(BUILD_TESTS)
   # rccl-UnitTestsMicro: standalone unit-test binary compiled directly into
   # the test binary. This lets us use preprocessor and link-time substitution
@@ -95,27 +122,13 @@ if(BUILD_TESTS)
   # not exist on device, making amdgcn-link fail. --offload-host-only removes the
   # device pass entirely, which is robust across clang toolchains that ignore the
   # older -Xarch_device coverage split.
-  target_compile_options(rccl-UnitTestsMicro PRIVATE --offload-host-only)
-  target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt)
-
   # The unit-under-test production .cc pulled in here trips these warnings on
   # code paths the test does not exercise; silence them (matches the standalone
   # build's global add_compile_options below).
   target_compile_options(rccl-UnitTestsMicro PRIVATE
     -Wno-unused-parameter -Wno-unused-variable)
 
-  target_compile_options(rccl-UnitTestsMicro PRIVATE
-    -fprofile-instr-generate -fcoverage-mapping)
-  target_link_options(rccl-UnitTestsMicro PRIVATE
-    -fprofile-instr-generate -fcoverage-mapping)
-
-  if(BUILD_ADDRESS_SANITIZER)
-    target_compile_options(rccl-UnitTestsMicro PRIVATE -fsanitize=address)
-    target_link_options(rccl-UnitTestsMicro PRIVATE -fsanitize=address -shared-libasan)
-    if(DEFINED ASAN_RUNTIME_DIR)
-      target_link_options(rccl-UnitTestsMicro PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
-    endif()
-  endif()
+  apply_host_only_coverage_asan(rccl-UnitTestsMicro)
 
   # Deliberately NOT linking librccl.so: this binary is for tests that compile
   # their unit-under-test source file(s) directly. Add files to
@@ -283,22 +296,9 @@ if(BUILD_TESTS)
     net_ib_header_symlinks rma_header_symlinks)
 
   # Host-only compile (see rccl-UnitTestsMicro above) + llvm coverage.
-  target_compile_options(rccl-UnitTestsDevRuntime PRIVATE --offload-host-only)
-  target_link_options(rccl-UnitTestsDevRuntime PRIVATE -no-hip-rt)
   target_compile_options(rccl-UnitTestsDevRuntime PRIVATE
     -Wno-unused-parameter -Wno-unused-variable)
-  target_compile_options(rccl-UnitTestsDevRuntime PRIVATE
-    -fprofile-instr-generate -fcoverage-mapping)
-  target_link_options(rccl-UnitTestsDevRuntime PRIVATE
-    -fprofile-instr-generate -fcoverage-mapping)
-
-  if(BUILD_ADDRESS_SANITIZER)
-    target_compile_options(rccl-UnitTestsDevRuntime PRIVATE -fsanitize=address)
-    target_link_options(rccl-UnitTestsDevRuntime PRIVATE -fsanitize=address -shared-libasan)
-    if(DEFINED ASAN_RUNTIME_DIR)
-      target_link_options(rccl-UnitTestsDevRuntime PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
-    endif()
-  endif()
+  apply_host_only_coverage_asan(rccl-UnitTestsDevRuntime)
 
   rocm_install(TARGETS rccl-UnitTestsDevRuntime COMPONENT tests)
 
