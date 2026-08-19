@@ -24,6 +24,7 @@ set(RJ_OBJECT_LIBS
     rocjitsu_vm_risc_v
     rocjitsu_config
     rocjitsu_dbt_config
+    rocjitsu_pci
 )
 
 if(RJ_INSTALL_TESTS)
@@ -546,6 +547,8 @@ add_executable(
     race-detector/race_log_expectation_test.cpp
     data_types_test.cpp
     drm_info_layout_test.cpp
+    pci/bar_access_trace_test.cpp
+    pci/scratch_pci_device_test.cpp
 )
 if(HAS_DEVICE_KERNELS)
     target_sources(
@@ -563,6 +566,21 @@ if(HAS_GFX1250_DEVICE_KERNELS)
     target_compile_definitions(
         rocjitsu_tests
         PRIVATE HAS_GFX1250_DEVICE_KERNELS=1
+    )
+endif()
+# The vfio-user backend is optional, so its tests build only when it does.
+if(ROCJITSU_ENABLE_VFIO)
+    target_sources(
+        rocjitsu_tests
+        PRIVATE
+            vmm/bus_plan_test.cpp
+            vmm/guest_region_map_test.cpp
+            vmm/vfio_user_client.cpp
+            vmm/vfio_device_host_test.cpp
+    )
+    target_link_libraries(
+        rocjitsu_tests
+        PRIVATE rocjitsu_vmm_vfu libvfio-user::libvfio-user
     )
 endif()
 if(RJ_ENABLE_EXPENSIVE_CHECKS)
