@@ -1003,21 +1003,8 @@ TEST_F(NetIbMPITest, RapidConnectDisconnect) {
         return out;
     };
 
-    // Count only RDMA objects owned by THIS process so a co-tenant test churning
-    // QPs/CQs/MRs/PDs between the before/after snapshots cannot cause a spurious leak
-    // failure under a parallel (--jobs>1) run. `rdma resource show` lines carry
-    // " pid <N> "; we count lines matching our own PID.
-    //
-    // The own-vs-system decision is based on whether the output exposes a pid column at
-    // all (a stable property of the iproute2 version), NOT on whether our PID currently
-    // owns any object. This matters because the connect/disconnect loop closes everything
-    // it opens, so at both the before and after snapshots this process typically owns ZERO
-    // QPs/CQs -- a per-snapshot "did we see our pid" test would then fall back to a
-    // system-wide count that includes a co-tenant's churn, and could even pick different
-    // modes for before vs after. Keying off the pid-column presence keeps both snapshots in
-    // the same mode and correctly reports our own count as 0 when we own nothing. Only when
-    // the tool emits no pid column at all do we fall back to a system-wide non-empty count
-    // (mirrors CaptureRdmaResources() in NetIbMPITestBase.hpp).
+    // Match "<space>pid <ourpid><space>" in `rdma resource show` output so we can count
+    // only this process's RDMA objects and ignore a parallel co-tenant's QP/CQ/MR/PD churn.
     const std::string rdmaPidFilter = " pid " + std::to_string(getpid()) + " ";
     auto countRdmaLines = [&rdmaPidFilter](const std::string& text) -> int {
         std::istringstream iss(text);
