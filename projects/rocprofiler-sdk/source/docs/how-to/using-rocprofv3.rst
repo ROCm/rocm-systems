@@ -923,7 +923,7 @@ Sample output for the list-avail command:
 
 You can also customize the counters according to the requirement. Such counters are named :ref:`extra-counters`.
 
-For a comprehensive list of counters available on MI200, see `MI200 performance counters and metrics <https://rocm.docs.amd.com/en/latest/conceptual/gpu-arch/mi300-mi200-performance-counters.html>`_.
+For a comprehensive list of counters available on MI200, see `MI200 performance counters and metrics <https://rocm.docs.amd.com/en/latest/reference/gpu-arch/mi300-mi200-performance-counters.html>`_.
 
 .. note::
 
