@@ -17,6 +17,7 @@
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/soc.h"
+#include "util/except.h"
 
 #include "simdojo/sim/simulation.h"
 
@@ -186,6 +187,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna3.soc()->num_xcds(), 1u);
   EXPECT_EQ(rdna3.soc()->xcd(0)->num_shader_engines(), 6u);
   EXPECT_EQ(rdna3.soc()->xcd(0)->shader_engine(0)->num_compute_units(), 16u);
+  EXPECT_EQ(rdna3.soc()->xcd(0)->shader_engine(0)->compute_unit(0)->config().sgprs_per_wf, 106u);
   EXPECT_TRUE(rdna3.soc()->xcd(0)->command_processor()->packed_tid());
   EXPECT_EQ(rdna3.soc()->xcd(0)->command_processor()->sdma_packet_dialect(),
             amdgpu::SdmaPacketDialect::Gfx11Plus);
@@ -223,6 +225,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna35.soc()->num_xcds(), 1u);
   EXPECT_EQ(rdna35.soc()->xcd(0)->num_shader_engines(), 2u);
   EXPECT_EQ(rdna35.soc()->xcd(0)->shader_engine(0)->num_compute_units(), 16u);
+  EXPECT_EQ(rdna35.soc()->xcd(0)->shader_engine(0)->compute_unit(0)->config().sgprs_per_wf, 106u);
   EXPECT_TRUE(rdna35.soc()->xcd(0)->command_processor()->packed_tid());
   EXPECT_EQ(rdna35.soc()->xcd(0)->command_processor()->sdma_packet_dialect(),
             amdgpu::SdmaPacketDialect::Gfx11Plus);
@@ -925,6 +928,35 @@ TEST(ConfigLoaderTest, Gfx1250ComputeUnitDefaultsCoverTtmpAndHighVgprs) {
   EXPECT_EQ(cu->config().vgprs_per_wf, 1024u);
 }
 
+TEST(ConfigLoaderTest, RejectsSgprBlockSmallerThanOrdinarySelectorWindow) {
+  const char *json = R"({"max_ticks":1000,"num_threads":1,
+    "vm":{"arch":"rdna3"},
+    "topology":{"root":{"name":"soc","type":"soc","children":[
+      {"name":"vram","type":"gpu_memory"},
+      {"name":"xcd0","type":"xcd","children":[
+        {"name":"l2","type":"l2_cache"},
+        {"name":"cp","type":"command_processor"},
+        {"name":"se0","type":"shader_engine","children":[
+          {"name":"cu0","type":"compute_unit","config":[
+            {"key":"num_wf_slots","value":"1"},
+            {"key":"sgprs_per_wf","value":"104"},
+            {"key":"vgprs_per_wf","value":"16"},
+            {"key":"lds_size_kb","value":"64"}
+          ]}
+        ]}
+      ]}
+    ]}}})";
+
+  try {
+    static_cast<void>(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema));
+    FAIL() << "Expected undersized SGPR block to be rejected";
+  } catch (const util::ConfigError &error) {
+    EXPECT_NE(std::string_view(error.what()).find("requires at least 106 slots"),
+              std::string_view::npos)
+        << error.what();
+  }
+}
+
 TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
   const char *json = R"({"max_ticks":10000,"num_threads":1,
     "vm":{"arch":"cdna3"},
@@ -1216,7 +1248,7 @@ TEST(CheckpointTest, SaveAndRestoreHwregState) {
             {"name":"se0","type":"shader_engine","children":[
               {"name":"cu[0:1]","type":"compute_unit","config":[
                 {"key":"num_wf_slots","value":"1"},
-                {"key":"sgprs_per_wf","value":"104"},
+                {"key":"sgprs_per_wf","value":"128"},
                 {"key":"vgprs_per_wf","value":"256"},
                 {"key":"lds_size_kb","value":"64"}
               ]}

@@ -174,7 +174,7 @@ def test_saddr_null_selector_rejects_unrelated_encodings():
     ('profile', 'expected'),
     [
         (CdnaProfile(), (101, 102, 104, None, 124)),
-        (Rdna1Profile(), (105, 104, None, 125, 124)),
+        (Rdna1Profile(), (105, None, None, 125, 124)),
         (Rdna2Profile(), (105, None, None, 125, 124)),
         (Rdna3Profile(), (105, None, None, 124, 125)),
         (Rdna4Profile(), (105, None, None, 124, 125)),

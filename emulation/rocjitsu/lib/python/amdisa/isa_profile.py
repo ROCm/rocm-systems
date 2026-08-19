@@ -1343,7 +1343,9 @@ class Rdna1Profile(_AmdgpuProfileBase):
 
     @property
     def scalar_flat_scratch_base_selector(self) -> int | None:
-        return 104
+        # gfx1010 exposes s104/s105 as ordinary SGPRs. LLVM rejects the
+        # flat_scratch_lo/hi names for this target despite the XML labels.
+        return None
 
     @property
     def scalar_null_selector(self) -> int | None:
@@ -1420,10 +1422,6 @@ class Rdna2Profile(Rdna1Profile):
     Inherits the RDNA1 Wave32 default and Wave64 maximum. DPP/SDWA variants
     remain skipped (``_SKIP_DPP_SDWA = True``).
     """
-
-    @property
-    def scalar_flat_scratch_base_selector(self) -> int | None:
-        return None
 
 
 class Rdna3Profile(_AmdgpuProfileBase):

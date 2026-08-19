@@ -768,6 +768,11 @@ struct PluginFixture {
 
   explicit PluginFixture(uint32_t num_wf_slots = 10, std::string_view arch = "cdna4",
                          uint32_t wavefront_size = 64) {
+    uint32_t sgprs_per_wf = 104;
+    if (arch == "gfx1250" || arch == "rdna4")
+      sgprs_per_wf = 128;
+    else if (arch.starts_with("rdna"))
+      sgprs_per_wf = 106;
     std::string json = std::format(R"({{
       "max_ticks":10000,"num_threads":1,"exec_mode":"functional",
       "vm":{{"arch":"{}","gpu":{{"device":{{"wave_front_size":{}}}}}}},
@@ -779,7 +784,7 @@ struct PluginFixture {
           {{"name":"se0","type":"shader_engine","children":[
             {{"name":"cu[0:1]","type":"compute_unit","config":[
               {{"key":"num_wf_slots","value":"{}"}},
-              {{"key":"sgprs_per_wf","value":"104"}},
+              {{"key":"sgprs_per_wf","value":"{}"}},
               {{"key":"vgprs_per_wf","value":"256"}},
               {{"key":"lds_size_kb","value":"64"}}
             ]}}
@@ -790,7 +795,7 @@ struct PluginFixture {
         {{"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}}
       ]}}}}
     )",
-                                   arch, wavefront_size, num_wf_slots);
+                                   arch, wavefront_size, num_wf_slots, sgprs_per_wf);
     auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
     soc = loaded.soc();
     mem = loaded.memory();
@@ -860,7 +865,8 @@ struct Wave32PluginFixture {
     amdgpu::ComputeUnitCore::Config cfg{};
     cfg.arch = arch;
     cfg.num_wf_slots = 1;
-    cfg.sgprs_per_wf = 104;
+    cfg.sgprs_per_wf =
+        arch == ROCJITSU_CODE_ARCH_GFX1250 || arch == ROCJITSU_CODE_ARCH_RDNA4 ? 128 : 106;
     cfg.vgprs_per_wf = 256;
     cfg.lds_size_kb = 64;
     cu = amdgpu::ComputeUnitCore::create("wave32_plugin_cu", cfg, gpu_mem.get(), l2.get());

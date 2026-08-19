@@ -11,6 +11,7 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/except.h"
 #include <cstdint>
+#include <span>
 #include <stdexcept>
 #include <string>
 
@@ -89,10 +90,8 @@ inline uint32_t resolve_src_scalar(const Wavefront &wf, int ev) {
     return static_cast<uint32_t>(wf.private_aperture_base() >> 32); // SRC_PRIVATE_BASE
   if (ev == 238)
     return static_cast<uint32_t>(wf.private_aperture_limit() >> 32); // SRC_PRIVATE_LIMIT
-  if (ev == 249)
+  if (ev == 239)
     return 0u; // SRC_POPS_EXITING_WAVE_ID (not used in compute)
-  if (ev == 250)
-    return 0u; // NULL
   if (ev == 251)
     return wf.vcc_mask() == 0 ? 1u : 0u; // VCCZ
   if (ev == 252)
@@ -140,7 +139,8 @@ inline bool can_resolve_src_scalar(rj_code_arch_t arch, int ev) {
          is_ordinary_sgpr_selector(arch, ev) || ev == 106 || ev == 107 ||
          (ev >= 108 && ev <= 123) || is_null_scalar_selector(arch, ev) ||
          ev == properties.scalar_m0_selector || ev == 126 || ev == 127 ||
-         (ev >= 128 && ev <= 208) || ev == 230 || ev == 231 || (ev >= 235 && ev <= 253);
+         (ev >= 128 && ev <= 208) || ev == 230 || ev == 231 || (ev >= 235 && ev <= 248) ||
+         (ev >= 251 && ev <= 253);
 }
 
 inline uint64_t resolve_src_scalar64(const Wavefront &wf, int ev) {
@@ -280,6 +280,41 @@ inline void resolve_dst_write64(Wavefront &wf, int ev, uint64_t val) {
     return;
   }
   throw std::logic_error("Unsupported encoding value for scalar64 write: " + std::to_string(ev));
+}
+
+inline void resolve_dst_write_span(Wavefront &wf, int ev, std::span<const uint32_t> values) {
+  if (values.empty())
+    return;
+
+  const auto arch = wf.cu().arch();
+  if (is_null_scalar_selector(arch, ev))
+    return;
+
+  if (values.size() == 1) {
+    resolve_dst_write(wf, ev, values.front());
+    return;
+  }
+
+  if (values.size() == 2) {
+    const uint64_t value =
+        static_cast<uint64_t>(values[0]) | (static_cast<uint64_t>(values[1]) << 32);
+    resolve_dst_write64(wf, ev, value);
+    return;
+  }
+
+  const bool ordinary_range =
+      is_ordinary_sgpr_selector_range(arch, ev, static_cast<uint32_t>(values.size()));
+  const bool trap_range =
+      ev >= static_cast<int>(Wavefront::kTrapRegisterSelectorBase) &&
+      ev + static_cast<int>(values.size()) <=
+          static_cast<int>(Wavefront::kTrapRegisterSelectorBase + Wavefront::kTrapRegisterCount);
+  if (!ordinary_range && !trap_range) {
+    throw util::UnimplementedInst("Unsupported " + std::to_string(values.size() * 32) +
+                                  "-bit scalar destination starting at selector " +
+                                  std::to_string(ev));
+  }
+
+  RegisterAccess(wf).write_sgpr_or_trap_registers(static_cast<uint32_t>(ev), values);
 }
 
 } // namespace amdgpu

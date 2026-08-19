@@ -1992,7 +1992,7 @@ TEST_P(CuFactoryTest, CreatesSuccessfully) {
   amdgpu::ComputeUnitCore::Config cfg{};
   cfg.arch = arch;
   cfg.num_wf_slots = 2;
-  cfg.sgprs_per_wf = 102;
+  cfg.sgprs_per_wf = static_cast<uint32_t>(isa_properties(arch).scalar_sgpr_max_selector + 1);
   cfg.vgprs_per_wf = 256;
   cfg.lds_size_kb = 64;
 
@@ -4042,6 +4042,95 @@ TEST(RdnaScalarSelectorTest, Rdna1NullSourceResolvesToZero) {
   EXPECT_EQ(amdgpu::resolve_src_scalar(*wf, rdna1::OPR_SRC_NULL), 0u);
 }
 
+TEST(RdnaScalarSelectorTest, Rdna1S104S105UseOrdinarySgprStorage) {
+  amdgpu::GpuMemory mem("rdna1_s104_mem");
+  amdgpu::L2Cache l2("rdna1_s104_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA1;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("rdna1_s104_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  const uint32_t sbase = wf->sgpr_alloc().base;
+  cu->write_sgpr(sbase + 104, 0x11111111u);
+  cu->write_sgpr(sbase + 105, 0x22222222u);
+  wf->set_scratch_base(0xAABBCCDDEEFF0011ULL);
+
+  EXPECT_EQ(amdgpu::resolve_src_scalar(*wf, 104), 0x11111111u);
+  EXPECT_EQ(amdgpu::resolve_src_scalar(*wf, 105), 0x22222222u);
+  amdgpu::resolve_dst_write(*wf, 104, 0x33333333u);
+  amdgpu::resolve_dst_write(*wf, 105, 0x44444444u);
+  EXPECT_EQ(cu->read_sgpr(sbase + 104), 0x33333333u);
+  EXPECT_EQ(cu->read_sgpr(sbase + 105), 0x44444444u);
+  EXPECT_EQ(wf->scratch_base(), 0xAABBCCDDEEFF0011ULL);
+}
+
+TEST(ScalarSelectorTest, CanResolveMatchesRuntimeAcrossSelectorNamespace) {
+  constexpr std::array arches = {
+      ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,   ROCJITSU_CODE_ARCH_CDNA3,
+      ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_RDNA1,
+      ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,   ROCJITSU_CODE_ARCH_RDNA3_5,
+      ROCJITSU_CODE_ARCH_RDNA4,
+  };
+
+  for (const auto arch : arches) {
+    amdgpu::GpuMemory mem("selector_contract_mem");
+    amdgpu::L2Cache l2("selector_contract_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = arch;
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = 128;
+    cfg.vgprs_per_wf = 16;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("selector_contract_cu", cfg, &mem, &l2);
+    ASSERT_NE(cu, nullptr);
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+
+    for (int selector = 0; selector <= 255; ++selector) {
+      SCOPED_TRACE(std::to_string(static_cast<int>(arch)) + ":" + std::to_string(selector));
+      bool runtime_resolves = true;
+      try {
+        static_cast<void>(amdgpu::resolve_src_scalar(*wf, selector));
+      } catch (const std::exception &) {
+        runtime_resolves = false;
+      }
+      EXPECT_EQ(amdgpu::can_resolve_src_scalar(arch, selector), runtime_resolves);
+    }
+  }
+}
+
+TEST(ScalarSelectorTest, InvalidWideDestinationFailsBeforePartialWrites) {
+  amdgpu::GpuMemory mem("wide_destination_atomicity_mem");
+  amdgpu::L2Cache l2("wide_destination_atomicity_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA3;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("wide_destination_atomicity_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  const uint32_t sbase = wf->sgpr_alloc().base;
+  cu->write_sgpr(sbase + 104, 0x11111111u);
+  cu->write_sgpr(sbase + 105, 0x22222222u);
+  wf->set_vcc(0x4444444433333333ULL);
+  constexpr std::array values{0xAAAAAAAAu, 0xBBBBBBBBu, 0xCCCCCCCCu, 0xDDDDDDDDu};
+
+  EXPECT_THROW(amdgpu::resolve_dst_write_span(*wf, 104, values), util::UnimplementedInst);
+  EXPECT_EQ(cu->read_sgpr(sbase + 104), 0x11111111u);
+  EXPECT_EQ(cu->read_sgpr(sbase + 105), 0x22222222u);
+  EXPECT_EQ(wf->vcc(), 0x4444444433333333ULL);
+}
+
 TEST(RdnaScalarSelectorTest, Rdna4SmemVccBaseIsResolved) {
   amdgpu::GpuMemory mem("rdna4_vcc_sbase_mem");
   amdgpu::L2Cache l2("rdna4_vcc_sbase_l2");
@@ -4231,7 +4320,7 @@ TEST(Gfx1250AddrCalcTest, SmemTtmpOffsetUsesPerWaveTrapStorage) {
   amdgpu::ComputeUnitCore::Config cfg{};
   cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
   cfg.num_wf_slots = 2;
-  cfg.sgprs_per_wf = 104;
+  cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 32;
   cfg.lds_size_kb = 64;
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250_smem_ttmp_cu", cfg, &mem, &l2);
@@ -4249,7 +4338,7 @@ TEST(Gfx1250AddrCalcTest, SmemTtmpOffsetUsesPerWaveTrapStorage) {
 
   constexpr uint32_t kTtmp6Selector = cdna5::OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP6;
   const uint32_t former_alias = sbase + kTtmp6Selector;
-  ASSERT_EQ(former_alias, second->sgpr_alloc().base + 10);
+  ASSERT_EQ(former_alias, second->sgpr_alloc().base + 8);
   cu->write_sgpr(former_alias, 0x80);
   first->write_trap_register(kTtmp6Selector, 0x40);
 
@@ -4267,7 +4356,7 @@ TEST(RdnaAddrCalcTest, Rdna4AddressSelectorsUsePerWaveTrapStorage) {
   amdgpu::ComputeUnitCore::Config cfg{};
   cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
   cfg.num_wf_slots = 2;
-  cfg.sgprs_per_wf = 104;
+  cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 16;
   cfg.lds_size_kb = 64;
   auto cu = amdgpu::ComputeUnitCore::create("rdna4_addr_ttmp_cu", cfg, &mem, &l2);
@@ -4280,7 +4369,7 @@ TEST(RdnaAddrCalcTest, Rdna4AddressSelectorsUsePerWaveTrapStorage) {
 
   constexpr uint32_t kTtmp0Selector = amdgpu::Wavefront::kTrapRegisterSelectorBase;
   const uint32_t former_alias = first->sgpr_alloc().base + kTtmp0Selector;
-  ASSERT_EQ(former_alias, second->sgpr_alloc().base + 4);
+  ASSERT_EQ(former_alias, second->sgpr_alloc().base + 2);
   cu->write_sgpr(former_alias, 0xDEAD0080u);
   cu->write_sgpr(former_alias + 1, 0xDEAD0081u);
 
@@ -4449,7 +4538,7 @@ TEST(CdnaMemoryTest, SmemLoadWritesTtmpDestination) {
       cdna4::build_smem(cdna4::kSLoadDwordSmem, {.sbase = 0, .sdata = kTtmp0Selector});
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "s_load_dword");
   cu->execute_and_route(inst.release(), *first);
@@ -4481,11 +4570,50 @@ TEST(CdnaMemoryTest, SmemLoadWritesVccDestination) {
       cdna4::build_smem(cdna4::kSLoadDwordSmem, {.sbase = 0, .sdata = cdna4::OPR_SDST_VCC_LO});
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   cu->execute_and_route(inst.release(), *wf);
 
   EXPECT_EQ(static_cast<uint32_t>(wf->vcc()), kValue);
+}
+
+TEST(RdnaMemoryTest, WideSmemLoadToNullLeavesM0AndExecUnchanged) {
+  amdgpu::GpuMemory mem("rdna3_smem_null_destination_mem");
+  amdgpu::L2Cache l2("rdna3_smem_null_destination_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA3;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = std::make_unique<Rdna3MemoryTestCu>("rdna3_smem_null_destination_cu", cfg, &mem, &l2);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint64_t kAddress = 0x7200;
+  constexpr uint32_t kM0 = 0xA5A5A5A5u;
+  constexpr uint64_t kExec = 0x0123456789ABCDEFULL;
+  cu->write_sgpr(wf->sgpr_alloc().base, static_cast<uint32_t>(kAddress));
+  cu->write_sgpr(wf->sgpr_alloc().base + 1, static_cast<uint32_t>(kAddress >> 32));
+  for (uint32_t i = 0; i < 4; ++i)
+    mem.write32(kAddress + i * sizeof(uint32_t), 0x11111111u * (i + 1));
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<std::array<uint32_t, 2>, 2> encodings = {{
+      {0xF4041F00u, 0xF8000000u}, // s_load_b64 null, s[0:1], 0x0
+      {0xF4081F00u, 0xF8000000u}, // s_load_b128 null, s[0:1], 0x0
+  }};
+  for (const auto &words : encodings) {
+    wf->set_m0(kM0);
+    wf->set_exec_raw(kExec);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    EXPECT_NE(inst->disassemble().find("null"), std::string::npos);
+    cu->execute_and_route(inst.release(), *wf);
+    EXPECT_EQ(wf->m0(), kM0);
+    EXPECT_EQ(wf->exec_raw(), kExec);
+  }
 }
 
 TEST(TrapRegisterPcTest, SetpcPrecheckReadsDecodedTtmpPair) {

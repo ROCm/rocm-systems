@@ -229,9 +229,8 @@ ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
   auto &d = *inst.data_as<ScalarMemState>();
   if (!d.is_load)
     return MemoryAccessCompletion::Complete;
-  for (uint32_t i = 0; i < d.num_dwords; ++i) {
-    resolve_dst_write(wf, d.dst_selector + i, d.response_data[i]);
-  }
+  resolve_dst_write_span(wf, d.dst_selector,
+                         std::span<const uint32_t>(d.response_data, d.num_dwords));
   // Trace: log SMEM load values for debugging.
   util::Logger::vm([&](auto &os) {
     if (wf.wg_id() == 0) {

@@ -88,7 +88,15 @@ struct VmFixture {
   amdgpu::GpuMemory *gpu_mem = nullptr;
 
   VmFixture(std::string_view arch = "cdna3", uint32_t num_cus = 1, uint32_t num_wf_slots = 10,
-            uint32_t lds_size_kb = 64, uint32_t sgprs_per_wf = 104, uint32_t vgprs_per_wf = 256) {
+            uint32_t lds_size_kb = 64, uint32_t sgprs_per_wf = 0, uint32_t vgprs_per_wf = 256) {
+    if (sgprs_per_wf == 0) {
+      if (arch == "gfx1250" || arch == "rdna4")
+        sgprs_per_wf = 128;
+      else if (arch.starts_with("rdna"))
+        sgprs_per_wf = 106;
+      else
+        sgprs_per_wf = 104;
+    }
     std::string cu_range = "cu[0:" + std::to_string(num_cus) + "]";
     std::string links;
     for (uint32_t i = 0; i < num_cus; ++i) {
@@ -1975,7 +1983,7 @@ TEST(ClusterDispatchTest, ReclaimsLdsBetweenClusterWaves) {
 }
 
 TEST(ClusterDispatchTest, Rdna4ExtendedDispatchKeepsOrdinaryTtmpWorkgroupIds) {
-  VmFixture f("rdna4", 1, 8, /*lds_size_kb=*/64, /*sgprs_per_wf=*/104);
+  VmFixture f("rdna4", 1, 8, /*lds_size_kb=*/64, /*sgprs_per_wf=*/106);
   auto *snap = f.capture_halts();
 
   const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};

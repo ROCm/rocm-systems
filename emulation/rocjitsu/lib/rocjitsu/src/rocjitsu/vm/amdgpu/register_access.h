@@ -1000,6 +1000,12 @@ public:
     write_sgpr_or_trap_register_unchecked(selector + 1, static_cast<uint32_t>(value >> 32));
   }
 
+  void write_sgpr_or_trap_registers(uint32_t selector, std::span<const uint32_t> values) const {
+    validate_sgpr_or_trap_register_range(selector, static_cast<uint32_t>(values.size()));
+    for (uint32_t i = 0; i < values.size(); ++i)
+      write_sgpr_or_trap_register_unchecked(selector + i, values[i]);
+  }
+
   // Physical SGPR access. These APIs are for helpers that already know the
   // physical scalar register index. ComputeUnitCore owns SGPR read observation,
   // so reads delegate to the CU accessor rather than exposing raw SGPR storage.

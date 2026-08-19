@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
@@ -44,6 +45,15 @@ uint32_t pack_barrier_state(uint32_t member_count, uint32_t signal_count,
 
 template <GpuIsa Isa> void validate_compute_unit_config(const ComputeUnitCore::Config &config) {
   using Limits = IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, Isa>;
+
+  const int32_t max_ordinary_selector = isa_properties(config.arch).scalar_sgpr_max_selector;
+  if (max_ordinary_selector >= 0 &&
+      config.sgprs_per_wf <= static_cast<uint32_t>(max_ordinary_selector)) {
+    throw util::ConfigError("sgprs_per_wf is " + std::to_string(config.sgprs_per_wf) +
+                            ", but the architecture exposes ordinary selectors through s" +
+                            std::to_string(max_ordinary_selector) + " and requires at least " +
+                            std::to_string(max_ordinary_selector + 1) + " slots");
+  }
 
   if (config.num_wf_slots > Isa::MAX_WF_SLOTS) {
     throw util::ConfigError("num_wf_slots exceeds the ISA maximum of " +

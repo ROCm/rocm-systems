@@ -66,7 +66,7 @@
                   "type": "compute_unit",
                   "config": [
                     { "key": "num_wf_slots", "value": "32" },
-                    { "key": "sgprs_per_wf", "value": "104" },
+                    { "key": "sgprs_per_wf", "value": "106" },
                     { "key": "vgprs_per_wf", "value": "256" },
                     { "key": "lds_size_kb", "value": "64" }
                   ]

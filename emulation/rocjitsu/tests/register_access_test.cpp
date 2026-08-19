@@ -113,7 +113,7 @@ struct Fixture {
     ComputeUnitCore::Config cfg{};
     cfg.arch = arch;
     cfg.num_wf_slots = 1;
-    cfg.sgprs_per_wf = kSgprsPerWave;
+    cfg.sgprs_per_wf = arch == ROCJITSU_CODE_ARCH_CDNA4 ? kSgprsPerWave : 128;
     cfg.vgprs_per_wf = kVgprsPerWave;
     cfg.lds_size_kb = 64;
     cu = ComputeUnitCore::create("register_access_cu", cfg, &gpu_mem, &l2);

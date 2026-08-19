@@ -1331,7 +1331,7 @@ void expect_sleep_yields_before_quantum_expires(rj_code_arch_t arch, uint32_t sl
   amdgpu::ComputeUnitCore::Config cfg{};
   cfg.arch = arch;
   cfg.num_wf_slots = 1;
-  cfg.sgprs_per_wf = 104;
+  cfg.sgprs_per_wf = arch == ROCJITSU_CODE_ARCH_RDNA4 ? 128 : 104;
   cfg.vgprs_per_wf = 256;
   cfg.lds_size_kb = 64;
 
