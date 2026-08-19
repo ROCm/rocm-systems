@@ -68,6 +68,13 @@ jobs:
       - name: Run host tests
         run: bash projects/rccl/test/host/run_host_tests.sh run
 
+      # Assemble the coverage profiles the run phase produced into per-binary
+      # reports plus an overall line/branch union (the CI coverage metric). Runs
+      # even if the suite failed so partial coverage is still captured.
+      - name: Coverage
+        if: always()
+        run: bash projects/rccl/test/host/run_host_tests.sh coverage
+
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -76,3 +83,7 @@ jobs:
           path: |
             projects/rccl/test/host/host_tests.log
             projects/rccl/test/host/host_tests.xml
+            projects/rccl/test/host/build/coverage/**/coverage.txt
+            projects/rccl/test/host/build/coverage/**/html/**
+            projects/rccl/test/host/build/coverage/overall/combined.lcov
+            projects/rccl/test/host/build/coverage/overall/summary.txt
