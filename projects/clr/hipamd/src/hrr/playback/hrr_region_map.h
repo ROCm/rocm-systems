@@ -61,9 +61,15 @@ class RegionMap {
     size_t records() const { return records_.size(); }
 
     // Apply every record with mono_ns <= ts. Monotonic: a timestamp older than
-    // the last one is ignored rather than rewinding the map. Records stamped
-    // mono_ns == 0 are the producer's baseline and are applied on first call.
+    // the last one is ignored rather than rewinding the map. Use rewind() to
+    // reset the cursor for a second pass. Records stamped mono_ns == 0 are the
+    // producer's baseline and are applied on first call.
     void advance_to(PlaybackContext& ctx, int64_t ts);
+
+    // Reset the live-set cursor so a second pass (the timed kernel-filter pass
+    // after warm-up) re-applies the timeline from the start. Does not free
+    // materialised buffers; those stay registered in PlaybackContext::alloc_map.
+    void rewind();
 
     // Back the segment containing `rec_addr`, if one is declared live and has
     // not been backed already, and return the live address for `rec_addr`.
