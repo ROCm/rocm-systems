@@ -534,8 +534,8 @@ configure_settings(bool _init)
 
     auto _config = *get_config_impl();
 
-    // if using timemory, default to perfetto being off
-    auto _default_perfetto_v = !rocprofsys::get_env<bool>(env_vars::PROFILE, false);
+    // rocpd is the default output format; perfetto must be explicitly enabled
+    auto _default_perfetto_v = false;
 
     auto _system_backend = rocprofsys::get_env(env_vars::PERFETTO_BACKEND_SYSTEM, false);
 
@@ -602,19 +602,19 @@ configure_settings(bool _init)
                               "backend", "perfetto", "deprecated");
 
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::PROFILE, "Enable timemory backend",
-                              !_config->get<bool>(std::string{ env_vars::TRACE }),
+                              false,
                               "backend", "timemory");
 
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_TIMEMORY,
                               "[DEPRECATED] Renamed to ROCPROFSYS_PROFILE",
-                              !_config->get<bool>(std::string{ env_vars::TRACE }),
+                              false,
                               "backend", "timemory", "deprecated");
 
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_CAUSAL,
                               "Enable causal profiling analysis", false, "backend",
                               "causal", "analysis");
 
-    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_ROCPD, "Enable rocpd backend", false,
+    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_ROCPD, "Enable rocpd backend", true,
                               "backend", "rocpd");
 
     ROCPROFSYS_CONFIG_SETTING(

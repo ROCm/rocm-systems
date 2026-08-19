@@ -50,6 +50,13 @@ public:
                                           bool             default_value = true) const;
 
     /**
+     * Check if rocpd output is enabled in a preset (output.rocpd_output.enabled).
+     * Defaults to true since rocpd is the default output format.
+     */
+    [[nodiscard]] bool is_rocpd_output_enabled(std::string_view preset_name,
+                                               bool             default_value = true) const;
+
+    /**
      * Translate a legacy preset flag (e.g., "--balanced") to new syntax
      * ("--preset=balanced"). Returns empty string if the argument is not
      * a recognized legacy preset flag. Emits a deprecation warning to stderr.

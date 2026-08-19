@@ -224,14 +224,16 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
 {
     auto output_dir = get_output_directory();
 
-    bool tracing_on   = true;
+    bool tracing_on   = false;
     bool profiling_on = true;
+    bool rocpd_on     = true;
 
     if(!preset_mode.empty() && !tool_name.empty())
     {
         auto normalized = strip_flag_prefix(preset_mode);
-        tracing_on      = registry.is_section_enabled(normalized, "tracing", true);
+        tracing_on      = registry.is_section_enabled(normalized, "tracing", false);
         profiling_on    = registry.is_section_enabled(normalized, "profiling", true);
+        rocpd_on        = registry.is_rocpd_output_enabled(normalized, true);
 
         constexpr size_t box_width       = 60;
         constexpr size_t box_inner_width = box_width - 2;
@@ -279,6 +281,12 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
     }
     if(tracing_on)
     {
+    if(rocpd_on)
+    {
+        std::cerr << "  • rocpd database: " << output_dir
+                  << "/rocpd.db
+";
+    }
         std::cerr << "  \u2022 Trace (visual): " << output_dir
                   << "/perfetto-trace.proto\n";
     }

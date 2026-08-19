@@ -127,7 +127,7 @@ make_run_config()
     cfg.workflow         = R"(INSTRUMENTATION WORKFLOW:
   1. Instrument: rocprof-sys-instrument -o app.inst -- ./app
   2. Run:        rocprof-sys-run --preset=balanced -- ./app.inst
-  3. Analyze:    cat rocprof-sys-output/wall_clock.txt)";
+  3. Analyze:    query rocprof-sys-output/rocpd.db with sqlite3 or rocpd tools)";
     cfg.output_prefix    = "ROCPROFSYS: ";
     cfg.enable_fork      = true;
     cfg.enable_launcher  = true;
@@ -146,8 +146,7 @@ make_sample_config()
                          "instrumentation.";
     cfg.workflow       = R"(PROFILING WORKFLOW:
   1. Profile:   rocprof-sys-sample --preset=balanced -- ./app
-  2. Analyze:   cat rocprof-sys-output/wall_clock.txt
-  3. Visualize: Open rocprof-sys-output/perfetto-trace.proto in ui.perfetto.dev)";
+  2. Analyze:   query rocprof-sys-output/rocpd.db with sqlite3 or rocpd tools)";
     cfg.force_sampling = true;
     cfg.disable_cputime_on_realtime_only = true;
     cfg.deprecated_flags                 = {
@@ -265,7 +264,7 @@ QUICK REFERENCE:
   Presets:  --preset=balanced (default), --preset=profile-only, --preset=trace-hpc, --preset=workload-trace
   Domains:  --gpu, --rocm, --cpu, --parallel (composable with presets)
   Output:   Results saved to rocprof-sys-output/ directory
-  Visualize: Open perfetto-trace.proto in https://ui.perfetto.dev
+  Default:  rocpd.db (SQLite database); use --preset=workload-trace for both rocpd + Perfetto
 EXAMPLES:
   Quick Start:
     @CMD@ --preset=balanced -- ./myapp
