@@ -1258,17 +1258,7 @@ impl Session {
             .collect();
         // Both handles on every live borrower; see [`Borrower`] for why
         // neither is sufficient alone.
-        let (live_pids, live_execs): (Vec<u32>, std::collections::BTreeSet<String>) = {
-            let borrowers = lock(&self.borrowers);
-            (
-                borrowers.values().filter_map(|b| b.pid).collect(),
-                borrowers
-                    .values()
-                    .filter_map(|b| b.exec.as_ref())
-                    .map(|id| id.as_str().to_string())
-                    .collect(),
-            )
-        };
+        let (live_pids, live_execs) = self.live_borrower_handles();
 
         let leftovers: Vec<u32> = tokio::task::spawn_blocking(move || {
             processes_in_session(&id)
@@ -1292,7 +1282,77 @@ impl Session {
         })
         .await
         .unwrap_or_default();
+
+        // Asked again, against the borrowers there are *now*.
+        //
+        // The scan above is a full walk of `/proc` reading every
+        // candidate's `environ`, and it runs on the blocking pool, so an
+        // appreciable time passes between the snapshot the filters used
+        // and the answer arriving. A `mirage exec` that attached inside
+        // that window is in neither list: its pid is not an ancestor
+        // anybody knew about and its exec mark was not in `live_execs`,
+        // so its workload — started moments before, very much alive —
+        // comes back in `leftovers` and would be sent `SIGTERM` and then
+        // `SIGKILL`. Two `mirage exec`s at once is ordinary, and one
+        // finishing must not take the other's workload with it.
+        //
+        // Re-checking cannot be exact — there is no instant at which the
+        // set is fixed — but the two mistakes are not equals. Sparing a
+        // borrower that left during the scan costs nothing: it is still
+        // leftover, and the next disconnect (or teardown, which stops
+        // everything) collects it. Killing a live borrower's workload is
+        // not recoverable. So the later, narrower answer wins.
+        let leftovers = self.still_stranded(leftovers).await;
         self.stop_leftovers(leftovers).await;
+    }
+
+    /// Both handles on every borrower holding a lease right now.
+    ///
+    /// See [`Borrower`]: a borrower may have either, both or neither, and
+    /// each handle protects on its own.
+    fn live_borrower_handles(&self) -> (Vec<u32>, std::collections::BTreeSet<String>) {
+        let borrowers = lock(&self.borrowers);
+        (
+            borrowers.values().filter_map(|b| b.pid).collect(),
+            borrowers
+                .values()
+                .filter_map(|b| b.exec.as_ref())
+                .map(|id| id.as_str().to_string())
+                .collect(),
+        )
+    }
+
+    /// Those of `candidates` that no borrower arriving since the scan has
+    /// claimed.
+    ///
+    /// The same two filters the scan applied, re-applied to the borrowers
+    /// of this moment — see the call site for why the answer is taken
+    /// twice. Cheap where it matters: `candidates` is what a scan of the
+    /// whole session narrowed down to, usually empty and never large,
+    /// whereas the scan itself walked every process on the machine.
+    async fn still_stranded(&self, candidates: Vec<u32>) -> Vec<u32> {
+        if candidates.is_empty() {
+            return candidates;
+        }
+        let ours: std::collections::BTreeSet<String> = self
+            .lock()
+            .execs
+            .keys()
+            .map(|id| id.as_str().to_string())
+            .collect();
+        let (live_pids, live_execs) = self.live_borrower_handles();
+        tokio::task::spawn_blocking(move || {
+            candidates
+                .into_iter()
+                .filter(|pid| {
+                    exec_mark_of(*pid)
+                        .is_some_and(|exec| !ours.contains(&exec) && !live_execs.contains(&exec))
+                })
+                .filter(|pid| !descends_from_any(*pid, &live_pids))
+                .collect()
+        })
+        .await
+        .unwrap_or_default()
     }
 
     /// `SIGTERM` each of `leftovers`, and `SIGKILL` whatever is still
