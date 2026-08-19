@@ -1,0 +1,412 @@
+#################### HIPFILE BACKEND: FASTPATH ####################
+RUN_DIRECTORY	/mnt/ais/ext4/johtyler/hipfile-io-stat-effects.AUEKRM/fastpath
+GPU_ID	0
+DIO_MEMORY_ALIGNMENT	4
+DIO_OFFSET_ALIGNMENT	512
+NORMAL_IO_SIZE	4096
+INITIAL_FILE_SIZE	1048576
+NOTE	Exact transitions are compared for structural fields; timestamps and inode values are compared by changed/unchanged state.
+
+=== read-zero-in-range (size=0, offset=0) ===
+RETURN	POSIX=0 errno=0	HIPFILE=0 errno=0
+CONTENT	POSIX=0x1f5e0df9bc822325	HIPFILE=0x1f5e0df9bc822325	MATCH
+FIELD	POSIX before -> after	HIPFILE before -> after	COMPARISON
+fstat.st_dev	259:3 -> 259:3 (unchanged)	259:3 -> 259:3 (unchanged)	MATCH
+fstat.st_ino	4063332 -> 4063332 (unchanged)	4063333 -> 4063333 (unchanged)	MATCH
+fstat.st_mode	0100640 -> 0100640 (unchanged)	0100640 -> 0100640 (unchanged)	MATCH
+fstat.st_nlink	1 -> 1 (unchanged)	1 -> 1 (unchanged)	MATCH
+fstat.st_uid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+fstat.st_gid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+fstat.st_rdev	0:0 -> 0:0 (unchanged)	0:0 -> 0:0 (unchanged)	MATCH
+fstat.st_size	1048576 -> 1048576 (unchanged)	1048576 -> 1048576 (unchanged)	MATCH
+fstat.st_blksize	4096 -> 4096 (unchanged)	4096 -> 4096 (unchanged)	MATCH
+fstat.st_blocks	2048 -> 2048 (unchanged)	2048 -> 2048 (unchanged)	MATCH
+fstat.st_atim	946684800.000000000 -> 946684800.000000000 (unchanged)	946684800.000000000 -> 946684800.000000000 (unchanged)	MATCH
+fstat.st_mtim	946684801.000000000 -> 946684801.000000000 (unchanged)	946684801.000000000 -> 946684801.000000000 (unchanged)	MATCH
+fstat.st_ctim	1787157822.299440507 -> 1787157822.299440507 (unchanged)	1787157822.306440867 -> 1787157822.306440867 (unchanged)	MATCH
+statx.stx_mask	0x3fff -> 0x3fff (unchanged)	0x3fff -> 0x3fff (unchanged)	MATCH
+statx.stx_blksize	4096 -> 4096 (unchanged)	4096 -> 4096 (unchanged)	MATCH
+statx.stx_attributes	0x0 -> 0x0 (unchanged)	0x0 -> 0x0 (unchanged)	MATCH
+statx.stx_nlink	1 -> 1 (unchanged)	1 -> 1 (unchanged)	MATCH
+statx.stx_uid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+statx.stx_gid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+statx.stx_mode	0100640 -> 0100640 (unchanged)	0100640 -> 0100640 (unchanged)	MATCH
+statx.stx_ino	4063332 -> 4063332 (unchanged)	4063333 -> 4063333 (unchanged)	MATCH
+statx.stx_size	1048576 -> 1048576 (unchanged)	1048576 -> 1048576 (unchanged)	MATCH
+statx.stx_blocks	2048 -> 2048 (unchanged)	2048 -> 2048 (unchanged)	MATCH
+statx.stx_attributes_mask	0x303874 -> 0x303874 (unchanged)	0x303874 -> 0x303874 (unchanged)	MATCH
+statx.stx_atime	946684800.000000000 -> 946684800.000000000 (unchanged)	946684800.000000000 -> 946684800.000000000 (unchanged)	MATCH
+statx.stx_btime	1787157822.297440404 -> 1787157822.297440404 (unchanged)	1787157822.304440764 -> 1787157822.304440764 (unchanged)	MATCH
+statx.stx_ctime	1787157822.299440507 -> 1787157822.299440507 (unchanged)	1787157822.306440867 -> 1787157822.306440867 (unchanged)	MATCH
+statx.stx_mtime	946684801.000000000 -> 946684801.000000000 (unchanged)	946684801.000000000 -> 946684801.000000000 (unchanged)	MATCH
+statx.stx_rdev	0:0 -> 0:0 (unchanged)	0:0 -> 0:0 (unchanged)	MATCH
+statx.stx_dev	259:3 -> 259:3 (unchanged)	259:3 -> 259:3 (unchanged)	MATCH
+statx.stx_dio_mem_align	4 -> 4 (unchanged)	4 -> 4 (unchanged)	MATCH
+statx.stx_dio_offset_align	512 -> 512 (unchanged)	512 -> 512 (unchanged)	MATCH
+POST_CLOSE_FIELD	POSIX before -> post-close	HIPFILE before -> post-close	COMPARISON
+POST_CLOSE_RESULT	MATCH
+CASE_RESULT	PASS
+
+=== read-zero-beyond-eof (size=0, offset=2097152) ===
+RETURN	POSIX=0 errno=0	HIPFILE=0 errno=0
+CONTENT	POSIX=0x1f5e0df9bc822325	HIPFILE=0x1f5e0df9bc822325	MATCH
+FIELD	POSIX before -> after	HIPFILE before -> after	COMPARISON
+fstat.st_dev	259:3 -> 259:3 (unchanged)	259:3 -> 259:3 (unchanged)	MATCH
+fstat.st_ino	4063334 -> 4063334 (unchanged)	4063335 -> 4063335 (unchanged)	MATCH
+fstat.st_mode	0100640 -> 0100640 (unchanged)	0100640 -> 0100640 (unchanged)	MATCH
+fstat.st_nlink	1 -> 1 (unchanged)	1 -> 1 (unchanged)	MATCH
+fstat.st_uid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+fstat.st_gid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+fstat.st_rdev	0:0 -> 0:0 (unchanged)	0:0 -> 0:0 (unchanged)	MATCH
+fstat.st_size	1048576 -> 1048576 (unchanged)	1048576 -> 1048576 (unchanged)	MATCH
+fstat.st_blksize	4096 -> 4096 (unchanged)	4096 -> 4096 (unchanged)	MATCH
+fstat.st_blocks	2048 -> 2048 (unchanged)	2048 -> 2048 (unchanged)	MATCH
+fstat.st_atim	946684800.000000000 -> 946684800.000000000 (unchanged)	946684800.000000000 -> 946684800.000000000 (unchanged)	MATCH
+fstat.st_mtim	946684801.000000000 -> 946684801.000000000 (unchanged)	946684801.000000000 -> 946684801.000000000 (unchanged)	MATCH
+fstat.st_ctim	1787157822.314441278 -> 1787157822.314441278 (unchanged)	1787157822.321441638 -> 1787157822.321441638 (unchanged)	MATCH
+statx.stx_mask	0x3fff -> 0x3fff (unchanged)	0x3fff -> 0x3fff (unchanged)	MATCH
+statx.stx_blksize	4096 -> 4096 (unchanged)	4096 -> 4096 (unchanged)	MATCH
+statx.stx_attributes	0x0 -> 0x0 (unchanged)	0x0 -> 0x0 (unchanged)	MATCH
+statx.stx_nlink	1 -> 1 (unchanged)	1 -> 1 (unchanged)	MATCH
+statx.stx_uid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+statx.stx_gid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+statx.stx_mode	0100640 -> 0100640 (unchanged)	0100640 -> 0100640 (unchanged)	MATCH
+statx.stx_ino	4063334 -> 4063334 (unchanged)	4063335 -> 4063335 (unchanged)	MATCH
+statx.stx_size	1048576 -> 1048576 (unchanged)	1048576 -> 1048576 (unchanged)	MATCH
+statx.stx_blocks	2048 -> 2048 (unchanged)	2048 -> 2048 (unchanged)	MATCH
+statx.stx_attributes_mask	0x303874 -> 0x303874 (unchanged)	0x303874 -> 0x303874 (unchanged)	MATCH
+statx.stx_atime	946684800.000000000 -> 946684800.000000000 (unchanged)	946684800.000000000 -> 946684800.000000000 (unchanged)	MATCH
+statx.stx_btime	1787157822.312441175 -> 1787157822.312441175 (unchanged)	1787157822.319441535 -> 1787157822.319441535 (unchanged)	MATCH
+statx.stx_ctime	1787157822.314441278 -> 1787157822.314441278 (unchanged)	1787157822.321441638 -> 1787157822.321441638 (unchanged)	MATCH
+statx.stx_mtime	946684801.000000000 -> 946684801.000000000 (unchanged)	946684801.000000000 -> 946684801.000000000 (unchanged)	MATCH
+statx.stx_rdev	0:0 -> 0:0 (unchanged)	0:0 -> 0:0 (unchanged)	MATCH
+statx.stx_dev	259:3 -> 259:3 (unchanged)	259:3 -> 259:3 (unchanged)	MATCH
+statx.stx_dio_mem_align	4 -> 4 (unchanged)	4 -> 4 (unchanged)	MATCH
+statx.stx_dio_offset_align	512 -> 512 (unchanged)	512 -> 512 (unchanged)	MATCH
+POST_CLOSE_FIELD	POSIX before -> post-close	HIPFILE before -> post-close	COMPARISON
+POST_CLOSE_RESULT	MATCH
+CASE_RESULT	PASS
+
+=== read-normal-in-range (size=4096, offset=0) ===
+RETURN	POSIX=4096 errno=0	HIPFILE=4096 errno=0
+CONTENT	POSIX=0x1f5e0df9bc822325	HIPFILE=0x1f5e0df9bc822325	MATCH
+READ_BUFFER	POSIX=0x90322cc3a55a8325	HIPFILE=0x90322cc3a55a8325	MATCH
+FIELD	POSIX before -> after	HIPFILE before -> after	COMPARISON
+fstat.st_dev	259:3 -> 259:3 (unchanged)	259:3 -> 259:3 (unchanged)	MATCH
+fstat.st_ino	4063336 -> 4063336 (unchanged)	4063337 -> 4063337 (unchanged)	MATCH
+fstat.st_mode	0100640 -> 0100640 (unchanged)	0100640 -> 0100640 (unchanged)	MATCH
+fstat.st_nlink	1 -> 1 (unchanged)	1 -> 1 (unchanged)	MATCH
+fstat.st_uid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+fstat.st_gid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+fstat.st_rdev	0:0 -> 0:0 (unchanged)	0:0 -> 0:0 (unchanged)	MATCH
+fstat.st_size	1048576 -> 1048576 (unchanged)	1048576 -> 1048576 (unchanged)	MATCH
+fstat.st_blksize	4096 -> 4096 (unchanged)	4096 -> 4096 (unchanged)	MATCH
+fstat.st_blocks	2048 -> 2048 (unchanged)	2048 -> 2048 (unchanged)	MATCH
+fstat.st_atim	946684800.000000000 -> 1787157822.365443901 (changed)	946684800.000000000 -> 1787157822.372444262 (changed)	MATCH
+fstat.st_mtim	946684801.000000000 -> 946684801.000000000 (unchanged)	946684801.000000000 -> 946684801.000000000 (unchanged)	MATCH
+fstat.st_ctim	1787157822.328441998 -> 1787157822.328441998 (unchanged)	1787157822.370444158 -> 1787157822.370444158 (unchanged)	MATCH
+statx.stx_mask	0x3fff -> 0x3fff (unchanged)	0x3fff -> 0x3fff (unchanged)	MATCH
+statx.stx_blksize	4096 -> 4096 (unchanged)	4096 -> 4096 (unchanged)	MATCH
+statx.stx_attributes	0x0 -> 0x0 (unchanged)	0x0 -> 0x0 (unchanged)	MATCH
+statx.stx_nlink	1 -> 1 (unchanged)	1 -> 1 (unchanged)	MATCH
+statx.stx_uid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+statx.stx_gid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+statx.stx_mode	0100640 -> 0100640 (unchanged)	0100640 -> 0100640 (unchanged)	MATCH
+statx.stx_ino	4063336 -> 4063336 (unchanged)	4063337 -> 4063337 (unchanged)	MATCH
+statx.stx_size	1048576 -> 1048576 (unchanged)	1048576 -> 1048576 (unchanged)	MATCH
+statx.stx_blocks	2048 -> 2048 (unchanged)	2048 -> 2048 (unchanged)	MATCH
+statx.stx_attributes_mask	0x303874 -> 0x303874 (unchanged)	0x303874 -> 0x303874 (unchanged)	MATCH
+statx.stx_atime	946684800.000000000 -> 1787157822.365443901 (changed)	946684800.000000000 -> 1787157822.372444262 (changed)	MATCH
+statx.stx_btime	1787157822.327441947 -> 1787157822.327441947 (unchanged)	1787157822.368444055 -> 1787157822.368444055 (unchanged)	MATCH
+statx.stx_ctime	1787157822.328441998 -> 1787157822.328441998 (unchanged)	1787157822.370444158 -> 1787157822.370444158 (unchanged)	MATCH
+statx.stx_mtime	946684801.000000000 -> 946684801.000000000 (unchanged)	946684801.000000000 -> 946684801.000000000 (unchanged)	MATCH
+statx.stx_rdev	0:0 -> 0:0 (unchanged)	0:0 -> 0:0 (unchanged)	MATCH
+statx.stx_dev	259:3 -> 259:3 (unchanged)	259:3 -> 259:3 (unchanged)	MATCH
+statx.stx_dio_mem_align	4 -> 4 (unchanged)	4 -> 4 (unchanged)	MATCH
+statx.stx_dio_offset_align	512 -> 512 (unchanged)	512 -> 512 (unchanged)	MATCH
+POST_CLOSE_FIELD	POSIX before -> post-close	HIPFILE before -> post-close	COMPARISON
+post-close.fstat.st_atim	946684800.000000000 -> 1787157822.365443901 (changed)	946684800.000000000 -> 1787157822.372444262 (changed)	MATCH
+post-close.statx.stx_atime	946684800.000000000 -> 1787157822.365443901 (changed)	946684800.000000000 -> 1787157822.372444262 (changed)	MATCH
+POST_CLOSE_RESULT	MATCH
+CASE_RESULT	PASS
+
+=== write-zero-in-range (size=0, offset=0) ===
+RETURN	POSIX=0 errno=0	HIPFILE=0 errno=0
+CONTENT	POSIX=0x1f5e0df9bc822325	HIPFILE=0x1f5e0df9bc822325	MATCH
+FIELD	POSIX before -> after	HIPFILE before -> after	COMPARISON
+fstat.st_dev	259:3 -> 259:3 (unchanged)	259:3 -> 259:3 (unchanged)	MATCH
+fstat.st_ino	4063338 -> 4063338 (unchanged)	4063339 -> 4063339 (unchanged)	MATCH
+fstat.st_mode	0100640 -> 0100640 (unchanged)	0100640 -> 0100640 (unchanged)	MATCH
+fstat.st_nlink	1 -> 1 (unchanged)	1 -> 1 (unchanged)	MATCH
+fstat.st_uid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+fstat.st_gid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+fstat.st_rdev	0:0 -> 0:0 (unchanged)	0:0 -> 0:0 (unchanged)	MATCH
+fstat.st_size	1048576 -> 1048576 (unchanged)	1048576 -> 1048576 (unchanged)	MATCH
+fstat.st_blksize	4096 -> 4096 (unchanged)	4096 -> 4096 (unchanged)	MATCH
+fstat.st_blocks	2048 -> 2048 (unchanged)	2048 -> 2048 (unchanged)	MATCH
+fstat.st_atim	946684800.000000000 -> 946684800.000000000 (unchanged)	946684800.000000000 -> 946684800.000000000 (unchanged)	MATCH
+fstat.st_mtim	946684801.000000000 -> 946684801.000000000 (unchanged)	946684801.000000000 -> 946684801.000000000 (unchanged)	MATCH
+fstat.st_ctim	1787157822.377444518 -> 1787157822.377444518 (unchanged)	1787157822.385444930 -> 1787157822.385444930 (unchanged)	MATCH
+statx.stx_mask	0x3fff -> 0x3fff (unchanged)	0x3fff -> 0x3fff (unchanged)	MATCH
+statx.stx_blksize	4096 -> 4096 (unchanged)	4096 -> 4096 (unchanged)	MATCH
+statx.stx_attributes	0x0 -> 0x0 (unchanged)	0x0 -> 0x0 (unchanged)	MATCH
+statx.stx_nlink	1 -> 1 (unchanged)	1 -> 1 (unchanged)	MATCH
+statx.stx_uid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+statx.stx_gid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+statx.stx_mode	0100640 -> 0100640 (unchanged)	0100640 -> 0100640 (unchanged)	MATCH
+statx.stx_ino	4063338 -> 4063338 (unchanged)	4063339 -> 4063339 (unchanged)	MATCH
+statx.stx_size	1048576 -> 1048576 (unchanged)	1048576 -> 1048576 (unchanged)	MATCH
+statx.stx_blocks	2048 -> 2048 (unchanged)	2048 -> 2048 (unchanged)	MATCH
+statx.stx_attributes_mask	0x303874 -> 0x303874 (unchanged)	0x303874 -> 0x303874 (unchanged)	MATCH
+statx.stx_atime	946684800.000000000 -> 946684800.000000000 (unchanged)	946684800.000000000 -> 946684800.000000000 (unchanged)	MATCH
+statx.stx_btime	1787157822.376444467 -> 1787157822.376444467 (unchanged)	1787157822.383444827 -> 1787157822.383444827 (unchanged)	MATCH
+statx.stx_ctime	1787157822.377444518 -> 1787157822.377444518 (unchanged)	1787157822.385444930 -> 1787157822.385444930 (unchanged)	MATCH
+statx.stx_mtime	946684801.000000000 -> 946684801.000000000 (unchanged)	946684801.000000000 -> 946684801.000000000 (unchanged)	MATCH
+statx.stx_rdev	0:0 -> 0:0 (unchanged)	0:0 -> 0:0 (unchanged)	MATCH
+statx.stx_dev	259:3 -> 259:3 (unchanged)	259:3 -> 259:3 (unchanged)	MATCH
+statx.stx_dio_mem_align	4 -> 4 (unchanged)	4 -> 4 (unchanged)	MATCH
+statx.stx_dio_offset_align	512 -> 512 (unchanged)	512 -> 512 (unchanged)	MATCH
+POST_CLOSE_FIELD	POSIX before -> post-close	HIPFILE before -> post-close	COMPARISON
+POST_CLOSE_RESULT	MATCH
+CASE_RESULT	PASS
+
+=== write-zero-beyond-eof (size=0, offset=2097152) ===
+RETURN	POSIX=0 errno=0	HIPFILE=0 errno=0
+CONTENT	POSIX=0x1f5e0df9bc822325	HIPFILE=0x1f5e0df9bc822325	MATCH
+FIELD	POSIX before -> after	HIPFILE before -> after	COMPARISON
+fstat.st_dev	259:3 -> 259:3 (unchanged)	259:3 -> 259:3 (unchanged)	MATCH
+fstat.st_ino	4063340 -> 4063340 (unchanged)	4063341 -> 4063341 (unchanged)	MATCH
+fstat.st_mode	0100640 -> 0100640 (unchanged)	0100640 -> 0100640 (unchanged)	MATCH
+fstat.st_nlink	1 -> 1 (unchanged)	1 -> 1 (unchanged)	MATCH
+fstat.st_uid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+fstat.st_gid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+fstat.st_rdev	0:0 -> 0:0 (unchanged)	0:0 -> 0:0 (unchanged)	MATCH
+fstat.st_size	1048576 -> 1048576 (unchanged)	1048576 -> 1048576 (unchanged)	MATCH
+fstat.st_blksize	4096 -> 4096 (unchanged)	4096 -> 4096 (unchanged)	MATCH
+fstat.st_blocks	2048 -> 2048 (unchanged)	2048 -> 2048 (unchanged)	MATCH
+fstat.st_atim	946684800.000000000 -> 946684800.000000000 (unchanged)	946684800.000000000 -> 946684800.000000000 (unchanged)	MATCH
+fstat.st_mtim	946684801.000000000 -> 946684801.000000000 (unchanged)	946684801.000000000 -> 946684801.000000000 (unchanged)	MATCH
+fstat.st_ctim	1787157822.393445341 -> 1787157822.393445341 (unchanged)	1787157822.400445701 -> 1787157822.400445701 (unchanged)	MATCH
+statx.stx_mask	0x3fff -> 0x3fff (unchanged)	0x3fff -> 0x3fff (unchanged)	MATCH
+statx.stx_blksize	4096 -> 4096 (unchanged)	4096 -> 4096 (unchanged)	MATCH
+statx.stx_attributes	0x0 -> 0x0 (unchanged)	0x0 -> 0x0 (unchanged)	MATCH
+statx.stx_nlink	1 -> 1 (unchanged)	1 -> 1 (unchanged)	MATCH
+statx.stx_uid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+statx.stx_gid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+statx.stx_mode	0100640 -> 0100640 (unchanged)	0100640 -> 0100640 (unchanged)	MATCH
+statx.stx_ino	4063340 -> 4063340 (unchanged)	4063341 -> 4063341 (unchanged)	MATCH
+statx.stx_size	1048576 -> 1048576 (unchanged)	1048576 -> 1048576 (unchanged)	MATCH
+statx.stx_blocks	2048 -> 2048 (unchanged)	2048 -> 2048 (unchanged)	MATCH
+statx.stx_attributes_mask	0x303874 -> 0x303874 (unchanged)	0x303874 -> 0x303874 (unchanged)	MATCH
+statx.stx_atime	946684800.000000000 -> 946684800.000000000 (unchanged)	946684800.000000000 -> 946684800.000000000 (unchanged)	MATCH
+statx.stx_btime	1787157822.391445239 -> 1787157822.391445239 (unchanged)	1787157822.398445599 -> 1787157822.398445599 (unchanged)	MATCH
+statx.stx_ctime	1787157822.393445341 -> 1787157822.393445341 (unchanged)	1787157822.400445701 -> 1787157822.400445701 (unchanged)	MATCH
+statx.stx_mtime	946684801.000000000 -> 946684801.000000000 (unchanged)	946684801.000000000 -> 946684801.000000000 (unchanged)	MATCH
+statx.stx_rdev	0:0 -> 0:0 (unchanged)	0:0 -> 0:0 (unchanged)	MATCH
+statx.stx_dev	259:3 -> 259:3 (unchanged)	259:3 -> 259:3 (unchanged)	MATCH
+statx.stx_dio_mem_align	4 -> 4 (unchanged)	4 -> 4 (unchanged)	MATCH
+statx.stx_dio_offset_align	512 -> 512 (unchanged)	512 -> 512 (unchanged)	MATCH
+POST_CLOSE_FIELD	POSIX before -> post-close	HIPFILE before -> post-close	COMPARISON
+POST_CLOSE_RESULT	MATCH
+CASE_RESULT	PASS
+
+=== write-normal-overwrite (size=4096, offset=0) ===
+RETURN	POSIX=4096 errno=0	HIPFILE=4096 errno=0
+CONTENT	POSIX=0x98a2ac64be1c8325	HIPFILE=0x98a2ac64be1c8325	MATCH
+FIELD	POSIX before -> after	HIPFILE before -> after	COMPARISON
+fstat.st_dev	259:3 -> 259:3 (unchanged)	259:3 -> 259:3 (unchanged)	MATCH
+fstat.st_ino	4063342 -> 4063342 (unchanged)	4063343 -> 4063343 (unchanged)	MATCH
+fstat.st_mode	0100640 -> 0100640 (unchanged)	0100640 -> 0100640 (unchanged)	MATCH
+fstat.st_nlink	1 -> 1 (unchanged)	1 -> 1 (unchanged)	MATCH
+fstat.st_uid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+fstat.st_gid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+fstat.st_rdev	0:0 -> 0:0 (unchanged)	0:0 -> 0:0 (unchanged)	MATCH
+fstat.st_size	1048576 -> 1048576 (unchanged)	1048576 -> 1048576 (unchanged)	MATCH
+fstat.st_blksize	4096 -> 4096 (unchanged)	4096 -> 4096 (unchanged)	MATCH
+fstat.st_blocks	2048 -> 2048 (unchanged)	2048 -> 2048 (unchanged)	MATCH
+fstat.st_atim	946684800.000000000 -> 946684800.000000000 (unchanged)	946684800.000000000 -> 946684800.000000000 (unchanged)	MATCH
+fstat.st_mtim	946684801.000000000 -> 1787157822.410446215 (changed)	946684801.000000000 -> 1787157822.417446575 (changed)	MATCH
+fstat.st_ctim	1787157822.408446113 -> 1787157822.410446215 (changed)	1787157822.415446473 -> 1787157822.417446575 (changed)	MATCH
+statx.stx_mask	0x3fff -> 0x3fff (unchanged)	0x3fff -> 0x3fff (unchanged)	MATCH
+statx.stx_blksize	4096 -> 4096 (unchanged)	4096 -> 4096 (unchanged)	MATCH
+statx.stx_attributes	0x0 -> 0x0 (unchanged)	0x0 -> 0x0 (unchanged)	MATCH
+statx.stx_nlink	1 -> 1 (unchanged)	1 -> 1 (unchanged)	MATCH
+statx.stx_uid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+statx.stx_gid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+statx.stx_mode	0100640 -> 0100640 (unchanged)	0100640 -> 0100640 (unchanged)	MATCH
+statx.stx_ino	4063342 -> 4063342 (unchanged)	4063343 -> 4063343 (unchanged)	MATCH
+statx.stx_size	1048576 -> 1048576 (unchanged)	1048576 -> 1048576 (unchanged)	MATCH
+statx.stx_blocks	2048 -> 2048 (unchanged)	2048 -> 2048 (unchanged)	MATCH
+statx.stx_attributes_mask	0x303874 -> 0x303874 (unchanged)	0x303874 -> 0x303874 (unchanged)	MATCH
+statx.stx_atime	946684800.000000000 -> 946684800.000000000 (unchanged)	946684800.000000000 -> 946684800.000000000 (unchanged)	MATCH
+statx.stx_btime	1787157822.406446010 -> 1787157822.406446010 (unchanged)	1787157822.413446370 -> 1787157822.413446370 (unchanged)	MATCH
+statx.stx_ctime	1787157822.408446113 -> 1787157822.410446215 (changed)	1787157822.415446473 -> 1787157822.417446575 (changed)	MATCH
+statx.stx_mtime	946684801.000000000 -> 1787157822.410446215 (changed)	946684801.000000000 -> 1787157822.417446575 (changed)	MATCH
+statx.stx_rdev	0:0 -> 0:0 (unchanged)	0:0 -> 0:0 (unchanged)	MATCH
+statx.stx_dev	259:3 -> 259:3 (unchanged)	259:3 -> 259:3 (unchanged)	MATCH
+statx.stx_dio_mem_align	4 -> 4 (unchanged)	4 -> 4 (unchanged)	MATCH
+statx.stx_dio_offset_align	512 -> 512 (unchanged)	512 -> 512 (unchanged)	MATCH
+POST_CLOSE_FIELD	POSIX before -> post-close	HIPFILE before -> post-close	COMPARISON
+post-close.fstat.st_mtim	946684801.000000000 -> 1787157822.410446215 (changed)	946684801.000000000 -> 1787157822.417446575 (changed)	MATCH
+post-close.fstat.st_ctim	1787157822.408446113 -> 1787157822.410446215 (changed)	1787157822.415446473 -> 1787157822.417446575 (changed)	MATCH
+post-close.statx.stx_ctime	1787157822.408446113 -> 1787157822.410446215 (changed)	1787157822.415446473 -> 1787157822.417446575 (changed)	MATCH
+post-close.statx.stx_mtime	946684801.000000000 -> 1787157822.410446215 (changed)	946684801.000000000 -> 1787157822.417446575 (changed)	MATCH
+POST_CLOSE_RESULT	MATCH
+CASE_RESULT	PASS
+
+=== write-normal-extend (size=4096, offset=1048576) ===
+RETURN	POSIX=4096 errno=0	HIPFILE=4096 errno=0
+CONTENT	POSIX=0xbab1a8f07754e325	HIPFILE=0xbab1a8f07754e325	MATCH
+FIELD	POSIX before -> after	HIPFILE before -> after	COMPARISON
+fstat.st_dev	259:3 -> 259:3 (unchanged)	259:3 -> 259:3 (unchanged)	MATCH
+fstat.st_ino	4063344 -> 4063344 (unchanged)	4063345 -> 4063345 (unchanged)	MATCH
+fstat.st_mode	0100640 -> 0100640 (unchanged)	0100640 -> 0100640 (unchanged)	MATCH
+fstat.st_nlink	1 -> 1 (unchanged)	1 -> 1 (unchanged)	MATCH
+fstat.st_uid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+fstat.st_gid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+fstat.st_rdev	0:0 -> 0:0 (unchanged)	0:0 -> 0:0 (unchanged)	MATCH
+fstat.st_size	1048576 -> 1052672 (changed)	1048576 -> 1052672 (changed)	MATCH
+fstat.st_blksize	4096 -> 4096 (unchanged)	4096 -> 4096 (unchanged)	MATCH
+fstat.st_blocks	2048 -> 2056 (changed)	2048 -> 2056 (changed)	MATCH
+fstat.st_atim	946684800.000000000 -> 946684800.000000000 (unchanged)	946684800.000000000 -> 946684800.000000000 (unchanged)	MATCH
+fstat.st_mtim	946684801.000000000 -> 1787157822.425446987 (changed)	946684801.000000000 -> 1787157822.433447399 (changed)	MATCH
+fstat.st_ctim	1787157822.423446884 -> 1787157822.425446987 (changed)	1787157822.431447295 -> 1787157822.433447399 (changed)	MATCH
+statx.stx_mask	0x3fff -> 0x3fff (unchanged)	0x3fff -> 0x3fff (unchanged)	MATCH
+statx.stx_blksize	4096 -> 4096 (unchanged)	4096 -> 4096 (unchanged)	MATCH
+statx.stx_attributes	0x0 -> 0x0 (unchanged)	0x0 -> 0x0 (unchanged)	MATCH
+statx.stx_nlink	1 -> 1 (unchanged)	1 -> 1 (unchanged)	MATCH
+statx.stx_uid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+statx.stx_gid	1003 -> 1003 (unchanged)	1003 -> 1003 (unchanged)	MATCH
+statx.stx_mode	0100640 -> 0100640 (unchanged)	0100640 -> 0100640 (unchanged)	MATCH
+statx.stx_ino	4063344 -> 4063344 (unchanged)	4063345 -> 4063345 (unchanged)	MATCH
+statx.stx_size	1048576 -> 1052672 (changed)	1048576 -> 1052672 (changed)	MATCH
+statx.stx_blocks	2048 -> 2056 (changed)	2048 -> 2056 (changed)	MATCH
+statx.stx_attributes_mask	0x303874 -> 0x303874 (unchanged)	0x303874 -> 0x303874 (unchanged)	MATCH
+statx.stx_atime	946684800.000000000 -> 946684800.000000000 (unchanged)	946684800.000000000 -> 946684800.000000000 (unchanged)	MATCH
+statx.stx_btime	1787157822.421446781 -> 1787157822.421446781 (unchanged)	1787157822.429447193 -> 1787157822.429447193 (unchanged)	MATCH
+statx.stx_ctime	1787157822.423446884 -> 1787157822.425446987 (changed)	1787157822.431447295 -> 1787157822.433447399 (changed)	MATCH
+statx.stx_mtime	946684801.000000000 -> 1787157822.425446987 (changed)	946684801.000000000 -> 1787157822.433447399 (changed)	MATCH
+statx.stx_rdev	0:0 -> 0:0 (unchanged)	0:0 -> 0:0 (unchanged)	MATCH
+statx.stx_dev	259:3 -> 259:3 (unchanged)	259:3 -> 259:3 (unchanged)	MATCH
+statx.stx_dio_mem_align	4 -> 4 (unchanged)	4 -> 4 (unchanged)	MATCH
+statx.stx_dio_offset_align	512 -> 512 (unchanged)	512 -> 512 (unchanged)	MATCH
+POST_CLOSE_FIELD	POSIX before -> post-close	HIPFILE before -> post-close	COMPARISON
+post-close.fstat.st_size	1048576 -> 1052672 (changed)	1048576 -> 1052672 (changed)	MATCH
+post-close.fstat.st_blocks	2048 -> 2056 (changed)	2048 -> 2056 (changed)	MATCH
+post-close.fstat.st_mtim	946684801.000000000 -> 1787157822.425446987 (changed)	946684801.000000000 -> 1787157822.433447399 (changed)	MATCH
+post-close.fstat.st_ctim	1787157822.423446884 -> 1787157822.425446987 (changed)	1787157822.431447295 -> 1787157822.433447399 (changed)	MATCH
+post-close.statx.stx_size	1048576 -> 1052672 (changed)	1048576 -> 1052672 (changed)	MATCH
+post-close.statx.stx_blocks	2048 -> 2056 (changed)	2048 -> 2056 (changed)	MATCH
+post-close.statx.stx_ctime	1787157822.423446884 -> 1787157822.425446987 (changed)	1787157822.431447295 -> 1787157822.433447399 (changed)	MATCH
+post-close.statx.stx_mtime	946684801.000000000 -> 1787157822.425446987 (changed)	946684801.000000000 -> 1787157822.433447399 (changed)	MATCH
+POST_CLOSE_RESULT	MATCH
+CASE_RESULT	PASS
+
+SUMMARY	7/7 cases passed
+AIS-STATS Version: 1
+HipFile Stats Level: 1
+File Handle Registrations: 7
+Buffer Registrations: 1
+Fastpath Rejections: 0
+
+Total Fastpath Read Size (B): 4096
+Average Fastpath Read Bandwidth (GiB/s): 0.0337584
+Average Fastpath Read Latency (us): 37.6667
+Total Fastpath Read Errors: 0
+Total Fastpath Read Unaligned: 0
+
+Total Fastpath Write Size (B): 8192
+Average Fastpath Write Bandwidth (GiB/s): 0.0687333
+Average Fastpath Write Latency (us): 27.75
+Total Fastpath Write Errors: 0
+Total Fastpath Write Unaligned: 0
+
+Total Fallback Read Size (B): 0
+Average Fallback Read Bandwidth (GiB/s): 0
+Average Fallback Read Latency (us): 0
+Total Fallback Read Errors: 0
+Total Fallback Read Unaligned: 0
+
+Total Fallback Write Size (B): 0
+Average Fallback Write Bandwidth (GiB/s): 0
+Average Fallback Write Latency (us): 0
+Total Fallback Write Errors: 0
+Total Fallback Write Unaligned: 0
+
+GPU 0:
+IO Size Histogram
+IO Size (KiB)               Fastpath Read Size (B)           Fastpath Write Size (B)            Fallback Read Size (B)           Fallback Write Size (B)
+0-4                                              0                                 0                                 0                                 0
+4-8                                           4096                              8192                                 0                                 0
+8-16                                             0                                 0                                 0                                 0
+16-32                                            0                                 0                                 0                                 0
+32-64                                            0                                 0                                 0                                 0
+64-128                                           0                                 0                                 0                                 0
+128-256                                          0                                 0                                 0                                 0
+256-512                                          0                                 0                                 0                                 0
+512-1024                                         0                                 0                                 0                                 0
+1024-2048                                        0                                 0                                 0                                 0
+2048-4096                                        0                                 0                                 0                                 0
+4096-8192                                        0                                 0                                 0                                 0
+8192-16384                                       0                                 0                                 0                                 0
+16384-32768                                      0                                 0                                 0                                 0
+32768-65536                                      0                                 0                                 0                                 0
+65536-...                                        0                                 0                                 0                                 0
+IO Bandwidth Histogram
+IO Size (KiB)      Fastpath Read Bandwidth (GiB/s)  Fastpath Write Bandwidth (GiB/s)   Fallback Read Bandwidth (GiB/s)  Fallback Write Bandwidth (GiB/s)
+0-4                                              0                                 0                                 0                                 0
+4-8                                      0.0433488                          0.074798                                 0                                 0
+8-16                                             0                                 0                                 0                                 0
+16-32                                            0                                 0                                 0                                 0
+32-64                                            0                                 0                                 0                                 0
+64-128                                           0                                 0                                 0                                 0
+128-256                                          0                                 0                                 0                                 0
+256-512                                          0                                 0                                 0                                 0
+512-1024                                         0                                 0                                 0                                 0
+1024-2048                                        0                                 0                                 0                                 0
+2048-4096                                        0                                 0                                 0                                 0
+4096-8192                                        0                                 0                                 0                                 0
+8192-16384                                       0                                 0                                 0                                 0
+16384-32768                                      0                                 0                                 0                                 0
+32768-65536                                      0                                 0                                 0                                 0
+65536-...                                        0                                 0                                 0                                 0
+IO Latency Histogram
+IO Size (KiB)           Fastpath Read Latency (us)       Fastpath Write Latency (us)        Fallback Read Latency (us)       Fallback Write Latency (us)
+0-4                                           12.5                               4.5                                 0                                 0
+4-8                                             88                                51                                 0                                 0
+8-16                                             0                                 0                                 0                                 0
+16-32                                            0                                 0                                 0                                 0
+32-64                                            0                                 0                                 0                                 0
+64-128                                           0                                 0                                 0                                 0
+128-256                                          0                                 0                                 0                                 0
+256-512                                          0                                 0                                 0                                 0
+512-1024                                         0                                 0                                 0                                 0
+1024-2048                                        0                                 0                                 0                                 0
+2048-4096                                        0                                 0                                 0                                 0
+4096-8192                                        0                                 0                                 0                                 0
+8192-16384                                       0                                 0                                 0                                 0
+16384-32768                                      0                                 0                                 0                                 0
+32768-65536                                      0                                 0                                 0                                 0
+65536-...                                        0                                 0                                 0                                 0
+IO Errors Histogram
+IO Size (KiB)            Fastpath Read Error Count        Fastpath Write Error Count         Fallback Read Error Count        Fallback Write Error Count
+0-4                                              0                                 0                                 0                                 0
+4-8                                              0                                 0                                 0                                 0
+8-16                                             0                                 0                                 0                                 0
+16-32                                            0                                 0                                 0                                 0
+32-64                                            0                                 0                                 0                                 0
+64-128                                           0                                 0                                 0                                 0
+128-256                                          0                                 0                                 0                                 0
+256-512                                          0                                 0                                 0                                 0
+512-1024                                         0                                 0                                 0                                 0
+1024-2048                                        0                                 0                                 0                                 0
+2048-4096                                        0                                 0                                 0                                 0
+4096-8192                                        0                                 0                                 0                                 0
+8192-16384                                       0                                 0                                 0                                 0
+16384-32768                                      0                                 0                                 0                                 0
+32768-65536                                      0                                 0                                 0                                 0
+65536-...                                        0                                 0                                 0                                 0
+Fastpath Read Unaligned Count: 0
+Fastpath Write Unaligned Count: 0
+Fallback Read Unaligned Count: 0
+Fallback Write Unaligned Count: 0

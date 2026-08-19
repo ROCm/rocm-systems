@@ -68,6 +68,16 @@ The filesystems were `/dev/nvme1n1p1` (ext4, `relatime`) and
 | XFS | fastpath only | 6/7 passed |
 | XFS | forced fallback | 7/7 passed |
 
+### Raw output
+
+The complete per-field output and the corresponding `ais-stats` report from
+each backend run are preserved verbatim here:
+
+- [ext4 fastpath](results/cgy-rowlet-ext4-fastpath.txt)
+- [ext4 forced fallback](results/cgy-rowlet-ext4-fallback.txt)
+- [XFS fastpath](results/cgy-rowlet-xfs-fastpath.txt)
+- [XFS forced fallback](results/cgy-rowlet-xfs-fallback.txt)
+
 `ais-stats` confirmed that the backend selection was effective:
 
 | Run mode | Fastpath rejection count | Fastpath bytes (read/write) | Fallback bytes (read/write) |
