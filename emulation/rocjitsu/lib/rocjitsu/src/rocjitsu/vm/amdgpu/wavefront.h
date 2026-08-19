@@ -171,6 +171,24 @@ public:
   /// @brief Set the per-WG LDS base offset.
   void set_lds_base(uint32_t base) { lds_base_ = base; }
 
+  /// @brief Initialize a workgroup named barrier from an ISA barrier operand.
+  void barrier_init(int32_t barrier_id, uint32_t member_count);
+
+  /// @brief Join one workgroup named barrier.
+  void barrier_join(int32_t barrier_id);
+
+  /// @brief Signal a barrier and report whether this is its first signal.
+  bool barrier_signal(int32_t barrier_id, uint32_t member_count);
+
+  /// @brief Read the packed architectural state of a barrier.
+  uint32_t barrier_state(int32_t barrier_id) const;
+
+  /// @brief Wait on a named, workgroup, trap, or cluster barrier.
+  void barrier_wait(int32_t barrier_id);
+
+  /// @brief Leave the currently joined named barrier.
+  bool barrier_leave();
+
   /// @brief Return the aligned LDS allocation size for this workgroup.
   uint32_t lds_size() const { return lds_size_; }
 
@@ -525,6 +543,9 @@ public:
     shared_aperture_limit_ = 0;
     private_aperture_base_ = 0;
     private_aperture_limit_ = 0;
+    named_barrier_id_ = 0;
+    barrier_complete_.fill(false);
+    waiting_barrier_bit_ = kNoBarrierWait;
     wait_counters_ = {};
     wait_target_ = {};
     ready_cycle_ = 0;
@@ -584,8 +605,13 @@ private:
   uint64_t shared_aperture_limit_ = 0;
   uint64_t private_aperture_base_ = 0;
   uint64_t private_aperture_limit_ = 0;
-  WfState state_ = WfState::HALTED; ///< Current execution state.
-  WaitCounters wait_counters_;      ///< Outstanding memory operation counters.
+  static constexpr uint8_t kNoBarrierWait = 0xff;
+  uint32_t named_barrier_id_ = 0; ///< Currently joined named barrier.
+  /// Completion bits: named, workgroup, workgroup trap, cluster, cluster trap.
+  std::array<bool, 5> barrier_complete_{};
+  uint8_t waiting_barrier_bit_ = kNoBarrierWait; ///< Completion bit awaited by split wait.
+  WfState state_ = WfState::HALTED;              ///< Current execution state.
+  WaitCounters wait_counters_;                   ///< Outstanding memory operation counters.
 
 public:
   uint32_t trace_inst_count_ = 0; ///< Debug: instruction count for trace.

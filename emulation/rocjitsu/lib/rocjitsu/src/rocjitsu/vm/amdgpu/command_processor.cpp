@@ -866,7 +866,7 @@ void CommandProcessor::register_cluster_workgroup(const DispatchEntry &entry, ui
                                                   uint32_t lds_base) {
   if (!entry.has_workgroup_clusters())
     return;
-  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+  std::lock_guard<std::recursive_mutex> lock(cluster_barrier_mutex_);
   uint32_t cluster_base_wg_id =
       entry.cluster_base_local_wg_id(local_wg_id) + entry.workgroup_id_offset;
   uint64_t cluster_key = wg_key(entry.dispatch_id, cluster_base_wg_id);
@@ -883,65 +883,218 @@ void CommandProcessor::register_cluster_workgroup(const DispatchEntry &entry, ui
     placement.peer_wg_ids.push_back(peer_local_wg_id + entry.workgroup_id_offset);
   }
   cluster_wg_placements_[wg_key(entry.dispatch_id, global_wg_id)] = std::move(placement);
+  auto &barriers = cluster_barriers_[cluster_key];
+  if (barriers.expected_member_count == 0) {
+    barriers.expected_member_count = entry.cluster_size();
+    barriers.member_count = entry.cluster_size();
+  }
+  barriers.registered_workgroups.insert(global_wg_id);
+}
+
+bool CommandProcessor::find_valid_cluster_barrier_locked(const Wavefront &wf, int32_t barrier_id,
+                                                         ClusterWorkgroupPlacement *&placement,
+                                                         ClusterBarrierState *&barriers) {
+  if (barrier_id != kClusterBarrierId && barrier_id != kClusterTrapBarrierId)
+    return false;
+  auto placement_it = cluster_wg_placements_.find(wg_key(wf.dispatch_id(), wf.wg_id()));
+  if (placement_it == cluster_wg_placements_.end())
+    return false;
+  auto barriers_it = cluster_barriers_.find(placement_it->second.cluster_key);
+  if (barriers_it == cluster_barriers_.end() || barriers_it->second.member_count == 0 ||
+      barriers_it->second.registered_workgroups.size() != barriers_it->second.expected_member_count)
+    return false;
+  placement = &placement_it->second;
+  barriers = &barriers_it->second;
+  return true;
+}
+
+bool CommandProcessor::find_valid_cluster_barrier_locked(
+    const Wavefront &wf, int32_t barrier_id, const ClusterWorkgroupPlacement *&placement,
+    const ClusterBarrierState *&barriers) const {
+  if (barrier_id != kClusterBarrierId && barrier_id != kClusterTrapBarrierId)
+    return false;
+  auto placement_it = cluster_wg_placements_.find(wg_key(wf.dispatch_id(), wf.wg_id()));
+  if (placement_it == cluster_wg_placements_.end())
+    return false;
+  auto barriers_it = cluster_barriers_.find(placement_it->second.cluster_key);
+  if (barriers_it == cluster_barriers_.end() || barriers_it->second.member_count == 0 ||
+      barriers_it->second.registered_workgroups.size() != barriers_it->second.expected_member_count)
+    return false;
+  placement = &placement_it->second;
+  barriers = &barriers_it->second;
+  return true;
+}
+
+bool CommandProcessor::cluster_barrier_valid(const Wavefront &wf, int32_t barrier_id) const {
+  std::lock_guard<std::recursive_mutex> lock(cluster_barrier_mutex_);
+  const ClusterWorkgroupPlacement *placement = nullptr;
+  const ClusterBarrierState *barriers = nullptr;
+  return find_valid_cluster_barrier_locked(wf, barrier_id, placement, barriers);
+}
+
+uint32_t CommandProcessor::cluster_barrier_state(const Wavefront &wf, int32_t barrier_id,
+                                                 uint32_t allocation_blocks) const {
+  std::lock_guard<std::recursive_mutex> lock(cluster_barrier_mutex_);
+  const ClusterWorkgroupPlacement *placement = nullptr;
+  const ClusterBarrierState *barriers = nullptr;
+  if (!find_valid_cluster_barrier_locked(wf, barrier_id, placement, barriers))
+    return 0;
+  const uint32_t index = static_cast<uint32_t>(-barrier_id - kClusterBarrierBit);
+  return 1u | ((barriers->member_count & 0x7fu) << 4) |
+         ((barriers->signaled_workgroups[index].size() & 0x7fu) << 16) |
+         ((allocation_blocks & 0x7u) << 24);
+}
+
+bool CommandProcessor::cluster_barrier_signal(Wavefront &wf, int32_t barrier_id) {
+  bool is_first = false;
+  std::vector<std::pair<ComputeUnitCore *, uint32_t>> peers;
+  const uint8_t completion_bit = static_cast<uint8_t>(-barrier_id);
+  {
+    std::lock_guard<std::recursive_mutex> lock(cluster_barrier_mutex_);
+    ClusterWorkgroupPlacement *placement = nullptr;
+    ClusterBarrierState *barriers = nullptr;
+    if (!find_valid_cluster_barrier_locked(wf, barrier_id, placement, barriers))
+      return false;
+
+    const uint32_t index = static_cast<uint32_t>(completion_bit - kClusterBarrierBit);
+    auto [_, inserted] = barriers->signaled_workgroups[index].insert(wf.wg_id());
+    if (!inserted)
+      return false;
+    is_first = barriers->signaled_workgroups[index].size() == 1;
+    if (barriers->signaled_workgroups[index].size() < barriers->member_count)
+      return is_first;
+
+    barriers->signaled_workgroups[index].clear();
+    peers.reserve(placement->peer_wg_ids.size());
+    for (uint32_t peer_wg_id : placement->peer_wg_ids) {
+      auto peer = cluster_wg_placements_.find(wg_key(wf.dispatch_id(), peer_wg_id));
+      if (peer != cluster_wg_placements_.end() && peer->second.cu)
+        peers.emplace_back(peer->second.cu, peer_wg_id);
+    }
+  }
+
+  std::vector<Wavefront *> members;
+  for (auto [cu, peer_wg_id] : peers) {
+    auto peer_members = cu->complete_barrier(wf.dispatch_id(), peer_wg_id, completion_bit);
+    members.insert(members.end(), peer_members.begin(), peer_members.end());
+  }
+  if (!members.empty())
+    plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(members));
+  return is_first;
 }
 
 void CommandProcessor::mark_cluster_workgroup_complete(uint32_t dispatch_id, uint32_t wg_id) {
-  auto it = cluster_wg_placements_.find(wg_key(dispatch_id, wg_id));
-  if (it == cluster_wg_placements_.end())
-    return;
-
-  it->second.completed = true;
-  uint64_t cluster_key = it->second.cluster_key;
-  auto peer_wg_ids = it->second.peer_wg_ids;
-  for (uint32_t peer_wg_id : peer_wg_ids) {
-    auto peer_it = cluster_wg_placements_.find(wg_key(dispatch_id, peer_wg_id));
-    if (peer_it == cluster_wg_placements_.end() || !peer_it->second.completed)
+  std::array<std::vector<std::pair<ComputeUnitCore *, uint32_t>>, 2> resolved_peers;
+  std::vector<ComputeUnitCore *> retired_cus;
+  uint64_t cluster_key = 0;
+  {
+    std::lock_guard<std::recursive_mutex> lock(cluster_barrier_mutex_);
+    auto it = cluster_wg_placements_.find(wg_key(dispatch_id, wg_id));
+    if (it == cluster_wg_placements_.end() || it->second.completed)
       return;
-  }
 
-  for (uint32_t peer_wg_id : peer_wg_ids) {
-    auto peer_it = cluster_wg_placements_.find(wg_key(dispatch_id, peer_wg_id));
-    if (peer_it != cluster_wg_placements_.end() && peer_it->second.cu) {
-      peer_it->second.cu->unpin_lds_for_cluster(cluster_key);
-      // The waves halted (and freed) before the pin was released, so reclaim each
-      // peer CU's LDS now that the whole cluster is done.
-      peer_it->second.cu->maybe_reset_lds_alloc();
+    it->second.completed = true;
+    cluster_key = it->second.cluster_key;
+    const auto peer_wg_ids = it->second.peer_wg_ids;
+    auto barrier_it = cluster_barriers_.find(cluster_key);
+    if (barrier_it != cluster_barriers_.end() && barrier_it->second.member_count != 0) {
+      auto &barriers = barrier_it->second;
+      --barriers.member_count;
+      for (uint32_t index = 0; index < barriers.signaled_workgroups.size(); ++index) {
+        barriers.signaled_workgroups[index].erase(wg_id);
+        if (barriers.member_count == 0 ||
+            barriers.signaled_workgroups[index].size() < barriers.member_count)
+          continue;
+        barriers.signaled_workgroups[index].clear();
+        for (uint32_t peer_wg_id : peer_wg_ids) {
+          auto peer = cluster_wg_placements_.find(wg_key(dispatch_id, peer_wg_id));
+          if (peer != cluster_wg_placements_.end() && !peer->second.completed && peer->second.cu)
+            resolved_peers[index].emplace_back(peer->second.cu, peer_wg_id);
+        }
+      }
+    }
+
+    const bool all_completed = std::ranges::all_of(peer_wg_ids, [&](uint32_t peer_wg_id) {
+      auto peer = cluster_wg_placements_.find(wg_key(dispatch_id, peer_wg_id));
+      return peer != cluster_wg_placements_.end() && peer->second.completed;
+    });
+    if (!all_completed)
+      cluster_key = 0;
+    else {
+      for (uint32_t peer_wg_id : peer_wg_ids) {
+        auto peer = cluster_wg_placements_.find(wg_key(dispatch_id, peer_wg_id));
+        if (peer != cluster_wg_placements_.end() && peer->second.cu)
+          retired_cus.push_back(peer->second.cu);
+        cluster_wg_placements_.erase(wg_key(dispatch_id, peer_wg_id));
+      }
+      cluster_barriers_.erase(cluster_key);
     }
   }
-  for (uint32_t peer_wg_id : peer_wg_ids)
-    cluster_wg_placements_.erase(wg_key(dispatch_id, peer_wg_id));
+
+  for (uint32_t index = 0; index < resolved_peers.size(); ++index) {
+    std::vector<Wavefront *> members;
+    const uint8_t completion_bit = static_cast<uint8_t>(kClusterBarrierBit + index);
+    for (auto [cu, peer_wg_id] : resolved_peers[index]) {
+      auto peer_members = cu->complete_barrier(dispatch_id, peer_wg_id, completion_bit);
+      members.insert(members.end(), peer_members.begin(), peer_members.end());
+    }
+    if (!members.empty())
+      plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(members));
+  }
+
+  if (cluster_key != 0) {
+    for (auto *cu : retired_cus) {
+      cu->unpin_lds_for_cluster(cluster_key);
+      // The waves halted before the pin was released, so reclaim LDS after
+      // every workgroup in the cluster has retired.
+      cu->maybe_reset_lds_alloc();
+    }
+  }
 }
 
 void CommandProcessor::erase_cluster_workgroup(uint32_t dispatch_id, uint32_t wg_id) {
-  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-  auto it = cluster_wg_placements_.find(wg_key(dispatch_id, wg_id));
-  if (it == cluster_wg_placements_.end())
-    return;
-  if (it->second.cu) {
-    it->second.cu->unpin_lds_for_cluster(it->second.cluster_key);
-    it->second.cu->maybe_reset_lds_alloc();
+  ComputeUnitCore *cu = nullptr;
+  uint64_t cluster_key = 0;
+  {
+    std::lock_guard<std::recursive_mutex> lock(cluster_barrier_mutex_);
+    auto it = cluster_wg_placements_.find(wg_key(dispatch_id, wg_id));
+    if (it == cluster_wg_placements_.end())
+      return;
+    cu = it->second.cu;
+    cluster_key = it->second.cluster_key;
+    cluster_barriers_.erase(cluster_key);
+    cluster_wg_placements_.erase(it);
   }
-  cluster_wg_placements_.erase(it);
+  if (cu) {
+    cu->unpin_lds_for_cluster(cluster_key);
+    cu->maybe_reset_lds_alloc();
+  }
 }
 
 void CommandProcessor::erase_cluster_workgroups(uint32_t dispatch_id) {
-  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-  for (auto it = cluster_wg_placements_.begin(); it != cluster_wg_placements_.end();) {
-    if ((it->first >> 32) == dispatch_id) {
-      if (it->second.cu) {
-        it->second.cu->unpin_lds_for_cluster(it->second.cluster_key);
-        it->second.cu->maybe_reset_lds_alloc();
+  std::vector<std::pair<ComputeUnitCore *, uint64_t>> retired;
+  {
+    std::lock_guard<std::recursive_mutex> lock(cluster_barrier_mutex_);
+    for (auto it = cluster_wg_placements_.begin(); it != cluster_wg_placements_.end();) {
+      if ((it->first >> 32) == dispatch_id) {
+        cluster_barriers_.erase(it->second.cluster_key);
+        if (it->second.cu)
+          retired.emplace_back(it->second.cu, it->second.cluster_key);
+        it = cluster_wg_placements_.erase(it);
+      } else {
+        ++it;
       }
-      it = cluster_wg_placements_.erase(it);
-    } else {
-      ++it;
     }
+  }
+  for (auto [cu, cluster_key] : retired) {
+    cu->unpin_lds_for_cluster(cluster_key);
+    cu->maybe_reset_lds_alloc();
   }
 }
 
 std::vector<ClusterLdsTarget>
 CommandProcessor::cluster_lds_targets(uint32_t dispatch_id, uint32_t wg_id, uint32_t mcast_mask) {
-  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+  std::lock_guard<std::recursive_mutex> lock(cluster_barrier_mutex_);
   std::vector<ClusterLdsTarget> targets;
   auto src_it = cluster_wg_placements_.find(wg_key(dispatch_id, wg_id));
   if (src_it == cluster_wg_placements_.end())
@@ -1067,7 +1220,8 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     }
 
     // All fallible per-wave work succeeded: commit WG bookkeeping and the cluster pin.
-    cu->begin_workgroup(entry.dispatch_id, global_wg_id, entry.wfs_per_workgroup);
+    cu->begin_workgroup(entry.dispatch_id, global_wg_id, entry.wfs_per_workgroup,
+                        entry.num_named_barriers);
     register_cluster_workgroup(entry, local_wg_id, global_wg_id, cu, lds_base);
 
     plugin_group_->onAmdgpuWorkgroupDispatched(entry.dispatch_id, global_wg_id,
@@ -1184,13 +1338,18 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
 void CommandProcessor::notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id) {
   util::Logger::cp(
       [&](auto &os) { os << std::format("WG_COMPLETE d={} wg={}", dispatch_id, wg_id); });
-  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-  for (auto *spi : spis_)
-    if (spi->release_wgp_workgroup(dispatch_id, wg_id))
-      break;
+  {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    for (auto *spi : spis_)
+      if (spi->release_wgp_workgroup(dispatch_id, wg_id))
+        break;
+  }
   mark_cluster_workgroup_complete(dispatch_id, wg_id);
-  if (completion_)
-    completion_->notify_wg_complete(dispatch_id, wg_id, new_queue_states_);
+  {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    if (completion_)
+      completion_->notify_wg_complete(dispatch_id, wg_id, new_queue_states_);
+  }
 }
 
 // INVARIANT: on_cu_idle() runs on the owning partition's engine thread — it is
@@ -1347,6 +1506,11 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dp.kernarg_size = kd.kernarg_size;
   dp.num_user_sgprs = user_sgprs;
   dp.kernel_code_properties = kd.kernel_code_properties;
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+    const uint32_t named_barrier_blocks =
+        AMDHSA_BITS_GET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT);
+    dp.num_named_barriers = std::min(named_barrier_blocks * 4u, ComputeUnitCore::kMaxNamedBarriers);
+  }
   dp.kernarg_preload = kd.kernarg_preload;
   dp.initial_mode_raw = initial_mode_from_compute_pgm_rsrc1(kd.compute_pgm_rsrc1, arch);
   dp.private_segment_fixed_size = std::max(kd.private_segment_fixed_size, pkt.private_segment_size);
