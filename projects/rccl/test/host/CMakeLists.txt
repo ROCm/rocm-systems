@@ -80,6 +80,35 @@ function(apply_host_only_coverage_asan tgt)
   endif()
 endfunction()
 
+# register_test_categories(<target> <yaml_name>)
+#
+# Register <target> with CTest exactly as rccl-UnitTests / rccl-UnitTestsFixtures
+# do: via RCCL's shared category mechanism (no bare add_test, matching the rest
+# of test/CMakeLists.txt). <yaml_name> is the category file's basename under
+# test/ (e.g. test_categories_micro.yaml). apply_test_category_labels is defined
+# by shared/ctest/TestCategories.cmake, which the parent test/CMakeLists.txt
+# include()s (globally) when building inside rocm-systems; INSTALL_TEST_FILE is
+# likewise set by the parent. Guard on COMMAND so a non-monorepo configure
+# (shared/ctest absent) still succeeds -- there the target is built but not
+# category-registered.
+function(register_test_categories tgt yaml_name)
+  if(NOT COMMAND apply_test_category_labels)
+    return()
+  endif()
+  set(_categories_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../${yaml_name}")
+  if(EXISTS "${_categories_yaml}")
+    message(STATUS "Applying test categories for ${tgt}")
+    apply_test_category_labels(
+      ${tgt}
+      "${_categories_yaml}"
+      "${PROJECT_BINARY_DIR}"
+      "${INSTALL_TEST_FILE}"
+    )
+  else()
+    message(WARNING "Skipping test categories for ${tgt}: missing ${_categories_yaml}")
+  endif()
+endfunction()
+
 if(BUILD_TESTS)
   # rccl-UnitTestsMicro: standalone unit-test binary compiled directly into
   # the test binary. This lets us use preprocessor and link-time substitution
@@ -135,28 +164,7 @@ if(BUILD_TESTS)
   # RCCL_MICRO_TEST_SOURCES at the top of this file as new units come under test.
   rocm_install(TARGETS rccl-UnitTestsMicro COMPONENT tests)
 
-  # Register with CTest exactly as rccl-UnitTests / rccl-UnitTestsFixtures do:
-  # via RCCL's shared category mechanism (no bare add_test, matching the rest of
-  # test/CMakeLists.txt). apply_test_category_labels is defined by
-  # shared/ctest/TestCategories.cmake, which the parent test/CMakeLists.txt
-  # include()s (globally) when building inside rocm-systems; INSTALL_TEST_FILE is
-  # likewise set by the parent. Guard on COMMAND so a non-monorepo configure
-  # (shared/ctest absent) still succeeds -- there, as with the other binaries,
-  # the target is built but not category-registered.
-  if(COMMAND apply_test_category_labels)
-    set(_micro_categories_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
-    if(EXISTS "${_micro_categories_yaml}")
-      message(STATUS "Applying test categories for rccl-UnitTestsMicro")
-      apply_test_category_labels(
-        rccl-UnitTestsMicro
-        "${_micro_categories_yaml}"
-        "${PROJECT_BINARY_DIR}"
-        "${INSTALL_TEST_FILE}"
-      )
-    else()
-      message(WARNING "Skipping test categories for rccl-UnitTestsMicro: missing ${_micro_categories_yaml}")
-    endif()
-  endif()
+  register_test_categories(rccl-UnitTestsMicro test_categories_micro.yaml)
 
   # ---------------------------------------------------------------------------
   # rccl-UnitTestsMicroInit(+-uncached): host-only microtests for src/init.cc
@@ -302,20 +310,7 @@ if(BUILD_TESTS)
 
   rocm_install(TARGETS rccl-UnitTestsDevRuntime COMPONENT tests)
 
-  if(COMMAND apply_test_category_labels)
-    set(_devrt_categories_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_devruntime.yaml")
-    if(EXISTS "${_devrt_categories_yaml}")
-      message(STATUS "Applying test categories for rccl-UnitTestsDevRuntime")
-      apply_test_category_labels(
-        rccl-UnitTestsDevRuntime
-        "${_devrt_categories_yaml}"
-        "${PROJECT_BINARY_DIR}"
-        "${INSTALL_TEST_FILE}"
-      )
-    else()
-      message(WARNING "Skipping test categories for rccl-UnitTestsDevRuntime: missing ${_devrt_categories_yaml}")
-    endif()
-  endif()
+  register_test_categories(rccl-UnitTestsDevRuntime test_categories_devruntime.yaml)
   endif() # ROCM_VERSION >= 60400
 
   return()
