@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "cdna5_sim_test_common.h"
+#include "decode_test_util.h"
 
 namespace {
 
@@ -83,8 +84,8 @@ TEST(Gfx1250SimulationTest, SAddPcI64WrapsAtUnsignedBoundaries) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> increment(decoder->decode(add_one.data()));
-  std::unique_ptr<Instruction> decrement(decoder->decode(add_minus_one.data()));
+  std::unique_ptr<Instruction> increment(decode_valid(*decoder, add_one.data()));
+  std::unique_ptr<Instruction> decrement(decode_valid(*decoder, add_minus_one.data()));
   ASSERT_NE(increment, nullptr);
   ASSERT_NE(decrement, nullptr);
 
@@ -285,7 +286,7 @@ TEST(Gfx1250SimulationTest, NamedBarrierSignalIsfirstPreservesSccWithoutAllocati
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
   const std::array<uint32_t, 1> signal_words = {0xBE804F7Du};
-  std::unique_ptr<Instruction> signal(decoder->decode(signal_words.data()));
+  std::unique_ptr<Instruction> signal(decode_valid(*decoder, signal_words.data()));
   ASSERT_NE(signal, nullptr);
 
   wf->set_m0((2u << 16) | 1u);
@@ -309,10 +310,10 @@ void expect_barrier_init_reads_implicit_m0(uint32_t init_encoding, uint32_t init
   const std::array<uint32_t, 1> join_words = {0xBE805281u};   // s_barrier_join 1
   const std::array<uint32_t, 1> signal_words = {0xBE804F81u}; // s_barrier_signal_isfirst 1
   const std::array<uint32_t, 1> state_words = {0xBE845081u};  // s_get_barrier_state s4, 1
-  std::unique_ptr<Instruction> init(decoder->decode(init_words.data()));
-  std::unique_ptr<Instruction> join(decoder->decode(join_words.data()));
-  std::unique_ptr<Instruction> signal(decoder->decode(signal_words.data()));
-  std::unique_ptr<Instruction> state(decoder->decode(state_words.data()));
+  std::unique_ptr<Instruction> init(decode_valid(*decoder, init_words.data()));
+  std::unique_ptr<Instruction> join(decode_valid(*decoder, join_words.data()));
+  std::unique_ptr<Instruction> signal(decode_valid(*decoder, signal_words.data()));
+  std::unique_ptr<Instruction> state(decode_valid(*decoder, state_words.data()));
   ASSERT_NE(init, nullptr);
   ASSERT_NE(join, nullptr);
   ASSERT_NE(signal, nullptr);
@@ -360,10 +361,10 @@ TEST(Gfx1250SimulationTest, NamedBarrierSynchronizesJoinedWavesAcrossPhases) {
   const std::array<uint32_t, 1> signal_words = {0xBE804F7Du};
   const std::array<uint32_t, 1> wait_words = {0xBF940001u};
   const std::array<uint32_t, 1> state_words = {0xBE84507Du};
-  std::unique_ptr<Instruction> join(decoder->decode(join_words.data()));
-  std::unique_ptr<Instruction> signal(decoder->decode(signal_words.data()));
-  std::unique_ptr<Instruction> wait(decoder->decode(wait_words.data()));
-  std::unique_ptr<Instruction> state(decoder->decode(state_words.data()));
+  std::unique_ptr<Instruction> join(decode_valid(*decoder, join_words.data()));
+  std::unique_ptr<Instruction> signal(decode_valid(*decoder, signal_words.data()));
+  std::unique_ptr<Instruction> wait(decode_valid(*decoder, wait_words.data()));
+  std::unique_ptr<Instruction> state(decode_valid(*decoder, state_words.data()));
   ASSERT_NE(join, nullptr);
   ASSERT_NE(signal, nullptr);
   ASSERT_NE(wait, nullptr);
@@ -496,7 +497,7 @@ TEST(Gfx1250SimulationTest, WorkgroupSignalIsfirstAcceptsNegativeInlineBarrierId
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
   const std::array<uint32_t, 1> signal_words = {0xBE804FC1u}; // s_barrier_signal_isfirst -1
-  std::unique_ptr<Instruction> signal(decoder->decode(signal_words.data()));
+  std::unique_ptr<Instruction> signal(decode_valid(*decoder, signal_words.data()));
   ASSERT_NE(signal, nullptr);
 
   cu->execute_instruction(signal.get(), *wf0);
@@ -1429,7 +1430,7 @@ TEST(Gfx1250SimulationTest, VopdFmamkUsesSrc2HighBank) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_dual_fmamk_f32 :: v_dual_mov_b32");
   cu->execute_instruction(inst.get(), *wf);
@@ -1574,7 +1575,7 @@ TEST(Gfx1250SimulationTest, DsAddtidLoadAndStoreUseM0ByteBaseAddresses) {
   const uint32_t expected1 = expected0 + sizeof(uint32_t);
 
   const uint32_t store_words[] = {0xDAC01234u, 0x00000500u};
-  std::unique_ptr<Instruction> store(decoder->decode(store_words));
+  std::unique_ptr<Instruction> store(decode_valid(*decoder, store_words));
   ASSERT_NE(store, nullptr);
   ASSERT_EQ(std::string_view(store->mnemonic()), "ds_store_addtid_b32");
   cu.execute_instruction(store.get(), *wf);
@@ -1594,7 +1595,7 @@ TEST(Gfx1250SimulationTest, DsAddtidLoadAndStoreUseM0ByteBaseAddresses) {
   EXPECT_EQ(cu.lds().read32(expected1), kLane1Data);
 
   const uint32_t load_words[] = {0xDAC41234u, 0x08000000u};
-  std::unique_ptr<Instruction> load(decoder->decode(load_words));
+  std::unique_ptr<Instruction> load(decode_valid(*decoder, load_words));
   ASSERT_NE(load, nullptr);
   ASSERT_EQ(std::string_view(load->mnemonic()), "ds_load_addtid_b32");
   cu.execute_instruction(load.get(), *wf);
@@ -1608,7 +1609,7 @@ TEST(Gfx1250SimulationTest, DsAddtidLoadAndStoreUseM0ByteBaseAddresses) {
   EXPECT_EQ(cu.read_vgpr(load_dst_base, 1), kLane1Data);
 
   wf->set_m0(0);
-  std::unique_ptr<Instruction> default_m0_store(decoder->decode(store_words));
+  std::unique_ptr<Instruction> default_m0_store(decode_valid(*decoder, store_words));
   ASSERT_NE(default_m0_store, nullptr);
   cu.execute_instruction(default_m0_store.get(), *wf);
   auto *default_m0_state = default_m0_store->data_as<amdgpu::VectorMemState>();
@@ -1731,7 +1732,7 @@ TEST(Gfx1250ExecutionTest, Vopd3CndmaskAppliesB32NegModifiers) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> inst(decoder->decode(cndmask.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, cndmask.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_dual_cndmask_b32 :: v_dual_cndmask_b32");
 

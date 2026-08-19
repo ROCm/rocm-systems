@@ -4,6 +4,7 @@
 /// @file translate_gfx1250_test.cpp
 /// @brief CPU-only tests for gfx1250 revision translation.
 
+#include "decode_test_util.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -1215,7 +1216,7 @@ void expect_cdna3_text_matches(const rocjitsu::Section &text,
   std::vector<std::unique_ptr<rocjitsu::Instruction>> actual;
   for (size_t pc = 0; pc < word_count;) {
     SCOPED_TRACE(pc);
-    auto inst = std::unique_ptr<rocjitsu::Instruction>(decoder->decode(&words[pc]));
+    auto inst = std::unique_ptr<rocjitsu::Instruction>(decode_valid(*decoder, &words[pc]));
     ASSERT_NE(inst, nullptr);
     ASSERT_GT(inst->size(), 0u);
     ASSERT_EQ(inst->size() % sizeof(uint32_t), 0u);
@@ -1843,7 +1844,7 @@ decode_text_instructions(const rocjitsu::Section &text, rj_code_arch_t arch) {
   size_t word_offset = 0;
   while (word_offset < word_count) {
     std::unique_ptr<rocjitsu::Instruction> inst(
-        decoder->decode(words + word_offset, word_offset * sizeof(rj_code_binary_inst_t)));
+        decode_valid(*decoder, words + word_offset, word_offset * sizeof(rj_code_binary_inst_t)));
     if (!inst)
       break;
     word_offset += static_cast<size_t>(inst->size()) / sizeof(rj_code_binary_inst_t);
@@ -7657,7 +7658,7 @@ run_gfx1250_e5m3_replacement(uint16_t opcode, uint8_t opsel, Gfx1250E5m3Operand 
       opcode == cdna5::kVCvtPkFp8F32Vop3 ? "v_cvt_pk_fp8_f32" : "v_cvt_sr_fp8_f32";
   bool borrowed_a_carrier = false;
   for (size_t index = 0; index < word_count;) {
-    std::unique_ptr<rocjitsu::Instruction> inst(decoder->decode(text + index));
+    std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, text + index));
     if (inst == nullptr) {
       ADD_FAILURE() << "undecodable replacement word at " << index;
       return std::nullopt;
@@ -8748,7 +8749,9 @@ TEST(SemanticTranslator, Gfx1250ResidualChecksRecognizeEveryActionableSourceRule
                                           rocjitsu::ProcessorRevision::Gfx1250A0);
   for (size_t sample_index = 0; sample_index < samples.size(); ++sample_index) {
     SCOPED_TRACE(sample_index);
-    std::unique_ptr<rocjitsu::Instruction> inst(decoder->decode(samples[sample_index].data(), 0));
+    rocjitsu::DecodeResult decoded = decoder->decode(samples[sample_index].data(), 0);
+    ASSERT_TRUE(decoded.succeeded());
+    std::unique_ptr<rocjitsu::Instruction> inst = std::move(decoded).value();
     ASSERT_NE(inst, nullptr);
     EXPECT_EQ(inst->encoding_id(), residual_rules[sample_index]->src_encoding_id);
     EXPECT_EQ(inst->opcode(), residual_rules[sample_index]->src_opcode);
@@ -9351,7 +9354,7 @@ TEST(BinaryTranslatorE2E, Gfx1250F16K128WmmaLoweringMatchesUnloweredExecution) {
 
   std::vector<uint32_t> body_words;
   for (size_t offset = 0; offset < text_word_count;) {
-    std::unique_ptr<rocjitsu::Instruction> inst(decoder->decode(text_words + offset));
+    std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, text_words + offset));
     ASSERT_NE(inst, nullptr) << "translated word " << offset << " failed to decode";
     const std::string_view mnemonic(inst->mnemonic());
     if (mnemonic == "s_endpgm")
@@ -9449,7 +9452,7 @@ TEST(BinaryTranslatorE2E, Gfx1250F16K128WmmaLoweringMatchesUnloweredExecution) {
 
   auto run_source = [&] {
     const std::array<uint32_t, 2> words = {matrix[0], matrix[1]};
-    std::unique_ptr<rocjitsu::Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, words.data()));
     EXPECT_NE(inst, nullptr);
     EXPECT_EQ(std::string_view(inst->mnemonic()), "v_wmma_f16_16x16x128_fp8_fp8");
     cu->execute_instruction(inst.get(), *wf);
@@ -9457,7 +9460,8 @@ TEST(BinaryTranslatorE2E, Gfx1250F16K128WmmaLoweringMatchesUnloweredExecution) {
 
   auto run_lowered = [&] {
     for (size_t offset = 0; offset < body_words.size();) {
-      std::unique_ptr<rocjitsu::Instruction> inst(decoder->decode(body_words.data() + offset));
+      std::unique_ptr<rocjitsu::Instruction> inst(
+          decode_valid(*decoder, body_words.data() + offset));
       ASSERT_NE(inst, nullptr);
       cu->execute_instruction(inst.get(), *wf);
       offset += static_cast<size_t>(inst->size()) / sizeof(uint32_t);
@@ -12891,7 +12895,7 @@ TEST(BinaryTranslatorE2E, Gfx1250Standalone32x16Fp4SplitMatchesUnsplitExecution)
   // Collect the translated body, stopping at the terminator.
   std::vector<uint32_t> body_words;
   for (size_t offset = 0; offset < text_word_count;) {
-    std::unique_ptr<rocjitsu::Instruction> inst(decoder->decode(text_words + offset));
+    std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, text_words + offset));
     ASSERT_NE(inst, nullptr) << "translated word " << offset << " failed to decode";
     if (std::string_view(inst->mnemonic()) == "s_endpgm")
       break;
@@ -12979,7 +12983,7 @@ TEST(BinaryTranslatorE2E, Gfx1250Standalone32x16Fp4SplitMatchesUnsplitExecution)
   zero_destination();
   {
     const std::array<uint32_t, 2> words = {matrix[0], matrix[1]};
-    std::unique_ptr<rocjitsu::Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_wmma_f32_32x16x128_f4");
     cu->execute_instruction(inst.get(), *wf);
@@ -13001,7 +13005,7 @@ TEST(BinaryTranslatorE2E, Gfx1250Standalone32x16Fp4SplitMatchesUnsplitExecution)
   zero_destination();
   size_t executed = 0;
   for (size_t offset = 0; offset < body_words.size();) {
-    std::unique_ptr<rocjitsu::Instruction> inst(decoder->decode(body_words.data() + offset));
+    std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, body_words.data() + offset));
     ASSERT_NE(inst, nullptr);
     cu->execute_instruction(inst.get(), *wf);
     offset += static_cast<size_t>(inst->size()) / sizeof(uint32_t);
@@ -14325,7 +14329,7 @@ TEST(BinaryTranslatorE2E, Gfx1250StagesFlatScratchBaseInDestinationWhenSgprsAreL
   ASSERT_NE(decoder, nullptr);
   bool found_rewritten_add = false;
   for (size_t offset = 0; offset < out_words;) {
-    std::unique_ptr<rocjitsu::Instruction> inst(decoder->decode(out + offset));
+    std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, out + offset));
     ASSERT_NE(inst, nullptr) << "translated word " << offset << " failed to decode";
     if (std::string_view(inst->mnemonic()) == "v_add_nc_u64") {
       ASSERT_NE(inst->raw_encoding(), nullptr);
@@ -14394,7 +14398,7 @@ TEST(BinaryTranslatorE2E, Gfx1250DestinationStagingExecutesInMatchingNonzeroBank
   auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
   for (size_t offset = 0; offset < translated_count;) {
-    std::unique_ptr<rocjitsu::Instruction> inst(decoder->decode(translated_words + offset));
+    std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, translated_words + offset));
     ASSERT_NE(inst, nullptr) << "translated word " << offset << " failed to decode";
     if (std::string_view(inst->mnemonic()) == "s_endpgm")
       break;

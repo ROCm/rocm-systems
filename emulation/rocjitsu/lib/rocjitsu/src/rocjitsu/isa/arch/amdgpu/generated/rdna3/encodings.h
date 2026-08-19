@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/decode_result.h"
 #include "rocjitsu/isa/instruction.h"
 #include <array>
 #include <cstdint>
@@ -503,6 +504,15 @@ class Vop3 : public IsaInstruction<Isa> {
 public:
   Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn);
   bool has_encoded_literal32() const;
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const Vop3MachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error) {
+    const auto &inst_ = *inst;
+    if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
+        (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255)) [[unlikely]]
+      return emit_error.emit() << "DPP and literal operands cannot be combined";
+    return Result::success();
+  }
   void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   bool has_lit_0();
@@ -529,6 +539,15 @@ class Vop3p : public IsaInstruction<Isa> {
 public:
   Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn);
   bool has_encoded_literal32() const;
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const Vop3pMachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error) {
+    const auto &inst_ = *inst;
+    if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
+        (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255)) [[unlikely]]
+      return emit_error.emit() << "DPP and literal operands cannot be combined";
+    return Result::success();
+  }
   void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   bool has_lit_0();
@@ -618,6 +637,15 @@ class Vop3SdstEnc : public IsaInstruction<Isa> {
 public:
   Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst, ExecuteFn exec_fn);
   bool has_encoded_literal32() const;
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const Vop3SdstEncMachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error) {
+    const auto &inst_ = *inst;
+    if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
+        (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255)) [[unlikely]]
+      return emit_error.emit() << "DPP and literal operands cannot be combined";
+    return Result::success();
+  }
   void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   bool has_lit_0();

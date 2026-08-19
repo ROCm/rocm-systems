@@ -4,6 +4,7 @@
 #pragma once
 
 #include "aql_queue.h"
+#include "decode_test_util.h"
 #include "halt_snapshot_plugin.h"
 
 #include "embedded_schema.h"
@@ -328,7 +329,7 @@ inline std::unique_ptr<Instruction> decode_gfx1250(const std::array<uint32_t, 3>
     return nullptr;
   }
 
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   if (!inst) {
     ADD_FAILURE() << "decode() returned nullptr for gfx1250 instruction";
     return nullptr;
