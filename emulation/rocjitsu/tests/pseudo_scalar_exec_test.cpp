@@ -70,7 +70,7 @@ struct PseudoScalarProfile {
 constexpr std::array<PseudoScalarProfile, 2> kProfiles{{
     {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", rdna4_encoding, rdna4::kSSetregB32Sopk,
      rdna4::kSSetregImm32B32Sopk},
-    {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", gfx1250_encoding, cdna5::kSSetregB32Sopk,
+    {ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", gfx1250_encoding, cdna5::kSSetregB32Sopk,
      cdna5::kSSetregImm32B32Sopk},
 }};
 
