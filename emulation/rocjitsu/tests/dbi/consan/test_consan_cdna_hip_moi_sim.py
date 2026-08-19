@@ -21,8 +21,13 @@ class CdnaHipMoiSimulatorTest(unittest.TestCase):
             sum(suite.expected_tests for suite in simulator.SUITES),
             simulator.EXPECTED_TESTS,
         )
-        self.assertEqual(simulator.EXPECTED_TESTS, 35)
+        self.assertEqual(simulator.EXPECTED_TESTS, 36)
         self.assertEqual(len(simulator.SUITES), 13)
+        self.assertEqual(
+            simulator.SUITE_BY_ID["jakub-matmul"].expected_tests,
+            5,
+            "the suite includes four correct workloads and one compile-only negative workload",
+        )
         self.assertEqual(
             {
                 target_id: (target.build_dir_name, target.default_config_name)
@@ -200,7 +205,7 @@ class CdnaHipMoiSimulatorTest(unittest.TestCase):
                 "SUITE_BY_ID",
                 {suite.id: suite for suite in wrong_test_count},
             ),
-            self.assertRaisesRegex(registry.RegistryError, "35 tests"),
+            self.assertRaisesRegex(registry.RegistryError, "36 tests"),
         ):
             registry.validate()
 
@@ -375,7 +380,7 @@ class CdnaHipMoiSimulatorTest(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(run.call_count, 13)
         self.assertIn("== gfx950 hip-moi simulator summary ==", output.getvalue())
-        self.assertIn("total: 35/35 tests", output.getvalue())
+        self.assertIn("total: 36/36 tests", output.getvalue())
 
     def test_single_suite_count_mismatch_fails_the_ctest_entry(self) -> None:
         target = simulator.TARGETS["gfx942"]

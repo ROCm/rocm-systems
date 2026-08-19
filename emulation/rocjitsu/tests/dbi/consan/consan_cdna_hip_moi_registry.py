@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 EXPECTED_SUITES = 13
-EXPECTED_TESTS = 35
+EXPECTED_TESTS = 36
 
 
 class RegistryError(ValueError):
@@ -38,7 +38,7 @@ SUITES = (
         "jakub-matmul",
         "JakubMatmul",
         "hip_moi_reference_{family}_jakub_matmul",
-        4,
+        5,
         "jakub-attention",
     ),
     Suite(
