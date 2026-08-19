@@ -513,6 +513,23 @@ jobs:
               esac
             done
           }
+          # Of the given nodes, echo the comma-separated subset that is actually in
+          # a fault state (down/drain/fail/...). A CANCELLED allocation on this
+          # shared cluster is usually preemption by a higher-priority job -- the
+          # node is healthy and must NOT be blacklisted, or the loop would burn
+          # through good hardware. Only genuinely broken nodes get excluded.
+          nodes_faulty() {
+            local nn stt out=""
+            for nn in $(printf '%s' "$1" | tr ',' ' '); do
+              [ -n "${nn}" ] || continue
+              stt=$(spur_cmd sinfo -n "${nn}" -h -o '%t' 2>/dev/null | head -1 | tr -d ' ')
+              case "${stt}" in
+                *down*|*drain*|*drng*|*fail*|*inval*|*unk*|*boot*|*na*)
+                  out="${out:+${out},}${nn}" ;;
+              esac
+            done
+            printf '%s' "${out}"
+          }
 
           echo "Submitting sbatch job (account=${SALLOC_ACCOUNT} partition=${SALLOC_PARTITION} nodes=${SALLOC_NODES} time=${SALLOC_TIME})..."
           MAX_LAUNCH_TRIES="${MAX_LAUNCH_TRIES:-8}"
@@ -558,12 +575,18 @@ jobs:
             echo "Submitted SPUR job ${JOBID} on ${PIN}; waiting until RUNNING"
             state=$(wait_until_running "${JOBID}") || true
             if [ "${state}" != "RUNNING" ]; then
-              # Never launched (dispatch/confirmation failure, node fell over, or
-              # the scheduler dropped it). The pinned hardware is the suspect --
-              # blacklist it so the next probe/submit routes around it.
-              echo "Did not reach RUNNING (state=${state:-gone}); blacklisting ${PIN} and retrying"
+              # Never launched: could be a genuine node fault, or just contention/
+              # preemption before start. Blacklist only nodes that are actually in
+              # a fault state; otherwise retry on the same pool without discarding
+              # healthy hardware.
               spur_cmd scancel "${JOBID}" >/dev/null 2>&1 || true
-              blacklist_nodes "${PIN}"
+              faulty=$(nodes_faulty "${PIN}")
+              if [ -n "${faulty}" ]; then
+                echo "Did not reach RUNNING (state=${state:-gone}); node fault on ${faulty} -- blacklisting and retrying"
+                blacklist_nodes "${faulty}"
+              else
+                echo "Did not reach RUNNING (state=${state:-gone}); nodes look healthy (contention/preemption) -- retrying without blacklisting"
+              fi
               JOBID=""
               launch_fails=$((launch_fails + 1))
               sleep 10
@@ -596,13 +619,30 @@ jobs:
             exitcode=$(spur_cmd spur show job "${JOBID}" | sed -n 's/.*[[:space:]]ExitCode=\([0-9-]*\):.*/\1/p' | head -n1)
             echo "sbatch job ${JOBID} state=${job_state:-gone} ExitCode=${exitcode:-?}"
             case "${job_state}" in
-              CANCELLED|NODE_FAIL|"")
-                # A live allocation that the scheduler killed (not by us) or whose
-                # node failed never produced a real test result -- the hardware is
-                # the suspect, not the code under test. Blacklist and retry
-                # elsewhere instead of failing the whole run.
-                echo "Allocation ended as ${job_state:-gone} without a clean workload exit; blacklisting ${PIN} and retrying"
+              NODE_FAIL)
+                # The node itself failed under the running allocation -- exclude
+                # the whole pinned set and retry elsewhere.
+                echo "Allocation ended as NODE_FAIL; blacklisting ${PIN} and retrying"
                 blacklist_nodes "${PIN}"
+                JOBID=""
+                launch_fails=$((launch_fails + 1))
+                sleep 10
+                continue
+                ;;
+              CANCELLED|"")
+                # On this shared, oversubscribed cluster a live allocation that is
+                # cancelled without our doing is almost always PREEMPTION: a
+                # higher-priority job reclaimed the node seconds after ours
+                # started. The hardware is fine, so do NOT blacklist it (that would
+                # burn through good nodes) -- only exclude nodes actually in a
+                # fault state, and retry.
+                faulty=$(nodes_faulty "${PIN}")
+                if [ -n "${faulty}" ]; then
+                  echo "Allocation ended as ${job_state:-gone}; node fault on ${faulty} -- blacklisting and retrying"
+                  blacklist_nodes "${faulty}"
+                else
+                  echo "Allocation ended as ${job_state:-gone} (likely preempted); nodes healthy -- retrying without blacklisting"
+                fi
                 JOBID=""
                 launch_fails=$((launch_fails + 1))
                 sleep 10
@@ -624,7 +664,9 @@ jobs:
           done
 
           if [ -z "${FINAL_RC}" ]; then
-            echo "ERROR: no healthy ${SALLOC_NODES}-node GPU allocation completed after ${MAX_LAUNCH_TRIES} attempts (auto-excluded: ${BAD_NODES:-none})"
+            echo "ERROR: no ${SALLOC_NODES}-node GPU allocation survived to a workload exit after ${MAX_LAUNCH_TRIES} attempts."
+            echo "If allocations kept ending as CANCELLED on healthy nodes, they are being preempted -- this account/QOS is preemptible on a busy cluster. Fix by submitting under a non-preemptible QOS (e.g. --qos=amd-frameworks-ci-qos once z1_coco is associated with it), reserving nodes, or running when the cluster is idle."
+            echo "Auto-excluded faulty nodes this run: ${BAD_NODES:-none}"
             exit 1
           fi
           rc="${FINAL_RC}"
