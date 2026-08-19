@@ -147,17 +147,24 @@ struct EngineGlobalAccessInfo {
   EntityId instruction_id = 0;
   uint64_t pc = 0;
   std::array<uint32_t, 4> raw_isa{};
+  /// Bytes of the shadow entry this access covers, one bit per byte. An entry
+  /// spans four bytes, so accesses narrower than a dword share one without
+  /// addressing the same memory; they conflict only where their masks meet.
+  uint8_t byte_mask = 0;
   bool valid = false;
 };
 
+/// Accesses held for two distinct workgroups, which is all a conflicting access
+/// needs: if its own workgroup fills the first slot, the second is by
+/// construction a different one. A single slot would let the workgroup that
+/// accessed last overwrite the others and hide its own conflict with them. One
+/// entry exists per four bytes of a dispatch, so accesses are not retained per
+/// workgroup; the byte masks keep disjoint ones inside an entry apart.
+using EngineGlobalAccessSlots = std::array<EngineGlobalAccessInfo, 2>;
+
 struct EngineGlobalShadowEntry {
-  EngineGlobalAccessInfo writer;
-  /// Readers held for two distinct workgroups, which is all a write needs: if
-  /// its own workgroup fills the first slot, the second is by construction a
-  /// different one. A single slot would let the workgroup that read last
-  /// overwrite the others and hide its own conflict with them. One entry exists
-  /// per four bytes of a dispatch, so readers are not retained per workgroup.
-  std::array<EngineGlobalAccessInfo, 2> readers;
+  EngineGlobalAccessSlots writers;
+  EngineGlobalAccessSlots readers;
   bool race_reported = false;
 };
 
