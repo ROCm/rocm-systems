@@ -99,7 +99,7 @@ tolerance. Prints a summary box, writes a per-stream comparison CSV to
 `ROCDECODE_PERF_RESULTS_DIR`), and exits `0` if there are no regressions, `1` otherwise.
 
 ```shell
-test/perf_regression.py [--perf-dir DIR] [--baseline FILE] [--tolerance PCT] [--runs N] [--device ID] [--check-rocm]
+test/perf_regression.py [--perf-dir DIR] [--baseline FILE] [--tolerance PCT] [--runs N] [--device ID] [--quick] [--check-rocm]
 ```
 
 | Option | Description |
@@ -109,6 +109,7 @@ test/perf_regression.py [--perf-dir DIR] [--baseline FILE] [--tolerance PCT] [--
 | `--tolerance PCT` | Regression threshold, % Avg FPS drop (default: `$ROCDECODE_PERF_TOLERANCE` or 5). |
 | `--runs N` | Runs to average when confirming a flagged stream (default: 3). |
 | `--device ID` | GPU device id (default: 0). |
+| `--quick` | Fast check: one baseline stream per leaf subfolder, capped at ≤4K (8K skipped). |
 | `--check-rocm` | Only verify the ROCm toolchain (`ROCM_PATH`) and exit. |
 
 ### GPU detection
@@ -189,8 +190,10 @@ GPU-specific baseline:
 3. `test/perf_regression.py` — detect the GPU, run the perf test, compare to baseline, and
    report the summary.
 
-Invoke it by typing `/perf-check` in a Claude Code session started from the project root.
-Requires `ROCDECODE_PERF_DIR` (streams + baseline) as described under
+Invoke it by typing `/perf-check` in a Claude Code session started from the project root,
+or `/perf-check quick` for the fast one-stream-per-subfolder variant (`--quick`, ≤4K only).
+Requires
+`ROCDECODE_PERF_DIR` (streams + baseline) as described under
 [`perf_regression.py`](#perf_regressionpy--performance-regression-check) above.
 
 <!-- Add future skills here as new "### /<skill-name> — <summary>" subsections. -->

@@ -47,6 +47,12 @@ first if you have not built and installed the library this session.
 
 Run: `test/perf_regression.py`
 
+If the skill was invoked with a `quick` argument (e.g. `/perf-check quick`), run the fast
+variant instead — `test/perf_regression.py --quick` — which measures one stream per leaf
+subfolder capped at ≤4K (the 8K streams dominate runtime, so they are skipped) instead of
+every stream. Use it for a fast sanity check; use the full run before finalizing. Each run
+prints its own elapsed time.
+
 Streams within tolerance pass on a single run; streams that appear to regress are
 re-measured (3-run average) to rule out noise before being reported.
 

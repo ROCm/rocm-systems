@@ -40,6 +40,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -247,6 +248,8 @@ def main():
     ap.add_argument("--device", type=int, default=0, help="GPU device id (default: 0)")
     ap.add_argument("--check-rocm", action="store_true",
         help="only verify the ROCm toolchain (ROCM_PATH) and exit")
+    ap.add_argument("--quick", action="store_true",
+        help="fast check: one baseline stream per leaf subfolder, capped at <=4K")
     args = ap.parse_args()
 
     # Verify the ROCm toolchain up front (and exit early if only checking).
@@ -282,7 +285,10 @@ def main():
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
     print(f"GPU: {label}  ({detail})")
-    print(f"Baseline column: {col}  ({len(baseline)} streams)  tolerance: {tol}%\n")
+    print(f"Baseline column: {col}  ({len(baseline)} streams)  tolerance: {tol}%")
+    if args.quick:
+        print("Quick mode: one stream per leaf subfolder, capped at <=4K")
+    print()
 
     ts = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     # Write results outside the repo tree (default: $HOME) so they do not clutter
@@ -293,6 +299,7 @@ def main():
     detail_rows = []
     summary_rows = []
     overall_ok = True
+    t0 = time.time()
 
     for disp, subdir in CODECS:
         codec_dir = perf_dir / subdir
@@ -302,13 +309,26 @@ def main():
             continue
         print(f"=== Measuring {disp} ({codec_dir}) ===")
         index = build_stream_index(codec_dir)
-        # Measure each baseline stream present in this codec dir once (flagged
-        # streams are re-measured below to rule out run-to-run noise). Measuring
-        # videoDecodePerf directly avoids writing any results into the repo tree.
+        # Baseline streams present in this codec dir, sorted for deterministic order.
+        candidates = sorted((n, p) for n, p in index.items() if n in baseline)
+        if args.quick:
+            # one stream per leaf subfolder, capped at <=4K -- the 8K streams
+            # dominate runtime, so skip them for a fast sanity check
+            seen_dirs = set()
+            picked = []
+            for name, path in candidates:
+                res = re.search(r"(\d{3,5})x(\d{3,5})", name)
+                if res and int(res.group(1)) > 4096:
+                    continue  # skip 8K
+                if path.parent not in seen_dirs:
+                    seen_dirs.add(path.parent)
+                    picked.append((name, path))
+            candidates = picked
+        # Measure each selected stream once (flagged streams are re-measured below
+        # to rule out run-to-run noise). Measuring videoDecodePerf directly avoids
+        # writing any results into the repo tree.
         measured = {}
-        for name, path in index.items():
-            if name not in baseline:
-                continue  # not in baseline for this GPU (e.g. n/a) -- skip
+        for name, path in candidates:
             fps = measure_stream(path, 1, args.device)
             if fps is not None:
                 measured[name] = fps
@@ -366,6 +386,8 @@ def main():
     else:
         summary_box(summary_rows, overall_ok)
         print("No streams were compared (check ROCDECODE_PERF_DIR and the baseline).")
+    elapsed = int(time.time() - t0)
+    print(f"Elapsed: {elapsed // 60}m {elapsed % 60}s")
     print()
     return 0 if overall_ok else 1
 
