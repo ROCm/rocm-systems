@@ -8,7 +8,8 @@
 #include "checkpoint_generated.h"
 #include "flatbuffers/flatbuffers.h"
 
-#include <cstring>
+#include <algorithm>
+#include <cstddef>
 #include <fstream>
 #include <stdexcept>
 #include <vector>
@@ -17,6 +18,32 @@ namespace rocjitsu {
 namespace config {
 
 namespace {
+
+flatbuffers::Offset<flatbuffers::Vector<uint8_t>>
+serialize_vgpr_block(flatbuffers::FlatBufferBuilder &builder, const amdgpu::ComputeUnitCore &cu,
+                     uint32_t base) {
+  const size_t register_bytes = static_cast<size_t>(cu.wf_size()) * sizeof(uint32_t);
+  const size_t block_bytes = static_cast<size_t>(cu.vgpr_allocation_block_size()) * register_bytes;
+  uint8_t *serialized = nullptr;
+  const auto offset = builder.CreateUninitializedVector<uint8_t>(block_bytes, &serialized);
+  cu.copy_raw_vgprs_to(base, cu.vgpr_allocation_block_size(),
+                       {reinterpret_cast<std::byte *>(serialized), block_bytes});
+  return offset;
+}
+
+/// Restore sparse checkpoint data into a freshly allocated, zeroed VGPR block.
+/// Zero source registers are skipped to preserve lazy backing; this is a full
+/// restore, rather than a merge, only while the destination begins entirely
+/// zeroed.
+void restore_vgpr_block_into_zeroed_storage(amdgpu::ComputeUnitCore &cu, uint32_t base,
+                                            const flatbuffers::Vector<uint8_t> &stored) {
+  const size_t register_bytes = static_cast<size_t>(cu.wf_size()) * sizeof(uint32_t);
+  const size_t block_bytes = static_cast<size_t>(cu.vgpr_allocation_block_size()) * register_bytes;
+  const size_t copy_size = std::min<size_t>(stored.size(), block_bytes);
+  cu.restore_raw_vgprs_into_zeroed_storage(
+      base, cu.vgpr_allocation_block_size(),
+      {reinterpret_cast<const std::byte *>(stored.data()), copy_size});
+}
 
 /// @brief Serialize the SoC configuration into a FlatBuffer SimulationConfig.
 flatbuffers::Offset<fb::SimulationConfig>
@@ -121,11 +148,7 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
 
           auto sgprs_vec = builder.CreateVector(cu->sgpr_data(w->sgpr_alloc().base, w->num_sgprs()),
                                                 w->num_sgprs());
-          size_t vgpr_bytes = static_cast<size_t>(cu->vgpr_allocation_block_size()) *
-                              static_cast<size_t>(w->wf_size()) * sizeof(uint32_t);
-          auto vgprs_vec = builder.CreateVector(
-              cu->raw_vgpr_data(w->vgpr_alloc().base, cu->vgpr_allocation_block_size()),
-              vgpr_bytes);
+          auto vgprs_vec = serialize_vgpr_block(builder, *cu, w->vgpr_alloc().base);
 
           auto wfs = fb::CreateWavefrontState(builder, w->wf_id(), w->wg_id(), w->pc, w->exec_raw(),
                                               w->vcc(), w->m0(), w->is_halted(), w->status_raw(),
@@ -267,13 +290,10 @@ LoadedConfig restore_checkpoint(const std::string &path) {
             }
           }
 
-          if (auto *vgprs = wf_state->vgprs()) {
-            size_t vgpr_bytes = static_cast<size_t>(cu->vgpr_allocation_block_size()) *
-                                static_cast<size_t>(wf->wf_size()) * sizeof(uint32_t);
-            size_t copy_size = std::min<size_t>(vgprs->size(), vgpr_bytes);
-            std::memcpy(cu->raw_vgpr_data(wf->vgpr_alloc().base, cu->vgpr_allocation_block_size()),
-                        vgprs->data(), copy_size);
-          }
+          // dispatch_wf_at() has just allocated this block, so RegisterFile::allocate()'s
+          // zero-state postcondition satisfies the sparse restore helper's precondition.
+          if (auto *vgprs = wf_state->vgprs())
+            restore_vgpr_block_into_zeroed_storage(*cu, wf->vgpr_alloc().base, *vgprs);
         }
       }
     }

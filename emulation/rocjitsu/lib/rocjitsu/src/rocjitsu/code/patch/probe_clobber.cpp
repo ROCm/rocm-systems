@@ -122,12 +122,16 @@ std::optional<ProbeClobberSummary> build_probe_clobber_summary(const ProbeCallab
 
   size_t w = 0;
   while (w < num_words) {
-    std::unique_ptr<Instruction> inst(
-        decoder->decode_window(std::span<const uint32_t>(words).subspan(w), w * sizeof(uint32_t)));
-    if (!inst) {
-      report(error_out, "failed to decode probe body while summarizing clobbers");
+    util::StringDiagnostic decode_error;
+    DecodeResult decoded = decoder->decode_window(std::span<const uint32_t>(words).subspan(w),
+                                                  w * sizeof(uint32_t), decode_error.emitter());
+    if (decoded.failed()) {
+      const std::string message = "failed to decode probe body at word " + std::to_string(w) +
+                                  " while summarizing clobbers: " + decode_error.message();
+      report(error_out, message.c_str());
       return std::nullopt;
     }
+    std::unique_ptr<Instruction> inst = std::move(decoded).value();
     const int size = inst->size();
     if (size != 4 && size != 8) {
       report(error_out, "probe body instruction has an unexpected size");

@@ -72,6 +72,13 @@ add_custom_target(
     COMMENT "Build and waitcheck representative gfx950 Tensile kernels"
 )
 
+add_executable(rj_decode_benchmark rj_decode_benchmark.cpp)
+target_link_libraries(
+    rj_decode_benchmark
+    PRIVATE ${RJ_TOOL_OBJECT_LIBS} util flatbuffers Threads::Threads
+)
+rj_configure_target(rj_decode_benchmark TOOL)
+
 # Ahead-of-time population of the shared translation tier.
 #
 # Deliberately narrow: the fixed-profile translator, the store, and nothing else

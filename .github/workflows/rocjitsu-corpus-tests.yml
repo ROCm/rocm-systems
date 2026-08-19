@@ -485,7 +485,7 @@ jobs:
           DBT_TRANSLATOR="${DBT_TRANSLATOR_BINARY}"
           if [[ "${{ matrix.verify_dbt_idempotence }}" == "1" ]]; then
             DBT_TRANSLATOR="${RUNNER_TEMP}/rj_dbt_translate-verify-idempotence"
-            printf '#!/usr/bin/env bash\nexec %q --verify-idempotence "$@"\n' \
+            printf '#!/usr/bin/env bash\nexec %q --verify-idempotence --verify-rewrite-discharge "$@"\n' \
               "${DBT_TRANSLATOR_BINARY}" \
               > "${DBT_TRANSLATOR}"
             chmod +x "${DBT_TRANSLATOR}"

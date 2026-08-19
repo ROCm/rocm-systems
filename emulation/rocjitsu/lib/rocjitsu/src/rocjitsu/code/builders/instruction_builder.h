@@ -968,9 +968,17 @@ inline constexpr uint64_t kSoppBranchMaximumBackwardReachBytes =
 /// negative scalar add/sub sequence needed to turn that pair into the final
 /// relocated target. Static PC recovery only records address-builder ranges that
 /// have enough instruction words for this replacement to be written in place.
+/// @param minimum_words Pad the builder with scalar no-ops to this many words.
+/// @param prefer_literal64 On gfx1250, use the literal64 add form even when the delta would fit a
+///        32-bit literal. The relocation lattice models only the literal64 encoding -- and cannot
+///        be widened to the 32-bit one, because the patcher writes an eight-byte delta into the
+///        literal slot -- so a builder that must stay visible to a later translation pass has to
+///        be emitted in that form. Costs one extra word, so callers with a fixed-size window ask
+///        for it only when the window can hold it.
 [[nodiscard]] bool append_pc_delta_builder(std::vector<uint32_t> &words, rj_code_arch_t arch,
                                            uint16_t pc_sreg, int64_t delta,
-                                           size_t minimum_words = 0);
+                                           size_t minimum_words = 0,
+                                           bool prefer_literal64 = false);
 
 /// @brief Encode an s_nop instruction for the given target ISA.
 ///

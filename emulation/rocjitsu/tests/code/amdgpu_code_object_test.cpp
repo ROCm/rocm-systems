@@ -866,6 +866,18 @@ make_zero_sized_section_dense_elf(size_t section_count,
   return image;
 }
 
+void set_section_type_and_offset(std::vector<uint8_t> &image, size_t section_index, uint32_t type,
+                                 uint64_t offset) {
+  Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+  Elf64_Shdr shdr{};
+  const size_t shdr_offset = ehdr.e_shoff + section_index * sizeof(Elf64_Shdr);
+  std::memcpy(&shdr, image.data() + shdr_offset, sizeof(shdr));
+  shdr.sh_type = type;
+  shdr.sh_offset = offset;
+  std::memcpy(image.data() + shdr_offset, &shdr, sizeof(shdr));
+}
+
 // CDNA: a granulated field of 0 encodes a real 8-SGPR allocation.
 TEST(AmdGpuCodeObjectSgpr, CdnaGranulatedZeroIsEightSgprs) {
   const auto image = make_elf_with_kds({{"k", 0}});
@@ -1937,6 +1949,37 @@ TEST(AmdGpuCodeObjectValidation, DoesNotTreatOtherNoBitsSectionAsText) {
   ASSERT_TRUE(obj.is_valid());
   EXPECT_TRUE(obj.functions().empty());
   EXPECT_TRUE(obj.text_sections().empty());
+}
+
+TEST(AmdGpuCodeObjectSections, RetainsAllocatedExecutableNobitsForLayoutValidation) {
+  std::vector<uint8_t> image = make_elf_with_kds({});
+  set_section_type_and_offset(image, 1, SHT_NOBITS, image.size() + 0x1000);
+
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+  EXPECT_TRUE(obj.text_sections().empty());
+  ASSERT_EQ(obj.allocated_executable_sections().size(), 1u);
+  const Section *section = obj.allocated_executable_sections().front();
+  ASSERT_NE(section, nullptr);
+  EXPECT_EQ(section->name(), ".text");
+  EXPECT_EQ(section->sectionHeaderIndex(), std::optional<size_t>(1));
+  EXPECT_EQ(section->data(), nullptr);
+  EXPECT_TRUE(std::ranges::none_of(obj.all_sections(), [](const auto &candidate) {
+    return candidate != nullptr && candidate->name() == ".text";
+  }));
+}
+
+TEST(AmdGpuCodeObjectSections, ContinuesToSkipOrdinaryNobits) {
+  std::vector<uint8_t> image = make_elf_with_kds({});
+  set_section_type_and_offset(image, 2, SHT_NOBITS, image.size() + 0x1000);
+
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+  ASSERT_EQ(obj.text_sections().size(), 1u);
+  EXPECT_TRUE(obj.rodata_sections().empty());
+  EXPECT_TRUE(std::ranges::none_of(obj.all_sections(), [](const auto &section) {
+    return section != nullptr && section->name() == ".rodata";
+  }));
 }
 
 } // namespace

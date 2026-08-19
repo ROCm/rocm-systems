@@ -18,6 +18,7 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/decoder.h"
 #include "scoped_temp.h"
 
 #include <gtest/gtest.h>
@@ -148,10 +149,23 @@ void expect_c_api_accepts_target(uint32_t mach_flag, rj_code_target_id_t target)
   // The returned code-object handle must keep its executable storage alive.
   rj_code_executable_destroy(exec);
 
+  auto pooled_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(pooled_decoder, nullptr);
+  pooled_decoder->enable_pool();
+
+  rj_code_inst_list_t *instructions = nullptr;
+  ASSERT_EQ(rj_code_inst_list_create(obj, target, &instructions), ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(instructions, nullptr);
+
   rj_code_basic_block_list_t *blocks = nullptr;
   EXPECT_EQ(rj_code_basic_block_list_create(obj, target, &blocks), ROCJITSU_STATUS_SUCCESS)
       << "rj_code_basic_block_list_create must succeed for a target whose decoder is wired in";
   ASSERT_NE(blocks, nullptr);
+
+  // Both C API list types own their decoded instructions independently of an
+  // unrelated decoder pool that was active while they were constructed.
+  rj_code_inst_list_destroy(instructions);
+  pooled_decoder.reset();
 
   rj_code_basic_block_t *block = nullptr;
   ASSERT_EQ(rj_code_basic_block_list_get(blocks, 0, &block), ROCJITSU_STATUS_SUCCESS);

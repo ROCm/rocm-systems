@@ -9,6 +9,8 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/register_set.h"
+#include "rocjitsu/result.h"
+#include "util/diagnostic.h"
 
 #include <cassert>
 #include <cstdint>
@@ -88,7 +90,11 @@ public:
 
   /// Validate encoding constraints deferred until the complete instruction is
   /// decoded. Literal sentinels may replace their provisional operands first.
-  void validate_encoding() const;
+  Result validate_encoding(const util::DiagnosticEmitter &emit_error = {}) const {
+    if (encoding_error_ == EncodingError::None) [[likely]]
+      return Result::success();
+    return emit_encoding_error(emit_error);
+  }
 
   /// @brief Human-readable name for this operand (e.g. "v0", "s4", or a literal).
   virtual std::string name() const { return std::to_string(encoding_value_); }
@@ -203,6 +209,8 @@ public:
   }
 
 private:
+  Result emit_encoding_error(const util::DiagnosticEmitter &emit_error) const;
+
   // Value access is intentionally private. Instruction implementations use
   // RegisterAccess; Operand remains the ISA-specific resolver/backend.
 

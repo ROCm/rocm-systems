@@ -32,7 +32,7 @@ sdk_check(typename Wrapper::status_t status)
 /// Device-counting service backend, parameterized over the rocprofiler-sdk
 /// abstraction layer.
 ///
-/// @tparam Wrapper  A type whose static interface matches rocprofiler_sdk::backend.
+/// @tparam Wrapper  A type whose static interface matches rocprofiler_sdk::wrapper.
 ///                  All SDK function calls are routed through Wrapper, keeping this
 ///              struct free of direct SDK dependencies and fully mockable.
 template <typename Wrapper>

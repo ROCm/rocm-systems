@@ -7,7 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
-#include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna1 {
@@ -29,6 +29,17 @@ VInterpP1F32Vop3::VInterpP1F32Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
+namespace detail {
+DecodeResult decodeVInterpP1F32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_interp_p1_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VInterpP1F32Vop3>(opcode);
+}
+} // namespace detail
+
 VInterpP2F32Vop3::VInterpP2F32Vop3(const MachineInst *inst)
     : Vop3("v_interp_p2_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VInterpP2F32Vop3)),
@@ -47,6 +58,17 @@ VInterpP2F32Vop3::VInterpP2F32Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
+namespace detail {
+DecodeResult decodeVInterpP2F32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_interp_p2_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VInterpP2F32Vop3>(opcode);
+}
+} // namespace detail
+
 VInterpMovF32Vop3::VInterpMovF32Vop3(const MachineInst *inst)
     : Vop3("v_interp_mov_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VInterpMovF32Vop3)),
@@ -64,12 +86,33 @@ VInterpMovF32Vop3::VInterpMovF32Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
+namespace detail {
+DecodeResult decodeVInterpMovF32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_interp_mov_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VInterpMovF32Vop3>(opcode);
+}
+} // namespace detail
+
 VNopVop3::VNopVop3(const MachineInst *inst)
     : Vop3("v_nop", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VNopVop3)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
+
+namespace detail {
+DecodeResult decodeVNopVop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_nop", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VNopVop3>(opcode);
+}
+} // namespace detail
 
 VMovB32Vop3::VMovB32Vop3(const MachineInst *inst)
     : Vop3("v_mov_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -86,6 +129,16 @@ VMovB32Vop3::VMovB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVMovB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mov_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMovB32Vop3>(opcode);
+}
+} // namespace detail
+
 VReadfirstlaneB32Vop3::VReadfirstlaneB32Vop3(const MachineInst *inst)
     : Vop3("v_readfirstlane_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VReadfirstlaneB32Vop3)),
@@ -96,6 +149,17 @@ VReadfirstlaneB32Vop3::VReadfirstlaneB32Vop3(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
 }
+
+namespace detail {
+DecodeResult decodeVReadfirstlaneB32Vop3(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_readfirstlane_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VReadfirstlaneB32Vop3>(opcode);
+}
+} // namespace detail
 
 VCvtI32F64Vop3::VCvtI32F64Vop3(const MachineInst *inst)
     : Vop3("v_cvt_i32_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -113,6 +177,16 @@ VCvtI32F64Vop3::VCvtI32F64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
+namespace detail {
+DecodeResult decodeVCvtI32F64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_i32_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtI32F64Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtF64I32Vop3::VCvtF64I32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f64_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF64I32Vop3)),
@@ -127,6 +201,16 @@ VCvtF64I32Vop3::VCvtF64I32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCvtF64I32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f64_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF64I32Vop3>(opcode);
+}
+} // namespace detail
 
 VCvtF32I32Vop3::VCvtF32I32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f32_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -143,6 +227,16 @@ VCvtF32I32Vop3::VCvtF32I32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCvtF32I32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f32_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF32I32Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtF32U32Vop3::VCvtF32U32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f32_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32U32Vop3)),
@@ -157,6 +251,16 @@ VCvtF32U32Vop3::VCvtF32U32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCvtF32U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f32_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF32U32Vop3>(opcode);
+}
+} // namespace detail
 
 VCvtU32F32Vop3::VCvtU32F32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_u32_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -173,6 +277,16 @@ VCvtU32F32Vop3::VCvtU32F32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCvtU32F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_u32_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtU32F32Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtI32F32Vop3::VCvtI32F32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_i32_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtI32F32Vop3)),
@@ -188,6 +302,16 @@ VCvtI32F32Vop3::VCvtI32F32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCvtI32F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_i32_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtI32F32Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtF16F32Vop3::VCvtF16F32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF16F32Vop3)),
@@ -202,6 +326,16 @@ VCvtF16F32Vop3::VCvtF16F32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCvtF16F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f16_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF16F32Vop3>(opcode);
+}
+} // namespace detail
 
 void VCvtF16F32Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -225,6 +359,16 @@ VCvtF32F16Vop3::VCvtF32F16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVCvtF32F16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f32_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF32F16Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtRpiI32F32Vop3::VCvtRpiI32F32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_rpi_i32_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtRpiI32F32Vop3)),
@@ -239,6 +383,17 @@ VCvtRpiI32F32Vop3::VCvtRpiI32F32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCvtRpiI32F32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_rpi_i32_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtRpiI32F32Vop3>(opcode);
+}
+} // namespace detail
 
 VCvtFlrI32F32Vop3::VCvtFlrI32F32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_flr_i32_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -255,6 +410,17 @@ VCvtFlrI32F32Vop3::VCvtFlrI32F32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCvtFlrI32F32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_flr_i32_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtFlrI32F32Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtOffF32I4Vop3::VCvtOffF32I4Vop3(const MachineInst *inst)
     : Vop3("v_cvt_off_f32_i4", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtOffF32I4Vop3)),
@@ -269,6 +435,17 @@ VCvtOffF32I4Vop3::VCvtOffF32I4Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCvtOffF32I4Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_off_f32_i4", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtOffF32I4Vop3>(opcode);
+}
+} // namespace detail
 
 VCvtF32F64Vop3::VCvtF32F64Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f32_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -286,6 +463,16 @@ VCvtF32F64Vop3::VCvtF32F64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
+namespace detail {
+DecodeResult decodeVCvtF32F64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f32_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF32F64Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtF64F32Vop3::VCvtF64F32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f64_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF64F32Vop3)),
@@ -300,6 +487,16 @@ VCvtF64F32Vop3::VCvtF64F32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCvtF64F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f64_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF64F32Vop3>(opcode);
+}
+} // namespace detail
 
 VCvtF32Ubyte0Vop3::VCvtF32Ubyte0Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f32_ubyte0", reinterpret_cast<const OpEncoding *>(inst),
@@ -316,6 +513,17 @@ VCvtF32Ubyte0Vop3::VCvtF32Ubyte0Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCvtF32Ubyte0Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f32_ubyte0", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF32Ubyte0Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtF32Ubyte1Vop3::VCvtF32Ubyte1Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f32_ubyte1", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32Ubyte1Vop3)),
@@ -330,6 +538,17 @@ VCvtF32Ubyte1Vop3::VCvtF32Ubyte1Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCvtF32Ubyte1Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f32_ubyte1", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF32Ubyte1Vop3>(opcode);
+}
+} // namespace detail
 
 VCvtF32Ubyte2Vop3::VCvtF32Ubyte2Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f32_ubyte2", reinterpret_cast<const OpEncoding *>(inst),
@@ -346,6 +565,17 @@ VCvtF32Ubyte2Vop3::VCvtF32Ubyte2Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCvtF32Ubyte2Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f32_ubyte2", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF32Ubyte2Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtF32Ubyte3Vop3::VCvtF32Ubyte3Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f32_ubyte3", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32Ubyte3Vop3)),
@@ -360,6 +590,17 @@ VCvtF32Ubyte3Vop3::VCvtF32Ubyte3Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCvtF32Ubyte3Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f32_ubyte3", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF32Ubyte3Vop3>(opcode);
+}
+} // namespace detail
 
 VCvtU32F64Vop3::VCvtU32F64Vop3(const MachineInst *inst)
     : Vop3("v_cvt_u32_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -377,6 +618,16 @@ VCvtU32F64Vop3::VCvtU32F64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
+namespace detail {
+DecodeResult decodeVCvtU32F64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_u32_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtU32F64Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtF64U32Vop3::VCvtF64U32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f64_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF64U32Vop3)),
@@ -391,6 +642,16 @@ VCvtF64U32Vop3::VCvtF64U32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCvtF64U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f64_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF64U32Vop3>(opcode);
+}
+} // namespace detail
 
 VTruncF64Vop3::VTruncF64Vop3(const MachineInst *inst)
     : Vop3("v_trunc_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -408,6 +669,16 @@ VTruncF64Vop3::VTruncF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
+namespace detail {
+DecodeResult decodeVTruncF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_trunc_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VTruncF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCeilF64Vop3::VCeilF64Vop3(const MachineInst *inst)
     : Vop3("v_ceil_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCeilF64Vop3)),
@@ -423,6 +694,16 @@ VCeilF64Vop3::VCeilF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
 }
+
+namespace detail {
+DecodeResult decodeVCeilF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_ceil_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCeilF64Vop3>(opcode);
+}
+} // namespace detail
 
 VRndneF64Vop3::VRndneF64Vop3(const MachineInst *inst)
     : Vop3("v_rndne_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -440,6 +721,16 @@ VRndneF64Vop3::VRndneF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
+namespace detail {
+DecodeResult decodeVRndneF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_rndne_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VRndneF64Vop3>(opcode);
+}
+} // namespace detail
+
 VFloorF64Vop3::VFloorF64Vop3(const MachineInst *inst)
     : Vop3("v_floor_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFloorF64Vop3)),
@@ -456,12 +747,32 @@ VFloorF64Vop3::VFloorF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
+namespace detail {
+DecodeResult decodeVFloorF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_floor_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFloorF64Vop3>(opcode);
+}
+} // namespace detail
+
 VPipeflushVop3::VPipeflushVop3(const MachineInst *inst)
     : Vop3("v_pipeflush", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VPipeflushVop3)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
+
+namespace detail {
+DecodeResult decodeVPipeflushVop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_pipeflush", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPipeflushVop3>(opcode);
+}
+} // namespace detail
 
 VFractF32Vop3::VFractF32Vop3(const MachineInst *inst)
     : Vop3("v_fract_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -478,6 +789,16 @@ VFractF32Vop3::VFractF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVFractF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_fract_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFractF32Vop3>(opcode);
+}
+} // namespace detail
+
 VTruncF32Vop3::VTruncF32Vop3(const MachineInst *inst)
     : Vop3("v_trunc_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VTruncF32Vop3)),
@@ -492,6 +813,16 @@ VTruncF32Vop3::VTruncF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVTruncF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_trunc_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VTruncF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCeilF32Vop3::VCeilF32Vop3(const MachineInst *inst)
     : Vop3("v_ceil_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -508,6 +839,16 @@ VCeilF32Vop3::VCeilF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCeilF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_ceil_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCeilF32Vop3>(opcode);
+}
+} // namespace detail
+
 VRndneF32Vop3::VRndneF32Vop3(const MachineInst *inst)
     : Vop3("v_rndne_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRndneF32Vop3)),
@@ -522,6 +863,16 @@ VRndneF32Vop3::VRndneF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVRndneF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_rndne_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VRndneF32Vop3>(opcode);
+}
+} // namespace detail
 
 VFloorF32Vop3::VFloorF32Vop3(const MachineInst *inst)
     : Vop3("v_floor_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -538,6 +889,16 @@ VFloorF32Vop3::VFloorF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVFloorF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_floor_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFloorF32Vop3>(opcode);
+}
+} // namespace detail
+
 VExpF32Vop3::VExpF32Vop3(const MachineInst *inst)
     : Vop3("v_exp_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VExpF32Vop3)),
@@ -552,6 +913,16 @@ VExpF32Vop3::VExpF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVExpF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_exp_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VExpF32Vop3>(opcode);
+}
+} // namespace detail
 
 VLogF32Vop3::VLogF32Vop3(const MachineInst *inst)
     : Vop3("v_log_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -568,6 +939,16 @@ VLogF32Vop3::VLogF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVLogF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_log_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLogF32Vop3>(opcode);
+}
+} // namespace detail
+
 VRcpF32Vop3::VRcpF32Vop3(const MachineInst *inst)
     : Vop3("v_rcp_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRcpF32Vop3)),
@@ -582,6 +963,16 @@ VRcpF32Vop3::VRcpF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVRcpF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_rcp_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VRcpF32Vop3>(opcode);
+}
+} // namespace detail
 
 VRcpIflagF32Vop3::VRcpIflagF32Vop3(const MachineInst *inst)
     : Vop3("v_rcp_iflag_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -598,6 +989,17 @@ VRcpIflagF32Vop3::VRcpIflagF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVRcpIflagF32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_rcp_iflag_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VRcpIflagF32Vop3>(opcode);
+}
+} // namespace detail
+
 VRsqF32Vop3::VRsqF32Vop3(const MachineInst *inst)
     : Vop3("v_rsq_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRsqF32Vop3)),
@@ -612,6 +1014,16 @@ VRsqF32Vop3::VRsqF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVRsqF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_rsq_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VRsqF32Vop3>(opcode);
+}
+} // namespace detail
 
 VRcpF64Vop3::VRcpF64Vop3(const MachineInst *inst)
     : Vop3("v_rcp_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -629,6 +1041,16 @@ VRcpF64Vop3::VRcpF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
+namespace detail {
+DecodeResult decodeVRcpF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_rcp_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VRcpF64Vop3>(opcode);
+}
+} // namespace detail
+
 VRsqF64Vop3::VRsqF64Vop3(const MachineInst *inst)
     : Vop3("v_rsq_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRsqF64Vop3)),
@@ -645,6 +1067,16 @@ VRsqF64Vop3::VRsqF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
+namespace detail {
+DecodeResult decodeVRsqF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_rsq_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VRsqF64Vop3>(opcode);
+}
+} // namespace detail
+
 VSqrtF32Vop3::VSqrtF32Vop3(const MachineInst *inst)
     : Vop3("v_sqrt_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSqrtF32Vop3)),
@@ -659,6 +1091,16 @@ VSqrtF32Vop3::VSqrtF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVSqrtF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sqrt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSqrtF32Vop3>(opcode);
+}
+} // namespace detail
 
 VSqrtF64Vop3::VSqrtF64Vop3(const MachineInst *inst)
     : Vop3("v_sqrt_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -676,6 +1118,16 @@ VSqrtF64Vop3::VSqrtF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
+namespace detail {
+DecodeResult decodeVSqrtF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sqrt_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSqrtF64Vop3>(opcode);
+}
+} // namespace detail
+
 VSinF32Vop3::VSinF32Vop3(const MachineInst *inst)
     : Vop3("v_sin_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSinF32Vop3)),
@@ -690,6 +1142,16 @@ VSinF32Vop3::VSinF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVSinF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sin_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSinF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCosF32Vop3::VCosF32Vop3(const MachineInst *inst)
     : Vop3("v_cos_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -706,6 +1168,16 @@ VCosF32Vop3::VCosF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCosF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cos_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCosF32Vop3>(opcode);
+}
+} // namespace detail
+
 VNotB32Vop3::VNotB32Vop3(const MachineInst *inst)
     : Vop3("v_not_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VNotB32Vop3)),
@@ -720,6 +1192,16 @@ VNotB32Vop3::VNotB32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVNotB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_not_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VNotB32Vop3>(opcode);
+}
+} // namespace detail
 
 VBfrevB32Vop3::VBfrevB32Vop3(const MachineInst *inst)
     : Vop3("v_bfrev_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -736,6 +1218,16 @@ VBfrevB32Vop3::VBfrevB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVBfrevB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_bfrev_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VBfrevB32Vop3>(opcode);
+}
+} // namespace detail
+
 VFfbhU32Vop3::VFfbhU32Vop3(const MachineInst *inst)
     : Vop3("v_ffbh_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFfbhU32Vop3)),
@@ -750,6 +1242,16 @@ VFfbhU32Vop3::VFfbhU32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVFfbhU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_ffbh_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFfbhU32Vop3>(opcode);
+}
+} // namespace detail
 
 VFfblB32Vop3::VFfblB32Vop3(const MachineInst *inst)
     : Vop3("v_ffbl_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -766,6 +1268,16 @@ VFfblB32Vop3::VFfblB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVFfblB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_ffbl_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFfblB32Vop3>(opcode);
+}
+} // namespace detail
+
 VFfbhI32Vop3::VFfbhI32Vop3(const MachineInst *inst)
     : Vop3("v_ffbh_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFfbhI32Vop3)),
@@ -780,6 +1292,16 @@ VFfbhI32Vop3::VFfbhI32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVFfbhI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_ffbh_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFfbhI32Vop3>(opcode);
+}
+} // namespace detail
 
 VFrexpExpI32F64Vop3::VFrexpExpI32F64Vop3(const MachineInst *inst)
     : Vop3("v_frexp_exp_i32_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -797,6 +1319,17 @@ VFrexpExpI32F64Vop3::VFrexpExpI32F64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
+namespace detail {
+DecodeResult decodeVFrexpExpI32F64Vop3(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_frexp_exp_i32_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFrexpExpI32F64Vop3>(opcode);
+}
+} // namespace detail
+
 VFrexpMantF64Vop3::VFrexpMantF64Vop3(const MachineInst *inst)
     : Vop3("v_frexp_mant_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFrexpMantF64Vop3)),
@@ -812,6 +1345,17 @@ VFrexpMantF64Vop3::VFrexpMantF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
 }
+
+namespace detail {
+DecodeResult decodeVFrexpMantF64Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_frexp_mant_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFrexpMantF64Vop3>(opcode);
+}
+} // namespace detail
 
 VFractF64Vop3::VFractF64Vop3(const MachineInst *inst)
     : Vop3("v_fract_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -829,6 +1373,16 @@ VFractF64Vop3::VFractF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
+namespace detail {
+DecodeResult decodeVFractF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_fract_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFractF64Vop3>(opcode);
+}
+} // namespace detail
+
 VFrexpExpI32F32Vop3::VFrexpExpI32F32Vop3(const MachineInst *inst)
     : Vop3("v_frexp_exp_i32_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFrexpExpI32F32Vop3)),
@@ -843,6 +1397,17 @@ VFrexpExpI32F32Vop3::VFrexpExpI32F32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVFrexpExpI32F32Vop3(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_frexp_exp_i32_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFrexpExpI32F32Vop3>(opcode);
+}
+} // namespace detail
 
 VFrexpMantF32Vop3::VFrexpMantF32Vop3(const MachineInst *inst)
     : Vop3("v_frexp_mant_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -859,12 +1424,33 @@ VFrexpMantF32Vop3::VFrexpMantF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVFrexpMantF32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_frexp_mant_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFrexpMantF32Vop3>(opcode);
+}
+} // namespace detail
+
 VClrexcpVop3::VClrexcpVop3(const MachineInst *inst)
     : Vop3("v_clrexcp", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VClrexcpVop3)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
+
+namespace detail {
+DecodeResult decodeVClrexcpVop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_clrexcp", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VClrexcpVop3>(opcode);
+}
+} // namespace detail
 
 VMovreldB32Vop3::VMovreldB32Vop3(const MachineInst *inst)
     : Vop3("v_movreld_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -885,6 +1471,17 @@ VMovreldB32Vop3::VMovreldB32Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
+namespace detail {
+DecodeResult decodeVMovreldB32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_movreld_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMovreldB32Vop3>(opcode);
+}
+} // namespace detail
+
 VMovrelsB32Vop3::VMovrelsB32Vop3(const MachineInst *inst)
     : Vop3("v_movrels_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMovrelsB32Vop3)),
@@ -899,6 +1496,17 @@ VMovrelsB32Vop3::VMovrelsB32Vop3(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
+
+namespace detail {
+DecodeResult decodeVMovrelsB32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_movrels_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMovrelsB32Vop3>(opcode);
+}
+} // namespace detail
 
 VMovrelsdB32Vop3::VMovrelsdB32Vop3(const MachineInst *inst)
     : Vop3("v_movrelsd_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -915,6 +1523,17 @@ VMovrelsdB32Vop3::VMovrelsdB32Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
+namespace detail {
+DecodeResult decodeVMovrelsdB32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_movrelsd_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMovrelsdB32Vop3>(opcode);
+}
+} // namespace detail
+
 VMovrelsd2B32Vop3::VMovrelsd2B32Vop3(const MachineInst *inst)
     : Vop3("v_movrelsd_2_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMovrelsd2B32Vop3)),
@@ -929,6 +1548,17 @@ VMovrelsd2B32Vop3::VMovrelsd2B32Vop3(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
+
+namespace detail {
+DecodeResult decodeVMovrelsd2B32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_movrelsd_2_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMovrelsd2B32Vop3>(opcode);
+}
+} // namespace detail
 
 VCvtF16U16Vop3::VCvtF16U16Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f16_u16", reinterpret_cast<const OpEncoding *>(inst),
@@ -945,6 +1575,16 @@ VCvtF16U16Vop3::VCvtF16U16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVCvtF16U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f16_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF16U16Vop3>(opcode);
+}
+} // namespace detail
 
 void VCvtF16U16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -968,6 +1608,16 @@ VCvtF16I16Vop3::VCvtF16I16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVCvtF16I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f16_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF16I16Vop3>(opcode);
+}
+} // namespace detail
+
 void VCvtF16I16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -989,6 +1639,16 @@ VCvtU16F16Vop3::VCvtU16F16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVCvtU16F16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_u16_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtU16F16Vop3>(opcode);
+}
+} // namespace detail
 
 void VCvtU16F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1012,6 +1672,16 @@ VCvtI16F16Vop3::VCvtI16F16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVCvtI16F16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_i16_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtI16F16Vop3>(opcode);
+}
+} // namespace detail
+
 void VCvtI16F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -1033,6 +1703,16 @@ VRcpF16Vop3::VRcpF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVRcpF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_rcp_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VRcpF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VRcpF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1056,6 +1736,16 @@ VSqrtF16Vop3::VSqrtF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVSqrtF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sqrt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSqrtF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VSqrtF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -1077,6 +1767,16 @@ VRsqF16Vop3::VRsqF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVRsqF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_rsq_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VRsqF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VRsqF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1100,6 +1800,16 @@ VLogF16Vop3::VLogF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVLogF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_log_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLogF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VLogF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -1121,6 +1831,16 @@ VExpF16Vop3::VExpF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVExpF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_exp_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VExpF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VExpF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1144,6 +1864,17 @@ VFrexpMantF16Vop3::VFrexpMantF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVFrexpMantF16Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_frexp_mant_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFrexpMantF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VFrexpMantF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -1165,6 +1896,17 @@ VFrexpExpI16F16Vop3::VFrexpExpI16F16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVFrexpExpI16F16Vop3(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_frexp_exp_i16_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFrexpExpI16F16Vop3>(opcode);
+}
+} // namespace detail
 
 void VFrexpExpI16F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1188,6 +1930,16 @@ VFloorF16Vop3::VFloorF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVFloorF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_floor_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFloorF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VFloorF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -1209,6 +1961,16 @@ VCeilF16Vop3::VCeilF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVCeilF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_ceil_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCeilF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VCeilF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1232,6 +1994,16 @@ VTruncF16Vop3::VTruncF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVTruncF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_trunc_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VTruncF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VTruncF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -1253,6 +2025,16 @@ VRndneF16Vop3::VRndneF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVRndneF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_rndne_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VRndneF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VRndneF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1276,6 +2058,16 @@ VFractF16Vop3::VFractF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVFractF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_fract_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFractF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VFractF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -1297,6 +2089,16 @@ VSinF16Vop3::VSinF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVSinF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sin_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSinF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VSinF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1320,6 +2122,16 @@ VCosF16Vop3::VCosF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVCosF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cos_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCosF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VCosF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -1341,6 +2153,17 @@ VSatPkU8I16Vop3::VSatPkU8I16Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVSatPkU8I16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sat_pk_u8_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSatPkU8I16Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtNormI16F16Vop3::VCvtNormI16F16Vop3(const MachineInst *inst)
     : Vop3("v_cvt_norm_i16_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtNormI16F16Vop3)),
@@ -1356,6 +2179,17 @@ VCvtNormI16F16Vop3::VCvtNormI16F16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVCvtNormI16F16Vop3(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_norm_i16_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtNormI16F16Vop3>(opcode);
+}
+} // namespace detail
 
 void VCvtNormI16F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1378,6 +2212,17 @@ VCvtNormU16F16Vop3::VCvtNormU16F16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVCvtNormU16F16Vop3(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_norm_u16_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtNormU16F16Vop3>(opcode);
+}
+} // namespace detail
 
 void VCvtNormU16F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1408,6 +2253,17 @@ VCndmaskB32Vop3::VCndmaskB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCndmaskB32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cndmask_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCndmaskB32Vop3>(opcode);
+}
+} // namespace detail
+
 VDot2cF32F16Vop3::VDot2cF32F16Vop3(const MachineInst *inst)
     : Vop3("v_dot2c_f32_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VDot2cF32F16Vop3)),
@@ -1430,6 +2286,17 @@ VDot2cF32F16Vop3::VDot2cF32F16Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVDot2cF32F16Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_dot2c_f32_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VDot2cF32F16Vop3>(opcode);
+}
+} // namespace detail
+
 VAddF32Vop3::VAddF32Vop3(const MachineInst *inst)
     : Vop3("v_add_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAddF32Vop3)),
@@ -1450,6 +2317,16 @@ VAddF32Vop3::VAddF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVAddF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_add_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAddF32Vop3>(opcode);
+}
+} // namespace detail
 
 VSubF32Vop3::VSubF32Vop3(const MachineInst *inst)
     : Vop3("v_sub_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1472,6 +2349,16 @@ VSubF32Vop3::VSubF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVSubF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sub_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSubF32Vop3>(opcode);
+}
+} // namespace detail
+
 VSubrevF32Vop3::VSubrevF32Vop3(const MachineInst *inst)
     : Vop3("v_subrev_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSubrevF32Vop3)),
@@ -1492,6 +2379,16 @@ VSubrevF32Vop3::VSubrevF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVSubrevF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_subrev_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSubrevF32Vop3>(opcode);
+}
+} // namespace detail
 
 VMacLegacyF32Vop3::VMacLegacyF32Vop3(const MachineInst *inst)
     : Vop3("v_mac_legacy_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1515,6 +2412,17 @@ VMacLegacyF32Vop3::VMacLegacyF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVMacLegacyF32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mac_legacy_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMacLegacyF32Vop3>(opcode);
+}
+} // namespace detail
+
 VMulLegacyF32Vop3::VMulLegacyF32Vop3(const MachineInst *inst)
     : Vop3("v_mul_legacy_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulLegacyF32Vop3)),
@@ -1535,6 +2443,17 @@ VMulLegacyF32Vop3::VMulLegacyF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVMulLegacyF32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mul_legacy_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMulLegacyF32Vop3>(opcode);
+}
+} // namespace detail
 
 VMulF32Vop3::VMulF32Vop3(const MachineInst *inst)
     : Vop3("v_mul_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1557,6 +2476,16 @@ VMulF32Vop3::VMulF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVMulF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mul_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMulF32Vop3>(opcode);
+}
+} // namespace detail
+
 VMulI32I24Vop3::VMulI32I24Vop3(const MachineInst *inst)
     : Vop3("v_mul_i32_i24", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulI32I24Vop3)),
@@ -1577,6 +2506,16 @@ VMulI32I24Vop3::VMulI32I24Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVMulI32I24Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mul_i32_i24", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMulI32I24Vop3>(opcode);
+}
+} // namespace detail
 
 VMulHiI32I24Vop3::VMulHiI32I24Vop3(const MachineInst *inst)
     : Vop3("v_mul_hi_i32_i24", reinterpret_cast<const OpEncoding *>(inst),
@@ -1599,6 +2538,17 @@ VMulHiI32I24Vop3::VMulHiI32I24Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVMulHiI32I24Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mul_hi_i32_i24", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMulHiI32I24Vop3>(opcode);
+}
+} // namespace detail
+
 VMulU32U24Vop3::VMulU32U24Vop3(const MachineInst *inst)
     : Vop3("v_mul_u32_u24", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulU32U24Vop3)),
@@ -1620,6 +2570,16 @@ VMulU32U24Vop3::VMulU32U24Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVMulU32U24Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mul_u32_u24", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMulU32U24Vop3>(opcode);
+}
+} // namespace detail
+
 VMulHiU32U24Vop3::VMulHiU32U24Vop3(const MachineInst *inst)
     : Vop3("v_mul_hi_u32_u24", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulHiU32U24Vop3)),
@@ -1640,6 +2600,17 @@ VMulHiU32U24Vop3::VMulHiU32U24Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVMulHiU32U24Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mul_hi_u32_u24", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMulHiU32U24Vop3>(opcode);
+}
+} // namespace detail
 
 VDot4cI32I8Vop3::VDot4cI32I8Vop3(const MachineInst *inst)
     : Vop3("v_dot4c_i32_i8", reinterpret_cast<const OpEncoding *>(inst),
@@ -1663,6 +2634,17 @@ VDot4cI32I8Vop3::VDot4cI32I8Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVDot4cI32I8Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_dot4c_i32_i8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VDot4cI32I8Vop3>(opcode);
+}
+} // namespace detail
+
 VMinF32Vop3::VMinF32Vop3(const MachineInst *inst)
     : Vop3("v_min_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinF32Vop3)),
@@ -1683,6 +2665,16 @@ VMinF32Vop3::VMinF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVMinF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_min_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMinF32Vop3>(opcode);
+}
+} // namespace detail
 
 VMaxF32Vop3::VMaxF32Vop3(const MachineInst *inst)
     : Vop3("v_max_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1705,6 +2697,16 @@ VMaxF32Vop3::VMaxF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVMaxF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_max_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMaxF32Vop3>(opcode);
+}
+} // namespace detail
+
 VMinI32Vop3::VMinI32Vop3(const MachineInst *inst)
     : Vop3("v_min_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinI32Vop3)),
@@ -1725,6 +2727,16 @@ VMinI32Vop3::VMinI32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVMinI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_min_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMinI32Vop3>(opcode);
+}
+} // namespace detail
 
 VMaxI32Vop3::VMaxI32Vop3(const MachineInst *inst)
     : Vop3("v_max_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1747,6 +2759,16 @@ VMaxI32Vop3::VMaxI32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVMaxI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_max_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMaxI32Vop3>(opcode);
+}
+} // namespace detail
+
 VMinU32Vop3::VMinU32Vop3(const MachineInst *inst)
     : Vop3("v_min_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinU32Vop3)),
@@ -1767,6 +2789,16 @@ VMinU32Vop3::VMinU32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVMinU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_min_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMinU32Vop3>(opcode);
+}
+} // namespace detail
 
 VMaxU32Vop3::VMaxU32Vop3(const MachineInst *inst)
     : Vop3("v_max_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1789,6 +2821,16 @@ VMaxU32Vop3::VMaxU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVMaxU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_max_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMaxU32Vop3>(opcode);
+}
+} // namespace detail
+
 VLshrrevB32Vop3::VLshrrevB32Vop3(const MachineInst *inst)
     : Vop3("v_lshrrev_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLshrrevB32Vop3)),
@@ -1809,6 +2851,17 @@ VLshrrevB32Vop3::VLshrrevB32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVLshrrevB32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_lshrrev_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLshrrevB32Vop3>(opcode);
+}
+} // namespace detail
 
 VAshrrevI32Vop3::VAshrrevI32Vop3(const MachineInst *inst)
     : Vop3("v_ashrrev_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1831,6 +2884,17 @@ VAshrrevI32Vop3::VAshrrevI32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVAshrrevI32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_ashrrev_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAshrrevI32Vop3>(opcode);
+}
+} // namespace detail
+
 VLshlrevB32Vop3::VLshlrevB32Vop3(const MachineInst *inst)
     : Vop3("v_lshlrev_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLshlrevB32Vop3)),
@@ -1851,6 +2915,17 @@ VLshlrevB32Vop3::VLshlrevB32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVLshlrevB32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_lshlrev_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLshlrevB32Vop3>(opcode);
+}
+} // namespace detail
 
 VAndB32Vop3::VAndB32Vop3(const MachineInst *inst)
     : Vop3("v_and_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1873,6 +2948,16 @@ VAndB32Vop3::VAndB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVAndB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_and_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAndB32Vop3>(opcode);
+}
+} // namespace detail
+
 VOrB32Vop3::VOrB32Vop3(const MachineInst *inst)
     : Vop3("v_or_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VOrB32Vop3)),
@@ -1893,6 +2978,16 @@ VOrB32Vop3::VOrB32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVOrB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_or_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VOrB32Vop3>(opcode);
+}
+} // namespace detail
 
 VXorB32Vop3::VXorB32Vop3(const MachineInst *inst)
     : Vop3("v_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1915,6 +3010,16 @@ VXorB32Vop3::VXorB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVXorB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_xor_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VXorB32Vop3>(opcode);
+}
+} // namespace detail
+
 VXnorB32Vop3::VXnorB32Vop3(const MachineInst *inst)
     : Vop3("v_xnor_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VXnorB32Vop3)),
@@ -1935,6 +3040,16 @@ VXnorB32Vop3::VXnorB32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVXnorB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_xnor_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VXnorB32Vop3>(opcode);
+}
+} // namespace detail
 
 VMacF32Vop3::VMacF32Vop3(const MachineInst *inst)
     : Vop3("v_mac_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1958,6 +3073,16 @@ VMacF32Vop3::VMacF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVMacF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mac_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMacF32Vop3>(opcode);
+}
+} // namespace detail
+
 VAddNcU32Vop3::VAddNcU32Vop3(const MachineInst *inst)
     : Vop3("v_add_nc_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAddNcU32Vop3)),
@@ -1978,6 +3103,16 @@ VAddNcU32Vop3::VAddNcU32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVAddNcU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_add_nc_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAddNcU32Vop3>(opcode);
+}
+} // namespace detail
 
 VSubNcU32Vop3::VSubNcU32Vop3(const MachineInst *inst)
     : Vop3("v_sub_nc_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2000,6 +3135,16 @@ VSubNcU32Vop3::VSubNcU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVSubNcU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sub_nc_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSubNcU32Vop3>(opcode);
+}
+} // namespace detail
+
 VSubrevNcU32Vop3::VSubrevNcU32Vop3(const MachineInst *inst)
     : Vop3("v_subrev_nc_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSubrevNcU32Vop3)),
@@ -2020,6 +3165,17 @@ VSubrevNcU32Vop3::VSubrevNcU32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVSubrevNcU32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_subrev_nc_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSubrevNcU32Vop3>(opcode);
+}
+} // namespace detail
 
 VFmacF32Vop3::VFmacF32Vop3(const MachineInst *inst)
     : Vop3("v_fmac_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2043,6 +3199,16 @@ VFmacF32Vop3::VFmacF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVFmacF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_fmac_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFmacF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtPkrtzF16F32Vop3::VCvtPkrtzF16F32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_pkrtz_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtPkrtzF16F32Vop3)),
@@ -2063,6 +3229,17 @@ VCvtPkrtzF16F32Vop3::VCvtPkrtzF16F32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCvtPkrtzF16F32Vop3(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_pkrtz_f16_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtPkrtzF16F32Vop3>(opcode);
+}
+} // namespace detail
 
 VAddF16Vop3::VAddF16Vop3(const MachineInst *inst)
     : Vop3("v_add_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -2086,6 +3263,16 @@ VAddF16Vop3::VAddF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVAddF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_add_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAddF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VAddF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -2116,6 +3303,16 @@ VSubF16Vop3::VSubF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVSubF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sub_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSubF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VSubF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -2145,6 +3342,16 @@ VSubrevF16Vop3::VSubrevF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVSubrevF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_subrev_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSubrevF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VSubrevF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -2173,6 +3380,16 @@ VMulF16Vop3::VMulF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVMulF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mul_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMulF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMulF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -2204,6 +3421,16 @@ VFmacF16Vop3::VFmacF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVFmacF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_fmac_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFmacF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VFmacF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -2232,6 +3459,16 @@ VMaxF16Vop3::VMaxF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVMaxF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_max_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMaxF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMaxF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -2262,6 +3499,16 @@ VMinF16Vop3::VMinF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVMinF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_min_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMinF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMinF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -2290,6 +3537,16 @@ VLdexpF16Vop3::VLdexpF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVLdexpF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_ldexp_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLdexpF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VLdexpF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -2324,6 +3581,17 @@ VMadLegacyF32Vop3::VMadLegacyF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVMadLegacyF32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mad_legacy_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMadLegacyF32Vop3>(opcode);
+}
+} // namespace detail
+
 VMadF32Vop3::VMadF32Vop3(const MachineInst *inst)
     : Vop3("v_mad_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMadF32Vop3)),
@@ -2350,6 +3618,16 @@ VMadF32Vop3::VMadF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVMadF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mad_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMadF32Vop3>(opcode);
+}
+} // namespace detail
 
 VMadI32I24Vop3::VMadI32I24Vop3(const MachineInst *inst)
     : Vop3("v_mad_i32_i24", reinterpret_cast<const OpEncoding *>(inst),
@@ -2378,6 +3656,16 @@ VMadI32I24Vop3::VMadI32I24Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVMadI32I24Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mad_i32_i24", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMadI32I24Vop3>(opcode);
+}
+} // namespace detail
+
 VMadU32U24Vop3::VMadU32U24Vop3(const MachineInst *inst)
     : Vop3("v_mad_u32_u24", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMadU32U24Vop3)),
@@ -2404,6 +3692,16 @@ VMadU32U24Vop3::VMadU32U24Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVMadU32U24Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mad_u32_u24", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMadU32U24Vop3>(opcode);
+}
+} // namespace detail
 
 VCubeidF32Vop3::VCubeidF32Vop3(const MachineInst *inst)
     : Vop3("v_cubeid_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2432,6 +3730,16 @@ VCubeidF32Vop3::VCubeidF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCubeidF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cubeid_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCubeidF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCubescF32Vop3::VCubescF32Vop3(const MachineInst *inst)
     : Vop3("v_cubesc_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCubescF32Vop3)),
@@ -2458,6 +3766,16 @@ VCubescF32Vop3::VCubescF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCubescF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cubesc_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCubescF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCubetcF32Vop3::VCubetcF32Vop3(const MachineInst *inst)
     : Vop3("v_cubetc_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2486,6 +3804,16 @@ VCubetcF32Vop3::VCubetcF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCubetcF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cubetc_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCubetcF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCubemaF32Vop3::VCubemaF32Vop3(const MachineInst *inst)
     : Vop3("v_cubema_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCubemaF32Vop3)),
@@ -2512,6 +3840,16 @@ VCubemaF32Vop3::VCubemaF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCubemaF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cubema_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCubemaF32Vop3>(opcode);
+}
+} // namespace detail
 
 VBfeU32Vop3::VBfeU32Vop3(const MachineInst *inst)
     : Vop3("v_bfe_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2540,6 +3878,16 @@ VBfeU32Vop3::VBfeU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVBfeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_bfe_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VBfeU32Vop3>(opcode);
+}
+} // namespace detail
+
 VBfeI32Vop3::VBfeI32Vop3(const MachineInst *inst)
     : Vop3("v_bfe_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VBfeI32Vop3)),
@@ -2566,6 +3914,16 @@ VBfeI32Vop3::VBfeI32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVBfeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_bfe_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VBfeI32Vop3>(opcode);
+}
+} // namespace detail
 
 VBfiB32Vop3::VBfiB32Vop3(const MachineInst *inst)
     : Vop3("v_bfi_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2594,6 +3952,16 @@ VBfiB32Vop3::VBfiB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVBfiB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_bfi_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VBfiB32Vop3>(opcode);
+}
+} // namespace detail
+
 VFmaF32Vop3::VFmaF32Vop3(const MachineInst *inst)
     : Vop3("v_fma_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFmaF32Vop3)),
@@ -2620,6 +3988,16 @@ VFmaF32Vop3::VFmaF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVFmaF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_fma_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFmaF32Vop3>(opcode);
+}
+} // namespace detail
 
 VFmaF64Vop3::VFmaF64Vop3(const MachineInst *inst)
     : Vop3("v_fma_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -2651,6 +4029,16 @@ VFmaF64Vop3::VFmaF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
+namespace detail {
+DecodeResult decodeVFmaF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_fma_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFmaF64Vop3>(opcode);
+}
+} // namespace detail
+
 VLerpU8Vop3::VLerpU8Vop3(const MachineInst *inst)
     : Vop3("v_lerp_u8", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLerpU8Vop3)),
@@ -2677,6 +4065,16 @@ VLerpU8Vop3::VLerpU8Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVLerpU8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_lerp_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLerpU8Vop3>(opcode);
+}
+} // namespace detail
 
 VAlignbitB32Vop3::VAlignbitB32Vop3(const MachineInst *inst)
     : Vop3("v_alignbit_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2705,6 +4103,17 @@ VAlignbitB32Vop3::VAlignbitB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVAlignbitB32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_alignbit_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAlignbitB32Vop3>(opcode);
+}
+} // namespace detail
+
 VAlignbyteB32Vop3::VAlignbyteB32Vop3(const MachineInst *inst)
     : Vop3("v_alignbyte_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAlignbyteB32Vop3)),
@@ -2731,6 +4140,17 @@ VAlignbyteB32Vop3::VAlignbyteB32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVAlignbyteB32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_alignbyte_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAlignbyteB32Vop3>(opcode);
+}
+} // namespace detail
 
 VMullitF32Vop3::VMullitF32Vop3(const MachineInst *inst)
     : Vop3("v_mullit_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2759,6 +4179,16 @@ VMullitF32Vop3::VMullitF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVMullitF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mullit_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMullitF32Vop3>(opcode);
+}
+} // namespace detail
+
 VMin3F32Vop3::VMin3F32Vop3(const MachineInst *inst)
     : Vop3("v_min3_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMin3F32Vop3)),
@@ -2785,6 +4215,16 @@ VMin3F32Vop3::VMin3F32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVMin3F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_min3_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMin3F32Vop3>(opcode);
+}
+} // namespace detail
 
 VMin3I32Vop3::VMin3I32Vop3(const MachineInst *inst)
     : Vop3("v_min3_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2813,6 +4253,16 @@ VMin3I32Vop3::VMin3I32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVMin3I32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_min3_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMin3I32Vop3>(opcode);
+}
+} // namespace detail
+
 VMin3U32Vop3::VMin3U32Vop3(const MachineInst *inst)
     : Vop3("v_min3_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMin3U32Vop3)),
@@ -2839,6 +4289,16 @@ VMin3U32Vop3::VMin3U32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVMin3U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_min3_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMin3U32Vop3>(opcode);
+}
+} // namespace detail
 
 VMax3F32Vop3::VMax3F32Vop3(const MachineInst *inst)
     : Vop3("v_max3_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2867,6 +4327,16 @@ VMax3F32Vop3::VMax3F32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVMax3F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_max3_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMax3F32Vop3>(opcode);
+}
+} // namespace detail
+
 VMax3I32Vop3::VMax3I32Vop3(const MachineInst *inst)
     : Vop3("v_max3_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMax3I32Vop3)),
@@ -2893,6 +4363,16 @@ VMax3I32Vop3::VMax3I32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVMax3I32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_max3_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMax3I32Vop3>(opcode);
+}
+} // namespace detail
 
 VMax3U32Vop3::VMax3U32Vop3(const MachineInst *inst)
     : Vop3("v_max3_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2921,6 +4401,16 @@ VMax3U32Vop3::VMax3U32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVMax3U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_max3_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMax3U32Vop3>(opcode);
+}
+} // namespace detail
+
 VMed3F32Vop3::VMed3F32Vop3(const MachineInst *inst)
     : Vop3("v_med3_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMed3F32Vop3)),
@@ -2947,6 +4437,16 @@ VMed3F32Vop3::VMed3F32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVMed3F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_med3_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMed3F32Vop3>(opcode);
+}
+} // namespace detail
 
 VMed3I32Vop3::VMed3I32Vop3(const MachineInst *inst)
     : Vop3("v_med3_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2975,6 +4475,16 @@ VMed3I32Vop3::VMed3I32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVMed3I32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_med3_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMed3I32Vop3>(opcode);
+}
+} // namespace detail
+
 VMed3U32Vop3::VMed3U32Vop3(const MachineInst *inst)
     : Vop3("v_med3_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMed3U32Vop3)),
@@ -3001,6 +4511,16 @@ VMed3U32Vop3::VMed3U32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVMed3U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_med3_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMed3U32Vop3>(opcode);
+}
+} // namespace detail
 
 VSadU8Vop3::VSadU8Vop3(const MachineInst *inst)
     : Vop3("v_sad_u8", reinterpret_cast<const OpEncoding *>(inst),
@@ -3029,6 +4549,16 @@ VSadU8Vop3::VSadU8Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVSadU8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sad_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSadU8Vop3>(opcode);
+}
+} // namespace detail
+
 VSadHiU8Vop3::VSadHiU8Vop3(const MachineInst *inst)
     : Vop3("v_sad_hi_u8", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSadHiU8Vop3)),
@@ -3055,6 +4585,16 @@ VSadHiU8Vop3::VSadHiU8Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVSadHiU8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sad_hi_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSadHiU8Vop3>(opcode);
+}
+} // namespace detail
 
 VSadU16Vop3::VSadU16Vop3(const MachineInst *inst)
     : Vop3("v_sad_u16", reinterpret_cast<const OpEncoding *>(inst),
@@ -3083,6 +4623,16 @@ VSadU16Vop3::VSadU16Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVSadU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sad_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSadU16Vop3>(opcode);
+}
+} // namespace detail
+
 VSadU32Vop3::VSadU32Vop3(const MachineInst *inst)
     : Vop3("v_sad_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSadU32Vop3)),
@@ -3109,6 +4659,16 @@ VSadU32Vop3::VSadU32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVSadU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sad_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSadU32Vop3>(opcode);
+}
+} // namespace detail
 
 VCvtPkU8F32Vop3::VCvtPkU8F32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_pk_u8_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -3137,6 +4697,17 @@ VCvtPkU8F32Vop3::VCvtPkU8F32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCvtPkU8F32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_pk_u8_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtPkU8F32Vop3>(opcode);
+}
+} // namespace detail
+
 VDivFixupF32Vop3::VDivFixupF32Vop3(const MachineInst *inst)
     : Vop3("v_div_fixup_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VDivFixupF32Vop3)),
@@ -3163,6 +4734,17 @@ VDivFixupF32Vop3::VDivFixupF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVDivFixupF32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_div_fixup_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VDivFixupF32Vop3>(opcode);
+}
+} // namespace detail
 
 VDivFixupF64Vop3::VDivFixupF64Vop3(const MachineInst *inst)
     : Vop3("v_div_fixup_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -3194,6 +4776,17 @@ VDivFixupF64Vop3::VDivFixupF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
+namespace detail {
+DecodeResult decodeVDivFixupF64Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_div_fixup_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VDivFixupF64Vop3>(opcode);
+}
+} // namespace detail
+
 VAddF64Vop3::VAddF64Vop3(const MachineInst *inst)
     : Vop3("v_add_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAddF64Vop3)),
@@ -3216,6 +4809,16 @@ VAddF64Vop3::VAddF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
 }
+
+namespace detail {
+DecodeResult decodeVAddF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_add_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAddF64Vop3>(opcode);
+}
+} // namespace detail
 
 VMulF64Vop3::VMulF64Vop3(const MachineInst *inst)
     : Vop3("v_mul_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -3240,6 +4843,16 @@ VMulF64Vop3::VMulF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
+namespace detail {
+DecodeResult decodeVMulF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mul_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMulF64Vop3>(opcode);
+}
+} // namespace detail
+
 VMinF64Vop3::VMinF64Vop3(const MachineInst *inst)
     : Vop3("v_min_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinF64Vop3)),
@@ -3262,6 +4875,16 @@ VMinF64Vop3::VMinF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
 }
+
+namespace detail {
+DecodeResult decodeVMinF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_min_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMinF64Vop3>(opcode);
+}
+} // namespace detail
 
 VMaxF64Vop3::VMaxF64Vop3(const MachineInst *inst)
     : Vop3("v_max_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -3286,6 +4909,16 @@ VMaxF64Vop3::VMaxF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
+namespace detail {
+DecodeResult decodeVMaxF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_max_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMaxF64Vop3>(opcode);
+}
+} // namespace detail
+
 VLdexpF64Vop3::VLdexpF64Vop3(const MachineInst *inst)
     : Vop3("v_ldexp_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLdexpF64Vop3)),
@@ -3308,6 +4941,16 @@ VLdexpF64Vop3::VLdexpF64Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVLdexpF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_ldexp_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLdexpF64Vop3>(opcode);
+}
+} // namespace detail
+
 VMulLoU32Vop3::VMulLoU32Vop3(const MachineInst *inst)
     : Vop3("v_mul_lo_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulLoU32Vop3)),
@@ -3328,6 +4971,16 @@ VMulLoU32Vop3::VMulLoU32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVMulLoU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mul_lo_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMulLoU32Vop3>(opcode);
+}
+} // namespace detail
 
 VMulHiU32Vop3::VMulHiU32Vop3(const MachineInst *inst)
     : Vop3("v_mul_hi_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -3350,6 +5003,16 @@ VMulHiU32Vop3::VMulHiU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVMulHiU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mul_hi_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMulHiU32Vop3>(opcode);
+}
+} // namespace detail
+
 VMulHiI32Vop3::VMulHiI32Vop3(const MachineInst *inst)
     : Vop3("v_mul_hi_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulHiI32Vop3)),
@@ -3370,6 +5033,16 @@ VMulHiI32Vop3::VMulHiI32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVMulHiI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mul_hi_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMulHiI32Vop3>(opcode);
+}
+} // namespace detail
 
 VDivFmasF32Vop3::VDivFmasF32Vop3(const MachineInst *inst)
     : Vop3("v_div_fmas_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -3401,6 +5074,17 @@ VDivFmasF32Vop3::VDivFmasF32Vop3(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
+
+namespace detail {
+DecodeResult decodeVDivFmasF32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_div_fmas_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VDivFmasF32Vop3>(opcode);
+}
+} // namespace detail
 
 VDivFmasF64Vop3::VDivFmasF64Vop3(const MachineInst *inst)
     : Vop3("v_div_fmas_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -3436,6 +5120,17 @@ VDivFmasF64Vop3::VDivFmasF64Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
+namespace detail {
+DecodeResult decodeVDivFmasF64Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_div_fmas_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VDivFmasF64Vop3>(opcode);
+}
+} // namespace detail
+
 VMsadU8Vop3::VMsadU8Vop3(const MachineInst *inst)
     : Vop3("v_msad_u8", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMsadU8Vop3)),
@@ -3462,6 +5157,16 @@ VMsadU8Vop3::VMsadU8Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVMsadU8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_msad_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMsadU8Vop3>(opcode);
+}
+} // namespace detail
 
 VQsadPkU16U8Vop3::VQsadPkU16U8Vop3(const MachineInst *inst)
     : Vop3("v_qsad_pk_u16_u8", reinterpret_cast<const OpEncoding *>(inst),
@@ -3492,6 +5197,17 @@ VQsadPkU16U8Vop3::VQsadPkU16U8Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
 }
 
+namespace detail {
+DecodeResult decodeVQsadPkU16U8Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_qsad_pk_u16_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VQsadPkU16U8Vop3>(opcode);
+}
+} // namespace detail
+
 VMqsadPkU16U8Vop3::VMqsadPkU16U8Vop3(const MachineInst *inst)
     : Vop3("v_mqsad_pk_u16_u8", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMqsadPkU16U8Vop3)),
@@ -3521,6 +5237,17 @@ VMqsadPkU16U8Vop3::VMqsadPkU16U8Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
 }
 
+namespace detail {
+DecodeResult decodeVMqsadPkU16U8Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mqsad_pk_u16_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMqsadPkU16U8Vop3>(opcode);
+}
+} // namespace detail
+
 VTrigPreopF64Vop3::VTrigPreopF64Vop3(const MachineInst *inst)
     : Vop3("v_trig_preop_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VTrigPreopF64Vop3)),
@@ -3542,6 +5269,17 @@ VTrigPreopF64Vop3::VTrigPreopF64Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVTrigPreopF64Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_trig_preop_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VTrigPreopF64Vop3>(opcode);
+}
+} // namespace detail
 
 VMqsadU32U8Vop3::VMqsadU32U8Vop3(const MachineInst *inst)
     : Vop3("v_mqsad_u32_u8", reinterpret_cast<const OpEncoding *>(inst),
@@ -3566,6 +5304,17 @@ VMqsadU32U8Vop3::VMqsadU32U8Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVMqsadU32U8Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mqsad_u32_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMqsadU32U8Vop3>(opcode);
+}
+} // namespace detail
 
 VXor3B32Vop3::VXor3B32Vop3(const MachineInst *inst)
     : Vop3("v_xor3_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -3594,6 +5343,16 @@ VXor3B32Vop3::VXor3B32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVXor3B32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_xor3_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VXor3B32Vop3>(opcode);
+}
+} // namespace detail
+
 VLshlrevB64Vop3::VLshlrevB64Vop3(const MachineInst *inst)
     : Vop3("v_lshlrev_b64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLshlrevB64Vop3)),
@@ -3615,6 +5374,17 @@ VLshlrevB64Vop3::VLshlrevB64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
 }
+
+namespace detail {
+DecodeResult decodeVLshlrevB64Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_lshlrev_b64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLshlrevB64Vop3>(opcode);
+}
+} // namespace detail
 
 VLshrrevB64Vop3::VLshrrevB64Vop3(const MachineInst *inst)
     : Vop3("v_lshrrev_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -3638,6 +5408,17 @@ VLshrrevB64Vop3::VLshrrevB64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
 }
 
+namespace detail {
+DecodeResult decodeVLshrrevB64Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_lshrrev_b64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLshrrevB64Vop3>(opcode);
+}
+} // namespace detail
+
 VAshrrevI64Vop3::VAshrrevI64Vop3(const MachineInst *inst)
     : Vop3("v_ashrrev_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAshrrevI64Vop3)),
@@ -3659,6 +5440,17 @@ VAshrrevI64Vop3::VAshrrevI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
 }
+
+namespace detail {
+DecodeResult decodeVAshrrevI64Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_ashrrev_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAshrrevI64Vop3>(opcode);
+}
+} // namespace detail
 
 VAddNcU16Vop3::VAddNcU16Vop3(const MachineInst *inst)
     : Vop3("v_add_nc_u16", reinterpret_cast<const OpEncoding *>(inst),
@@ -3682,6 +5474,16 @@ VAddNcU16Vop3::VAddNcU16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVAddNcU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_add_nc_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAddNcU16Vop3>(opcode);
+}
+} // namespace detail
 
 void VAddNcU16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -3712,6 +5514,16 @@ VSubNcU16Vop3::VSubNcU16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVSubNcU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sub_nc_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSubNcU16Vop3>(opcode);
+}
+} // namespace detail
+
 void VSubNcU16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -3740,6 +5552,16 @@ VMulLoU16Vop3::VMulLoU16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVMulLoU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mul_lo_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMulLoU16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMulLoU16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -3770,6 +5592,17 @@ VLshrrevB16Vop3::VLshrrevB16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVLshrrevB16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_lshrrev_b16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLshrrevB16Vop3>(opcode);
+}
+} // namespace detail
+
 void VLshrrevB16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -3798,6 +5631,17 @@ VAshrrevI16Vop3::VAshrrevI16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVAshrrevI16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_ashrrev_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAshrrevI16Vop3>(opcode);
+}
+} // namespace detail
 
 void VAshrrevI16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -3828,6 +5672,16 @@ VMaxU16Vop3::VMaxU16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVMaxU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_max_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMaxU16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMaxU16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -3856,6 +5710,16 @@ VMaxI16Vop3::VMaxI16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVMaxI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_max_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMaxI16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMaxI16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -3886,6 +5750,16 @@ VMinU16Vop3::VMinU16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVMinU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_min_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMinU16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMinU16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -3914,6 +5788,16 @@ VMinI16Vop3::VMinI16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVMinI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_min_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMinI16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMinI16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -3944,6 +5828,16 @@ VAddNcI16Vop3::VAddNcI16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVAddNcI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_add_nc_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAddNcI16Vop3>(opcode);
+}
+} // namespace detail
+
 void VAddNcI16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -3972,6 +5866,16 @@ VSubNcI16Vop3::VSubNcI16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVSubNcI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sub_nc_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSubNcI16Vop3>(opcode);
+}
+} // namespace detail
 
 void VSubNcI16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -4002,6 +5906,17 @@ VPackB32F16Vop3::VPackB32F16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVPackB32F16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_pack_b32_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPackB32F16Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtPknormI16F16Vop3::VCvtPknormI16F16Vop3(const MachineInst *inst)
     : Vop3("v_cvt_pknorm_i16_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtPknormI16F16Vop3)),
@@ -4024,6 +5939,17 @@ VCvtPknormI16F16Vop3::VCvtPknormI16F16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVCvtPknormI16F16Vop3(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_pknorm_i16_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtPknormI16F16Vop3>(opcode);
+}
+} // namespace detail
 
 VCvtPknormU16F16Vop3::VCvtPknormU16F16Vop3(const MachineInst *inst)
     : Vop3("v_cvt_pknorm_u16_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -4048,6 +5974,17 @@ VCvtPknormU16F16Vop3::VCvtPknormU16F16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVCvtPknormU16F16Vop3(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_pknorm_u16_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtPknormU16F16Vop3>(opcode);
+}
+} // namespace detail
+
 VLshlrevB16Vop3::VLshlrevB16Vop3(const MachineInst *inst)
     : Vop3("v_lshlrev_b16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLshlrevB16Vop3)),
@@ -4070,6 +6007,17 @@ VLshlrevB16Vop3::VLshlrevB16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVLshlrevB16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_lshlrev_b16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLshlrevB16Vop3>(opcode);
+}
+} // namespace detail
 
 void VLshlrevB16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -4107,6 +6055,16 @@ VMadU16Vop3::VMadU16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVMadU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mad_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMadU16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMadU16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -4126,6 +6084,17 @@ VInterpP1llF16Vop3::VInterpP1llF16Vop3(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+DecodeResult decodeVInterpP1llF16Vop3(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_interp_p1ll_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VInterpP1llF16Vop3>(opcode);
+}
+} // namespace detail
+
 VInterpP1lvF16Vop3::VInterpP1lvF16Vop3(const MachineInst *inst)
     : Vop3("v_interp_p1lv_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VInterpP1lvF16Vop3)),
@@ -4140,6 +6109,17 @@ VInterpP1lvF16Vop3::VInterpP1lvF16Vop3(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+DecodeResult decodeVInterpP1lvF16Vop3(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_interp_p1lv_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VInterpP1lvF16Vop3>(opcode);
+}
+} // namespace detail
 
 VPermB32Vop3::VPermB32Vop3(const MachineInst *inst)
     : Vop3("v_perm_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -4168,6 +6148,16 @@ VPermB32Vop3::VPermB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVPermB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_perm_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPermB32Vop3>(opcode);
+}
+} // namespace detail
+
 VXadU32Vop3::VXadU32Vop3(const MachineInst *inst)
     : Vop3("v_xad_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VXadU32Vop3)),
@@ -4194,6 +6184,16 @@ VXadU32Vop3::VXadU32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVXadU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_xad_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VXadU32Vop3>(opcode);
+}
+} // namespace detail
 
 VLshlAddU32Vop3::VLshlAddU32Vop3(const MachineInst *inst)
     : Vop3("v_lshl_add_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -4222,6 +6222,17 @@ VLshlAddU32Vop3::VLshlAddU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVLshlAddU32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_lshl_add_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLshlAddU32Vop3>(opcode);
+}
+} // namespace detail
+
 VAddLshlU32Vop3::VAddLshlU32Vop3(const MachineInst *inst)
     : Vop3("v_add_lshl_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAddLshlU32Vop3)),
@@ -4248,6 +6259,17 @@ VAddLshlU32Vop3::VAddLshlU32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVAddLshlU32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_add_lshl_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAddLshlU32Vop3>(opcode);
+}
+} // namespace detail
 
 VFmaF16Vop3::VFmaF16Vop3(const MachineInst *inst)
     : Vop3("v_fma_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -4278,6 +6300,16 @@ VFmaF16Vop3::VFmaF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVFmaF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_fma_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFmaF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VFmaF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -4315,6 +6347,16 @@ VMin3F16Vop3::VMin3F16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVMin3F16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_min3_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMin3F16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMin3F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -4350,6 +6392,16 @@ VMin3I16Vop3::VMin3I16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVMin3I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_min3_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMin3I16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMin3I16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -4387,6 +6439,16 @@ VMin3U16Vop3::VMin3U16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVMin3U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_min3_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMin3U16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMin3U16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -4422,6 +6484,16 @@ VMax3F16Vop3::VMax3F16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVMax3F16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_max3_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMax3F16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMax3F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -4459,6 +6531,16 @@ VMax3I16Vop3::VMax3I16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVMax3I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_max3_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMax3I16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMax3I16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -4494,6 +6576,16 @@ VMax3U16Vop3::VMax3U16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVMax3U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_max3_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMax3U16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMax3U16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -4531,6 +6623,16 @@ VMed3F16Vop3::VMed3F16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVMed3F16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_med3_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMed3F16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMed3F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -4566,6 +6668,16 @@ VMed3I16Vop3::VMed3I16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVMed3I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_med3_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMed3I16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMed3I16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -4603,6 +6715,16 @@ VMed3U16Vop3::VMed3U16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVMed3U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_med3_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMed3U16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMed3U16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -4623,6 +6745,17 @@ VInterpP2F16Vop3::VInterpP2F16Vop3(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
 }
+
+namespace detail {
+DecodeResult decodeVInterpP2F16Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_interp_p2_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VInterpP2F16Vop3>(opcode);
+}
+} // namespace detail
 
 void VInterpP2F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -4660,6 +6793,16 @@ VMadI16Vop3::VMadI16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVMadI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mad_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMadI16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMadI16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -4696,6 +6839,17 @@ VDivFixupF16Vop3::VDivFixupF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVDivFixupF16Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_div_fixup_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VDivFixupF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VDivFixupF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
@@ -4715,6 +6869,17 @@ VReadlaneB32Vop3::VReadlaneB32Vop3(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+DecodeResult decodeVReadlaneB32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_readlane_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VReadlaneB32Vop3>(opcode);
+}
+} // namespace detail
+
 VWritelaneB32Vop3::VWritelaneB32Vop3(const MachineInst *inst)
     : Vop3("v_writelane_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VWritelaneB32Vop3)),
@@ -4732,6 +6897,17 @@ VWritelaneB32Vop3::VWritelaneB32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVWritelaneB32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_writelane_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VWritelaneB32Vop3>(opcode);
+}
+} // namespace detail
 
 VLdexpF32Vop3::VLdexpF32Vop3(const MachineInst *inst)
     : Vop3("v_ldexp_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -4754,6 +6930,16 @@ VLdexpF32Vop3::VLdexpF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVLdexpF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_ldexp_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLdexpF32Vop3>(opcode);
+}
+} // namespace detail
+
 VBfmB32Vop3::VBfmB32Vop3(const MachineInst *inst)
     : Vop3("v_bfm_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VBfmB32Vop3)),
@@ -4774,6 +6960,16 @@ VBfmB32Vop3::VBfmB32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVBfmB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_bfm_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VBfmB32Vop3>(opcode);
+}
+} // namespace detail
 
 VBcntU32B32Vop3::VBcntU32B32Vop3(const MachineInst *inst)
     : Vop3("v_bcnt_u32_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -4796,6 +6992,17 @@ VBcntU32B32Vop3::VBcntU32B32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVBcntU32B32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_bcnt_u32_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VBcntU32B32Vop3>(opcode);
+}
+} // namespace detail
+
 VMbcntLoU32B32Vop3::VMbcntLoU32B32Vop3(const MachineInst *inst)
     : Vop3("v_mbcnt_lo_u32_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMbcntLoU32B32Vop3)),
@@ -4816,6 +7023,17 @@ VMbcntLoU32B32Vop3::VMbcntLoU32B32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVMbcntLoU32B32Vop3(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mbcnt_lo_u32_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMbcntLoU32B32Vop3>(opcode);
+}
+} // namespace detail
 
 VMbcntHiU32B32Vop3::VMbcntHiU32B32Vop3(const MachineInst *inst)
     : Vop3("v_mbcnt_hi_u32_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -4838,6 +7056,17 @@ VMbcntHiU32B32Vop3::VMbcntHiU32B32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVMbcntHiU32B32Vop3(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mbcnt_hi_u32_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMbcntHiU32B32Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtPknormI16F32Vop3::VCvtPknormI16F32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_pknorm_i16_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtPknormI16F32Vop3)),
@@ -4858,6 +7087,17 @@ VCvtPknormI16F32Vop3::VCvtPknormI16F32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCvtPknormI16F32Vop3(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_pknorm_i16_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtPknormI16F32Vop3>(opcode);
+}
+} // namespace detail
 
 VCvtPknormU16F32Vop3::VCvtPknormU16F32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_pknorm_u16_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -4880,6 +7120,17 @@ VCvtPknormU16F32Vop3::VCvtPknormU16F32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCvtPknormU16F32Vop3(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_pknorm_u16_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtPknormU16F32Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtPkU16U32Vop3::VCvtPkU16U32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_pk_u16_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtPkU16U32Vop3)),
@@ -4901,6 +7152,17 @@ VCvtPkU16U32Vop3::VCvtPkU16U32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCvtPkU16U32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_pk_u16_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtPkU16U32Vop3>(opcode);
+}
+} // namespace detail
+
 VCvtPkI16I32Vop3::VCvtPkI16I32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_pk_i16_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtPkI16I32Vop3)),
@@ -4921,6 +7183,17 @@ VCvtPkI16I32Vop3::VCvtPkI16I32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCvtPkI16I32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_pk_i16_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtPkI16I32Vop3>(opcode);
+}
+} // namespace detail
 
 VAdd3U32Vop3::VAdd3U32Vop3(const MachineInst *inst)
     : Vop3("v_add3_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -4949,6 +7222,16 @@ VAdd3U32Vop3::VAdd3U32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVAdd3U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_add3_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAdd3U32Vop3>(opcode);
+}
+} // namespace detail
+
 VLshlOrB32Vop3::VLshlOrB32Vop3(const MachineInst *inst)
     : Vop3("v_lshl_or_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLshlOrB32Vop3)),
@@ -4975,6 +7258,16 @@ VLshlOrB32Vop3::VLshlOrB32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVLshlOrB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_lshl_or_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLshlOrB32Vop3>(opcode);
+}
+} // namespace detail
 
 VAndOrB32Vop3::VAndOrB32Vop3(const MachineInst *inst)
     : Vop3("v_and_or_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -5003,6 +7296,16 @@ VAndOrB32Vop3::VAndOrB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVAndOrB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_and_or_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAndOrB32Vop3>(opcode);
+}
+} // namespace detail
+
 VOr3B32Vop3::VOr3B32Vop3(const MachineInst *inst)
     : Vop3("v_or3_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VOr3B32Vop3)),
@@ -5029,6 +7332,16 @@ VOr3B32Vop3::VOr3B32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVOr3B32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_or3_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VOr3B32Vop3>(opcode);
+}
+} // namespace detail
 
 VMadU32U16Vop3::VMadU32U16Vop3(const MachineInst *inst)
     : Vop3("v_mad_u32_u16", reinterpret_cast<const OpEncoding *>(inst),
@@ -5059,6 +7372,16 @@ VMadU32U16Vop3::VMadU32U16Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVMadU32U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mad_u32_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMadU32U16Vop3>(opcode);
+}
+} // namespace detail
+
 VMadI32I16Vop3::VMadI32I16Vop3(const MachineInst *inst)
     : Vop3("v_mad_i32_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMadI32I16Vop3)),
@@ -5088,6 +7411,16 @@ VMadI32I16Vop3::VMadI32I16Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVMadI32I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mad_i32_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMadI32I16Vop3>(opcode);
+}
+} // namespace detail
+
 VSubNcI32Vop3::VSubNcI32Vop3(const MachineInst *inst)
     : Vop3("v_sub_nc_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSubNcI32Vop3)),
@@ -5108,6 +7441,16 @@ VSubNcI32Vop3::VSubNcI32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVSubNcI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sub_nc_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSubNcI32Vop3>(opcode);
+}
+} // namespace detail
 
 VPermlane16B32Vop3::VPermlane16B32Vop3(const MachineInst *inst)
     : Vop3("v_permlane16_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -5132,6 +7475,17 @@ VPermlane16B32Vop3::VPermlane16B32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVPermlane16B32Vop3(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_permlane16_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPermlane16B32Vop3>(opcode);
+}
+} // namespace detail
+
 VPermlanex16B32Vop3::VPermlanex16B32Vop3(const MachineInst *inst)
     : Vop3("v_permlanex16_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VPermlanex16B32Vop3)),
@@ -5155,6 +7509,17 @@ VPermlanex16B32Vop3::VPermlanex16B32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVPermlanex16B32Vop3(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_permlanex16_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPermlanex16B32Vop3>(opcode);
+}
+} // namespace detail
+
 VAddNcI32Vop3::VAddNcI32Vop3(const MachineInst *inst)
     : Vop3("v_add_nc_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAddNcI32Vop3)),
@@ -5175,6 +7540,16 @@ VAddNcI32Vop3::VAddNcI32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVAddNcI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_add_nc_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAddNcI32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpFF32Vop3::VCmpFF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_f_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -5197,6 +7572,16 @@ VCmpFF32Vop3::VCmpFF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCmpFF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_f_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpFF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpLtF32Vop3::VCmpLtF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lt_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLtF32Vop3)),
@@ -5217,6 +7602,16 @@ VCmpLtF32Vop3::VCmpLtF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCmpLtF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_lt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLtF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpEqF32Vop3::VCmpEqF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_eq_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -5239,6 +7634,16 @@ VCmpEqF32Vop3::VCmpEqF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCmpEqF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_eq_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpEqF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpLeF32Vop3::VCmpLeF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_le_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLeF32Vop3)),
@@ -5259,6 +7664,16 @@ VCmpLeF32Vop3::VCmpLeF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCmpLeF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_le_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLeF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpGtF32Vop3::VCmpGtF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_gt_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -5281,6 +7696,16 @@ VCmpGtF32Vop3::VCmpGtF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCmpGtF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_gt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGtF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpLgF32Vop3::VCmpLgF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lg_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLgF32Vop3)),
@@ -5301,6 +7726,16 @@ VCmpLgF32Vop3::VCmpLgF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCmpLgF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_lg_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLgF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpGeF32Vop3::VCmpGeF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ge_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -5323,6 +7758,16 @@ VCmpGeF32Vop3::VCmpGeF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCmpGeF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ge_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGeF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpOF32Vop3::VCmpOF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_o_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpOF32Vop3)),
@@ -5343,6 +7788,16 @@ VCmpOF32Vop3::VCmpOF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCmpOF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_o_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpOF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpUF32Vop3::VCmpUF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_u_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -5365,6 +7820,16 @@ VCmpUF32Vop3::VCmpUF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCmpUF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_u_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpUF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpNgeF32Vop3::VCmpNgeF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nge_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNgeF32Vop3)),
@@ -5385,6 +7850,16 @@ VCmpNgeF32Vop3::VCmpNgeF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCmpNgeF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_nge_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNgeF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpNlgF32Vop3::VCmpNlgF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nlg_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -5407,6 +7882,16 @@ VCmpNlgF32Vop3::VCmpNlgF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCmpNlgF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_nlg_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNlgF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpNgtF32Vop3::VCmpNgtF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ngt_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNgtF32Vop3)),
@@ -5427,6 +7912,16 @@ VCmpNgtF32Vop3::VCmpNgtF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCmpNgtF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ngt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNgtF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpNleF32Vop3::VCmpNleF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nle_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -5449,6 +7944,16 @@ VCmpNleF32Vop3::VCmpNleF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCmpNleF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_nle_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNleF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpNeqF32Vop3::VCmpNeqF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_neq_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNeqF32Vop3)),
@@ -5469,6 +7974,16 @@ VCmpNeqF32Vop3::VCmpNeqF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCmpNeqF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_neq_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNeqF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpNltF32Vop3::VCmpNltF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nlt_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -5491,6 +8006,16 @@ VCmpNltF32Vop3::VCmpNltF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCmpNltF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_nlt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNltF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpTruF32Vop3::VCmpTruF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_tru_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpTruF32Vop3)),
@@ -5511,6 +8036,16 @@ VCmpTruF32Vop3::VCmpTruF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCmpTruF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_tru_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpTruF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxFF32Vop3::VCmpxFF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_f_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -5538,6 +8073,16 @@ VCmpxFF32Vop3::VCmpxFF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxFF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_f_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxFF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLtF32Vop3::VCmpxLtF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_lt_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtF32Vop3)),
@@ -5563,6 +8108,16 @@ VCmpxLtF32Vop3::VCmpxLtF32Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxLtF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_lt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLtF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxEqF32Vop3::VCmpxEqF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_eq_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -5590,6 +8145,16 @@ VCmpxEqF32Vop3::VCmpxEqF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxEqF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_eq_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxEqF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLeF32Vop3::VCmpxLeF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_le_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeF32Vop3)),
@@ -5615,6 +8180,16 @@ VCmpxLeF32Vop3::VCmpxLeF32Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxLeF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_le_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLeF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxGtF32Vop3::VCmpxGtF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_gt_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -5642,6 +8217,16 @@ VCmpxGtF32Vop3::VCmpxGtF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxGtF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_gt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGtF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLgF32Vop3::VCmpxLgF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_lg_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLgF32Vop3)),
@@ -5667,6 +8252,16 @@ VCmpxLgF32Vop3::VCmpxLgF32Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxLgF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_lg_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLgF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxGeF32Vop3::VCmpxGeF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ge_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -5694,6 +8289,16 @@ VCmpxGeF32Vop3::VCmpxGeF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxGeF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ge_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGeF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxOF32Vop3::VCmpxOF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_o_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxOF32Vop3)),
@@ -5719,6 +8324,16 @@ VCmpxOF32Vop3::VCmpxOF32Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxOF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_o_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxOF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxUF32Vop3::VCmpxUF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_u_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -5746,6 +8361,16 @@ VCmpxUF32Vop3::VCmpxUF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxUF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_u_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxUF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxNgeF32Vop3::VCmpxNgeF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_nge_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNgeF32Vop3)),
@@ -5771,6 +8396,17 @@ VCmpxNgeF32Vop3::VCmpxNgeF32Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxNgeF32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_nge_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNgeF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxNlgF32Vop3::VCmpxNlgF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_nlg_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -5798,6 +8434,17 @@ VCmpxNlgF32Vop3::VCmpxNlgF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxNlgF32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_nlg_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNlgF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxNgtF32Vop3::VCmpxNgtF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ngt_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNgtF32Vop3)),
@@ -5823,6 +8470,17 @@ VCmpxNgtF32Vop3::VCmpxNgtF32Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxNgtF32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ngt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNgtF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxNleF32Vop3::VCmpxNleF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_nle_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -5850,6 +8508,17 @@ VCmpxNleF32Vop3::VCmpxNleF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxNleF32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_nle_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNleF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxNeqF32Vop3::VCmpxNeqF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_neq_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeqF32Vop3)),
@@ -5875,6 +8544,17 @@ VCmpxNeqF32Vop3::VCmpxNeqF32Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxNeqF32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_neq_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNeqF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxNltF32Vop3::VCmpxNltF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_nlt_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -5902,6 +8582,17 @@ VCmpxNltF32Vop3::VCmpxNltF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxNltF32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_nlt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNltF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxTruF32Vop3::VCmpxTruF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_tru_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxTruF32Vop3)),
@@ -5928,6 +8619,17 @@ VCmpxTruF32Vop3::VCmpxTruF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxTruF32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_tru_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxTruF32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpFF64Vop3::VCmpFF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_f_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpFF64Vop3)),
@@ -5950,6 +8652,16 @@ VCmpFF64Vop3::VCmpFF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
 }
+
+namespace detail {
+DecodeResult decodeVCmpFF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_f_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpFF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpLtF64Vop3::VCmpLtF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lt_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -5974,6 +8686,16 @@ VCmpLtF64Vop3::VCmpLtF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
+namespace detail {
+DecodeResult decodeVCmpLtF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_lt_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLtF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpEqF64Vop3::VCmpEqF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_eq_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqF64Vop3)),
@@ -5996,6 +8718,16 @@ VCmpEqF64Vop3::VCmpEqF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
 }
+
+namespace detail {
+DecodeResult decodeVCmpEqF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_eq_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpEqF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpLeF64Vop3::VCmpLeF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_le_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -6020,6 +8752,16 @@ VCmpLeF64Vop3::VCmpLeF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
+namespace detail {
+DecodeResult decodeVCmpLeF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_le_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLeF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpGtF64Vop3::VCmpGtF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_gt_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtF64Vop3)),
@@ -6042,6 +8784,16 @@ VCmpGtF64Vop3::VCmpGtF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
 }
+
+namespace detail {
+DecodeResult decodeVCmpGtF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_gt_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGtF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpLgF64Vop3::VCmpLgF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lg_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -6066,6 +8818,16 @@ VCmpLgF64Vop3::VCmpLgF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
+namespace detail {
+DecodeResult decodeVCmpLgF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_lg_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLgF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpGeF64Vop3::VCmpGeF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ge_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeF64Vop3)),
@@ -6088,6 +8850,16 @@ VCmpGeF64Vop3::VCmpGeF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
 }
+
+namespace detail {
+DecodeResult decodeVCmpGeF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ge_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGeF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpOF64Vop3::VCmpOF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_o_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -6112,6 +8884,16 @@ VCmpOF64Vop3::VCmpOF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
+namespace detail {
+DecodeResult decodeVCmpOF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_o_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpOF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpUF64Vop3::VCmpUF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_u_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpUF64Vop3)),
@@ -6134,6 +8916,16 @@ VCmpUF64Vop3::VCmpUF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
 }
+
+namespace detail {
+DecodeResult decodeVCmpUF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_u_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpUF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpNgeF64Vop3::VCmpNgeF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nge_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -6158,6 +8950,16 @@ VCmpNgeF64Vop3::VCmpNgeF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
+namespace detail {
+DecodeResult decodeVCmpNgeF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_nge_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNgeF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpNlgF64Vop3::VCmpNlgF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nlg_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNlgF64Vop3)),
@@ -6180,6 +8982,16 @@ VCmpNlgF64Vop3::VCmpNlgF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
 }
+
+namespace detail {
+DecodeResult decodeVCmpNlgF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_nlg_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNlgF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpNgtF64Vop3::VCmpNgtF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ngt_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -6204,6 +9016,16 @@ VCmpNgtF64Vop3::VCmpNgtF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
+namespace detail {
+DecodeResult decodeVCmpNgtF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ngt_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNgtF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpNleF64Vop3::VCmpNleF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nle_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNleF64Vop3)),
@@ -6226,6 +9048,16 @@ VCmpNleF64Vop3::VCmpNleF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
 }
+
+namespace detail {
+DecodeResult decodeVCmpNleF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_nle_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNleF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpNeqF64Vop3::VCmpNeqF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_neq_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -6250,6 +9082,16 @@ VCmpNeqF64Vop3::VCmpNeqF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
+namespace detail {
+DecodeResult decodeVCmpNeqF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_neq_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNeqF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpNltF64Vop3::VCmpNltF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nlt_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNltF64Vop3)),
@@ -6273,6 +9115,16 @@ VCmpNltF64Vop3::VCmpNltF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
+namespace detail {
+DecodeResult decodeVCmpNltF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_nlt_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNltF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpTruF64Vop3::VCmpTruF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_tru_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpTruF64Vop3)),
@@ -6295,6 +9147,16 @@ VCmpTruF64Vop3::VCmpTruF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
 }
+
+namespace detail {
+DecodeResult decodeVCmpTruF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_tru_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpTruF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxFF64Vop3::VCmpxFF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_f_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -6324,6 +9186,16 @@ VCmpxFF64Vop3::VCmpxFF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxFF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_f_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxFF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLtF64Vop3::VCmpxLtF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_lt_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtF64Vop3)),
@@ -6351,6 +9223,16 @@ VCmpxLtF64Vop3::VCmpxLtF64Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxLtF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_lt_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLtF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxEqF64Vop3::VCmpxEqF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_eq_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -6380,6 +9262,16 @@ VCmpxEqF64Vop3::VCmpxEqF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxEqF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_eq_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxEqF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLeF64Vop3::VCmpxLeF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_le_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeF64Vop3)),
@@ -6407,6 +9299,16 @@ VCmpxLeF64Vop3::VCmpxLeF64Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxLeF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_le_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLeF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxGtF64Vop3::VCmpxGtF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_gt_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -6436,6 +9338,16 @@ VCmpxGtF64Vop3::VCmpxGtF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxGtF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_gt_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGtF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLgF64Vop3::VCmpxLgF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_lg_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLgF64Vop3)),
@@ -6463,6 +9375,16 @@ VCmpxLgF64Vop3::VCmpxLgF64Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxLgF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_lg_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLgF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxGeF64Vop3::VCmpxGeF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ge_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -6492,6 +9414,16 @@ VCmpxGeF64Vop3::VCmpxGeF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxGeF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ge_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGeF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxOF64Vop3::VCmpxOF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_o_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxOF64Vop3)),
@@ -6519,6 +9451,16 @@ VCmpxOF64Vop3::VCmpxOF64Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxOF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_o_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxOF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxUF64Vop3::VCmpxUF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_u_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -6548,6 +9490,16 @@ VCmpxUF64Vop3::VCmpxUF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxUF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_u_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxUF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxNgeF64Vop3::VCmpxNgeF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_nge_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNgeF64Vop3)),
@@ -6575,6 +9527,17 @@ VCmpxNgeF64Vop3::VCmpxNgeF64Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxNgeF64Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_nge_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNgeF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxNlgF64Vop3::VCmpxNlgF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_nlg_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -6604,6 +9567,17 @@ VCmpxNlgF64Vop3::VCmpxNlgF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxNlgF64Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_nlg_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNlgF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxNgtF64Vop3::VCmpxNgtF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ngt_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNgtF64Vop3)),
@@ -6631,6 +9605,17 @@ VCmpxNgtF64Vop3::VCmpxNgtF64Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxNgtF64Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ngt_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNgtF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxNleF64Vop3::VCmpxNleF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_nle_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -6660,6 +9645,17 @@ VCmpxNleF64Vop3::VCmpxNleF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxNleF64Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_nle_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNleF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxNeqF64Vop3::VCmpxNeqF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_neq_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeqF64Vop3)),
@@ -6687,6 +9683,17 @@ VCmpxNeqF64Vop3::VCmpxNeqF64Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxNeqF64Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_neq_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNeqF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxNltF64Vop3::VCmpxNltF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_nlt_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -6716,6 +9723,17 @@ VCmpxNltF64Vop3::VCmpxNltF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxNltF64Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_nlt_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNltF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxTruF64Vop3::VCmpxTruF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_tru_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxTruF64Vop3)),
@@ -6744,6 +9762,17 @@ VCmpxTruF64Vop3::VCmpxTruF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxTruF64Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_tru_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxTruF64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpFI32Vop3::VCmpFI32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_f_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpFI32Vop3)),
@@ -6764,6 +9793,16 @@ VCmpFI32Vop3::VCmpFI32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCmpFI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_f_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpFI32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpLtI32Vop3::VCmpLtI32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lt_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -6786,6 +9825,16 @@ VCmpLtI32Vop3::VCmpLtI32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCmpLtI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_lt_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLtI32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpEqI32Vop3::VCmpEqI32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_eq_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqI32Vop3)),
@@ -6806,6 +9855,16 @@ VCmpEqI32Vop3::VCmpEqI32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCmpEqI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_eq_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpEqI32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpLeI32Vop3::VCmpLeI32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_le_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -6828,6 +9887,16 @@ VCmpLeI32Vop3::VCmpLeI32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCmpLeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_le_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLeI32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpGtI32Vop3::VCmpGtI32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_gt_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtI32Vop3)),
@@ -6848,6 +9917,16 @@ VCmpGtI32Vop3::VCmpGtI32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCmpGtI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_gt_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGtI32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpNeI32Vop3::VCmpNeI32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ne_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -6870,6 +9949,16 @@ VCmpNeI32Vop3::VCmpNeI32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCmpNeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ne_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNeI32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpGeI32Vop3::VCmpGeI32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ge_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeI32Vop3)),
@@ -6890,6 +9979,16 @@ VCmpGeI32Vop3::VCmpGeI32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCmpGeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ge_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGeI32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpTI32Vop3::VCmpTI32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_t_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -6912,6 +10011,16 @@ VCmpTI32Vop3::VCmpTI32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCmpTI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_t_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpTI32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpClassF32Vop3::VCmpClassF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_class_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpClassF32Vop3)),
@@ -6932,6 +10041,17 @@ VCmpClassF32Vop3::VCmpClassF32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCmpClassF32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_class_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpClassF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpLtI16Vop3::VCmpLtI16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lt_i16", reinterpret_cast<const OpEncoding *>(inst),
@@ -6956,6 +10076,16 @@ VCmpLtI16Vop3::VCmpLtI16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVCmpLtI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_lt_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLtI16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpEqI16Vop3::VCmpEqI16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_eq_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqI16Vop3)),
@@ -6978,6 +10108,16 @@ VCmpEqI16Vop3::VCmpEqI16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVCmpEqI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_eq_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpEqI16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpLeI16Vop3::VCmpLeI16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_le_i16", reinterpret_cast<const OpEncoding *>(inst),
@@ -7002,6 +10142,16 @@ VCmpLeI16Vop3::VCmpLeI16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVCmpLeI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_le_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLeI16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpGtI16Vop3::VCmpGtI16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_gt_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtI16Vop3)),
@@ -7024,6 +10174,16 @@ VCmpGtI16Vop3::VCmpGtI16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVCmpGtI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_gt_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGtI16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpNeI16Vop3::VCmpNeI16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ne_i16", reinterpret_cast<const OpEncoding *>(inst),
@@ -7048,6 +10208,16 @@ VCmpNeI16Vop3::VCmpNeI16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVCmpNeI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ne_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNeI16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpGeI16Vop3::VCmpGeI16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ge_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeI16Vop3)),
@@ -7071,6 +10241,16 @@ VCmpGeI16Vop3::VCmpGeI16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVCmpGeI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ge_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGeI16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpClassF16Vop3::VCmpClassF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_class_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpClassF16Vop3)),
@@ -7093,6 +10273,17 @@ VCmpClassF16Vop3::VCmpClassF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVCmpClassF16Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_class_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpClassF16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxFI32Vop3::VCmpxFI32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_f_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -7120,6 +10311,16 @@ VCmpxFI32Vop3::VCmpxFI32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxFI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_f_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxFI32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLtI32Vop3::VCmpxLtI32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_lt_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtI32Vop3)),
@@ -7145,6 +10346,16 @@ VCmpxLtI32Vop3::VCmpxLtI32Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxLtI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_lt_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLtI32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxEqI32Vop3::VCmpxEqI32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_eq_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -7172,6 +10383,16 @@ VCmpxEqI32Vop3::VCmpxEqI32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxEqI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_eq_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxEqI32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLeI32Vop3::VCmpxLeI32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_le_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeI32Vop3)),
@@ -7197,6 +10418,16 @@ VCmpxLeI32Vop3::VCmpxLeI32Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxLeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_le_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLeI32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxGtI32Vop3::VCmpxGtI32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_gt_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -7224,6 +10455,16 @@ VCmpxGtI32Vop3::VCmpxGtI32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxGtI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_gt_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGtI32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxNeI32Vop3::VCmpxNeI32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ne_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeI32Vop3)),
@@ -7249,6 +10490,16 @@ VCmpxNeI32Vop3::VCmpxNeI32Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxNeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ne_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNeI32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxGeI32Vop3::VCmpxGeI32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ge_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -7276,6 +10527,16 @@ VCmpxGeI32Vop3::VCmpxGeI32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxGeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ge_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGeI32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxTI32Vop3::VCmpxTI32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_t_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxTI32Vop3)),
@@ -7302,6 +10563,16 @@ VCmpxTI32Vop3::VCmpxTI32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxTI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_t_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxTI32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxClassF32Vop3::VCmpxClassF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_class_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxClassF32Vop3)),
@@ -7327,6 +10598,17 @@ VCmpxClassF32Vop3::VCmpxClassF32Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxClassF32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_class_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxClassF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxLtI16Vop3::VCmpxLtI16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_lt_i16", reinterpret_cast<const OpEncoding *>(inst),
@@ -7356,6 +10638,16 @@ VCmpxLtI16Vop3::VCmpxLtI16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxLtI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_lt_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLtI16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxEqI16Vop3::VCmpxEqI16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_eq_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqI16Vop3)),
@@ -7383,6 +10675,16 @@ VCmpxEqI16Vop3::VCmpxEqI16Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxEqI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_eq_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxEqI16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxLeI16Vop3::VCmpxLeI16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_le_i16", reinterpret_cast<const OpEncoding *>(inst),
@@ -7412,6 +10714,16 @@ VCmpxLeI16Vop3::VCmpxLeI16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxLeI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_le_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLeI16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxGtI16Vop3::VCmpxGtI16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_gt_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtI16Vop3)),
@@ -7439,6 +10751,16 @@ VCmpxGtI16Vop3::VCmpxGtI16Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxGtI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_gt_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGtI16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxNeI16Vop3::VCmpxNeI16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ne_i16", reinterpret_cast<const OpEncoding *>(inst),
@@ -7468,6 +10790,16 @@ VCmpxNeI16Vop3::VCmpxNeI16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxNeI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ne_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNeI16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxGeI16Vop3::VCmpxGeI16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ge_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeI16Vop3)),
@@ -7495,6 +10827,16 @@ VCmpxGeI16Vop3::VCmpxGeI16Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxGeI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ge_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGeI16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxClassF16Vop3::VCmpxClassF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_class_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -7524,6 +10866,17 @@ VCmpxClassF16Vop3::VCmpxClassF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxClassF16Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_class_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxClassF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpFI64Vop3::VCmpFI64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_f_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpFI64Vop3)),
@@ -7546,6 +10899,16 @@ VCmpFI64Vop3::VCmpFI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
 }
+
+namespace detail {
+DecodeResult decodeVCmpFI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_f_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpFI64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpLtI64Vop3::VCmpLtI64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lt_i64", reinterpret_cast<const OpEncoding *>(inst),
@@ -7570,6 +10933,16 @@ VCmpLtI64Vop3::VCmpLtI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
 }
 
+namespace detail {
+DecodeResult decodeVCmpLtI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_lt_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLtI64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpEqI64Vop3::VCmpEqI64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_eq_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqI64Vop3)),
@@ -7592,6 +10965,16 @@ VCmpEqI64Vop3::VCmpEqI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
 }
+
+namespace detail {
+DecodeResult decodeVCmpEqI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_eq_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpEqI64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpLeI64Vop3::VCmpLeI64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_le_i64", reinterpret_cast<const OpEncoding *>(inst),
@@ -7616,6 +10999,16 @@ VCmpLeI64Vop3::VCmpLeI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
 }
 
+namespace detail {
+DecodeResult decodeVCmpLeI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_le_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLeI64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpGtI64Vop3::VCmpGtI64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_gt_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtI64Vop3)),
@@ -7638,6 +11031,16 @@ VCmpGtI64Vop3::VCmpGtI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
 }
+
+namespace detail {
+DecodeResult decodeVCmpGtI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_gt_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGtI64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpNeI64Vop3::VCmpNeI64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ne_i64", reinterpret_cast<const OpEncoding *>(inst),
@@ -7662,6 +11065,16 @@ VCmpNeI64Vop3::VCmpNeI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
 }
 
+namespace detail {
+DecodeResult decodeVCmpNeI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ne_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNeI64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpGeI64Vop3::VCmpGeI64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ge_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeI64Vop3)),
@@ -7684,6 +11097,16 @@ VCmpGeI64Vop3::VCmpGeI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
 }
+
+namespace detail {
+DecodeResult decodeVCmpGeI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ge_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGeI64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpTI64Vop3::VCmpTI64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_t_i64", reinterpret_cast<const OpEncoding *>(inst),
@@ -7708,6 +11131,16 @@ VCmpTI64Vop3::VCmpTI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
 }
 
+namespace detail {
+DecodeResult decodeVCmpTI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_t_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpTI64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpClassF64Vop3::VCmpClassF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_class_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpClassF64Vop3)),
@@ -7729,6 +11162,17 @@ VCmpClassF64Vop3::VCmpClassF64Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCmpClassF64Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_class_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpClassF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpLtU16Vop3::VCmpLtU16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lt_u16", reinterpret_cast<const OpEncoding *>(inst),
@@ -7753,6 +11197,16 @@ VCmpLtU16Vop3::VCmpLtU16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVCmpLtU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_lt_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLtU16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpEqU16Vop3::VCmpEqU16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_eq_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqU16Vop3)),
@@ -7775,6 +11229,16 @@ VCmpEqU16Vop3::VCmpEqU16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVCmpEqU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_eq_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpEqU16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpLeU16Vop3::VCmpLeU16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_le_u16", reinterpret_cast<const OpEncoding *>(inst),
@@ -7799,6 +11263,16 @@ VCmpLeU16Vop3::VCmpLeU16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVCmpLeU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_le_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLeU16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpGtU16Vop3::VCmpGtU16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_gt_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtU16Vop3)),
@@ -7821,6 +11295,16 @@ VCmpGtU16Vop3::VCmpGtU16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVCmpGtU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_gt_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGtU16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpNeU16Vop3::VCmpNeU16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ne_u16", reinterpret_cast<const OpEncoding *>(inst),
@@ -7845,6 +11329,16 @@ VCmpNeU16Vop3::VCmpNeU16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVCmpNeU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ne_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNeU16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpGeU16Vop3::VCmpGeU16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ge_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeU16Vop3)),
@@ -7867,6 +11361,16 @@ VCmpGeU16Vop3::VCmpGeU16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVCmpGeU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ge_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGeU16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxFI64Vop3::VCmpxFI64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_f_i64", reinterpret_cast<const OpEncoding *>(inst),
@@ -7896,6 +11400,16 @@ VCmpxFI64Vop3::VCmpxFI64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxFI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_f_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxFI64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLtI64Vop3::VCmpxLtI64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_lt_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtI64Vop3)),
@@ -7923,6 +11437,16 @@ VCmpxLtI64Vop3::VCmpxLtI64Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxLtI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_lt_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLtI64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxEqI64Vop3::VCmpxEqI64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_eq_i64", reinterpret_cast<const OpEncoding *>(inst),
@@ -7952,6 +11476,16 @@ VCmpxEqI64Vop3::VCmpxEqI64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxEqI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_eq_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxEqI64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLeI64Vop3::VCmpxLeI64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_le_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeI64Vop3)),
@@ -7979,6 +11513,16 @@ VCmpxLeI64Vop3::VCmpxLeI64Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxLeI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_le_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLeI64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxGtI64Vop3::VCmpxGtI64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_gt_i64", reinterpret_cast<const OpEncoding *>(inst),
@@ -8008,6 +11552,16 @@ VCmpxGtI64Vop3::VCmpxGtI64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxGtI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_gt_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGtI64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxNeI64Vop3::VCmpxNeI64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ne_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeI64Vop3)),
@@ -8035,6 +11589,16 @@ VCmpxNeI64Vop3::VCmpxNeI64Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxNeI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ne_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNeI64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxGeI64Vop3::VCmpxGeI64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ge_i64", reinterpret_cast<const OpEncoding *>(inst),
@@ -8064,6 +11628,16 @@ VCmpxGeI64Vop3::VCmpxGeI64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxGeI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ge_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGeI64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxTI64Vop3::VCmpxTI64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_t_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxTI64Vop3)),
@@ -8092,6 +11666,16 @@ VCmpxTI64Vop3::VCmpxTI64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxTI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_t_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxTI64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxClassF64Vop3::VCmpxClassF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_class_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxClassF64Vop3)),
@@ -8118,6 +11702,17 @@ VCmpxClassF64Vop3::VCmpxClassF64Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxClassF64Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_class_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxClassF64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxLtU16Vop3::VCmpxLtU16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_lt_u16", reinterpret_cast<const OpEncoding *>(inst),
@@ -8147,6 +11742,16 @@ VCmpxLtU16Vop3::VCmpxLtU16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxLtU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_lt_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLtU16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxEqU16Vop3::VCmpxEqU16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_eq_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqU16Vop3)),
@@ -8174,6 +11779,16 @@ VCmpxEqU16Vop3::VCmpxEqU16Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxEqU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_eq_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxEqU16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxLeU16Vop3::VCmpxLeU16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_le_u16", reinterpret_cast<const OpEncoding *>(inst),
@@ -8203,6 +11818,16 @@ VCmpxLeU16Vop3::VCmpxLeU16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxLeU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_le_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLeU16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxGtU16Vop3::VCmpxGtU16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_gt_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtU16Vop3)),
@@ -8230,6 +11855,16 @@ VCmpxGtU16Vop3::VCmpxGtU16Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxGtU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_gt_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGtU16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxNeU16Vop3::VCmpxNeU16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ne_u16", reinterpret_cast<const OpEncoding *>(inst),
@@ -8259,6 +11894,16 @@ VCmpxNeU16Vop3::VCmpxNeU16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxNeU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ne_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNeU16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxGeU16Vop3::VCmpxGeU16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ge_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeU16Vop3)),
@@ -8287,6 +11932,16 @@ VCmpxGeU16Vop3::VCmpxGeU16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxGeU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ge_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGeU16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpFU32Vop3::VCmpFU32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_f_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpFU32Vop3)),
@@ -8307,6 +11962,16 @@ VCmpFU32Vop3::VCmpFU32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCmpFU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_f_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpFU32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpLtU32Vop3::VCmpLtU32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lt_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -8329,6 +11994,16 @@ VCmpLtU32Vop3::VCmpLtU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCmpLtU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_lt_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLtU32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpEqU32Vop3::VCmpEqU32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_eq_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqU32Vop3)),
@@ -8349,6 +12024,16 @@ VCmpEqU32Vop3::VCmpEqU32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCmpEqU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_eq_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpEqU32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpLeU32Vop3::VCmpLeU32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_le_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -8371,6 +12056,16 @@ VCmpLeU32Vop3::VCmpLeU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCmpLeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_le_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLeU32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpGtU32Vop3::VCmpGtU32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_gt_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtU32Vop3)),
@@ -8391,6 +12086,16 @@ VCmpGtU32Vop3::VCmpGtU32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCmpGtU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_gt_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGtU32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpNeU32Vop3::VCmpNeU32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ne_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -8413,6 +12118,16 @@ VCmpNeU32Vop3::VCmpNeU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCmpNeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ne_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNeU32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpGeU32Vop3::VCmpGeU32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ge_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeU32Vop3)),
@@ -8434,6 +12149,16 @@ VCmpGeU32Vop3::VCmpGeU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCmpGeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ge_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGeU32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpTU32Vop3::VCmpTU32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_t_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpTU32Vop3)),
@@ -8454,6 +12179,16 @@ VCmpTU32Vop3::VCmpTU32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVCmpTU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_t_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpTU32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpFF16Vop3::VCmpFF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_f_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -8478,6 +12213,16 @@ VCmpFF16Vop3::VCmpFF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVCmpFF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_f_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpFF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpLtF16Vop3::VCmpLtF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lt_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLtF16Vop3)),
@@ -8500,6 +12245,16 @@ VCmpLtF16Vop3::VCmpLtF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVCmpLtF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_lt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLtF16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpEqF16Vop3::VCmpEqF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_eq_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -8524,6 +12279,16 @@ VCmpEqF16Vop3::VCmpEqF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVCmpEqF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_eq_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpEqF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpLeF16Vop3::VCmpLeF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_le_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLeF16Vop3)),
@@ -8546,6 +12311,16 @@ VCmpLeF16Vop3::VCmpLeF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVCmpLeF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_le_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLeF16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpGtF16Vop3::VCmpGtF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_gt_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -8570,6 +12345,16 @@ VCmpGtF16Vop3::VCmpGtF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVCmpGtF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_gt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGtF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpLgF16Vop3::VCmpLgF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lg_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLgF16Vop3)),
@@ -8592,6 +12377,16 @@ VCmpLgF16Vop3::VCmpLgF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVCmpLgF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_lg_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLgF16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpGeF16Vop3::VCmpGeF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ge_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -8616,6 +12411,16 @@ VCmpGeF16Vop3::VCmpGeF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVCmpGeF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ge_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGeF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpOF16Vop3::VCmpOF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_o_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpOF16Vop3)),
@@ -8638,6 +12443,16 @@ VCmpOF16Vop3::VCmpOF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVCmpOF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_o_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpOF16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxFU32Vop3::VCmpxFU32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_f_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -8665,6 +12480,16 @@ VCmpxFU32Vop3::VCmpxFU32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxFU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_f_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxFU32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLtU32Vop3::VCmpxLtU32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_lt_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtU32Vop3)),
@@ -8690,6 +12515,16 @@ VCmpxLtU32Vop3::VCmpxLtU32Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxLtU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_lt_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLtU32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxEqU32Vop3::VCmpxEqU32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_eq_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -8717,6 +12552,16 @@ VCmpxEqU32Vop3::VCmpxEqU32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxEqU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_eq_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxEqU32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLeU32Vop3::VCmpxLeU32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_le_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeU32Vop3)),
@@ -8742,6 +12587,16 @@ VCmpxLeU32Vop3::VCmpxLeU32Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxLeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_le_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLeU32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxGtU32Vop3::VCmpxGtU32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_gt_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -8769,6 +12624,16 @@ VCmpxGtU32Vop3::VCmpxGtU32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxGtU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_gt_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGtU32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxNeU32Vop3::VCmpxNeU32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ne_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeU32Vop3)),
@@ -8794,6 +12659,16 @@ VCmpxNeU32Vop3::VCmpxNeU32Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxNeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ne_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNeU32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxGeU32Vop3::VCmpxGeU32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ge_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -8821,6 +12696,16 @@ VCmpxGeU32Vop3::VCmpxGeU32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxGeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ge_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGeU32Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxTU32Vop3::VCmpxTU32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_t_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxTU32Vop3)),
@@ -8846,6 +12731,16 @@ VCmpxTU32Vop3::VCmpxTU32Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxTU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_t_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxTU32Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxFF16Vop3::VCmpxFF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_f_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -8875,6 +12770,16 @@ VCmpxFF16Vop3::VCmpxFF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxFF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_f_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxFF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLtF16Vop3::VCmpxLtF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_lt_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtF16Vop3)),
@@ -8902,6 +12807,16 @@ VCmpxLtF16Vop3::VCmpxLtF16Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxLtF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_lt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLtF16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxEqF16Vop3::VCmpxEqF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_eq_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -8931,6 +12846,16 @@ VCmpxEqF16Vop3::VCmpxEqF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxEqF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_eq_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxEqF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLeF16Vop3::VCmpxLeF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_le_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeF16Vop3)),
@@ -8958,6 +12883,16 @@ VCmpxLeF16Vop3::VCmpxLeF16Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxLeF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_le_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLeF16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxGtF16Vop3::VCmpxGtF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_gt_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -8987,6 +12922,16 @@ VCmpxGtF16Vop3::VCmpxGtF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxGtF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_gt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGtF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLgF16Vop3::VCmpxLgF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_lg_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLgF16Vop3)),
@@ -9014,6 +12959,16 @@ VCmpxLgF16Vop3::VCmpxLgF16Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxLgF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_lg_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLgF16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxGeF16Vop3::VCmpxGeF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ge_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -9043,6 +12998,16 @@ VCmpxGeF16Vop3::VCmpxGeF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxGeF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ge_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGeF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxOF16Vop3::VCmpxOF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_o_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxOF16Vop3)),
@@ -9071,6 +13036,16 @@ VCmpxOF16Vop3::VCmpxOF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxOF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_o_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxOF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpFU64Vop3::VCmpFU64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_f_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpFU64Vop3)),
@@ -9093,6 +13068,16 @@ VCmpFU64Vop3::VCmpFU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
 }
+
+namespace detail {
+DecodeResult decodeVCmpFU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_f_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpFU64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpLtU64Vop3::VCmpLtU64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lt_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -9117,6 +13102,16 @@ VCmpLtU64Vop3::VCmpLtU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
 }
 
+namespace detail {
+DecodeResult decodeVCmpLtU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_lt_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLtU64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpEqU64Vop3::VCmpEqU64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_eq_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqU64Vop3)),
@@ -9139,6 +13134,16 @@ VCmpEqU64Vop3::VCmpEqU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
 }
+
+namespace detail {
+DecodeResult decodeVCmpEqU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_eq_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpEqU64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpLeU64Vop3::VCmpLeU64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_le_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -9163,6 +13168,16 @@ VCmpLeU64Vop3::VCmpLeU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
 }
 
+namespace detail {
+DecodeResult decodeVCmpLeU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_le_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLeU64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpGtU64Vop3::VCmpGtU64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_gt_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtU64Vop3)),
@@ -9185,6 +13200,16 @@ VCmpGtU64Vop3::VCmpGtU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
 }
+
+namespace detail {
+DecodeResult decodeVCmpGtU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_gt_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGtU64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpNeU64Vop3::VCmpNeU64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ne_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -9209,6 +13234,16 @@ VCmpNeU64Vop3::VCmpNeU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
 }
 
+namespace detail {
+DecodeResult decodeVCmpNeU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ne_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNeU64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpGeU64Vop3::VCmpGeU64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ge_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeU64Vop3)),
@@ -9231,6 +13266,16 @@ VCmpGeU64Vop3::VCmpGeU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
 }
+
+namespace detail {
+DecodeResult decodeVCmpGeU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ge_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGeU64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpTU64Vop3::VCmpTU64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_t_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -9255,6 +13300,16 @@ VCmpTU64Vop3::VCmpTU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
 }
 
+namespace detail {
+DecodeResult decodeVCmpTU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_t_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpTU64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpUF16Vop3::VCmpUF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_u_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpUF16Vop3)),
@@ -9277,6 +13332,16 @@ VCmpUF16Vop3::VCmpUF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVCmpUF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_u_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpUF16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpNgeF16Vop3::VCmpNgeF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nge_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -9301,6 +13366,16 @@ VCmpNgeF16Vop3::VCmpNgeF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVCmpNgeF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_nge_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNgeF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpNlgF16Vop3::VCmpNlgF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nlg_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNlgF16Vop3)),
@@ -9323,6 +13398,16 @@ VCmpNlgF16Vop3::VCmpNlgF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVCmpNlgF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_nlg_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNlgF16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpNgtF16Vop3::VCmpNgtF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ngt_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -9347,6 +13432,16 @@ VCmpNgtF16Vop3::VCmpNgtF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVCmpNgtF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ngt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNgtF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpNleF16Vop3::VCmpNleF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nle_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNleF16Vop3)),
@@ -9369,6 +13464,16 @@ VCmpNleF16Vop3::VCmpNleF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVCmpNleF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_nle_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNleF16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpNeqF16Vop3::VCmpNeqF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_neq_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -9393,6 +13498,16 @@ VCmpNeqF16Vop3::VCmpNeqF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVCmpNeqF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_neq_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNeqF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpNltF16Vop3::VCmpNltF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nlt_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNltF16Vop3)),
@@ -9416,6 +13531,16 @@ VCmpNltF16Vop3::VCmpNltF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVCmpNltF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_nlt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNltF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpTruF16Vop3::VCmpTruF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_tru_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpTruF16Vop3)),
@@ -9438,6 +13563,16 @@ VCmpTruF16Vop3::VCmpTruF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVCmpTruF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_tru_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpTruF16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxFU64Vop3::VCmpxFU64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_f_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -9467,6 +13602,16 @@ VCmpxFU64Vop3::VCmpxFU64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxFU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_f_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxFU64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLtU64Vop3::VCmpxLtU64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_lt_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtU64Vop3)),
@@ -9494,6 +13639,16 @@ VCmpxLtU64Vop3::VCmpxLtU64Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxLtU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_lt_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLtU64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxEqU64Vop3::VCmpxEqU64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_eq_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -9523,6 +13678,16 @@ VCmpxEqU64Vop3::VCmpxEqU64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxEqU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_eq_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxEqU64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxLeU64Vop3::VCmpxLeU64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_le_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeU64Vop3)),
@@ -9550,6 +13715,16 @@ VCmpxLeU64Vop3::VCmpxLeU64Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxLeU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_le_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLeU64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxGtU64Vop3::VCmpxGtU64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_gt_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -9579,6 +13754,16 @@ VCmpxGtU64Vop3::VCmpxGtU64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxGtU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_gt_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGtU64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxNeU64Vop3::VCmpxNeU64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ne_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeU64Vop3)),
@@ -9606,6 +13791,16 @@ VCmpxNeU64Vop3::VCmpxNeU64Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxNeU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ne_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNeU64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxGeU64Vop3::VCmpxGeU64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ge_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -9635,6 +13830,16 @@ VCmpxGeU64Vop3::VCmpxGeU64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxGeU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ge_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGeU64Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxTU64Vop3::VCmpxTU64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_t_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxTU64Vop3)),
@@ -9662,6 +13867,16 @@ VCmpxTU64Vop3::VCmpxTU64Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxTU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_t_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxTU64Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxUF16Vop3::VCmpxUF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_u_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -9691,6 +13906,16 @@ VCmpxUF16Vop3::VCmpxUF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxUF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_u_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxUF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxNgeF16Vop3::VCmpxNgeF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_nge_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNgeF16Vop3)),
@@ -9718,6 +13943,17 @@ VCmpxNgeF16Vop3::VCmpxNgeF16Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxNgeF16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_nge_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNgeF16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxNlgF16Vop3::VCmpxNlgF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_nlg_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -9747,6 +13983,17 @@ VCmpxNlgF16Vop3::VCmpxNlgF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxNlgF16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_nlg_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNlgF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxNgtF16Vop3::VCmpxNgtF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ngt_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNgtF16Vop3)),
@@ -9774,6 +14021,17 @@ VCmpxNgtF16Vop3::VCmpxNgtF16Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxNgtF16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ngt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNgtF16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxNleF16Vop3::VCmpxNleF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_nle_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -9803,6 +14061,17 @@ VCmpxNleF16Vop3::VCmpxNleF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxNleF16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_nle_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNleF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxNeqF16Vop3::VCmpxNeqF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_neq_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeqF16Vop3)),
@@ -9830,6 +14099,17 @@ VCmpxNeqF16Vop3::VCmpxNeqF16Vop3(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
   flags_ |= WRITES_EXEC;
 }
+
+namespace detail {
+DecodeResult decodeVCmpxNeqF16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_neq_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNeqF16Vop3>(opcode);
+}
+} // namespace detail
 
 VCmpxNltF16Vop3::VCmpxNltF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_nlt_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -9859,6 +14139,17 @@ VCmpxNltF16Vop3::VCmpxNltF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxNltF16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_nlt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNltF16Vop3>(opcode);
+}
+} // namespace detail
+
 VCmpxTruF16Vop3::VCmpxTruF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_tru_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxTruF16Vop3)),
@@ -9887,6 +14178,17 @@ VCmpxTruF16Vop3::VCmpxTruF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
+namespace detail {
+DecodeResult decodeVCmpxTruF16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_tru_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxTruF16Vop3>(opcode);
+}
+} // namespace detail
+
 VAddCoCiU32Vop3SdstEnc::VAddCoCiU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_add_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VAddCoCiU32Vop3SdstEnc)),
@@ -9911,6 +14213,17 @@ VAddCoCiU32Vop3SdstEnc::VAddCoCiU32Vop3SdstEnc(const MachineInst *inst)
                    static_cast<int>(
                        reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVAddCoCiU32Vop3SdstEnc(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3SdstEnc::validate_encoding(
+      "v_add_co_ci_u32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAddCoCiU32Vop3SdstEnc>(opcode);
+}
+} // namespace detail
 
 VSubCoCiU32Vop3SdstEnc::VSubCoCiU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_sub_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -9937,6 +14250,17 @@ VSubCoCiU32Vop3SdstEnc::VSubCoCiU32Vop3SdstEnc(const MachineInst *inst)
                        reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVSubCoCiU32Vop3SdstEnc(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3SdstEnc::validate_encoding(
+      "v_sub_co_ci_u32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSubCoCiU32Vop3SdstEnc>(opcode);
+}
+} // namespace detail
+
 VSubrevCoCiU32Vop3SdstEnc::VSubrevCoCiU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_subrev_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VSubrevCoCiU32Vop3SdstEnc)),
@@ -9961,6 +14285,17 @@ VSubrevCoCiU32Vop3SdstEnc::VSubrevCoCiU32Vop3SdstEnc(const MachineInst *inst)
                    static_cast<int>(
                        reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVSubrevCoCiU32Vop3SdstEnc(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3SdstEnc::validate_encoding(
+      "v_subrev_co_ci_u32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSubrevCoCiU32Vop3SdstEnc>(opcode);
+}
+} // namespace detail
 
 VDivScaleF32Vop3SdstEnc::VDivScaleF32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_div_scale_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -9990,6 +14325,17 @@ VDivScaleF32Vop3SdstEnc::VDivScaleF32Vop3SdstEnc(const MachineInst *inst)
                    static_cast<int>(
                        reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVDivScaleF32Vop3SdstEnc(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3SdstEnc::validate_encoding(
+      "v_div_scale_f32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VDivScaleF32Vop3SdstEnc>(opcode);
+}
+} // namespace detail
 
 VDivScaleF64Vop3SdstEnc::VDivScaleF64Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_div_scale_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -10026,6 +14372,17 @@ VDivScaleF64Vop3SdstEnc::VDivScaleF64Vop3SdstEnc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
+namespace detail {
+DecodeResult decodeVDivScaleF64Vop3SdstEnc(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3SdstEnc::validate_encoding(
+      "v_div_scale_f64", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VDivScaleF64Vop3SdstEnc>(opcode);
+}
+} // namespace detail
+
 VMadU64U32Vop3SdstEnc::VMadU64U32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_mad_u64_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VMadU64U32Vop3SdstEnc)),
@@ -10056,6 +14413,17 @@ VMadU64U32Vop3SdstEnc::VMadU64U32Vop3SdstEnc(const MachineInst *inst)
             reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
 }
+
+namespace detail {
+DecodeResult decodeVMadU64U32Vop3SdstEnc(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3SdstEnc::validate_encoding(
+      "v_mad_u64_u32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMadU64U32Vop3SdstEnc>(opcode);
+}
+} // namespace detail
 
 VMadI64I32Vop3SdstEnc::VMadI64I32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_mad_i64_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -10088,6 +14456,17 @@ VMadI64I32Vop3SdstEnc::VMadI64I32Vop3SdstEnc(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
 }
 
+namespace detail {
+DecodeResult decodeVMadI64I32Vop3SdstEnc(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3SdstEnc::validate_encoding(
+      "v_mad_i64_i32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMadI64I32Vop3SdstEnc>(opcode);
+}
+} // namespace detail
+
 VAddCoU32Vop3SdstEnc::VAddCoU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_add_co_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VAddCoU32Vop3SdstEnc)),
@@ -10110,6 +14489,17 @@ VAddCoU32Vop3SdstEnc::VAddCoU32Vop3SdstEnc(const MachineInst *inst)
                    static_cast<int>(
                        reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVAddCoU32Vop3SdstEnc(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3SdstEnc::validate_encoding(
+      "v_add_co_u32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAddCoU32Vop3SdstEnc>(opcode);
+}
+} // namespace detail
 
 VSubCoU32Vop3SdstEnc::VSubCoU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_sub_co_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -10134,6 +14524,17 @@ VSubCoU32Vop3SdstEnc::VSubCoU32Vop3SdstEnc(const MachineInst *inst)
                        reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVSubCoU32Vop3SdstEnc(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3SdstEnc::validate_encoding(
+      "v_sub_co_u32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSubCoU32Vop3SdstEnc>(opcode);
+}
+} // namespace detail
+
 VSubrevCoU32Vop3SdstEnc::VSubrevCoU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_subrev_co_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VSubrevCoU32Vop3SdstEnc)),
@@ -10156,6 +14557,17 @@ VSubrevCoU32Vop3SdstEnc::VSubrevCoU32Vop3SdstEnc(const MachineInst *inst)
                    static_cast<int>(
                        reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVSubrevCoU32Vop3SdstEnc(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3SdstEnc::validate_encoding(
+      "v_subrev_co_u32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSubrevCoU32Vop3SdstEnc>(opcode);
+}
+} // namespace detail
 
 } // namespace rdna1
 } // namespace rocjitsu

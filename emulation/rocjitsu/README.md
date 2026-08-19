@@ -16,19 +16,21 @@ real hardware. Supports three execution strategies:
 
 ## Supported architectures
 
-| Architecture | GFX Target | ISA Family | Simulation | DBT | DBI |
-|---|---|---|---|---|---|
-| CDNA1&trade; | gfx908 | GFX9 | Experimental | Experimental | Planned |
-| CDNA2&trade; | gfx90a | GFX9 | Experimental | Experimental | Planned |
-| CDNA3&trade; | gfx94x | GFX9 | Experimental | Experimental | Planned |
-| CDNA4&trade; | gfx950 | GFX9 | Beta | Experimental | Planned |
-| RDNA1&trade; | gfx1010 | GFX10 | Experimental | Experimental | Planned |
-| RDNA2&trade; | gfx1030 | GFX10 | Experimental | Experimental | Planned |
-| RDNA3&trade; | gfx1100 | GFX11 | Experimental | Experimental | Planned |
-| RDNA3.5&trade; | gfx1150 | GFX11 | Experimental | Experimental | Planned |
-| RDNA4&trade; | gfx1200 | GFX12 | Experimental | Experimental | Planned |
-| CDNA5&trade; | gfx1250 | GFX12 | Experimental | Experimental | Planned |
-| RISC-V | RV64I | RV | Experimental | &mdash; | &mdash; |
+| Architecture | GFX Target | ISA Family | Simulation |
+|---|---|---|---|
+| CDNA1&trade; | gfx908 | GFX9 | Experimental |
+| CDNA2&trade; | gfx90a | GFX9 | Experimental |
+| CDNA3&trade; | gfx94x | GFX9 | Beta |
+| CDNA4&trade; | gfx950 | GFX9 | Beta |
+| CDNA5&trade; | gfx1250 | GFX12.5 | Beta |
+| RDNA1&trade; | gfx1010 | GFX10 | Experimental |
+| RDNA2&trade; | gfx1030 | GFX10 | Experimental |
+| RDNA3&trade; | gfx110x | GFX11 | Beta |
+| RDNA3.5&trade; | gfx1151 | GFX11.5 | Experimental |
+| RDNA4&trade; | gfx120x | GFX12 | Beta |
+| RISC-V | RV64I | RV | Experimental |
+
+CDNA4&trade; to CDNA3&trade; dynamic binary translation is experimental.
 
 <!-- \NPI new GPU: add a row to the supported-architectures table above. -->
 
@@ -135,6 +137,7 @@ See [docs/building.md](docs/building.md) for container setup with PyTorch.
 | [DBT Design](docs/dbt-design.md) | Binary translator architecture |
 | [DBI Design](docs/dbi-design.md) | Binary instrumentation (in progress) |
 | [AMDGPU Register Spilling](docs/spilling.md) | Reusable DBI private-layout and VGPR save/restore backend |
+| [CDNA5 Tensor DMA](docs/tensor-dma.md) | gfx1250 tensor descriptor, bounds, iteration, gather, and padding model |
 | [Codegen](docs/codegen.md) | ISA codegen pipeline and regen commands |
 | [ISA Target Providers](docs/isa-target-providers.md) | Static target registration and per-component subsets |
 

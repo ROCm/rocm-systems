@@ -570,6 +570,8 @@ void trace_virtual_lds_kernarg(uint64_t packet_id, const void *kernarg, size_t s
     return "resource-limit";
   case DiagnosticKind::KernelSkipped:
     return "kernel-skipped";
+  case DiagnosticKind::ResidualRewrite:
+    return "residual-rewrite";
   }
   return "unknown";
 }
@@ -581,6 +583,9 @@ void print_diagnostic(FILE *stream, const TranslationDiagnostic &diagnostic) {
   if (diagnostic.guest_offset)
     std::fprintf(stream, " .text+0x%llx",
                  static_cast<unsigned long long>(*diagnostic.guest_offset));
+  if (diagnostic.output_offset)
+    std::fprintf(stream, " output:.text+0x%llx",
+                 static_cast<unsigned long long>(*diagnostic.output_offset));
   if (!diagnostic.mnemonic.empty())
     std::fprintf(stream, " %s", diagnostic.mnemonic.c_str());
   std::fprintf(stream, ": %s\n", diagnostic.message.c_str());

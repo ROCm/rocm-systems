@@ -6,7 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/exp.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/execution_backend.h"
-#include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna1 {
@@ -31,6 +31,16 @@ ExpExp::ExpExp(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
+
+namespace detail {
+DecodeResult decodeExpExp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Exp::validate_encoding("exp", reinterpret_cast<const Exp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ExpExp>(opcode);
+}
+} // namespace detail
 
 } // namespace rdna1
 } // namespace rocjitsu

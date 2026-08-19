@@ -18,6 +18,7 @@
 /// those lanes are excluded from the comparison — NaN-ness of the result is
 /// deterministic from the inputs, so both runs skip the same lanes.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -192,7 +193,7 @@ void check_fmac_literal_src0(bool force_scalar) {
 
   uint32_t enc = vop2_encode(/*opcode=*/4, /*vdst=*/4, /*vsrc1=*/2, /*src0=*/255);
   uint32_t words[4] = {enc, kLiteralHighWord, 0u, 0u};
-  Instruction *inst = fx.decoder->decode(words);
+  Instruction *inst = decode_valid(*fx.decoder, words);
   ASSERT_NE(inst, nullptr) << "v_fmac_f64 literal decode failed";
   fx.cu->execute_instruction(inst, *fx.wf);
   delete inst;
@@ -217,7 +218,7 @@ void check_fmac(uint64_t exec) {
     // v_fmac_f64 = VOP2 op 4. src0 = v0:v1 (enc 256), vsrc1 = v2:v3, vdst = v4:v5.
     uint32_t enc = vop2_encode(/*opcode=*/4, /*vdst=*/4, /*vsrc1=*/2, /*src0=*/256);
     uint32_t words[4] = {enc, 0u, 0u, 0u};
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << "v_fmac_f64 decode failed";
     auto out = fx.run(inst, exec);
     delete inst;

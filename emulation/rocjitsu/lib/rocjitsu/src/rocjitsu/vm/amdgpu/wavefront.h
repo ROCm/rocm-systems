@@ -18,6 +18,7 @@
 #include <cassert>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -205,6 +206,30 @@ public:
   /// @brief Set the per-WG LDS base offset.
   void set_lds_base(uint32_t base) { lds_base_ = base; }
 
+  /// @brief Initialize a workgroup named barrier from an ISA barrier operand.
+  void barrier_init(int32_t barrier_id, uint32_t member_count);
+
+  /// @brief Join one workgroup named barrier.
+  void barrier_join(int32_t barrier_id);
+
+  /// @brief Signal a barrier and report whether this is its first signal.
+  bool barrier_signal(int32_t barrier_id, uint32_t member_count);
+
+  /// @brief Read the packed architectural state of a barrier.
+  uint32_t barrier_state(int32_t barrier_id) const;
+
+  /// @brief Wait on a named, workgroup, trap, or cluster barrier.
+  void barrier_wait(int32_t barrier_id);
+
+  /// @brief Leave the currently joined named barrier.
+  bool barrier_leave();
+
+  /// @brief Return the aligned LDS allocation size for this workgroup.
+  uint32_t lds_size() const { return lds_size_; }
+
+  /// @brief Set the aligned LDS allocation size for this workgroup.
+  void set_lds_size(uint32_t size) { lds_size_ = size; }
+
   /// @brief Return the LDS backing selected for this workgroup placement.
   ///
   /// CU-mode workgroups use their owning CU's LDS. WGP-mode workgroups can
@@ -215,6 +240,15 @@ public:
   /// @brief Override the LDS backing for this workgroup placement.
   /// Passing nullptr restores the owning CU's LDS.
   void set_lds(Lds *lds) { lds_ = lds; }
+
+  /// @brief Return whether this wave's compute unit has GPU memory backing.
+  bool has_gpu_memory() const;
+
+  /// @brief Read GPU memory in this wave's process address space.
+  void read_gpu_memory(uint64_t addr, std::span<uint8_t> dst) const;
+
+  /// @brief Write GPU memory in this wave's process address space.
+  void write_gpu_memory(uint64_t addr, std::span<const uint8_t> src);
 
   /// @brief Return this workgroup's rank within its cluster.
   uint32_t cluster_rank() const { return cluster_rank_; }
@@ -264,13 +298,27 @@ public:
   /// @brief Set the raw architectural EXEC register pair.
   void set_exec_raw(uint64_t val) { exec_ = val; }
 
-  /// @brief Return the VCC scalar register pair.
-  /// @returns Raw VCC register value.
+  /// @brief Return the raw architectural VCC register pair.
+  /// @returns Raw VCC register value, including non-lane bits in wave32 mode.
   uint64_t vcc() const { return vcc_; }
 
-  /// @brief Set the VCC scalar register pair.
-  /// @param val New VCC value.
+  /// @brief Return the active-lane portion of the VCC register pair.
+  /// @returns VCC mask with non-lane bits cleared.
+  uint64_t vcc_mask() const { return vcc_ & lane_mask(); }
+
+  /// @brief Set the raw architectural VCC register pair.
+  /// @param val New raw VCC value.
+  ///
+  /// Scalar operand writes may update either half directly. Vector predicate
+  /// and carry producers must use set_vcc_mask() to preserve wave32 VCC_HI.
   void set_vcc(uint64_t val) { vcc_ = val; }
+
+  /// @brief Set the active-lane portion of the VCC register pair.
+  /// @param val New lane-mask value.
+  ///
+  /// Wave32 leaves VCC_HI available as scalar scratch. Vector instructions
+  /// that produce a predicate or carry mask must preserve those non-lane bits.
+  void set_vcc_mask(uint64_t val) { vcc_ = (vcc_ & ~lane_mask()) | (val & lane_mask()); }
 
   /// @brief Return the M0 special register.
   /// @returns M0 register value.
@@ -512,6 +560,7 @@ public:
     queue_id_ = 0;
     process_id_ = 0;
     lds_base_ = 0;
+    lds_size_ = 0;
     lds_ = nullptr;
     cluster_rank_ = 0;
     cluster_size_ = 1;
@@ -530,6 +579,9 @@ public:
     shared_aperture_limit_ = 0;
     private_aperture_base_ = 0;
     private_aperture_limit_ = 0;
+    named_barrier_id_ = 0;
+    barrier_complete_.fill(false);
+    waiting_barrier_bit_ = kNoBarrierWait;
     wait_counters_ = {};
     wait_target_ = {};
     ready_cycle_ = 0;
@@ -557,6 +609,7 @@ protected:
   uint32_t queue_id_ = 0;     ///< Hardware queue ID (set per dispatch).
   uint32_t process_id_ = 0;   ///< Owning process ID (PASID analog, set per dispatch).
   uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
+  uint32_t lds_size_ = 0;     ///< Aligned per-WG LDS allocation size.
   Lds *lds_ = nullptr;        ///< Placement-selected LDS backing; nullptr means CU-local LDS.
   uint32_t cluster_rank_ = 0; ///< Workgroup rank inside the dispatch cluster.
   uint32_t cluster_size_ = 1; ///< Number of workgroups in the dispatch cluster.
@@ -589,8 +642,13 @@ private:
   uint64_t shared_aperture_limit_ = 0;
   uint64_t private_aperture_base_ = 0;
   uint64_t private_aperture_limit_ = 0;
-  WfState state_ = WfState::HALTED; ///< Current execution state.
-  WaitCounters wait_counters_;      ///< Outstanding memory operation counters.
+  static constexpr uint8_t kNoBarrierWait = 0xff;
+  uint32_t named_barrier_id_ = 0; ///< Currently joined named barrier.
+  /// Completion bits: named, workgroup, workgroup trap, cluster, cluster trap.
+  std::array<bool, 5> barrier_complete_{};
+  uint8_t waiting_barrier_bit_ = kNoBarrierWait; ///< Completion bit awaited by split wait.
+  WfState state_ = WfState::HALTED;              ///< Current execution state.
+  WaitCounters wait_counters_;                   ///< Outstanding memory operation counters.
 
 public:
   uint32_t trace_inst_count_ = 0; ///< Debug: instruction count for trace.

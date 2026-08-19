@@ -630,7 +630,7 @@ template <typename Inst, typename CarryOp>
         carry_bits |= (1ULL << i);
     vcc_out = (vcc_out & ~(chunk << base)) | ((carry_bits & chunk) << base);
   }
-  wf.set_vcc(vcc_out);
+  wf.set_vcc_mask(vcc_out);
   return true;
 }
 
@@ -1184,7 +1184,7 @@ template <typename T, typename Inst, typename CmpOp>
         cmp_bits |= (1ULL << i);
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
   return true;
 }
 
@@ -1220,7 +1220,7 @@ template <typename T, typename Inst, typename CmpOp>
     const uint64_t cmp_bits = cmp_bits64<T>(a, b, cmp_op);
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
   return true;
 }
 
@@ -1261,7 +1261,7 @@ template <typename Inst, typename CmpOp>
     const uint64_t cmp_bits = cmp_class_f64_bits(s, mask, cmp_op);
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
   return true;
 }
 

@@ -10,6 +10,7 @@
 /// Machine-level preservation below RegisterAccess must not add callbacks.
 
 #include "aql_queue.h"
+#include "decode_test_util.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -37,6 +38,7 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/soc.h"
 #include "scoped_temp.h"
@@ -1076,7 +1078,7 @@ TEST(ExecutionPluginTest, ValuSimdReadObservationUsesActiveExecMask) {
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     uint32_t words[4] = {vop2_encode(/*opcode=*/52, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256), 0u, 0u,
                          0u};
-    Instruction *inst = decoder->decode(words);
+    Instruction *inst = decode_valid(*decoder, words);
     ASSERT_NE(inst, nullptr);
     cu->execute_instruction(inst, *wf);
     delete inst;
@@ -1108,7 +1110,7 @@ TEST(ExecutionPluginTest, ValuSimdWriteObservationUsesActiveExecMask) {
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     uint32_t words[4] = {vop2_encode(/*opcode=*/52, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256), 0u, 0u,
                          0u};
-    Instruction *inst = decoder->decode(words);
+    Instruction *inst = decode_valid(*decoder, words);
     ASSERT_NE(inst, nullptr);
     cu->execute_instruction(inst, *wf);
     delete inst;
@@ -1155,7 +1157,7 @@ TEST(ExecutionPluginTest, DppObservationReportsExactSourceAndDestinationLanes) {
         vop1_encode(/*opcode=*/1, kDst, amdgpu::SRC_DPP),
         vop1_dpp_word(kSrc, /*dpp_ctrl=*/0, /*row_mask=*/0x1, /*bank_mask=*/0x5),
     };
-    Instruction *inst = decoder->decode(words);
+    Instruction *inst = decode_valid(*decoder, words);
     ASSERT_NE(inst, nullptr);
     plugin->events.clear();
     cu->execute_instruction(inst, *wf);
@@ -1204,7 +1206,7 @@ TEST(ExecutionPluginTest, DppOutOfBoundsObservationHonorsBoundCtrl) {
         vop1_dpp_word(kSrc, amdgpu::dpp::ROW_SHR1, /*row_mask=*/0xF,
                       /*bank_mask=*/0xF, bound_ctrl),
     };
-    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     plugin->events.clear();
     cu->execute_instruction(inst.get(), *wf);
@@ -1251,7 +1253,7 @@ TEST(ExecutionPluginTest, DppSourceDestinationAliasStagesBeforeWriting) {
       vop1_dpp_word(kReg, /*quad_perm:[1,0,3,2]=*/0xB1, /*row_mask=*/0x1,
                     /*bank_mask=*/0x1, /*bound_ctrl=*/true),
   };
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   plugin->events.clear();
   cu->execute_instruction(inst.get(), *wf);
@@ -1296,7 +1298,7 @@ TEST(ExecutionPluginTest, Dpp8FetchInactiveControlsSourceObservation) {
         vop1_encode(/*v_mov_b32 opcode=*/1, kDst, src_marker),
         kSrc | (lane_sel << 8u),
     };
-    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     plugin->events.clear();
     f.cu->execute_instruction(inst.get(), *wf);
@@ -1355,7 +1357,7 @@ TEST(ExecutionPluginTest, True16InstructionsReportSelectedSourceAndDestinationHa
     f.cu->write_vgpr(vb + 1, 0, 0xAAAA5555u);
     f.cu->write_vgpr(vb + 129, 0, 0xDEADBEEFu);
 
-    std::unique_ptr<Instruction> inst(decoder->decode(&test_case.word));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, &test_case.word));
     ASSERT_NE(inst, nullptr);
     plugin->events.clear();
     f.cu->execute_instruction(inst.get(), *wf);
@@ -1400,7 +1402,7 @@ TEST(ExecutionPluginTest, Gfx1250Simd64BitWriteReportsBothDestinationRegisters) 
         vop1_encode(/*v_mov_b64 opcode=*/29, kDst, /*generic VGPR source=*/256 + kSrc);
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
     ASSERT_NE(decoder, nullptr);
-    std::unique_ptr<Instruction> inst(decoder->decode(&word));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, &word));
     ASSERT_NE(inst, nullptr);
     plugin->events.clear();
     f.cu->execute_instruction(inst.get(), *wf);
@@ -1684,7 +1686,7 @@ TEST(ExecutionPluginTest, SdwaFloatingModifiersUseSemanticSourceWidth) {
 
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     std::unique_ptr<Instruction> f32_inst(
-        decoder->decode(reinterpret_cast<const uint32_t *>(&add_f32)));
+        decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&add_f32)));
     ASSERT_NE(f32_inst, nullptr);
     cu->write_vgpr(vb + kSrc0, 0, std::bit_cast<uint32_t>(-2.0f));
     cu->write_vgpr(vb + kSrc1, 0, std::bit_cast<uint32_t>(0.5f));
@@ -1703,9 +1705,9 @@ TEST(ExecutionPluginTest, SdwaFloatingModifiersUseSemanticSourceWidth) {
     cvt_bf16.dst_unused = amdgpu::sdwa::UNUSED_PAD;
 
     std::unique_ptr<Instruction> bf16_inst(
-        decoder->decode(reinterpret_cast<const uint32_t *>(&cvt_bf16)));
+        decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&cvt_bf16)));
     ASSERT_NE(bf16_inst, nullptr);
-    ASSERT_EQ(std::string_view(bf16_inst->mnemonic()), "v_cvt_f32_bf16_e32");
+    ASSERT_EQ(std::string_view(bf16_inst->mnemonic()), "v_cvt_f32_bf16_sdwa");
     cu->write_vgpr(vb + kSrc0, 0, 0xCAFE'C000u);
     cu->execute_instruction(bf16_inst.get(), *wf);
     EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), std::bit_cast<uint32_t>(2.0f));
@@ -1725,7 +1727,7 @@ TEST(ExecutionPluginTest, SdwaFloatingModifiersUseSemanticSourceWidth) {
       add_f16.dst_unused = amdgpu::sdwa::UNUSED_PAD;
 
       std::unique_ptr<Instruction> f16_inst(
-          decoder->decode(reinterpret_cast<const uint32_t *>(&add_f16)));
+          decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&add_f16)));
       ASSERT_NE(f16_inst, nullptr);
       const uint32_t shift = selection == amdgpu::sdwa::WORD_1 ? 16u : 0u;
       const uint32_t selected_word_mask = uint32_t{0xFFFF} << shift;
@@ -1768,7 +1770,8 @@ TEST(ExecutionPluginTest, SdwaVop2Src1SelectorReportsExactBytes) {
   raw.dst_unused = amdgpu::sdwa::UNUSED_PAD;
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
-  std::unique_ptr<Instruction> inst(decoder->decode(reinterpret_cast<const uint32_t *>(&raw)));
+  std::unique_ptr<Instruction> inst(
+      decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&raw)));
   ASSERT_NE(inst, nullptr);
   plugin->events.clear();
   cu->execute_instruction(inst.get(), *wf);
@@ -1822,7 +1825,8 @@ TEST(ExecutionPluginTest, SdwaVop2ScalarSelectorsUseSgprs) {
     raw.dst_unused = amdgpu::sdwa::UNUSED_PAD;
 
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
-    std::unique_ptr<Instruction> inst(decoder->decode(reinterpret_cast<const uint32_t *>(&raw)));
+    std::unique_ptr<Instruction> inst(
+        decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&raw)));
     ASSERT_NE(inst, nullptr);
     plugin->events.clear();
     cu->execute_instruction(inst.get(), *wf);
@@ -1904,7 +1908,7 @@ TEST(ExecutionPluginTest, SdwaObservationReportsExactSourceAndDestinationBytes) 
           vop1_encode(/*opcode=*/1, kDst, amdgpu::SRC_SDWA),
           vop1_sdwa_word(kSrc, test_case.dst_sel, test_case.dst_unused, test_case.src0_sel),
       };
-      Instruction *inst = decoder->decode(words);
+      Instruction *inst = decode_valid(*decoder, words);
       ASSERT_NE(inst, nullptr);
       plugin->events.clear();
       cu->execute_instruction(inst, *wf);
@@ -1960,7 +1964,7 @@ TEST(ExecutionPluginTest, SdwaClampIsAppliedInsideArchitecturalDestinationWrite)
       vop1_sdwa_word(kSrc, amdgpu::sdwa::DWORD, amdgpu::sdwa::UNUSED_PAD, amdgpu::sdwa::DWORD,
                      /*clamp=*/true),
   };
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   plugin->events.clear();
   cu->execute_instruction(inst.get(), *wf);
@@ -1997,7 +2001,7 @@ TEST(ExecutionPluginTest, SdwaClampHonorsDx10ClampMode) {
       vop1_sdwa_word(kSrc, amdgpu::sdwa::DWORD, amdgpu::sdwa::UNUSED_PAD, amdgpu::sdwa::DWORD,
                      /*clamp=*/true),
   };
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
 
   struct Case {
@@ -2041,7 +2045,7 @@ TEST(ExecutionPluginTest, SdwaPartialPreserveClampReportsFullDwordWrite) {
       vop1_sdwa_word(kSrc, amdgpu::sdwa::BYTE_1, amdgpu::sdwa::UNUSED_PRESERVE, amdgpu::sdwa::DWORD,
                      /*clamp=*/true),
   };
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   plugin->events.clear();
   cu->execute_instruction(inst.get(), *wf);
@@ -2158,7 +2162,7 @@ TEST(ExecutionPluginTest, F64SimdSourceReadObservationReportsBothHalves) {
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     uint32_t words[4] = {vop2_encode(/*opcode=*/4, /*vdst=*/4, /*vsrc1=*/2, /*src0=*/256), 0u, 0u,
                          0u};
-    Instruction *inst = decoder->decode(words);
+    Instruction *inst = decode_valid(*decoder, words);
     ASSERT_NE(inst, nullptr);
     cu->execute_instruction(inst, *wf);
     delete inst;
@@ -2190,7 +2194,7 @@ TEST(ExecutionPluginTest, Vop3FmacSimdReadObservationReportsAccumulator) {
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_encode(/*opcode=*/315, /*vdst=*/4, /*src0=*/256, /*src1=*/257, words);
-    Instruction *inst = decoder->decode(words);
+    Instruction *inst = decode_valid(*decoder, words);
     ASSERT_NE(inst, nullptr);
     cu->execute_instruction(inst, *wf);
     delete inst;
@@ -2932,6 +2936,53 @@ TEST(KernelLoggingPluginOutputTest, SuppressesProgressBelowLargeDispatchThreshol
   EXPECT_EQ(sink.str().find(" progress "), std::string::npos);
   EXPECT_NE(sink.str().find("Kernel #1 execution begin"), std::string::npos);
   EXPECT_NE(sink.str().find("Kernel #1 execution end"), std::string::npos);
+}
+
+TEST(RaceDetectorPluginTest, DroppedAsyncLdsLaneDoesNotCreateLowAddressRace) {
+  PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"gfx1250", /*wavefront_size=*/32);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *cu = f.cu();
+  auto *writer = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  auto *reader = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(writer, nullptr);
+  ASSERT_NE(reader, nullptr);
+  writer->set_exec(0x1u);
+  reader->set_exec(0x1u);
+  std::array<amdgpu::Wavefront *, 2> waves{writer, reader};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/0,
+                                               /*physical_vgpr_count=*/512, /*sgpr_count=*/208,
+                                               waves);
+
+  auto dropped = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  dropped->elem_size = 4;
+  dropped->num_elems = 1;
+  dropped->is_load = true;
+  dropped->lds_dst = true;
+  dropped->lds_per_lane_addr = true;
+  dropped->wf_size = writer->wf_size();
+  dropped->lane_mask = 0x1u;
+  dropped->per_lane_lds_addr[0] = amdgpu::kInvalidLdsAddress;
+  TestMemoryInstruction dropped_inst(std::move(dropped));
+  f.plugin_group_->onAmdgpuRouteMemoryInstruction(dropped_inst, *writer);
+
+  auto read = std::make_unique<VectorMemState>(LOCAL_MEM);
+  read->elem_size = 4;
+  read->num_elems = 1;
+  read->is_load = true;
+  read->wf_size = reader->wf_size();
+  read->lane_mask = 0x1u;
+  read->per_lane_addr[0] = 0;
+  read->dst_reg_base = reader->vgpr_alloc().base;
+  TestMemoryInstruction read_inst(std::move(read));
+  f.plugin_group_->onAmdgpuRouteMemoryInstruction(read_inst, *reader);
+
+  EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
 }
 
 TEST(ExecutionPluginGroupTest, OwnsConfiguredSinkForRetainedGroupLifetime) {

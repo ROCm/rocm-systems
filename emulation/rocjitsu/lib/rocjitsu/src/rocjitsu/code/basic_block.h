@@ -10,6 +10,7 @@
 #include "rocjitsu/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/code/instruction_list.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/decode_result.h"
 #include "util/intrusive_list.h"
 
 #include <cstdint>
@@ -84,25 +85,23 @@ public:
   /// @returns Instruction count.
   uint32_t num_instructions() const { return num_instructions_; }
 
-  /// @brief Whether the block ends with a terminator instruction or compiler stub.
-  /// @retval true The last instruction is a branch/program terminator, or the
-  /// block is an exact gfx1250 clang unreachable-stub body followed by padding.
+  /// @brief Whether the block ends with an explicit or implicit terminator.
+  /// @retval true The last instruction is a branch/program terminator, or the block carries an
+  /// inferred boundary (see has_implicit_terminator()).
   /// @retval false The block falls through to the next.
   bool has_terminator() const { return has_terminator_; }
 
-  /// @brief Whether sequential execution would enter undecodable source bytes.
+  /// @brief Whether an inferred boundary terminates this block's fallthrough edge.
   ///
-  /// @details Large code objects may place padding or opaque data between
-  /// functions in `.text`. Fallthrough into an undecodable gap cannot be safely
-  /// relocated and must make translation fail closed. The only exception is a
-  /// recognized gfx1250 clang unreachable-stub body followed by zero padding.
-  bool falls_through_to_undecodable_text() const { return falls_through_to_undecodable_text_; }
-
-  /// @brief Whether zero padding supplies this block's implicit terminator.
+  /// @details Clang may omit an architectural terminator after __builtin_unreachable(). Two
+  /// source conditions establish the boundary, and they are equivalent because neither leaves a
+  /// next instruction to reach: the following word is gfx1250 zero-filled text padding, or the
+  /// block ends at the end of `.text`. Relocation materializes either as an s_endpgm.
   ///
-  /// @details The recognized gfx1250 clang unreachable stub has no architectural
-  /// terminator. Its following zero-filled alignment hole establishes a CFG
-  /// boundary that relocation must materialize as an s_endpgm in target text.
+  /// This cuts the FALLTHROUGH edge only. A conditional or indirect branch carrying this flag
+  /// still has a live taken edge, so consumers must not read it as a whole-block program exit --
+  /// classify_function() treats it as one only when no branch edge remains, which keeps the taken
+  /// target subject to the missing-target checks.
   bool has_implicit_terminator() const { return has_implicit_terminator_; }
 
   /// @brief Last instruction in the block, or nullptr for an empty block.
@@ -180,11 +179,27 @@ public:
   /// @param[in] co Code object to analyze.
   /// @param[in] decoder Decoder for the target ISA.
   /// @param[in] arch ISA architecture used to match static PC builders.
-  /// @param[in] extra_leaders Byte offsets that must start a basic block.
+  /// @param[in] emit_error Destination for a decode diagnostic, including the
+  /// source `.text` byte offset.
+  /// @param[in] extra_leaders Byte offsets that must start a basic block AND are entered from
+  /// outside the decoded graph. Under ExplicitOnly these become the external-entry set, so an
+  /// offset listed here has no incoming caller facts.
   /// @param[in] entry_policy Whether predecessorless blocks are inferred to be
   /// external function entries. Use ExplicitOnly only when extra_leaders
   /// enumerates every externally reachable entry.
-  /// @returns Ordered list of basic blocks with their decoded instructions.
+  /// @param[in] extra_split_points Byte offsets that must start a basic block but are NOT external
+  /// entries. Function-entry symbols and stored-pointer targets belong here: they are genuine
+  /// boundaries, yet most are ordinary helpers whose callers reach them by a decoded edge, and
+  /// calling them external would throw those caller facts away.
+  /// @returns Ordered basic blocks with their decoded instructions, or failure.
+  static FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
+  build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
+        DecodeErrorEmitter emit_error, std::span<const uint64_t> extra_leaders = {},
+        ExternalEntryPolicy entry_policy = ExternalEntryPolicy::InferPredecessorless,
+        std::span<const uint64_t> extra_split_points = {},
+        std::span<const CodeRange> code_ranges = {});
+
+  /// @brief Compatibility entry point for callers that report malformed code by exception.
   static std::vector<std::unique_ptr<BasicBlock>>
   build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
         std::span<const uint64_t> extra_leaders = {},
@@ -207,14 +222,14 @@ public:
                   std::span<const uint64_t> entry_sizes = {}, uint32_t wavefront_size = 0);
 
 private:
-  static std::vector<std::unique_ptr<BasicBlock>>
+  static FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
   build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
-             std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
+             DecodeErrorEmitter emit_error, std::span<const uint64_t> extra_leaders,
+             ExternalEntryPolicy entry_policy, std::span<const uint64_t> extra_split_points,
              std::span<const CodeRange> code_ranges,
              std::span<const IndirectCallFixup> retained_indirect_targets);
 
   void add_instruction(std::unique_ptr<Instruction> inst);
-  [[nodiscard]] bool is_gfx1250_clang_unreachable_stub() const;
   void add_successor(BasicBlock &successor);
   /// Remove one proven-dead edge while preserving the inverse predecessor list.
   [[nodiscard]] bool remove_successor(BasicBlock &successor);
@@ -229,7 +244,6 @@ private:
   uint32_t size_ = 0;
   uint32_t num_instructions_ = 0;
   bool has_terminator_ = false;
-  bool falls_through_to_undecodable_text_ = false;
   bool has_implicit_terminator_ = false;
   InstructionList instructions_;
   std::vector<std::unique_ptr<Instruction>> storage_;

@@ -34,6 +34,7 @@ constexpr char kKindTranslatorDataOnly[] = "translator-data-only";
 constexpr char kKindTranslatorNothingToTranslate[] = "translator-nothing-to-translate";
 constexpr char kKindTranslatorResourceLimit[] = "translator-resource-limit";
 constexpr char kKindTranslatorKernelSkipped[] = "translator-kernel-skipped";
+constexpr char kKindTranslatorResidualRewrite[] = "translator-residual-rewrite";
 
 const char *diagnostic_severity_name(rocjitsu::DiagnosticSeverity severity) noexcept {
   switch (severity) {
@@ -67,6 +68,8 @@ const char *diagnostic_kind_name(rocjitsu::DiagnosticKind kind) noexcept {
     return kKindTranslatorResourceLimit;
   case rocjitsu::DiagnosticKind::KernelSkipped:
     return kKindTranslatorKernelSkipped;
+  case rocjitsu::DiagnosticKind::ResidualRewrite:
+    return kKindTranslatorResidualRewrite;
   }
   return "unknown";
 }

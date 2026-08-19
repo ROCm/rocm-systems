@@ -6,7 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/vintrp.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/execution_backend.h"
-#include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna1 {
@@ -28,6 +28,17 @@ VInterpP1F32Vintrp::VInterpP1F32Vintrp(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
+namespace detail {
+DecodeResult decodeVInterpP1F32Vintrp(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vintrp::validate_encoding(
+      "v_interp_p1_f32", reinterpret_cast<const Vintrp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VInterpP1F32Vintrp>(opcode);
+}
+} // namespace detail
+
 VInterpP2F32Vintrp::VInterpP2F32Vintrp(const MachineInst *inst)
     : Vintrp("v_interp_p2_f32", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::VInterpP2F32Vintrp)),
@@ -46,6 +57,17 @@ VInterpP2F32Vintrp::VInterpP2F32Vintrp(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
+namespace detail {
+DecodeResult decodeVInterpP2F32Vintrp(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vintrp::validate_encoding(
+      "v_interp_p2_f32", reinterpret_cast<const Vintrp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VInterpP2F32Vintrp>(opcode);
+}
+} // namespace detail
+
 VInterpMovF32Vintrp::VInterpMovF32Vintrp(const MachineInst *inst)
     : Vintrp("v_interp_mov_f32", reinterpret_cast<const OpEncoding *>(inst),
              selected_exec_fn(InstructionExecutionId::VInterpMovF32Vintrp)),
@@ -62,6 +84,17 @@ VInterpMovF32Vintrp::VInterpMovF32Vintrp(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
+
+namespace detail {
+DecodeResult decodeVInterpMovF32Vintrp(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vintrp::validate_encoding(
+      "v_interp_mov_f32", reinterpret_cast<const Vintrp::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VInterpMovF32Vintrp>(opcode);
+}
+} // namespace detail
 
 } // namespace rdna1
 } // namespace rocjitsu

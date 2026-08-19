@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/decode_result.h"
 #include "rocjitsu/isa/instruction.h"
 #include <array>
 #include <cstdint>
@@ -378,8 +379,23 @@ enum class LiteralSupport : uint8_t {
 
 class Sop1 : public IsaInstruction<Isa> {
 public:
-  Sop1(std::string_view mnemonic, const Sop1MachineInst *inst, ExecuteFn exec_fn,
-       LiteralSupport literal_support = LiteralSupport::Both, int num_encoded_sources = 1);
+  Sop1(std::string_view mnemonic, const Sop1MachineInst *inst, ExecuteFn exec_fn);
+  bool has_encoded_literal64() const;
+  bool has_encoded_literal32() const;
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const Sop1MachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error,
+                                  LiteralSupport literal_support = LiteralSupport::Both,
+                                  int num_encoded_sources = 1) {
+    const auto &inst_ = *inst;
+    if (!supports_literal(literal_support, LiteralSupport::Literal32) &&
+        ((num_encoded_sources > 0 && inst_.ssrc0 == 255))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 32-bit literals";
+    if (!supports_literal(literal_support, LiteralSupport::Literal64) &&
+        ((num_encoded_sources > 0 && inst_.ssrc0 == 254))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 64-bit literals";
+    return Result::success();
+  }
   bool default_encoding();
   bool has_lit_0();
   bool has_lit64_0();
@@ -390,8 +406,25 @@ public:
 
 class Sopc : public IsaInstruction<Isa> {
 public:
-  Sopc(std::string_view mnemonic, const SopcMachineInst *inst, ExecuteFn exec_fn,
-       LiteralSupport literal_support = LiteralSupport::Both, int num_encoded_sources = 2);
+  Sopc(std::string_view mnemonic, const SopcMachineInst *inst, ExecuteFn exec_fn);
+  bool has_encoded_literal64() const;
+  bool has_encoded_literal32() const;
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const SopcMachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error,
+                                  LiteralSupport literal_support = LiteralSupport::Both,
+                                  int num_encoded_sources = 2) {
+    const auto &inst_ = *inst;
+    if (!supports_literal(literal_support, LiteralSupport::Literal32) &&
+        ((num_encoded_sources > 0 && inst_.ssrc0 == 255) ||
+         (num_encoded_sources > 1 && inst_.ssrc1 == 255))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 32-bit literals";
+    if (!supports_literal(literal_support, LiteralSupport::Literal64) &&
+        ((num_encoded_sources > 0 && inst_.ssrc0 == 254) ||
+         (num_encoded_sources > 1 && inst_.ssrc1 == 254))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 64-bit literals";
+    return Result::success();
+  }
   bool default_encoding();
   bool has_lit_0();
   bool has_lit_1();
@@ -425,8 +458,25 @@ public:
 
 class Sop2 : public IsaInstruction<Isa> {
 public:
-  Sop2(std::string_view mnemonic, const Sop2MachineInst *inst, ExecuteFn exec_fn,
-       LiteralSupport literal_support = LiteralSupport::Both, int num_encoded_sources = 2);
+  Sop2(std::string_view mnemonic, const Sop2MachineInst *inst, ExecuteFn exec_fn);
+  bool has_encoded_literal64() const;
+  bool has_encoded_literal32() const;
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const Sop2MachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error,
+                                  LiteralSupport literal_support = LiteralSupport::Both,
+                                  int num_encoded_sources = 2) {
+    const auto &inst_ = *inst;
+    if (!supports_literal(literal_support, LiteralSupport::Literal32) &&
+        ((num_encoded_sources > 0 && inst_.ssrc0 == 255) ||
+         (num_encoded_sources > 1 && inst_.ssrc1 == 255))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 32-bit literals";
+    if (!supports_literal(literal_support, LiteralSupport::Literal64) &&
+        ((num_encoded_sources > 0 && inst_.ssrc0 == 254) ||
+         (num_encoded_sources > 1 && inst_.ssrc1 == 254))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 64-bit literals";
+    return Result::success();
+  }
   bool default_encoding();
   bool has_lit_0();
   bool has_lit_1();
@@ -451,8 +501,23 @@ public:
 
 class Vop1 : public IsaInstruction<Isa> {
 public:
-  Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn,
-       LiteralSupport literal_support = LiteralSupport::Both, int num_encoded_sources = 1);
+  Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn);
+  bool has_encoded_literal64() const;
+  bool has_encoded_literal32() const;
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const Vop1MachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error,
+                                  LiteralSupport literal_support = LiteralSupport::Both,
+                                  int num_encoded_sources = 1) {
+    const auto &inst_ = *inst;
+    if (!supports_literal(literal_support, LiteralSupport::Literal32) &&
+        ((num_encoded_sources > 0 && inst_.src0 == 255))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 32-bit literals";
+    if (!supports_literal(literal_support, LiteralSupport::Literal64) &&
+        ((num_encoded_sources > 0 && inst_.src0 == 254))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 64-bit literals";
+    return Result::success();
+  }
   void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
@@ -487,8 +552,23 @@ public:
 
 class Vopc : public IsaInstruction<Isa> {
 public:
-  Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exec_fn,
-       LiteralSupport literal_support = LiteralSupport::Both, int num_encoded_sources = 1);
+  Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exec_fn);
+  bool has_encoded_literal64() const;
+  bool has_encoded_literal32() const;
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const VopcMachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error,
+                                  LiteralSupport literal_support = LiteralSupport::Both,
+                                  int num_encoded_sources = 1) {
+    const auto &inst_ = *inst;
+    if (!supports_literal(literal_support, LiteralSupport::Literal32) &&
+        ((num_encoded_sources > 0 && inst_.src0 == 255))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 32-bit literals";
+    if (!supports_literal(literal_support, LiteralSupport::Literal64) &&
+        ((num_encoded_sources > 0 && inst_.src0 == 254))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 64-bit literals";
+    return Result::success();
+  }
   void build_modifiers(std::string &out) const override;
   bool default_encoding();
   bool has_lit();
@@ -520,8 +600,23 @@ public:
 
 class Vop2 : public IsaInstruction<Isa> {
 public:
-  Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn,
-       LiteralSupport literal_support = LiteralSupport::Both, int num_encoded_sources = 1);
+  Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn);
+  bool has_encoded_literal64() const;
+  bool has_encoded_literal32() const;
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const Vop2MachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error,
+                                  LiteralSupport literal_support = LiteralSupport::Both,
+                                  int num_encoded_sources = 1) {
+    const auto &inst_ = *inst;
+    if (!supports_literal(literal_support, LiteralSupport::Literal32) &&
+        ((num_encoded_sources > 0 && inst_.src0 == 255))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 32-bit literals";
+    if (!supports_literal(literal_support, LiteralSupport::Literal64) &&
+        ((num_encoded_sources > 0 && inst_.src0 == 254))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 64-bit literals";
+    return Result::success();
+  }
   void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
@@ -560,8 +655,29 @@ public:
 
 class Vop3 : public IsaInstruction<Isa> {
 public:
-  Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn,
-       LiteralSupport literal_support = LiteralSupport::Both, int num_encoded_sources = 3);
+  Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn);
+  bool has_encoded_literal32() const;
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const Vop3MachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error,
+                                  LiteralSupport literal_support = LiteralSupport::Both,
+                                  int num_encoded_sources = 3) {
+    const auto &inst_ = *inst;
+    if (!supports_literal(literal_support, LiteralSupport::Literal32) &&
+        ((num_encoded_sources > 0 && inst_.src0 == 255) ||
+         (num_encoded_sources > 1 && inst_.src1 == 255) ||
+         (num_encoded_sources > 2 && inst_.src2 == 255))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 32-bit literals";
+    if (!supports_literal(literal_support, LiteralSupport::Literal64) &&
+        ((num_encoded_sources > 0 && inst_.src0 == 254) ||
+         (num_encoded_sources > 1 && inst_.src1 == 254) ||
+         (num_encoded_sources > 2 && inst_.src2 == 254))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 64-bit literals";
+    if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
+        (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255)) [[unlikely]]
+      return emit_error.emit() << "DPP and literal operands cannot be combined";
+    return Result::success();
+  }
   void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
@@ -591,8 +707,36 @@ class Vop3p : public IsaInstruction<Isa> {
 public:
   enum class ExtensionDecodePolicy { Decode, Skip };
   Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn,
-        LiteralSupport literal_support = LiteralSupport::Both, int num_encoded_sources = 3,
         ExtensionDecodePolicy extension_policy = ExtensionDecodePolicy::Decode);
+  bool has_encoded_literal32() const;
+  static Result
+  validate_encoding([[maybe_unused]] std::string_view mnemonic, const Vop3pMachineInst *inst,
+                    const util::DiagnosticEmitter &emit_error,
+                    LiteralSupport literal_support = LiteralSupport::Both,
+                    int num_encoded_sources = 3,
+                    ExtensionDecodePolicy extension_policy = ExtensionDecodePolicy::Decode) {
+    const auto &inst_ = *inst;
+    if (extension_policy == ExtensionDecodePolicy::Decode) {
+      if ((num_encoded_sources > 0 && inst_.src0 == 254) ||
+          (num_encoded_sources > 1 && inst_.src1 == 254) ||
+          (num_encoded_sources > 2 && inst_.src2 == 254)) [[unlikely]]
+        return emit_error.emit() << "Vop3p does not support Literal64";
+      if (!supports_literal(literal_support, LiteralSupport::Literal32) &&
+          ((num_encoded_sources > 0 && inst_.src0 == 255) ||
+           (num_encoded_sources > 1 && inst_.src1 == 255) ||
+           (num_encoded_sources > 2 && inst_.src2 == 255))) [[unlikely]]
+        return emit_error.emit() << mnemonic << " does not support 32-bit literals";
+      if (!supports_literal(literal_support, LiteralSupport::Literal64) &&
+          ((num_encoded_sources > 0 && inst_.src0 == 254) ||
+           (num_encoded_sources > 1 && inst_.src1 == 254) ||
+           (num_encoded_sources > 2 && inst_.src2 == 254))) [[unlikely]]
+        return emit_error.emit() << mnemonic << " does not support 64-bit literals";
+      if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
+          (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255)) [[unlikely]]
+        return emit_error.emit() << "DPP and literal operands cannot be combined";
+    }
+    return Result::success();
+  }
   void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
@@ -666,8 +810,29 @@ public:
 
 class Vop3SdstEnc : public IsaInstruction<Isa> {
 public:
-  Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst, ExecuteFn exec_fn,
-              LiteralSupport literal_support = LiteralSupport::Both, int num_encoded_sources = 3);
+  Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst, ExecuteFn exec_fn);
+  bool has_encoded_literal32() const;
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const Vop3SdstEncMachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error,
+                                  LiteralSupport literal_support = LiteralSupport::Both,
+                                  int num_encoded_sources = 3) {
+    const auto &inst_ = *inst;
+    if (!supports_literal(literal_support, LiteralSupport::Literal32) &&
+        ((num_encoded_sources > 0 && inst_.src0 == 255) ||
+         (num_encoded_sources > 1 && inst_.src1 == 255) ||
+         (num_encoded_sources > 2 && inst_.src2 == 255))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 32-bit literals";
+    if (!supports_literal(literal_support, LiteralSupport::Literal64) &&
+        ((num_encoded_sources > 0 && inst_.src0 == 254) ||
+         (num_encoded_sources > 1 && inst_.src1 == 254) ||
+         (num_encoded_sources > 2 && inst_.src2 == 254))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support 64-bit literals";
+    if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
+        (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255)) [[unlikely]]
+      return emit_error.emit() << "DPP and literal operands cannot be combined";
+    return Result::success();
+  }
   void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;

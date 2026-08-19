@@ -6,7 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/sopk.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
-#include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace cdna5 {
@@ -22,6 +22,16 @@ SMovkI32Sopk::SMovkI32Sopk(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+DecodeResult decodeSMovkI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_movk_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SMovkI32Sopk>(opcode);
+}
+} // namespace detail
+
 SVersionSopk::SVersionSopk(const MachineInst *inst)
     : Sopk("s_version", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SVersionSopk)),
@@ -30,6 +40,16 @@ SVersionSopk::SVersionSopk(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
 }
+
+namespace detail {
+DecodeResult decodeSVersionSopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_version", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SVersionSopk>(opcode);
+}
+} // namespace detail
 
 SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
     : Sopk("s_cmovk_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -48,6 +68,16 @@ SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
+namespace detail {
+DecodeResult decodeSCmovkI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_cmovk_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SCmovkI32Sopk>(opcode);
+}
+} // namespace detail
+
 SAddkCoI32Sopk::SAddkCoI32Sopk(const MachineInst *inst)
     : Sopk("s_addk_co_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SAddkCoI32Sopk)),
@@ -64,6 +94,16 @@ SAddkCoI32Sopk::SAddkCoI32Sopk(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
+namespace detail {
+DecodeResult decodeSAddkCoI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_addk_co_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAddkCoI32Sopk>(opcode);
+}
+} // namespace detail
+
 SMulkI32Sopk::SMulkI32Sopk(const MachineInst *inst)
     : Sopk("s_mulk_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SMulkI32Sopk)),
@@ -75,6 +115,16 @@ SMulkI32Sopk::SMulkI32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
 }
+
+namespace detail {
+DecodeResult decodeSMulkI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_mulk_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SMulkI32Sopk>(opcode);
+}
+} // namespace detail
 
 SGetregB32Sopk::SGetregB32Sopk(const MachineInst *inst)
     : Sopk("s_getreg_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -88,6 +138,16 @@ SGetregB32Sopk::SGetregB32Sopk(const MachineInst *inst)
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
 
+namespace detail {
+DecodeResult decodeSGetregB32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_getreg_b32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SGetregB32Sopk>(opcode);
+}
+} // namespace detail
+
 SSetregB32Sopk::SSetregB32Sopk(const MachineInst *inst)
     : Sopk("s_setreg_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SSetregB32Sopk)),
@@ -99,6 +159,16 @@ SSetregB32Sopk::SSetregB32Sopk(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
+
+namespace detail {
+DecodeResult decodeSSetregB32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_setreg_b32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SSetregB32Sopk>(opcode);
+}
+} // namespace detail
 
 void SSetregB32Sopk::implicit_uses(RegisterSet &uses) const {
   Sopk::implicit_uses(uses);
@@ -125,6 +195,17 @@ SSetregImm32B32Sopk::SSetregImm32B32Sopk(const MachineInst *inst)
   literal = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(literal_));
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
+
+namespace detail {
+DecodeResult decodeSSetregImm32B32Sopk(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_setreg_imm32_b32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SSetregImm32B32Sopk>(opcode);
+}
+} // namespace detail
 
 void SSetregImm32B32Sopk::implicit_uses(RegisterSet &uses) const {
   Sopk::implicit_uses(uses);
@@ -156,6 +237,16 @@ SCallI64Sopk::SCallI64Sopk(const MachineInst *inst)
   flags_ |= INDIRECT_CALL;
   flags_ |= HAS_IMPLICIT_REGISTER_OPERAND;
 }
+
+namespace detail {
+DecodeResult decodeSCallI64Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sopk::validate_encoding(
+      "s_call_i64", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SCallI64Sopk>(opcode);
+}
+} // namespace detail
 
 std::optional<int64_t> SCallI64Sopk::branch_offset_bytes() const {
   // AMDGPU PC-relative branch immediates are signed instruction-count deltas.

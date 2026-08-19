@@ -8,7 +8,7 @@
 #include "util/except.h"
 
 #include <algorithm>
-#include <array>
+#include <vector>
 
 namespace rocjitsu {
 
@@ -24,37 +24,30 @@ std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry, rj_c
 }
 
 Decoder::~Decoder() {
-  // If this decoder's pool is still the active one, deactivate it so
-  // surviving instructions (held by callers in unique_ptr/vectors) fall
-  // back to ::operator delete instead of following a dangling pool pointer.
-  if (Instruction::alloc_pool_ == &pool_)
-    deactivate_pool();
+  // Clear direct and temporarily suppressed references to this pool so no
+  // later allocation scope can restore a pointer into a destroyed decoder.
+  Instruction::invalidate_allocator_pool(&pool_);
 }
 
-void Decoder::validate_instruction_operands(const Instruction &inst) {
-  for (int index = 0; index < inst.num_src_operands(); ++index) {
-    if (const Operand *operand = inst.src_operand(index))
-      operand->validate_encoding();
-  }
-  for (int index = 0; index < inst.num_dst_operands(); ++index) {
-    if (const Operand *operand = inst.dst_operand(index))
-      operand->validate_encoding();
-  }
-}
+void Decoder::disable_pool() { Instruction::invalidate_allocator_pool(&pool_); }
 
-Instruction *Decoder::decode(const rj_code_binary_inst_t *inst, uint64_t src_loc) {
-  Instruction *decoded = decode(inst);
-  if (decoded != nullptr)
-    decoded->src_loc_ = src_loc;
+DecodeResult Decoder::decode(const rj_code_binary_inst_t *inst, uint64_t src_loc,
+                             const DecodeErrorEmitter &emit_error) {
+  DecodeResult decoded = decode(inst, emit_error);
+  if (decoded.succeeded())
+    decoded.value()->src_loc_ = src_loc;
   return decoded;
 }
 
-Instruction *Decoder::decode_window(std::span<const rj_code_binary_inst_t> words,
-                                    uint64_t src_loc) {
+DecodeResult Decoder::decode_window(std::span<const rj_code_binary_inst_t> words, uint64_t src_loc,
+                                    const DecodeErrorEmitter &emit_error) {
   if (words.empty())
     throw util::InvalidInst("empty decode window");
 
-  std::array<rj_code_binary_inst_t, kMaximumInstructionWords> window{};
+  const std::size_t maximum_words = max_instruction_words();
+  if (maximum_words == 0)
+    throw util::InvalidInst("decoder reported a zero-width decode window");
+  std::vector<rj_code_binary_inst_t> window(maximum_words, 0);
   const bool needs_padding = words.size() < window.size();
   const rj_code_binary_inst_t *decode_words = words.data();
   if (needs_padding) {
@@ -62,18 +55,18 @@ Instruction *Decoder::decode_window(std::span<const rj_code_binary_inst_t> words
     decode_words = window.data();
   }
 
-  Instruction *decoded = decode(decode_words, src_loc);
-  if (decoded == nullptr)
-    return nullptr;
+  DecodeResult decode_result = decode(decode_words, src_loc, emit_error);
+  if (decode_result.failed())
+    return Result::failure();
+  std::unique_ptr<Instruction> decoded_owner = std::move(decode_result).value();
+  Instruction *decoded = decoded_owner.get();
 
   const int decoded_size = decoded->size();
   if (decoded_size <= 0 || decoded_size % static_cast<int>(sizeof(window.front())) != 0 ||
       static_cast<std::size_t>(decoded_size) > window.size() * sizeof(window.front())) {
-    delete decoded;
     throw util::InvalidInst("decoder exceeded the maximum instruction size");
   }
   if (static_cast<std::size_t>(decoded_size) > words.size_bytes()) {
-    delete decoded;
     throw util::InvalidInst("truncated instruction encoding");
   }
 
@@ -83,7 +76,13 @@ Instruction *Decoder::decode_window(std::span<const rj_code_binary_inst_t> words
   // tail window was required.
   if (needs_padding && decoded->raw_encoding_ == window.data())
     decoded->raw_encoding_ = words.data();
-  return decoded;
+  return decoded_owner;
+}
+
+Instruction *Decoder::decode_window(std::span<const rj_code_binary_inst_t> words,
+                                    uint64_t src_loc) {
+  DecodeResult result = decode_window(words, src_loc, DecodeErrorEmitter{});
+  return result.failed() ? nullptr : std::move(result).value().release();
 }
 
 void Decoder::activate_pool(AllocFn alloc, DeallocFn dealloc, void *pool) {
@@ -92,10 +91,19 @@ void Decoder::activate_pool(AllocFn alloc, DeallocFn dealloc, void *pool) {
   Instruction::alloc_pool_ = pool;
 }
 
-void Decoder::deactivate_pool() {
-  Instruction::alloc_fn_ = nullptr;
-  Instruction::dealloc_fn_ = nullptr;
-  Instruction::alloc_pool_ = nullptr;
+Result Decoder::validate_instruction_operands(const Instruction &inst,
+                                              const DecodeErrorEmitter &emit_error) {
+  for (int index = 0; index < inst.num_src_operands(); ++index) {
+    if (const Operand *operand = inst.src_operand(index))
+      if (operand->validate_encoding(emit_error).failed()) [[unlikely]]
+        return Result::failure();
+  }
+  for (int index = 0; index < inst.num_dst_operands(); ++index) {
+    if (const Operand *operand = inst.dst_operand(index))
+      if (operand->validate_encoding(emit_error).failed()) [[unlikely]]
+        return Result::failure();
+  }
+  return Result::success();
 }
 
 } // namespace rocjitsu

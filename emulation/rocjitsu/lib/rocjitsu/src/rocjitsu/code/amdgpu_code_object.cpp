@@ -48,26 +48,28 @@ private:
 
 class HsaSection : public Section {
 public:
-  HsaSection(std::string name, const char *data, const Elf64_Shdr &shdr)
-      : Section(std::move(name)), data_(data), shdr_(shdr) {}
+  HsaSection(std::string name, const char *data, const Elf64_Shdr &shdr, size_t section_index)
+      : Section(std::move(name)), data_(data), shdr_(shdr), section_index_(section_index) {}
 
   std::size_t size() const override { return shdr_.sh_size; }
   uint64_t flags() const override { return shdr_.sh_flags; }
   uint64_t vaddr() const override { return shdr_.sh_addr; }
   const char *data() const override { return data_; }
   uint32_t sectionHeaderNameIdx() const override { return shdr_.sh_name; }
+  std::optional<size_t> sectionHeaderIndex() const override { return section_index_; }
   uint64_t sectionOffset() const override { return shdr_.sh_offset; }
 
 private:
   const char *data_ = nullptr;
   Elf64_Shdr shdr_;
+  size_t section_index_;
 };
 
 // The requested section objects and their mutually exclusive text/rodata
 // classification slot must fit within the two-image section model. The runtime
 // capacity check below additionally covers standard-library over-allocation.
 static_assert(sizeof(HsaSection) + sizeof(std::unique_ptr<Section>) + sizeof(const Section *) <=
-              2 * sizeof(Elf64_Shdr));
+              3 * sizeof(Elf64_Shdr));
 
 bool is_elf(const Elf64_Ehdr &ehdr) { return !std::memcmp(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE); }
 
@@ -247,6 +249,8 @@ AmdGpuCodeObject::AmdGpuCodeObject(AmdGpuCodeObject &&other) noexcept
   header_ = std::move(other.header_);
   sections_ = std::move(other.sections_);
   text_sections_ = std::move(other.text_sections_);
+  executable_nobits_sections_ = std::move(other.executable_nobits_sections_);
+  allocated_executable_sections_ = std::move(other.allocated_executable_sections_);
   rodata_sections_ = std::move(other.rodata_sections_);
   kd_offsets_ = std::move(other.kd_offsets_);
   kernels_ = std::move(other.kernels_);
@@ -385,7 +389,27 @@ void AmdGpuCodeObject::load_sections() {
   // string table into a quadratic parser working set.
   uint64_t copied_section_name_bytes = 0;
   for (size_t i = 0; i < section_count; ++i) {
-    const size_t name_len = section_name(*section_header(i)).size();
+    const Elf64_Shdr shdr = *section_header(i);
+    if (shdr.sh_type == SHT_NULL)
+      continue;
+    const bool allocated_executable =
+        (shdr.sh_flags & (SHF_ALLOC | SHF_EXECINSTR)) == (SHF_ALLOC | SHF_EXECINSTR);
+    if (shdr.sh_type == SHT_NOBITS && !allocated_executable)
+      continue;
+    const std::string_view name = section_name(shdr);
+    if (name.empty()) {
+      if (allocated_executable) {
+        is_valid_ = false;
+        return;
+      }
+      continue;
+    }
+    if (shdr.sh_type != SHT_NOBITS &&
+        !fits_in_bounds(shdr.sh_offset, shdr.sh_size, image_.size())) {
+      is_valid_ = false;
+      return;
+    }
+    const size_t name_len = name.size();
     if (name_len > image_.size() - copied_section_name_bytes) {
       is_valid_ = false;
       return;
@@ -399,6 +423,8 @@ void AmdGpuCodeObject::load_sections() {
   // cannot amplify the amount of payload exposed by one parser.
   uint64_t viewed_section_bytes = 0;
   size_t materialized_section_count = 0;
+  size_t executable_nobits_section_count = 0;
+  size_t allocated_executable_section_count = 0;
   size_t text_section_count = 0;
   size_t rodata_section_count = 0;
   const auto section_classification_bytes =
@@ -419,7 +445,16 @@ void AmdGpuCodeObject::load_sections() {
   for (size_t i = 0; i < section_count; ++i) {
     const Elf64_Shdr shdr = *section_header(i);
     const std::string_view sec_name = section_name(shdr);
-    if (shdr.sh_type == SHT_NULL || shdr.sh_type == SHT_NOBITS || sec_name.empty()) {
+    if (shdr.sh_type == SHT_NULL || sec_name.empty()) {
+      continue;
+    }
+    const bool allocated_executable =
+        (shdr.sh_flags & (SHF_ALLOC | SHF_EXECINSTR)) == (SHF_ALLOC | SHF_EXECINSTR);
+    if (shdr.sh_type == SHT_NOBITS) {
+      if (allocated_executable) {
+        ++executable_nobits_section_count;
+        ++allocated_executable_section_count;
+      }
       continue;
     }
     if (!fits_in_bounds(shdr.sh_offset, shdr.sh_size, image_.size()) ||
@@ -436,6 +471,7 @@ void AmdGpuCodeObject::load_sections() {
       return;
     }
     ++materialized_section_count;
+    allocated_executable_section_count += allocated_executable;
     text_section_count += sec_name == ".text";
     rodata_section_count += sec_name == ".rodata";
   }
@@ -452,14 +488,21 @@ void AmdGpuCodeObject::load_sections() {
   // construction; the runtime limit is the portability backstop for capacity
   // over-allocation or a larger private section type.
   sections_.reserve(materialized_section_count);
+  executable_nobits_sections_.reserve(executable_nobits_section_count);
   text_sections_.reserve(text_section_count);
+  allocated_executable_sections_.reserve(allocated_executable_section_count);
   rodata_sections_.reserve(rodata_section_count);
   byte_accounting::CheckedByteBudget section_collections(
       byte_accounting::saturating_multiply(image_.size(), 2u));
-  if (!section_collections.charge_allocation(materialized_section_count, sizeof(HsaSection)) ||
+  if (!section_collections.charge_allocation(
+          materialized_section_count + executable_nobits_section_count, sizeof(HsaSection)) ||
       !section_collections.charge_allocation(sections_.capacity(),
                                              sizeof(std::unique_ptr<Section>)) ||
+      !section_collections.charge_allocation(executable_nobits_sections_.capacity(),
+                                             sizeof(std::unique_ptr<Section>)) ||
       !section_collections.charge_allocation(text_sections_.capacity(), sizeof(const Section *)) ||
+      !section_collections.charge_allocation(allocated_executable_sections_.capacity(),
+                                             sizeof(const Section *)) ||
       !section_collections.charge_allocation(rodata_sections_.capacity(),
                                              sizeof(const Section *))) {
     is_valid_ = false;
@@ -469,15 +512,29 @@ void AmdGpuCodeObject::load_sections() {
 
   for (size_t i = 0; i < section_count; ++i) {
     const Elf64_Shdr shdr = *section_header(i);
-    if (shdr.sh_type == SHT_NULL || shdr.sh_type == SHT_NOBITS)
+    if (shdr.sh_type == SHT_NULL)
       continue;
     const std::string_view sec_name = section_name(shdr);
     if (sec_name.empty())
       continue;
 
-    sections_.emplace_back(
-        std::make_unique<HsaSection>(std::string(sec_name), image_.data() + shdr.sh_offset, shdr));
+    const bool allocated_executable =
+        (shdr.sh_flags & (SHF_ALLOC | SHF_EXECINSTR)) == (SHF_ALLOC | SHF_EXECINSTR);
+    // SHT_NOBITS has no executable bytes to decode. Retain allocated executable
+    // metadata above so the translator's sole-PROGBITS-.text gate rejects the
+    // layout, but keep all_sections() restricted to readable section data.
+    if (shdr.sh_type == SHT_NOBITS) {
+      executable_nobits_sections_.emplace_back(
+          std::make_unique<HsaSection>(std::string(sec_name), nullptr, shdr, i));
+      allocated_executable_sections_.push_back(executable_nobits_sections_.back().get());
+      continue;
+    }
 
+    sections_.emplace_back(
+        std::make_unique<HsaSection>(std::string(sec_name), image_.data() + shdr.sh_offset, shdr, i));
+
+    if (allocated_executable)
+      allocated_executable_sections_.push_back(sections_.back().get());
     if (sec_name == ".text") {
       text_sections_.push_back(sections_.back().get());
     } else if (sec_name == ".rodata") {
