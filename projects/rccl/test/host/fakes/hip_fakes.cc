@@ -11,15 +11,40 @@
 // hipErrorInvalidValue so unexercised paths fail loudly instead of binding the
 // real driver).
 
+#include <cassert>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
 
+#include <sys/mman.h>
+
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_runtime.h>
 
 #include "hip_fakes.h"   // g_hip* hook declarations + ResetHipFakes()
+
+// Compile-time watchdog: each VMM/stream seam must keep the exact signature of
+// the real HIP symbol it stands in for (templates + macro in signature-drift.h).
+#include "signature-drift.h"
+ASSERT_HOOK_MATCHES_PROD(g_hipMemAddressReserve,     hipMemAddressReserve);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemAddressFree,        hipMemAddressFree);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemCreate,             hipMemCreate);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemGetAllocationGranularity,
+                         hipMemGetAllocationGranularity);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemGetAllocationPropertiesFromHandle,
+                         hipMemGetAllocationPropertiesFromHandle);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemImportFromShareableHandle,
+                         hipMemImportFromShareableHandle);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemMap,                hipMemMap);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemUnmap,              hipMemUnmap);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemSetAccess,          hipMemSetAccess);
+ASSERT_HOOK_MATCHES_PROD(g_hipStreamCreateWithFlags, hipStreamCreateWithFlags);
+ASSERT_HOOK_MATCHES_PROD(g_hipStreamDestroy,         hipStreamDestroy);
+ASSERT_HOOK_MATCHES_PROD(g_hipStreamSynchronize,     hipStreamSynchronize);
+ASSERT_HOOK_MATCHES_PROD(g_hipThreadExchangeStreamCaptureMode,
+                         hipThreadExchangeStreamCaptureMode);
+#undef ASSERT_HOOK_MATCHES_PROD
 
 // ===========================================================================
 // Section 1: controllable HIP seams (defaults return hipErrorInvalidValue)
@@ -179,6 +204,116 @@ hipError_t g_hipStreamCreateResult       = hipErrorInvalidValue;
 hipError_t g_hipAsyncOpsResult           = hipErrorInvalidValue;
 int        g_hipWarpSize                 = 64;
 
+// --- HIP VMM driver API + stream lifecycle seams ------------------------
+// Defaults mirror the old fail-loud stubs: return hipErrorInvalidValue and
+// zero any out-param. InstallHostBackedVmm() below overrides them.
+static hipError_t DefaultHipMemAddressReserve(void** ptr, std::size_t,
+                                              std::size_t, void*,
+                                              unsigned long long)
+{
+    if (ptr) *ptr = nullptr;
+    return hipErrorInvalidValue;
+}
+static hipError_t DefaultHipMemAddressFree(void*, std::size_t)
+{
+    return hipErrorInvalidValue;
+}
+static hipError_t DefaultHipMemCreate(hipMemGenericAllocationHandle_t* handle,
+                                      std::size_t, const hipMemAllocationProp*,
+                                      unsigned long long)
+{
+    if (handle) *handle = nullptr;
+    return hipErrorInvalidValue;
+}
+static hipError_t DefaultHipMemGetAllocationGranularity(
+    std::size_t* granularity, const hipMemAllocationProp*,
+    hipMemAllocationGranularity_flags)
+{
+    if (granularity) *granularity = 0;
+    return hipErrorInvalidValue;
+}
+static hipError_t DefaultHipMemGetAllocationPropertiesFromHandle(
+    hipMemAllocationProp*, hipMemGenericAllocationHandle_t)
+{
+    return hipErrorInvalidValue;
+}
+static hipError_t DefaultHipMemImportFromShareableHandle(
+    hipMemGenericAllocationHandle_t* handle, void*, hipMemAllocationHandleType)
+{
+    if (handle) *handle = nullptr;
+    return hipErrorInvalidValue;
+}
+static hipError_t DefaultHipMemMap(void*, std::size_t, std::size_t,
+                                   hipMemGenericAllocationHandle_t,
+                                   unsigned long long)
+{
+    return hipErrorInvalidValue;
+}
+static hipError_t DefaultHipMemUnmap(void*, std::size_t)
+{
+    return hipErrorInvalidValue;
+}
+static hipError_t DefaultHipMemSetAccess(void*, std::size_t,
+                                         const hipMemAccessDesc*, std::size_t)
+{
+    return hipErrorInvalidValue;
+}
+static hipError_t DefaultHipStreamCreateWithFlags(hipStream_t* stream,
+                                                  unsigned int)
+{
+    if (stream) *stream = nullptr;
+    return hipErrorInvalidValue;
+}
+static hipError_t DefaultHipStreamDestroy(hipStream_t)
+{
+    return hipErrorInvalidValue;
+}
+static hipError_t DefaultHipStreamSynchronize(hipStream_t)
+{
+    return hipErrorInvalidValue;
+}
+static hipError_t DefaultHipThreadExchangeStreamCaptureMode(
+    hipStreamCaptureMode*)
+{
+    return hipErrorInvalidValue;
+}
+
+std::function<hipError_t(void**, std::size_t, std::size_t, void*,
+                         unsigned long long)>
+    g_hipMemAddressReserve = DefaultHipMemAddressReserve;
+std::function<hipError_t(void*, std::size_t)>
+    g_hipMemAddressFree = DefaultHipMemAddressFree;
+std::function<hipError_t(hipMemGenericAllocationHandle_t*, std::size_t,
+                         const hipMemAllocationProp*, unsigned long long)>
+    g_hipMemCreate = DefaultHipMemCreate;
+std::function<hipError_t(std::size_t*, const hipMemAllocationProp*,
+                         hipMemAllocationGranularity_flags)>
+    g_hipMemGetAllocationGranularity = DefaultHipMemGetAllocationGranularity;
+std::function<hipError_t(hipMemAllocationProp*,
+                         hipMemGenericAllocationHandle_t)>
+    g_hipMemGetAllocationPropertiesFromHandle =
+        DefaultHipMemGetAllocationPropertiesFromHandle;
+std::function<hipError_t(hipMemGenericAllocationHandle_t*, void*,
+                         hipMemAllocationHandleType)>
+    g_hipMemImportFromShareableHandle = DefaultHipMemImportFromShareableHandle;
+std::function<hipError_t(void*, std::size_t, std::size_t,
+                         hipMemGenericAllocationHandle_t, unsigned long long)>
+    g_hipMemMap = DefaultHipMemMap;
+std::function<hipError_t(void*, std::size_t)>
+    g_hipMemUnmap = DefaultHipMemUnmap;
+std::function<hipError_t(void*, std::size_t, const hipMemAccessDesc*,
+                         std::size_t)>
+    g_hipMemSetAccess = DefaultHipMemSetAccess;
+std::function<hipError_t(hipStream_t*, unsigned int)>
+    g_hipStreamCreateWithFlags = DefaultHipStreamCreateWithFlags;
+std::function<hipError_t(hipStream_t)>
+    g_hipStreamDestroy = DefaultHipStreamDestroy;
+std::function<hipError_t(hipStream_t)>
+    g_hipStreamSynchronize = DefaultHipStreamSynchronize;
+std::function<hipError_t(hipStreamCaptureMode*)>
+    g_hipThreadExchangeStreamCaptureMode =
+        DefaultHipThreadExchangeStreamCaptureMode;
+
 // Restore every HIP hook to its default.
 void ResetHipFakes()
 {
@@ -206,6 +341,125 @@ void ResetHipFakes()
     g_hipStreamCreateResult         = hipErrorInvalidValue;
     g_hipAsyncOpsResult             = hipErrorInvalidValue;
     g_hipWarpSize                   = 64;
+
+    g_hipMemAddressReserve          = DefaultHipMemAddressReserve;
+    g_hipMemAddressFree             = DefaultHipMemAddressFree;
+    g_hipMemCreate                  = DefaultHipMemCreate;
+    g_hipMemGetAllocationGranularity = DefaultHipMemGetAllocationGranularity;
+    g_hipMemGetAllocationPropertiesFromHandle =
+        DefaultHipMemGetAllocationPropertiesFromHandle;
+    g_hipMemImportFromShareableHandle = DefaultHipMemImportFromShareableHandle;
+    g_hipMemMap                     = DefaultHipMemMap;
+    g_hipMemUnmap                   = DefaultHipMemUnmap;
+    g_hipMemSetAccess               = DefaultHipMemSetAccess;
+    g_hipStreamCreateWithFlags      = DefaultHipStreamCreateWithFlags;
+    g_hipStreamDestroy              = DefaultHipStreamDestroy;
+    g_hipStreamSynchronize          = DefaultHipStreamSynchronize;
+    g_hipThreadExchangeStreamCaptureMode =
+        DefaultHipThreadExchangeStreamCaptureMode;
+}
+
+// ===========================================================================
+// Host-memory-backed HIP VMM/stream profile.
+//
+// Sets the seams above to behaviour that lets code driving the driver VMM API
+// run to completion on a plain CPU (no GPU). Mirrors the fakes that lived in
+// test/DevRuntimeTestsStubs.cc. Opt in per test via InstallHostBackedVmm().
+// ===========================================================================
+void InstallHostBackedVmm()
+{
+    // Reserve VA with an uncommitted anonymous mapping (MAP_NORESERVE): cheap
+    // multi-GB flat-VA reservations that are never dereferenced (all
+    // map/set-access are no-ops), so no physical memory is committed.
+    g_hipMemAddressReserve = [](void** ptr, std::size_t size, std::size_t,
+                                void*, unsigned long long) -> hipError_t {
+        // The real driver rejects a zero-size reservation; a zero here would
+        // be a bug in the code under test, so surface it.
+        assert(size != 0);
+        void* p = mmap(nullptr, size, PROT_NONE,
+                       MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+        if (p == MAP_FAILED) return hipErrorOutOfMemory;
+        if (ptr) *ptr = p;
+        return hipSuccess;
+    };
+    g_hipMemAddressFree = [](void* devPtr, std::size_t size) -> hipError_t {
+        assert(size != 0);
+        munmap(devPtr, size);
+        return hipSuccess;
+    };
+    g_hipMemCreate = [](hipMemGenericAllocationHandle_t* handle, std::size_t,
+                        const hipMemAllocationProp*,
+                        unsigned long long) -> hipError_t {
+        if (handle)
+            *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
+        return hipSuccess;
+    };
+    g_hipMemGetAllocationGranularity =
+        [](std::size_t* granularity, const hipMemAllocationProp*,
+           hipMemAllocationGranularity_flags) -> hipError_t {
+        if (granularity) *granularity = 4096;
+        return hipSuccess;
+    };
+    g_hipMemGetAllocationPropertiesFromHandle =
+        [](hipMemAllocationProp* prop,
+           hipMemGenericAllocationHandle_t) -> hipError_t {
+        if (prop) {
+            *prop = hipMemAllocationProp{};
+            prop->location.type = hipMemLocationTypeDevice;
+        }
+        return hipSuccess;
+    };
+    g_hipMemImportFromShareableHandle =
+        [](hipMemGenericAllocationHandle_t* handle, void*,
+           hipMemAllocationHandleType) -> hipError_t {
+        if (handle)
+            *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
+        return hipSuccess;
+    };
+    g_hipMemExportToShareableHandle =
+        [](void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
+           unsigned long long) -> hipError_t { return hipSuccess; };
+    g_hipMemMap = [](void*, std::size_t, std::size_t,
+                     hipMemGenericAllocationHandle_t,
+                     unsigned long long) -> hipError_t { return hipSuccess; };
+    g_hipMemUnmap = [](void*, std::size_t) -> hipError_t {
+        return hipSuccess;
+    };
+    g_hipMemSetAccess = [](void*, std::size_t, const hipMemAccessDesc*,
+                           std::size_t) -> hipError_t { return hipSuccess; };
+    g_hipMemRelease = [](hipMemGenericAllocationHandle_t) -> hipError_t {
+        return hipSuccess;
+    };
+    g_hipMemRetainAllocationHandle =
+        [](hipMemGenericAllocationHandle_t* handle, void*) -> hipError_t {
+        if (handle)
+            *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
+        return hipSuccess;
+    };
+    g_hipMemGetAddressRange = [](hipDeviceptr_t* pbase, std::size_t* psize,
+                                 hipDeviceptr_t dptr) -> hipError_t {
+        if (pbase) *pbase = dptr;
+        if (psize) *psize = 0;
+        return hipSuccess;
+    };
+
+    // Stream lifecycle: ncclDevrFinalize creates/synchronizes/destroys
+    // throwaway streams for teardown bookkeeping; none carry real work on the
+    // host, so a non-null opaque handle and success returns suffice.
+    g_hipStreamCreateWithFlags = [](hipStream_t* stream,
+                                    unsigned int) -> hipError_t {
+        if (stream) *stream = reinterpret_cast<hipStream_t>(0x1);
+        return hipSuccess;
+    };
+    g_hipStreamSynchronize = [](hipStream_t) -> hipError_t {
+        return hipSuccess;
+    };
+    g_hipStreamDestroy = [](hipStream_t) -> hipError_t { return hipSuccess; };
+    g_hipThreadExchangeStreamCaptureMode =
+        [](hipStreamCaptureMode* mode) -> hipError_t {
+        if (mode) *mode = hipStreamCaptureModeRelaxed;
+        return hipSuccess;
+    };
 }
 
 // ===========================================================================
@@ -230,6 +484,15 @@ hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle,
 hipError_t hipMemRelease(hipMemGenericAllocationHandle_t handle)
 {
     return g_hipMemRelease(handle);
+}
+
+hipError_t hipMemExportToShareableHandle(void* shareableHandle,
+                                         hipMemGenericAllocationHandle_t handle,
+                                         hipMemAllocationHandleType handleType,
+                                         unsigned long long flags)
+{
+    return g_hipMemExportToShareableHandle(shareableHandle, handle, handleType,
+                                           flags);
 }
 
 // --- plain link-satisfying stubs (unexercised paths) --------------------
@@ -327,55 +590,60 @@ hipError_t hipIpcOpenMemHandle(void** devPtr, hipIpcMemHandle_t, unsigned int)
     return hipErrorInvalidValue;
 }
 
-hipError_t hipMemAddressFree(void*, size_t) { return hipErrorInvalidValue; }
-
-hipError_t hipMemAddressReserve(void** ptr, size_t, size_t, void*,
-                                unsigned long long)
+hipError_t hipMemAddressFree(void* devPtr, size_t size)
 {
-    if (ptr) *ptr = nullptr;
-    return hipErrorInvalidValue;
+    return g_hipMemAddressFree(devPtr, size);
 }
 
-hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t,
-                        const hipMemAllocationProp*, unsigned long long)
+hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t alignment,
+                                void* addr, unsigned long long flags)
 {
-    if (handle) *handle = nullptr;
-    return hipErrorInvalidValue;
+    return g_hipMemAddressReserve(ptr, size, alignment, addr, flags);
+}
+
+hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
+                        const hipMemAllocationProp* prop, unsigned long long flags)
+{
+    return g_hipMemCreate(handle, size, prop, flags);
 }
 
 hipError_t hipMemGetAllocationGranularity(size_t* granularity,
-                                          const hipMemAllocationProp*,
-                                          hipMemAllocationGranularity_flags)
+                                          const hipMemAllocationProp* prop,
+                                          hipMemAllocationGranularity_flags option)
 {
-    if (granularity) *granularity = 0;
-    return hipErrorInvalidValue;
+    return g_hipMemGetAllocationGranularity(granularity, prop, option);
 }
 
 hipError_t hipMemGetAllocationPropertiesFromHandle(
-    hipMemAllocationProp*, hipMemGenericAllocationHandle_t)
+    hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t handle)
 {
-    return hipErrorInvalidValue;
+    return g_hipMemGetAllocationPropertiesFromHandle(prop, handle);
 }
 
 hipError_t hipMemImportFromShareableHandle(
-    hipMemGenericAllocationHandle_t* handle, void*, hipMemAllocationHandleType)
+    hipMemGenericAllocationHandle_t* handle, void* osHandle,
+    hipMemAllocationHandleType shHandleType)
 {
-    if (handle) *handle = nullptr;
-    return hipErrorInvalidValue;
+    return g_hipMemImportFromShareableHandle(handle, osHandle, shHandleType);
 }
 
-hipError_t hipMemMap(void*, size_t, size_t, hipMemGenericAllocationHandle_t,
-                     unsigned long long)
+hipError_t hipMemMap(void* ptr, size_t size, size_t offset,
+                     hipMemGenericAllocationHandle_t handle,
+                     unsigned long long flags)
 {
-    return hipErrorInvalidValue;
+    return g_hipMemMap(ptr, size, offset, handle, flags);
 }
 
-hipError_t hipMemSetAccess(void*, size_t, const hipMemAccessDesc*, size_t)
+hipError_t hipMemSetAccess(void* ptr, size_t size,
+                           const hipMemAccessDesc* desc, size_t count)
 {
-    return hipErrorInvalidValue;
+    return g_hipMemSetAccess(ptr, size, desc, count);
 }
 
-hipError_t hipMemUnmap(void*, size_t) { return hipErrorInvalidValue; }
+hipError_t hipMemUnmap(void* ptr, size_t size)
+{
+    return g_hipMemUnmap(ptr, size);
+}
 
 hipError_t hipMemcpyAsync(void*, const void*, size_t, hipMemcpyKind,
                           hipStream_t)
@@ -394,11 +662,9 @@ hipError_t hipPointerGetAttribute(void* data, hipPointer_attribute attribute,
     return g_hipPointerGetAttribute(data, attribute, ptr);
 }
 
-hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int)
+hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int flags)
 {
-    if (stream) *stream = (g_hipStreamCreateResult == hipSuccess)
-                              ? reinterpret_cast<hipStream_t>(0x1) : nullptr;
-    return g_hipStreamCreateResult;
+    return g_hipStreamCreateWithFlags(stream, flags);
 }
 
 hipError_t hipStreamCreateWithPriority(hipStream_t* stream, unsigned int, int)
@@ -421,12 +687,18 @@ hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority, int* greatestPrio
     return hipSuccess;
 }
 
-hipError_t hipStreamDestroy(hipStream_t)     { return hipSuccess; }  // benign teardown (ncclDestroySideStream)
-hipError_t hipStreamSynchronize(hipStream_t) { return hipErrorInvalidValue; }
-
-hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode*)
+hipError_t hipStreamDestroy(hipStream_t stream)
 {
-    return g_hipAsyncOpsResult;
+    return g_hipStreamDestroy(stream);
+}
+hipError_t hipStreamSynchronize(hipStream_t stream)
+{
+    return g_hipStreamSynchronize(stream);
+}
+
+hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode)
+{
+    return g_hipThreadExchangeStreamCaptureMode(mode);
 }
 
 hipError_t hipSetDevice(int deviceId) { return g_hipSetDevice(deviceId); }
