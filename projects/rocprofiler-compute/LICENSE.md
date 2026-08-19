@@ -28,7 +28,6 @@ astunparse python library: PSFL
 dash python library: MIT
 dash-bootstrap-components python library: MIT
 dash-svg python library: MIT
-Nuitka specific runtime code: Apache 2.0 license
 numpy python library: BSD
 pandas python library: BSD
 plotext python library: MIT
