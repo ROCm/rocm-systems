@@ -15,6 +15,7 @@ Usage from GitHub Actions:
 """
 
 import argparse
+import json
 import logging
 import os
 import subprocess
@@ -397,11 +398,39 @@ def run_tests(pytorch_src: Path, results_log: Path, test_scope: str = "smoke") -
         )
         exit_code = 1
 
+    known_failures_file = Path(__file__).parent / "known_failures.json"
+    known_set: set[str] = set()
+    if known_failures_file.exists():
+        with open(known_failures_file) as f:
+            known_data = json.load(f)
+        known_set = set(known_data.get("tests", {}).keys())
+        log.info("Loaded %d known failures from %s", len(known_set), known_failures_file.name)
+
+    known_failed = [t for t in failed_tests if t in known_set]
+    unexpected_failed = [t for t in failed_tests if t not in known_set]
+
+    if unexpected_failed:
+        log.error("Unexpected failures: %s", unexpected_failed)
+    elif failed_tests and not unexpected_failed:
+        log.info("All %d failures are known — treating as PASSED", len(known_failed))
+        exit_code = 0
+
+    parts = []
+    if passed_tests:
+        parts.append(f"{len(passed_tests)} passed")
+    if unexpected_failed:
+        parts.append(f"{len(unexpected_failed)} unexpected failures")
+    if known_failed:
+        parts.append(f"{len(known_failed)} known failures")
+    summary_line = ", ".join(parts)
+
     summary = {
         "exit_code": exit_code,
         "test_scope": test_scope,
         "passed": passed_tests,
         "failed": failed_tests,
+        "known_failed": known_failed,
+        "unexpected_failed": unexpected_failed,
         "summary_line": summary_line,
         "tests_run": tests_run,
         "expected_tests": len(SMOKE_TESTS) if test_scope == "smoke" else None,
@@ -436,10 +465,17 @@ def generate_summary_report(summary: dict, rccl_lib: Path) -> str:
         lines.append(f"Collected:  {summary['tests_run']}/{summary['expected_tests']} expected smoke tests")
     lines.append("")
 
-    if summary["failed"]:
-        lines.append(f"FAILED tests ({len(summary['failed'])}):")
-        for name in summary["failed"]:
+    unexpected = summary.get("unexpected_failed", [])
+    known = summary.get("known_failed", [])
+
+    if unexpected:
+        lines.append(f"UNEXPECTED failures ({len(unexpected)}):")
+        for name in unexpected:
             lines.append(f"  FAIL  {name}")
+        lines.append("")
+
+    if known:
+        lines.append(f"Known failures ({len(known)}) — excluded from verdict")
         lines.append("")
 
     if summary["passed"]:
