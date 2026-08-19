@@ -623,6 +623,11 @@ hipError_t StatCO::RegisterManagedVar(Var* var) {
 void StatCO::ResizeForDevices(size_t device_count) {
   std::scoped_lock lock(sclock_);
   managedVarsDevicePtrInitialized_ = std::make_unique<std::atomic<bool>[]>(device_count);
+  // Explicitly initialize each per-device flag to false before it can be read by
+  // the lock-free fast path in InitManagedVarDevicePtr.
+  for (size_t i = 0; i < device_count; ++i) {
+    managedVarsDevicePtrInitialized_[i].store(false, std::memory_order_relaxed);
+  }
   managedVarsDevicePtrInitializedSize_ = device_count;
   for (const auto& it : vars_) {
     it.second->ResizeDVar(device_count);
