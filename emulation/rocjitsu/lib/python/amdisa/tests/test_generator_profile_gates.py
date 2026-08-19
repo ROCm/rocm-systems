@@ -2173,8 +2173,8 @@ def test_generated_operand_validates_scalar_register_selector_intervals(
             (amdgpu_generated_root / arch / 'operand.cpp').read_text().split()
         )
         assert (
-            'opr_type==OperandType::OPR_SREG&&'
-            '!((encoding_value>=0&&encoding_value<=123)||'
+            'caseOperandType::OPR_SREG:'
+            'if(!((encoding_value>=0&&encoding_value<=123)||'
             '(encoding_value>=125&&encoding_value<=125))' in operand
         )
         assert (
@@ -2189,12 +2189,12 @@ def test_generated_operand_validates_scalar_register_selector_variants(
     gfx1250_operand = ''.join(
         (gfx1250_generated_root / 'operand.cpp').read_text().split()
     )
-    assert 'opr_type==OperandType::OPR_SREG_M0&&' in gfx1250_operand
+    assert 'caseOperandType::OPR_SREG_M0:' in gfx1250_operand
 
     rdna4_operand = ''.join((rdna4_generated_root / 'operand.cpp').read_text().split())
     assert (
-        'opr_type==OperandType::OPR_SREG_LITERAL&&'
-        '!((encoding_value>=0&&encoding_value<=124)||'
+        'caseOperandType::OPR_SREG_LITERAL:'
+        'if(!((encoding_value>=0&&encoding_value<=124)||'
         '(encoding_value>=255&&encoding_value<=255))' in rdna4_operand
     )
 
@@ -2207,13 +2207,13 @@ def test_generated_operand_validates_scalar_selector_families(
     )
 
     assert (
-        'opr_type==OperandType::OPR_SDST&&'
-        '!((encoding_value>=0&&encoding_value<=124)||'
+        'caseOperandType::OPR_SDST:'
+        'if(!((encoding_value>=0&&encoding_value<=124)||'
         '(encoding_value>=126&&encoding_value<=127))' in operand
     )
     assert (
-        'opr_type==OperandType::OPR_SSRC_NOLIT&&'
-        '!((encoding_value>=0&&encoding_value<=124)||'
+        'caseOperandType::OPR_SSRC_NOLIT:'
+        'if(!((encoding_value>=0&&encoding_value<=124)||'
         '(encoding_value>=126&&encoding_value<=208)||'
         '(encoding_value>=235&&encoding_value<=248)||'
         '(encoding_value>=251&&encoding_value<=253))' in operand
@@ -2232,7 +2232,7 @@ def test_generated_operand_validates_barrier_id_selectors(
         (rdna4_generated_root, 194),
     ):
         operand = ''.join((root / 'operand.cpp').read_text().split())
-        assert 'opr_type==OperandType::OPR_SSRC_BARRIER_ID&&' in operand
+        assert 'caseOperandType::OPR_SSRC_BARRIER_ID:' in operand
         assert '(encoding_value>=125&&encoding_value<=125)' in operand
         assert '(encoding_value>=128&&encoding_value<=159)' in operand
         assert f'(encoding_value>=193&&encoding_value<={negative_max})' in operand
@@ -2261,9 +2261,9 @@ def test_generated_operand_validates_direct_selector_namespaces(
     gfx1250_operand = ''.join(
         (gfx1250_generated_root / 'operand.cpp').read_text().split()
     )
-    assert 'opr_type==OperandType::OPR_SRC&&' in gfx1250_operand
+    assert 'caseOperandType::OPR_SRC:' in gfx1250_operand
     assert '(encoding_value>=209&&encoding_value<=229)' not in gfx1250_operand
-    assert 'opr_type==OperandType::OPR_SRC_VGPR_OR_INLINE&&' in gfx1250_operand
+    assert 'caseOperandType::OPR_SRC_VGPR_OR_INLINE:' in gfx1250_operand
     assert '(encoding_value>=128&&encoding_value<=208)' in gfx1250_operand
     assert '(encoding_value>=240&&encoding_value<=248)' in gfx1250_operand
     assert '(encoding_value>=256&&encoding_value<=511)' in gfx1250_operand
@@ -2272,8 +2272,8 @@ def test_generated_operand_validates_direct_selector_namespaces(
         (amdgpu_generated_root / 'cdna1' / 'operand.cpp').read_text().split()
     )
     assert (
-        'opr_type==OperandType::OPR_SMEM_OFFSET&&'
-        '!((encoding_value>=0&&encoding_value<=124))' in cdna1_operand
+        'caseOperandType::OPR_SMEM_OFFSET:'
+        'if(!((encoding_value>=0&&encoding_value<=124))' in cdna1_operand
     )
 
 
@@ -2324,7 +2324,7 @@ def test_gfx1250_generated_operand_validates_lane_selectors(
 
     assert 'OPR_SSRC_LANESEL_POS_INT_MAX = 191' in operand_types
     assert '#include "util/except.h"' not in operand
-    assert 'opr_type == OperandType::OPR_SSRC_LANESEL' in operand
+    assert 'case OperandType::OPR_SSRC_LANESEL:' in operand
     assert 'EncodingError::InvalidLaneSelector' in operand
 
 
@@ -2333,7 +2333,7 @@ def test_gfx1250_generated_operand_rejects_invalid_exec_selector(
 ):
     operand = (gfx1250_generated_root / 'operand.cpp').read_text()
     assert '#include "util/except.h"' not in operand
-    assert 'opr_type == OperandType::OPR_EXEC' in operand
+    assert 'case OperandType::OPR_EXEC:' in operand
     assert '(encoding_value >= 126 && encoding_value <= 126)' in operand
     assert 'EncodingError::InvalidExecSelector' in operand
 
@@ -3346,7 +3346,7 @@ def test_gfx1250_generated_operand_rejects_reserved_scalar_source_selectors(
 ):
     operand = (gfx1250_generated_root / 'operand.cpp').read_text()
 
-    assert 'opr_type == OperandType::OPR_SSRC' in operand
+    assert 'case OperandType::OPR_SSRC:' in operand
     assert '(encoding_value >= 209 && encoding_value <= 229)' not in operand
     assert 'EncodingError::InvalidScalarSourceSelector' in operand
 
@@ -4289,9 +4289,10 @@ def test_generated_operands_validate_vgpr_source_selectors(
     amdgpu_generated_root: Path,
 ):
     validation = (
-        'if (opr_type == OperandType::OPR_SRC_VGPR && '
-        '!((encoding_value >= 256 && encoding_value <= 511)))\n'
-        '    defer_encoding_error(EncodingError::InvalidVgprSourceSelector);'
+        'case OperandType::OPR_SRC_VGPR:\n'
+        '    if (!((encoding_value >= 256 && encoding_value <= 511)))\n'
+        '      defer_encoding_error(EncodingError::InvalidVgprSourceSelector);\n'
+        '    break;'
     )
     for arch in (
         'cdna1',
@@ -4307,6 +4308,31 @@ def test_generated_operands_validate_vgpr_source_selectors(
     ):
         operand = (amdgpu_generated_root / arch / 'operand.cpp').read_text()
         assert validation in operand
+
+
+def test_generated_operand_validation_switch_is_shared_by_constructors(
+    amdgpu_generated_root: Path,
+):
+    literal16_constructor = (
+        'Operand::Operand(int size_bits, OperandType opr_type, int encoding_value,\n'
+        '                 uint16_t literal16_display_value, bool has_literal16_display)\n'
+        '    : Operand(size_bits, opr_type, encoding_value) {'
+    )
+    for arch in (
+        'cdna1',
+        'cdna2',
+        'cdna3',
+        'cdna4',
+        'cdna5',
+        'rdna1',
+        'rdna2',
+        'rdna3',
+        'rdna3_5',
+        'rdna4',
+    ):
+        operand = (amdgpu_generated_root / arch / 'operand.cpp').read_text()
+        assert operand.count('switch (opr_type) {') == 1
+        assert literal16_constructor in operand
 
 
 def test_cdna4_mfma_f8f6f4_accepts_standalone_and_prefixed_encodings(
