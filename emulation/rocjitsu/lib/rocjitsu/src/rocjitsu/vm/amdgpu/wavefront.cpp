@@ -42,7 +42,7 @@ void Wavefront::barrier_wait(int32_t barrier_id) { cu_.barrier_wait(*this, barri
 
 bool Wavefront::barrier_leave() { return cu_.named_barrier_leave(*this); }
 
-void Wavefront::halt() {
+void Wavefront::halt(CpCompletionNotice notice) {
   // s_endpgm terminates the wave, frees its resources, and notifies the CP as one
   // action, mirroring hardware. Order matters:
   //   (1) fire the halt hook while registers are still live so observers snapshot
@@ -55,7 +55,7 @@ void Wavefront::halt() {
   const uint32_t dispatch_id = dispatch_id_;
   const uint32_t wg_id = wg_id_;
   cu_.free_wavefront_resources(*this);
-  cu_.release_wf(dispatch_id, wg_id);
+  cu_.release_wf(dispatch_id, wg_id, notice);
 }
 
 void Wavefront::release_wait_counter(WaitCounterType type) {

@@ -4545,6 +4545,131 @@ class CodeGenerator:
             enabled=enabled,
         )
 
+    # The trap-handler control ops are spelled differently per ISA. Every
+    # spelling has to be listed: an omitted one derives as `true_nop` and its
+    # generated execute_impl() comes out an empty body, which leaves that ISA's
+    # trap handlers unable to return at all. GFX1250 spells the return
+    # S_RFE_I64 (SOP1 opcode 74).
+    _TRAP_RETURN_NAMES = ('S_RFE', 'S_RFE_B64', 'S_RFE_I64')
+    _TRAP_SENDMSG_NAMES = ('S_SENDMSG', 'S_SENDMSGHALT')
+
+    def _sleep_body(self, sem: InstructionSemantics) -> str:
+        """execute() body for S_SLEEP / S_SLEEP_VAR.
+
+        The MR ISA gives these no pseudocode, so they derive as `true_nop` and
+        the generator used to emit the yield alone. The delay *is* the whole
+        instruction -- there is no result register -- so retiring it in one step
+        leaves it with no effect and lets a sleep loop spin at the speed of its
+        own scalar code. That is not only a performance detail: an asynchronous
+        debugger suspend then lands uniformly across the loop body instead of
+        overwhelmingly on the sleep, and -O0 loop bodies are full of short
+        windows where the compiler has forced EXEC to all lanes to spill an
+        AGPR. Stopping inside one reports every lane active, which
+        gdb.rocm/lane-info.exp catches by comparing the stopped lane states
+        against the ones it recorded at a breakpoint. That expect test is the
+        only guard -- the C++ ISA harness lists s_sleep in SKIP_PREFIXES -- so
+        the policy belongs here, where a regeneration cannot drop it.
+        """
+        # S_SLEEP idles the wave for 64 * SIMM16[6:0] clocks; S_SLEEP_VAR takes
+        # the same 7-bit count from a scalar operand instead of the literal.
+        count = (
+            'static_cast<uint32_t>(simm16.encoding_value_)'
+            if sem.name == 'S_SLEEP'
+            else 'amdgpu::RegisterAccess(wf).read_scalar(ssrc0)'
+        )
+        return (
+            '  constexpr uint32_t kSleepClocksPerUnit = 64;\n'
+            f'  wf.set_sleep_cycles(kSleepClocksPerUnit * ({count} & 0x7Fu));\n'
+            '  wf.cu().request_functional_yield();'
+        )
+
+    def _trap_control_body(self, sem: InstructionSemantics) -> str | None:
+        """execute() body for a trap-handler control op, or None if not one.
+
+        The MR ISA carries no pseudocode for these, so they derive as
+        `true_nop`. They are not nops: the configured GPU trap handler returns
+        through S_RFE and reports through S_SENDMSG, and leaving them empty
+        silently disables ROCgdb's whole stop/resume path (see
+        docs/rocgdb-debugging.md). The bodies belong here rather than in a
+        hand-edit of the generated header, which a regeneration would drop.
+        """
+        if sem.name in self._TRAP_RETURN_NAMES:
+            # Return from exception: restore the PC the trap handler saved in
+            # ssrc0. The 48-bit mask drops the status bits the hardware packs
+            # into the high half, and the instruction size is subtracted
+            # because the interpreter advances the PC after execute() returns.
+            return (
+                # Bare operand and size_ spellings: that is the arch-local form
+                # every generated execute_impl() uses, and
+                # _write_shared_execute_templates() lifts them to inst.ssrc0 /
+                # inst.size() for the shared template. Writing the lifted form
+                # here instead compiles only on the ISAs that happen to share
+                # the body -- S_RFE_I64 is gfx1250-only, so it does not.
+                '  uint64_t saved_pc = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);\n'
+                '  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;\n'
+                '  wf.pc = (saved_pc & kPcAddressMask) - size_;\n'
+                '\n'
+                '  // Returning from the handler puts the interrupted EXEC back. The handler runs\n'
+                '  // under its own mask -- it parks a doorbell id in EXEC_LO on the way to\n'
+                '  // MSG_INTERRUPT -- and restoring that is part of returning, not part of\n'
+                '  // stopping for a debugger: a handler that returns without stopping the wave\n'
+                '  // used to leave its mask installed, so the application ran on with every lane\n'
+                '  // active. That silently un-diverges a branch (gdb.rocm/lane-info.exp sees\n'
+                '  // lanes that converged out of a branch reported active again) and is\n'
+                '  // permanent, because nothing later puts the application\'s mask back.\n'
+                '  if (wf.in_trap_handler())\n'
+                '    wf.set_exec(wf.trap_saved_exec());\n'
+                '  wf.set_in_trap_handler(false);\n'
+                '\n'
+                '  // The handler sets STATUS.HALT when it wants the wave to stay\n'
+                '  // stopped for the debugger; honour that on the way out.\n'
+                '  constexpr uint32_t kStatusHalt = 1u << 13;\n'
+                '  if ((wf.status_raw() & kStatusHalt) != 0) {\n'
+                '    wf.set_debug_single_step(false);\n'
+                '    wf.set_debug_halted(true);\n'
+                '  } else {\n'
+                '    // Nothing is halting the wave any more, so an s_sendmsghalt marker\n'
+                '    // left over from an earlier stop is stale. Leaving it set would make\n'
+                '    // the next resume clear a HALT the handler raises later.\n'
+                '    wf.set_self_halted(false);\n'
+                '  }'
+            )
+
+        if sem.name in self._TRAP_SENDMSG_NAMES:
+            # MSG_INTERRUPT (id 1) from inside the trap handler is how the wave
+            # tells KFD it has stopped; the CU turns it into a debug event.
+            body = (
+                '  const uint32_t message = static_cast<uint32_t>(simm16.encoding_value_);\n'
+                '  if (wf.in_trap_handler() && (message & 0xFu) == 1u)\n'
+                '    wf.set_trap_interrupt_sent(true);\n'
+                '  wf.cu().handle_sendmsg(wf, message);'
+            )
+            if sem.name == 'S_SENDMSGHALT':
+                # "...and then HALT the wavefront". The halt is architectural,
+                # so publish it in STATUS.HALT and not only in the debugger's
+                # private flag: the s_rfe path above reads STATUS.HALT to decide
+                # whether the wave stays stopped, and saw 0 for a wave this
+                # instruction had already halted. Both halves now agree, and a
+                # debugger reading STATUS sees the same thing the wave does.
+                body += (
+                    '\n'
+                    '\n'
+                    '  // S_SENDMSGHALT halts the wave. Keep the architectural bit and the\n'
+                    '  // scheduler flag in step -- s_rfe consults STATUS.HALT on the way out.\n'
+                    '  constexpr uint32_t kStatusHalt = 1u << 13;\n'
+                    '  wf.set_status_raw(wf.status_raw() | kStatusHalt);\n'
+                    '  wf.set_debug_halted(true);\n'
+                    '  // Remember who raised the bit. The trap handler also raises HALT, via\n'
+                    '  // s_setreg just before it returns, and there it means "keep the wave\n'
+                    '  // stopped" -- the opposite of what it means here, where the wave has\n'
+                    '  // already reported and is waiting to be resumed. The CWSR record cannot\n'
+                    '  // distinguish the two, so the resume path reads this instead.\n'
+                    '  wf.set_self_halted(true);'
+                )
+            return body
+
+        return None
+
     def _gen_execute_body(
         self, inst: Instruction, sem: InstructionSemantics, enc_name: str = ''
     ) -> str:
@@ -4873,13 +4998,13 @@ class CodeGenerator:
         # Fallback: inline dispatch for classes not yet extracted.
         L = []  # output lines
 
-        # Sleep has no architectural register effect, but FUNCTIONAL execution
-        # must return to the event loop so peer CUs can make progress.
-        if cls == 'true_nop' and sem.name in ('S_SLEEP', 'S_SLEEP_VAR'):
-            return '  wf.cu().request_functional_yield();'
-
         if cls == 'true_nop':
-            return '  (void)wf;'
+            # Sleep has no architectural register effect, but FUNCTIONAL
+            # execution must return to the event loop so peer CUs can make
+            # progress.
+            if sem.name in ('S_SLEEP', 'S_SLEEP_VAR'):
+                return self._sleep_body(sem)
+            return self._trap_control_body(sem) or '  (void)wf;'
 
         if cls == 'gpr_idx':
             if op == 'on':
@@ -5060,17 +5185,39 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'scalar_setpc':
+            L.append('  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;')
+            L.append('  constexpr uint64_t kPcSignBit = 1ULL << 47;')
             L.append(
-                f'  wf.pc = amdgpu::RegisterAccess(wf).read_scalar64({src_ops[0]}) - size_;'
+                f'  const uint64_t encoded = amdgpu::RegisterAccess(wf).read_scalar64({src_ops[0]});'
             )
+            L.append('  uint64_t target = encoded & kPcAddressMask;')
+            L.append(
+                '  if ((encoded >> 32 == 0x1FFFFu || encoded >> 32 == 0xFFFFFFFFu) && wf.code_load_bias() != 0)'
+            )
+            L.append(
+                '    target = wf.code_load_bias() + static_cast<int32_t>(encoded);'
+            )
+            L.append('  else if (target & kPcSignBit)')
+            L.append('    target |= ~kPcAddressMask;')
+            L.append('  wf.pc = target - size_;')
             return '\n'.join(L)
 
         if cls == 'scalar_swappc':
             # S_SWAPPC_B64: dst = PC of next inst, then jump to src.
+            L.append('  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;')
+            L.append('  constexpr uint64_t kPcSignBit = 1ULL << 47;')
             L.append(f'  uint64_t next_pc = wf.pc + size_;')
             L.append(
-                f'  wf.pc = amdgpu::RegisterAccess(wf).read_scalar64({src_ops[0]}) - size_;'
+                f'  const uint64_t encoded = amdgpu::RegisterAccess(wf).read_scalar64({src_ops[0]});'
             )
+            L.append('  uint64_t target = encoded & kPcAddressMask;')
+            L.append(
+                '  if ((encoded >> 32 == 0x1FFFFu || encoded >> 32 == 0xFFFFFFFFu) && wf.code_load_bias() != 0)'
+            )
+            L.append('    target = next_pc - 20 + static_cast<int32_t>(encoded);')
+            L.append('  else if (target & kPcSignBit)')
+            L.append('    target |= ~kPcAddressMask;')
+            L.append('  wf.pc = target - size_;')
             L.append(
                 f'  amdgpu::RegisterAccess(wf).write_scalar64({dst_ops[0]}, next_pc);'
             )
@@ -5604,9 +5751,9 @@ class CodeGenerator:
             return (
                 '  static thread_local uint64_t counter = 0;\n'
                 '  counter += 100;\n'
-                '  uint32_t dst = wf.sgpr_alloc().base + inst_.sdata;\n'
-                '  amdgpu::RegisterAccess(wf).write_sgpr(dst, static_cast<uint32_t>(counter));\n'
-                '  amdgpu::RegisterAccess(wf).write_sgpr(dst + 1, static_cast<uint32_t>(counter >> 32));'
+                '  const uint32_t dst_sel = inst_.sdata;\n'
+                '  amdgpu::write_scalar_selector(wf, dst_sel, static_cast<uint32_t>(counter));\n'
+                '  amdgpu::write_scalar_selector(wf, dst_sel + 1, static_cast<uint32_t>(counter >> 32));'
             )
 
         if cls == 'gl1_wbinv':
@@ -5794,6 +5941,7 @@ class CodeGenerator:
         nd = sem.num_elems if elem_size == 4 else 1
         L.append('  auto d = std::make_unique<amdgpu::ScalarMemState>();')
         L.append(f'  d->dst_reg_base = wf.sgpr_alloc().base + inst_.sdata;')
+        L.append(f'  d->dst_selector = inst_.sdata;')
         L.append(f'  d->num_dwords = {nd};')
         L.append(f'  d->elem_size = {elem_size};')
         L.append(f'  d->sign_extend = {str(sem.sign_extend).lower()};')
@@ -5821,11 +5969,10 @@ class CodeGenerator:
         L.append('  d->is_load = false;')
         self._append_wait_counter_type(L, 'smem_store')
         L.append(f'  d->mtype = {self._mtype_expr(is_smem=True)};')
-        L.append('  auto &cu = wf.cu();')
-        L.append('  uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;')
+        L.append('  const uint32_t sdata_sel = inst_.sdata;')
         L.append(f'  for (uint32_t i = 0; i < {nd}; ++i)')
         L.append(
-            '    d->store_data[i] = amdgpu::RegisterAccess(cu).read_sgpr(sdata_base + i);'
+            '    d->store_data[i] = amdgpu::read_scalar_selector(wf, sdata_sel + i);'
         )
         if self.isa_spec.profile.smem_address_uses_access_size:
             addr_args = 'inst_, wf, d->elem_size * d->num_dwords'
@@ -10555,6 +10702,7 @@ class CodeGenerator:
             '#include "rocjitsu/vm/amdgpu/mem_state.h"',
             '#include "rocjitsu/vm/amdgpu/register_access.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"',
+            '#include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"',
             *simd_extra_includes(),
@@ -10579,9 +10727,28 @@ class CodeGenerator:
                 f'[[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {{'
             )
             probe = simd_probe_line(mnemonic, true16_vop3=is_true16_vop3)
+            alu_classifiers = {
+                'v_mul_f32_vop2': 'classify_mul_f32_vop2',
+                'v_mul_f32_vop3': 'classify_mul_f32_vop3',
+                'v_sqrt_f32_vop1': 'classify_sqrt_f32_vop1',
+                'v_sqrt_f32_vop3': 'classify_sqrt_f32_vop3',
+                'v_div_fixup_f32_vop3': 'classify_div_fixup_f32_exceptions',
+                'v_rcp_iflag_f32_vop1': 'classify_rcp_iflag_f32_exceptions',
+                'v_rcp_iflag_f32_vop3': 'classify_rcp_iflag_f32_exceptions',
+            }
+            classifier = alu_classifiers.get(mnemonic)
+            if classifier is not None:
+                lines.append(f'  uint32_t alu_causes = {classifier}(inst, wf);')
             if probe is not None:
-                lines.append(probe)
+                if classifier is None:
+                    lines.append(probe)
+                else:
+                    lines.append('  if (!(wf.mode_raw() & kAluExceptionModeMask)) {')
+                    lines.append(probe.replace('  ', '    ', 1))
+                    lines.append('  }')
             lines.append(prefixed_body)
+            if classifier is not None:
+                lines.append('  wf.set_trapsts(wf.trapsts() | alu_causes);')
             lines.append('}')
             lines.append('')
 

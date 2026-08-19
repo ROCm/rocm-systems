@@ -64,6 +64,9 @@ TEST(ConfigLoaderTest, LoadCdna4Config) {
   EXPECT_EQ(xcd->num_shader_engines(), 4u);
   EXPECT_EQ(xcd->shader_engine(0)->num_compute_units(), 9u);
   EXPECT_EQ(kmd::drm_cu_active_number(loaded.device.simd_count, loaded.device.simd_per_cu), 256u);
+  EXPECT_EQ(soc->assign_queue_cp(0), soc->xcd(0)->command_processor());
+  EXPECT_EQ(soc->assign_queue_cp(1), soc->xcd(1)->command_processor());
+  EXPECT_EQ(soc->assign_queue_cp(soc->num_xcds()), soc->xcd(0)->command_processor());
 }
 
 TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
@@ -1212,6 +1215,134 @@ TEST(CheckpointTest, SaveAndRestoreHwregState) {
   EXPECT_EQ(restored_wf->mode_raw(), amdgpu::Wavefront::FP16_OVFL_BIT);
   EXPECT_EQ(restored_wf->wave_sched_mode_raw(), kWaveSchedMode);
   EXPECT_TRUE(restored_wf->fp16_ovfl());
+}
+
+// The checkpoint record carries the architectural registers and the TTMPs but
+// none of the trap/debug state around them, so a wave captured mid-handler
+// would restore without the EXEC restore or the privileged STATUS write that
+// leaving the handler performs. Refusing beats resuming the application with
+// the trap handler's state installed.
+TEST(CheckpointTest, RefusesToSaveTrappedOrDebuggerStoppedWaves) {
+  const char *json = R"({"max_ticks":10000,"num_threads":1,
+    "vm":{"arch":"cdna5"},
+    "topology":{
+      "root":{
+        "name":"soc","type":"soc",
+        "children":[
+          {"name":"vram","type":"gpu_memory"},
+          {"name":"xcd0","type":"xcd","children":[
+            {"name":"l2","type":"l2_cache"},
+            {"name":"cp","type":"command_processor"},
+            {"name":"se0","type":"shader_engine","children":[
+              {"name":"cu[0:1]","type":"compute_unit","config":[
+                {"key":"num_wf_slots","value":"1"},
+                {"key":"sgprs_per_wf","value":"104"},
+                {"key":"vgprs_per_wf","value":"256"},
+                {"key":"lds_size_kb","value":"64"}
+              ]}
+            ]}
+          ]}
+        ]
+      },
+      "links":[
+        {"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
+        {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}
+      ]
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
+  // A plain running wave still checkpoints.
+  EXPECT_NO_THROW(
+      config::save_checkpoint(checkpoint.path(), *loaded.soc(), 1, loaded.engine_config));
+
+  wf->set_in_trap_handler(true);
+  EXPECT_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 2, loaded.engine_config),
+               std::runtime_error);
+  wf->set_in_trap_handler(false);
+
+  wf->set_debug_halted(true);
+  EXPECT_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 3, loaded.engine_config),
+               std::runtime_error);
+  wf->set_debug_halted(false);
+
+  wf->set_debug_suspended(true);
+  EXPECT_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 4, loaded.engine_config),
+               std::runtime_error);
+  wf->set_debug_suspended(false);
+
+  // The runtime's own pause is not a debugger stop. A queue throttled to
+  // queue_percentage 0 carries none of the trap or debugger state the refusals
+  // above exist to protect, so it must stay checkpointable -- this is the one
+  // assertion that tells debug_stopped() apart from debug_paused().
+  wf->set_runtime_suspended(true);
+  EXPECT_NO_THROW(
+      config::save_checkpoint(checkpoint.path(), *loaded.soc(), 5, loaded.engine_config));
+  wf->set_runtime_suspended(false);
+}
+
+// wg_coord is dispatch identity, and the flat wg_id cannot stand in for it: the
+// grid dimensions needed to unflatten one into the other live in the dispatch
+// packet, which is not part of a checkpoint. A restored wave that lost the
+// coordinate publishes the wrong workgroup in TTMP8/9/10 at trap entry and can
+// no longer be matched to its own CWSR record.
+TEST(CheckpointTest, RoundTripsWorkgroupCoordinates) {
+  const char *json = R"({"max_ticks":10000,"num_threads":1,
+    "vm":{"arch":"cdna3"},
+    "topology":{
+      "root":{
+        "name":"soc","type":"soc",
+        "children":[
+          {"name":"vram","type":"gpu_memory"},
+          {"name":"xcd0","type":"xcd","children":[
+            {"name":"l2","type":"l2_cache"},
+            {"name":"cp","type":"command_processor"},
+            {"name":"se0","type":"shader_engine","children":[
+              {"name":"cu[0:1]","type":"compute_unit","config":[
+                {"key":"num_wf_slots","value":"1"},
+                {"key":"sgprs_per_wf","value":"104"},
+                {"key":"vgprs_per_wf","value":"256"},
+                {"key":"lds_size_kb","value":"64"}
+              ]}
+            ]}
+          ]}
+        ]
+      },
+      "links":[
+        {"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
+        {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}
+      ]
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+  // A flat id that is not any of the coordinates, so restoring wg_id into them
+  // would not pass either.
+  auto *wf = cu->dispatch_wf(/*wg_id=*/9, /*pc=*/0x1000, cu->config().sgprs_per_wf,
+                             cu->config().vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_wg_coord(3, 5, 7);
+
+  test::ScopedTempFile checkpoint("rocjitsu-wg-coord-checkpoint-");
+  ASSERT_NO_THROW(
+      config::save_checkpoint(checkpoint.path(), *loaded.soc(), 1, loaded.engine_config));
+
+  auto restored = config::restore_checkpoint(checkpoint.path());
+  auto *restored_cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(restored_cu, nullptr);
+  ASSERT_EQ(restored_cu->num_wfs(), 1u);
+  const auto *restored_wf = restored_cu->wf(0);
+  ASSERT_NE(restored_wf, nullptr);
+  EXPECT_EQ(restored_wf->wg_id(), 9u);
+  EXPECT_EQ(restored_wf->wg_coord(), (std::array<uint32_t, 3>{3, 5, 7}));
 }
 
 TEST(CApiTest, CreateAndDestroyFromString) {

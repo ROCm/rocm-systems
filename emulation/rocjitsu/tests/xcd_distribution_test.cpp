@@ -34,10 +34,10 @@ namespace {
 
 using namespace rocjitsu;
 
-const std::string CONFIG_PATH = test::config_path("gfx950_cdna4.json");
+const std::string CONFIG_PATH = test::config_path("gfx950_mi355x.json");
 
 constexpr uint32_t kTotalXcds = 8;
-constexpr uint32_t kCusPerXcd = 32; // 4 SEs x 8 CUs
+constexpr uint32_t kCusPerXcd = 36; // 4 SEs x 9 CUs
 constexpr uint32_t kTotalCus = kTotalXcds * kCusPerXcd;
 constexpr uint64_t kKdAddr = 0x10000;
 constexpr uint32_t kWavefrontSize = 64;
@@ -96,7 +96,7 @@ TEST(XcdDistributionTest, SingleQueueGridLandsOnOneXcd) {
   ASSERT_EQ(fx.soc->num_xcds(), kTotalXcds);
   ASSERT_EQ(fx.soc->all_cus().size(), kTotalCus);
 
-  auto *cp = fx.soc->assign_queue_cp();
+  auto *cp = fx.soc->assign_queue_cp(/*queue_ordinal=*/0);
   ASSERT_NE(cp, nullptr);
   test::AqlQueue queue(fx.memory, cp);
   queue.dispatch(kKdAddr, kTotalCus * kWavefrontSize, kWavefrontSize);
@@ -128,7 +128,7 @@ TEST(XcdDistributionTest, QueuesRotateAcrossXcds) {
   constexpr uint32_t kWgsPerQueue = kCusPerXcd;
   std::vector<std::unique_ptr<test::AqlQueue>> queues;
   for (uint32_t qi = 0; qi < kTotalXcds; ++qi) {
-    auto *cp = fx.soc->assign_queue_cp();
+    auto *cp = fx.soc->assign_queue_cp(qi);
     ASSERT_NE(cp, nullptr);
     uint64_t ring = 0xF0000000ULL + qi * 0x100000ULL;
     queues.push_back(std::make_unique<test::AqlQueue>(fx.memory, cp, ring, 4096, ring + 0x10000,
@@ -154,7 +154,7 @@ TEST(XcdDistributionTest, CounterAccumulatesAcrossDispatchesOnOneQueue) {
   ASSERT_EQ(fx.soc->num_xcds(), kTotalXcds);
   ASSERT_EQ(fx.soc->all_cus().size(), kTotalCus);
 
-  auto *cp = fx.soc->assign_queue_cp();
+  auto *cp = fx.soc->assign_queue_cp(/*queue_ordinal=*/0);
   ASSERT_NE(cp, nullptr);
   const uint32_t xi = assigned_xcd_index(*fx.soc, cp);
 
