@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "common/env_vars.hpp"
 #include "backends/rocprofiler_sdk/wrapper.hpp"
+#include "common/env_vars.hpp"
 #include "core/config.hpp"
 #include "core/sdk-tracing-config-deps.hpp"
 #include "core/sdk-tracing-config.hpp"
@@ -20,10 +20,10 @@ namespace
 {
 using rocprofsys::rocprofiler_sdk::default_sdk_externals;
 using rocprofsys::rocprofiler_sdk::sdk_tracing_config;
+using rocprofsys::rocprofiler_sdk::wrapper;
 using rocprofsys::rocprofiler_sdk::spm::configuration;
 using rocprofsys::rocprofiler_sdk::spm::configure_runtime;
 using rocprofsys::rocprofiler_sdk::spm::is_config_valid;
-using rocprofsys::rocprofiler_sdk::wrapper;
 namespace spm_detail = rocprofsys::rocprofiler_sdk::spm::detail;
 
 void

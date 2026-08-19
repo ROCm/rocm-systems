@@ -152,8 +152,8 @@ public:
         using TypeIdentifierEnumUderlayingType =
             std::underlying_type_t<TypeIdentifierEnum>;
 
-        size_t sample_size      = get_size(value);
-        size_t bytes_to_reserve = header_size<TypeIdentifierEnum> + sample_size;
+        const size_t sample_size      = get_size(value);
+        const size_t bytes_to_reserve = header_size<TypeIdentifierEnum> + sample_size;
 
         // Variable-size samples (SPM batches scale with record count) can in
         // principle exceed the whole buffer. Without this guard such a sample
@@ -180,7 +180,7 @@ public:
         // actual memcpy closes the window that TSan (correctly) flags.
         //
         auto thread_state_guard = ThreadStatePolicy::scoped(ThreadStatePolicy::Internal);
-        std::lock_guard scope{ m_mutex };
+        const std::lock_guard scope{ m_mutex };
 
         auto*  buf      = reserve_memory_space(bytes_to_reserve);
         size_t position = 0;

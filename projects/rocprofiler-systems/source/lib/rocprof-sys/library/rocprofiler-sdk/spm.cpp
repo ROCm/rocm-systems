@@ -276,7 +276,7 @@ using resolved_counter_vec_t     = std::vector<resolved_counter>;
 using requested_counter_vec_t    = detail::requested_counter_vec_t;
 namespace gpu_perf_counter       = pmc::collectors::gpu_perf_counter;
 using counter_detail_backend     = ::rocprofsys::backends::rocprofiler_sdk::backend<
-        ::rocprofsys::rocprofiler_sdk::backend>;
+        ::rocprofsys::rocprofiler_sdk::wrapper>;
 
 enum class spm_status
 {
