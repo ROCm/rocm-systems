@@ -37,6 +37,7 @@ from amdisa.gpuisa import Instruction, Operand
 from amdisa.isa_profile import (
     Cdna1Profile,
     Cdna2Profile,
+    Cdna4Profile,
     CdnaProfile,
     Cdna5Profile,
     Rdna1Profile,
@@ -111,7 +112,7 @@ def _profile_for_arch(arch_name: str):
         'cdna1': Cdna1Profile,
         'cdna2': Cdna2Profile,
         'cdna3': CdnaProfile,
-        'cdna4': CdnaProfile,
+        'cdna4': Cdna4Profile,
         'rdna1': Rdna1Profile,
         'rdna2': Rdna2Profile,
         'rdna3': Rdna3Profile,
@@ -394,7 +395,7 @@ def test_parser_separates_logical_arch_directory_and_cpp_namespace():
         ('cdna1', Cdna1Profile),
         ('cdna2', Cdna2Profile),
         ('cdna3', CdnaProfile),
-        ('cdna4', CdnaProfile),
+        ('cdna4', Cdna4Profile),
         ('rdna1', Rdna1Profile),
         ('rdna2', Rdna2Profile),
         ('rdna3', Rdna3Profile),
@@ -3449,9 +3450,9 @@ def test_generated_decoders_publish_instruction_lookahead_bounds(
     amdgpu_generated_root: Path,
 ) -> None:
     expected_bounds = {
-        'cdna1': 4,
-        'cdna2': 4,
-        'cdna3': 4,
+        'cdna1': 2,
+        'cdna2': 2,
+        'cdna3': 2,
         'cdna4': 4,
         'cdna5': 4,
         'rdna1': 3,
@@ -3472,10 +3473,10 @@ def test_generated_decoders_publish_instruction_lookahead_bounds(
 @pytest.mark.parametrize(
     ('arch_name', 'profile_type', 'expected_bound'),
     [
-        ('cdna1', Cdna1Profile, 4),
-        ('cdna2', Cdna2Profile, 4),
-        ('cdna3', CdnaProfile, 4),
-        ('cdna4', CdnaProfile, 4),
+        ('cdna1', Cdna1Profile, 2),
+        ('cdna2', Cdna2Profile, 2),
+        ('cdna3', CdnaProfile, 2),
+        ('cdna4', Cdna4Profile, 4),
         ('cdna5', Cdna5Profile, 4),
         ('rdna1', Rdna1Profile, 3),
         ('rdna2', Rdna2Profile, 3),
@@ -3505,6 +3506,7 @@ def test_instruction_lookahead_derivation_covers_each_width_source() -> None:
         has_vopd: bool = False,
         arch_name: str = 'synthetic',
         scaled_wmma: bool = False,
+        compound_mfma: bool = False,
         owns_dpp_extension: bool = False,
     ) -> CodeGenerator:
         instruction = SimpleNamespace(
@@ -3525,6 +3527,9 @@ def test_instruction_lookahead_derivation_covers_each_width_source() -> None:
             inst_size_overrides=size_overrides or {},
             has_vopd=has_vopd,
             generate_scaled_wmma_vop3px2=scaled_wmma,
+            mfma_scale_vop3px2_specs=(
+                (SimpleNamespace(dense_name='SYNTHETIC'),) if compound_mfma else ()
+            ),
         )
         generator = object.__new__(CodeGenerator)
         generator.isa_spec = SimpleNamespace(
@@ -3561,7 +3566,8 @@ def test_instruction_lookahead_derivation_covers_each_width_source() -> None:
         == 5
     )
     assert generator_for(has_vopd=True)._max_instruction_word_count() == 3
-    assert generator_for(arch_name='cdna4')._max_instruction_word_count() == 4
+    assert generator_for(arch_name='cdna4')._max_instruction_word_count() == 1
+    assert generator_for(compound_mfma=True)._max_instruction_word_count() == 4
     assert (
         generator_for(arch_name='cdna5', scaled_wmma=True)._max_instruction_word_count()
         == 4
@@ -3641,6 +3647,7 @@ def test_gfx1250_scaled_wmma_skips_vop3p_extension_decode(
 ):
     encodings_h = (gfx1250_generated_root / 'encodings.h').read_text()
     encodings_cpp = (gfx1250_generated_root / 'encodings.cpp').read_text()
+    decoder_cpp = (gfx1250_generated_root / 'decoder.cpp').read_text()
     vop3p_cpp = ' '.join((gfx1250_generated_root / 'vop3p.cpp').read_text().split())
 
     assert 'enum class ExtensionDecodePolicy { Decode, Skip };' in encodings_h
@@ -3674,6 +3681,11 @@ def test_gfx1250_scaled_wmma_skips_vop3p_extension_decode(
         'selected_exec_fn(InstructionExecutionId::VWmmaScaleF32Vop3px2), '
         'Vop3p::ExtensionDecodePolicy::Skip)'
     ) in vop3p_cpp
+    assert 'scale->src2 != 0x100u' in decoder_cpp
+    assert '(scale->opsel & 0x2u) != 0u' in decoder_cpp
+    assert '(scale->opsel_hi & 0x2u) != 0u' in decoder_cpp
+    assert '(matrix->neg_hi & 0x3u) != 0u' in decoder_cpp
+    assert '(matrix->neg & 0x3u) != 0u' in decoder_cpp
 
 
 @pytest.mark.parametrize(
@@ -3682,7 +3694,7 @@ def test_gfx1250_scaled_wmma_skips_vop3p_extension_decode(
         ('cdna1', Cdna1Profile()),
         ('cdna2', Cdna2Profile()),
         ('cdna3', CdnaProfile()),
-        ('cdna4', CdnaProfile()),
+        ('cdna4', Cdna4Profile()),
         ('rdna1', Rdna1Profile()),
         ('rdna2', Rdna2Profile()),
         ('rdna3', Rdna3Profile()),
@@ -4361,7 +4373,10 @@ def test_cdna4_mfma_f8f6f4_decodes_dense_and_exact_abid1_scaled_encodings(
         in decoder
     )
     assert 'decodeCdna4MfmaF8f6f4Suffix' in decoder
-    assert 'DecodeResult DecoderImpl::decodeVop3pX2Prefix(const MachineInst *opcode,' in decoder
+    assert (
+        'DecodeResult DecoderImpl::decodeVop3pX2Prefix(const MachineInst *opcode,'
+        in decoder
+    )
     assert 'return decodeInvalid(opcode, emit_error);' in decoder
     assert 'reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode)' in decoder
     assert 'isLegalMfmaF8f6f4Format(uint32_t format)' in decoder

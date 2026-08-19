@@ -8711,11 +8711,11 @@ TEST(SemanticTranslator, Gfx1250ResidualChecksRecognizeEveryActionableSourceRule
                                 {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272}));
 
   constexpr auto regular_scale =
-      cdna5::build_vop3p(0x35, {.src0 = 256 + 64, .src1 = 256 + 66, .src2 = 0});
+      cdna5::build_vop3p(0x35, {.src0 = 256 + 64, .src1 = 256 + 66, .src2 = 256});
   constexpr auto scale16 =
-      cdna5::build_vop3p(0x3a, {.src0 = 256 + 64, .src1 = 256 + 66, .src2 = 0});
+      cdna5::build_vop3p(0x3a, {.src0 = 256 + 64, .src1 = 256 + 66, .src2 = 256});
   constexpr auto scale_body =
-      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128F8f6f4Vop3p,
+      cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
                          {.vdst = 96, .src0 = 256 + 16, .src1 = 256 + 32, .src2 = 256 + 48});
   add_compound_sample(regular_scale, scale_body);
   add_compound_sample(scale16, scale_body);
@@ -11812,8 +11812,9 @@ TEST(BinaryTranslatorE2E, Gfx1250TensorLoadDoesNotReuseMaskPrefixBypassedByBranc
 
 TEST(BinaryTranslatorE2E, Gfx1250RegularWmmaScaleEncodesSrc2AndWaitsForCompletion) {
   // Real VOP3PX2 encoding from the mxscale offline oracle. Bits [58:50] are
-  // zero in the B0 object even though SQ decodes that unused field as a scalar
-  // dependency. The A0 output must encode VGPR0 without changing other bits.
+  // the inline-zero selector in the B0 object even though SQ decodes that unused
+  // field as a scalar dependency. The A0 output must encode VGPR0 without changing
+  // other bits.
   constexpr std::array<uint32_t, 4> source_scale = {0xCC350000u, 0x0202954Eu, 0xCC332042u,
                                                     0x050A01CAu};
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
@@ -11851,13 +11852,12 @@ TEST(BinaryTranslatorE2E, Gfx1250FloatingScaledWmmaRejectsNonzeroCmFields) {
     uint16_t prefix_opcode;
     uint8_t prefix_cm;
     uint8_t matrix_cm;
-    const char *diagnostic;
   };
   constexpr std::array cases = {
-      CmCase{"regular_prefix", 0x35, 1, 0, "SCL_CM must be set to zero"},
-      CmCase{"regular_matrix", 0x35, 0, 1, "CLAMP \"must be set to zero\""},
-      CmCase{"scale16_prefix", 0x3a, 1, 0, "SCL_CM must be set to zero"},
-      CmCase{"scale16_matrix", 0x3a, 0, 1, "CLAMP \"must be set to zero\""},
+      CmCase{"regular_prefix", 0x35, 1, 0},
+      CmCase{"regular_matrix", 0x35, 0, 1},
+      CmCase{"scale16_prefix", 0x3a, 1, 0},
+      CmCase{"scale16_matrix", 0x3a, 0, 1},
   };
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
 
@@ -11883,7 +11883,7 @@ TEST(BinaryTranslatorE2E, Gfx1250FloatingScaledWmmaRejectsNonzeroCmFields) {
     EXPECT_FALSE(result.ok());
     EXPECT_EQ(result.elf_bytes, image);
     EXPECT_TRUE(rocjitsu::test_support::has_error_containing(
-        result, rocjitsu::DiagnosticKind::ExpandFailed, test_case.diagnostic));
+        result, rocjitsu::DiagnosticKind::Legalization, "Invalid instruction opcode"));
   }
 }
 

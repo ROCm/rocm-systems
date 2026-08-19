@@ -8,7 +8,7 @@ import pytest
 
 from amdisa.codegen import CodeGenerator
 from amdisa.gpuisa import Instruction
-from amdisa.isa_profile import CdnaProfile, Rdna4Profile
+from amdisa.isa_profile import Cdna4Profile, Rdna4Profile
 from amdisa.parser import Parser
 
 
@@ -25,7 +25,7 @@ def _find_instruction(spec, encoding_name: str, instruction_name: str):
 
 
 def test_cdna4_preserves_conditional_dpp_encoding_availability():
-    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_cdna4.xml'), CdnaProfile()).parse()
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_cdna4.xml'), Cdna4Profile()).parse()
     inst = _find_instruction(spec, 'ENC_VOP1', 'V_CVT_F64_I32')
 
     assert 'VOP1_VOP_DPP' in inst.available_encodings
@@ -50,7 +50,7 @@ def test_rdna4_distinguishes_vop1_instructions_with_and_without_dpp():
 
 
 def test_cdna4_distinguishes_vop1_instructions_with_and_without_sdwa():
-    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_cdna4.xml'), CdnaProfile()).parse()
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_cdna4.xml'), Cdna4Profile()).parse()
     supported = _find_instruction(spec, 'ENC_VOP1', 'V_MOV_B32')
     unsupported = _find_instruction(spec, 'ENC_VOP1', 'V_CVT_F64_I32')
 
@@ -63,7 +63,7 @@ def test_cdna4_distinguishes_vop1_instructions_with_and_without_sdwa():
 
 
 def test_modifier_availability_requires_explicit_encoding_provenance():
-    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_cdna4.xml'), CdnaProfile()).parse()
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_cdna4.xml'), Cdna4Profile()).parse()
     generator = CodeGenerator(spec, '')
     unknown = Instruction('V_SYNTHETIC', 'ENC_VOP1', 0, [])
     known_absent = Instruction(

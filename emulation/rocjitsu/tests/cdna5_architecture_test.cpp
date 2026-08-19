@@ -535,7 +535,7 @@ TEST(Gfx1250DecodeTest, WmmaF8f6f4UsesMatrixFormatOperandWidths) {
 TEST(Gfx1250DecodeTest, WmmaScaleF8f6f4ConsumesVop3px2Pair) {
   const uint32_t words[] = {
       0xCC350000u,
-      0x02020900u,
+      0x04020900u,
       0xCC330006u,
       0x02026912u,
   };
@@ -556,7 +556,7 @@ TEST(Gfx1250DecodeTest, WmmaScalePairRejectsInvalidEmbeddedSourceSelectors) {
     SCOPED_TRACE(embedded_src0);
     const uint32_t words[] = {
         0xCC350000u,
-        0x20020700u,
+        0x24020700u,
         0xCC330000u,
         0xD600D400u | embedded_src0,
     };
@@ -567,10 +567,48 @@ TEST(Gfx1250DecodeTest, WmmaScalePairRejectsInvalidEmbeddedSourceSelectors) {
   }
 }
 
+TEST(Gfx1250DecodeTest, WmmaScalePairRejectsInvalidFixedAndReservedFields) {
+  struct InvalidField {
+    const char *name;
+    size_t word;
+    uint32_t bits;
+  };
+  constexpr std::array invalid_fields = {
+      InvalidField{"prefix_vdst", 0, 1u << 0},
+      InvalidField{"prefix_neg_hi_reserved", 0, 1u << 10},
+      InvalidField{"prefix_opsel_reserved", 0, 1u << 12},
+      InvalidField{"prefix_clamp", 0, 1u << 15},
+      InvalidField{"prefix_opsel_hi_reserved", 1, 1u << 28},
+      InvalidField{"prefix_neg_reserved", 1, 1u << 31},
+      InvalidField{"matrix_neg_hi_reserved_0", 2, 1u << 8},
+      InvalidField{"matrix_neg_hi_reserved_1", 2, 1u << 9},
+      InvalidField{"matrix_clamp", 2, 1u << 15},
+      InvalidField{"matrix_neg_reserved_0", 3, 1u << 29},
+      InvalidField{"matrix_neg_reserved_1", 3, 1u << 30},
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  for (const auto &field : invalid_fields) {
+    SCOPED_TRACE(field.name);
+    auto words = build_scaled_wmma_words(0x35, 0, 0, 0, 0, 128, 128);
+    words[field.word] |= field.bits;
+    EXPECT_TRUE(decode_fails(*decoder, words.data()));
+  }
+
+  for (uint32_t fixed_src2 : {0u, 128u, 255u, 511u}) {
+    SCOPED_TRACE(::testing::Message() << "prefix_src2=" << fixed_src2);
+    auto words = build_scaled_wmma_words(0x35, 0, 0, 0, 0, 128, 128);
+    constexpr uint32_t kSrc2Mask = 0x1ffu << 18;
+    words[1] = (words[1] & ~kSrc2Mask) | (fixed_src2 << 18);
+    EXPECT_TRUE(decode_fails(*decoder, words.data()));
+  }
+}
+
 TEST(Gfx1250DecodeTest, WmmaScale16F8f6f4ConsumesVop3px2Pair) {
   const uint32_t words[] = {
       0xCC3A0000u,
-      0x0202391Au,
+      0x0402391Au,
       0xCC336012u,
       0x02021502u,
   };
@@ -589,7 +627,7 @@ TEST(Gfx1250DecodeTest, WmmaScale16F8f6f4ConsumesVop3px2Pair) {
 TEST(Gfx1250DecodeTest, WmmaScaleF4_32x16x128ConsumesVop3px2Pair) {
   const uint32_t words[] = {
       0xCC350000u,
-      0x02025328u,
+      0x04025328u,
       0xCC884000u,
       0x1A024110u,
   };
@@ -607,7 +645,7 @@ TEST(Gfx1250DecodeTest, WmmaScaleF4_32x16x128ConsumesVop3px2Pair) {
 TEST(Gfx1250DecodeTest, WmmaScalePrefixRejectsNonWmmaSuffix) {
   const uint32_t words[] = {
       0xCC350000u,
-      0x02020900u,
+      0x04020900u,
       0xCC340006u,
       0x02026912u,
   };

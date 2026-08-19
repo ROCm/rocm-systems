@@ -4637,6 +4637,12 @@ class CodeGenerator:
               const auto *scale = reinterpret_cast<const Vop3pMachineInst *>(opcode);
               const auto *matrix = reinterpret_cast<const Vop3pMachineInst *>(opcode + 2);
               const bool scale16 = scale->op == 0x3au;
+              if (scale->vdst != 0u || (scale->neg_hi & 0x4u) != 0u ||
+                  (scale->opsel & 0x2u) != 0u || scale->clamp != 0u || scale->src2 != 0x100u ||
+                  (scale->opsel_hi & 0x2u) != 0u || (scale->neg & 0x4u) != 0u ||
+                  (matrix->neg_hi & 0x3u) != 0u || matrix->clamp != 0u ||
+                  (matrix->neg & 0x3u) != 0u)
+                return false;
               if (!isGfx1250WmmaScaleSource(scale->src0, scale16) ||
                   !isGfx1250WmmaScaleSource(scale->src1, scale16))
                 return false;
@@ -10284,7 +10290,7 @@ class CodeGenerator:
                     class_func_impls.model.insert(
                         0, cgen.Line(self._emit_mfma_operand_helpers())
                     )
-                    if self.isa_spec.arch_name.lower() == 'cdna4':
+                    if self._supports_cdna_mfma_f8f6f4_vop3px2():
                         class_func_impls.model.insert(
                             0, cgen.Line(self._emit_cdna4_matrix_fmt_helpers())
                         )
@@ -13235,9 +13241,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                 '    return decodeInvalid(opcode, emit_error);\n'
                             ),
                             cgen.Line(dense_factory_cases),
-                            cgen.Statement(
-                                'return decodeInvalid(opcode, emit_error)'
-                            ),
+                            cgen.Statement('return decodeInvalid(opcode, emit_error)'),
                         ]
                     )
                     _custom_decode_bodies[_pfx] = cgen.Block(
