@@ -20,17 +20,18 @@ std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry, rj_c
 }
 
 Decoder::~Decoder() {
-  // If this decoder's pool is still the active one, deactivate it so
-  // surviving instructions (held by callers in unique_ptr/vectors) fall
-  // back to ::operator delete instead of following a dangling pool pointer.
-  if (Instruction::alloc_pool_ == &pool_)
-    deactivate_pool();
+  // Clear direct and temporarily suppressed references to this pool so no
+  // later allocation scope can restore a pointer into a destroyed decoder.
+  Instruction::invalidate_allocator_pool(&pool_);
 }
 
-Instruction *Decoder::decode(const rj_code_binary_inst_t *inst, uint64_t src_loc) {
-  Instruction *decoded = decode(inst);
-  if (decoded != nullptr)
-    decoded->src_loc_ = src_loc;
+void Decoder::disable_pool() { Instruction::invalidate_allocator_pool(&pool_); }
+
+DecodeResult Decoder::decode(const rj_code_binary_inst_t *inst, uint64_t src_loc,
+                             const DecodeErrorEmitter &emit_error) {
+  DecodeResult decoded = decode(inst, emit_error);
+  if (decoded.succeeded())
+    decoded.value()->src_loc_ = src_loc;
   return decoded;
 }
 
@@ -40,10 +41,19 @@ void Decoder::activate_pool(AllocFn alloc, DeallocFn dealloc, void *pool) {
   Instruction::alloc_pool_ = pool;
 }
 
-void Decoder::deactivate_pool() {
-  Instruction::alloc_fn_ = nullptr;
-  Instruction::dealloc_fn_ = nullptr;
-  Instruction::alloc_pool_ = nullptr;
+Result Decoder::validate_instruction_operands(const Instruction &inst,
+                                              const DecodeErrorEmitter &emit_error) {
+  for (int index = 0; index < inst.num_src_operands(); ++index) {
+    if (const Operand *operand = inst.src_operand(index))
+      if (operand->validate_encoding(emit_error).failed()) [[unlikely]]
+        return Result::failure();
+  }
+  for (int index = 0; index < inst.num_dst_operands(); ++index) {
+    if (const Operand *operand = inst.dst_operand(index))
+      if (operand->validate_encoding(emit_error).failed()) [[unlikely]]
+        return Result::failure();
+  }
+  return Result::success();
 }
 
 } // namespace rocjitsu

@@ -83,11 +83,6 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
   hipError_t (*dyn_hipMemAllocPitch_ptr)(hipDeviceptr_t*, size_t*, size_t, size_t, unsigned int) =
       reinterpret_cast<hipError_t (*)(hipDeviceptr_t*, size_t*, size_t, size_t, unsigned int)>(
           hipMemAllocPitch_ptr);
-  hipError_t (*dyn_hipFreeHost_ptr)(void*) =
-      reinterpret_cast<hipError_t (*)(void*)>(hipFreeHost_ptr);
-  hipError_t (*dyn_hipHostFree_ptr)(void*) =
-      reinterpret_cast<hipError_t (*)(void*)>(hipHostFree_ptr);
-
   // Validating hipMalloc and hipFree APIs
   {
     void* d_ptr = nullptr;
@@ -299,6 +294,11 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
 
   // Skip these if we have address sanitizer enable because free might not actually free it
 #if !defined(ENABLE_ADDRESS_SANITIZER)
+  hipError_t (*dyn_hipFreeHost_ptr)(void*) =
+      reinterpret_cast<hipError_t (*)(void*)>(hipFreeHost_ptr);
+  hipError_t (*dyn_hipHostFree_ptr)(void*) =
+      reinterpret_cast<hipError_t (*)(void*)>(hipHostFree_ptr);
+
   // Validating hipFreeHost API
   {
     void* h_ptr = nullptr;

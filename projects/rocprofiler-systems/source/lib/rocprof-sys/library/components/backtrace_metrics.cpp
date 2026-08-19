@@ -240,12 +240,12 @@ cache_backtrace_metrics_events(const std::uint32_t device_id, std::uint64_t time
 {
     auto _tid_name = fmt::format("[{}]", _tid);
 
-    size_t      stack_id        = 0;
-    size_t      parent_stack_id = 0;
-    size_t      correlation_id  = 0;
-    const auto* event_metadata  = "{}";
-    const auto* call_stack      = "{}";
-    const auto* line_info       = "{}";
+    const size_t stack_id        = 0;
+    const size_t parent_stack_id = 0;
+    const size_t correlation_id  = 0;
+    const auto*  event_metadata  = "{}";
+    const auto*  call_stack      = "{}";
+    const auto*  line_info       = "{}";
 
     std::optional<std::int64_t> _system_tid{ std::nullopt };
     const auto&                 _thread_info = thread_info::get(_tid, SequentTID);
@@ -324,8 +324,8 @@ backtrace_metrics::sample(int)
 void
 backtrace_metrics::configure(bool _setup, std::int64_t _tid)
 {
-    auto& _running    = get_sampler_running(_tid);
-    bool  _is_running = (!_running) ? false : *_running;
+    auto&      _running    = get_sampler_running(_tid);
+    const bool _is_running = (!_running) ? false : *_running;
 
     ensure_storage<comp::trip_count, sampling_wall_clock, sampling_cpu_clock, hw_counters,
                    sampling_percent>{}();

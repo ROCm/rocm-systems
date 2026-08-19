@@ -66,14 +66,14 @@ add_subdirectory(arch/amdgpu/rdna2)
 add_subdirectory(arch/amdgpu/rdna3)
 add_subdirectory(arch/amdgpu/rdna3_5)
 add_subdirectory(arch/amdgpu/rdna4)
-add_subdirectory(arch/amdgpu/gfx1250)
+add_subdirectory(arch/amdgpu/cdna5)
 
 # Narrow production composition for the fixed-profile gfx1250 B0-to-A0
 # library and other model-only consumers. It supplies the default enum entry
 # points for each final image that links it without pulling execution objects.
 rj_add_isa_target_registry(
-    rocjitsu_gfx1250_model_registry
-    PROVIDERS rocjitsu_isa_gfx1250_model
+    rocjitsu_cdna5_model_registry
+    PROVIDERS rocjitsu_isa_cdna5_model
 )
 
 get_property(

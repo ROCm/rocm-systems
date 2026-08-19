@@ -13,7 +13,9 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/AMDHSAKernelDescriptor.h"
 RJ_DIAGNOSTIC_POP
 
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -35,7 +37,8 @@ struct KernelDescriptorInfo {
 /// The single discovery routine shared by DBT translation and DBI; operates on the
 /// raw, pre-growth image.
 [[nodiscard]] std::vector<KernelDescriptorInfo>
-scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size);
+scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size,
+                        std::optional<size_t> text_section_index = std::nullopt);
 
 /// @brief Wavefront size (32 or 64) the launch hardware interprets for @p desc.
 ///

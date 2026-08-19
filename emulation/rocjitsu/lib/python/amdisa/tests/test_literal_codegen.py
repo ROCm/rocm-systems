@@ -175,6 +175,63 @@ def test_literal_fixups_require_generated_machine_inst_struct():
     assert not codegen._has_machine_inst_struct(info[0])
 
 
+def test_literal_extension_fields_follow_each_opcodes_operands():
+    enc = _enc('ENC_VOP3P')
+    enc.insts = [
+        Instruction(
+            'V_PK_ADD_I16',
+            'ENC_VOP3P',
+            opcode=2,
+            operands=[
+                _operand('src0', 'OPR_SRC'),
+                _operand('src1', 'OPR_SRC'),
+            ],
+        ),
+        Instruction('V_NOP', 'ENC_VOP3P', opcode=384, operands=[]),
+    ]
+
+    masks = CodeGenerator._encoded_literal_field_masks(enc, ('src0', 'src1', 'src2'))
+
+    assert masks == {2: ('src0', 'src1'), 384: ()}
+
+
+def test_only_literal_capable_operand_fields_select_extension_words():
+    enc = _enc('ENC_SOPC')
+    enc.insts = [
+        Instruction(
+            'S_SET_GPR_IDX_ON',
+            'ENC_SOPC',
+            opcode=17,
+            operands=[
+                _operand('ssrc0', 'OPR_SSRC'),
+                _operand('ssrc1', 'OPR_SIMM4'),
+            ],
+        ),
+        Instruction(
+            'S_CBRANCH_G_FORK',
+            'ENC_SOPC',
+            opcode=18,
+            operands=[
+                _operand('ssrc0', 'OPR_SSRC_NOLIT'),
+                _operand('ssrc1', 'OPR_SRC_NOLIT'),
+            ],
+        ),
+        Instruction(
+            'V_READFIRSTLANE_B32',
+            'ENC_SOPC',
+            opcode=19,
+            operands=[_operand('ssrc0', 'OPR_VGPR')],
+        ),
+    ]
+
+    masks = CodeGenerator._encoded_literal_field_masks(enc, ('ssrc0', 'ssrc1'))
+    helper = CodeGenerator._encoded_literal_helper_impl(enc, ('ssrc0', 'ssrc1'), 255)
+
+    assert masks == {17: ('ssrc0',), 18: (), 19: ()}
+    assert 'inst_.ssrc0 == 255' in helper
+    assert 'inst_.ssrc1 == 255' not in helper
+
+
 def test_simm32_literal_operand_is_initialized_from_extension_word():
     stmt = CodeGenerator._literal_operand_fixup_stmt(
         _literal_operand(32, 'OPR_SIMM32'), 'Sop2InstLiteralMachineInst'
@@ -360,6 +417,8 @@ def test_generated_operand_tracks_literal32_widening_without_literal64_provenanc
     generator = CodeGenerator(
         SimpleNamespace(
             arch_name='rdna4',
+            generated_dir_name='rdna4',
+            cpp_namespace='rdna4',
             opnd_selectors=[],
             operand_types=['OPR_SIMM16', 'OPR_SIMM32', 'OPR_VGPR'],
             profile=Rdna4Profile(),

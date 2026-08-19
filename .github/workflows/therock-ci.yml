@@ -81,7 +81,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 2e7c190b99caa226a8644eda6eca720b3db102d5 # 2026-07-22
+          ref: d5287602f01bb9e2f0c644f2b6f129b043eb1a0c # 2026-08-18
 
       - name: Checkout CI config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -182,7 +182,8 @@ jobs:
       contents: read
       id-token: write
     needs: setup
-    if: ${{ needs.setup.outputs.linux_projects != '[]' && needs.setup.outputs.run_mi455_test == 'true' }}
+    # Build always runs for all PRs; tests are gated separately by run_mi455_test
+    if: ${{ needs.setup.outputs.linux_projects != '[]' }}
     uses: ./.github/workflows/therock-build-linux.yml
     with:
       package_version: ${{ needs.setup.outputs.package_version }}

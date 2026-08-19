@@ -3099,6 +3099,11 @@ inline static hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t att
     case hipDeviceAttributeDmaBufSupported:
       return hipCUResultTohipError(
           cuDeviceGetAttribute(pi, CU_DEVICE_ATTRIBUTE_DMA_BUF_SUPPORTED, device));
+#if CUDA_VERSION >= CUDA_13000
+    case hipDeviceAttributeHostAllocDmaBufSupported:
+      return hipCUResultTohipError(
+          cuDeviceGetAttribute(pi, CU_DEVICE_ATTRIBUTE_HOST_ALLOC_DMA_BUF_SUPPORTED, device));
+#endif
     case hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported:
       return hipCUResultTohipError(cuDeviceGetAttribute(
           pi, CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED, device));
@@ -3790,6 +3795,16 @@ inline static hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device) {
   }
   return err;
 }
+
+#if CUDA_VERSION >= CUDA_10000
+inline static hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask,
+                                          hipDevice_t device) {
+  if (luid == NULL || deviceNodeMask == NULL) {
+    return hipErrorInvalidValue;
+  }
+  return hipCUResultTohipError(cuDeviceGetLuid(luid, deviceNodeMask, device));
+}
+#endif
 
 inline static hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr, int srcDevice,
                                                   int dstDevice) {

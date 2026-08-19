@@ -17,6 +17,7 @@
 #include <string.h>
 
 #define LOC_BW 5000.0
+#define MLOPART_LOC_BW 2618.0
 #define SM60_NVLINK_BW 18.0
 #define SM70_NVLINK_BW 20.0
 #define SM80_NVLINK_BW 20.0
@@ -44,7 +45,7 @@
 // to GPU traffic consumes more PCI bandwidth.
 #define INTEL_P2P_OVERHEAD(bw) (bw * 6 / 5)
 
-#define NCCL_TOPO_NODE_TYPES 8
+#define NCCL_TOPO_NODE_TYPES 10
 #define GPU 0
 #define PCI 1
 #define NVS 2
@@ -52,7 +53,9 @@
 #define NIC 4
 #define NET 5
 #define GIN 6
-#define DEV 7
+#define RMA 7
+#define DEV 8
+#define CXB 9 // C2C Cross-Bridge: shared C2C bus node for GPUs split with mlopart
 extern const char* topoNodeTypeStr[];
 
 // We want link types and path types to match as much as possible
@@ -113,6 +116,11 @@ struct ncclTopoLinkList {
 #define RCCL_ROME_TOPO_PRESET_MODEL_IDX_4H4P (1000001)
 
 #define GCN_ARCH_NAME_LEN 16
+#define NCCL_TOPO_MLOPART_MASK (0x3) // lower 2 bits: bit[0]=enabled, bit[1]=partition index
+#define NCCL_TOPO_MLOPART_DEV_MAX (2) // max DEV nodes per physical GPU (one per uGPU partition)
+#define NCCL_TOPO_MLOPART(mloPart) ((((int64_t)(mloPart) << 1) | 0x1) & NCCL_TOPO_MLOPART_MASK)
+#define NCCL_TOPO_MLOPART_BUSID(busId, mloPart) \
+  ((mloPart) != NCCL_TOPO_UNDEF ? ((busId) | NCCL_TOPO_MLOPART(mloPart)) : (busId))
 
 struct ncclTopoNode {
   int type;
@@ -127,6 +135,7 @@ struct ncclTopoNode {
       char gcn[GCN_ARCH_NAME_LEN];
       hipDeviceArch_t arch;
       int cu;
+      int mloPart; // MLOPart partition index, or NCCL_TOPO_UNDEF if not MLOPart
       struct ncclTopoNode* parent; // parent DEV node
     } gpu;
     struct {
@@ -135,6 +144,7 @@ struct ncclTopoNode {
       int cudaCompCap;
       int gdrSupport;
       char gcn[GCN_ARCH_NAME_LEN]; // RCCL: GCN arch mirrored from the device's GPU rank, used for XGMI link BW
+      int nGpus; // number of GPU partitions attached to this DEV node
     } dev;
     struct {
       int dev; // Plugin dev number
@@ -148,6 +158,8 @@ struct ncclTopoNode {
       int maxChannels;
       int localGpu;
       int64_t busId;
+      int16_t railId;
+      int16_t planeId;
     } net;
     struct {
       int arch;
@@ -214,9 +226,15 @@ ncclResult_t ncclTopoGetGpuMinPath(struct ncclTopoSystem* system, int type, int*
 ncclResult_t ncclTopoGetGpuMaxPath(struct ncclTopoSystem* system, int type, int* max);
 ncclResult_t ncclTopoSplitNvLink(struct ncclTopoSystem* system, int* splitNvLink);
 
+enum {
+  NCCL_NET_MERGE_POLICY_ALL = 0,
+  NCCL_NET_MERGE_POLICY_RAIL = 1
+};
+
 struct ncclTopoNetInfo {
   bool coll;
   bool gin;
+  bool rma;
   bool net;
   // communicator-specific information
   int netPluginIndex;
@@ -224,6 +242,7 @@ struct ncclTopoNetInfo {
   bool dmaBufSupport;
   // NIC fusion
   int mergeLevel;
+  int mergePolicy;
   const char* forceMerge;
   // dev count tracking functions (not part of ncclNet)
   ncclResult_t (*getDevCount)(int, int*, int*);

@@ -31,9 +31,9 @@
 #include <limits>
 #include <type_traits>
 
-namespace rocjitsu::gfx1250 {
+namespace rocjitsu::cdna5 {
 struct Isa;
-} // namespace rocjitsu::gfx1250
+} // namespace rocjitsu::cdna5
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -259,7 +259,7 @@ inline T apply_vop3_b32_src_mod(T value, uint32_t abs, uint32_t neg, uint32_t sr
 
 template <typename Inst> inline bool vop3_fp8_decode_e5m3(const Inst &inst) {
   if constexpr (requires { typename Inst::IsaType; }) {
-    if constexpr (std::is_same_v<typename Inst::IsaType, ::rocjitsu::gfx1250::Isa> &&
+    if constexpr (std::is_same_v<typename Inst::IsaType, ::rocjitsu::cdna5::Isa> &&
                   requires { inst.inst_.clamp; })
       return inst.inst_.clamp;
   }
@@ -628,7 +628,7 @@ template <typename Inst, typename CarryOp>
         carry_bits |= (1ULL << i);
     vcc_out = (vcc_out & ~(chunk << base)) | ((carry_bits & chunk) << base);
   }
-  wf.set_vcc(vcc_out);
+  wf.set_vcc_mask(vcc_out);
   return true;
 }
 
@@ -1182,7 +1182,7 @@ template <typename T, typename Inst, typename CmpOp>
         cmp_bits |= (1ULL << i);
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
   return true;
 }
 
@@ -1218,7 +1218,7 @@ template <typename T, typename Inst, typename CmpOp>
     const uint64_t cmp_bits = cmp_bits64<T>(a, b, cmp_op);
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
   return true;
 }
 
@@ -1259,7 +1259,7 @@ template <typename Inst, typename CmpOp>
     const uint64_t cmp_bits = cmp_class_f64_bits(s, mask, cmp_op);
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
   return true;
 }
 

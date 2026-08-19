@@ -363,6 +363,7 @@ FILTER[gfx1250]=\
 "KFDQMTest.MultipleCpQueuesStressDispatch:"\
 "KFDCWSRTest.InternalRegTest:"\
 "KFDEvictTest.QueueTest:"\
+"KFDEvictTest.BasicTest:"\
 "KFDRASTest.*:"\
 "KFDExceptionTest.AddressFault:"\
 "KFDQMTest.GpuMemCopyTest:"\

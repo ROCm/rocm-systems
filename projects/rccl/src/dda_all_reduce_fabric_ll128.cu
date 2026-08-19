@@ -13,6 +13,7 @@
 #include "checks.h"
 #include "comm.h"
 #include "debug.h"
+#include "dda_init_detail.h"
 #include "fabric_gpu_barrier.h" // meta::comms::kDdaMaxNranks
 #include "param.h"
 
@@ -29,7 +30,6 @@ RCCL_PARAM(DdaLL128ArThreads, "DDA_LL128_AR_THREADS", 1024);
 
 namespace {
 
-using meta::comms::kDdaLL128ArMaxBytes;
 using meta::comms::kDdaLL128DataElems;
 using meta::comms::kDdaLL128Lanes;
 using meta::comms::LLLine128;
@@ -145,7 +145,9 @@ bool ncclAllReduceDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, v
   if (bytes % 8 != 0) {
     return false;
   }
-  if (bytes > kDdaLL128ArMaxBytes) {
+  // Use the runtime LL128 threshold (RCCL_DDA_LL128_THRESHOLD) as the cap.
+  const int64_t ll128Thresh = rcclParamDdaLL128Threshold();
+  if (ll128Thresh <= 0 || bytes > (size_t)ll128Thresh) {
     return false;
   }
   // Scratch is sized from the actual message (compact per-call slot stride), so
