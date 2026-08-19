@@ -208,6 +208,16 @@ protected:
         return (!mseg || std::string(mseg) != "0");
     }
 
+    // Mirror DeviceApiTests (PR #9599): when cuMem / symmetric windows are
+    // unavailable (e.g. an older driver where the runtime disables cuMem),
+    // registration is rejected with ncclInvalidUsage. Treat that as an
+    // unsupported configuration and skip, so CI reports a skip rather than a
+    // spurious failure. Any other non-success code remains a real error.
+    static bool isUnsupportedRegistration(ncclResult_t rc)
+    {
+        return rc == ncclInvalidUsage;
+    }
+
     bool isWinEnabled()
     {
         const char* win = getenv("NCCL_WIN_ENABLE");
@@ -804,7 +814,10 @@ TEST_F(UBR_MultiSegment, Generic)
     size_t count   = halfSize / sizeof(T);
 
     void* regHandle = nullptr;
-    ASSERT_MPI_EQ(ncclSuccess, ncclCommRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &regHandle));
+    ncclResult_t regResult = ncclCommRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &regHandle);
+    if (isUnsupportedRegistration(regResult))
+        GTEST_SKIP() << "Multi-segment registration is unsupported on this configuration (cuMem/symmetric disabled).";
+    ASSERT_MPI_EQ(ncclSuccess, regResult);
     auto regCleanup = makeScopeGuard([&]() {
         if (regHandle) HIP_EXPECT(ncclCommDeregister(getActiveCommunicator(), regHandle));
     });
@@ -875,7 +888,10 @@ TEST_F(UBR_MultiSegment, Generic)
      size_t count   = halfSize / sizeof(T);
  
      void* regHandle = nullptr;
-     ASSERT_MPI_EQ(ncclSuccess, ncclCommRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &regHandle));
+     ncclResult_t regResult = ncclCommRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &regHandle);
+     if (isUnsupportedRegistration(regResult))
+         GTEST_SKIP() << "Multi-segment registration is unsupported on this configuration (cuMem/symmetric disabled).";
+     ASSERT_MPI_EQ(ncclSuccess, regResult);
      auto regCleanup = makeScopeGuard([&]() {
          if (regHandle) HIP_EXPECT(ncclCommDeregister(getActiveCommunicator(), regHandle));
      });
@@ -960,7 +976,10 @@ TEST_F(UBR_MultiSegment, Generic)
      size_t count   = halfSize / sizeof(T);
  
      ncclWindow_t win = nullptr;
-     ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &win, NCCL_WIN_COLL_SYMMETRIC));
+     ncclResult_t winResult = ncclCommWindowRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &win, NCCL_WIN_COLL_SYMMETRIC);
+     if (isUnsupportedRegistration(winResult))
+         GTEST_SKIP() << "Multi-segment symmetric window registration is unsupported on this configuration (cuMem/symmetric disabled).";
+     ASSERT_MPI_EQ(ncclSuccess, winResult);
      auto winCleanup = makeScopeGuard([&]() {
          if (win) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), win));
      });
@@ -1143,7 +1162,10 @@ TEST_F(UBR_MultiSegment, Symmetric_Elastic_Lsa)
      size_t count   = halfSize / sizeof(T);
  
      ncclWindow_t win = nullptr;
-     ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &win, NCCL_WIN_COLL_SYMMETRIC));
+     ncclResult_t winResult = ncclCommWindowRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &win, NCCL_WIN_COLL_SYMMETRIC);
+     if (isUnsupportedRegistration(winResult))
+         GTEST_SKIP() << "Multi-segment symmetric window registration is unsupported on this configuration (cuMem/symmetric disabled).";
+     ASSERT_MPI_EQ(ncclSuccess, winResult);
      auto winCleanup = makeScopeGuard([&]() {
          if (win) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), win));
      });
