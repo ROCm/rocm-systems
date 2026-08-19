@@ -63,6 +63,15 @@ struct ncclCePipeline {
   cudaStream_t copyStream;                         // copy-back leg
   cudaEvent_t  readyEvent[NCCL_CE_NUM_SLOTS];  // stream -> copyStream (slot filled)
   cudaEvent_t  doneEvent[NCCL_CE_NUM_SLOTS];   // copyStream -> stream (slot free)
+  cudaEvent_t  kernelDoneEvent;                // persistent copy kernel -> caller stream
+  uint32_t*    doneCounter;                    // device-local per-slot arrival counter (NCCL_CE_NUM_SLOTS)
+};
+#define MAX_CE_RANKS 32
+struct CeCopyBatchParams {
+ const uint8_t* srcs[MAX_CE_RANKS];
+ uint8_t*       dsts[MAX_CE_RANKS];
+ size_t         n;
+ int            vecShift;
 };
 
 struct ncclCeColl {
@@ -200,4 +209,15 @@ ncclResult_t ncclHierCeAlltoAll(struct ncclComm* comm, struct ncclKernelPlan* pl
 ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                              ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream,
                              struct ncclDevrWindow* recvWin = nullptr);
+
+// Host launchers defined in device/ce_local_copy.cc (device linker TU).
+ncclResult_t ncclCeLaunchLocalCopyKernel(const void* src, void* dst, size_t n, hipStream_t stream);
+ncclResult_t ncclCeLaunchMultiSlotCopyKernel(const CeCopyBatchParams& batch, int nRanks, hipStream_t stream);
+ncclResult_t ncclCeLaunchPersistentGatherCopy(const void* sendBuff, const void* scratch, void* userRecv, size_t sub,
+                                               size_t totalBytes, int nRanks, int myRank, size_t localSrcBase,
+                                               uint32_t* signalBuffer, size_t totalSteps, uint32_t* doneCounter,
+                                               hipStream_t stream);
+ncclResult_t ncclCeLaunchPersistentScatterCopy(const void* scratch, void* userRecv, size_t sub, size_t totalBytes,
+                                                int nRanks, int rootRank, uint32_t* signalBuffer, size_t totalSteps,
+                                                uint32_t* doneCounter, hipStream_t stream);
 #endif /* NCCL_CE_COLL_H_ */

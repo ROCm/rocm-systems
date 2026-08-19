@@ -3817,7 +3817,12 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       // Uncapped sym-window CE AllReduce (-R 2), without flipping whole comm to CE mode
       bool ceArSymRegistered =
         info->coll == ncclFuncAllReduce && rcclParamForceCeAllReduce() && ceAvailable && !hasSysmemSegment;
-      size_t recvBytes = (size_t)comm->nRanks * info->count * ncclTypeSize(info->datatype);
+      size_t typeBytes = ncclTypeSize(info->datatype);
+      // Scratch footprint of the staged result (pipeline cutoff uses the same).
+      // Scatter only stages one chunk per rank; others stage nRanks chunks.
+      size_t recvBytes = (info->coll == ncclFuncScatter)
+                           ? info->count * typeBytes
+                           : (size_t)comm->nRanks * info->count * typeBytes;
       if (((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && (ceAvailable || hierCeAvailable) && !hasSysmemSegment) ||
           ceArSymRegistered) {
         INFO(NCCL_INIT, "Taking CE collective path with symmetric registered windows for user buffers");
@@ -3829,7 +3834,6 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         bool unregistered =
           winRegType != ncclSymSendRegRecvReg && winRegType != ncclSymSendNonregRecvReg && !hasSysmemSegment;
         if (CeScratchAvailable && unregistered && rcclParamForceCe() && comm->ddaScratch != nullptr) {
-          size_t typeBytes = ncclTypeSize(info->datatype);
           if (recvBytes <= comm->ddaScratchBytes) {
             // whole result fits -> single-shot DDA (no pipeline)
             INFO(NCCL_TUNING, "Using DDA scratch for CE collective (single-shot), count=%zu, recvBytes=%zu",
@@ -3839,10 +3843,16 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
                                        /*ddaPipeline=*/false, /*ddaSubChunkBytes=*/0, opDev));
             ddaHandled = true;
           } else if (rcclParamCePipeline() && comm->ceColl.pipeline != nullptr &&
-                     info->coll == ncclFuncAllGather) { // only AG is pipelined so far
+                     (info->coll == ncclFuncAllGather || info->coll == ncclFuncAlltoAll ||
+                      info->coll == ncclFuncGather || info->coll == ncclFuncScatter)) {
             // result > scratch -> pipeline through a multi-buffered scratch.
-            // all buffers must fit: nbuf * nRanks * sub <= ddaScratchBytes
-            size_t maxSub = comm->ddaScratchBytes / ((size_t)NCCL_CE_NUM_SLOTS * (size_t)comm->nRanks);
+            // AG/A2A/Gather stage nRanks lanes per slot; Scatter stages one lane.
+            const bool scatterLayout = (info->coll == ncclFuncScatter);
+            size_t maxSub =
+              scatterLayout ? comm->ddaScratchBytes / (size_t)NCCL_CE_NUM_SLOTS
+                            : comm->ddaScratchBytes / ((size_t)NCCL_CE_NUM_SLOTS * (size_t)comm->nRanks);
+            // For Gather the staged result lives on the root; non-roots only
+            // need a producer. Scratch sizing still uses the full layout.
             size_t sub = rcclParamCePipelineChunkBytes();
             if (sub == 0 || sub > maxSub) sub = maxSub; // auto-size / clamp to bound
             sub = (sub / typeBytes) * typeBytes;        // element-align

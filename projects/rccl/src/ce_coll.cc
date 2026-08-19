@@ -39,6 +39,10 @@ ncclResult_t ncclCeLaunchPersistentReduce(const void* in, void* out, int nRanks,
 // ce_coll.cc itself has no __global__ call site, so it stays in the main
 // target and is compiled --offload-host-only as usual.
 ncclResult_t ncclCeLaunchLocalCopyKernel(const void* src, void* dst, size_t n, hipStream_t stream);
+ncclResult_t ncclCeLaunchMultiSlotCopyKernel(const CeCopyBatchParams& batch, int nRanks, hipStream_t stream);
+ncclResult_t ncclCeLaunchPersistentGatherCopy(const void* sendBuff, const void* scratch, void* userRecv, size_t sub,
+                                               size_t totalBytes, int nRanks, int myRank, uint32_t* signalBuffer,
+                                               size_t totalSteps, uint32_t* barrier, hipStream_t stream);
 
 RCCL_PARAM(CeMultiStreams, "CE_MULTI_STREAMS", 0);
 RCCL_PARAM(CeBatchAsyncEnable, "CE_BATCH_ASYNC_ENABLE", -2);
@@ -101,6 +105,8 @@ static void ceDestroyPipeline(struct ncclCePipeline* p) {
     if (p->readyEvent[b]) CUDACHECKIGNORE(cudaEventDestroy(p->readyEvent[b]));
     if (p->doneEvent[b]) CUDACHECKIGNORE(cudaEventDestroy(p->doneEvent[b]));
   }
+  if (p->kernelDoneEvent) CUDACHECKIGNORE(cudaEventDestroy(p->kernelDoneEvent));
+  if (p->doneCounter) CUDACHECKIGNORE(hipFree(p->doneCounter));
   if (p->copyStream) CUDACHECKIGNORE(cudaStreamDestroy(p->copyStream));
   free(p);
 }
@@ -115,6 +121,10 @@ static ncclResult_t ceCreatePipeline(struct ncclComm* comm) {
     CUDACHECKGOTO(cudaEventCreateWithFlags(&p->readyEvent[b], cudaEventDisableTiming), ret, fail);
     CUDACHECKGOTO(cudaEventCreateWithFlags(&p->doneEvent[b], cudaEventDisableTiming), ret, fail);
   }
+  CUDACHECKGOTO(cudaEventCreateWithFlags(&p->kernelDoneEvent, cudaEventDisableTiming), ret, fail);
+  CUDACHECKGOTO(hipExtMallocWithFlags((void**)&p->doneCounter, NCCL_CE_NUM_SLOTS * sizeof(uint32_t),
+                                      hipDeviceMallocUncached),
+                ret, fail);
   comm->ceColl.pipeline = p;
   return ncclSuccess;
 
@@ -143,7 +153,10 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   ncclWindow_vidmem* arWinDev = nullptr;
   ncclWindow_vidmem* arWinDevHost = nullptr;
   size_t ceDevBaseSize = alignUp(comm->nRanks * sizeof(uint32_t), 16) * 2;
-  size_t sigBufferSize = NUM_SLOTS * comm->nRanks * sizeof(uint32_t);
+  // [NUM_SLOTS][nRanks] arm doorbells followed by [NUM_SLOTS] consumed
+  // generations used by the oversized-scratch AllGather pipeline. AllReduce only
+  // touches the leading arm region, so the extra consumed words are inert there.
+  size_t sigBufferSize = NUM_SLOTS * (comm->nRanks + 1) * sizeof(uint32_t);
   size_t maxChunkBytes = ncclCeAllReduceMaxChunkBytes(comm->nRanks);
   size_t ceARTmpBufSize = alignUp(NUM_SLOTS * comm->nRanks * maxChunkBytes, 16);
   int i = 0;
@@ -718,65 +731,460 @@ static ncclResult_t ncclCeAllGatherPipelined(struct ncclComm* comm, struct ncclC
   ncclResult_t ret = ncclSuccess;
   struct ncclCePipeline* p = comm->ceColl.pipeline;
   const int    nRanks     = comm->nRanks;
+  const int    myRank     = comm->rank;
+  const size_t NUM_SLOTS  = NCCL_CE_NUM_SLOTS;
   const size_t totalBytes = args->nElts * args->eltSize;     // this rank's contribution
   const size_t sub        = args->ceDdaSubChunkBytes;
-  const size_t slotBytes  = (size_t)nRanks * sub;            // half of the total bytes for one slot (double buffer)
+  const size_t slotBytes  = (size_t)nRanks * sub;            // one double-buffer slot in scratch
+  const size_t sigBytes   = NUM_SLOTS * ((size_t)nRanks + 1) * sizeof(uint32_t);
   uint8_t* sendBuff = (uint8_t*)args->sendBuff;
   uint8_t* userRecv = (uint8_t*)args->ddaUserRecvBuff;
   uint8_t* scratch  = (uint8_t*)args->recvBuff;              // DDA scratch base
+  uint32_t* signalBuffer = comm->ceColl.signalBuffer;
+  struct ncclCeColl* ceColl = &comm->ceColl;
   struct ncclCeBatchOpsParams batch = {};
-  int chunk = 0;  
+  int chunk = 0;
+  void* peerPtr = nullptr;
+
+  // Per-slot, per-peer LSA addresses. arm[slot,me] lives in each peer's window
+  // at (slot*nRanks + myRank); consumed[slot] follows the arm region.
+  std::vector<uint32_t*> peerArmAddr((size_t)NUM_SLOTS * nRanks, nullptr);
+  std::vector<uint32_t*> peerConsumedAddr((size_t)NUM_SLOTS * nRanks, nullptr);
+  std::vector<hipStreamBatchMemOpParams> waits(nRanks);
+  std::vector<hipStreamBatchMemOpParams> writes(nRanks);
+  for (int r = 0; r < nRanks; r++) {
+    waits[r] = {};
+    waits[r].operation = CU_STREAM_MEM_OP_WAIT_VALUE_32;
+    waits[r].waitValue.flags = CU_STREAM_WAIT_VALUE_GEQ;   // generation counters are monotonic
+    writes[r] = {};
+    writes[r].operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
+    writes[r].writeValue.flags = CU_STREAM_WRITE_VALUE_DEFAULT;
+  }
+
   NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batch, nRanks), ret, fail);
 
-  // Both slots are issued from this thread, so the record-then-wait pairs below are
-  // ordered by program order: each cudaStreamWaitEvent snapshots the recording made
-  // for the chunk that owned the buffer last, even though the host runs ahead of the
-  // GPU. Cross-chunk correctness is enforced entirely by these events. 
-  for (size_t off = 0; off < totalBytes; off += sub, chunk++) {
-    size_t n      = std::min(sub, totalBytes - off);
-    int    slot    = chunk % NCCL_CE_NUM_SLOTS;
-    size_t slotOff = (size_t)slot * slotBytes;
-
-    // Reusing this scratch half: hold off until its previous copy-back drained.
-    if (chunk >= NCCL_CE_NUM_SLOTS)
-      CUDACHECKGOTO(cudaStreamWaitEvent(stream, p->doneEvent[slot], 0), ret, fail);
-
-    NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);            // (1) ready
-
-    batch.numOps = 0;                                                       // (2) send
+  for (int slot = 0; slot < (int)NUM_SLOTS; slot++) {
+    const size_t armOff = ((size_t)slot * nRanks + myRank) * sizeof(uint32_t);
+    const size_t consumedOff = ((size_t)NUM_SLOTS * nRanks + slot) * sizeof(uint32_t);
     for (int r = 0; r < nRanks; r++) {
-      if (r == comm->rank) continue;     // skip self: own data is copied locally from sendBuff
+      if (r == myRank) continue;
+      NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceColl->signalWin, armOff, r, &peerPtr), ret, fail);
+      peerArmAddr[(size_t)slot * nRanks + r] = (uint32_t*)peerPtr;
+      NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceColl->signalWin, consumedOff, r, &peerPtr), ret, fail);
+      peerConsumedAddr[(size_t)slot * nRanks + r] = (uint32_t*)peerPtr;
+    }
+  }
+
+  // Reset the doorbells/consumed generations and the per-slot arrival counter
+  // behind prior caller-stream work, rendezvous so no peer rings a doorbell
+  // before every rank has cleared its window, then launch the copy kernel once.
+  CUDACHECKGOTO(cudaEventRecord(p->readyEvent[0], stream), ret, fail);
+  CUDACHECKGOTO(cudaStreamWaitEvent(p->copyStream, p->readyEvent[0], 0), ret, fail);
+  CUDACHECKGOTO(cudaMemsetAsync(signalBuffer, 0, sigBytes, p->copyStream), ret, fail);
+  CUDACHECKGOTO(cudaMemsetAsync(p->doneCounter, 0, NUM_SLOTS * sizeof(uint32_t), p->copyStream), ret, fail);
+  CUDACHECKGOTO(cudaEventRecord(p->doneEvent[0], p->copyStream), ret, fail);
+  CUDACHECKGOTO(cudaStreamWaitEvent(stream, p->doneEvent[0], 0), ret, fail);
+  NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);   // all ranks past the reset
+  CUDACHECKGOTO(cudaEventRecord(p->readyEvent[1], stream), ret, fail);
+  CUDACHECKGOTO(cudaStreamWaitEvent(p->copyStream, p->readyEvent[1], 0), ret, fail);
+  NCCLCHECKGOTO(ncclCeLaunchPersistentGatherCopy(sendBuff, scratch, userRecv, sub, totalBytes, nRanks, myRank,
+                                                 /*localSrcBase=*/0, signalBuffer, (totalBytes + sub - 1) / sub,
+                                                 p->doneCounter, p->copyStream),
+                ret, fail);
+  CUDACHECKGOTO(cudaEventRecord(p->kernelDoneEvent, p->copyStream), ret, fail);
+
+  for (size_t off = 0; off < totalBytes; off += sub, chunk++) {
+    const size_t n       = std::min(sub, totalBytes - off);
+    const int    slot    = chunk % (int)NUM_SLOTS;
+    const uint32_t g     = (uint32_t)(chunk / (int)NUM_SLOTS) + 1;
+    const size_t slotOff = (size_t)slot * slotBytes;
+
+    // Drain: do not overwrite a peer's scratch slot until its copy kernel has
+    // consumed the previous generation (consumed[slot] >= g-1). GEQ tolerates a
+    // kernel that has already raced ahead to a later generation.
+    if (chunk >= (int)NUM_SLOTS) {
+      int k = 0;
+      for (int r = 0; r < nRanks; r++) {
+        if (r == myRank) continue;
+        waits[k].waitValue.address = peerConsumedAddr[(size_t)slot * nRanks + r];
+        waits[k].waitValue.value = g - 1;
+        k++;
+      }
+      if (k > 0) CUCHECK(hipStreamBatchMemOp(stream, k, waits.data(), 0));
+    }
+
+    // Scatter this rank's slice into every peer's scratch slot.
+    batch.numOps = 0;
+    for (int r = 0; r < nRanks; r++) {
+      if (r == myRank) continue;   // own slice is copied locally from sendBuff
       batch.srcs[batch.numOps]  = (void*)(sendBuff + off);
-      batch.dsts[batch.numOps]  = (void*)((uint8_t*)args->ddaPeerBases[r] + slotOff + (size_t)comm->rank*sub);
+      batch.dsts[batch.numOps]  = (void*)((uint8_t*)args->ddaPeerBases[r] + slotOff + (size_t)myRank * sub);
       batch.sizes[batch.numOps] = n;
       batch.numOps++;
     }
     NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &batch, stream, args), ret, fail);
 
-    NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);            // (3) complete
-
-    // (4) copy-back slot: overlaps the next chunk's barrier + SDMA push.
-    CUDACHECKGOTO(cudaEventRecord(p->readyEvent[slot], stream), ret, fail);
-    CUDACHECKGOTO(cudaStreamWaitEvent(p->copyStream, p->readyEvent[slot], 0), ret, fail);
-    for (int r = 0; r < nRanks; r++) {
-      if (r == comm->rank) {
-        // local slot: vectorized kernel copy straight from the user sendbuff (no scratch round-trip)
-        NCCLCHECKGOTO(ncclCeLaunchLocalCopyKernel(sendBuff + off, userRecv + (size_t)r*totalBytes + off, n,
-                                                  p->copyStream), ret, fail);
-      } else {
-        // remote slots come from this rank's scratch half written by peers' SDMA.
-        const uint8_t* src = scratch + slotOff + (size_t)r*sub;
-        CUDACHECKGOTO(cudaMemcpyAsync(userRecv + (size_t)r*totalBytes + off, src, n,
-                                      hipMemcpyDeviceToDevice, p->copyStream), ret, fail);
+    // Arm: publish generation g into each peer's arm[slot, me] once the scatter
+    // above is stream-ordered complete, waking their copy kernels for this slot.
+    {
+      int k = 0;
+      for (int r = 0; r < nRanks; r++) {
+        if (r == myRank) continue;
+        writes[k].writeValue.address = peerArmAddr[(size_t)slot * nRanks + r];
+        writes[k].writeValue.value = g;
+        k++;
       }
+      if (k > 0) CUCHECK(hipStreamBatchMemOp(stream, k, writes.data(), 0));
     }
-    CUDACHECKGOTO(cudaEventRecord(p->doneEvent[slot], p->copyStream), ret, fail);
   }
 
-  // copyStream is in-order, so the last chunk's doneEvent dominates all earlier
-  // copy-backs; one wait rejoins the collective's stream.
-  if (chunk > 0)
-    CUDACHECKGOTO(cudaStreamWaitEvent(stream, p->doneEvent[(chunk - 1) % NCCL_CE_NUM_SLOTS], 0), ret, fail);
+  // The persistent kernel exits after consuming every step; joining on it makes
+  // caller-stream completion cover all user-buffer writes.
+  CUDACHECKGOTO(cudaStreamWaitEvent(stream, p->kernelDoneEvent, 0), ret, fail);
+
+exit:
+  ncclCeFreeBatchOpsParams(&batch);
+  return ret;
+fail:
+  goto exit;
+}
+
+// AlltoAll pipeline: same scratch/signal protocol as AllGather, but each peer
+// receives sendBuff[dstRank*chunk + off] into scratch[slot][myRank], and the
+// copy kernel's local lane reads sendBuff[myRank*chunk + off].
+static ncclResult_t ncclCeAlltoAllPipelined(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream) {
+  ncclResult_t ret = ncclSuccess;
+  struct ncclCePipeline* p = comm->ceColl.pipeline;
+  const int    nRanks     = comm->nRanks;
+  const int    myRank     = comm->rank;
+  const size_t NUM_SLOTS  = NCCL_CE_NUM_SLOTS;
+  const size_t totalBytes = args->nElts * args->eltSize; // per-peer chunk
+  const size_t sub        = args->ceDdaSubChunkBytes;
+  const size_t slotBytes  = (size_t)nRanks * sub;
+  const size_t sigBytes   = NUM_SLOTS * ((size_t)nRanks + 1) * sizeof(uint32_t);
+  const size_t localSrcBase = (size_t)myRank * totalBytes;
+  uint8_t* sendBuff = (uint8_t*)args->sendBuff;
+  uint8_t* userRecv = (uint8_t*)args->ddaUserRecvBuff;
+  uint8_t* scratch  = (uint8_t*)args->recvBuff;
+  uint32_t* signalBuffer = comm->ceColl.signalBuffer;
+  struct ncclCeColl* ceColl = &comm->ceColl;
+  struct ncclCeBatchOpsParams batch = {};
+  int chunk = 0;
+  void* peerPtr = nullptr;
+
+  std::vector<uint32_t*> peerArmAddr((size_t)NUM_SLOTS * nRanks, nullptr);
+  std::vector<uint32_t*> peerConsumedAddr((size_t)NUM_SLOTS * nRanks, nullptr);
+  std::vector<hipStreamBatchMemOpParams> waits(nRanks);
+  std::vector<hipStreamBatchMemOpParams> writes(nRanks);
+  for (int r = 0; r < nRanks; r++) {
+    waits[r] = {};
+    waits[r].operation = CU_STREAM_MEM_OP_WAIT_VALUE_32;
+    waits[r].waitValue.flags = CU_STREAM_WAIT_VALUE_GEQ;
+    writes[r] = {};
+    writes[r].operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
+    writes[r].writeValue.flags = CU_STREAM_WRITE_VALUE_DEFAULT;
+  }
+
+  NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batch, nRanks), ret, fail);
+
+  for (int slot = 0; slot < (int)NUM_SLOTS; slot++) {
+    const size_t armOff = ((size_t)slot * nRanks + myRank) * sizeof(uint32_t);
+    const size_t consumedOff = ((size_t)NUM_SLOTS * nRanks + slot) * sizeof(uint32_t);
+    for (int r = 0; r < nRanks; r++) {
+      if (r == myRank) continue;
+      NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceColl->signalWin, armOff, r, &peerPtr), ret, fail);
+      peerArmAddr[(size_t)slot * nRanks + r] = (uint32_t*)peerPtr;
+      NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceColl->signalWin, consumedOff, r, &peerPtr), ret, fail);
+      peerConsumedAddr[(size_t)slot * nRanks + r] = (uint32_t*)peerPtr;
+    }
+  }
+
+  CUDACHECKGOTO(cudaEventRecord(p->readyEvent[0], stream), ret, fail);
+  CUDACHECKGOTO(cudaStreamWaitEvent(p->copyStream, p->readyEvent[0], 0), ret, fail);
+  CUDACHECKGOTO(cudaMemsetAsync(signalBuffer, 0, sigBytes, p->copyStream), ret, fail);
+  CUDACHECKGOTO(cudaMemsetAsync(p->doneCounter, 0, NUM_SLOTS * sizeof(uint32_t), p->copyStream), ret, fail);
+  CUDACHECKGOTO(cudaEventRecord(p->doneEvent[0], p->copyStream), ret, fail);
+  CUDACHECKGOTO(cudaStreamWaitEvent(stream, p->doneEvent[0], 0), ret, fail);
+  NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);
+  CUDACHECKGOTO(cudaEventRecord(p->readyEvent[1], stream), ret, fail);
+  CUDACHECKGOTO(cudaStreamWaitEvent(p->copyStream, p->readyEvent[1], 0), ret, fail);
+  NCCLCHECKGOTO(ncclCeLaunchPersistentGatherCopy(sendBuff, scratch, userRecv, sub, totalBytes, nRanks, myRank,
+                                                 localSrcBase, signalBuffer, (totalBytes + sub - 1) / sub,
+                                                 p->doneCounter, p->copyStream),
+                ret, fail);
+  CUDACHECKGOTO(cudaEventRecord(p->kernelDoneEvent, p->copyStream), ret, fail);
+
+  for (size_t off = 0; off < totalBytes; off += sub, chunk++) {
+    const size_t n       = std::min(sub, totalBytes - off);
+    const int    slot    = chunk % (int)NUM_SLOTS;
+    const uint32_t g     = (uint32_t)(chunk / (int)NUM_SLOTS) + 1;
+    const size_t slotOff = (size_t)slot * slotBytes;
+
+    if (chunk >= (int)NUM_SLOTS) {
+      int k = 0;
+      for (int r = 0; r < nRanks; r++) {
+        if (r == myRank) continue;
+        waits[k].waitValue.address = peerConsumedAddr[(size_t)slot * nRanks + r];
+        waits[k].waitValue.value = g - 1;
+        k++;
+      }
+      if (k > 0) CUCHECK(hipStreamBatchMemOp(stream, k, waits.data(), 0));
+    }
+
+    batch.numOps = 0;
+    for (int r = 0; r < nRanks; r++) {
+      if (r == myRank) continue;
+      batch.srcs[batch.numOps]  = (void*)(sendBuff + (size_t)r * totalBytes + off);
+      batch.dsts[batch.numOps]  = (void*)((uint8_t*)args->ddaPeerBases[r] + slotOff + (size_t)myRank * sub);
+      batch.sizes[batch.numOps] = n;
+      batch.numOps++;
+    }
+    NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &batch, stream, args), ret, fail);
+
+    {
+      int k = 0;
+      for (int r = 0; r < nRanks; r++) {
+        if (r == myRank) continue;
+        writes[k].writeValue.address = peerArmAddr[(size_t)slot * nRanks + r];
+        writes[k].writeValue.value = g;
+        k++;
+      }
+      if (k > 0) CUCHECK(hipStreamBatchMemOp(stream, k, writes.data(), 0));
+    }
+  }
+
+  CUDACHECKGOTO(cudaStreamWaitEvent(stream, p->kernelDoneEvent, 0), ret, fail);
+
+exit:
+  ncclCeFreeBatchOpsParams(&batch);
+  return ret;
+fail:
+  goto exit;
+}
+
+// Gather pipeline: non-roots produce into the root's scratch[slot][sender];
+// only the root launches the persistent assemble kernel.
+static ncclResult_t ncclCeGatherPipelined(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream) {
+  ncclResult_t ret = ncclSuccess;
+  struct ncclCePipeline* p = comm->ceColl.pipeline;
+  const int    nRanks     = comm->nRanks;
+  const int    myRank     = comm->devrState.lsaSelf;
+  const size_t NUM_SLOTS  = NCCL_CE_NUM_SLOTS;
+  const size_t totalBytes = args->nElts * args->eltSize;
+  const size_t sub        = args->ceDdaSubChunkBytes;
+  const size_t slotBytes  = (size_t)nRanks * sub;
+  const size_t sigBytes   = NUM_SLOTS * ((size_t)nRanks + 1) * sizeof(uint32_t);
+  const size_t totalSteps = (totalBytes + sub - 1) / sub;
+  uint8_t* sendBuff = (uint8_t*)args->sendBuff;
+  uint8_t* userRecv = (uint8_t*)args->ddaUserRecvBuff;
+  uint8_t* scratch  = (uint8_t*)args->recvBuff;
+  uint32_t* signalBuffer = comm->ceColl.signalBuffer;
+  struct ncclCeColl* ceColl = &comm->ceColl;
+  struct ncclCeBatchOpsParams batch = {};
+  int chunk = 0;
+  int rootLsaRank = 0;
+  void* peerPtr = nullptr;
+  uint32_t* rootConsumedAddr[NCCL_CE_NUM_SLOTS] = {};
+  uint32_t* rootArmAddr[NCCL_CE_NUM_SLOTS] = {};
+
+  NCCLCHECKGOTO(ncclDevrWorldToLsaRank(comm, args->rootRank, &rootLsaRank), ret, fail);
+  NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batch, 1), ret, fail);
+
+  if (myRank != rootLsaRank) {
+    for (int slot = 0; slot < (int)NUM_SLOTS; slot++) {
+      const size_t armOff = ((size_t)slot * nRanks + myRank) * sizeof(uint32_t);
+      const size_t consumedOff = ((size_t)NUM_SLOTS * nRanks + slot) * sizeof(uint32_t);
+      NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceColl->signalWin, armOff, rootLsaRank, &peerPtr), ret, fail);
+      rootArmAddr[slot] = (uint32_t*)peerPtr;
+      NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceColl->signalWin, consumedOff, rootLsaRank, &peerPtr), ret, fail);
+      rootConsumedAddr[slot] = (uint32_t*)peerPtr;
+    }
+  }
+
+  // Root owns the doorbell window reset; everyone rendezvous before producers arm.
+  if (myRank == rootLsaRank) {
+    CUDACHECKGOTO(cudaEventRecord(p->readyEvent[0], stream), ret, fail);
+    CUDACHECKGOTO(cudaStreamWaitEvent(p->copyStream, p->readyEvent[0], 0), ret, fail);
+    CUDACHECKGOTO(cudaMemsetAsync(signalBuffer, 0, sigBytes, p->copyStream), ret, fail);
+    CUDACHECKGOTO(cudaMemsetAsync(p->doneCounter, 0, NUM_SLOTS * sizeof(uint32_t), p->copyStream), ret, fail);
+    CUDACHECKGOTO(cudaEventRecord(p->doneEvent[0], p->copyStream), ret, fail);
+    CUDACHECKGOTO(cudaStreamWaitEvent(stream, p->doneEvent[0], 0), ret, fail);
+  }
+  NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);
+
+  if (myRank == rootLsaRank) {
+    CUDACHECKGOTO(cudaEventRecord(p->readyEvent[1], stream), ret, fail);
+    CUDACHECKGOTO(cudaStreamWaitEvent(p->copyStream, p->readyEvent[1], 0), ret, fail);
+    NCCLCHECKGOTO(ncclCeLaunchPersistentGatherCopy(sendBuff, scratch, userRecv, sub, totalBytes, nRanks, myRank,
+                                                   /*localSrcBase=*/0, signalBuffer, totalSteps, p->doneCounter,
+                                                   p->copyStream),
+                  ret, fail);
+    CUDACHECKGOTO(cudaEventRecord(p->kernelDoneEvent, p->copyStream), ret, fail);
+  }
+
+  if (myRank != rootLsaRank) {
+    hipStreamBatchMemOpParams wait = {};
+    hipStreamBatchMemOpParams write = {};
+    wait.operation = CU_STREAM_MEM_OP_WAIT_VALUE_32;
+    wait.waitValue.flags = CU_STREAM_WAIT_VALUE_GEQ;
+    write.operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
+    write.writeValue.flags = CU_STREAM_WRITE_VALUE_DEFAULT;
+
+    for (size_t off = 0; off < totalBytes; off += sub, chunk++) {
+      const size_t n       = std::min(sub, totalBytes - off);
+      const int    slot    = chunk % (int)NUM_SLOTS;
+      const uint32_t g     = (uint32_t)(chunk / (int)NUM_SLOTS) + 1;
+      const size_t slotOff = (size_t)slot * slotBytes;
+
+      if (chunk >= (int)NUM_SLOTS) {
+        wait.waitValue.address = rootConsumedAddr[slot];
+        wait.waitValue.value = g - 1;
+        CUCHECK(hipStreamBatchMemOp(stream, 1, &wait, 0));
+      }
+
+      batch.numOps = 0;
+      batch.srcs[0]  = (void*)(sendBuff + off);
+      batch.dsts[0]  = (void*)((uint8_t*)args->ddaPeerBases[rootLsaRank] + slotOff + (size_t)myRank * sub);
+      batch.sizes[0] = n;
+      batch.numOps = 1;
+      NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &batch, stream, args), ret, fail);
+
+      write.writeValue.address = rootArmAddr[slot];
+      write.writeValue.value = g;
+      CUCHECK(hipStreamBatchMemOp(stream, 1, &write, 0));
+    }
+  } else {
+    CUDACHECKGOTO(cudaStreamWaitEvent(stream, p->kernelDoneEvent, 0), ret, fail);
+  }
+
+exit:
+  ncclCeFreeBatchOpsParams(&batch);
+  return ret;
+fail:
+  goto exit;
+}
+
+// Scatter pipeline: root is the sole producer into each peer's single-lane
+// scratch[slot*sub]; every rank runs the single-lane consumer kernel.
+static ncclResult_t ncclCeScatterPipelined(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream) {
+  ncclResult_t ret = ncclSuccess;
+  struct ncclCePipeline* p = comm->ceColl.pipeline;
+  const int    nRanks     = comm->nRanks;
+  const int    myRank     = comm->devrState.lsaSelf;
+  const size_t NUM_SLOTS  = NCCL_CE_NUM_SLOTS;
+  const size_t totalBytes = args->nElts * args->eltSize;
+  const size_t sub        = args->ceDdaSubChunkBytes;
+  const size_t sigBytes   = NUM_SLOTS * ((size_t)nRanks + 1) * sizeof(uint32_t);
+  const size_t totalSteps = (totalBytes + sub - 1) / sub;
+  uint8_t* sendBuff = (uint8_t*)args->sendBuff;
+  uint8_t* userRecv = (uint8_t*)args->ddaUserRecvBuff;
+  uint8_t* scratch  = (uint8_t*)args->recvBuff;
+  uint32_t* signalBuffer = comm->ceColl.signalBuffer;
+  struct ncclCeColl* ceColl = &comm->ceColl;
+  struct ncclCeBatchOpsParams batch = {};
+  int chunk = 0;
+  int rootLsaRank = 0;
+  void* peerPtr = nullptr;
+
+  std::vector<uint32_t*> peerArmAddr((size_t)NUM_SLOTS * nRanks, nullptr);
+  std::vector<uint32_t*> peerConsumedAddr((size_t)NUM_SLOTS * nRanks, nullptr);
+  std::vector<hipStreamBatchMemOpParams> waits(nRanks);
+  std::vector<hipStreamBatchMemOpParams> writes(nRanks);
+
+  NCCLCHECKGOTO(ncclDevrWorldToLsaRank(comm, args->rootRank, &rootLsaRank), ret, fail);
+  NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batch, nRanks), ret, fail);
+
+  for (int r = 0; r < nRanks; r++) {
+    waits[r] = {};
+    waits[r].operation = CU_STREAM_MEM_OP_WAIT_VALUE_32;
+    waits[r].waitValue.flags = CU_STREAM_WAIT_VALUE_GEQ;
+    writes[r] = {};
+    writes[r].operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
+    writes[r].writeValue.flags = CU_STREAM_WRITE_VALUE_DEFAULT;
+  }
+
+  if (myRank == rootLsaRank) {
+    for (int slot = 0; slot < (int)NUM_SLOTS; slot++) {
+      const size_t armOff = ((size_t)slot * nRanks + rootLsaRank) * sizeof(uint32_t);
+      const size_t consumedOff = ((size_t)NUM_SLOTS * nRanks + slot) * sizeof(uint32_t);
+      for (int r = 0; r < nRanks; r++) {
+        if (r == myRank) continue;
+        NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceColl->signalWin, armOff, r, &peerPtr), ret, fail);
+        peerArmAddr[(size_t)slot * nRanks + r] = (uint32_t*)peerPtr;
+        NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceColl->signalWin, consumedOff, r, &peerPtr), ret, fail);
+        peerConsumedAddr[(size_t)slot * nRanks + r] = (uint32_t*)peerPtr;
+      }
+    }
+  }
+
+  CUDACHECKGOTO(cudaEventRecord(p->readyEvent[0], stream), ret, fail);
+  CUDACHECKGOTO(cudaStreamWaitEvent(p->copyStream, p->readyEvent[0], 0), ret, fail);
+  CUDACHECKGOTO(cudaMemsetAsync(signalBuffer, 0, sigBytes, p->copyStream), ret, fail);
+  CUDACHECKGOTO(cudaMemsetAsync(p->doneCounter, 0, NUM_SLOTS * sizeof(uint32_t), p->copyStream), ret, fail);
+  CUDACHECKGOTO(cudaEventRecord(p->doneEvent[0], p->copyStream), ret, fail);
+  CUDACHECKGOTO(cudaStreamWaitEvent(stream, p->doneEvent[0], 0), ret, fail);
+  NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);
+  CUDACHECKGOTO(cudaEventRecord(p->readyEvent[1], stream), ret, fail);
+  CUDACHECKGOTO(cudaStreamWaitEvent(p->copyStream, p->readyEvent[1], 0), ret, fail);
+  NCCLCHECKGOTO(ncclCeLaunchPersistentScatterCopy(scratch, userRecv, sub, totalBytes, nRanks, rootLsaRank,
+                                                  signalBuffer, totalSteps, p->doneCounter, p->copyStream),
+                ret, fail);
+  CUDACHECKGOTO(cudaEventRecord(p->kernelDoneEvent, p->copyStream), ret, fail);
+
+  if (myRank == rootLsaRank) {
+    for (size_t off = 0; off < totalBytes; off += sub, chunk++) {
+      const size_t n       = std::min(sub, totalBytes - off);
+      const int    slot    = chunk % (int)NUM_SLOTS;
+      const uint32_t g     = (uint32_t)(chunk / (int)NUM_SLOTS) + 1;
+      const size_t slotOff = (size_t)slot * sub;
+
+      if (chunk >= (int)NUM_SLOTS) {
+        int k = 0;
+        // Drain remote peers and the local slot before refill.
+        waits[k].waitValue.address = &signalBuffer[(size_t)NUM_SLOTS * nRanks + slot];
+        waits[k].waitValue.value = g - 1;
+        k++;
+        for (int r = 0; r < nRanks; r++) {
+          if (r == myRank) continue;
+          waits[k].waitValue.address = peerConsumedAddr[(size_t)slot * nRanks + r];
+          waits[k].waitValue.value = g - 1;
+          k++;
+        }
+        CUCHECK(hipStreamBatchMemOp(stream, k, waits.data(), 0));
+      }
+
+      batch.numOps = 0;
+      // Local lane first so the root kernel can see arm after stream-ordered write.
+      batch.srcs[batch.numOps]  = (void*)(sendBuff + (size_t)myRank * totalBytes + off);
+      batch.dsts[batch.numOps]  = (void*)(scratch + slotOff);
+      batch.sizes[batch.numOps] = n;
+      batch.numOps++;
+      for (int r = 0; r < nRanks; r++) {
+        if (r == myRank) continue;
+        batch.srcs[batch.numOps]  = (void*)(sendBuff + (size_t)r * totalBytes + off);
+        batch.dsts[batch.numOps]  = (void*)((uint8_t*)args->ddaPeerBases[r] + slotOff);
+        batch.sizes[batch.numOps] = n;
+        batch.numOps++;
+      }
+      NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &batch, stream, args), ret, fail);
+
+      {
+        int k = 0;
+        writes[k].writeValue.address = &signalBuffer[(size_t)slot * nRanks + rootLsaRank];
+        writes[k].writeValue.value = g;
+        k++;
+        for (int r = 0; r < nRanks; r++) {
+          if (r == myRank) continue;
+          writes[k].writeValue.address = peerArmAddr[(size_t)slot * nRanks + r];
+          writes[k].writeValue.value = g;
+          k++;
+        }
+        CUCHECK(hipStreamBatchMemOp(stream, k, writes.data(), 0));
+      }
+    }
+  }
+
+  CUDACHECKGOTO(cudaStreamWaitEvent(stream, p->kernelDoneEvent, 0), ret, fail);
 
 exit:
   ncclCeFreeBatchOpsParams(&batch);
@@ -852,6 +1260,11 @@ ncclResult_t ncclCeAlltoAll(struct ncclComm* comm, struct ncclCeCollArgs* args, 
   ncclResult_t ret = ncclSuccess;
   int myLsaRank = comm->devrState.lsaSelf;
   int lsaSize = comm->devrState.lsaSize;
+  bool capturing = ncclCudaGraphValid(comm->planner.capturingGraph);
+  bool legacy = false; (void)ncclCudaStreamIsLegacyNull(stream, &legacy);
+  if (args->useDda && args->ceDdaPipeline && comm->ceColl.pipeline && !capturing && !legacy) {
+    return ncclCeAlltoAllPipelined(comm, args, stream);
+  }
   // Calculate the size of data each rank sends to every other rank
   const size_t chunkBytes = args->nElts * args->eltSize;
   uint8_t* mySendBuff = (uint8_t*)args->sendBuff;
@@ -1004,6 +1417,11 @@ ncclResult_t ncclCeScatter(struct ncclComm* comm, struct ncclCeCollArgs* args, c
   ncclResult_t ret = ncclSuccess;
   int myLsaRank = comm->devrState.lsaSelf;
   int lsaSize = comm->devrState.lsaSize;
+  bool capturing = ncclCudaGraphValid(comm->planner.capturingGraph);
+  bool legacy = false; (void)ncclCudaStreamIsLegacyNull(stream, &legacy);
+  if (args->useDda && args->ceDdaPipeline && comm->ceColl.pipeline && !capturing && !legacy) {
+    return ncclCeScatterPipelined(comm, args, stream);
+  }
   // Calculate the size of data each rank sends to every other rank
   const size_t chunkBytes = args->nElts * args->eltSize;
   uint8_t* mySendBuff = (uint8_t*)args->sendBuff;
@@ -1070,6 +1488,11 @@ fail:
 ncclResult_t ncclCeGather(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
   int myLsaRank = comm->devrState.lsaSelf;
+  bool capturing = ncclCudaGraphValid(comm->planner.capturingGraph);
+  bool legacy = false; (void)ncclCudaStreamIsLegacyNull(stream, &legacy);
+  if (args->useDda && args->ceDdaPipeline && comm->ceColl.pipeline && !capturing && !legacy) {
+    return ncclCeGatherPipelined(comm, args, stream);
+  }
   // Calculate the size of data each rank sends to every other rank
   const size_t chunkBytes = args->nElts * args->eltSize;
   uint8_t* mySendBuff = (uint8_t*)args->sendBuff;
