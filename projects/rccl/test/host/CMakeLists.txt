@@ -84,6 +84,12 @@ if(BUILD_TESTS)
   target_compile_options(rccl-UnitTestsMicro PRIVATE --offload-host-only)
   target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt)
 
+  # The unit-under-test production .cc pulled in here trips these warnings on
+  # code paths the test does not exercise; silence them (matches the standalone
+  # build's global add_compile_options below).
+  target_compile_options(rccl-UnitTestsMicro PRIVATE
+    -Wno-unused-parameter -Wno-unused-variable)
+
   target_compile_options(rccl-UnitTestsMicro PRIVATE
     -fprofile-instr-generate -fcoverage-mapping)
   target_link_options(rccl-UnitTestsMicro PRIVATE
@@ -275,6 +281,8 @@ if(BUILD_TESTS)
   target_compile_options(rccl-UnitTestsDevRuntime PRIVATE --offload-host-only)
   target_link_options(rccl-UnitTestsDevRuntime PRIVATE -no-hip-rt)
   target_compile_options(rccl-UnitTestsDevRuntime PRIVATE
+    -Wno-unused-parameter -Wno-unused-variable)
+  target_compile_options(rccl-UnitTestsDevRuntime PRIVATE
     -fprofile-instr-generate -fcoverage-mapping)
   target_link_options(rccl-UnitTestsDevRuntime PRIVATE
     -fprofile-instr-generate -fcoverage-mapping)
@@ -347,7 +355,14 @@ project(rccl-HostUnitTests LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_compile_options(-Wno-tautological-constant-out-of-range-compare)
+# Applied to every target in this standalone project (the in-RCCL-build path
+# above returns before reaching here and sets these per-target instead). The
+# -Wno-unused-* pair covers production .cc files #included by the micro/devr
+# binaries whose unexercised paths would otherwise warn.
+add_compile_options(
+  -Wno-tautological-constant-out-of-range-compare
+  -Wno-unused-parameter
+  -Wno-unused-variable)
 
 find_package(Threads REQUIRED)
 include(FetchContent)
@@ -597,9 +612,6 @@ add_executable(rccl-UnitTestsMicro
   ${RCCL_TEST_DIR}/common/ProcessIsolatedTestRunner.cpp
 )
 
-target_compile_options(rccl-UnitTestsMicro PRIVATE
-  -Wno-unused-parameter -Wno-unused-variable)
-
 target_include_directories(rccl-UnitTestsMicro PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${RCCL_INCLUDE_DIRS}
@@ -641,9 +653,6 @@ add_executable(rccl-UnitTestsDevRuntime
   ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
   ${RCCL_TEST_DIR}/common/ProcessIsolatedTestRunner.cpp
 )
-
-target_compile_options(rccl-UnitTestsDevRuntime PRIVATE
-  -Wno-unused-parameter -Wno-unused-variable)
 
 target_include_directories(rccl-UnitTestsDevRuntime PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
