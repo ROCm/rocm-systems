@@ -54,39 +54,27 @@ struct OffParam {
 
 struct HipFileVerifyUnaligned : public testing::TestWithParam<std::tuple<OffParam, OffParam, SizeParam>> {
 
+    const size_t io_bytes{std::get<2>(GetParam()).bytes}; // bytes transferred using the hipFile API
+    // (possibly unaligned) file and device buffer offsets of the data
+    const hoff_t file_off{kFileOffBase + std::get<0>(GetParam()).delta};
+    const hoff_t buf_off{kBufOffBase + std::get<1>(GetParam()).delta};
+    // Device layout (each sentinel region ~4_KiB (+-1), data io_bytes):
+    // [head device sentinel region][data][tail device sentinel region]
+    const size_t buffer_bytes{io_bytes + 2 * 4_KiB}; // total device buffer size
+
     Tmpfile         tmpfile;
     hipFileHandle_t tmpfile_handle{nullptr};
-    void           *device_buffer{nullptr};
-    size_t          io_bytes{0};     // bytes transferred using the hipFile API
-    size_t          buffer_bytes{0}; // total device buffer size
-    hoff_t          file_off{0};     // (possibly unaligned) file offset of the data
-    hoff_t          buf_off{0};      // (possibly unaligned) device buffer offset of the data
+    void           *device_buffer{nullptr}; // allocated by SetUp
+    uint8_t        *buffer_start{nullptr};  // typed view of device_buffer
 
     HipFileVerifyUnaligned() : tmpfile{test_env.ais_capable_dir}
     {
-    }
-
-    hoff_t fileDelta() const
-    {
-        return std::get<0>(GetParam()).delta;
-    }
-    hoff_t bufferDelta() const
-    {
-        return std::get<1>(GetParam()).delta;
     }
 
     void SetUp() override
     {
         Context<Configuration>::get()->fastpath(false);
         Context<Configuration>::get()->fallback(true); // fallback only
-
-        io_bytes = std::get<2>(GetParam()).bytes;
-        file_off = kFileOffBase + fileDelta();
-        buf_off  = kBufOffBase + bufferDelta();
-
-        // Device layout (each sentinel region ~4_KiB (+-1), data io_bytes):
-        // [head device sentinel region][data][tail device sentinel region]
-        buffer_bytes = io_bytes + 2 * 4_KiB;
 
         // File layout (each sentinel region 4_KiB, data io_bytes; data begins at file
         // offset file_off past the chunk boundary). Size through the tail bracket:
@@ -100,6 +88,7 @@ struct HipFileVerifyUnaligned : public testing::TestWithParam<std::tuple<OffPara
         ASSERT_EQ(HIPFILE_SUCCESS, hipFileHandleRegister(&tmpfile_handle, &descr));
 
         ASSERT_EQ(hipSuccess, hipMalloc(&device_buffer, buffer_bytes));
+        buffer_start = static_cast<uint8_t *>(device_buffer);
         ASSERT_EQ(hipSuccess, hipMemset(device_buffer, kByteDevSlack, buffer_bytes));
         // hipMemset is not synchronous w.r.t. the host, and hipFileRead is not ordered w.r.t. the stream.
         ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
@@ -111,11 +100,6 @@ struct HipFileVerifyUnaligned : public testing::TestWithParam<std::tuple<OffPara
             ASSERT_EQ(hipSuccess, hipFree(device_buffer));
         }
         hipFileHandleDeregister(tmpfile_handle);
-    }
-
-    uint8_t *bufferStart() const
-    {
-        return static_cast<uint8_t *>(device_buffer);
     }
 };
 
@@ -139,8 +123,8 @@ TEST_P(HipFileVerifyUnaligned, RoundTripGuardsAllRegions)
 
     // Device layout (each sentinel region ~4_KiB (+-1), data n bytes):
     // [head device sentinel region][data][tail device sentinel region]
-    uint8_t *data = bufferStart() + static_cast<size_t>(buf_off);
-    assertVerifyAndModifyBytes(bufferStart(), buffer_bytes, data, n, defaultGrid(n),
+    uint8_t *data = buffer_start + static_cast<size_t>(buf_off);
+    assertVerifyAndModifyBytes(buffer_start, buffer_bytes, data, n, defaultGrid(n),
                                dim3(kDefaultWorkgroupSize), kStride);
 
     ASSERT_EQ(static_cast<ssize_t>(io_bytes),
@@ -241,10 +225,19 @@ HIPFILE_WARN_NO_EXIT_DTOR_ON
 
 struct HipFileExtendUnaligned : public testing::TestWithParam<ExtendScenarioParam> {
 
+    const size_t io_bytes{GetParam().io_bytes};     // bytes transferred using the hipFile API
+    const hoff_t base_len{GetParam().ext.base_len}; // file length before the extending write
+    const hoff_t file_off{GetParam().ext.file_off}; // file offset the write starts at
+    const hoff_t buf_off{GetParam().buf_off};       // (possibly unaligned) device buffer offset of the data
+    // Device layout (each sentinel region ~4_KiB, data io_bytes; data begins at
+    // buffer offset buf_off, which may be +1 unaligned within the head sentinel region):
+    // [head device sentinel region][data][tail device sentinel region]
+    const size_t buffer_bytes{io_bytes + 2 * 4_KiB}; // total device buffer size
+
     Tmpfile         tmpfile;
     hipFileHandle_t tmpfile_handle{nullptr};
-    void           *device_buffer{nullptr};
-    size_t          buffer_bytes{0};
+    void           *device_buffer{nullptr}; // allocated by SetUp
+    uint8_t        *buffer_start{nullptr};  // typed view of device_buffer
 
     HipFileExtendUnaligned() : tmpfile{test_env.ais_capable_dir}
     {
@@ -256,17 +249,10 @@ struct HipFileExtendUnaligned : public testing::TestWithParam<ExtendScenarioPara
         Context<Configuration>::get()->fastpath(false);
         Context<Configuration>::get()->fallback(true);
 
-        const ExtendScenarioParam &r = GetParam();
-
         // Every scenario must actually extend the file.
-        ASSERT_GT(r.ext.file_off + static_cast<hoff_t>(r.io_bytes), r.ext.base_len);
+        ASSERT_GT(file_off + static_cast<hoff_t>(io_bytes), base_len);
 
-        ASSERT_EQ(0, ftruncate(tmpfile.fd, static_cast<off_t>(r.ext.base_len)));
-
-        // Device layout (each sentinel region ~4_KiB, data r.io_bytes; data begins at
-        // buffer offset r.buf_off, which may be +1 unaligned within the head sentinel region):
-        // [head device sentinel region][data][tail device sentinel region]
-        buffer_bytes = r.io_bytes + 2 * 4_KiB;
+        ASSERT_EQ(0, ftruncate(tmpfile.fd, static_cast<off_t>(base_len)));
 
         hipFileDescr_t descr{};
         descr.type      = hipFileHandleTypeOpaqueFD;
@@ -274,6 +260,7 @@ struct HipFileExtendUnaligned : public testing::TestWithParam<ExtendScenarioPara
         ASSERT_EQ(HIPFILE_SUCCESS, hipFileHandleRegister(&tmpfile_handle, &descr));
 
         ASSERT_EQ(hipSuccess, hipMalloc(&device_buffer, buffer_bytes));
+        buffer_start = static_cast<uint8_t *>(device_buffer);
         ASSERT_EQ(hipSuccess, hipMemset(device_buffer, kByteDevSlack, buffer_bytes));
     }
 
@@ -284,48 +271,42 @@ struct HipFileExtendUnaligned : public testing::TestWithParam<ExtendScenarioPara
         }
         hipFileHandleDeregister(tmpfile_handle);
     }
-
-    uint8_t *bufferStart() const
-    {
-        return static_cast<uint8_t *>(device_buffer);
-    }
 };
 
 TEST_P(HipFileExtendUnaligned, Extends)
 {
-    const ExtendScenarioParam &r       = GetParam();
-    const size_t               n       = r.io_bytes;
-    constexpr size_t           kStride = 2;
+    const size_t     n       = io_bytes;
+    constexpr size_t kStride = 2;
 
-    uint8_t *data = bufferStart() + static_cast<size_t>(r.buf_off);
+    uint8_t *data = buffer_start + static_cast<size_t>(buf_off);
     ASSERT_EQ(hipSuccess, hipMemset(data, kByteEntry, n));
 
-    assertVerifyAndModifyBytes(bufferStart(), buffer_bytes, data, n, defaultGrid(n),
+    assertVerifyAndModifyBytes(buffer_start, buffer_bytes, data, n, defaultGrid(n),
                                dim3(kDefaultWorkgroupSize), kStride);
 
     // File layout after the write (preserved region is preserved_n ints, data is n ints, hole spans
     // [base_len, file_off) and is empty when we append to the file):
     // [preserved = -1][hole = 0][data = stride-modified i+1], when file_off >= base_len.
     // [preserved = -1][data = stride-modified i+1], when file_off < base_len.
-    const hoff_t preserved_end = (r.ext.file_off < r.ext.base_len) ? r.ext.file_off : r.ext.base_len;
+    const hoff_t preserved_end = (file_off < base_len) ? file_off : base_len;
     const size_t preserved_n   = static_cast<size_t>(preserved_end);
     if (preserved_n > 0) {
         seedFileBytesConstant(tmpfile.fd, 0, preserved_n, kByteFileSlack);
     }
 
-    ASSERT_EQ(static_cast<ssize_t>(r.io_bytes),
-              hipFileWrite(tmpfile_handle, device_buffer, r.io_bytes, r.ext.file_off, r.buf_off));
+    ASSERT_EQ(static_cast<ssize_t>(io_bytes),
+              hipFileWrite(tmpfile_handle, device_buffer, io_bytes, file_off, buf_off));
 
-    std::vector<uint8_t> body = readFileBytes(tmpfile.fd, r.ext.file_off, n);
+    std::vector<uint8_t> body = readFileBytes(tmpfile.fd, file_off, n);
     assertBytesModified(body.data(), n, kStride);
 
     // Hole was zero-filled.
-    if (r.ext.file_off > r.ext.base_len) {
-        assertHoleZero(tmpfile.fd, r.ext.base_len, r.ext.file_off);
+    if (file_off > base_len) {
+        assertHoleZero(tmpfile.fd, base_len, file_off);
     }
 
     // Final size.
-    ASSERT_EQ(r.ext.file_off + static_cast<hoff_t>(r.io_bytes), fileSize(tmpfile.fd));
+    ASSERT_EQ(file_off + static_cast<hoff_t>(io_bytes), fileSize(tmpfile.fd));
 
     // Existing data below the write is fully intact.
     if (preserved_n > 0) {
