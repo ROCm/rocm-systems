@@ -7,7 +7,7 @@
 #ifdef ENABLE_ROCSHMEM_GIN
 
 /**
- * GIN plugin: SDMA Anvil device path (NCCL_GIN_TYPE=6).
+ * GIN plugin: SDMA Anvil device path (NCCL_GIN_TYPE=5).
  * Small messages use inlined IPC flat stores via GIN-owned device-memory peer table in GPU context.
  * Large messages use standalone Anvil SDMA (gin_anvil_sdma_factory).
  */
@@ -68,6 +68,7 @@ struct GinAnvilPendingEntry {
 };
 
 static std::map<struct ncclComm*, GinAnvilPendingEntry*> g_pendingByComm;
+static std::map<struct ncclComm*, int> g_nextSignalSlot;
 
 static void ginAnvilPendingAdd(struct ncclComm* comm, ginAnvilGinCtx* ctx) {
   std::lock_guard<std::mutex> lock(pluginMutex);
@@ -96,6 +97,7 @@ static void ginAnvilPendingClear(struct ncclComm* comm) {
     e = next;
   }
   g_pendingByComm.erase(comm);
+  g_nextSignalSlot.erase(comm);
 }
 
 struct ginAnvilMemHandle {
@@ -128,6 +130,7 @@ void ncclGinAnvilPluginTestResetHostState(void) {
       e = next;
     }
     g_pendingByComm.erase(comm);
+    g_nextSignalSlot.erase(comm);
   }
   bufferRegRefcount.clear();
 }
@@ -143,16 +146,6 @@ static ncclResult_t ginAnvilInit(void** ctx, uint64_t commId, ncclDebugLogger_t 
 
 static ncclResult_t ginAnvilDevices(int* ndev) {
   *ndev = 1;
-  return ncclSuccess;
-}
-
-// v14 GIN plugins expose GIN capability flags via getGinProperties. The Anvil
-// SDMA backend uses intra-node LSA (flat) signals, which behave as both strong
-// and VA-addressable signals; report both as supported (matches the behavior
-// previously injected by the v13->v14 shim for internal plugins).
-static ncclResult_t ginAnvilGetGinProperties(ncclGinProperties_t* ginProps) {
-  ginProps->supportsStrongSignals = true;
-  ginProps->supportsVASignals = true;
   return ncclSuccess;
 }
 
@@ -190,9 +183,16 @@ static int ginAnvilSdmaThresholdFromEnv() {
   return ginAnvilEnvInt("NCCL_GIN_ANVIL_SDMA_THRESHOLD", (int)NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT);
 }
 
-static int ginAnvilSdmaNumChannelsFromEnv() {
-  int v = ginAnvilEnvInt("NCCL_GIN_ANVIL_SDMA_NUM_CHANNELS", 1);
-  return v >= 1 && v <= 8 ? v : 1;
+static int ginAnvilSdmaNumChannels() {
+  // Forced to a single SDMA channel. Multi-channel (>=4 channels) at
+  // >=256 MiB/peer aborts with a fail-loud "unhandled system error" on
+  // 8x MI355X, and the collective GIN-put paths issue their puts from a single
+  // warp anyway (channel 0), so additional channels provide no benefit. The
+  // multi-channel machinery (per-(peer,channel) queue handles, effectiveChannel,
+  // dirty tracking, Flush) is retained and simply operates with numChannels==1,
+  // so nothing downstream changes. The former NCCL_GIN_ANVIL_SDMA_NUM_CHANNELS
+  // tunable is intentionally no longer honored.
+  return 1;
 }
 
 static uint32_t ginAnvilFusedSignalFromEnv() {
@@ -230,7 +230,7 @@ static ncclResult_t ginAnvilConnect(void* ctx, void* handles[], int nranks, int 
     return ncclSystemError;
   }
 
-  int numCh = ginAnvilSdmaNumChannelsFromEnv();
+  int numCh = ginAnvilSdmaNumChannels();
 
   gin_anvil_sdma_handle_t h = nullptr;
   void* gpu_handles = nullptr;
@@ -461,12 +461,10 @@ ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm* comm, void* 
   if (!comm || !resourceUserPtr || nContexts < 1 || nSignalsPerContext < 1) return ncclInvalidArgument;
 
   ncclResult_t ret = ncclSuccess;
-  int slot = 0;
   for (GinAnvilPendingEntry* e = g_pendingByComm[comm]; e != nullptr; e = e->next) {
     ginAnvilGinCtx* ctx = e->ctx;
     if (ctx->nSignals <= 0) continue;
-    ctx->signalSlot = slot++;
-    if (ctx->signalSlot >= nContexts) {
+    if (ctx->signalSlot < 0 || ctx->signalSlot >= nContexts) {
       WARN("GIN anvil-sdma: signal slot %d out of range (nContexts=%d)", ctx->signalSlot, nContexts);
       ginAnvilPendingClear(comm);
       return ncclInvalidArgument;
@@ -491,7 +489,7 @@ fail:
   return ret;
 }
 
-static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* config, void** outGinCtx,
+static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_v13_t* config, void** outGinCtx,
                                           ncclNetDeviceHandle_v11_t** outDevHandle) {
   ginAnvilCollCtx* cctx = (ginAnvilCollCtx*)collComm;
   ncclResult_t ret = ncclSuccess;
@@ -501,7 +499,10 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* confi
   ctx->nSignals = config->nSignals;
   ctx->nCounters = config->nCounters;
   ctx->comm = cctx->comm;
-  ctx->signalSlot = -1;  // assigned during ncclGinAnvilBindResourceWindowSignals
+  {
+    std::lock_guard<std::mutex> lock(pluginMutex);
+    ctx->signalSlot = g_nextSignalSlot[cctx->comm]++;
+  }
   ctx->hasError = false;
   ctx->signalsBound = false;
   ctx->gpu_queue_handles = cctx->gpu_queue_handles;
@@ -628,7 +629,6 @@ __attribute__((visibility("default"))) ncclGin_t ncclGinAnvilSdmaPlugin = {
   .name = "gin-anvil-sdma",
   .init = ginAnvilInit,
   .devices = ginAnvilDevices,
-  .getGinProperties = ginAnvilGetGinProperties,
   .getProperties = ginAnvilGetProperties,
   .listen = ginAnvilListen,
   .connect = ginAnvilConnect,
@@ -639,6 +639,11 @@ __attribute__((visibility("default"))) ncclGin_t ncclGinAnvilSdmaPlugin = {
   .destroyContext = ginAnvilDestroyContext,
   .closeColl = ginAnvilCloseColl,
   .closeListen = ginAnvilCloseListen,
+  .iput = NULL,
+  .iputSignal = NULL,
+  .iget = NULL,
+  .iflush = NULL,
+  .test = NULL,
   .ginProgress = ginAnvilGinProgress,
   .queryLastError = ginAnvilQueryLastError,
   .finalize = ginAnvilFinalize,
