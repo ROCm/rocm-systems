@@ -23,8 +23,11 @@
 
 #include <hip_test_common.hh>
 #include <hip/hiprtc.h>
+#include <hip/hip_ext.h>  // hipExtModuleLaunchKernel
 #include <filesystem>
 #include <fstream>
+#include <string>
+#include <vector>
 
 #define HIPRTC_CHECK(expr)                                                    \
   do {                                                                        \
@@ -40,6 +43,25 @@ static constexpr int    N            = 1 << 12;   // 4K floats (16 KB)
 static constexpr size_t SZ           = N * sizeof(float);
 static constexpr int    KERNEL_ITERS = 4;
 static constexpr int    GRAPH_ITERS  = 4;
+
+static bool hrr_find_peer_accessible_pair(int& src_dev, int& dst_dev, int& ndev) {
+  HIP_CHECK(hipGetDeviceCount(&ndev));
+  if (ndev < 2) return false;
+
+  for (int src = 0; src < ndev; ++src) {
+    for (int dst = 0; dst < ndev; ++dst) {
+      if (src == dst) continue;
+      int can_access = 0;
+      HIP_CHECK(hipDeviceCanAccessPeer(&can_access, src, dst));
+      if (can_access) {
+        src_dev = src;
+        dst_dev = dst;
+        return true;
+      }
+    }
+  }
+  return false;
+}
 
 // ---------------------------------------------------------------------------
 // GPU kernels
@@ -859,15 +881,305 @@ TEST_CASE("Unit_HRR_StressApis_Direct", "[.][hrr-direct]") {
 }
 
 // ===========================================================================
+// Workload: hipStreamWriteValue32 / hipStreamWriteValue64
+//
+// Exercises hipStreamWriteValue32 and hipStreamWriteValue64. These are replayed
+// faithfully (replay-only fix: the destination void* ptr is translated via the
+// alloc_map and the stream is translated); replay must reproduce the written
+// values, validated via D2H.
+//
+// Each written value gets its OWN D2H readback rather than one combined 16-byte
+// readback, because hrr-playback's D2H validator falls back to candidate float
+// encodings (f32/bf16/f16/f64, atol=rtol=1e-3) when the bytes differ and skips
+// byte-identical elements. A 16-byte readback holding the 32-bit sentinel in the
+// low half of an 8-byte slot decodes, under the f64 candidate, to the subnormal
+// 1.68e-314; a lost 32-bit write reads back as 0.0, which is inside the 1e-3
+// tolerance, so the buffer would be accepted as "f64 within tolerance" while the
+// 64-bit slot stayed byte-identical (skipped). Splitting the readbacks makes the
+// 32-bit blob 4 bytes, and 4 % 8 != 0 excludes the f64 candidate outright; the
+// remaining candidates reject 0.0-vs-0xCAFEBABE by ~1000x (f32 sees -8.35e6
+// against a tolerance of 8.35e3). Unit_HRR_StreamWriteValueRoundtrip also pins
+// HIP_HRR_D2H_EXACT=1 so the replay gate really is byte-for-byte.
+// ===========================================================================
+TEST_CASE("Unit_HRR_StreamWriteValue_Direct", "[.][hrr-direct]") {
+  HIP_CHECK(hipSetDevice(0));
+
+  // Stream write/wait value is an optional device capability. Gate on the same
+  // attribute every other test of these APIs uses (catch/unit/stream/
+  // hipStreamValue.cc, Unit_HRR_StreamAdvanced2_Direct) so an unsupported
+  // target skips instead of aborting the capture subprocess.
+  int canUseStreamValue = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&canUseStreamValue,
+                                  hipDeviceAttributeCanUseStreamWaitValue, 0));
+  if (!canUseStreamValue) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
+  }
+
+  constexpr uint64_t kVal64 = 0xDEADBEEFFEEDFACEull;
+  constexpr uint32_t kVal32 = 0xCAFEBABEu;
+  // Increment slot: base value, then a read-modify-write increment on top of it.
+  // 0x0A0A0A0A + 0xF4E3F0C4 wraps to 0xFEEDFACE.
+  constexpr uint32_t kIncBase = 0x0A0A0A0Au;
+  constexpr uint32_t kIncDelta = 0xF4E3F0C4u;
+
+  hipStream_t s;
+  HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+
+  // Two 64-bit slots so the 32-bit write and the 64-bit write land in disjoint,
+  // fully-defined memory.
+  uint64_t* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, 2 * sizeof(uint64_t)));
+  HIP_CHECK(hipMemset(d, 0, 2 * sizeof(uint64_t)));
+
+  // Separate slot for the flags-bearing write. Allocated 8 bytes wide so a
+  // 64-bit-granular implementation of the increment cannot overrun it.
+  uint32_t* inc = nullptr;
+  HIP_CHECK(hipMalloc(&inc, sizeof(uint64_t)));
+  HIP_CHECK(hipMemset(inc, 0, sizeof(uint64_t)));
+
+  // 64-bit stream write into slot0.
+  HIP_CHECK(hipStreamWriteValue64(s, d, kVal64, 0));
+  // 32-bit stream write into slot1 (low 32 bits); the high 32 bits stay zero.
+  HIP_CHECK(hipStreamWriteValue32(s, d + 1, kVal32, 0));
+
+  // Flags are plumbed through capture and replay, so exercise a non-default one.
+  // hipExtStreamWriteValueIncrement turns the write into a read-modify-write,
+  // which makes replay fidelity depend on the earlier writes to the same slot
+  // having been replayed too. The increment flag is not guaranteed on every
+  // target, so tolerate a rejection: capture only records successful calls, so
+  // on a target that rejects it the slot simply keeps kIncBase in both the
+  // recorded blob and the replay.
+  HIP_CHECK(hipStreamWriteValue32(s, inc, kIncBase, 0));
+  hipError_t incErr = hipStreamWriteValue32(s, inc, kIncDelta,
+                                            hipExtStreamWriteValueIncrement);
+  REQUIRE((incErr == hipSuccess || incErr == hipErrorInvalidValue
+           || incErr == hipErrorNotSupported));
+
+  HIP_CHECK(hipStreamSynchronize(s));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  // One readback per value: an 8-byte blob for the 64-bit write and 4-byte blobs
+  // for the 32-bit ones (see the note above on the f64 candidate encoding).
+  uint64_t h64 = 0;
+  HIP_CHECK(hipMemcpy(&h64, d, sizeof(h64), hipMemcpyDeviceToHost));
+  REQUIRE(h64 == kVal64);
+
+  uint32_t h32 = 0;
+  HIP_CHECK(hipMemcpy(&h32, d + 1, sizeof(h32), hipMemcpyDeviceToHost));
+  REQUIRE(h32 == kVal32);
+
+  uint32_t hInc = 0;
+  HIP_CHECK(hipMemcpy(&hInc, inc, sizeof(hInc), hipMemcpyDeviceToHost));
+  // Deliberately not asserting the exact sum: the point of this slot is that
+  // replay reproduces whatever the increment produced at capture time. Only
+  // assert that a successful increment of a non-zero delta changed the slot.
+  if (incErr == hipSuccess) REQUIRE(hInc != kIncBase);
+
+  HIP_CHECK(hipFree(inc));
+  HIP_CHECK(hipFree(d));
+  HIP_CHECK(hipStreamDestroy(s));
+}
+
+// ===========================================================================
+// Pitched device-to-device memset (hipMemsetD2D*): shared geometry
+//
+// PITCH must be strictly greater than WIDTH.  CLR short-circuits the pitched
+// fill to the plain non-pitched one whenever pitch == extent.width
+// (ihipMemset3DCommand), so a contiguous buffer never reaches the pitched
+// FillMemoryCommand at all, and it has no inter-row padding, so there is
+// nothing to prove the fill stayed inside the requested sub-region.
+//
+// Note on units: CLR treats `width` as BYTES (sizeBytes = width * height);
+// the D2D8/16/32 flavour only selects the fill-pattern width via elementSize,
+// despite the doxygen wording implying elements.  hipMemsetD2D32Async.cc in
+// catch/unit/memory/ likewise passes width = numW * sizeof(int).
+// ===========================================================================
+namespace {
+constexpr size_t kD2DWidth = 32 * sizeof(int);          // 128 bytes filled per row
+constexpr size_t kD2DPitch = 192;                       // row stride (> width)
+constexpr size_t kD2DRows  = 32;
+constexpr size_t kD2DTotal = kD2DPitch * kD2DRows;      // 6144 bytes
+constexpr size_t kD2DPad   = kD2DPitch - kD2DWidth;     // 64 untouched bytes/row
+
+// Sentinel pre-fill of the WHOLE buffer vs the pattern written into the
+// WIDTH sub-region.  The two must be far apart under every dtype the replay
+// D2H validator guesses (f32/bf16/f16/f64 at atol=rtol=1e-3), otherwise a
+// replay that never ran the memsets (HRR zero-initialises replay allocations,
+// so the buffer reads back all-zero) would land inside the tolerance and
+// "pass".  0x5A5A5A5A and 0x44444444 decode to (f32) 1.54e16 / 785.07,
+// (bf16) 1.53e16 / 784, (f16) 203.25 / 4.266 and (f64) 1.78e127 / 7.48e20;
+// against zero, and against each other, every one of those is far outside
+// tolerance, so both a skipped-memset replay and a pitch-ignoring replay
+// (which would overwrite the padding with the pattern) genuinely FAIL.
+constexpr unsigned char kD2DSentinelByte = 0x5Au;       // 0x5A5A5A5A per int
+constexpr unsigned int  kD2DPattern      = 0x44444444u;
+
+static_assert(kD2DPitch > kD2DWidth, "pitched memset path requires pitch > width");
+static_assert(kD2DWidth % sizeof(unsigned int) == 0, "width must hold whole ints");
+
+// Count ints in the filled sub-region that hold `pattern`, and bytes in the
+// inter-row padding that still hold the sentinel.  Aggregated rather than
+// asserted per element so a mismatch does not emit thousands of Catch2 failures.
+void d2d_count_matches(const std::vector<unsigned char>& buf, unsigned int pattern,
+                       size_t* filled_ok, size_t* padding_ok) {
+  *filled_ok = 0;
+  *padding_ok = 0;
+  for (size_t r = 0; r < kD2DRows; ++r) {
+    const unsigned char* row = buf.data() + r * kD2DPitch;
+    for (size_t c = 0; c < kD2DWidth; c += sizeof(unsigned int)) {
+      unsigned int v = 0;
+      memcpy(&v, row + c, sizeof(v));
+      if (v == pattern) ++*filled_ok;
+    }
+    for (size_t b = kD2DWidth; b < kD2DPitch; ++b)
+      if (row[b] == kD2DSentinelByte) ++*padding_ok;
+  }
+}
+}  // namespace
+
+// ===========================================================================
+// Workload: pitched device-to-device memset (hipMemsetD2D*)
+//
+// Exercises hipMemsetD2D8 / hipMemsetD2D8Async / hipMemsetD2D16 /
+// hipMemsetD2D16Async / hipMemsetD2D32 / hipMemsetD2D32Async. These are
+// replayed faithfully (mirror the hipMemset2D handler, with alloc-map pointer
+// translation and stream translation for the async variants); replay must
+// reproduce the final byte pattern.
+//
+// Final blob (whole allocation, padding included): the first kD2DWidth bytes
+// of every row are kD2DPattern, the remaining kD2DPad bytes still hold
+// kD2DSentinelByte.
+// ===========================================================================
+TEST_CASE("Unit_HRR_MemsetD2D_Direct", "[.][hrr-direct]") {
+  HIP_CHECK(hipSetDevice(0));
+
+  hipStream_t s;
+  HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+
+  void* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, kD2DTotal));
+  const hipDeviceptr_t dp = reinterpret_cast<hipDeviceptr_t>(d);
+
+  // Sentinel the whole allocation, padding included, using an API that is
+  // already replayed faithfully, so the padding has a known non-zero value
+  // that the pitched fills below must leave alone.
+  HIP_CHECK(hipMemsetD8(dp, kD2DSentinelByte, kD2DTotal));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  // Pitched fills, kD2DWidth bytes per row only.
+  HIP_CHECK(hipMemsetD2D8(dp, kD2DPitch, 0x11, kD2DWidth, kD2DRows));
+  HIP_CHECK(hipMemsetD2D8Async(dp, kD2DPitch, 0x22, kD2DWidth, kD2DRows, s));
+  HIP_CHECK(hipMemsetD2D16(dp, kD2DPitch, 0x3333, kD2DWidth, kD2DRows));
+  HIP_CHECK(hipMemsetD2D16Async(dp, kD2DPitch, 0x4444, kD2DWidth, kD2DRows, s));
+  HIP_CHECK(hipMemsetD2D32(dp, kD2DPitch, 0x11223344u, kD2DWidth, kD2DRows));
+  HIP_CHECK(hipMemsetD2D32Async(dp, kD2DPitch, 0x55667788u, kD2DWidth, kD2DRows, s));
+
+  // The non-Async D2D memsets are NOT synchronous here: ihipMemset3D flips
+  // isAsync true for a plain device allocation at offset 0 and enqueues on the
+  // null stream without finish(), and `s` was created hipStreamNonBlocking so
+  // it never implicitly waits on the null stream.  The fills above are
+  // therefore mutually unordered.  Drain the device, then issue one final
+  // deterministic fill and drain again, so the captured end state is unique.
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemsetD2D32(dp, kD2DPitch, kD2DPattern, kD2DWidth, kD2DRows));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  // D2H the WHOLE allocation so the captured blob covers the padding too.
+  std::vector<unsigned char> h(kD2DTotal, 0);
+  HIP_CHECK(hipMemcpy(h.data(), d, kD2DTotal, hipMemcpyDeviceToHost));
+
+  HIP_CHECK(hipFree(d));
+  HIP_CHECK(hipStreamDestroy(s));
+
+  size_t filled_ok = 0, padding_ok = 0;
+  d2d_count_matches(h, kD2DPattern, &filled_ok, &padding_ok);
+  REQUIRE(filled_ok == kD2DRows * (kD2DWidth / sizeof(unsigned int)));
+  REQUIRE(padding_ok == kD2DRows * kD2DPad);
+}
+
+// ===========================================================================
+// Workload: hipMemsetD2D* onto a destination whose allocation is NOT replayed
+//
+// hipMemAllocPitch is itself in the playback no-op set, so nothing it returns
+// ever reaches alloc_map, yet hipMemAllocPitch + hipMemsetD2D* is the idiomatic
+// driver-API pairing, which makes an untranslatable destination the expected
+// case rather than a corner case.  dispatch_event() treats any
+// non-success handler return as fatal, so passing the real API a null
+// destination (hipErrorInvalidValue) would abort the whole replay; the
+// handlers must warn once and skip instead.
+//
+// A plain hipMalloc buffer is filled and read back as well, so the archive
+// still carries a translatable D2H blob.  Replay only reaches and validates
+// that blob if the untranslatable memsets were skipped rather than fatal,
+// which is what makes the roundtrip a regression guard for the skip path.
+// ===========================================================================
+TEST_CASE("Unit_HRR_MemsetD2DPitchAlloc_Direct", "[.][hrr-direct]") {
+  HIP_CHECK(hipSetDevice(0));
+
+  hipStream_t s;
+  HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+
+  // Destination that replay cannot translate.
+  hipDeviceptr_t pitched = nullptr;
+  size_t pitch = 0;
+  HIP_CHECK(hipMemAllocPitch(&pitched, &pitch, kD2DWidth, kD2DRows,
+                             /*elementSizeBytes=*/4));
+  REQUIRE(pitched != nullptr);
+  REQUIRE(pitch >= kD2DWidth);
+
+  // All six variants, so every generated handler takes the skip path on replay.
+  // These fills are mutually unordered (null stream vs non-blocking `s`), which
+  // is harmless: this buffer is never read back, only its recorded destination
+  // matters.
+  HIP_CHECK(hipMemsetD2D8(pitched, pitch, 0x11, kD2DWidth, kD2DRows));
+  HIP_CHECK(hipMemsetD2D8Async(pitched, pitch, 0x22, kD2DWidth, kD2DRows, s));
+  HIP_CHECK(hipMemsetD2D16(pitched, pitch, 0x3333, kD2DWidth, kD2DRows));
+  HIP_CHECK(hipMemsetD2D16Async(pitched, pitch, 0x4444, kD2DWidth, kD2DRows, s));
+  HIP_CHECK(hipMemsetD2D32(pitched, pitch, 0x11223344u, kD2DWidth, kD2DRows));
+  HIP_CHECK(hipMemsetD2D32Async(pitched, pitch, kD2DPattern, kD2DWidth, kD2DRows, s));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  // Translatable destination: this is the blob replay must still validate.
+  void* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, kD2DTotal));
+  const hipDeviceptr_t dp = reinterpret_cast<hipDeviceptr_t>(d);
+  HIP_CHECK(hipMemsetD8(dp, kD2DSentinelByte, kD2DTotal));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemsetD2D32(dp, kD2DPitch, kD2DPattern, kD2DWidth, kD2DRows));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  std::vector<unsigned char> h(kD2DTotal, 0);
+  HIP_CHECK(hipMemcpy(h.data(), d, kD2DTotal, hipMemcpyDeviceToHost));
+
+  HIP_CHECK(hipFree(d));
+  HIP_CHECK(hipFree(reinterpret_cast<void*>(pitched)));
+  HIP_CHECK(hipStreamDestroy(s));
+
+  size_t filled_ok = 0, padding_ok = 0;
+  d2d_count_matches(h, kD2DPattern, &filled_ok, &padding_ok);
+  REQUIRE(filled_ok == kD2DRows * (kD2DWidth / sizeof(unsigned int)));
+  REQUIRE(padding_ok == kD2DRows * kD2DPad);
+}
+
+// ===========================================================================
 // Workload B: hipMemsetD8/16/32 variants + hipMemset2D/2DAsync
 //
 // Exercises typed-memset driver APIs and 2-D pitched memset.
-// Final blob: h[i] == 2 (set by hipMemsetD32 at the end).
+// Final blob: h[i] == 0x44444444 (set by hipMemsetD32 at the end).
 // ===========================================================================
 TEST_CASE("Unit_HRR_MemsetVariants_Direct", "[.][hrr-direct]") {
   HIP_CHECK(hipSetDevice(0));
   constexpr int    N  = 1024;
   constexpr size_t SZ = N * sizeof(int);  // 4096 bytes
+
+  // Final validation pattern.  Replay zero-initialises its allocations and the
+  // playback D2H validator falls back to a float tolerance (atol=rtol=1e-3 over
+  // f32/bf16/f16/f64, accepting the first encoding that fits), so a small
+  // integer canary cannot detect a no-op replay: 2 decodes to f32 2.8e-45, well
+  // inside atol, and would validate against an all-zero buffer.  0x44444444 is
+  // far from zero in every candidate encoding (f32 785.07, bf16 784, f16 4.27,
+  // f64 7.5e20).
+  constexpr int VAL = 0x44444444;
 
   hipStream_t s;
   HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
@@ -898,16 +1210,16 @@ TEST_CASE("Unit_HRR_MemsetVariants_Direct", "[.][hrr-direct]") {
   HIP_CHECK(hipMemset2DAsync(d, PITCH, 0, PITCH, ROWS, s));
   HIP_CHECK(hipStreamSynchronize(s));
 
-  // Restore final value == 2 for blob validation
+  // Restore the final validation pattern
   HIP_CHECK(hipDeviceSynchronize());  // ensure all async ops complete first
-  HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(d), 2, N));
+  HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(d), VAL, N));
   HIP_CHECK(hipDeviceSynchronize());
 
-  // D2H blob — playback validates all values == 2
+  // D2H blob — playback validates all values == VAL
   int* h = new int[N]();
   HIP_CHECK(hipMemcpyAsync(h, d, SZ, hipMemcpyDeviceToHost, s));
   HIP_CHECK(hipStreamSynchronize(s));
-  for (int i = 0; i < N; ++i) REQUIRE(h[i] == 2);
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == VAL);
 
   HIP_CHECK(hipFree(d));
   HIP_CHECK(hipStreamDestroy(s));
@@ -1419,6 +1731,549 @@ TEST_CASE("Unit_HRR_MemPoolExtended_Direct", "[.][hrr-direct]") {
   HIP_CHECK(hipStreamSynchronize(s));
   HIP_CHECK(hipStreamDestroy(s));
   HIP_CHECK(hipMemPoolDestroy(pool));
+  delete[] h;
+}
+
+// ===========================================================================
+// Workload G2: Device-associated stream-ordered memory pool
+//
+// Exercises hipDeviceSetMemPool — the one device mem-pool API deliberately
+// left untested by Unit_HRR_DeviceInfo_Direct ("hipDeviceGetMemPool — query
+// only (SetMemPool can reset pool context)").  A user pool is made device 0's
+// current pool, then the pool-less hipMallocAsync (which draws from the device's
+// current pool) allocates from it; a known value is written and validated D2H.
+//
+// hipDeviceSetMemPool has a clean generated playback handler that resolves the
+// pool via translate_mempool(), and every supporting API here (hipMemPoolCreate,
+// hipDeviceGetDefaultMemPool, hipDeviceGetMemPool, hipMallocAsync, hipMemsetD32,
+// hipFreeAsync, hipMemPoolDestroy) already replays via existing MemPool / DeviceInfo
+// coverage.  Cleanup destroys the user pool while it is current; hipMemPoolDestroy
+// force-resets the device to its default pool (see hip_mempool.cpp), so replay
+// never needs an untracked "restore the default pool" handle.
+// Final blob: h[i] == 11.
+// ===========================================================================
+TEST_CASE("Unit_HRR_DeviceMemPool_Direct", "[.][hrr-direct]") {
+  HIP_CHECK(hipSetDevice(0));
+  constexpr int N = 256;
+  constexpr size_t SZ = N * sizeof(int);
+
+  // Baseline: the default pool is the current pool of a fresh context.
+  hipMemPool_t defPool = nullptr;
+  HIP_CHECK(hipDeviceGetDefaultMemPool(&defPool, 0));
+  REQUIRE(defPool != nullptr);
+  hipMemPool_t curPool = nullptr;
+  HIP_CHECK(hipDeviceGetMemPool(&curPool, 0));
+  REQUIRE(curPool == defPool);
+
+  // Create a user pool and make it device 0's current pool (API under test).
+  hipMemPoolProps props{};
+  props.allocType     = hipMemAllocationTypePinned;
+  props.location.type = hipMemLocationTypeDevice;
+  props.location.id   = 0;
+  hipMemPool_t myPool = nullptr;
+  HIP_CHECK(hipMemPoolCreate(&myPool, &props));
+
+  HIP_CHECK(hipDeviceSetMemPool(0, myPool));
+
+  // Confirm the association took effect.
+  HIP_CHECK(hipDeviceGetMemPool(&curPool, 0));
+  REQUIRE(curPool == myPool);
+
+  // Pool-less async alloc draws from the device's current pool (== myPool),
+  // exercising the device-pool association end to end.
+  hipStream_t s;
+  HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+  int* d = nullptr;
+  HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&d), SZ, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+
+  // D2H blob (value = 11) for playback validation.
+  int* h = new int[N]();
+  HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(d), 11, N));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpyAsync(h, d, SZ, hipMemcpyDeviceToHost, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == 11);
+
+  // Free the allocation, then destroy the (still-current) user pool: HIP resets
+  // device 0 to its default pool automatically, so no unsafe restore is replayed.
+  HIP_CHECK(hipFreeAsync(d, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+  HIP_CHECK(hipMemPoolDestroy(myPool));
+  HIP_CHECK(hipStreamDestroy(s));
+  delete[] h;
+}
+
+// ===========================================================================
+// Workload G3: hipExtMallocWithFlags device allocation
+//
+// hipExtMallocWithFlags is a supported (manual playback handler) device
+// allocation API with no prior HRR capture->replay coverage.  The manual
+// handler allocates a real buffer and records it in alloc_map (parity with
+// hipMalloc), so a write + D2H validates byte-for-byte at replay.
+// Final blob: h[i] == 22.
+// ===========================================================================
+TEST_CASE("Unit_HRR_ExtMalloc_Direct", "[.][hrr-direct]") {
+  HIP_CHECK(hipSetDevice(0));
+  constexpr int N = 256;
+  constexpr size_t SZ = N * sizeof(int);
+
+  hipStream_t s;
+  HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+  int* d = nullptr;
+  HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&d), SZ,
+                                  hipDeviceMallocDefault));
+
+  int* h = new int[N]();
+  HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(d), 22, N));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpyAsync(h, d, SZ, hipMemcpyDeviceToHost, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == 22);
+
+  HIP_CHECK(hipFree(d));
+  HIP_CHECK(hipStreamDestroy(s));
+  delete[] h;
+}
+
+// ===========================================================================
+// Workload G4: hipStreamWaitEvent_spt cross-stream ordering
+//
+// hipStreamWaitEvent_spt (per-thread-default-stream variant) has no prior HRR
+// coverage; its generated handler translates both the stream and the event
+// handle.  Stream s1 waits (via _spt) on an event recorded on s0 after a memset,
+// then copies the result — a correct D2H (33) requires the recorded event
+// ordering to be reproduced at replay.
+// Final blob: h[i] == 33.
+// ===========================================================================
+TEST_CASE("Unit_HRR_StreamWaitEventSpt_Direct", "[.][hrr-direct]") {
+  HIP_CHECK(hipSetDevice(0));
+  constexpr int N = 256;
+  constexpr size_t SZ = N * sizeof(int);
+
+  hipStream_t s0, s1;
+  HIP_CHECK(hipStreamCreateWithFlags(&s0, hipStreamNonBlocking));
+  HIP_CHECK(hipStreamCreateWithFlags(&s1, hipStreamNonBlocking));
+  hipEvent_t ev;
+  HIP_CHECK(hipEventCreate(&ev));
+
+  int *d0, *d1;
+  HIP_CHECK(hipMalloc(&d0, SZ));
+  HIP_CHECK(hipMalloc(&d1, SZ));
+
+  HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(d0), 33, N, s0));
+  HIP_CHECK(hipEventRecord(ev, s0));
+  HIP_CHECK(hipStreamWaitEvent_spt(s1, ev, 0));
+  HIP_CHECK(hipMemcpyAsync(d1, d0, SZ, hipMemcpyDeviceToDevice, s1));
+
+  int* h = new int[N]();
+  HIP_CHECK(hipMemcpyAsync(h, d1, SZ, hipMemcpyDeviceToHost, s1));
+  HIP_CHECK(hipStreamSynchronize(s1));
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == 33);
+
+  HIP_CHECK(hipFree(d0)); HIP_CHECK(hipFree(d1));
+  HIP_CHECK(hipEventDestroy(ev));
+  HIP_CHECK(hipStreamDestroy(s0)); HIP_CHECK(hipStreamDestroy(s1));
+  delete[] h;
+}
+
+// ===========================================================================
+// Workload G5: hipGraphLaunch_spt
+//
+// hipGraphLaunch_spt (per-thread-default-stream graph launch) has no prior HRR
+// coverage.  The graph is built with the already-supported stream-capture path
+// (hipStreamBeginCapture / hipStreamEndCapture / hipGraphInstantiate) and
+// launched via the _spt variant, whose generated handler translates the
+// graph-exec handle recorded by the manual hipGraphInstantiate handler.
+// Final blob: h[i] == 77.
+// ===========================================================================
+TEST_CASE("Unit_HRR_GraphLaunchSpt_Direct", "[.][hrr-direct]") {
+  HIP_CHECK(hipSetDevice(0));
+  constexpr int N = 256;
+  constexpr size_t SZ = N * sizeof(int);
+
+  hipStream_t s;
+  HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+  int* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, SZ));
+
+  HIP_CHECK(hipStreamBeginCapture(s, hipStreamCaptureModeThreadLocal));
+  HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(d), 77, N, s));
+  hipGraph_t g;
+  HIP_CHECK(hipStreamEndCapture(s, &g));
+  hipGraphExec_t exec;
+  HIP_CHECK(hipGraphInstantiate(&exec, g, nullptr, nullptr, 0));
+
+  HIP_CHECK(hipGraphLaunch_spt(exec, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+
+  int* h = new int[N]();
+  HIP_CHECK(hipMemcpyAsync(h, d, SZ, hipMemcpyDeviceToHost, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == 77);
+
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphDestroy(g));
+  HIP_CHECK(hipFree(d));
+  HIP_CHECK(hipStreamDestroy(s));
+  delete[] h;
+}
+
+// ===========================================================================
+// Workload G6: hipExtModuleLaunchKernel (OpenCL-style module kernel launch)
+//
+// hipExtModuleLaunchKernel has a manual playback handler (replay_kernel_launch
+// with ext_global_worksize=true) that reconstructs the kernarg blob and
+// translates the function handle and the device pointer inside the kernargs; it
+// has no prior HRR coverage.  The kernel is compiled at runtime with HIPRTC and
+// loaded via hipModuleLoadData (a manual handler that restores the code object
+// from the archive by hash), so — unlike static fat-binary kernels, which are
+// not captured at static-init on Linux — this replays with full D2H validation.
+// NOTE: hipExtModuleLaunchKernel takes GLOBAL work size (total work items), not
+// grid dims: global=LN, local=256 launches ceil(LN/256) workgroups.
+// Final blob: h[i] == 55.
+// ===========================================================================
+TEST_CASE("Unit_HRR_ExtModuleLaunchKernel_Direct", "[.][hrr-direct]") {
+  HIP_CHECK(hipSetDevice(0));
+  constexpr int    LN  = 256;
+  constexpr size_t LSZ = LN * sizeof(int);
+
+  int* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, LSZ));
+  hipStream_t s;
+  HIP_CHECK(hipStreamCreate(&s));
+
+  // Runtime-compiled kernel (captured via hipModuleLoadData, not static init).
+  static const char* ext_fill_src = R"(
+extern "C" __global__ void ext_fill(int* out, int val, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) out[i] = val;
+}
+)";
+  hiprtcProgram prog = nullptr;
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, ext_fill_src, "ext_fill.hip",
+                                   0, nullptr, nullptr));
+  hiprtcResult crc = hiprtcCompileProgram(prog, 0, nullptr);
+  if (crc != HIPRTC_SUCCESS) {
+    size_t log_sz = 0;
+    (void)hiprtcGetProgramLogSize(prog, &log_sz);
+    std::string log(log_sz, '\0');
+    (void)hiprtcGetProgramLog(prog, log.data());
+    (void)hiprtcDestroyProgram(&prog);
+    FAIL("hiprtcCompileProgram failed: " + log);
+  }
+  size_t co_size = 0;
+  HIPRTC_CHECK(hiprtcGetCodeSize(prog, &co_size));
+  std::vector<char> co(co_size);
+  HIPRTC_CHECK(hiprtcGetCode(prog, co.data()));
+  HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
+
+  hipModule_t mod = nullptr;
+  HIP_CHECK(hipModuleLoadData(&mod, co.data()));
+  hipFunction_t fn = nullptr;
+  HIP_CHECK(hipModuleGetFunction(&fn, mod, "ext_fill"));
+
+  // API under test.  kernelParams holds the address of each argument value;
+  // args[0] = &d is the address of the int* device pointer.
+  int   val = 55;
+  int   n   = LN;
+  void* args[] = { &d, &val, &n };
+  HIP_CHECK(hipExtModuleLaunchKernel(fn,
+      /*globalWorkSize*/ LN, 1, 1,
+      /*localWorkSize */ 256, 1, 1,
+      /*sharedMemBytes*/ 0, s, args, /*extra*/ nullptr,
+      /*startEvent*/ nullptr, /*stopEvent*/ nullptr, /*flags*/ 0));
+  HIP_CHECK(hipStreamSynchronize(s));
+
+  HIP_CHECK(hipModuleUnload(mod));
+
+  int* h = new int[LN]();
+  HIP_CHECK(hipMemcpyAsync(h, d, LSZ, hipMemcpyDeviceToHost, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+  for (int i = 0; i < LN; ++i) REQUIRE(h[i] == 55);
+
+  HIP_CHECK(hipFree(d));
+  HIP_CHECK(hipStreamDestroy(s));
+  delete[] h;
+}
+
+// ===========================================================================
+// Workload G7: hipHostFree (pinned host allocation lifecycle)
+//
+// hipHostFree has a real (non-noop) playback handler that translates the
+// recorded pointer via alloc_map and removes the mapping; hipHostMalloc's
+// handler records the pinned allocation (AllocKind::HostMalloc).  Neither is
+// exercised by any existing _Direct workload (the HostMem workload frees pinned
+// memory with hipFree).  The pinned buffer is used as an H2D source so the
+// allocation is genuinely live, then released with hipHostFree *before* the D2H
+// so its alloc-map removal is replayed mid-stream and must not disturb the
+// device->host validation that follows.
+// Final blob: h[i] == 44.
+// ===========================================================================
+TEST_CASE("Unit_HRR_HostFree_Direct", "[.][hrr-direct]") {
+  HIP_CHECK(hipSetDevice(0));
+  constexpr int    N   = 256;
+  constexpr size_t SZ  = N * sizeof(int);
+
+  hipStream_t s;
+  HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+
+  int* h_pinned = nullptr;
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h_pinned), SZ,
+                          hipHostMallocDefault));
+  for (int i = 0; i < N; ++i) h_pinned[i] = 44;
+
+  int* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, SZ));
+  HIP_CHECK(hipMemcpyAsync(d, h_pinned, SZ, hipMemcpyHostToDevice, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+
+  // API under test: release the pinned allocation via hipHostFree (not hipFree).
+  HIP_CHECK(hipHostFree(h_pinned));
+
+  int* h = new int[N]();
+  HIP_CHECK(hipMemcpyAsync(h, d, SZ, hipMemcpyDeviceToHost, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == 44);
+
+  HIP_CHECK(hipFree(d));
+  HIP_CHECK(hipStreamDestroy(s));
+  delete[] h;
+}
+
+// ===========================================================================
+// Workload G8: HIP external logging controls
+//
+// hipExtSetLoggingParams / hipExtEnableLogging / hipExtDisableLogging each have
+// a real (non-noop) generated playback handler and no prior HRR coverage.  They
+// take only scalar / no arguments (no stale pointers) and always return
+// hipSuccess.  Params are set to level 0 so enabling logging produces no output.
+// None touch device memory, so a memset-based D2H canary confirms the whole
+// replay stream (including the three logging calls) stays intact.
+// Final blob: h[i] == 66.
+// ===========================================================================
+TEST_CASE("Unit_HRR_Logging_Direct", "[.][hrr-direct]") {
+  HIP_CHECK(hipSetDevice(0));
+  constexpr int    N  = 256;
+  constexpr size_t SZ = N * sizeof(int);
+
+  // APIs under test (log_level 0 => enabling logging stays quiet).
+  HIP_CHECK(hipExtSetLoggingParams(/*log_level*/ 0, /*log_size*/ 0,
+                                   /*log_mask*/ 0));
+  HIP_CHECK(hipExtEnableLogging());
+  HIP_CHECK(hipExtDisableLogging());
+
+  hipStream_t s;
+  HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+  int* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, SZ));
+  HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(d), 66, N));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  int* h = new int[N]();
+  HIP_CHECK(hipMemcpyAsync(h, d, SZ, hipMemcpyDeviceToHost, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == 66);
+
+  HIP_CHECK(hipFree(d));
+  HIP_CHECK(hipStreamDestroy(s));
+  delete[] h;
+}
+
+// ===========================================================================
+// Workload G9: hipStreamIsCapturing_spt / hipStreamGetCaptureInfo_spt
+//
+// The per-thread-stream capture *query* APIs have real generated handlers that
+// only translate the stream and write to local outputs (safe).  They are
+// exercised INSIDE a MANUAL hipStreamBeginCapture/EndCapture frame: the manual
+// handlers set ctx.in_graph_capture and record the graph in graph_map, which the
+// generated _spt begin/end handlers omit.  The captured memset builds a graph
+// that is instantiated + launched, so a correct D2H proves the whole
+// capture->graph->replay path — with the two _spt queries mid-capture — works.
+// Final blob: h[i] == 0x5A5A5A5A.
+// ===========================================================================
+TEST_CASE("Unit_HRR_StreamCaptureQuerySpt_Direct", "[.][hrr-direct]") {
+  HIP_CHECK(hipSetDevice(0));
+  constexpr int    N  = 256;
+  constexpr size_t SZ = N * sizeof(int);
+  constexpr int    VAL = 0x5A5A5A5A;
+
+  hipStream_t s;
+  HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+  int* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, SZ));
+
+  HIP_CHECK(hipStreamBeginCapture(s, hipStreamCaptureModeThreadLocal));
+
+  // APIs under test: query capture state via the _spt variants.
+  hipStreamCaptureStatus st = hipStreamCaptureStatusNone;
+  HIP_CHECK(hipStreamIsCapturing_spt(s, &st));
+  REQUIRE(st == hipStreamCaptureStatusActive);
+
+  hipStreamCaptureStatus st2 = hipStreamCaptureStatusNone;
+  unsigned long long capId = 0;
+  HIP_CHECK(hipStreamGetCaptureInfo_spt(s, &st2, &capId));
+  REQUIRE(st2 == hipStreamCaptureStatusActive);
+
+  HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(d), VAL, N, s));
+
+  hipGraph_t g = nullptr;
+  HIP_CHECK(hipStreamEndCapture(s, &g));
+  hipGraphExec_t exec = nullptr;
+  HIP_CHECK(hipGraphInstantiate(&exec, g, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphLaunch(exec, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+
+  int* h = new int[N]();
+  HIP_CHECK(hipMemcpyAsync(h, d, SZ, hipMemcpyDeviceToHost, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == VAL);
+
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphDestroy(g));
+  HIP_CHECK(hipFree(d));
+  HIP_CHECK(hipStreamDestroy(s));
+  delete[] h;
+}
+
+// ===========================================================================
+// Workload G10: hipStreamBeginCapture_spt (GPU-VALIDATED)
+//
+// hipStreamBeginCapture_spt's generated handler translates the stream and starts
+// capture but (unlike the manual hipStreamBeginCapture) does NOT set
+// ctx.in_graph_capture.  That flag only gates timing / sync-after-launch /
+// zero-init memsets, none of which apply to a memset-only capture region with no
+// alloc or kernel launch inside it — so replay should still be correct.  Capture
+// is ended with the MANUAL hipStreamEndCapture (records the graph in graph_map;
+// the generated end_spt discards it, so end_spt stays R2).  This slice validates
+// begin_spt on GPU: green keeps it, red reclassifies it R2.
+// Final blob: h[i] == 0x33333333.
+// ===========================================================================
+TEST_CASE("Unit_HRR_StreamCaptureBeginSpt_Direct", "[.][hrr-direct]") {
+  HIP_CHECK(hipSetDevice(0));
+  constexpr int    N  = 256;
+  constexpr size_t SZ = N * sizeof(int);
+  constexpr int    VAL = 0x33333333;
+
+  hipStream_t s;
+  HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+  int* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, SZ));
+
+  // API under test: start capture via the _spt variant.
+  HIP_CHECK(hipStreamBeginCapture_spt(s, hipStreamCaptureModeThreadLocal));
+  HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(d), VAL, N, s));
+  hipGraph_t g = nullptr;
+  HIP_CHECK(hipStreamEndCapture(s, &g));
+  hipGraphExec_t exec = nullptr;
+  HIP_CHECK(hipGraphInstantiate(&exec, g, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphLaunch(exec, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+
+  int* h = new int[N]();
+  HIP_CHECK(hipMemcpyAsync(h, d, SZ, hipMemcpyDeviceToHost, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == VAL);
+
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphDestroy(g));
+  HIP_CHECK(hipFree(d));
+  HIP_CHECK(hipStreamDestroy(s));
+  delete[] h;
+}
+// ===========================================================================
+// Workload: hipConfigureCall (legacy execution-stack launch config)
+//
+// hipConfigureCall has a real (non-noop) generated playback handler that
+// rebuilds the grid/block dim3s and the shared-mem size and translates the
+// stream handle before re-issuing the call - it drops no buffer and
+// dereferences no stale pointer.  It has no prior HRR coverage.  The legacy
+// hipConfigureCall / hipSetupArgument / hipLaunchByPtr execution-stack launch
+// path is separate from the <<<>>> (__hipPushCallConfiguration) path HRR records
+// for kernel launches, so the API is exercised on its own: it only pushes a
+// call configuration onto the thread-local execution stack and returns
+// hipSuccess (no matching hipLaunchByPtr consumes it).  A memset-based D2H canary
+// then confirms the replay stream - including the replayed hipConfigureCall -
+// stays intact end to end.
+// Final blob: h[i] == 88.
+// ===========================================================================
+TEST_CASE("Unit_HRR_ConfigureCall_Direct", "[.][hrr-direct]") {
+  HIP_CHECK(hipSetDevice(0));
+  constexpr int    N  = 256;
+  constexpr size_t SZ = N * sizeof(int);
+
+  hipStream_t s;
+  HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+
+  // API under test: push a launch configuration onto the execution stack.
+  dim3 grid((N + 255) / 256), block(256);
+  HIP_CHECK(hipConfigureCall(grid, block, /*sharedMem*/ 0, s));
+
+  int* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, SZ));
+  HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(d), 88, N, s));
+
+  int* h = new int[N]();
+  HIP_CHECK(hipMemcpyAsync(h, d, SZ, hipMemcpyDeviceToHost, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == 88);
+
+  HIP_CHECK(hipFree(d));
+  HIP_CHECK(hipStreamDestroy(s));
+  delete[] h;
+}
+
+// ===========================================================================
+// Workload: cross-GPU peer copy (REQUIRES 2 GPUs)
+//
+// First HRR workload that spans two devices. src_dev is memset to a known value
+// and peer-copied to dst_dev via hipMemcpyPeer. Replay must recreate the two
+// allocations on the correct devices for the peer copy to land.
+// Skips on hosts without two peer-accessible GPUs; the roundtrip driver guards
+// the same way.
+// Final blob: h[i] == 0x7E7E7E7E.
+// ===========================================================================
+TEST_CASE("Unit_HRR_MemcpyPeer_Direct", "[.][hrr-direct]") {
+  int src_dev = 0;
+  int dst_dev = 1;
+  int ndev = 0;
+  if (!hrr_find_peer_accessible_pair(src_dev, dst_dev, ndev)) {
+    if (ndev < 2) {
+      HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+    } else {
+      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+    }
+  }
+  constexpr int    N   = 256;
+  constexpr size_t SZ  = N * sizeof(int);
+  constexpr int    VAL = 0x7E7E7E7E;
+
+  HIP_CHECK(hipSetDevice(src_dev));
+  HIP_CHECK(hipDeviceEnablePeerAccess(dst_dev, 0));
+  int* d0 = nullptr;
+  HIP_CHECK(hipMalloc(&d0, SZ));
+  HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(d0), VAL, N));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  HIP_CHECK(hipSetDevice(dst_dev));
+  int* d1 = nullptr;
+  HIP_CHECK(hipMalloc(&d1, SZ));
+
+  // API under test: cross-device peer copy src_dev -> dst_dev.
+  // Issue the copy under the src-device context (matches
+  // catch/unit/memory/hipMemcpyPeer.cc).
+  HIP_CHECK(hipSetDevice(src_dev));
+  HIP_CHECK(hipMemcpyPeer(d1, dst_dev, d0, src_dev, SZ));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  int* h = new int[N]();
+  HIP_CHECK(hipMemcpy(h, d1, SZ, hipMemcpyDeviceToHost));
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == VAL);
+
+  HIP_CHECK(hipFree(d1));
+  HIP_CHECK(hipSetDevice(src_dev));
+  HIP_CHECK(hipFree(d0));
+  HIP_CHECK(hipDeviceDisablePeerAccess(dst_dev));
   delete[] h;
 }
 
@@ -2125,67 +2980,227 @@ TEST_CASE("Unit_HRR_MiscAPIs_Direct", "[.][hrr][direct]") {
 
 // ---------------------------------------------------------------------------
 // Workload V — Driver-style 3D/2D memcpy variants
+//
+// Canary choice matters here.  Replay zero-initialises allocations, and the D2H
+// validator falls back from memcmp to a float tolerance (atol=rtol=1e-3) over
+// candidate f32/bf16/f16/f64 decodings, accepting the first encoding with no
+// out-of-tolerance element.  A canary that decodes near 0.0 in any candidate
+// encoding therefore passes against an all-zero replay buffer, which makes the
+// whole roundtrip vacuous.  Both values below decode far from zero in all four:
+//   0x5C5C5C5C -> f32 2.48e17, bf16 2.48e17, f16 279, f64 8.25e136
+//   0x4B4B4B4B -> f32 1.33e7,  bf16 1.33e7,  f16 14.6, f64 5.23e54
+// (0x2D2D2D2D, for contrast, is 9.84e-12 as f32, i.e. inside atol.)
 // ---------------------------------------------------------------------------
+static constexpr int kDrvPayload  = 0x5C5C5C5C;  // bytes the copy must move
+static constexpr int kDrvPad      = 0x4B4B4B4B;  // device padding that must survive
+static constexpr int kDrvHostFill = 0x3A3A3A3A;  // host padding that must NOT be copied
+
+// Pitched-rect geometry: pitch > width and height > 1, so the host source
+// footprint is pitch*(height-1)+width rather than the width*height volume.
+static constexpr size_t kDrvPitch = 256;  // bytes per row
+static constexpr size_t kDrvWidth = 64;   // bytes actually copied per row
+static constexpr size_t kDrvRows  = 4;    // rows per slice
+
 TEST_CASE("Unit_HRR_DrvMemcpy3D_Direct", "[.][hrr][direct]") {
-  // Warm-up first HIP call so the hipMalloc below is captured (see MiscAPIs).
+  // Driver 3D struct-pointer copies, validated end to end by D2H.
+  // Chain: host(hsrc=VAL) --hipDrvMemcpy3D H2D--> A --hipDrvMemcpy3DAsync D2D--> B
+  //        --hipDrvMemcpy3D D2D--> C. Final D2H requires all three driver copies
+  //        (H2D blob path + dual device-ptr translation) to have replayed.
   HIP_CHECK(hipSetDevice(0));
-  float* d = nullptr;
-  HIP_CHECK(hipMalloc(&d, SZ));
+  constexpr int    N   = 256;
+  constexpr size_t SZ  = N * sizeof(int);
+  constexpr int    VAL = kDrvPayload;
+
+  int *A = nullptr, *B = nullptr, *C = nullptr;
+  HIP_CHECK(hipMalloc(&A, SZ));
+  HIP_CHECK(hipMalloc(&B, SZ));
+  HIP_CHECK(hipMalloc(&C, SZ));
   hipStream_t s;
-  HIP_CHECK(hipStreamCreate(&s));
+  HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
 
-  // hipDrvMemcpy3D — D2D (same pointer, zero-size to avoid actual copy)
+  int* hsrc = new int[N];
+  for (int i = 0; i < N; ++i) hsrc[i] = VAL;
+
+  // (1) hipDrvMemcpy3D H2D: host hsrc -> device A (exercises the blob path).
   { HIP_MEMCPY3D p{};
-    p.srcMemoryType = hipMemoryTypeDevice;
-    p.dstMemoryType = hipMemoryTypeDevice;
-    p.srcDevice     = reinterpret_cast<hipDeviceptr_t>(d);
-    p.dstDevice     = reinterpret_cast<hipDeviceptr_t>(d);
-    p.WidthInBytes  = 4;
-    p.Height        = 1;
-    p.Depth         = 1;
-    p.srcPitch      = 4; p.srcHeight = 1;
-    p.dstPitch      = 4; p.dstHeight = 1;
-    (void)hipDrvMemcpy3D(&p); }
+    p.srcMemoryType = hipMemoryTypeHost;   p.srcHost   = hsrc;
+    p.dstMemoryType = hipMemoryTypeDevice; p.dstDevice = reinterpret_cast<hipDeviceptr_t>(A);
+    p.WidthInBytes  = SZ; p.Height = 1; p.Depth = 1;
+    p.srcPitch = SZ; p.srcHeight = 1;
+    p.dstPitch = SZ; p.dstHeight = 1;
+    HIP_CHECK(hipDrvMemcpy3D(&p)); }
 
-  // hipDrvMemcpy3DAsync
+  // (2) hipDrvMemcpy3DAsync D2D: A -> B on a stream (dual pointer translation).
   { HIP_MEMCPY3D p{};
-    p.srcMemoryType = hipMemoryTypeDevice;
-    p.dstMemoryType = hipMemoryTypeDevice;
-    p.srcDevice     = reinterpret_cast<hipDeviceptr_t>(d);
-    p.dstDevice     = reinterpret_cast<hipDeviceptr_t>(d);
-    p.WidthInBytes  = 4;
-    p.Height        = 1;
-    p.Depth         = 1;
-    p.srcPitch      = 4; p.srcHeight = 1;
-    p.dstPitch      = 4; p.dstHeight = 1;
-    (void)hipDrvMemcpy3DAsync(&p, s); }
+    p.srcMemoryType = hipMemoryTypeDevice; p.srcDevice = reinterpret_cast<hipDeviceptr_t>(A);
+    p.dstMemoryType = hipMemoryTypeDevice; p.dstDevice = reinterpret_cast<hipDeviceptr_t>(B);
+    p.WidthInBytes  = SZ; p.Height = 1; p.Depth = 1;
+    p.srcPitch = SZ; p.srcHeight = 1;
+    p.dstPitch = SZ; p.dstHeight = 1;
+    HIP_CHECK(hipDrvMemcpy3DAsync(&p, s)); }
+  HIP_CHECK(hipStreamSynchronize(s));
 
-  // hipMemcpy3DPeer / hipMemcpy3DPeerAsync — same device (device 0 → 0)
+  // (3) hipDrvMemcpy3D D2D: B -> C (sync device-to-device).
+  { HIP_MEMCPY3D p{};
+    p.srcMemoryType = hipMemoryTypeDevice; p.srcDevice = reinterpret_cast<hipDeviceptr_t>(B);
+    p.dstMemoryType = hipMemoryTypeDevice; p.dstDevice = reinterpret_cast<hipDeviceptr_t>(C);
+    p.WidthInBytes  = SZ; p.Height = 1; p.Depth = 1;
+    p.srcPitch = SZ; p.srcHeight = 1;
+    p.dstPitch = SZ; p.dstHeight = 1;
+    HIP_CHECK(hipDrvMemcpy3D(&p)); }
+
+  int* h = new int[N]();
+  HIP_CHECK(hipMemcpyAsync(h, C, SZ, hipMemcpyDeviceToHost, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == VAL);
+
+  // (4) Pitched 3D H2D: kDrvRows rows of kDrvWidth bytes per slice, rows spaced
+  // kDrvPitch apart, over two slices.  The host source rect therefore spans
+  // srcPitch*srcHeight*(Depth-1) + srcPitch*(Height-1) + WidthInBytes
+  // = 1024 + 768 + 64 = 1856 bytes, not the 64*4*2 = 512-byte volume, so a blob
+  // sized by the volume makes the runtime stride 1344 bytes past its end on
+  // replay.  Seeding the destination with kDrvPad and requiring the inter-row
+  // padding to survive also proves the copy wrote only the row regions.
+  constexpr size_t DEPTH  = 2;
+  constexpr size_t PSZ    = kDrvPitch * kDrvRows * DEPTH;   // 2048 bytes
+  constexpr size_t PWORDS = PSZ / sizeof(int);
+  int* P = nullptr;
+  HIP_CHECK(hipMalloc(&P, PSZ));
+  HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(P), kDrvPad, PWORDS));
+
+  std::vector<int> hp(PWORDS, kDrvHostFill);
+  for (size_t z = 0; z < DEPTH; ++z)
+    for (size_t y = 0; y < kDrvRows; ++y) {
+      size_t off = (z * kDrvRows + y) * kDrvPitch / sizeof(int);
+      for (size_t w = 0; w < kDrvWidth / sizeof(int); ++w) hp[off + w] = kDrvPayload;
+    }
+
+  { HIP_MEMCPY3D p{};
+    p.srcMemoryType = hipMemoryTypeHost;   p.srcHost   = hp.data();
+    p.dstMemoryType = hipMemoryTypeDevice; p.dstDevice = reinterpret_cast<hipDeviceptr_t>(P);
+    p.WidthInBytes  = kDrvWidth; p.Height = kDrvRows; p.Depth = DEPTH;
+    p.srcPitch = kDrvPitch; p.srcHeight = kDrvRows;
+    p.dstPitch = kDrvPitch; p.dstHeight = kDrvRows;
+    HIP_CHECK(hipDrvMemcpy3D(&p)); }
+  HIP_CHECK(hipDeviceSynchronize());
+
+  std::vector<int> back(PWORDS, 0);
+  HIP_CHECK(hipMemcpy(back.data(), P, PSZ, hipMemcpyDeviceToHost));
+  for (size_t z = 0; z < DEPTH; ++z)
+    for (size_t y = 0; y < kDrvRows; ++y) {
+      size_t row = (z * kDrvRows + y) * kDrvPitch / sizeof(int);
+      for (size_t w = 0; w < kDrvPitch / sizeof(int); ++w)
+        REQUIRE(back[row + w] == (w < kDrvWidth / sizeof(int) ? kDrvPayload : kDrvPad));
+    }
+
+  // (5) hipMemcpy3DPeer / hipMemcpy3DPeerAsync: device 0 -> device 0 self-copy
+  // on a scratch buffer, purely to keep these two APIs exercised at capture.
+  // Both are NOOP on playback, so they must not touch a buffer that feeds a D2H
+  // check; a same-pointer copy is also a no-op at capture time, so capture and
+  // replay agree either way.
+  int* scratch = nullptr;
+  HIP_CHECK(hipMalloc(&scratch, SZ));
+  HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(scratch), kDrvPad, N));
   { hipMemcpy3DPeerParms pp{};
     pp.srcDevice = 0; pp.dstDevice = 0;
-    pp.srcPtr    = make_hipPitchedPtr(d, sizeof(float), 1, 1);
-    pp.dstPtr    = make_hipPitchedPtr(d, sizeof(float), 1, 1);
-    pp.extent    = make_hipExtent(sizeof(float), 1, 1);
+    pp.srcPtr    = make_hipPitchedPtr(scratch, sizeof(int), 1, 1);
+    pp.dstPtr    = make_hipPitchedPtr(scratch, sizeof(int), 1, 1);
+    pp.extent    = make_hipExtent(sizeof(int), 1, 1);
     (void)hipMemcpy3DPeer(&pp); }
   { hipMemcpy3DPeerParms pp{};
     pp.srcDevice = 0; pp.dstDevice = 0;
-    pp.srcPtr    = make_hipPitchedPtr(d, sizeof(float), 1, 1);
-    pp.dstPtr    = make_hipPitchedPtr(d, sizeof(float), 1, 1);
-    pp.extent    = make_hipExtent(sizeof(float), 1, 1);
+    pp.srcPtr    = make_hipPitchedPtr(scratch, sizeof(int), 1, 1);
+    pp.dstPtr    = make_hipPitchedPtr(scratch, sizeof(int), 1, 1);
+    pp.extent    = make_hipExtent(sizeof(int), 1, 1);
     (void)hipMemcpy3DPeerAsync(&pp, s); }
-
-  (void)hipStreamSynchronize(s);
-
-  // D2H blob (value = 21)
-  HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(d), 21, N));
-  HIP_CHECK(hipDeviceSynchronize());
-  int* h = new int[N]();
-  HIP_CHECK(hipMemcpyAsync(h, d, SZ, hipMemcpyDeviceToHost, s));
   HIP_CHECK(hipStreamSynchronize(s));
-  for (int i = 0; i < N; ++i) REQUIRE(h[i] == 21);
 
-  HIP_CHECK(hipFree(d));
+  HIP_CHECK(hipFree(scratch));
+  HIP_CHECK(hipFree(P));
+  HIP_CHECK(hipFree(A));
+  HIP_CHECK(hipFree(B));
+  HIP_CHECK(hipFree(C));
   HIP_CHECK(hipStreamDestroy(s));
+  delete[] hsrc;
+  delete[] h;
+}
+
+// ===========================================================================
+// hipDrvMemcpy2DUnaligned — driver 2D struct-pointer copy (hip_Memcpy2D).
+// host(hsrc=VAL) --H2D--> A --D2D--> B, validated by D2H on B, then a pitched
+// H2D rect whose inter-row padding must survive.
+// ===========================================================================
+TEST_CASE("Unit_HRR_DrvMemcpy2DUnaligned_Direct", "[.][hrr][direct]") {
+  HIP_CHECK(hipSetDevice(0));
+  constexpr int    N   = 256;
+  constexpr size_t SZ  = N * sizeof(int);
+  constexpr int    VAL = kDrvPayload;
+
+  int *A = nullptr, *B = nullptr;
+  HIP_CHECK(hipMalloc(&A, SZ));
+  HIP_CHECK(hipMalloc(&B, SZ));
+  hipStream_t s;
+  HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+
+  int* hsrc = new int[N];
+  for (int i = 0; i < N; ++i) hsrc[i] = VAL;
+
+  // (1) H2D single row: host hsrc -> device A (blob path).
+  { hip_Memcpy2D p{};
+    p.srcMemoryType = hipMemoryTypeHost;   p.srcHost   = hsrc;                                p.srcPitch = SZ;
+    p.dstMemoryType = hipMemoryTypeDevice; p.dstDevice = reinterpret_cast<hipDeviceptr_t>(A); p.dstPitch = SZ;
+    p.WidthInBytes  = SZ; p.Height = 1;
+    HIP_CHECK(hipDrvMemcpy2DUnaligned(&p)); }
+
+  // (2) D2D: A -> B (dual pointer translation).
+  { hip_Memcpy2D p{};
+    p.srcMemoryType = hipMemoryTypeDevice; p.srcDevice = reinterpret_cast<hipDeviceptr_t>(A); p.srcPitch = SZ;
+    p.dstMemoryType = hipMemoryTypeDevice; p.dstDevice = reinterpret_cast<hipDeviceptr_t>(B); p.dstPitch = SZ;
+    p.WidthInBytes  = SZ; p.Height = 1;
+    HIP_CHECK(hipDrvMemcpy2DUnaligned(&p)); }
+
+  int* h = new int[N]();
+  HIP_CHECK(hipMemcpyAsync(h, B, SZ, hipMemcpyDeviceToHost, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == VAL);
+
+  // (3) Pitched 2D H2D: kDrvRows rows of kDrvWidth bytes spaced kDrvPitch apart.
+  // The host source rect spans srcPitch*(Height-1) + WidthInBytes
+  // = 768 + 64 = 832 bytes, not the 64*4 = 256-byte volume, so a blob sized by
+  // the volume makes the runtime stride 576 bytes past its end on replay.  The
+  // destination is pre-seeded with kDrvPad, so the inter-row padding also has to
+  // survive untouched.
+  constexpr size_t PSZ    = kDrvPitch * kDrvRows;  // 1024 bytes
+  constexpr size_t PWORDS = PSZ / sizeof(int);
+  int* P = nullptr;
+  HIP_CHECK(hipMalloc(&P, PSZ));
+  HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(P), kDrvPad, PWORDS));
+
+  std::vector<int> hp(PWORDS, kDrvHostFill);
+  for (size_t y = 0; y < kDrvRows; ++y)
+    for (size_t w = 0; w < kDrvWidth / sizeof(int); ++w)
+      hp[y * kDrvPitch / sizeof(int) + w] = kDrvPayload;
+
+  { hip_Memcpy2D p{};
+    p.srcMemoryType = hipMemoryTypeHost;   p.srcHost   = hp.data();
+    p.dstMemoryType = hipMemoryTypeDevice; p.dstDevice = reinterpret_cast<hipDeviceptr_t>(P);
+    p.srcPitch = kDrvPitch; p.dstPitch = kDrvPitch;
+    p.WidthInBytes  = kDrvWidth; p.Height = kDrvRows;
+    HIP_CHECK(hipDrvMemcpy2DUnaligned(&p)); }
+  HIP_CHECK(hipDeviceSynchronize());
+
+  std::vector<int> back(PWORDS, 0);
+  HIP_CHECK(hipMemcpy(back.data(), P, PSZ, hipMemcpyDeviceToHost));
+  for (size_t y = 0; y < kDrvRows; ++y)
+    for (size_t w = 0; w < kDrvPitch / sizeof(int); ++w)
+      REQUIRE(back[y * kDrvPitch / sizeof(int) + w] ==
+              (w < kDrvWidth / sizeof(int) ? kDrvPayload : kDrvPad));
+
+  HIP_CHECK(hipFree(P));
+  HIP_CHECK(hipFree(A));
+  HIP_CHECK(hipFree(B));
+  HIP_CHECK(hipStreamDestroy(s));
+  delete[] hsrc;
   delete[] h;
 }
 

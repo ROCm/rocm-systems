@@ -17,10 +17,10 @@ from .vop3_modifiers import vop3_dst_mod, vop3_src_mod
 
 
 def _append_pk_f32_pair_read(
-    L: list[str], var: str, src: str, use_gfx1250_helpers: bool = False
+    L: list[str], var: str, src: str, use_cdna5_helpers: bool = False
 ) -> None:
     """Read a packed F32 operand as a pair of 32-bit words."""
-    if use_gfx1250_helpers:
+    if use_cdna5_helpers:
         L.append(f'    const auto {var} = read_pk_f32_words({src}, wf, lane);')
         return
     L.append(
@@ -38,8 +38,8 @@ def _append_pk_f32_pair_read(
     L.append('    }')
 
 
-def _pk_f32_word_expr(var: str, half: str, use_gfx1250_helpers: bool = False) -> str:
-    if use_gfx1250_helpers:
+def _pk_f32_word_expr(var: str, half: str, use_cdna5_helpers: bool = False) -> str:
+    if use_cdna5_helpers:
         return f'{var}.{half}'
     return f'{var}_{half}_w'
 
@@ -97,7 +97,7 @@ def gen_pk_binop(
         L.append(f'    float rlo = {lo_expr};')
         L.append(f'    float rhi = {hi_expr};')
         L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, util::f32_to_f16(rlo) | (static_cast<uint32_t>(util::f32_to_f16(rhi)) << 16));'
+            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, util::f32_to_f16_mode(rlo, wf.fp16_ovfl()) | (static_cast<uint32_t>(util::f32_to_f16_mode(rhi, wf.fp16_ovfl())) << 16));'
         )
     elif dtype == 'bf16':
         L.append(
@@ -125,6 +125,8 @@ def gen_pk_binop(
         lo_expr, hi_expr = f_op_map[op]
         L.append(f'    float rlo = {lo_expr};')
         L.append(f'    float rhi = {hi_expr};')
+        # Packed BF16 arithmetic is not mode-aware here. Explicit F32-to-BF16
+        # data conversions use the mode-aware helpers instead.
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, util::f32_to_bf16(rlo) | (static_cast<uint32_t>(util::f32_to_bf16(rhi)) << 16));'
         )
@@ -274,7 +276,7 @@ def gen_pk_ternary(
             L.append('    float rlo = a_lo * b_lo + c_lo;')
             L.append('    float rhi = a_hi * b_hi + c_hi;')
         L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, util::f32_to_f16(rlo) | (static_cast<uint32_t>(util::f32_to_f16(rhi)) << 16));'
+            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, util::f32_to_f16_mode(rlo, wf.fp16_ovfl()) | (static_cast<uint32_t>(util::f32_to_f16_mode(rhi, wf.fp16_ovfl())) << 16));'
         )
     elif dtype == 'bf16':
         L.append(
@@ -307,6 +309,8 @@ def gen_pk_ternary(
         else:
             L.append('    float rlo = a_lo * b_lo + c_lo;')
             L.append('    float rhi = a_hi * b_hi + c_hi;')
+        # Packed BF16 arithmetic is not mode-aware here. Explicit F32-to-BF16
+        # data conversions use the mode-aware helpers instead.
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, util::f32_to_bf16(rlo) | (static_cast<uint32_t>(util::f32_to_bf16(rhi)) << 16));'
         )
@@ -398,7 +402,7 @@ def gen_pk_binop_f32(
     src: list[str],
     op: str | None,
     opsel_exprs: tuple[str, str] = ('', ''),
-    use_gfx1250_helpers: bool = False,
+    use_cdna5_helpers: bool = False,
 ) -> str:
     """Generate packed F32 binary op (V_PK_ADD_F32, V_PK_MUL_F32).
 
@@ -413,15 +417,15 @@ def gen_pk_binop_f32(
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     for var, src in [('s0', s0), ('s1', s1)]:
-        _append_pk_f32_pair_read(L, var, src, use_gfx1250_helpers)
+        _append_pk_f32_pair_read(L, var, src, use_cdna5_helpers)
     L.append(f'    bool sel0_lo = ({opsel} >> 0) & 1;')
     L.append(f'    bool sel1_lo = ({opsel} >> 1) & 1;')
     L.append(f'    bool sel0_hi = ({opsel_hi} >> 0) & 1;')
     L.append(f'    bool sel1_hi = ({opsel_hi} >> 1) & 1;')
-    s0_lo = _pk_f32_word_expr('s0', 'lo', use_gfx1250_helpers)
-    s0_hi = _pk_f32_word_expr('s0', 'hi', use_gfx1250_helpers)
-    s1_lo = _pk_f32_word_expr('s1', 'lo', use_gfx1250_helpers)
-    s1_hi = _pk_f32_word_expr('s1', 'hi', use_gfx1250_helpers)
+    s0_lo = _pk_f32_word_expr('s0', 'lo', use_cdna5_helpers)
+    s0_hi = _pk_f32_word_expr('s0', 'hi', use_cdna5_helpers)
+    s1_lo = _pk_f32_word_expr('s1', 'lo', use_cdna5_helpers)
+    s1_hi = _pk_f32_word_expr('s1', 'hi', use_cdna5_helpers)
     L.append(f'    float a_lo = std::bit_cast<float>(sel0_lo ? {s0_hi} : {s0_lo});')
     L.append(f'    float a_hi = std::bit_cast<float>(sel0_hi ? {s0_hi} : {s0_lo});')
     L.append(f'    float b_lo = std::bit_cast<float>(sel1_lo ? {s1_hi} : {s1_lo});')
@@ -450,7 +454,7 @@ def gen_pk_ternary_f32(
     op: str | None,
     op_sel_hi_2_expr: str = '',
     opsel_exprs: tuple[str, str] = ('', ''),
-    use_gfx1250_helpers: bool = False,
+    use_cdna5_helpers: bool = False,
 ) -> str:
     """Generate packed F32 ternary op (V_PK_FMA_F32).
 
@@ -465,19 +469,19 @@ def gen_pk_ternary_f32(
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     for var, src in [('s0', s0), ('s1', s1), ('s2', s2)]:
-        _append_pk_f32_pair_read(L, var, src, use_gfx1250_helpers)
+        _append_pk_f32_pair_read(L, var, src, use_cdna5_helpers)
     L.append(f'    bool sel0_lo = ({opsel} >> 0) & 1;')
     L.append(f'    bool sel1_lo = ({opsel} >> 1) & 1;')
     L.append(f'    bool sel2_lo = ({opsel} >> 2) & 1;')
     L.append(f'    bool sel0_hi = ({opsel_hi} >> 0) & 1;')
     L.append(f'    bool sel1_hi = ({opsel_hi} >> 1) & 1;')
     L.append(f'    bool sel2_hi = {opsel_hi_2};')
-    s0_lo = _pk_f32_word_expr('s0', 'lo', use_gfx1250_helpers)
-    s0_hi = _pk_f32_word_expr('s0', 'hi', use_gfx1250_helpers)
-    s1_lo = _pk_f32_word_expr('s1', 'lo', use_gfx1250_helpers)
-    s1_hi = _pk_f32_word_expr('s1', 'hi', use_gfx1250_helpers)
-    s2_lo = _pk_f32_word_expr('s2', 'lo', use_gfx1250_helpers)
-    s2_hi = _pk_f32_word_expr('s2', 'hi', use_gfx1250_helpers)
+    s0_lo = _pk_f32_word_expr('s0', 'lo', use_cdna5_helpers)
+    s0_hi = _pk_f32_word_expr('s0', 'hi', use_cdna5_helpers)
+    s1_lo = _pk_f32_word_expr('s1', 'lo', use_cdna5_helpers)
+    s1_hi = _pk_f32_word_expr('s1', 'hi', use_cdna5_helpers)
+    s2_lo = _pk_f32_word_expr('s2', 'lo', use_cdna5_helpers)
+    s2_hi = _pk_f32_word_expr('s2', 'hi', use_cdna5_helpers)
     L.append(f'    float a_lo = std::bit_cast<float>(sel0_lo ? {s0_hi} : {s0_lo});')
     L.append(f'    float a_hi = std::bit_cast<float>(sel0_hi ? {s0_hi} : {s0_lo});')
     L.append(f'    float b_lo = std::bit_cast<float>(sel1_lo ? {s1_hi} : {s1_lo});')
@@ -537,7 +541,7 @@ def gen_mad_mix_f32(
     src: list[str],
     op_sel_hi_2_expr: str = '',
     opsel_exprs: tuple[str, str] = ('', ''),
-    use_gfx1250_helpers: bool = False,
+    use_cdna5_helpers: bool = False,
 ) -> str:
     """Generate V_MAD_MIX_F32: mixed-precision FMA with op_sel selecting f16/f32 per src."""
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
@@ -545,7 +549,7 @@ def gen_mad_mix_f32(
     L.append('  uint64_t exec = wf.exec();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
-    if use_gfx1250_helpers:
+    if use_cdna5_helpers:
         L.append(
             f'    float a = read_fma_mix_source_f32({s0}, wf, lane, inst_.src0, inst_.opsel_hi & 1, inst_.opsel & 1);'
         )
@@ -596,7 +600,7 @@ def gen_mad_mix_f32(
     L.append('    if (inst_.neg & 2) b = -b;')
     L.append('    if (inst_.neg & 4) c = -c;')
     L.append(
-        f'    float result = {"std::fma(a, b, c)" if use_gfx1250_helpers else "a * b + c"};'
+        f'    float result = {"std::fma(a, b, c)" if use_cdna5_helpers else "a * b + c"};'
     )
     L.append('    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);')
     L.append(
@@ -612,7 +616,7 @@ def gen_mad_mix_lo_hi(
     is_lo: bool,
     op_sel_hi_2_expr: str = '',
     opsel_exprs: tuple[str, str] = ('', ''),
-    use_gfx1250_helpers: bool = False,
+    use_cdna5_helpers: bool = False,
 ) -> str:
     """Generate V_MAD_MIXLO_F16 / V_MAD_MIXHI_F16."""
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
@@ -620,7 +624,7 @@ def gen_mad_mix_lo_hi(
     L.append('  uint64_t exec = wf.exec();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
-    if use_gfx1250_helpers:
+    if use_cdna5_helpers:
         L.append(
             f'    float a = read_fma_mix_source_f32({s0}, wf, lane, inst_.src0, inst_.opsel_hi & 1, inst_.opsel & 1);'
         )
@@ -671,10 +675,10 @@ def gen_mad_mix_lo_hi(
     L.append('    if (inst_.neg & 2) b = -b;')
     L.append('    if (inst_.neg & 4) c = -c;')
     L.append(
-        f'    float result = {"std::fma(a, b, c)" if use_gfx1250_helpers else "a * b + c"};'
+        f'    float result = {"std::fma(a, b, c)" if use_cdna5_helpers else "a * b + c"};'
     )
     L.append('    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);')
-    L.append(f'    uint16_t h = util::f32_to_f16(result);')
+    L.append(f'    uint16_t h = util::f32_to_f16_mode(result, wf.fp16_ovfl());')
     if is_lo:
         L.append(
             f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({d}, wf, lane, 0u, h);'
@@ -693,7 +697,7 @@ def gen_mad_mix_bf16(
     result: str,
     op_sel_hi_2_expr: str = '',
     opsel_exprs: tuple[str, str] = ('', ''),
-    use_gfx1250_helpers: bool = False,
+    use_cdna5_helpers: bool = False,
 ) -> str:
     """Generate gfx1250 BF16 FMA_MIX variants."""
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
@@ -701,7 +705,7 @@ def gen_mad_mix_bf16(
     L.append('  uint64_t exec = wf.exec();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
-    if use_gfx1250_helpers:
+    if use_cdna5_helpers:
         L.append(
             f'    float a = read_fma_mix_bf16_source_f32({s0}, wf, lane, inst_.src0, inst_.opsel_hi & 1, inst_.opsel & 1);'
         )
@@ -793,18 +797,22 @@ def gen_dot2(
     L.append(f'    bool sel0_hi = ({opsel_hi} >> 0) & 1;')
     L.append(f'    bool sel1_hi = ({opsel_hi} >> 1) & 1;')
 
-    if cls == 'dot2_f32_f16':
+    if cls in ('dot2_f32_f16', 'dot2_f32_bf16'):
+        # F16 and BF16 share the dot2 structure but widen differently: BF16 has
+        # an 8-bit exponent and no denormal renormalization, so it must use
+        # bf16_to_f32, not f16_to_f32 (which would misinterpret the exponent).
+        widen = 'util::bf16_to_f32' if cls == 'dot2_f32_bf16' else 'util::f16_to_f32'
         L.append(
-            '    float a0 = util::f16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));'
+            f'    float a0 = {widen}(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));'
         )
         L.append(
-            '    float a1 = util::f16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));'
+            f'    float a1 = {widen}(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));'
         )
         L.append(
-            '    float b0 = util::f16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));'
+            f'    float b0 = {widen}(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));'
         )
         L.append(
-            '    float b1 = util::f16_to_f32(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));'
+            f'    float b1 = {widen}(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));'
         )
         L.append('    if (inst_.neg & 1) a0 = -a0;')
         L.append('    if (inst_.neg & 2) b0 = -b0;')
@@ -878,9 +886,10 @@ def gen_dot2_true16(dst: list[str], src: list[str], cls: str) -> str:
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
     if cls == 'dot2_f16_f16':
         widen = 'util::f16_to_f32'
-        narrow = 'util::f32_to_f16'
+        narrow = 'util::f32_to_f16_mode'
     elif cls == 'dot2_bf16_bf16':
         widen = 'util::bf16_to_f32'
+        # DOT2_BF16_BF16 is a packed arithmetic op, not a data conversion.
         narrow = 'util::f32_to_bf16'
     else:
         raise ValueError(f'unhandled true16 dot2 class: {cls}')
@@ -908,7 +917,10 @@ def gen_dot2_true16(dst: list[str], src: list[str], cls: str) -> str:
     L.extend(vop3_src_mod('acc', 2, True))
     L.append('    float result = a0 * b0 + a1 * b1 + acc;')
     L.extend(vop3_dst_mod('result'))
-    L.append(f'    uint32_t result_bits = {narrow}(result);')
+    if cls == 'dot2_f16_f16':
+        L.append(f'    uint32_t result_bits = {narrow}(result, wf.fp16_ovfl());')
+    else:
+        L.append(f'    uint32_t result_bits = {narrow}(result);')
     L.append(
         f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({d}, wf, lane, opsel, result_bits, true);'
     )

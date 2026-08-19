@@ -11,6 +11,7 @@
  * Tests cover:
  *   W1  - WindowRegisterDeregister: collective register/deregister lifecycle
  *   P1  - SinglePutRank0ToRank1:   basic ncclPutSignal + ncclWaitSignal
+ *   G1  - GraphCaptureReplayPutWait: capture once, replay and verify repeatedly
  *   P2  - PutWithNonZeroOffset:    peerWinOffset at kSize/2
  *   P3  - PutMultipleDataTypes:    float32, int32, float16 (raw bytes)
  *   S1  - SignalOnlyNoData:        ncclSignal with no data transfer
@@ -63,10 +64,24 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <chrono>
 
 using namespace MPITestConstants;
 using namespace RCCLTestGuards;
 using namespace RCCLHostApiHelpers;
+
+// ---------------------------------------------------------------------------
+// busy wait kernel
+// ---------------------------------------------------------------------------
+__global__ void hostApiSpinKernel(unsigned long long cycles, volatile int* sink)
+{
+    unsigned long long start = clock64();
+    int                acc   = 0;
+    while(static_cast<unsigned long long>(clock64() - start) < cycles)
+        acc++;
+    if(sink)
+        *sink = acc;
+}
 
 namespace RcclUnitTesting
 {
@@ -134,6 +149,21 @@ inline int winMode()
         cumem_ = e ? (atoi(e) != 0) : true; 
     }
     return cumem_ ? NCCL_WIN_COLL_SYMMETRIC : NCCL_WIN_DEFAULT;
+}
+
+// Calibrate how many clock64() cycles approximate targetMs of GPU busy wait.
+inline unsigned long long calibrateSpinCycles(hipStream_t s, volatile int* sink,
+                                              double targetMs)
+{
+    const unsigned long long probe = 1500000ULL * 1000ULL; // ~1 ms @ 1.5 GHz guess
+    auto t0 = std::chrono::steady_clock::now();
+    hipLaunchKernelGGL(hostApiSpinKernel, dim3(1), dim3(1), 0, s, probe, sink);
+    (void)hipStreamSynchronize(s);
+    auto t1 = std::chrono::steady_clock::now();
+    double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+    if(ms < 1e-3)
+        ms = 1e-3;
+    return static_cast<unsigned long long>((probe / ms) * targetMs);
 }
 } // namespace
 
@@ -248,6 +278,215 @@ TEST_F(HostApiTest, SinglePutRank0ToRank1)
     ASSERT_MPI_TRUE(ok);
 
     TEST_INFO("P1 rank %d: SinglePutRank0ToRank1 passed.", myRank);
+}
+
+// ============================================================================
+// G1 — GraphCaptureReplayPutWait
+// ============================================================================
+
+/**
+ * @test HostApiTest.GraphCaptureReplayPutWait
+ * @brief Capture ncclPutSignal/ncclWaitSignal once and replay repeatedly.
+ *
+ * Rank 0 captures a PUT into rank 1's window while rank 1 captures the
+ * matching wait.  Each replay uses a different source pattern, proving that
+ * the graph performs a fresh transfer rather than exposing data left by the
+ * first launch.  No eager Put/Wait warm-up is issued before capture.
+ */
+TEST_F(HostApiTest, GraphCaptureReplayPutWait)
+{
+    constexpr int kReplayCount = 10;
+
+    if(!validateTestPrerequisites(/*min=*/2, /*max=*/2))
+    {
+        GTEST_SKIP() << "Need exactly 2 MPI processes";
+    }
+
+    const int   myRank = rank();
+    ncclComm_t  comm   = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+
+    void* winBuf = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, allocFineGrainBuffer(&winBuf, kOneMB));
+    auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
+
+    ncclWindow_t win = nullptr;
+    NcclWindowGuard wg(comm, winBuf, kOneMB, &win, winMode());
+    ASSERT_MPI_NE(win, nullptr);
+    ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
+
+    void* srcBuf = static_cast<uint8_t*>(winBuf) + kSendOffset;
+    void* dstBuf = static_cast<uint8_t*>(winBuf) + kRecvOffset;
+
+    hipGraph_t graph = nullptr;
+    hipGraphExec_t graphExec = nullptr;
+    bool captureActive = false;
+
+    auto graphCleanup = makeScopeGuard([&]() {
+        if(captureActive)
+        {
+            hipGraph_t abandonedGraph = nullptr;
+            if(hipStreamEndCapture(stream, &abandonedGraph) == hipSuccess && abandonedGraph)
+                (void)hipGraphDestroy(abandonedGraph);
+        }
+        if(graphExec)
+            (void)hipGraphExecDestroy(graphExec);
+        if(graph)
+            (void)hipGraphDestroy(graph);
+    });
+
+    hipError_t captureRes = hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal);
+    captureActive = (captureRes == hipSuccess);
+    ASSERT_MPI_EQ(hipSuccess, captureRes);
+
+    ncclResult_t rmaRes = ncclSuccess;
+    if(myRank == 0)
+    {
+        rmaRes = ncclPutSignal(srcBuf, kTransferSize, ncclUint8,
+                               /*peer=*/1, win, /*peerWinOffset=*/kRecvOffset,
+                               kSigIdx, kCtx, kFlags, comm, stream);
+    }
+    else
+    {
+        ncclWaitSignalDesc_t desc{/*opCnt=*/1, /*peer=*/0, kSigIdx, kCtx};
+        rmaRes = ncclWaitSignal(/*nDesc=*/1, &desc, comm, stream);
+    }
+    ASSERT_MPI_EQ(ncclSuccess, rmaRes);
+
+    captureRes = hipStreamEndCapture(stream, &graph);
+    captureActive = false;
+    ASSERT_MPI_EQ(hipSuccess, captureRes);
+    ASSERT_MPI_NE(nullptr, graph);
+
+    size_t numNodes = 0;
+    ASSERT_MPI_EQ(hipSuccess, hipGraphGetNodes(graph, nullptr, &numNodes));
+    ASSERT_MPI_GT(numNodes, 0u);
+
+    ASSERT_MPI_EQ(hipSuccess, hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+    ASSERT_MPI_NE(nullptr, graphExec);
+
+    for(int replay = 0; replay < kReplayCount; ++replay)
+    {
+        const int seed = 17 + replay * 31;
+        if(myRank == 0)
+            FillBuf(srcBuf, kTransferSize, seed);
+        else
+            FillSentinel(dstBuf, kTransferSize, 0);
+
+        ASSERT_MPI_SUCCESS(MPI_Barrier(MPI_COMM_WORLD));
+        ASSERT_MPI_EQ(hipSuccess, hipGraphLaunch(graphExec, stream));
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+        const bool dataValid = (myRank != 1) || VerifyBuf(dstBuf, kTransferSize, seed);
+        ASSERT_MPI_TRUE(dataValid);
+        TEST_INFO("G1 rank %d: replay %d/%d passed.", myRank, replay + 1, kReplayCount);
+    }
+
+    hipError_t destroyRes = hipGraphExecDestroy(graphExec);
+    if(destroyRes == hipSuccess)
+        graphExec = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, destroyRes);
+
+    destroyRes = hipGraphDestroy(graph);
+    if(destroyRes == hipSuccess)
+        graph = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, destroyRes);
+
+    TEST_INFO("G1 rank %d: GraphCaptureReplayPutWait passed.", myRank);
+}
+
+// ============================================================================
+// A1 — PutSignalEnqueueIsAsync
+// ============================================================================
+/**
+ * @test HostApiTest.PutSignalEnqueueIsAsync
+ * @brief ncclPutSignal host-side enqueue must be asynchronous (no implicit
+ *        CPU-GPU synchronization) even while the target stream is busy.
+ *
+ * Regression test:
+ * defect was an implicit stream synchronization inside the CE / putSignal
+ * enqueue path caused by staging the signal value through a pageable host
+ * memcpy.
+ */
+TEST_F(HostApiTest, PutSignalEnqueueIsAsync)
+{
+    constexpr double kSpinMs        = 80.0;  // how long the busy wait kernel runs
+    constexpr double kBlockFraction = 0.5;   // host-return >= this*kSpinMs => blocked
+    constexpr int    kAsyncNumPuts  = 16;    // puts issued per measurement
+    constexpr size_t kAsyncPutElems = 256;   // uint8 elements per put (small)
+
+    if(!validateTestPrerequisites(/*min=*/2, /*max=*/2))
+    {
+        GTEST_SKIP() << "Need exactly 2 MPI processes";
+    }
+
+    const int   myRank = rank();
+    ncclComm_t  comm   = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+
+    const int    peer     = (myRank + 1) % 2;
+    const size_t winBytes = static_cast<size_t>(kAsyncNumPuts) * kAsyncPutElems;
+
+    void* winBuf = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, allocFineGrainBuffer(&winBuf, winBytes));
+    auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
+
+    ncclWindow_t win = nullptr;
+    NcclWindowGuard wg(comm, winBuf, winBytes, &win, winMode());
+    ASSERT_MPI_NE(win, nullptr);
+    ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
+
+    // Sink for the busy wait kernel (device scratch).
+    void* sink = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sink, sizeof(int)));
+    auto sinkGuard = makeScopeGuard([&]() { if(sink) (void)hipFree(sink); });
+
+    // Warm up the putSignal machinery once.
+    ncclResult_t warmRes = ncclPutSignal(
+        winBuf, kAsyncPutElems, ncclUint8, peer, win, /*peerWinOffset=*/0,
+        kSigIdx, kCtx, kFlags, comm, stream);
+    ASSERT_MPI_EQ(ncclSuccess, warmRes);
+    {
+        ncclWaitSignalDesc_t d{/*opCnt=*/1, /*peer=*/peer, kSigIdx, kCtx};
+        ASSERT_MPI_EQ(ncclSuccess, ncclWaitSignal(1, &d, comm, stream));
+    }
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    const unsigned long long spinCycles =
+        calibrateSpinCycles(stream, static_cast<volatile int*>(sink), kSpinMs);
+
+    // Measurement: occupy the stream, then time a batch of putSignal enqueues.
+    MPI_Barrier(MPI_COMM_WORLD);
+    // NOTE: sink value and winBuf have no meaningfull values, thus should not be checked
+    hipLaunchKernelGGL(hostApiSpinKernel, dim3(1), dim3(1), 0, stream,
+                       spinCycles, static_cast<volatile int*>(sink));
+
+    auto t0 = std::chrono::steady_clock::now();
+    ncclResult_t putRes = ncclSuccess;
+    for(int i = 0; i < kAsyncNumPuts && putRes == ncclSuccess; ++i)
+    {
+        size_t off = static_cast<size_t>(i) * kAsyncPutElems;
+        putRes = ncclPutSignal(
+            static_cast<uint8_t*>(winBuf) + off, kAsyncPutElems, ncclUint8,
+            peer, win, off, kSigIdx, kCtx, kFlags, comm, stream);
+    }
+    auto t1 = std::chrono::steady_clock::now();
+    const double hostMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
+
+    ASSERT_MPI_EQ(ncclSuccess, putRes);
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    const double blockThresholdMs = kSpinMs * kBlockFraction;
+    const bool   async            = hostMs < blockThresholdMs;
+
+    TEST_INFO("A1 rank %d -> peer %d: %d putSignal enqueues host-return %.3f ms "
+              "(stream busy ~%.1f ms) => %s",
+              myRank, peer, kAsyncNumPuts, hostMs, kSpinMs,
+              async ? "async" : "BLOCKED (implicit sync)");
+
+    ASSERT_MPI_TRUE(async);
 }
 
 // ============================================================================

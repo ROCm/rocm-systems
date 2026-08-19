@@ -555,6 +555,7 @@ typedef enum hipDeviceAttribute_t {
                                                        ///< (requires DMA-Buf and HIP virtual memory
                                                        ///< management)
   hipDeviceAttributeHandleTypeFabricSupported,   ///< Device supports exporting memory to a fabric handle
+  hipDeviceAttributeHostAllocDmaBufSupported,  ///< Device supports host-allocated DMABuf buffer sharing
 
   hipDeviceAttributeCudaCompatibleEnd = 9999,
   hipDeviceAttributeAmdSpecificBegin = 10000,
@@ -2303,6 +2304,20 @@ hipError_t hipDeviceGetName(char* name, int len, hipDevice_t device);
  * #hipErrorDeinitialized
  */
 hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device);
+/**
+ * @brief Returns an LUID and device node mask for the device.
+ * @param [out] luid Returned 8-byte locally unique identifier for the device
+ * @param [out] deviceNodeMask Returned device node mask
+ * @param [in] device Device ordinal
+ *
+ * Returns identifying information (@p luid and @p deviceNodeMask) that allows the device to be
+ * matched with graphics APIs. The LUID is only valid on Windows; on other platforms this function
+ * returns #hipErrorNotSupported and does not modify @p luid or @p deviceNodeMask.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidValue, #hipErrorNotInitialized,
+ * #hipErrorDeinitialized, #hipErrorNotSupported
+ */
+hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask, hipDevice_t device);
 /**
  * @brief Returns a value for attribute of link between two devices
  * @param [out] value Pointer of the value for the attrubute
@@ -4779,7 +4794,22 @@ hipError_t hipMemSetMemPool(hipMemLocation* location, hipMemAllocationType type,
  */
 hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
                             hipMemAllocationType type);
-// Doxygen end of ordered memory allocator
+
+/**
+ * @brief Returns the default memory pool for a given location and allocation type
+ *
+ * @param [out] memPool Returned memory pool
+ * @param [in] location location type for which to get the default memory pool,
+ * currently only hipMemLocationTypeDevice is supported
+ * @param [in] type allocation type for which to get the default memory pool,
+ * currently only hipMemAllocationTypePinned & hipMemAllocationTypeManaged are supported
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ */
+hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location,
+                                   hipMemAllocationType type);
+
+// Doxygen end of Stream Ordered Memory Allocator
 /**
  * @}
  */
@@ -9918,24 +9948,6 @@ hipError_t hipDrvGraphExecMemcpyNodeSetParams(hipGraphExec_t hGraphExec, hipGrap
 hipError_t hipDrvGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
                                               const hipMemsetParams* memsetParams, hipCtx_t ctx);
 
-/**
- * @brief Launches a HIP kernel using the driver API with the specified configuration.
- * @ingroup Execution
- *
- * This function dispatches the device kernel represented by a HIP function object.
- * It passes both the kernel parameters and any extra configuration arguments to the kernel launch.
- *
- * @param [in] config  Pointer to the kernel launch configuration structure.
- * @param [in] f       HIP function object representing the device kernel to be launched.
- * @param [in] params  Array of pointers to the kernel parameters.
- * @param [in] extra   Array of pointers for additional launch parameters or extra configuration
- * data.
- *
- * @returns #hipSuccess if the kernel is launched successfully, otherwise an appropriate error code.
- */
-hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f, void** params,
-                                void** extra);
-
 // doxygen end graph API
 /**
  * @}
@@ -10289,37 +10301,6 @@ hipError_t hipExtDisableLogging();
  * @see hipExtEnableLogging, hipExtDisableLogging
  */
 hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size, size_t log_mask);
-/**
- * @brief Launches a HIP kernel using a generic function pointer and the specified configuration.
- * @ingroup Execution
- *
- * This function is equivalent to hipLaunchKernelEx but accepts the kernel as a generic function
- * pointer.
- *
- * @param [in] config                 Pointer to the kernel launch configuration structure.
- * @param [in] fPtr                   Pointer to the device kernel function.
- * @param [in] args                   Array of pointers to the kernel arguments.
- *
- * @returns #hipSuccess if the kernel is launched successfully, otherwise an appropriate error code.
- */
-hipError_t hipLaunchKernelExC(const hipLaunchConfig_t* config, const void* fPtr, void** args);
-/**
- * @brief Launches a HIP kernel using the driver API with the specified configuration.
- * @ingroup Execution
- *
- * This function dispatches the device kernel represented by a HIP function object.
- * It passes both the kernel parameters and any extra configuration arguments to the kernel launch.
- *
- * @param [in] config  Pointer to the kernel launch configuration structure.
- * @param [in] f       HIP function object representing the device kernel to be launched.
- * @param [in] params  Array of pointers to the kernel parameters.
- * @param [in] extra   Array of pointers for additional launch parameters or extra configuration
- * data.
- *
- * @returns #hipSuccess if the kernel is launched successfully, otherwise an appropriate error code.
- */
-hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f, void** params,
-                                void** extra);
 /**
 * @}
 */

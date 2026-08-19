@@ -100,29 +100,19 @@ def _make_codegen(profile) -> CodeGenerator:
 
 
 # Regex tolerant to whitespace and identifier choice. We anchor on the
-# stable parts of the contract — the RegisterAccess scalar write calls
-# ``set_vcc``, ``set_exec``) and the dst identifier — not on the exact
+# stable parts of the contract — the wave-mask helper calls
+# ``set_vcc_mask``, ``set_exec``) and the dst identifier — not on the exact
 # variable name of the result-mask local.
-def _re_write_scalar64(dst_ident: str) -> re.Pattern[str]:
+def _re_write_wave_mask(dst_ident: str) -> re.Pattern[str]:
     return re.compile(
-        rf'amdgpu::RegisterAccess\s*\(\s*wf\s*\)\s*\.\s*write_scalar64\s*\(\s*'
-        rf'{re.escape(dst_ident)}\s*,\s*\w+\s*\)\s*;'
+        rf'amdgpu::write_wave_mask_scalar\s*\(\s*{re.escape(dst_ident)}\s*,'
+        rf'\s*wf\s*,\s*\w+\s*\)\s*;'
     )
 
 
-def _re_write_scalar32(dst_ident: str) -> re.Pattern[str]:
-    return re.compile(
-        rf'amdgpu::RegisterAccess\s*\(\s*wf\s*\)\s*\.\s*write_scalar\s*\(\s*'
-        rf'{re.escape(dst_ident)}\s*,\s*'
-        rf'static_cast\s*<\s*uint32_t\s*>\s*\(\s*\w+\s*\)\s*\)\s*;'
-    )
-
-
-_RE_SET_VCC = re.compile(r'\bwf\s*\.\s*set_vcc\s*\(\s*\w+\s*\)\s*;')
+_RE_SET_VCC = re.compile(r'\bwf\s*\.\s*set_vcc_mask\s*\(\s*\w+\s*\)\s*;')
 _RE_SET_EXEC = re.compile(r'\bwf\s*\.\s*set_exec\s*\(\s*\w+\s*\)\s*;')
-_RE_ANY_WRITE_SCALAR64 = re.compile(
-    r'\bamdgpu::RegisterAccess\s*\(\s*wf\s*\)\s*\.\s*write_scalar64\s*\('
-)
+_RE_ANY_WRITE_WAVE_MASK = re.compile(r'\bamdgpu::write_wave_mask_scalar\s*\(')
 
 
 # Truth table driving the codegen tests. Each row pins one cell of the
@@ -157,7 +147,7 @@ class TestGenVectorCmpxWriteBacks:
       * ``set_exec`` is emitted unconditionally.
       * a wave-size-width-aware write on the SDST is emitted iff
         ``profile.cmpx_writes_vcc and is_vop3 and dst``.
-      * ``set_vcc`` is emitted iff
+      * ``set_vcc_mask`` is emitted iff
         ``profile.cmpx_writes_vcc and not (is_vop3 and dst)``.
 
     The ``op='t'`` shortcut is intentional: it bypasses ``_cmp_condition``
@@ -189,39 +179,34 @@ class TestGenVectorCmpxWriteBacks:
         ), f'V_CMPX must always update EXEC; not found in:\n{body}'
 
         # SDST write: must appear iff expected, and target the right ident.
-        sdst32_match = _re_write_scalar32(_DST_IDENT).search(body) if dst else None
-        sdst_match = _re_write_scalar64(_DST_IDENT).search(body) if dst else None
-        sdst_count = len(_RE_ANY_WRITE_SCALAR64.findall(body))
+        sdst_match = _re_write_wave_mask(_DST_IDENT).search(body) if dst else None
+        sdst_count = len(_RE_ANY_WRITE_WAVE_MASK.findall(body))
         if expect_sdst_write:
             assert (
-                sdst32_match
-            ), f'Expected wave32 write_scalar on {_DST_IDENT!r}; body was:\n{body}'
-            assert (
                 sdst_match
-            ), f'Expected wave64 write_scalar64 on {_DST_IDENT!r}; body was:\n{body}'
-            # Guard against a stray second write_scalar64 to a different
+            ), f'Expected wave-mask write on {_DST_IDENT!r}; body was:\n{body}'
+            # Guard against a stray second wave-mask write to a different
             # target slipping through alongside the expected one.
             assert sdst_count == 1, (
-                f'Expected exactly one write_scalar64 call, got '
+                f'Expected exactly one write_wave_mask_scalar call, got '
                 f'{sdst_count}; body was:\n{body}'
             )
         else:
             assert sdst_count == 0, (
-                f'Did not expect any write_scalar64 call, got '
+                f'Did not expect any write_wave_mask_scalar call, got '
                 f'{sdst_count}; body was:\n{body}'
             )
 
         # VCC write: must appear iff expected.
         vcc_match = _RE_SET_VCC.search(body)
         if expect_vcc_write:
-            assert vcc_match, f'Expected wf.set_vcc(...) call; body was:\n{body}'
+            assert vcc_match, f'Expected wf.set_vcc_mask(...) call; body was:\n{body}'
         else:
             assert (
                 not vcc_match
-            ), f'Did not expect wf.set_vcc(...) call; body was:\n{body}'
+            ), f'Did not expect wf.set_vcc_mask(...) call; body was:\n{body}'
 
         # Mutual exclusion: a single V_CMPX never writes both VCC and SDST.
         assert not (
-            ((sdst32_match is not None) or (sdst_match is not None))
-            and (vcc_match is not None)
+            (sdst_match is not None) and (vcc_match is not None)
         ), f'V_CMPX wrote both SDST and VCC; body was:\n{body}'

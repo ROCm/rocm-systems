@@ -26,6 +26,7 @@
 ///   - s_store_dwordx2: store family, where sdata is also a source so SBASE is
 ///     not the first source operand.
 
+#include "decode_test_util.h"
 #include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
@@ -94,7 +95,7 @@ TEST_P(SmemSbaseOperandTest, SbaseResolvesToScaledSgpr) {
   auto decoder = Decoder::create(tc.arch);
   ASSERT_NE(decoder, nullptr) << "Decoder::create() failed for " << tc.label;
 
-  std::unique_ptr<Instruction> inst(decoder->decode(tc.word.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, tc.word.data()));
   ASSERT_NE(inst, nullptr) << "decode() returned nullptr for " << tc.label;
   ASSERT_EQ(inst->mnemonic(), tc.mnemonic) << "unexpected mnemonic for " << tc.label;
 
@@ -132,7 +133,7 @@ INSTANTIATE_TEST_SUITE_P(
         SmemCase{ROCJITSU_CODE_ARCH_RDNA3, "rdna3", kRdnaGfx1011SLoad64, "s_load_b64", 2},
         SmemCase{ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", kRdnaGfx1011SLoad64, "s_load_b64", 2},
         SmemCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4", kGfx12SLoadB64, "s_load_b64", 2},
-        SmemCase{ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", kGfx12SLoadB64, "s_load_b64", 2},
+        SmemCase{ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", kGfx12SLoadB64, "s_load_b64", 2},
         // 128-bit buffer-descriptor SBASE (width 4) -> s[4:7], both naming forms.
         SmemCase{ROCJITSU_CODE_ARCH_CDNA4, "cdna4_buffer_load_x4", kCdnaSBufferLoadDwordx4,
                  "s_buffer_load_dwordx4", 4},

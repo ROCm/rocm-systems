@@ -3,6 +3,18 @@
 Documentation for rocJPEG is available at
 [https://rocm.docs.amd.com/projects/rocJPEG/en/latest/](https://rocm.docs.amd.com/projects/rocJPEG/en/latest/)
 
+## (unreleased) rocJPEG 1.8.0
+
+### Added
+
+* Added rocJpegDecodeBatchedAsync and rocJpegDecodeBatchedSync APIs to support asynchronous batched JPEG decoding.
+
+## rocJPEG 1.7.0
+
+### Added
+
+* Added rocJpegDecodeAsync and rocJpegDecodeSync APIs to support asynchronous single-image JPEG decoding, allowing decode submission and completion to be separated across threads for improved pipeline throughput.
+
 ## (unreleased) rocJPEG 1.6.1
 
 ### Changed

@@ -24,8 +24,6 @@
 ###############################################################################
 
 import os
-import otf2
-from otf2.enums import LocationType, LocationGroupType, RegionRole, Paradigm
 import shutil
 import time
 from collections import defaultdict
@@ -58,11 +56,15 @@ def get_perfetto_category_name(category):
         "RUNTIME_INITIALIZATION": "none",
         "ROCDECODE_API": "rocdecode_api",
         "ROCJPEG_API": "rocjpeg_api",
+        "ROCSHMEM_API": "rocshmem_api",
+        "HIPFILE_API": "hipfile_api",
         "HIP_STREAM": "hip_api",
         "HIP_GRAPH": "hip_api",
         "HIP_RUNTIME_API_EXT": "hip_api",
         "HIP_COMPILER_API_EXT": "hip_api",
         "ROCDECODE_API_EXT": "rocdecode_api",
+        "ROCSHMEM_API_EXT": "rocshmem_api",
+        "HIPFILE_API_EXT": "hipfile_api",
         "KFD_EVENT_PAGE_MIGRATE": "kfd_events",
         "KFD_EVENT_PAGE_FAULT": "kfd_events",
         "KFD_EVENT_QUEUE": "kfd_events",
@@ -96,6 +98,13 @@ def allocation_level_type_name(level, type):
 
 
 def write_otf2(importData, config):
+    try:
+        import otf2
+        from otf2.enums import LocationType, LocationGroupType, RegionRole, Paradigm
+    except ImportError as e:
+        raise ImportError(
+            "otf2 module not found. Please install it using 'pip install otf2' to convert to OTF2 format"
+        ) from e
 
     timer_resolution = 1_000_000_000
     trace_dir = getattr(config, "output_path", "./otf_traces")

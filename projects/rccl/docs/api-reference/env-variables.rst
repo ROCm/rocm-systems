@@ -29,6 +29,17 @@ in the following table.
       - | String path to configuration file
         | Default: ``~/.rccl.conf`` or ``/etc/rccl.conf``
 
+    * - | ``NCCL_IBVERBS_LIB``
+        | Specifies the libibverbs shared object that RCCL loads at runtime for
+          the InfiniBand/RoCE (IB verbs) transport. Use it when rdma-core is
+          installed in a non-default prefix, such as inside a container or an
+          HPC software module, where the loader cannot find the library by its
+          default name. When the override is unset or fails to load, RCCL falls
+          back to ``libibverbs.so`` and then ``libibverbs.so.1``. ``NCCL_LIBIBVERBS_SO``
+          is accepted as an alias and is used when ``NCCL_IBVERBS_LIB`` is unset.
+      - | String path or soname of the libibverbs shared object
+        | Default: unset (loads ``libibverbs.so`` or ``libibverbs.so.1``)
+
     * - | ``NCCL_HOSTID``
         | Sets the host identifier for multi-node communication.
       - | String value for host identification
@@ -46,9 +57,11 @@ in the following table.
           which is required for ``ncclCommSuspend`` and ``ncclCommResume`` to
           release the physical GPU memory of a suspended communicator. See
           :ref:`suspend-resume` for the full prerequisites.
-      - | ``0``: Disabled (default).
-        | ``1``: Enabled.
-        | ``-2``: Auto-detect; enable when the platform supports VMM.
+      - | ``0``: Disabled.
+        | ``1``: Enabled on any architecture.
+        | ``-2``: Auto-detect (default); enable when the platform supports VMM.
+          Auto-detect is limited to gfx1250, the only architecture where the VMM
+          path is validated. Use ``1`` to force it on elsewhere.
 
     * - | ``NCCL_MIN_CTAS``
         | Minimum number of CTAs (channels) used for a collective. Overrides
@@ -61,6 +74,12 @@ in the following table.
           the ``maxCTAs`` field of ``ncclConfig_t``.
       - | Positive integer (values ``<= 0`` are ignored).
         | Default: unset (uses the RCCL default).
+
+    * - | ``NCCL_ALLGATHERV_ENABLE``
+        | Fuses grouped multi-root ``ncclBroadcast`` calls into a single AllGatherV
+          ring kernel when two or more distinct roots appear in a group.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
 
 Logging and debugging
 =====================
@@ -108,6 +127,7 @@ in the following table.
         | ``PROFILE``: Prints logs related to the profiling/timing info.
         | ``RAS``: Prints logs related to RAS.
         | ``VERBS``: Prints logs related to IB/Verbs.
+        | ``DESTROY``: Prints logs related to communicator/plugin teardown (destroy, abort, revoke, plugin unload).
         | ``ALL``: Activates all logging subsystems.
 
     * - | ``NCCL_WARN_ENABLE_DEBUG_INFO``
@@ -182,6 +202,13 @@ in the following table.
 
     * - | ``NCCL_SOCKET_IFNAME``
         | Specifies which IP interfaces to use for communication.
+        | When unset, RCCL auto-selects an interface in this order:
+        | ``ib*`` first; if none is found and ``NCCL_COMM_ID`` is set, an
+        | interface on the same subnet as that address; then any interface
+        | other than ``docker*``, ``lo`` and ``virbr*``; then ``docker*``;
+        | then ``lo``; and finally ``virbr*``. Libvirt bridge interfaces
+        | (``virbr*``) are considered last because they serve host-to-VM
+        | (virtual machine) traffic and cannot reach a remote node.
       - | Interface prefix string or list
         | Multiple prefixes separated by ``,``
         | Prefix with ``^`` for exclusion, ``=`` for exact match
@@ -193,14 +220,56 @@ in the following table.
         | ``AF_INET6``: Force IPv6
         | Unset: Use first available
 
+    * - | ``NCCL_IGNORE_NET_MISMATCH``
+        | Controls what happens when ranks report a different number of local
+          network (NET) devices during communicator initialization. RCCL gathers
+          each rank's local NET device count and compares the minimum and maximum
+          across the communicator. A mismatch usually means the job was launched
+          with an inconsistent NIC selection (for example, an uneven
+          ``NCCL_SOCKET_IFNAME``/``NCCL_IB_HCA`` per rank, or nodes with different
+          NIC counts), which otherwise surfaces later as obscure transport
+          failures. See :ref:`heterogeneous-nic-counts`.
+      - | ``1``: Detect and continue, logging the mismatch at ``INFO`` level (default).
+        | ``0``: Fail initialization with ``ncclSystemError`` and a warning on the mismatch.
+
+    * - | ``NCCL_IGNORE_COLLNET_MISMATCH``
+        | Same as ``NCCL_IGNORE_NET_MISMATCH`` but for the number of local CollNet
+          devices reported by each rank.
+      - | ``0``: Fail initialization with ``ncclSystemError`` and a warning on the mismatch (default).
+        | ``1``: Detect and continue, logging the mismatch at ``INFO`` level.
+
+    * - | ``NCCL_IB_MERGE_NICS``
+        | Enables RCCL to combine several physical IB NICs that are close to the
+          same GPU into a single logical network device (NIC Fusion). This allows
+          RCCL to aggregate the bandwidth of those NICs. Use
+          ``NCCL_NET_MERGE_LEVEL`` and ``NCCL_NET_FORCE_MERGE`` to control which
+          NICs are combined.
+      - | ``1``: Enabled (default).
+        | ``0``: Disabled.
+        | On AINIC with the ``IB-CAST`` transport, merging is off unless this
+          variable is explicitly set to ``1``.
+
     * - | ``NCCL_NET_MERGE_LEVEL``
-        | Controls network device merging behavior.
-      - | Integer value specifying merge level
-        | Default: ``PATH_PORT``
+        | Sets the maximum topological distance between two NICs that can be
+          merged into a single logical device. NICs farther apart than this level
+          are left separate.
+      - | ``LOC``: Same device only, which disables merging.
+        | ``PORT``: Two ports of the same NIC (default).
+        | ``PIX``: Under the same PCIe switch.
+        | ``PXB``: Multiple PCIe bridges, without crossing the PCIe host bridge.
+        | ``P2C``, ``PXN``: Accepted, with the same effect as ``PXB`` for NIC pairs.
+        | ``PHB``: Under the same CPU socket.
+        | ``SYS``: Anywhere in the node, including across NUMA nodes.
+        | The value is a string, so ``PATH_PORT`` is not valid. An unrecognized
+          value falls back to ``LOC`` and disables merging.
 
     * - | ``NCCL_NET_FORCE_MERGE``
-        | Forces merging of network devices.
-      - | String specifying forced merge configuration
+        | Merges the listed groups of NICs regardless of
+          ``NCCL_NET_MERGE_LEVEL``. NICs that are not listed are then merged
+          automatically.
+      - | Semicolon-separated list of groups, each a comma-separated list of
+          device names in ``NCCL_IB_HCA`` notation.
+        | Default: unset.
 
     * - | ``NCCL_NETDEVS_POLICY``
         | Controls how many of a GPU's locally reachable NICs are used on the
@@ -222,6 +291,17 @@ in the following table.
         | This variable can be leveraged when NIC Fusion (``NCCL_NET_MERGE_LEVEL``) and/or data splitting on QPs (``NCCL_IB_SPLIT_DATA_ON_QPS``) is enabled.
       - | Integer value in bytes (default: ``128``)
         | ``N``: Split only when message size >= N bytes
+
+    * - | ``NCCL_NCHANNELS_PER_NET_PEER``
+        | Sets the number of channels used per network (remote) peer.
+        | This overrides the value of the ``nChannelsPerNetPeer`` field in
+        | ``ncclConfig_t``. When neither this variable nor the config field is
+        | set, RCCL auto-tunes the per-peer channel count based on the
+        | available NIC bandwidth and rank count.
+      - | Integer value, ``1`` to ``MAXCHANNELS`` (default: unset/auto-tuned)
+        | Values ``<= 0`` are ignored and a warning is logged.
+        | Values ``> MAXCHANNELS`` set through ``ncclConfig_t`` are rejected
+        | with ``ncclInvalidArgument`` at communicator initialization.
 
     * - | ``NCCL_RINGS``
         | Defines custom ring topology.
@@ -307,3 +387,104 @@ application adds explicit synchronization between streams.
         | output feeds into the next.
       - | ``0``: Disabled (default).
         | ``1``: Enabled. Operations execute in host launch order.
+
+Inspector profiling
+===================
+
+The NCCL Inspector is a profiler plugin that emits per-communicator,
+per-operation performance data (collectives and point-to-point) as JSON or
+Prometheus textfile metrics. For a full walkthrough, see
+:doc:`../how-to/using-rccl-inspector-plugin`. The Inspector environment
+variables are collected in the following table.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40,60
+
+    * - **Environment variable**
+      - **Values**
+
+    * - | ``NCCL_INSPECTOR_ENABLE``
+        | Enables the Inspector profiler plugin. The plugin must also be
+        | loaded through ``NCCL_PROFILER_PLUGIN``.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
+    * - | ``NCCL_INSPECTOR_ENABLE_P2P``
+        | Enables tracking of point-to-point (``Send``/``Recv``) operations in
+        | addition to collectives. Required for the ``nccl_p2p_*`` Prometheus
+        | metrics and the P2P panels of the Grafana dashboard.
+      - | ``0``: Disabled.
+        | ``1``: Enabled (default).
+
+    * - | ``NCCL_INSPECTOR_PROM_DUMP``
+        | Selects the Prometheus node-exporter textfile output format
+        | (``nccl_inspector_metrics_<uuid>.prom``) instead of the default JSON.
+      - | ``0``: JSON output (default).
+        | ``1``: Prometheus textfile output.
+
+    * - | ``NCCL_INSPECTOR_DUMP_THREAD_ENABLE``
+        | Enables the internal dump thread. When disabled, output is only
+        | written at communicator teardown, regardless of the configured
+        | dump interval.
+      - | ``0``: Disabled.
+        | ``1``: Enabled (default).
+
+    * - | ``NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS``
+        | Interval, in microseconds, at which the internal dump thread writes
+        | output. Output is always written at communicator teardown.
+      - | ``-1``: Dump only at teardown (default).
+        | ``0``: Dump continuously.
+        | ``N``: Dump every ``N`` microseconds. In Prometheus mode a minimum of
+        | ``30000000`` (30 s) is enforced to match node-exporter polling.
+
+    * - | ``NCCL_INSPECTOR_DUMP_DIR``
+        | Output directory for Inspector logs/metrics. For Prometheus mode,
+        | point this at the node-exporter textfile collector directory.
+      - | String path.
+        | Default: ``nccl-inspector-<slurm_job_id>`` or
+        | ``nccl-inspector-unknown-jobid``.
+
+    * - | ``NCCL_INSPECTOR_DUMP_VERBOSE``
+        | Includes per-event trace information (sequence numbers and
+        | timestamps) in the JSON output.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
+    * - | ``NCCL_INSPECTOR_DUMP_MIN_SIZE_BYTES``
+        | Minimum message size (in bytes) tracked by the Inspector.
+      - | Integer value in bytes (default: ``8192``).
+
+    * - | ``NCCL_INSPECTOR_REQUIRE_KERNEL_TIMING``
+        | Requires GPU-based kernel timing for an event to be recorded. When
+        | enabled, events that fall back to CPU-measured timing are discarded.
+      - | ``0``: Record events regardless of timing source.
+        | ``1``: Record only GPU-timed events (default).
+
+    * - | ``NCCL_INSPECTOR_DUMP_COLL_RING_SIZE``
+        | Per-communicator capacity of the ring buffer holding completed
+        | collectives waiting to be dumped.
+      - | Integer number of entries (default: ``1024``).
+
+    * - | ``NCCL_INSPECTOR_DUMP_P2P_RING_SIZE``
+        | Per-communicator capacity of the ring buffer holding completed
+        | point-to-point operations waiting to be dumped.
+      - | Integer number of entries (default: ``1024``).
+
+    * - | ``NCCL_INSPECTOR_COLL_POOL_SIZE``
+        | Initial size, and growth stride, of the collective event pool.
+      - | Integer number of entries (default: ``256``).
+
+    * - | ``NCCL_INSPECTOR_P2P_POOL_SIZE``
+        | Initial size, and growth stride, of the point-to-point event pool.
+      - | Integer number of entries (default: ``256``).
+
+    * - | ``NCCL_INSPECTOR_COMM_POOL_SIZE``
+        | Initial size, and growth stride, of the communicator event pool.
+      - | Integer number of entries (default: ``256``).
+
+    * - | ``NCCL_INSPECTOR_POOL_GROW``
+        | Allows the event pools above to grow beyond their initial size. When
+        | disabled, events are dropped once a pool is exhausted.
+      - | ``0``: Fixed-size pools.
+        | ``1``: Pools grow on demand (default).

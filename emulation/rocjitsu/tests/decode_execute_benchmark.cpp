@@ -11,6 +11,7 @@
 /// This benchmark is NOT a pass/fail gate — it reports numbers for tracking
 /// performance regressions across changesets.
 
+#include "decode_test_util.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -20,9 +21,9 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/except.h"
 
-#include "rocjitsu/isa/arch/amdgpu/cdna4/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/test_encodings.h"
 
 #include <gtest/gtest.h>
 
@@ -95,7 +96,7 @@ std::vector<CorpusEntry> build_corpus(const TestEncEntry *encodings, size_t num_
 
     // Try decode — skip if the synthesized encoding doesn't decode.
     try {
-      auto *inst = decoder.decode(te.words.data());
+      auto *inst = decode_valid(decoder, te.words.data());
       if (inst) {
         corpus.push_back({te.mnemonic, te.words, cat});
         delete inst;
@@ -135,7 +136,7 @@ void run_benchmark(rj_code_arch_t arch, std::string_view arch_name, const TestEn
 
   // Build corpus (decode-only filtering, no execute warmup).
   auto corpus = build_corpus(encodings, num_encodings, *decoder);
-  cu->reset_all_wf();
+  wf->halt();
   wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
   ASSERT_NE(wf, nullptr);
 
@@ -177,7 +178,7 @@ void run_benchmark(rj_code_arch_t arch, std::string_view arch_name, const TestEn
   auto decode_start = Clock::now();
   for (int iter = 0; iter < ITERATIONS; ++iter) {
     for (const auto &entry : corpus) {
-      auto *inst = decoder->decode(entry.words.data());
+      auto *inst = decode_valid(*decoder, entry.words.data());
       delete inst;
     }
   }
@@ -186,16 +187,25 @@ void run_benchmark(rj_code_arch_t arch, std::string_view arch_name, const TestEn
       std::chrono::duration_cast<std::chrono::nanoseconds>(decode_end - decode_start).count();
 
   // --- Measure decode + execute (non-memory only) ---
+  // build_corpus() already excludes program terminators (s_endpgm et al.) via
+  // should_skip(), so no instruction here frees the wave. Guard defensively anyway:
+  // a wave frees its resources at s_endpgm, so if the skip list ever drifts and a
+  // terminator slips in, re-dispatch a fresh wave rather than execute on a freed
+  // slot (which would benchmark dead work).
   auto full_start = Clock::now();
   for (int iter = 0; iter < ITERATIONS; ++iter) {
     for (const auto *entry : executable) {
-      auto *inst = decoder->decode(entry->words.data());
+      auto *inst = decode_valid(*decoder, entry->words.data());
       if (inst) {
         try {
           cu->execute_instruction(inst, *wf);
         } catch (...) {
         }
         delete inst;
+        if (wf->is_halted()) {
+          wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+          ASSERT_NE(wf, nullptr); // single-slot CU: re-dispatch must succeed
+        }
       }
     }
   }
@@ -245,9 +255,9 @@ TEST(DecodeExecuteBenchmark, Rdna4) {
 }
 
 TEST(DecodeExecuteBenchmark, Gfx1250) {
-  run_benchmark(ROCJITSU_CODE_ARCH_GFX1250, "gfx1250",
-                reinterpret_cast<const TestEncEntry *>(gfx1250::test_data::ENCODINGS),
-                gfx1250::test_data::NUM_ENCODINGS);
+  run_benchmark(ROCJITSU_CODE_ARCH_CDNA5, "gfx1250",
+                reinterpret_cast<const TestEncEntry *>(cdna5::test_data::ENCODINGS),
+                cdna5::test_data::NUM_ENCODINGS);
 }
 
 } // namespace

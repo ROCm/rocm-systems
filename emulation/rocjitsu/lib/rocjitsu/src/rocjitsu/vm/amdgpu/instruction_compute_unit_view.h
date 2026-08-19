@@ -22,11 +22,11 @@ template <typename Isa> class AmdgpuIsaOperand;
 
 namespace amdgpu {
 class ComputeUnitCore;
-class GpuMemory;
 class L1ScalarCache;
 class L1VectorCache;
 class L2Cache;
 class Lds;
+class OperandExecutionAccess;
 class RegisterAccess;
 
 /// @brief Narrow CU API exposed to AMDGPU instruction emulation code.
@@ -38,7 +38,6 @@ class InstructionComputeUnitView {
 public:
   explicit InstructionComputeUnitView(ComputeUnitCore &cu) : cu_(&cu) {}
 
-  GpuMemory *memory() const;
   L1ScalarCache &l1_scalar();
   L1VectorCache &l1_vector();
   L2Cache *l2() const;
@@ -47,6 +46,7 @@ public:
   rj_code_arch_t arch() const;
   uint32_t wf_size() const;
   uint32_t sgprs_per_wf() const;
+  uint32_t vgpr_allocation_block_size() const;
   std::string full_path() const;
   simdojo::ComponentID id() const;
   simdojo::SimulationEngine *engine() const;
@@ -66,9 +66,10 @@ private:
   // instruction-facing CU view.
   friend class RegisterAccess;
 
-  // The ISA operand backend is the only instruction-side code allowed to reach
-  // private CU register hooks. It remains private behind Operand/RegisterAccess.
+  // The non-split ISA operand fallback and the execution-only access key are
+  // the only instruction-side code allowed to reach private CU register hooks.
   template <typename Isa> friend class ::rocjitsu::AmdgpuIsaOperand;
+  friend class OperandExecutionAccess;
 };
 
 } // namespace amdgpu

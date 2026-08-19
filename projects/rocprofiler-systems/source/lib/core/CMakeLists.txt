@@ -18,8 +18,6 @@ set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/output_file_registry.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perf.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/state.cpp
     ${CMAKE_CURRENT_LIST_DIR}/timemory.cpp
     ${CMAKE_CURRENT_LIST_DIR}/track_registry.cpp
     ${CMAKE_CURRENT_LIST_DIR}/utility.cpp
@@ -50,7 +48,8 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/output_file_registry.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perf.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/sdk-tracing-config-deps.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/sdk-tracing-config.hpp
     ${CMAKE_CURRENT_LIST_DIR}/state.hpp
     ${CMAKE_CURRENT_LIST_DIR}/timemory.hpp
     ${CMAKE_CURRENT_LIST_DIR}/track_registry.hpp
@@ -69,7 +68,6 @@ add_subdirectory(components)
 add_subdirectory(containers)
 add_subdirectory(perfetto)
 add_subdirectory(progress)
-add_subdirectory(rocpd)
 add_subdirectory(trace_cache)
 
 target_include_directories(
@@ -96,7 +94,7 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-definitions>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-options>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-perfetto>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-sqlite3>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-profiler-hub>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-json>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-timemory>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-mpi>

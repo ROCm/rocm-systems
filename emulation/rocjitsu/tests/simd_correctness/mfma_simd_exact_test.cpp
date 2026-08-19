@@ -23,6 +23,10 @@ constexpr uint32_t S0 = 0, S1 = 64, ACC = 128, DST = 192, DST_REGS = 32;
 constexpr uint32_t IN_REGS = 16, ACC_REGS = 32;
 constexpr uint32_t CONST_ONE = 0x3F800000u;
 
+using MfmaFloatSpecFn = void (*)(amdgpu::ComputeUnitCore &, uint32_t, uint32_t, uint32_t, uint32_t,
+                                 uint32_t, uint32_t, uint32_t, uint32_t);
+using MfmaIntSpecFn = void (*)(amdgpu::ComputeUnitCore &, uint32_t, uint32_t, uint32_t, uint32_t,
+                               uint32_t);
 struct MfmaFixture : ExactFixture {
   MfmaFixture() : ExactFixture(ROCJITSU_CODE_ARCH_CDNA4, WF) {}
 };
@@ -59,6 +63,30 @@ void run_i8(const char *label, uint32_t M, uint32_t N, uint32_t K, uint32_t B) {
     amdgpu::exec_i32_i8(*fx.cu, M, N, K, B, fx.vbase + DST, fx.vbase + S0, fx.vbase + S1,
                         fx.vbase + ACC, const_acc);
   });
+}
+
+void expect_fixture_bit_exact(const char *label, const std::function<void(MfmaFixture &)> &seed,
+                              const std::function<void(MfmaFixture &)> &kernel, uint32_t dst,
+                              uint32_t dst_regs) {
+  ForceScalarGuard force_scalar_guard;
+  MfmaFixture scalar_fixture;
+  MfmaFixture simd_fixture;
+  ASSERT_NE(scalar_fixture.wf, nullptr);
+  ASSERT_NE(simd_fixture.wf, nullptr);
+  seed(scalar_fixture);
+  seed(simd_fixture);
+
+  util::set_force_scalar_for_testing(true);
+  kernel(scalar_fixture);
+  util::set_force_scalar_for_testing(false);
+  kernel(simd_fixture);
+
+  std::vector<uint32_t> scalar = scalar_fixture.snapshot(dst, dst_regs);
+  std::vector<uint32_t> simd = simd_fixture.snapshot(dst, dst_regs);
+  for (size_t word = 0; word < scalar.size(); ++word)
+    ASSERT_EQ(scalar[word], simd[word])
+        << label << ": SIMD diverges from scalar at word " << word << " (scalar=0x" << std::hex
+        << scalar[word] << " simd=0x" << simd[word] << ")";
 }
 
 } // namespace
@@ -118,7 +146,7 @@ TEST(MfmaSimdExact, F32_f16_Permuted) {
 // --- specialized f16 kernels (constexpr dims + F16C bulk convert) ---
 TEST(MfmaSimdExact, F16Spec_AllShapes) {
   SKIP_IF_NO_SIMD();
-  auto spec = [](auto fn, const char *label) {
+  auto spec = [](MfmaFloatSpecFn fn, const char *label) {
     run_case(label, Fmt::F16, Fmt::F32, [fn](MfmaFixture &fx, uint32_t const_acc) {
       fn(*fx.cu, fx.vbase + DST, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, const_acc, 0, 0, 0);
     });
@@ -134,7 +162,7 @@ TEST(MfmaSimdExact, F16Spec_AllShapes) {
 // --- specialized bf16 kernels (constexpr dims + bf16 zero-extend bulk convert) ---
 TEST(MfmaSimdExact, Bf16Spec_AllShapes) {
   SKIP_IF_NO_SIMD();
-  auto spec = [](auto fn, const char *label) {
+  auto spec = [](MfmaFloatSpecFn fn, const char *label) {
     run_case(label, Fmt::BF16, Fmt::F32, [fn](MfmaFixture &fx, uint32_t const_acc) {
       fn(*fx.cu, fx.vbase + DST, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, const_acc, 0, 0, 0);
     });
@@ -152,7 +180,7 @@ TEST(MfmaSimdExact, Bf16Spec_AllShapes) {
 // denorm, and max-finite f8 codes through both paths. ---
 TEST(MfmaSimdExact, F8Spec_AllShapes) {
   SKIP_IF_NO_SIMD();
-  auto spec = [](auto fn, Fmt fmt, const char *label) {
+  auto spec = [](MfmaFloatSpecFn fn, Fmt fmt, const char *label) {
     run_case(label, fmt, Fmt::F32, [fn](MfmaFixture &fx, uint32_t const_acc) {
       fn(*fx.cu, fx.vbase + DST, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, const_acc, 0, 0, 0);
     });
@@ -170,7 +198,7 @@ TEST(MfmaSimdExact, F8Spec_AllShapes) {
 // --- specialized f32 kernels ---
 TEST(MfmaSimdExact, F32Spec_AllShapes) {
   SKIP_IF_NO_SIMD();
-  auto spec = [](auto fn, const char *label) {
+  auto spec = [](MfmaFloatSpecFn fn, const char *label) {
     run_case(label, Fmt::F32, Fmt::F32, [fn](MfmaFixture &fx, uint32_t const_acc) {
       fn(*fx.cu, fx.vbase + DST, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, const_acc, 0, 0, 0);
     });
@@ -179,6 +207,110 @@ TEST(MfmaSimdExact, F32Spec_AllShapes) {
   spec(amdgpu::exec_f32_mfma_f32_spec<16, 16, 4, 1>, "spec_f32_16x16x4");
   spec(amdgpu::exec_f32_mfma_f32_spec<32, 32, 1, 2>, "spec_f32_32x32x1x2");
   spec(amdgpu::exec_f32_mfma_f32_spec<16, 16, 1, 4>, "spec_f32_16x16x1x4");
+}
+
+TEST(MfmaSimdExact, F32SpecDestructiveSourceOverlap) {
+  SKIP_IF_NO_SIMD();
+  if (util::native<float>::size() != 16)
+    GTEST_SKIP() << "test requires the 16-lane matrix fast path";
+  constexpr uint32_t source_b = 0;
+  constexpr uint32_t destination_and_source_a = 64;
+  constexpr uint32_t accumulator = 128;
+
+  for (bool materialize_overlap : {false, true}) {
+    SCOPED_TRACE(materialize_overlap ? "materialized" : "logical zero");
+    auto seed = [=](MfmaFixture &fx) {
+      fx.seed(source_b, 1, Fmt::F32, Mode::RandomInt, 11);
+      fx.seed(accumulator, 32, Fmt::F32, Mode::RandomInt, 22);
+      if (materialize_overlap)
+        fx.seed(destination_and_source_a, 1, Fmt::F32, Mode::RandomInt, 33);
+    };
+    auto kernel = [](MfmaFixture &fx) {
+      amdgpu::exec_f32_mfma_f32_spec<32, 32, 1, 2>(
+          *fx.cu, fx.vbase + destination_and_source_a, fx.vbase + destination_and_source_a,
+          fx.vbase + source_b, fx.vbase + accumulator, amdgpu::ACC_FROM_VGPR, 0, 0, 0);
+    };
+    expect_fixture_bit_exact("f32 source overlap", seed, kernel, destination_and_source_a, 32);
+  }
+}
+
+TEST(MfmaSimdExact, F16SpecDestructiveAccumulatorOverlap) {
+  SKIP_IF_NO_SIMD();
+  if (util::native<float>::size() != 16)
+    GTEST_SKIP() << "test requires the 16-lane matrix fast path";
+  constexpr uint32_t source_a = 0;
+  constexpr uint32_t source_b = 16;
+  constexpr uint32_t accumulator = 48;
+  constexpr uint32_t destination = 64;
+
+  for (bool materialize_overlap : {false, true}) {
+    SCOPED_TRACE(materialize_overlap ? "materialized" : "logical zero");
+    auto seed = [=](MfmaFixture &fx) {
+      fx.seed(source_a, 2, Fmt::F16, Mode::RandomInt, 44);
+      fx.seed(source_b, 2, Fmt::F16, Mode::RandomInt, 55);
+      fx.seed(accumulator, 16, Fmt::F32, Mode::RandomInt, 66);
+      if (materialize_overlap)
+        fx.seed(destination, 16, Fmt::F32, Mode::RandomInt, 77);
+    };
+    auto kernel = [](MfmaFixture &fx) {
+      amdgpu::exec_f32_mfma_f16_spec<32, 32, 4, 2>(
+          *fx.cu, fx.vbase + destination, fx.vbase + source_a, fx.vbase + source_b,
+          fx.vbase + accumulator, amdgpu::ACC_FROM_VGPR, 0, 0, 0);
+    };
+    expect_fixture_bit_exact("f16 accumulator overlap", seed, kernel, destination, 32);
+  }
+}
+
+TEST(MfmaSimdExact, Bf16SpecDestructiveAccumulatorOverlap) {
+  SKIP_IF_NO_SIMD();
+  if (util::native<float>::size() != 16)
+    GTEST_SKIP() << "test requires the 16-lane matrix fast path";
+  constexpr uint32_t source_a = 0;
+  constexpr uint32_t source_b = 16;
+  constexpr uint32_t accumulator = 48;
+  constexpr uint32_t destination = 64;
+
+  for (bool materialize_overlap : {false, true}) {
+    SCOPED_TRACE(materialize_overlap ? "materialized" : "logical zero");
+    auto seed = [=](MfmaFixture &fx) {
+      fx.seed(source_a, 2, Fmt::BF16, Mode::RandomInt, 122);
+      fx.seed(source_b, 2, Fmt::BF16, Mode::RandomInt, 133);
+      fx.seed(accumulator, 16, Fmt::F32, Mode::RandomInt, 144);
+      if (materialize_overlap)
+        fx.seed(destination, 16, Fmt::F32, Mode::RandomInt, 155);
+    };
+    auto kernel = [](MfmaFixture &fx) {
+      amdgpu::exec_f32_mfma_bf16_spec<32, 32, 4, 2>(
+          *fx.cu, fx.vbase + destination, fx.vbase + source_a, fx.vbase + source_b,
+          fx.vbase + accumulator, amdgpu::ACC_FROM_VGPR, 0, 0, 0);
+    };
+    expect_fixture_bit_exact("bf16 accumulator overlap", seed, kernel, destination, 32);
+  }
+}
+
+TEST(MfmaSimdExact, I8SpecDestructiveSourceOverlap) {
+  SKIP_IF_NO_SIMD();
+  if (util::native<float>::size() != 16)
+    GTEST_SKIP() << "test requires the 16-lane matrix fast path";
+  constexpr uint32_t source_b = 0;
+  constexpr uint32_t destination_and_source_a = 64;
+  constexpr uint32_t accumulator = 128;
+
+  for (bool materialize_overlap : {false, true}) {
+    SCOPED_TRACE(materialize_overlap ? "materialized" : "logical zero");
+    auto seed = [=](MfmaFixture &fx) {
+      fx.seed(source_b, 1, Fmt::I8, Mode::RandomInt, 166);
+      fx.seed(accumulator, 32, Fmt::I8, Mode::RandomInt, 177);
+      if (materialize_overlap)
+        fx.seed(destination_and_source_a, 1, Fmt::I8, Mode::RandomInt, 188);
+    };
+    auto kernel = [](MfmaFixture &fx) {
+      amdgpu::exec_i32_mfma_i8_spec<32, 32, 4, 2>(
+          *fx.cu, fx.vbase + destination_and_source_a, fx.vbase + destination_and_source_a,
+          fx.vbase + source_b, fx.vbase + accumulator, amdgpu::ACC_FROM_VGPR);
+    };
+    expect_fixture_bit_exact("i8 source overlap", seed, kernel, destination_and_source_a, 32);
+  }
 }
 
 // --- MX-scaled fp8/bf8 (per-32-block e8m0 scales: power-of-two, exact) ---
@@ -214,7 +346,7 @@ TEST(MfmaSimdExact, I32_i8_AllShapes) {
 // range, so wrap-around near INT32_MAX/INT32_MIN is exercised on both paths.
 TEST(MfmaSimdExact, I8Spec_AllShapes) {
   SKIP_IF_NO_SIMD();
-  auto spec = [](auto fn, const char *label) {
+  auto spec = [](MfmaIntSpecFn fn, const char *label) {
     run_case(label, Fmt::I8, Fmt::I8, [fn](MfmaFixture &fx, uint32_t const_acc) {
       fn(*fx.cu, fx.vbase + DST, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, const_acc);
     });

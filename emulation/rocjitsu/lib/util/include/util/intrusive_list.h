@@ -58,6 +58,12 @@ public:
   {
     return this->parent_;
   }
+
+  const ParentT *parent() const
+    requires(metaprogramming::IsNonVoid<ParentT>)
+  {
+    return this->parent_;
+  }
 };
 
 template <typename T, typename... Options> class IListIterator {

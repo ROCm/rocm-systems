@@ -41,7 +41,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                 </tr>
                 <tr>
                     <td>-f {csv,json,pftrace,otf2,rocpd} [{csv,json,pftrace,otf2,rocpd} ...] | --output-format {csv,json,pftrace,otf2,rocpd} [{csv,json,pftrace,otf2,rocpd} ...]</td>
-                    <td>Specifies output format. Supported formats: CSV, JSON, PFTrace, OTF2 and rocpd. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#output-formats">Read more...</a></td>
+                    <td>Specifies output format. Supported formats: CSV, JSON, PFTrace, OTF2 and rocpd. Direct CSV, PFTrace, and OTF2 output is deprecated; collect in the default rocpd format and use <code>rocpd convert</code> instead. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#output-formats">Read more...</a></td>
                 </tr>
                 <tr>
                     <td>--output-config [BOOL]</td>
@@ -129,6 +129,10 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                 <tr>
                     <td>--rocdecode-trace [BOOL]</td>
                     <td>Collects traces for rocDecode APIs. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#rocdecode-trace">Read more...</a></td>
+                </tr>
+                <tr>
+                    <td>--hipfile-trace [BOOL]</td>
+                    <td>Collects traces for hipFILE APIs. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#hipfile-trace">Read more...</a></td>
                 </tr>
                 <tr>
                     <td>--ompt-trace [CATEGORY ...]</td>

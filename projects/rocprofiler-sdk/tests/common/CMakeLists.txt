@@ -66,6 +66,7 @@ if(NOT TARGET rocprofiler-sdk::rocprofiler-sdk-cereal)
             cereal
             GIT_REPOSITORY https://github.com/jrmadsen/cereal.git
             GIT_TAG rocprofiler
+            GIT_SHALLOW TRUE
             SOURCE_DIR ${PROJECT_BINARY_DIR}/external/cereal BINARY_DIR
             ${PROJECT_BINARY_DIR}/external/build/cereal-build SUBBUILD_DIR
             ${PROJECT_BINARY_DIR}/external/build/cereal-subdir)
@@ -88,6 +89,7 @@ if(NOT TARGET rocprofiler-sdk::rocprofiler-sdk-perfetto)
         perfetto
         GIT_REPOSITORY https://github.com/google/perfetto
         GIT_TAG v44.0
+        GIT_SHALLOW TRUE
         SOURCE_DIR ${PROJECT_BINARY_DIR}/external/perfetto BINARY_DIR
         ${PROJECT_BINARY_DIR}/external/build/perfetto-build SUBBUILD_DIR
         ${PROJECT_BINARY_DIR}/external/build/perfetto-subdir)

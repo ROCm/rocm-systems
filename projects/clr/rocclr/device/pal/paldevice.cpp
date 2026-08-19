@@ -628,12 +628,21 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
   info_.luidLowPart_ = palProp.osProperties.luidLowPart;
   info_.luidHighPart_ = palProp.osProperties.luidHighPart;
 #endif
-  // Setup the node mask for MGPU only case from the original PAL list of all devices
-  if ((gNumDevices > 1) && (pal_device != nullptr)) {
-    for (uint32_t i = 0; i < gNumDevices; ++i) {
-      if (gDeviceList[i] == pal_device) {
-        info_.luidDeviceNodeMask_ = 1 << i;
+  // Node mask = this device's index within its adapter (LUID). Devices sharing a
+  // LUID form a linked adapter; a standalone adapter reports 0x1.
+  if (pal_device != nullptr) {
+    uint32_t luidNodeIndex = 0;
+    for (uint32_t i = 0; (i < gNumDevices) && (gDeviceList[i] != pal_device); ++i) {
+      Pal::DeviceProperties siblingProps = {};
+      if ((gDeviceList[i] != nullptr) &&
+          (gDeviceList[i]->GetProperties(&siblingProps) == Pal::Result::Success) &&
+          (siblingProps.osProperties.luidLowPart == palProp.osProperties.luidLowPart) &&
+          (siblingProps.osProperties.luidHighPart == palProp.osProperties.luidHighPart)) {
+        ++luidNodeIndex;
       }
+    }
+    if (luidNodeIndex < 32) {
+      info_.luidDeviceNodeMask_ = 1u << luidNodeIndex;
     }
   }
 #if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 989
@@ -1582,8 +1591,22 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
         }
         remoteAlloc = true;
       }
+      // Multi-GPU fine-grain SVM (e.g. __managed__ / hipMallocManaged, which use
+      // CL_MEM_ALLOC_HOST_PTR | CL_MEM_SVM_FINE_GRAIN_BUFFER) must be addressable
+      // at the SAME canonical VA on every device. The pinned path maps the shared
+      // host pages at a device-local Default-range VA that differs from the owner's
+      // SVM VA, so a peer kernel using the canonical pointer faults or reads the
+      // wrong memory (observed as a dev1 GPU fault accessing a __managed__ var).
+      // For these, skip pinning on the peer and fall through to the reserved-VA SVM
+      // path so the peer reserves the canonical VA (same as a regular fine-grain
+      // hipHostAlloc peer). This also keeps the per-device suballocator free-lists
+      // symmetric, which is required for consistent intra-chunk offsets.
+      const bool mgpuFineGrainSvm =
+          (owner.getMemFlags() & CL_MEM_ALLOC_HOST_PTR) &&
+          (owner.getMemFlags() & CL_MEM_SVM_FINE_GRAIN_BUFFER) &&
+          (owner.getSvmPtr() != nullptr) && (owner.getContext().devices().size() > 1);
       // Make sure owner has a valid hostmem pointer and it's not COPY
-      if (!remoteAlloc && (owner.getHostMem() != nullptr)) {
+      if (!remoteAlloc && !mgpuFineGrainSvm && (owner.getHostMem() != nullptr)) {
         Resource::PinnedParams params;
         params.owner_ = &owner;
         params.gpu_ = reinterpret_cast<VirtualGPU*>(owner.getVirtualDevice());
@@ -1921,11 +1944,14 @@ bool Device::bindExternalDevice(uint flags, void* const pDevice[], void* pContex
 #endif  //_WIN32
 
   if (flags & amd::Context::Flags::GLDeviceKhr) {
-    // Attempt to associate PAL-OGL
-    if (!glAssociate(pContext, pDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx])) {
-      if (!validateOnly) {
-        LogError("Failed glAssociate()");
+    void* glDevice = pDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
+    if (validateOnly) {
+      // Probe: check compatibility without starting a GL interop session.
+      if (!initGLInteropPrivateExt(pContext, glDevice) || !glCanInterop(pContext, glDevice)) {
+        return false;
       }
+    } else if (!glAssociate(pContext, glDevice)) {
+      LogError("Failed glAssociate()");
       return false;
     }
   }
@@ -1940,12 +1966,11 @@ bool Device::unbindExternalDevice(uint flags, void* const pDevice[], void* pCont
   }
 
   void* glDevice = pDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
-  if (glDevice != nullptr) {
+  // validateOnly never started a session; nothing to dissociate.
+  if (glDevice != nullptr && !validateOnly) {
     // Dissociate PAL-OGL
     if (!glDissociate(pContext, glDevice)) {
-      if (validateOnly) {
-        LogWarning("Failed glDissociate()");
-      }
+      LogWarning("Failed glDissociate()");
       return false;
     }
   }
@@ -2665,7 +2690,22 @@ bool Device::GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const {
     return false;
   }
 
-  device::Memory* phys_dev_mem = phys_mem_obj->getDeviceMemory(*this);
+  // Query this device's backing without allocating. On multi-GPU the same VA can be
+  // probed on a device that does not physically back the allocation (e.g. hipMemUnmap
+  // iterates every device, or hipMemGetAccess queries a non-owning device). Passing
+  // alloc=false avoids an allocate-on-query side effect; getDeviceMemory() would
+  // otherwise return nullptr for such a device, which was dereferenced below and crashed.
+  device::Memory* phys_dev_mem = phys_mem_obj->getDeviceMemory(*this, false);
+  if (phys_dev_mem == nullptr) {
+    // The VA is a valid mapped allocation, it is just not backed on this device, so it
+    // has no access here. Report "no access" (not an error) to match the documented
+    // hipMemGetAccess semantics (Unit_hipMemSetAccess_SetGet expects ProtNone for a
+    // device without access) and to keep the hipMemUnmap probe loop working.
+    LogPrintfInfo("Virtual address 0x%x is not backed on device index %d; reporting no access\n",
+                  va_addr, index());
+    *access_flags_ptr = static_cast<VmmAccess>(device::Memory::MemAccess::kMemAccessNone);
+    return true;
+  }
   device::Memory::MemAccess mem_access = phys_dev_mem->GetAccess();
   *access_flags_ptr = static_cast<VmmAccess>(mem_access);
 

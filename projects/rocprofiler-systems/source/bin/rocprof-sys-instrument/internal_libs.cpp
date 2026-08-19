@@ -11,6 +11,7 @@
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
+#include "common/path.hpp"
 #include "core/demangler.hpp"
 #include "core/utility.hpp"
 #include "fwd.hpp"
@@ -21,7 +22,6 @@
 #include <timemory/components/timing/wall_clock.hpp>
 #include <timemory/environment/types.hpp>
 #include <timemory/log/macros.hpp>
-#include <timemory/utility/filepath.hpp>
 #include <timemory/utility/types.hpp>
 
 #include <algorithm>
@@ -33,17 +33,10 @@
 
 namespace
 {
-namespace filepath = ::tim::filepath;
 using rocprofsys::get_env;
 using strview_init_t   = std::initializer_list<std::string_view>;
 using strview_set_t    = std::set<std::string_view>;
 using open_modes_vec_t = std::vector<int>;
-
-auto
-get_exe_realpath()
-{
-    return filepath::realpath("/proc/self/exe", nullptr, false);
-}
 
 auto&
 get_symtab_file_cache()
@@ -59,8 +52,8 @@ get_symtab_file(const std::string& _name)
     auto  itr    = _cache.find(_name);
     if(itr == _cache.end())
     {
-        symtab_t* _v        = SymTab::Symtab::findOpenSymtab(_name);
-        bool      _closable = (_v == nullptr);
+        symtab_t*  _v        = SymTab::Symtab::findOpenSymtab(_name);
+        const bool _closable = (_v == nullptr);
         if(!_v) SymTab::Symtab::openFile(_v, _name);
 
         TIMEMORY_PREFER(_v != nullptr)
@@ -79,8 +72,8 @@ close_symtab_file(const std::string& _name)
     auto  itr    = _cache.find(_name);
     if(itr != _cache.end())
     {
-        symtab_t* _symtab   = itr->second.first;
-        bool      _closable = itr->second.second;
+        symtab_t*  _symtab   = itr->second.first;
+        const bool _closable = itr->second.second;
         if(_symtab && _closable) SymTab::Symtab::closeSymtab(_symtab);
         _cache.erase(itr);
         return true;
@@ -104,7 +97,8 @@ get_linked_path(const char*        _name,
                 open_modes_vec_t&& _open_modes = { (RTLD_LAZY | RTLD_NOLOAD) })
 {
     void* _handle = nullptr;
-    bool  _noload = false;
+    // NOLINTNEXTLINE(misc-const-correctness)
+    bool _noload = false;
     for(auto _mode : _open_modes)
     {
         _handle = dlopen(_name, _mode);
@@ -112,7 +106,7 @@ get_linked_path(const char*        _name,
         if(_handle) break;
     }
 
-    tim::scope::destructor _dtor{ [&_noload, &_handle]() {
+    const tim::scope::destructor _dtor{ [&_noload, &_handle]() {
         if(_noload == false) dlclose(_handle);
     } };
 
@@ -122,7 +116,7 @@ get_linked_path(const char*        _name,
         dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
         if(_link_map != nullptr && !std::string_view{ _link_map->l_name }.empty())
         {
-            return filepath::realpath(_link_map->l_name, nullptr, false);
+            return rocprofsys::path::realpath(_link_map->l_name);
         }
     }
 
@@ -153,7 +147,7 @@ get_link_map(const std::string& _lib,
             if(!std::string_view{ _next->l_name }.empty() &&
                std::string_view{ _next->l_name } != _lib)
             {
-                _chain.emplace(filepath::realpath(_next->l_name, nullptr, false));
+                _chain.emplace(rocprofsys::path::realpath(_next->l_name));
             }
             _next = _next->l_next;
         }
@@ -413,30 +407,28 @@ get_internal_libs_data_impl()
     auto _libs   = std::vector<std::string>{};
     _libs.assign(_libs_v.begin(), _libs_v.end());
 
-    auto _rocprofsys_base_path = filepath::dirname(
-        filepath::dirname(filepath::realpath("/proc/self/exe", nullptr, false)));
-    auto _rocprofsys_lib_path = std::string{};
-
-    for(const auto* itr : { "lib", "lib64" })
+    auto rocprofsys_root = rocprofsys::path::get_rocprofsys_root();
+    for(const auto* lib_dir : { "lib", "lib64" })
     {
-        for(const auto* litr :
+        for(const auto* lib_fname :
             { "librocprof-sys-dl.so", "librocprof-sys-user.so", "librocprof-sys-rt.so" })
         {
-            auto _libpath = fmt::format("{}/{}/{}", _rocprofsys_base_path, itr, litr);
-            if(filepath::exists(_libpath))
+            auto libpath = fmt::format("{}/{}/{}", rocprofsys_root, lib_dir, lib_fname);
+            if(rocprofsys::path::is_regular_file(libpath))
             {
-                _libs.emplace_back(filepath::realpath(_libpath, nullptr, false));
+                _libs.emplace_back(rocprofsys::path::realpath(libpath));
             }
         }
     }
 
-    rocprofsys::utility::filter_sort_unique(
-        _libs, [](const auto& itr) { return itr.empty() || !filepath::exists(itr); });
+    rocprofsys::utility::filter_sort_unique(_libs, [](const auto& itr) {
+        return itr.empty() || !rocprofsys::path::is_regular_file(itr);
+    });
 
     auto _data = library_module_map_t{};
     for(const auto& itr : _libs)
     {
-        auto _fpath = filepath::realpath(itr, nullptr, false);
+        auto _fpath = rocprofsys::path::realpath(itr);
         // allow the user to request this library be considered for instrumentation
         if(check_regex_restrictions(strvec_t{ itr, _fpath }, file_internal_include))
             continue;
@@ -470,7 +462,7 @@ get_internal_libs_data_impl()
                 continue;
 
             verbprintf(3, "[internal]     parsing module: '%s' (via '%s')...\n",
-                       _mname.c_str(), filepath::basename(itr.first));
+                       _mname.c_str(), rocprofsys::path::filename(itr.first).c_str());
 
             _data[itr.first].emplace(_mpath, func_set_t{});
             _data[itr.first].emplace(_mname, func_set_t{});
@@ -535,7 +527,10 @@ find_library(std::string_view _lib_v)
     for(const auto& itr : get_library_search_paths())
     {
         auto _path = fmt::format("{}/{}", itr, _lib_v);
-        if(filepath::exists(_path)) return std::optional<std::string>{ _path };
+        if(rocprofsys::path::is_regular_file(_path))
+        {
+            return std::optional<std::string>{ _path };
+        }
     }
 
     return std::optional<std::string>{};
@@ -552,7 +547,10 @@ find_libraries(std::string_view _lib_v)
     for(const auto& itr : get_library_search_paths())
     {
         auto _path = fmt::format("{}/{}", itr, _lib_v);
-        if(filepath::exists(_path)) _libs.emplace_back(_path);
+        if(rocprofsys::path::is_regular_file(_path))
+        {
+            _libs.emplace_back(_path);
+        }
     }
 
     return _libs;

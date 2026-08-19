@@ -492,6 +492,22 @@ save(ArchiveT& ar, rocprofiler_callback_tracing_rccl_api_data_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& /*ar*/, rocprofiler_rocshmem_api_retval_t /*data*/)
+{
+    // every traced rocSHMEM API returns void; nothing to record
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_callback_tracing_rocshmem_api_data_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(size);
+    // ROCP_SDK_SAVE_DATA_FIELD(args);
+    ROCP_SDK_SAVE_DATA_FIELD(retval);
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_rocdecode_api_retval_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(uint64_t_retval);
@@ -514,7 +530,30 @@ save(ArchiveT& ar, rocprofiler_rocjpeg_api_retval_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, hipFileError_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(err);
+    ROCP_SDK_SAVE_DATA_FIELD(hip_drv_err);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_hipfile_api_retval_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(int64_t_retval);
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_callback_tracing_rocjpeg_api_data_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(size);
+    ROCP_SDK_SAVE_DATA_FIELD(retval);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_callback_tracing_hipfile_api_data_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);
     ROCP_SDK_SAVE_DATA_FIELD(retval);
@@ -665,6 +704,64 @@ void
 save(ArchiveT& ar, rocprofiler_buffer_tracing_rocjpeg_api_record_t data)
 {
     save_buffer_tracing_api_record(ar, data);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_buffer_tracing_rocshmem_api_record_t data)
+{
+    save_buffer_tracing_api_record(ar, data);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_buffer_tracing_rocshmem_api_ext_record_t data)
+{
+    save_buffer_tracing_api_record(ar, data);
+    auto args = sdk::serialization::get_buffer_tracing_args(data);
+    ROCP_SDK_SAVE_VALUE("args", args);
+    ROCP_SDK_SAVE_DATA_FIELD(retval);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_buffer_tracing_hipfile_api_record_t data)
+{
+    save_buffer_tracing_api_record(ar, data);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_buffer_tracing_hipfile_api_ext_record_t data)
+{
+    save_buffer_tracing_api_record(ar, data);
+    auto args = sdk::serialization::get_buffer_tracing_args(data);
+    ROCP_SDK_SAVE_VALUE("args", args);
+    switch(data.operation)
+    {
+        case ROCPROFILER_HIPFILE_API_ID_hipFileGetOpErrorString:
+        {
+            auto _retval =
+                std::string{data.retval.const_charp_retval ? data.retval.const_charp_retval : ""};
+            ROCP_SDK_SAVE_VALUE("retval", _retval);
+            break;
+        }
+        case ROCPROFILER_HIPFILE_API_ID_hipFileRead:
+        case ROCPROFILER_HIPFILE_API_ID_hipFileWrite:
+            ROCP_SDK_SAVE_VALUE("retval", data.retval.ssize_t_retval);
+            break;
+        case ROCPROFILER_HIPFILE_API_ID_hipFileUseCount:
+            ROCP_SDK_SAVE_VALUE("retval", data.retval.int64_t_retval);
+            break;
+        case ROCPROFILER_HIPFILE_API_ID_hipFileHandleDeregister:
+        case ROCPROFILER_HIPFILE_API_ID_hipFileBatchIODestroy:
+        {
+            auto _retval = std::string{};
+            ROCP_SDK_SAVE_VALUE("retval", _retval);
+            break;
+        }
+        default: ROCP_SDK_SAVE_VALUE("retval", data.retval.hipFileError_t_retval); break;
+    }
 }
 
 template <typename ArchiveT>

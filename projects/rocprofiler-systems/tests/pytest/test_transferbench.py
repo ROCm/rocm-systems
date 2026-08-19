@@ -26,7 +26,6 @@ def gpu_connect_env() -> dict[str, str]:
     """Environment variables for GPU connectivity tests."""
     return {
         "ROCPROFSYS_TRACE": "ON",
-        "ROCPROFSYS_TRACE_LEGACY": "ON",
         "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api",
         "ROCPROFSYS_AMD_SMI_METRICS": "busy,temp,power,xgmi,pcie,gfx_clock,mem_clock",
         "ROCPROFSYS_SAMPLING_CPUS": "none",

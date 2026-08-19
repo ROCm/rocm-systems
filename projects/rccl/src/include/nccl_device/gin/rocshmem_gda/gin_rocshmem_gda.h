@@ -33,7 +33,8 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
         __threadfence_system();
       }
 
-      if (hasWins) {
+      // Skip zero-length RDMA writes (0-byte put_nbi can stall quiet()/flush() -> deadlock); signal still delivered, matching native rocSHMEM/PROXY.
+      if (hasWins && bytes != 0) {
         ncclGinRocshmemGdaMemHandle* dstMh = (ncclGinRocshmemGdaMemHandle*)dstWin;
         ncclGinRocshmemGdaMemHandle* srcMh = (ncclGinRocshmemGdaMemHandle*)srcWin;
 
@@ -50,7 +51,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
         uintptr_t sigAddr =
           loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signal.indexedSignal.signalId;
         uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
-        qp->atomic_add((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info, /*fence=*/false);
+        qp->atomic_add((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info);
       } else if (hasCounter) {
         qp->quiet(wf_info);
       }
@@ -97,7 +98,7 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
         uintptr_t sigAddr =
           loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signal.indexedSignal.signalId;
         uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
-        qp->atomic_add((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info, /*fence=*/false);
+        qp->atomic_add((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info);
       }
     }
     coop.sync();
@@ -106,9 +107,9 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
 
 template <>
 struct ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
-  NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx ctx, ncclGinCounter_t counterId) {
+  NCCL_DEVICE_INLINE static ncclGinOffsetPtr call(ncclGinCtx ctx, ncclGinCounter_t counterId) {
     ncclGinRocshmemGdaGPUContext* rsCtx = (ncclGinRocshmemGdaGPUContext*)ctx.handle;
-    return nccl::utility::loadConst(&rsCtx->counters) + counterId;
+    return {nccl::utility::loadConst(&rsCtx->counters) + counterId, 0};
   }
 };
 
@@ -122,9 +123,9 @@ struct ncclGinApi_ResetCounter<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
 
 template <>
 struct ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
-  NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx ctx, ncclGinSignal_t signalId) {
+  NCCL_DEVICE_INLINE static ncclGinOffsetPtr call(ncclGinCtx ctx, ncclGinSignal_t signalId) {
     ncclGinRocshmemGdaGPUContext* rsCtx = (ncclGinRocshmemGdaGPUContext*)ctx.handle;
-    return nccl::utility::loadConst(&rsCtx->signals) + signalId;
+    return {nccl::utility::loadConst(&rsCtx->signals) + signalId, 0};
   }
 };
 
@@ -140,7 +141,12 @@ struct ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
 template <>
 struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
   template <typename Coop>
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, cuda::memory_order ord, uint32_t* abortFlag) {
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, bool hasDescriptor,
+                                      ncclGinDescriptorSmem* descriptor, cuda::memory_order ord, uint32_t* abortFlag) {
+    (void)hasDescriptor;
+    (void)descriptor;
+    (void)ord;
+    (void)abortFlag;
     using nccl::utility::loadConst;
     ncclGinRocshmemGdaGPUContext* rsCtx = (ncclGinRocshmemGdaGPUContext*)ctx.handle;
     rocshmem::QueuePair** qps = loadConst(&rsCtx->qps);
@@ -149,6 +155,32 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
       rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
       loadConst(qps + peer)->quiet(wf_info);
     }
+  }
+};
+
+template <>
+struct ncclGinApi_Get<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
+  template <typename Coop>
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, Coop, int, ncclGinWindow_t, size_t,
+                                      ncclGinWindow_t, size_t, size_t, bool,
+                                      ncclGinDescriptorSmem*, uint32_t = ncclGinOptFlagsDefault) {
+    __builtin_trap();
+  }
+};
+
+template <>
+struct ncclGinApi_FlushAsync<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, int, ncclGinRequest_t*, bool,
+                                      ncclGinDescriptorSmem*, uint32_t) {
+    __builtin_trap();
+  }
+};
+
+template <>
+struct ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, ncclGinRequest_t&, bool,
+                                      ncclGinDescriptorSmem*, cuda::memory_order, uint32_t*) {
+    __builtin_trap();
   }
 };
 

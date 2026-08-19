@@ -92,15 +92,15 @@ __device__ void Context::putmem_nbi(void* dest, const void* source,
   DISPATCH(putmem_nbi(dest, source, nelems, pe));
 }
 
-__device__ void Context::getmem_nbi(void* dest, const void* source, size_t size,
+__device__ void Context::getmem_nbi(void* dest, const void* source, size_t nelems,
                                     int pe) {
-  if (size == 0) {
+  if (nelems == 0) {
     return;
   }
 
   ctxStats.incStat(NUM_GET_NBI);
 
-  DISPATCH(getmem_nbi(dest, source, size, pe));
+  DISPATCH(getmem_nbi(dest, source, nelems, pe));
 }
 
 __device__ void Context::fence() {
@@ -239,14 +239,14 @@ __device__ void Context::putmem_nbi_wg(void* dest, const void* source,
 }
 
 __device__ void Context::getmem_nbi_wg(void* dest, const void* source,
-                                       size_t size, int pe) {
-  if (size == 0) {
+                                       size_t nelems, int pe) {
+  if (nelems == 0) {
     return;
   }
 
   ctxStats.incStat(NUM_GET_NBI_WG);
 
-  DISPATCH(getmem_nbi_wg(dest, source, size, pe));
+  DISPATCH(getmem_nbi_wg(dest, source, nelems, pe));
 }
 
 __device__ void Context::putmem_wave(void* dest, const void* source,
@@ -283,24 +283,24 @@ __device__ void Context::putmem_nbi_wave(void* dest, const void* source,
 }
 
 __device__ void Context::getmem_nbi_wave(void* dest, const void* source,
-                                         size_t size, int pe) {
-  if (size == 0) {
+                                         size_t nelems, int pe) {
+  if (nelems == 0) {
     return;
   }
 
   ctxStats.incStat(NUM_GET_NBI_WAVE);
 
-  DISPATCH(getmem_nbi_wave(dest, source, size, pe));
+  DISPATCH(getmem_nbi_wave(dest, source, nelems, pe));
 }
 
-__device__ int Context::broadcastmem_wave(rocshmem_team_t team, void *dest, const void *source, 
-                                          int nelement, int PE_root){
-  DISPATCH_RET(broadcastmem_wave(team, dest, source, nelement, PE_root));
+__device__ int Context::broadcastmem_wave(rocshmem_team_t team, void *dest, const void *source,
+                                          int nelems, int PE_root){
+  DISPATCH_RET(broadcastmem_wave(team, dest, source, nelems, PE_root));
 }
 
-__device__ void Context::broadcastmem_wg(rocshmem_team_t team, void *dest, const void *source, 
-                                        int nelement, int PE_root){
-  DISPATCH(broadcastmem_wg(team, dest, source, nelement, PE_root));
+__device__ void Context::broadcastmem_wg(rocshmem_team_t team, void *dest, const void *source,
+                                        int nelems, int PE_root){
+  DISPATCH(broadcastmem_wg(team, dest, source, nelems, PE_root));
 }
 
 __device__ void Context::alltoallmem_wg(rocshmem_team_t team, void* dest,

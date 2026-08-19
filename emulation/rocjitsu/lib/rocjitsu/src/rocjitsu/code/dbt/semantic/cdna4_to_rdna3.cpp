@@ -7,12 +7,13 @@
 #include "rocjitsu/code/dbt/semantic/cdna4_to_rdna_common.h"
 #include "rocjitsu/code/dbt/semantic/rules.h"
 #include "rocjitsu/code/dbt/translation_rule.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
 
+#include <span>
 #include <string>
 #include <vector>
 
@@ -24,8 +25,9 @@ namespace {
 /// create a weaker wait. Until we add precise GFX11 re-encoding, emit a
 /// conservative full-drain wait, which is slower but preserves correctness.
 ExpandResult expand_waitcnt_gfx9_to_gfx11(const Instruction &inst, uint32_t, uint64_t,
-                                          const LivenessAnalysis &, TranslationContext &,
-                                          const LaneLayout *, const LaneLayout *) {
+                                          std::span<const uint8_t>, const LivenessAnalysis &,
+                                          TranslationContext &, const LaneLayout *,
+                                          const LaneLayout *) {
   if (inst.encoding_id() != cdna4::encoding::kSopp)
     return ExpandResult::failed(std::string(inst.mnemonic()) +
                                 " matched the waitcnt expansion rule with an unexpected encoding");
@@ -34,12 +36,15 @@ ExpandResult expand_waitcnt_gfx9_to_gfx11(const Instruction &inst, uint32_t, uin
 }
 
 // Table MUST be sorted by (src_encoding_id, src_opcode) for binary search.
-const TranslationRule kExpandRules_cdna4_to_rdna3[] = {
+constexpr TranslationRule kExpandRules_cdna4_to_rdna3[] = {
     {cdna4::encoding::kSopp, cdna4::kSWaitcnt, RuleAction::Expand, 0, 0, nullptr,
      expand_waitcnt_gfx9_to_gfx11, nullptr, nullptr},
     {cdna4::encoding::kVop3OpHi4, cdna4::kVLshlAddU64, RuleAction::Expand, 0, 0, nullptr,
      expand_cdna4_v_lshl_add_u64_for_rdna, nullptr, nullptr},
 };
+
+static_assert(translation_rules_sorted(kExpandRules_cdna4_to_rdna3),
+              "the CDNA4-to-RDNA3 rule table must stay sorted by (encoding id, opcode)");
 
 } // namespace
 

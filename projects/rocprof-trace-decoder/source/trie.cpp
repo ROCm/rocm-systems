@@ -22,9 +22,18 @@
 
 #include "trie.h"
 
-Trie Trie::root_trie;
+#include <cstddef>
+#include <new>
 
-static const std::unordered_map<std::string, InstCategory> type_dict = {
+namespace
+{
+struct TrieEntry
+{
+    std::string_view instruction;
+    InstCategory type;
+};
+
+constexpr TrieEntry type_dict[] = {
     {"s_waitcnt",        InstCategory::IMMED},
     {"s_wait_idle",      InstCategory::IMMED},
     {"s_wait_dep",       InstCategory::SKIP },
@@ -147,25 +156,22 @@ static const std::unordered_map<std::string, InstCategory> type_dict = {
     {"image_m",          InstCategory::VMEM },
     {"image_g",          InstCategory::VMEM },
 };
+} // namespace
 
-InstCategory Trie::type_from_trie(const std::string_view inst)
+Trie::Trie()
+{
+    for (const auto& entry : type_dict) add_type(entry.instruction, entry.type);
+}
+
+InstCategory Trie::type_from_trie(const std::string_view inst) const
 {
     if (inst.find("v_") == 0) return InstCategory::VALU;
 
-    if (!bInit)
-    {
-        bInit = true;
-        for (auto& p : type_dict) add_type(p.first, p.second);
-    }
-
-    Trie* trie = this;
+    const Node* trie = &root;
     for (char c : inst)
     {
-        if (trie->paths.find(c) != trie->paths.end())
-        {
-            assert(trie != nullptr);
-            trie = trie->paths[c];
-        }
+        auto it = trie->paths.find(c);
+        if (it != trie->paths.end()) trie = it->second.get();
         if (trie->type != InstCategory::LAST) return trie->type;
     }
 
@@ -174,28 +180,21 @@ InstCategory Trie::type_from_trie(const std::string_view inst)
     return InstCategory::DONT_KNOW;
 }
 
-void Trie::add_type(const std::string& inst_header, InstCategory type)
+void Trie::add_type(std::string_view inst_header, InstCategory type)
 {
-    Trie* trie = this;
+    Node* trie = &root;
     for (char c : inst_header)
     {
-        assert(trie != nullptr);
-        if (trie->paths.find(c) == trie->paths.end())
-        {
-            Trie* new_trie = new Trie();
-            trie->paths[c] = new_trie;
-            trie = new_trie;
-        }
-        else { trie = trie->paths[c]; }
+        auto [it, inserted] = trie->paths.try_emplace(c);
+        if (inserted) it->second = std::make_unique<Node>();
+        trie = it->second.get();
     }
     trie->type = type;
 }
 
-Trie::~Trie()
+Trie& get_instruction_trie()
 {
-    for (auto& p : paths)
-    {
-        if (p.second != nullptr) delete p.second;
-        p.second = nullptr;
-    }
+    alignas(Trie) static std::byte storage[sizeof(Trie)];
+    static Trie* trie = ::new (static_cast<void*>(storage)) Trie{};
+    return *trie;
 }

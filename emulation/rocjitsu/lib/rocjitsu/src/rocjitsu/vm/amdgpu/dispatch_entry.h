@@ -44,6 +44,7 @@ struct ClusterDispatchShape {
 struct DispatchEntry {
   uint32_t dispatch_id = 0;
   uint32_t queue_id = 0;
+  uint32_t queue_packet_id = 0;
   uint32_t process_id = 0;
 
   uint64_t kernel_entry_pc = 0;
@@ -54,7 +55,9 @@ struct DispatchEntry {
   uint32_t kernarg_size = 0;
   uint32_t num_user_sgprs = 2;
   uint32_t kernel_code_properties = 0;
+  uint32_t num_named_barriers = 0;
   uint16_t kernarg_preload = 0;
+  uint32_t initial_mode_raw = 0;
   uint64_t dispatch_ptr = 0;
   uint64_t queue_ptr = 0;
   uint32_t workgroup_id_offset = 0;
@@ -65,6 +68,7 @@ struct DispatchEntry {
   uint32_t grid_wgs_x = 0;
   uint32_t grid_wgs_y = 1;
   uint32_t grid_wgs_z = 1;
+  bool grid_yz_valid = false;
   uint32_t cluster_count_x = 0;
   uint32_t cluster_count_y = 0;
   uint32_t cluster_count_z = 0;
@@ -100,6 +104,7 @@ struct DispatchEntry {
   uint64_t profiling_start_timestamp = 0;
   bool host_signal = false;
   bool barrier_bit = false;
+  bool execution_begun = false;
 
   bool fully_dispatched() const { return dispatched_wgs >= total_wgs; }
   bool fully_completed() const { return completed_wgs >= total_wgs; }
@@ -125,15 +130,31 @@ struct DispatchEntry {
     return coord.x + gx * (coord.y + gy * coord.z);
   }
 
-  uint32_t cluster_rank_for_local_wg(uint32_t local_wg_id) const {
-    WorkgroupCoord coord = local_wg_coord(local_wg_id);
+  WorkgroupCoord cluster_local_wg_coord_for_flat_wg_id(uint32_t flat_wg_id) const {
+    WorkgroupCoord coord = local_wg_coord(flat_wg_id);
     uint32_t sx = cluster_size_x == 0 ? 1 : cluster_size_x;
     uint32_t sy = cluster_size_y == 0 ? 1 : cluster_size_y;
     uint32_t sz = cluster_size_z == 0 ? 1 : cluster_size_z;
-    uint32_t local_x = coord.x % sx;
-    uint32_t local_y = coord.y % sy;
-    uint32_t local_z = coord.z % sz;
-    return local_x + sx * (local_y + sy * local_z);
+    return {coord.x % sx, coord.y % sy, coord.z % sz};
+  }
+
+  uint32_t cluster_rank_for_flat_wg_id(uint32_t flat_wg_id) const {
+    WorkgroupCoord local = cluster_local_wg_coord_for_flat_wg_id(flat_wg_id);
+    uint32_t sx = cluster_size_x == 0 ? 1 : cluster_size_x;
+    uint32_t sy = cluster_size_y == 0 ? 1 : cluster_size_y;
+    return local.x + sx * (local.y + sy * local.z);
+  }
+
+  uint64_t cluster_rank_period() const {
+    assert(cluster_grid_is_complete() && "cluster rank period requires a complete cluster grid");
+    // A complete grid makes the highest active axis period a multiple of all
+    // lower-axis periods, so one alignment check preserves the full rank.
+    uint64_t period = cluster_size_x;
+    if (cluster_size_y > 1 || cluster_size_z > 1)
+      period = static_cast<uint64_t>(grid_wgs_x) * cluster_size_y;
+    if (cluster_size_z > 1)
+      period = static_cast<uint64_t>(grid_wgs_x) * grid_wgs_y * cluster_size_z;
+    return period;
   }
 
   uint32_t cluster_base_local_wg_id(uint32_t local_wg_id) const {

@@ -36,7 +36,11 @@ struct WaveSize {
 /// retirement. Strongly typed to prevent accidental mixing with wave IDs,
 /// register indices, or byte addresses.
 struct EventId {
-  int value;
+  static constexpr int kInvalidValue = -1;
+
+  int value = kInvalidValue;
+
+  bool isValid() const { return value != kInvalidValue; }
   bool operator==(EventId o) const { return value == o.value; }
   bool operator!=(EventId o) const { return value != o.value; }
   bool operator<(EventId o) const { return value < o.value; }
@@ -52,9 +56,9 @@ inline void removeFromUnorderedList(std::vector<EventId> &list, EventId eventId)
 
 /// Status of a memory event in the race detection lifecycle.
 enum class EventStatus {
-  ACTIVE,        // Pending. Unsafe for everyone.
-  WAVE_COMPLETE, // s_waitcnt passed. Safe for owning wave, unsafe for others.
-  RETIRED        // Fully retired (s_barrier). No longer referenced.
+  ACTIVE,        // Pending; in flight.
+  WAVE_COMPLETE, // Owning-wave wait passed; retained until retirement if needed.
+  RETIRED        // Fully retired; no longer referenced.
 };
 
 /// Describes a detected race condition. Used by the race detection layer
@@ -67,6 +71,12 @@ struct RaceViolation {
   int lane;     ///< Lane within the wave, or -1 for scalar.
   bool isWrite; ///< True if the violating access was a write.
   Dim3d workgroupId;
+  EventId conflictingEvent; ///< Exact pending memory event that caused the violation.
+
+  RaceViolation(Space space, int index, int wave, int lane, bool isWrite, Dim3d workgroupId,
+                EventId conflictingEvent)
+      : space(space), index(index), wave(wave), lane(lane), isWrite(isWrite),
+        workgroupId(workgroupId), conflictingEvent(conflictingEvent) {}
 };
 
 /// Pending memory event data dispatched to WaveRaceState by the plugin adapter.
