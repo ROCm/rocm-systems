@@ -135,11 +135,12 @@ namespace RcclUnitTesting
         // HIP/HSA runtime state does not survive fork(), so a HIP-initialized parent yields pool
         // workers that SEGV in libhsa-runtime on their first GPU use. The codebase enforces this
         // (EnvVars runs every hipGetDeviceCount inside a forked probe). Use the already-computed,
-        // HIP-clean ev.numDetectedGpus here -- do NOT call hipGetDeviceCount in the parent.
+        // HIP-clean detected count here -- do NOT call hipGetDeviceCount in the parent.
         int poolSize = this->numDevicesAvailable;
-        if (ev.numDetectedGpus > 0 && ev.numDetectedGpus < poolSize)
+        int const detectedGpus = ev.GetNumDetectedGpus();
+        if (detectedGpus > 0 && detectedGpus < poolSize)
         {
-          poolSize = ev.numDetectedGpus;
+          poolSize = detectedGpus;
         }
         this->poolChildren.assign(poolSize, nullptr);
         for (int d = 0; d < poolSize; ++d)
