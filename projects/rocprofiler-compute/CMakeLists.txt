@@ -887,11 +887,6 @@ add_test(
         tests/unit/rocprof_compute_tui/widgets/test_collapsibles.py ${WORKING_DIR_OPTION}
 )
 
-# Build the roctx_recordfn pybind11 extension and its gtest.
-if(ENABLE_TESTS)
-    add_subdirectory(src/lib/roctx_recordfn)
-endif()
-
 if(TARGET test-roctx-recordfn)
     if(TEST_FROM_INSTALL)
         set(_rcfn_test_cmd tests/test-roctx-recordfn)

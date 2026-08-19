@@ -2,18 +2,16 @@
 ## SPDX-License-Identifier:  MIT
 ##
 ## Builds roctx_recordfn-<tag>.so for --torch-trace.
-##   A. parent add_subdirectory() under ENABLE_TESTS (CI fixture).
+##   A. parent add_subdirectory() from src/lib.
 ##   B. standalone (runtime cmake-tier from
 ##      utils/inject_roctx/_backends/torch_cpp_loader.py).
+## The .so is built whenever torch is importable; ENABLE_TESTS only adds the
+## gtest below.
 set(_rcfn_standalone OFF)
 if(NOT PROJECT_NAME)
     cmake_minimum_required(VERSION 3.16)
     project(roctx_recordfn_runtime LANGUAGES CXX)
     set(_rcfn_standalone ON)
-endif()
-
-if(NOT _rcfn_standalone AND NOT ENABLE_TESTS)
-    return()
 endif()
 
 # Honor TORCH_TRACE_PYTHON when provided; otherwise locate an interpreter.
@@ -156,26 +154,40 @@ find_path(
 )
 
 # Lowest standard the torch headers accept. Applies to this directory and tests/.
+# The probe drives CMAKE_CXX_STANDARD rather than a -std= flag: try_compile
+# inherits the standard from the enclosing scope and appends its flag last, which
+# would override anything passed through CMAKE_REQUIRED_FLAGS.
 include(CheckCXXSourceCompiles)
 set(CMAKE_REQUIRED_INCLUDES ${_torch_includes})
 # Compile only; the header pulls in inline code referencing unlinked torch symbols.
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(_rcfn_std "")
 foreach(_std IN ITEMS 17 20)
-    set(CMAKE_REQUIRED_FLAGS "-std=c++${_std}")
+    set(CMAKE_CXX_STANDARD ${_std})
     check_cxx_source_compiles(
         "#include <ATen/record_function.h>
          int main() { return 0; }"
         _rcfn_torch_cxx${_std}
     )
     if(_rcfn_torch_cxx${_std})
-        set(CMAKE_CXX_STANDARD ${_std})
-        set(CMAKE_CXX_STANDARD_REQUIRED ON)
+        set(_rcfn_std ${_std})
         break()
     endif()
 endforeach()
 unset(CMAKE_TRY_COMPILE_TARGET_TYPE)
 unset(CMAKE_REQUIRED_INCLUDES)
-unset(CMAKE_REQUIRED_FLAGS)
+
+if(NOT _rcfn_std)
+    message(
+        WARNING
+        "roctx_recordfn: skipping .so build (torch headers in ${_torch_includes} "
+        "compile under neither C++17 nor C++20); torch-trace falls back to the "
+        "runtime cmake tier."
+    )
+    return()
+endif()
+set(CMAKE_CXX_STANDARD ${_rcfn_std})
 
 add_library(${_so_name} MODULE roctx_recordfn.cpp)
 
@@ -236,13 +248,12 @@ target_link_libraries(${_so_name} PRIVATE ${_torch_resolved_libs} ${ROCTX_LIB})
 
 # Detect whether c10::DebugInfoKind accepts a custom string_view-backed
 # key. When unavailable, the source falls back to TEST_INFO_2.
+# try_compile inherits CMAKE_CXX_STANDARD, so the standard needs no explicit flag.
 include(CheckCXXSourceCompiles)
-set(_rcfn_saved_required_flags ${CMAKE_REQUIRED_FLAGS})
 set(_rcfn_saved_required_libs ${CMAKE_REQUIRED_LIBRARIES})
 set(_rcfn_saved_required_includes ${CMAKE_REQUIRED_INCLUDES})
 get_target_property(_rcfn_inc_dirs ${_so_name} INCLUDE_DIRECTORIES)
 set(CMAKE_REQUIRED_INCLUDES ${_rcfn_inc_dirs})
-set(CMAKE_REQUIRED_FLAGS "-std=c++${CMAKE_CXX_STANDARD}")
 check_cxx_source_compiles(
     "#include <c10/util/ThreadLocalDebugInfo.h>
      #include <string_view>
@@ -251,7 +262,6 @@ check_cxx_source_compiles(
      int main() { (void)kProbeKind; return 0; }"
     ROCPROF_TORCHTRACE_HAS_CUSTOM_DBGINFOKIND
 )
-set(CMAKE_REQUIRED_FLAGS ${_rcfn_saved_required_flags})
 set(CMAKE_REQUIRED_LIBRARIES ${_rcfn_saved_required_libs})
 set(CMAKE_REQUIRED_INCLUDES ${_rcfn_saved_required_includes})
 if(ROCPROF_TORCHTRACE_HAS_CUSTOM_DBGINFOKIND)

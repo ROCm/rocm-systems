@@ -9,6 +9,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* The `roctx_recordfn` extension used by `--torch-trace` is now built whenever PyTorch is importable during configuration, independent of `ENABLE_TESTS`. `ENABLE_TESTS` continues to control its gtest.
+
 ### Removed
 
 ### Optimized
