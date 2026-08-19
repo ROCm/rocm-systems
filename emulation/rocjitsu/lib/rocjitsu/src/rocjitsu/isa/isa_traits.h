@@ -83,14 +83,14 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
   return (wf == 32 || wf == 64) && wf >= Isa::WF_SIZE && wf <= Isa::WF_SIZE_MAX;
 }
 
-/// @brief Return true when @p arch belongs to the CDNA ISA family.
+/// @brief Return true when @p arch is CDNA1 through CDNA4.
 ///
-/// @details Keep architecture-family policy near the ISA trait declarations so
-/// DBT call sites do not grow their own partial CDNA/RDNA switch statements.
-///
-/// Currently CDNA5 is missing from this check. This is because CDNA5
-/// support in rocjitsu started as gfx1250 and modeled as inheriting
-/// properties from an RDNA4 profile.
+/// @details This predicate represents the CDNA1-4 descriptor and wavefront
+/// policy boundary, not the entire CDNA family. Rocjitsu models CDNA5, which
+/// originated as gfx1250, with RDNA4-derived descriptor and wavefront
+/// properties. Adding CDNA5 here would silently change those decisions in
+/// callers. Keep this policy near the ISA trait declarations so DBT call sites
+/// do not grow their own partial architecture switch statements.
 [[nodiscard]] inline constexpr bool arch_is_cdna_4_or_lower(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
          arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
