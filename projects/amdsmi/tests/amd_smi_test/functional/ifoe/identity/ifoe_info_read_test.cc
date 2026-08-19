@@ -123,13 +123,15 @@ void TestIfoeInfoRead::Run(void) {
 
     // physical_acc_id is UALoE-backed; without an active session it stays at
     // the UINT32_MAX sentinel rather than failing amdsmi_get_gpu_asic_info().
-    IF_VERB(STANDARD) {
-      std::cout << "\t**Physical Accelerator ID: ";
-      if (asic_info.physical_acc_id == std::numeric_limits<uint32_t>::max()) {
-        std::cout << "N/A (not supported on this system)" << std::endl;
-      } else {
-        std::cout << asic_info.physical_acc_id << std::endl;
+    if (asic_info.physical_acc_id == std::numeric_limits<uint32_t>::max()) {
+      IF_VERB(STANDARD) {
+        std::cout << "\t**Physical Accelerator ID: N/A (not supported on this system)" << std::endl;
       }
+    } else {
+      IF_VERB(STANDARD) {
+        std::cout << "\t**Physical Accelerator ID: " << asic_info.physical_acc_id << std::endl;
+      }
+      ASSERT_NE(asic_info.physical_acc_id, std::numeric_limits<uint32_t>::max());
     }
 
     // device name, brand, serial_number

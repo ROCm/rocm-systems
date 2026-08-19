@@ -7680,12 +7680,17 @@ amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle, amdsmi_npm_i
  *
  * @note node_handle is reserved for future use and MUST be NULL.
  *
+ * @note This call is host-scoped: it scans all sockets/GPUs on the host and returns the first
+ *       UALoE-backed identity found. Multi-tray host semantics are undefined until node_handle
+ *       is honored.
+ *
  * @param[in]  node_handle Reserved for future use; must be NULL.
  * @param[out] info Pointer to amdsmi_tray_info_t structure to receive tray info.
  *             Must be allocated by the user.
  *
- * @return ::AMDSMI_STATUS_SUCCESS on success, ::AMDSMI_STATUS_NOT_SUPPORTED if no active UALoE
- *         session is available, non-zero on other failures.
+ * @return ::AMDSMI_STATUS_SUCCESS on success, ::AMDSMI_STATUS_INVAL if node_handle is non-NULL or
+ *         info is NULL, ::AMDSMI_STATUS_NOT_SUPPORTED if no active UALoE session is available,
+ *         non-zero on other failures.
  */
 amdsmi_status_t amdsmi_get_tray_info(amdsmi_node_handle node_handle, amdsmi_tray_info_t* info);
 

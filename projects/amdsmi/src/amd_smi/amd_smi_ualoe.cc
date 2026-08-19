@@ -747,6 +747,16 @@ amdsmi_status_t amdsmi_get_gpu_fabric_info(amdsmi_processor_handle processor_han
 
 // ualoe HELIOS_P=0/HELIOS_R=1/TITAN=2 do NOT numerically match
 // amdsmi UNKNOWN=0/HELIOS_P=1/HELIOS_R=2/TITAN=3 (UNKNOWN sentinel shifts by +1).
+// These static_asserts catch either enum being renumbered without updating the
+// switch below.
+static_assert(UALOE_COMPUTE_TRAY_TYPE_HELIOS_P == 0, "map_ualoe_tray_type assumes this value");
+static_assert(UALOE_COMPUTE_TRAY_TYPE_HELIOS_R == 1, "map_ualoe_tray_type assumes this value");
+static_assert(UALOE_COMPUTE_TRAY_TYPE_TITAN == 2, "map_ualoe_tray_type assumes this value");
+static_assert(AMDSMI_COMPUTE_TRAY_TYPE_UNKNOWN == 0, "map_ualoe_tray_type assumes this value");
+static_assert(AMDSMI_COMPUTE_TRAY_TYPE_HELIOS_P == 1, "map_ualoe_tray_type assumes this value");
+static_assert(AMDSMI_COMPUTE_TRAY_TYPE_HELIOS_R == 2, "map_ualoe_tray_type assumes this value");
+static_assert(AMDSMI_COMPUTE_TRAY_TYPE_TITAN == 3, "map_ualoe_tray_type assumes this value");
+
 static amdsmi_compute_tray_type_t map_ualoe_tray_type(uint32_t raw_tray_type) {
   switch (static_cast<ualoe_compute_tray_type_e>(raw_tray_type)) {
     case UALOE_COMPUTE_TRAY_TYPE_HELIOS_P:
@@ -820,6 +830,7 @@ amdsmi_status_t amdsmi_get_tray_info(amdsmi_node_handle node_handle, amdsmi_tray
     return AMDSMI_STATUS_INVAL;
   }
 
+  memset(info, 0, sizeof(*info));
   info->max_acc_per_tray = std::numeric_limits<uint32_t>::max();
   info->tray_type = AMDSMI_COMPUTE_TRAY_TYPE_UNKNOWN;
 

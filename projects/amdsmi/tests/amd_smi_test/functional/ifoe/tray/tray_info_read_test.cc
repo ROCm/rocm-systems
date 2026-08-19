@@ -93,6 +93,8 @@ void TestTrayInfoRead::Run(void) {
     IF_VERB(STANDARD) {
       std::cout << "\t**amdsmi_get_tray_info() is not supported on this system" << std::endl;
     }
+    ASSERT_EQ(tray_info.max_acc_per_tray, std::numeric_limits<uint32_t>::max());
+    ASSERT_EQ(tray_info.tray_type, AMDSMI_COMPUTE_TRAY_TYPE_UNKNOWN);
   } else {
     IF_VERB(STANDARD) {
       std::cout << "\t\tmax_acc_per_tray: " << tray_info.max_acc_per_tray << "\n"

@@ -8,13 +8,7 @@
 # when the libs live outside the default linker path (e.g. rocm_sysdeps).
 
 # Define source files for ualoe library
-set(UALOE_SRC_LIST
-    ualoe_lib.c
-    ualoe_cdev.c
-    ualoe_cb.c
-    ualoe_nl.c
-    ualoe_telem.c
-)
+set(UALOE_SRC_LIST ualoe_lib.c ualoe_cdev.c ualoe_cb.c ualoe_nl.c)
 
 # Convert relative paths to absolute paths
 set(UALOE_ABS_SRC_LIST)
@@ -28,8 +22,6 @@ set(UALOE_HDR_LIST
     "${UALOE_LIB_INC_DIR}/ualoe_cdev.h"
     "${UALOE_LIB_INC_DIR}/ualoe_cb.h"
     "${UALOE_LIB_INC_DIR}/ualoe_nl.h"
-    "${UALOE_LIB_INC_DIR}/ualoe_telem.h"
-    "${UALOE_LIB_INC_DIR}/telemetry_dataset.h"
     "${UALOE_LIB_INC_DIR}/ifoe_telemetry.h"
     "${UALOE_LIB_INC_DIR}/ifoe_telemetry_hostapp.h"
     "${UALOE_LIB_INC_DIR}/cbl_cfg/uapi.h"

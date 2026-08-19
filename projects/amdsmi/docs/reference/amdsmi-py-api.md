@@ -3086,7 +3086,7 @@ finally:
 
 Description: Returns node-scoped compute tray type and accelerator count via UALoE.
 
-Input parameters: None
+Input parameters: `node_handle` (reserved for future use; must be `None`)
 
 Output: Dictionary with fields
 

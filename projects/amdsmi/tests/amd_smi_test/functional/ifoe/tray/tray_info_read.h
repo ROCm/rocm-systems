@@ -33,19 +33,19 @@ class TestTrayInfoRead : public TestBase {
   virtual ~TestTrayInfoRead();
 
   // @Brief: Setup the environment for measurement
-  virtual void SetUp();
+  void SetUp() override;
 
   // @Brief: Core measurement execution
-  virtual void Run();
+  void Run() override;
 
   // @Brief: Clean up and retrieve the resource
-  virtual void Close();
+  void Close() override;
 
   // @Brief: Display results
-  virtual void DisplayResults() const;
+  void DisplayResults() const override;
 
   // @Brief: Display information about what this test does
-  virtual void DisplayTestInfo(void);
+  void DisplayTestInfo() override;
 };
 
 #endif  // TESTS_AMD_SMI_TEST_FUNCTIONAL_TRAY_INFO_READ_H_

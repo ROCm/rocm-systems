@@ -27,7 +27,7 @@ from ctypes import POINTER, c_void_p
 from enum import IntEnum, Enum
 from pathlib import Path
 from time import asctime, localtime, time
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from . import amdsmi_wrapper
 from .amdsmi_exception import *
@@ -5362,13 +5362,16 @@ def amdsmi_get_npm_info(node_handle: processor_handle_t) -> Dict[str, Any]:
     return dict_ret
 
 
-def amdsmi_get_tray_info(node_handle: processor_handle_t = None) -> Dict[str, Any]:
+def amdsmi_get_tray_info(
+    node_handle: Optional[amdsmi_wrapper.amdsmi_node_handle] = None,
+) -> Dict[str, Any]:
     """
     Return tray-wide compute-tray type and accelerator count from UALoE.
 
     node_handle is reserved for future use and MUST be NULL.
 
-    max_acc_per_tray is "N/A" when no UALoE session is active.
+    Raises AmdSmiLibraryException (AMDSMI_STATUS_NOT_SUPPORTED) when no
+    UALoE session is active.
     """
     if node_handle is not None and not isinstance(node_handle, amdsmi_wrapper.amdsmi_node_handle):
         raise AmdSmiParameterException(node_handle, amdsmi_wrapper.amdsmi_node_handle)

@@ -1021,6 +1021,47 @@ Command Modifiers:
                              DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
+### amd-smi node
+
+Gets power and baseboard information for the node. Returns information for
+node 0 (OAM_ID 0) on the system. If no node argument is provided, all node
+information will be displayed.
+
+```shell-session
+~$ amd-smi node --help
+usage: amd-smi node [-h] [-p] [-b] [-G] [-T] [--json | --csv] [--file FILE]
+                     [--loglevel LEVEL]
+
+Node arguments:
+  -h, --help                    show this help message and exit
+  -p, --power-management        Displays power management information
+  -b, --base-board-temps        Displays baseboard temperatures
+  -G, --gtt                     Displays GTT (shared GPU memory) size
+  -T, --tray                    Displays compute tray type and accelerator count
+
+Command Modifiers:
+  --json                        Displays output in JSON format (human readable by default).
+  --csv                         Displays output in CSV format (human readable by default).
+  --file FILE                   Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL              Set the logging level from the possible choices:
+                                   DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+This example shows `amd-smi node --tray` output on a system with a UALoE
+session active:
+
+```shell-session
+~$ amd-smi node --tray
+NODE:
+    TRAY:
+        MAX_ACC_PER_TRAY: 8
+        TRAY_TYPE: HELIOS_P
+```
+
+On systems without UALoE hardware/session, `amdsmi_get_tray_info()` returns
+`AMDSMI_STATUS_NOT_SUPPORTED` and the `TRAY:` block (and the `tray`/
+`max_acc_per_tray`/`tray_type` keys in `--json`/`--csv`) is omitted entirely.
+
 ## Interpreting the output
 
 When you run an `amd-smi` command, the tool presents detailed information
@@ -1166,9 +1207,9 @@ GPU: 0
         REV_ID: 0x00
         ASIC_SERIAL: 0xXXXXXXXXXXXXXXXX
         OAM_ID: 0
+        PHYSICAL_ACC_ID: N/A
         NUM_COMPUTE_UNITS: 228
         TARGET_GRAPHICS_VERSION: gfx942
-        PHYSICAL_ACC_ID: N/A
         FLAGS: 17
     BUS:
         BDF: 0000:01:00.0
