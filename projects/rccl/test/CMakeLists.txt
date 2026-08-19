@@ -446,6 +446,7 @@ if(BUILD_TESTS)
     add_executable(rccl-UnitTestsDevRuntime
       DevRuntimeTests.cpp
       DevRuntimeTestsStubs.cc
+      host/fakes/nccl_fakes.cc         # shared reusable stubs for nccl* symbols
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/TestChecks.cpp
@@ -453,6 +454,7 @@ if(BUILD_TESTS)
     )
 
     target_include_directories(rccl-UnitTestsDevRuntime PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/host/fakes
       ${PROJECT_BINARY_DIR}/hipify/src
       ${PROJECT_BINARY_DIR}/hipify/src/include
       ${PROJECT_BINARY_DIR}/hipify/src/include/nccl_device

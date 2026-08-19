@@ -34,15 +34,16 @@
 
 // ---------------------------------------------------------------------------
 // Globals the translation unit references.
+//
+// ncclDebugLevel/Mask/NoWarn, ncclCuMemHandleType, ncclDebugLog,
+// ncclLoadParam and ncclProxyClientGetFdBlocking are shared with (and defined
+// identically by) test/host/fakes/nccl_fakes.cc, which this target now links.
+// They are intentionally NOT redefined here to avoid duplicate symbols.
+// nccl_fakes.cc also uses POSIX-FD handles for ncclCuMemHandleType, so the
+// single-rank success path still takes the no-export / reuse-local branch in
+// symMemory{Export,ImportAndMap}SegmentHandle (no real shareable-handle
+// export/import needed).
 // ---------------------------------------------------------------------------
-int                          ncclDebugLevel = 0;
-uint64_t                     ncclDebugMask  = 0;
-thread_local int             ncclDebugNoWarn = 0;
-// Use POSIX-FD handles so the single-rank success path takes the no-export /
-// reuse-local branch in symMemory{Export,ImportAndMap}SegmentHandle (no real
-// shareable-handle export/import needed).
-hipMemAllocationHandleType   ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
-
 thread_local int             ncclGroupDepth = 0;
 thread_local ncclResult_t    ncclGroupError = ncclSuccess;
 thread_local struct ncclComm* ncclGroupCommHead[ncclGroupTaskTypeNum] = {};
@@ -54,9 +55,8 @@ struct ncclDevCommCompat ncclDevCommCompat_v22907 = {};
 struct ncclDevCommCompat ncclDevCommCompat_v23000 = {};
 
 // ---------------------------------------------------------------------------
-// Debug / error.
+// Error. (ncclDebugLog is provided by nccl_fakes.cc.)
 // ---------------------------------------------------------------------------
-void ncclDebugLog(ncclDebugLogLevel, unsigned long, const char*, int, const char*, ...) {}
 const char* ncclGetErrorString(ncclResult_t) { return "ncclSuccess"; }
 
 // ---------------------------------------------------------------------------
@@ -87,19 +87,8 @@ ncclResult_t ncclCommWindowDeregister(ncclComm_t, ncclWindow_t) { return ncclSuc
 ncclResult_t ncclGroupStartInternal() { return ncclSuccess; }
 ncclResult_t ncclGroupEndInternal(ncclSimInfo_t*) { return ncclSuccess; }
 
-// ---------------------------------------------------------------------------
-// Param loader.
-// ---------------------------------------------------------------------------
-int64_t ncclLoadParam(char const*, int64_t deftVal, int64_t, int64_t* cache, int8_t* noCache) {
-  if (cache) *cache = deftVal;
-  if (noCache) *noCache = 0;
-  return deftVal;
-}
-
-// ---------------------------------------------------------------------------
-// Proxy.
-// ---------------------------------------------------------------------------
-ncclResult_t ncclProxyClientGetFdBlocking(struct ncclComm*, int, void*, int*) { return ncclSuccess; }
+// ncclLoadParam and ncclProxyClientGetFdBlocking are provided by
+// nccl_fakes.cc (shared fakes layer) and deliberately not redefined here.
 
 // ---------------------------------------------------------------------------
 // Symmetric kernels.
