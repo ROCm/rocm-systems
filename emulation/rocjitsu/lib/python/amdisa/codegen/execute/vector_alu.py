@@ -1234,7 +1234,7 @@ def gen_vector_ternary(
             L.append(
                 '      uint32_t ba = (a >> (i * 8)) & 0xFF, bb = (b >> (i * 8)) & 0xFF;'
             )
-            L.append('      if (ba != 0) sum += ba > bb ? ba - bb : bb - ba;')
+            L.append('      if (bb != 0) sum += ba > bb ? ba - bb : bb - ba;')
             L.append('    }')
             L.append(f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, sum + c);')
         elif op == 'lerp_u8':

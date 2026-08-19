@@ -973,8 +973,12 @@ void VFmacF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VPkFmacF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                           dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
+  ScopedOperandDelegate dpp_src0_binding_(vdst, dpp_src0_.get());
+  ScopedOperandDelegate dpp_src1_binding_(src0, dpp_src1_.get());
+  amdgpu::execute_v_pk_fmac_f16_vop2(*this, wf);
 }
 
 void VXnorB32Vop2::execute_impl(amdgpu::Wavefront &wf) {

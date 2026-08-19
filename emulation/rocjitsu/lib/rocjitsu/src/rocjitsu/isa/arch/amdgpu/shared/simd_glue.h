@@ -65,6 +65,16 @@ inline bool pk16_src_needs_narrowing(uint32_t selector, int src_size_bits) {
   return is_inline_float_src(selector) && src_size_bits != 16;
 }
 
+/// Return whether V_DOT4 integer instructions honor the encoded CLAMP bit.
+/// GFX12 (RDNA4) and the CDNA5-backed gfx1250 profile explicitly ignore CLAMP
+/// for the integer DOT4 forms; earlier CDNA/RDNA profiles retain the ordinary
+/// integer saturation behavior. Keep this policy shared by scalar generation
+/// and SIMD execution.
+inline bool dot4_clamp_supported(const Wavefront &wf) {
+  const rj_code_arch_t arch = wf.cu().arch();
+  return arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_GFX1250;
+}
+
 inline uint32_t sign_extend_u32(uint32_t value, unsigned bits) {
   assert(bits >= 1 && bits <= 32 && "sign_extend_u32 requires a 1..32 bit width");
   const uint32_t sign = uint32_t{1} << (bits - 1);
@@ -3209,19 +3219,20 @@ template <typename Inst, typename Op>
   return false;
 }
 
-/// VOP3P packed-16 f16 ternary SIMD fast path (3-source pk_fma_f16). Same
-/// default-packing gate as the integer ternary form (op_sel = 0,
-/// op_sel_hi = 3, op_sel_hi_2 = 1). Per-source neg / neg_hi bits 0/1/2 for
-/// src0/src1/src2 (verified pk_fma_f16 scalar at line 15300-15317). No
-/// clamp on pk_fma_f16. NaN-payload divergence between stdx::fma and
-/// std::fma accepted (same carve-out as fma_mix slice).
+/// VOP3P packed-16 f16 ternary SIMD fast path (3-source pk_fma_f16). Directed
+/// rounding modes use the scalar path. The RNE path applies the input/output
+/// denormal controls and CLAMP around the fused operation.
 template <typename Inst, typename Op>
   requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_vop3p_pk_ternary_fp16_simd(Inst &inst, Wavefront &wf, Op op) {
+[[nodiscard]] inline bool
+try_execute_vop3p_pk_ternary_fp16_simd(Inst &inst, Wavefront &wf, uint32_t op_sel,
+                                       uint32_t op_sel_hi, uint32_t op_sel_hi_2, Op op) {
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
     return false;
-  if (inst.inst_.op_sel != 0u || inst.inst_.op_sel_hi != 3u || inst.inst_.op_sel_hi_2 != 1u)
+  if (wf.fp_round_mode_f16_f64() != 0)
+    return false;
+  if (op_sel != 0u || op_sel_hi != 3u || op_sel_hi_2 != 1u)
     return false;
   // Decline exactly the sources the scalar body re-narrows -- an inline float
   // constant on a 32-bit source -- so the two paths cannot disagree. Keyed on
@@ -3243,6 +3254,29 @@ template <typename Inst, typename Op>
   const bool neg0_hi = inst.inst_.neg_hi & 1u;
   const bool neg1_hi = inst.inst_.neg_hi & 2u;
   const bool neg2_hi = inst.inst_.neg_hi & 4u;
+  const bool flush_inputs = (wf.fp_denorm_mode_f16_f64() & 1u) == 0;
+  const bool flush_outputs = (wf.fp_denorm_mode_f16_f64() & 2u) == 0;
+  const bool clamp = inst.inst_.clamp;
+  const auto flush_input = [flush_inputs](U raw) {
+    if (flush_inputs) {
+      const U magnitude = raw & U(0x7fffu);
+      util::stdx::where((magnitude != U(0)) && (magnitude < U(0x0400u)), raw) = raw & U(0x8000u);
+    }
+    return raw;
+  };
+  const auto finish = [flush_outputs, clamp, &wf](F value) {
+    if (clamp) {
+      util::stdx::where(util::stdx::isnan(value) || value < F(0.0f), value) = F(0.0f);
+      util::stdx::where(value > F(1.0f), value) = F(1.0f);
+    }
+    U result = util::f32_to_f16_mode_simd(value, wf.fp16_ovfl());
+    if (flush_outputs) {
+      const U magnitude = result & U(0x7fffu);
+      util::stdx::where((magnitude != U(0)) && (magnitude < U(0x0400u)), result) =
+          result & U(0x8000u);
+    }
+    return result;
+  };
   RegisterAccess regs(wf);
   auto src0 = regs.read_operand(inst.src0, exec);
   auto src1 = regs.read_operand(inst.src1, exec);
@@ -3255,12 +3289,12 @@ template <typename Inst, typename Op>
     const U raw0 = src0.template load_native<uint32_t>(base);
     const U raw1 = src1.template load_native<uint32_t>(base);
     const U raw2 = src2.template load_native<uint32_t>(base);
-    F a_lo = util::f16_to_f32_simd(raw0 & 0xFFFFu);
-    F a_hi = util::f16_to_f32_simd(raw0 >> 16);
-    F b_lo = util::f16_to_f32_simd(raw1 & 0xFFFFu);
-    F b_hi = util::f16_to_f32_simd(raw1 >> 16);
-    F c_lo = util::f16_to_f32_simd(raw2 & 0xFFFFu);
-    F c_hi = util::f16_to_f32_simd(raw2 >> 16);
+    F a_lo = util::f16_to_f32_simd(flush_input(raw0 & 0xFFFFu));
+    F a_hi = util::f16_to_f32_simd(flush_input(raw0 >> 16));
+    F b_lo = util::f16_to_f32_simd(flush_input(raw1 & 0xFFFFu));
+    F b_hi = util::f16_to_f32_simd(flush_input(raw1 >> 16));
+    F c_lo = util::f16_to_f32_simd(flush_input(raw2 & 0xFFFFu));
+    F c_hi = util::f16_to_f32_simd(flush_input(raw2 >> 16));
     if (neg0_lo)
       a_lo = std::bit_cast<F>(std::bit_cast<U>(a_lo) ^ kSignBit);
     if (neg1_lo)
@@ -3273,10 +3307,8 @@ template <typename Inst, typename Op>
       b_hi = std::bit_cast<F>(std::bit_cast<U>(b_hi) ^ kSignBit);
     if (neg2_hi)
       c_hi = std::bit_cast<F>(std::bit_cast<U>(c_hi) ^ kSignBit);
-    const F r_lo = op(a_lo, b_lo, c_lo);
-    const F r_hi = op(a_hi, b_hi, c_hi);
-    const U h_lo = util::f32_to_f16_mode_simd(r_lo, wf.fp16_ovfl());
-    const U h_hi = util::f32_to_f16_mode_simd(r_hi, wf.fp16_ovfl());
+    const U h_lo = finish(op(a_lo, b_lo, c_lo));
+    const U h_hi = finish(op(a_hi, b_hi, c_hi));
     const U packed = h_lo | (h_hi << 16);
     dst.template store_native<uint32_t>(base, packed, chunk);
   }
@@ -3284,8 +3316,15 @@ template <typename Inst, typename Op>
 }
 
 template <typename Inst, typename Op>
-[[nodiscard]] bool try_execute_vop3p_pk_ternary_fp16_simd(Inst &, Wavefront &, Op) {
+[[nodiscard]] bool try_execute_vop3p_pk_ternary_fp16_simd(Inst &, Wavefront &, uint32_t, uint32_t,
+                                                          uint32_t, Op) {
   return false;
+}
+
+template <typename Inst, typename Op>
+[[nodiscard]] inline bool try_execute_vop3p_pk_ternary_fp16_simd(Inst &inst, Wavefront &wf, Op op) {
+  return try_execute_vop3p_pk_ternary_fp16_simd(inst, wf, inst.inst_.op_sel, inst.inst_.op_sel_hi,
+                                                inst.inst_.op_sel_hi_2, op);
 }
 
 /// VOP3P packed-f32 binary fast path (v_pk_add_f32 / v_pk_mul_f32). In a VGPR
@@ -3461,12 +3500,10 @@ template <typename Inst> [[nodiscard]] bool try_execute_vop3p_mov_b32_simd(Inst 
 /// each lane, so the fast path vectorizes across lanes (each lane computes
 /// its own reduction). ElemBits selects the sub-word width (16/8/4 -> 2/4/8
 /// products per lane); Signed selects sign- vs zero-extension and, for the
-/// signed forms when inst.clamp is set, a lower clamp to 0 — the scalar
-/// std::clamp(sum, 0, INT_MAX) on an int32 sum is just max(sum, 0). The
-/// unsigned scalar bodies have NO clamp branch, so the unsigned fast path
-/// ignores the clamp bit entirely. Signed products fit in int32, but the
-/// accumulator is kept as uint32_t bits so overflow wraps like the scalar tail
-/// without tripping signed-overflow sanitizers. For the 16-bit forms op_sel /
+/// signed forms when inst.clamp is set, saturation to [INT_MIN, INT_MAX]. Unsigned
+/// clamp saturates to UINT_MAX. Clamped accumulation is widened so overflow is
+/// detected before narrowing; unclamped accumulation remains in uint32_t bits
+/// and wraps. For the 16-bit forms op_sel /
 /// op_sel_hi pick the source halves,
 /// so the fast path gates on the default packing (op_sel == 0, op_sel_hi == 3)
 /// and bails otherwise; the 8/4-bit scalar bodies ignore op_sel so no gate is
@@ -3488,10 +3525,11 @@ template <int ElemBits, bool Signed, typename Inst>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  const bool clamp = inst.inst_.clamp;
+  const bool clamp = inst.inst_.clamp && (ElemBits != 8 || dot4_clamp_supported(wf));
   using U = util::native<uint32_t>;
   using I = util::native<int32_t>;
-  const I kZeroI(0);
+  using U64 = util::stdx::fixed_size_simd<uint64_t, W>;
+  using I64 = util::stdx::fixed_size_simd<int64_t, W>;
   RegisterAccess regs(wf);
   auto src0 = regs.read_operand(inst.src0, exec);
   auto src1 = regs.read_operand(inst.src1, exec);
@@ -3505,28 +3543,51 @@ template <int ElemBits, bool Signed, typename Inst>
     const U raw1 = src1.template load_native<uint32_t>(base);
     const U acc = src2.template load_native<uint32_t>(base);
     if constexpr (Signed) {
-      U sum = acc;
-      for (int i = 0; i < N; ++i) {
-        const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
-        const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
-        const I a = std::bit_cast<I>(simd_sign_extend_u32(ea, ElemBits));
-        const I b = std::bit_cast<I>(simd_sign_extend_u32(eb, ElemBits));
-        sum += std::bit_cast<U>(a * b);
-      }
       if (clamp) {
-        I signed_sum = std::bit_cast<I>(sum);
-        util::stdx::where(signed_sum < kZeroI, signed_sum) = kZeroI;
-        sum = std::bit_cast<U>(signed_sum);
+        I64 sum = util::stdx::static_simd_cast<I64>(std::bit_cast<I>(acc));
+        for (int i = 0; i < N; ++i) {
+          const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
+          const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
+          const I a = std::bit_cast<I>(simd_sign_extend_u32(ea, ElemBits));
+          const I b = std::bit_cast<I>(simd_sign_extend_u32(eb, ElemBits));
+          sum += util::stdx::static_simd_cast<I64>(a * b);
+        }
+        util::stdx::where(sum < I64(std::numeric_limits<int32_t>::min()), sum) =
+            I64(std::numeric_limits<int32_t>::min());
+        util::stdx::where(sum > I64(std::numeric_limits<int32_t>::max()), sum) =
+            I64(std::numeric_limits<int32_t>::max());
+        dst.template store_native<uint32_t>(base, util::stdx::static_simd_cast<U>(sum), chunk);
+      } else {
+        U sum = acc;
+        for (int i = 0; i < N; ++i) {
+          const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
+          const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
+          const I a = std::bit_cast<I>(simd_sign_extend_u32(ea, ElemBits));
+          const I b = std::bit_cast<I>(simd_sign_extend_u32(eb, ElemBits));
+          sum += std::bit_cast<U>(a * b);
+        }
+        dst.template store_native<uint32_t>(base, sum, chunk);
       }
-      dst.template store_native<uint32_t>(base, sum, chunk);
     } else {
-      U sum = acc;
-      for (int i = 0; i < N; ++i) {
-        const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
-        const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
-        sum += ea * eb;
+      if (clamp) {
+        U64 sum = util::stdx::static_simd_cast<U64>(acc);
+        for (int i = 0; i < N; ++i) {
+          const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
+          const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
+          sum += util::stdx::static_simd_cast<U64>(ea * eb);
+        }
+        util::stdx::where(sum > U64(std::numeric_limits<uint32_t>::max()), sum) =
+            U64(std::numeric_limits<uint32_t>::max());
+        dst.template store_native<uint32_t>(base, util::stdx::static_simd_cast<U>(sum), chunk);
+      } else {
+        U sum = acc;
+        for (int i = 0; i < N; ++i) {
+          const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
+          const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
+          sum += ea * eb;
+        }
+        dst.template store_native<uint32_t>(base, sum, chunk);
       }
-      dst.template store_native<uint32_t>(base, sum, chunk);
     }
   }
   return true;
@@ -3630,9 +3691,9 @@ template <Vop3pDotHalfFormat Fmt, typename Inst>
 /// Same structure as try_execute_vop3p_dot_int_simd but the per-operand
 /// signedness is chosen at RUNTIME from inst.neg (bit 0 -> src0 signed, bit 1
 /// -> src1 signed) — hoisted out of the chunk loop. src2 is the int32
-/// accumulator seed; clamp (when set) is the lower clamp to 0. Accumulation is
-/// in uint32_t bits so signed overflow wraps without sanitizer traps. The 8/4-bit
-/// scalar bodies read no op_sel/neg_hi, so no gate.
+/// accumulator seed; clamp (when set) saturates to [INT_MIN, INT_MAX] before
+/// narrowing. Unclamped accumulation wraps in uint32_t bits. The 8/4-bit scalar
+/// bodies read no op_sel/neg_hi, so no gate.
 template <int ElemBits, typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_dot_int_mixed_simd(Inst &inst, Wavefront &wf) {
@@ -3646,12 +3707,12 @@ template <int ElemBits, typename Inst>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  const bool clamp = inst.inst_.clamp;
+  const bool clamp = inst.inst_.clamp && (ElemBits != 8 || dot4_clamp_supported(wf));
   const bool src0_signed = (inst.inst_.neg & 0x1u) != 0;
   const bool src1_signed = (inst.inst_.neg & 0x2u) != 0;
   using U = util::native<uint32_t>;
   using I = util::native<int32_t>;
-  const I kZeroI(0);
+  using I64 = util::stdx::fixed_size_simd<int64_t, W>;
   RegisterAccess regs(wf);
   auto src0 = regs.read_operand(inst.src0, exec);
   auto src1 = regs.read_operand(inst.src1, exec);
@@ -3664,25 +3725,35 @@ template <int ElemBits, typename Inst>
     const U raw0 = src0.template load_native<uint32_t>(base);
     const U raw1 = src1.template load_native<uint32_t>(base);
     const U acc = src2.template load_native<uint32_t>(base);
-    U sum = acc;
-    for (int i = 0; i < N; ++i) {
-      const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
-      const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
-      // Sign-extend the low ElemBits when the operand is signed (same shift
-      // trick as the signed dot path); plain zero-extended reinterpret when
-      // unsigned. Sign choice is per operand, resolved at runtime.
-      const I a = src0_signed ? std::bit_cast<I>(simd_sign_extend_u32(ea, ElemBits))
-                              : util::stdx::static_simd_cast<I>(ea);
-      const I b = src1_signed ? std::bit_cast<I>(simd_sign_extend_u32(eb, ElemBits))
-                              : util::stdx::static_simd_cast<I>(eb);
-      sum += std::bit_cast<U>(a * b);
-    }
     if (clamp) {
-      I signed_sum = std::bit_cast<I>(sum);
-      util::stdx::where(signed_sum < kZeroI, signed_sum) = kZeroI;
-      sum = std::bit_cast<U>(signed_sum);
+      I64 sum = util::stdx::static_simd_cast<I64>(std::bit_cast<I>(acc));
+      for (int i = 0; i < N; ++i) {
+        const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
+        const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
+        const I a = src0_signed ? std::bit_cast<I>(simd_sign_extend_u32(ea, ElemBits))
+                                : util::stdx::static_simd_cast<I>(ea);
+        const I b = src1_signed ? std::bit_cast<I>(simd_sign_extend_u32(eb, ElemBits))
+                                : util::stdx::static_simd_cast<I>(eb);
+        sum += util::stdx::static_simd_cast<I64>(a * b);
+      }
+      util::stdx::where(sum < I64(std::numeric_limits<int32_t>::min()), sum) =
+          I64(std::numeric_limits<int32_t>::min());
+      util::stdx::where(sum > I64(std::numeric_limits<int32_t>::max()), sum) =
+          I64(std::numeric_limits<int32_t>::max());
+      dst.template store_native<uint32_t>(base, util::stdx::static_simd_cast<U>(sum), chunk);
+    } else {
+      U sum = acc;
+      for (int i = 0; i < N; ++i) {
+        const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
+        const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
+        const I a = src0_signed ? std::bit_cast<I>(simd_sign_extend_u32(ea, ElemBits))
+                                : util::stdx::static_simd_cast<I>(ea);
+        const I b = src1_signed ? std::bit_cast<I>(simd_sign_extend_u32(eb, ElemBits))
+                                : util::stdx::static_simd_cast<I>(eb);
+        sum += std::bit_cast<U>(a * b);
+      }
+      dst.template store_native<uint32_t>(base, sum, chunk);
     }
-    dst.template store_native<uint32_t>(base, sum, chunk);
   }
   return true;
 }

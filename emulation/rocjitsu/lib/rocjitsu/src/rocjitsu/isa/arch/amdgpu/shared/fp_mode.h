@@ -1,0 +1,167 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+/// @file fp_mode.h
+/// @brief Shared MODE-aware floating-point execution helpers.
+
+#include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"
+#include "util/data_types.h"
+
+#include <algorithm>
+#include <bit>
+#include <cfenv>
+#include <cmath>
+#include <cstdint>
+
+namespace rocjitsu::amdgpu::fp_mode {
+
+namespace detail {
+
+inline uint16_t modify_f16(uint16_t value, bool absolute, bool negate) {
+  if (absolute)
+    value &= 0x7fffu;
+  if (negate)
+    value ^= 0x8000u;
+  return value;
+}
+
+inline uint16_t flush_input_f16(uint16_t value, uint32_t denorm_mode) {
+  if ((denorm_mode & 1u) == 0 && (value & 0x7c00u) == 0 && (value & 0x03ffu) != 0)
+    return value & 0x8000u;
+  return value;
+}
+
+inline uint64_t flush_f64(uint64_t value) {
+  if ((value & 0x7ff0000000000000ULL) == 0 && (value & 0x000fffffffffffffULL) != 0)
+    return value & 0x8000000000000000ULL;
+  return value;
+}
+
+inline int host_round_mode(uint32_t round_mode) {
+  switch (round_mode & 3u) {
+  case 1:
+    return FE_UPWARD;
+  case 2:
+    return FE_DOWNWARD;
+  case 3:
+    return FE_TOWARDZERO;
+  default:
+    return FE_TONEAREST;
+  }
+}
+
+class ScopedFenv {
+public:
+  explicit ScopedFenv(uint32_t round_mode) : saved_(std::feholdexcept(&environment_) == 0) {
+    if (saved_)
+      std::fesetround(host_round_mode(round_mode));
+  }
+
+  ScopedFenv(const ScopedFenv &) = delete;
+  ScopedFenv &operator=(const ScopedFenv &) = delete;
+
+  ~ScopedFenv() {
+    if (saved_)
+      std::fesetenv(&environment_);
+  }
+
+private:
+  std::fenv_t environment_{};
+  bool saved_;
+};
+
+} // namespace detail
+
+/// Return the OMOD value supported by an ordinary floating-point result.
+inline uint32_t effective_omod(rj_code_arch_t arch, uint32_t denorm_mode, bool ieee_mode,
+                               uint32_t omod) {
+  if (omod == 0)
+    return 0;
+  if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250)
+    return omod;
+  return (denorm_mode & 2u) == 0 && !ieee_mode ? omod : 0;
+}
+
+/// Return the OMOD value that applies to an F16 result on the selected ISA.
+/// GFX11+ packed-F16 results explicitly ignore OMOD. Older profiles expose
+/// OMOD on the promoted VOP3 form of V_PK_FMAC_F16, subject to their ordinary
+/// output-denormal and MODE.IEEE restrictions. GFX12 and gfx1250 allow OMOD on
+/// non-packed F16 results regardless of output-denormal mode.
+inline uint32_t effective_f16_omod(rj_code_arch_t arch, uint32_t denorm_mode, bool ieee_mode,
+                                   bool packed_result, uint32_t omod) {
+  if (omod == 0)
+    return 0;
+  if (packed_result && (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+                        arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250))
+    return 0;
+  return effective_omod(arch, denorm_mode, ieee_mode, omod);
+}
+
+/// Execute an F16 fused multiply-add and return its raw F16 encoding.
+inline uint16_t fma_f16(uint16_t src0, uint16_t src1, uint16_t src2, bool abs0, bool abs1,
+                        bool abs2, bool neg0, bool neg1, bool neg2, uint32_t round_mode,
+                        uint32_t denorm_mode, uint32_t omod, bool clamp, bool fp16_ovfl) {
+  src0 = detail::flush_input_f16(detail::modify_f16(src0, abs0, neg0), denorm_mode);
+  src1 = detail::flush_input_f16(detail::modify_f16(src1, abs1, neg1), denorm_mode);
+  src2 = detail::flush_input_f16(detail::modify_f16(src2, abs2, neg2), denorm_mode);
+
+  const double multiplicand = static_cast<double>(util::f16_to_f32(src0));
+  const double multiplier = static_cast<double>(util::f16_to_f32(src1));
+  const double addend = static_cast<double>(util::f16_to_f32(src2));
+  uint16_t result = pseudo_scalar::round_f16_result(std::fma(multiplicand, multiplier, addend),
+                                                    round_mode, omod, clamp, fp16_ovfl);
+  if ((denorm_mode & 2u) == 0 && (result & 0x7c00u) == 0 && (result & 0x03ffu) != 0)
+    result &= 0x8000u;
+  return result;
+}
+
+/// Execute an F64 fused multiply-add under MODE.FP_ROUND and MODE.FP_DENORM.
+inline uint64_t fma_f64(uint64_t src0, uint64_t src1, uint64_t src2, uint32_t round_mode,
+                        uint32_t denorm_mode) {
+  if ((denorm_mode & 1u) == 0) {
+    src0 = detail::flush_f64(src0);
+    src1 = detail::flush_f64(src1);
+    src2 = detail::flush_f64(src2);
+  }
+
+  uint64_t result;
+  {
+    detail::ScopedFenv environment(round_mode);
+    const double value = std::fma(std::bit_cast<double>(src0), std::bit_cast<double>(src1),
+                                  std::bit_cast<double>(src2));
+    result = std::bit_cast<uint64_t>(value);
+  }
+  if ((denorm_mode & 2u) == 0)
+    result = detail::flush_f64(result);
+  return result;
+}
+
+/// Apply F64 OMOD/CLAMP under the architectural rounding mode. A nonzero OMOD
+/// flushes a denormal result and converts either signed zero to +0.
+inline uint64_t finish_f64(uint64_t value, uint32_t round_mode, uint32_t omod, bool clamp) {
+  double result;
+  {
+    detail::ScopedFenv environment(round_mode);
+    result = std::bit_cast<double>(value);
+    if (omod == 1)
+      result *= 2.0;
+    else if (omod == 2)
+      result *= 4.0;
+    else if (omod == 3)
+      result *= 0.5;
+    if (clamp)
+      result = std::clamp(result, 0.0, 1.0);
+  }
+  uint64_t bits = std::bit_cast<uint64_t>(result);
+  if (omod != 0) {
+    bits = detail::flush_f64(bits);
+    if ((bits & 0x7fffffffffffffffULL) == 0)
+      bits = 0;
+  }
+  return bits;
+}
+
+} // namespace rocjitsu::amdgpu::fp_mode

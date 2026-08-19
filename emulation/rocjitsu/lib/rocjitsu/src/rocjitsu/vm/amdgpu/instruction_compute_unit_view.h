@@ -27,6 +27,7 @@ class L1VectorCache;
 class L2Cache;
 class Lds;
 class OperandExecutionAccess;
+class PhysicalVgprOperand;
 class RegisterAccess;
 class Wavefront;
 
@@ -74,6 +75,7 @@ private:
   // the only instruction-side code allowed to reach private CU register hooks.
   template <typename Isa> friend class ::rocjitsu::AmdgpuIsaOperand;
   friend class OperandExecutionAccess;
+  friend class PhysicalVgprOperand;
 };
 
 } // namespace amdgpu

@@ -2513,7 +2513,8 @@ void VCvtPkNormI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     auto cvt_i16 = [](float f) -> int16_t {
       if (std::isnan(f))
         return 0;
-      return static_cast<int16_t>(std::clamp(f * 32767.0f, -32768.0f, 32767.0f));
+      return static_cast<int16_t>(
+          util::round_to_nearest_even(std::clamp(f * 32767.0f, -32768.0f, 32767.0f)));
     };
     int16_t lo = cvt_i16(s0);
     int16_t hi = cvt_i16(s1);
@@ -2550,7 +2551,8 @@ void VCvtPkNormU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     auto cvt_u16 = [](float f) -> uint16_t {
       if (std::isnan(f))
         return 0;
-      return static_cast<uint16_t>(std::clamp(f * 65535.0f, 0.0f, 65535.0f));
+      return static_cast<uint16_t>(
+          util::round_to_nearest_even(std::clamp(f * 65535.0f, 0.0f, 65535.0f)));
     };
     uint16_t lo = cvt_u16(s0);
     uint16_t hi = cvt_u16(s1);

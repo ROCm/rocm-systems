@@ -2,10 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop3_ternary_fp_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs scalar body) for the f32 / f16 /
-/// f64 ternary VOP3 ops on CDNA4 (FMA + MAD family, non-accumulate). The new
-/// ternary fp glue applies per-source abs/neg and result omod/clamp in the f32 /
-/// f64 domain; f16 widens each src then operates in f32 then narrows. NaN-result
+/// @brief Bit-identity check (SIMD fast path vs scalar body) for f32 and
+/// non-fused f16 ternary VOP3 ops on CDNA4. Fused f16/f64 operations are
+/// deliberately excluded because architectural MODE requires the scalar policy path. NaN-result
 /// lanes are an accepted divergence (gcc-13 packed FMA quiets a different NaN
 /// operand). Each (case, mods, rot) runs TWICE in the same process -- once
 /// forcing the scalar body, once the SIMD fast path, with identical inputs/EXEC
@@ -78,11 +77,9 @@ struct Case {
   Kind kind;
 };
 
-const std::array<Case, 10> kCases = {{
+const std::array<Case, 8> kCases = {{
     {"v_fma_f32_vop3", 459, Kind::F32},
-    {"v_fma_f16_vop3", 518, Kind::F16},
     {"v_mad_f16_vop3", 515, Kind::F16},
-    {"v_fma_f64_vop3", 460, Kind::F64},
     // min3/max3/med3: fmax/fmin compositions. Inputs are finite non-zero
     // normals, so the fmax/fmin NaN-payload / signed-zero-tie carve-out never
     // triggers — bit-exact vs scalar on every lane.

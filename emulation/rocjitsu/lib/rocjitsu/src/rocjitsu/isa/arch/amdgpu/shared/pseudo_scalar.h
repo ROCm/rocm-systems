@@ -292,6 +292,17 @@ inline float apply_source_modifiers(float value, bool absolute, bool negate) {
 
 } // namespace detail
 
+/// @brief Apply F16 result modifiers and perform one direct F64-to-F16 rounding.
+/// @details This is the supported policy surface for fused operations whose exact result is
+/// representable in F64. It avoids exposing pseudo-scalar implementation details to other
+/// execution helpers.
+inline uint16_t round_f16_result(double value, uint32_t round_mode, uint32_t omod, bool clamp,
+                                 bool fp16_ovfl) {
+  const detail::EvaluationResult modified =
+      detail::apply_output_modifiers({value, detail::ResultProvenance::VALUE}, omod, clamp);
+  return detail::round_f64_to_f16(modified, round_mode, fp16_ovfl);
+}
+
 /// @brief Execute a pseudo-scalar F32 transcendental operation.
 /// @details Source absolute value and negation are applied before input-denormal handling and
 /// operation evaluation. OMOD is then applied before CLAMP, result rounding, and output-denormal

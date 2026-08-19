@@ -16,6 +16,7 @@ from amdisa.sema_ast import (
 )
 from amdisa.codegen.execute.sema_lower import (
     _INLINE_BINARY_OPS,
+    _INLINE_TERNARY_OPS,
     InlineBinaryOp,
     LoweringContext,
     OperandBinding,
@@ -54,6 +55,17 @@ def test_scc_shift_add_inline_operations_do_not_read_scc(name):
 
 def test_non_scc_inline_operation_has_no_scc_effect():
     assert not isinstance(_INLINE_BINARY_OPS['add_co'], InlineBinaryOp)
+
+
+def test_packed_byte_inline_operations_match_isa_special_cases():
+    lerp = _INLINE_TERNARY_OPS['lerp_u8']
+    msad = _INLINE_TERNARY_OPS['msad_u8']
+    perm = _INLINE_TERNARY_OPS['perm']
+
+    assert '(ab + bb + round_up) >> 1' in lerp
+    assert 'if (reference != 0)' in msad
+    assert '(sel - 8) * 2 + 1' in perm
+    assert 'sel >= 13' in perm
 
 
 def _src(idx: int) -> SemaNode:

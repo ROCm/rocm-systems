@@ -3661,6 +3661,7 @@ class CodeGenerator:
     _READS_ALL_OUTPUT_CLASSES = frozenset(
         {
             'vector_swap',
+            'vector_swaprel',
             'vector_permlane16_swap',
             'vector_permlane32_swap',
         }
@@ -4700,7 +4701,7 @@ class CodeGenerator:
         if (
             not src_operands
             and len(dst_operands) >= 2
-            and sem.semantic_class == 'vector_swap'
+            and sem.semantic_class in ('vector_swap', 'vector_swaprel')
         ):
             src_operands = dst_operands[1:]
             dst_operands = dst_operands[:1]
@@ -5189,6 +5190,161 @@ class CodeGenerator:
                         f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst_ops[0]}, wf, lane, opsel, result, true);\n'
                         '  }\n'
                     )
+                if (
+                    cls == 'vector_ternary'
+                    and op == 'fma'
+                    and dtype == 'f16'
+                    and is_vop3
+                ):
+                    if is_true16_vop3:
+                        src_reads = [
+                            f'::rocjitsu::amdgpu::read_vop3_true16_src({src_ops[i]}, wf, lane, opsel, {i})'
+                            for i in range(3)
+                        ]
+                        preamble = '  uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);\n'
+                        write_result = f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst_ops[0]}, wf, lane, opsel, result, true);'
+                    else:
+                        src_reads = [
+                            f'amdgpu::RegisterAccess(wf).read_lane({src_ops[i]}, lane)'
+                            for i in range(3)
+                        ]
+                        preamble = ''
+                        write_result = f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, result);'
+                    return (
+                        '  uint64_t exec = wf.exec();\n'
+                        f'{preamble}'
+                        '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {\n'
+                        '    if (!(exec & (1ULL << lane)))\n'
+                        '      continue;\n'
+                        f'    uint16_t src0_bits = static_cast<uint16_t>({src_reads[0]});\n'
+                        f'    uint16_t src1_bits = static_cast<uint16_t>({src_reads[1]});\n'
+                        f'    uint16_t src2_bits = static_cast<uint16_t>({src_reads[2]});\n'
+                        '    uint32_t omod = amdgpu::fp_mode::effective_f16_omod(\n'
+                        '        wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false, inst_.omod);\n'
+                        '    uint16_t result = amdgpu::fp_mode::fma_f16(\n'
+                        '        src0_bits, src1_bits, src2_bits, inst_.abs & 1u, inst_.abs & 2u,\n'
+                        '        inst_.abs & 4u, inst_.neg & 1u, inst_.neg & 2u, inst_.neg & 4u,\n'
+                        '        wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod,\n'
+                        '        inst_.clamp, wf.fp16_ovfl());\n'
+                        f'{write_result}\n'
+                        '  }\n'
+                    )
+                if (
+                    cls == 'vector_ternary'
+                    and op == 'fma'
+                    and dtype == 'f64'
+                    and is_vop3
+                ):
+                    src_loads = ''.join(
+                        f'    double src{i}_value = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64({src_ops[i]}, lane));\n'
+                        for i in range(3)
+                    )
+                    src_mods = ''.join(
+                        f'    if (inst_.abs & (1u << {i})) src{i}_value = std::fabs(src{i}_value);\n'
+                        f'    if (inst_.neg & (1u << {i})) src{i}_value = -src{i}_value;\n'
+                        for i in range(3)
+                    )
+                    return (
+                        '  uint64_t exec = wf.exec();\n'
+                        '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {\n'
+                        '    if (!(exec & (1ULL << lane)))\n'
+                        '      continue;\n'
+                        f'{src_loads}'
+                        f'{src_mods}'
+                        '    uint64_t result = amdgpu::fp_mode::fma_f64(\n'
+                        '        std::bit_cast<uint64_t>(src0_value), std::bit_cast<uint64_t>(src1_value),\n'
+                        '        std::bit_cast<uint64_t>(src2_value), wf.fp_round_mode_f16_f64(),\n'
+                        '        wf.fp_denorm_mode_f16_f64());\n'
+                        '    uint32_t omod = amdgpu::fp_mode::effective_omod(\n'
+                        '        wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst_.omod);\n'
+                        '    result = amdgpu::fp_mode::finish_f64(\n'
+                        '        result, wf.fp_round_mode_f16_f64(), omod, inst_.clamp);\n'
+                        f'    amdgpu::RegisterAccess(wf).write_lane64({dst_ops[0]}, lane, result);\n'
+                        '  }\n'
+                    )
+                if cls == 'vector_binop' and op == 'fmac' and dtype == 'f64':
+                    src_mods = ''
+                    finish = ''
+                    if is_vop3:
+                        src_mods = (
+                            '    if (inst_.abs & 1u) src0_value = std::fabs(src0_value);\n'
+                            '    if (inst_.abs & 2u) src1_value = std::fabs(src1_value);\n'
+                            '    if (inst_.neg & 1u) src0_value = -src0_value;\n'
+                            '    if (inst_.neg & 2u) src1_value = -src1_value;\n'
+                        )
+                        finish = (
+                            '    uint32_t omod = amdgpu::fp_mode::effective_omod(\n'
+                            '        wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst_.omod);\n'
+                            '    result = amdgpu::fp_mode::finish_f64(\n'
+                            '        result, wf.fp_round_mode_f16_f64(), omod, inst_.clamp);\n'
+                        )
+                    return (
+                        '  uint64_t exec = wf.exec();\n'
+                        '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {\n'
+                        '    if (!(exec & (1ULL << lane)))\n'
+                        '      continue;\n'
+                        f'    double src0_value = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64({src_ops[0]}, lane));\n'
+                        f'    double src1_value = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64({src_ops[1]}, lane));\n'
+                        f'{src_mods}'
+                        f'    uint64_t accumulator = amdgpu::RegisterAccess(wf).read_lane64({dst_ops[0]}, lane);\n'
+                        '    uint64_t result = amdgpu::fp_mode::fma_f64(\n'
+                        '        std::bit_cast<uint64_t>(src0_value), std::bit_cast<uint64_t>(src1_value),\n'
+                        '        accumulator, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64());\n'
+                        f'{finish}'
+                        f'    amdgpu::RegisterAccess(wf).write_lane64({dst_ops[0]}, lane, result);\n'
+                        '  }\n'
+                    )
+                if cls == 'vector_binop' and op == 'fmac' and dtype == 'f16':
+                    if is_true16_vop3:
+                        src_reads = [
+                            f'::rocjitsu::amdgpu::read_vop3_true16_src({src_ops[i]}, wf, lane, opsel, {i})'
+                            for i in range(2)
+                        ]
+                        accumulator_read = (
+                            f'((opsel & 0x8u) != 0 ? '
+                            f'(amdgpu::RegisterAccess(wf).read_lane({dst_ops[0]}, lane) >> 16) : '
+                            f'amdgpu::RegisterAccess(wf).read_lane({dst_ops[0]}, lane))'
+                        )
+                        preamble = '  uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);\n'
+                        write_result = f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst_ops[0]}, wf, lane, opsel, result, true);'
+                    else:
+                        src_reads = [
+                            f'amdgpu::RegisterAccess(wf).read_lane({src_ops[i]}, lane)'
+                            for i in range(2)
+                        ]
+                        accumulator_read = (
+                            f'amdgpu::RegisterAccess(wf).read_lane({dst_ops[0]}, lane)'
+                        )
+                        preamble = ''
+                        write_result = f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, result);'
+                    abs0 = 'inst_.abs & 1u' if is_vop3 else 'false'
+                    abs1 = 'inst_.abs & 2u' if is_vop3 else 'false'
+                    neg0 = 'inst_.neg & 1u' if is_vop3 else 'false'
+                    neg1 = 'inst_.neg & 2u' if is_vop3 else 'false'
+                    omod = (
+                        'amdgpu::fp_mode::effective_f16_omod(\n'
+                        '        wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false, inst_.omod)'
+                        if is_vop3
+                        else '0u'
+                    )
+                    clamp = 'inst_.clamp' if is_vop3 else 'false'
+                    return (
+                        '  uint64_t exec = wf.exec();\n'
+                        f'{preamble}'
+                        '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {\n'
+                        '    if (!(exec & (1ULL << lane)))\n'
+                        '      continue;\n'
+                        f'    uint16_t src0_bits = static_cast<uint16_t>({src_reads[0]});\n'
+                        f'    uint16_t src1_bits = static_cast<uint16_t>({src_reads[1]});\n'
+                        f'    uint16_t accumulator = static_cast<uint16_t>({accumulator_read});\n'
+                        f'    uint32_t omod = {omod};\n'
+                        '    uint16_t result = amdgpu::fp_mode::fma_f16(\n'
+                        f'        src0_bits, src1_bits, accumulator, {abs0}, {abs1}, false,\n'
+                        f'        {neg0}, {neg1}, false, wf.fp_round_mode_f16_f64(),\n'
+                        f'        wf.fp_denorm_mode_f16_f64(), omod, {clamp}, wf.fp16_ovfl());\n'
+                        f'{write_result}\n'
+                        '  }\n'
+                    )
                 if cls == 'vector_add_co':
                     if is_vop3 and len(src_ops) >= 3:
                         lctx.vcc_read = (
@@ -5222,6 +5378,21 @@ class CodeGenerator:
             arch_name=self.isa_spec.arch_name.lower(),
             enc_field_names=getattr(self, '_current_inst_fields', set()),
             encoding_map=self.isa_spec.encoding_map,
+            supports_dpp=(
+                cls == 'vector_movrel'
+                and inst.available_encodings is not None
+                and self._instruction_supports_dpp(inst, enc_name)
+            ),
+            supports_dpp8=(
+                cls == 'vector_movrel'
+                and inst.available_encodings is not None
+                and self._instruction_supports_dpp8(inst, enc_name)
+            ),
+            supports_sdwa=(
+                cls == 'vector_movrel'
+                and inst.available_encodings is not None
+                and self._instruction_supports_sdwa(inst, enc_name)
+            ),
         )
         handler = DISPATCH.get(cls)
         if handler is not None:
@@ -5766,17 +5937,45 @@ class CodeGenerator:
             L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
             L.append('    if (!(exec & (1ULL << lane))) continue;')
             if dtype == 'f16':
+                if inst.name.startswith('V_FMA'):
+                    L.append(
+                        f'    uint16_t s0 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src_ops[0]}, lane));'
+                    )
+                    L.append(f'    uint16_t k = static_cast<uint16_t>({k_expr});')
+                    L.append(
+                        f'    uint16_t s2 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({s2_expr}, lane));'
+                    )
+                    L.append(
+                        f'    uint16_t result = amdgpu::fp_mode::fma_f16(s0, k, s2, false, false, false, false, false, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, false, wf.fp16_ovfl());'
+                    )
+                    L.append(
+                        f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, result);'
+                    )
+                else:
+                    L.append(
+                        f'    float s0 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src_ops[0]}, lane)));'
+                    )
+                    L.append(
+                        f'    float k = util::f16_to_f32(static_cast<uint16_t>({k_expr}));'
+                    )
+                    L.append(
+                        f'    float s2 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({s2_expr}, lane)));'
+                    )
+                    L.append(
+                        f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, util::f32_to_f16_mode(std::fma(s0, k, s2), wf.fp16_ovfl()));'
+                    )
+            elif dtype == 'f64':
                 L.append(
-                    f'    float s0 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src_ops[0]}, lane)));'
+                    f'    uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64({src_ops[0]}, lane);'
                 )
                 L.append(
-                    f'    float k = util::f16_to_f32(static_cast<uint16_t>({k_expr}));'
+                    f'    uint64_t k = amdgpu::RegisterAccess(wf).read_lane64({src_ops[1]}, lane);'
                 )
                 L.append(
-                    f'    float s2 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({s2_expr}, lane)));'
+                    f'    uint64_t s2 = amdgpu::RegisterAccess(wf).read_lane64({s2_expr}, lane);'
                 )
                 L.append(
-                    f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, util::f32_to_f16_mode(std::fma(s0, k, s2), wf.fp16_ovfl()));'
+                    f'    amdgpu::RegisterAccess(wf).write_lane64({dst_ops[0]}, lane, amdgpu::fp_mode::fma_f64(s0, k, s2, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()));'
                 )
             else:
                 L.append(
@@ -5803,17 +6002,45 @@ class CodeGenerator:
             L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
             L.append('    if (!(exec & (1ULL << lane))) continue;')
             if dtype == 'f16':
+                if inst.name.startswith('V_FMA'):
+                    L.append(
+                        f'    uint16_t s0 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src_ops[0]}, lane));'
+                    )
+                    L.append(
+                        f'    uint16_t s1 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src_ops[1]}, lane));'
+                    )
+                    L.append(f'    uint16_t k = static_cast<uint16_t>({k_expr});')
+                    L.append(
+                        '    uint16_t result = amdgpu::fp_mode::fma_f16(s0, s1, k, false, false, false, false, false, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, false, wf.fp16_ovfl());'
+                    )
+                    L.append(
+                        f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, result);'
+                    )
+                else:
+                    L.append(
+                        f'    float s0 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src_ops[0]}, lane)));'
+                    )
+                    L.append(
+                        f'    float s1 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src_ops[1]}, lane)));'
+                    )
+                    L.append(
+                        f'    float k = util::f16_to_f32(static_cast<uint16_t>({k_expr}));'
+                    )
+                    L.append(
+                        f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, util::f32_to_f16_mode(std::fma(s0, s1, k), wf.fp16_ovfl()));'
+                    )
+            elif dtype == 'f64':
                 L.append(
-                    f'    float s0 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src_ops[0]}, lane)));'
+                    f'    uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64({src_ops[0]}, lane);'
                 )
                 L.append(
-                    f'    float s1 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src_ops[1]}, lane)));'
+                    f'    uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64({src_ops[1]}, lane);'
                 )
                 L.append(
-                    f'    float k = util::f16_to_f32(static_cast<uint16_t>({k_expr}));'
+                    f'    uint64_t k = amdgpu::RegisterAccess(wf).read_lane64({src_ops[2]}, lane);'
                 )
                 L.append(
-                    f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, util::f32_to_f16_mode(std::fma(s0, s1, k), wf.fp16_ovfl()));'
+                    f'    amdgpu::RegisterAccess(wf).write_lane64({dst_ops[0]}, lane, amdgpu::fp_mode::fma_f64(s0, s1, k, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()));'
                 )
             else:
                 L.append(
@@ -7684,6 +7911,9 @@ class CodeGenerator:
             'vector_swap',
             # Movrel uses ISA-local OperandType/Isa helpers.
             'vector_movrel',
+            'vector_swaprel',
+            'vector_perm_pk16',
+            'vector_qsad',
             # Vector readlane/writelane/readfirstlane access encoding fields:
             'vector_readlane',
             'vector_writelane',
@@ -9518,6 +9748,11 @@ class CodeGenerator:
                                 sem is not None
                                 and sem.semantic_class in self._READS_ALL_OUTPUT_CLASSES
                             )
+                            _semantic_stages_src0 = (
+                                sem is not None
+                                and sem.semantic_class == 'vector_movrel'
+                                and sem.operation in ('src', 'srcdst', 'srcdst2')
+                            )
                             if _reads_all_outputs and (
                                 _supports_dpp_encoding or _dpp8_struct
                             ):
@@ -9526,20 +9761,28 @@ class CodeGenerator:
                                     '      amdgpu::dpp::is_src_dpp8(inst_.src0))\n'
                                     '    throw util::UnimplementedInst(mnemonic());\n'
                                 )
-                            elif _dpp_struct and _supports_dpp_encoding:
+                            elif (
+                                not _semantic_stages_src0
+                                and _dpp_struct
+                                and _supports_dpp_encoding
+                            ):
                                 _dpp_preamble += (
                                     '  if (inst_.src0 == amdgpu::SRC_DPP)\n'
                                     '    amdgpu::dpp::apply_dpp(src_operands_[0], dpp_ctrl_,\n'
                                     '        dpp_row_mask_, dpp_bank_mask_, dpp_bound_ctrl_, dpp_fi_,\n'
                                     f'        dpp_src0_, wf{_dpp_src0_byte_mask_arg});\n'
                                 )
-                            if not _reads_all_outputs and _supports_dpp8_encoding:
+                            if (
+                                not _reads_all_outputs
+                                and not _semantic_stages_src0
+                                and _supports_dpp8_encoding
+                            ):
                                 _dpp_preamble += (
                                     '  if (amdgpu::dpp::is_src_dpp8(inst_.src0))\n'
                                     '    amdgpu::dpp::apply_dpp8(src_operands_[0], dpp8_lane_sel_, dpp_fi_,\n'
                                     f'        dpp_src0_, wf{_dpp_src0_byte_mask_arg});\n'
                                 )
-                            if _has_sdwa_encoding:
+                            if _has_sdwa_encoding and not _semantic_stages_src0:
                                 # src1 references the field-bearing second source
                                 # by name (it may not sit at src_operands_[1]; see
                                 # FMAMK/MADMK note above). The shared helper owns
@@ -9572,15 +9815,16 @@ class CodeGenerator:
                                     + _sdwa_src1_block
                                     + '  }\n'
                                 )
-                            _dpp_preamble += (
-                                f'  ScopedOperandDelegate dpp_src0_binding_({_src0_name}, dpp_src0_.get());\n'
-                                if _src0_name
-                                else ''
-                            ) + (
-                                f'  ScopedOperandDelegate dpp_src1_binding_({_src1_name}, dpp_src1_.get());\n'
-                                if _src1_name
-                                else ''
-                            )
+                            if not _semantic_stages_src0:
+                                _dpp_preamble += (
+                                    f'  ScopedOperandDelegate dpp_src0_binding_({_src0_name}, dpp_src0_.get());\n'
+                                    if _src0_name
+                                    else ''
+                                ) + (
+                                    f'  ScopedOperandDelegate dpp_src1_binding_({_src1_name}, dpp_src1_.get());\n'
+                                    if _src1_name
+                                    else ''
+                                )
                         # Destination modifiers are applied by the generated
                         # semantic store.
                         _sdwa_postamble = ''
@@ -10013,6 +10257,8 @@ class CodeGenerator:
                         False,
                     ),
                     ('rocjitsu/isa/arch/amdgpu/shared/simd_glue.h', False),
+                    ('rocjitsu/isa/arch/amdgpu/shared/fp_mode.h', False),
+                    ('rocjitsu/isa/arch/amdgpu/shared/vgpr_range.h', False),
                     ('util/except.h', False),
                 ]
                 _MEM_ENC_NAMES = frozenset(
@@ -10496,12 +10742,36 @@ class CodeGenerator:
                 os.remove(unsplit_file)
             return
 
+        def scoped_includes(impls: list[object]) -> list[tuple[str, bool]]:
+            impl_text = '\n'.join(str(impl) for impl in impls)
+            helper_tokens = {
+                'rocjitsu/isa/arch/amdgpu/shared/fp_mode.h': 'fp_mode::',
+                'rocjitsu/isa/arch/amdgpu/shared/vgpr_range.h': (
+                    'PhysicalVgprOperand',
+                    'ResolvedVgprSpan',
+                    'destination_vgpr_offset',
+                    'source_vgpr_offset',
+                    'resolve_vgpr_span',
+                ),
+            }
+            result: list[tuple[str, bool]] = []
+            for include, system in cpp_includes:
+                tokens = helper_tokens.get(include)
+                if tokens is None:
+                    result.append((include, system))
+                    continue
+                if isinstance(tokens, str):
+                    tokens = (tokens,)
+                if any(token in impl_text for token in tokens):
+                    result.append((include, system))
+            return result
+
         if not max_bytes:
             CppFile(
                 base_name,
                 self.out_path,
                 False,
-                cpp_includes,
+                scoped_includes(class_func_impls),
                 [],
                 class_func_impls,
                 self.cpp_namespace,
@@ -10565,7 +10835,7 @@ class CodeGenerator:
                 file_name,
                 self.out_path,
                 False,
-                cpp_includes,
+                scoped_includes(chunk),
                 [],
                 chunk,
                 self.cpp_namespace,
@@ -10922,6 +11192,7 @@ class CodeGenerator:
             '#include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"',
+            '#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"',
             *simd_extra_includes(),
             '#include "util/data_types.h"',
             '#include "util/except.h"',
@@ -10931,6 +11202,7 @@ class CodeGenerator:
             '#include <cmath>',
             '#include <functional>',
             '#include <limits>',
+            '#include <optional>',
             '',
             'namespace rocjitsu {',
             'namespace amdgpu {',

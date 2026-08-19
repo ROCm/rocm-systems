@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -1473,7 +1474,29 @@ void VFmacF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
                            dpp_bound_ctrl_, dpp_fi_, dpp_src0_, wf);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
   ScopedOperandDelegate dpp_src1_binding_(src1, dpp_src1_.get());
-  amdgpu::execute_v_fmac_f64_vop3(*this, wf);
+  uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    double src0_value = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
+    double src1_value = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane));
+    if (inst_.abs & 1u)
+      src0_value = std::fabs(src0_value);
+    if (inst_.abs & 2u)
+      src1_value = std::fabs(src1_value);
+    if (inst_.neg & 1u)
+      src0_value = -src0_value;
+    if (inst_.neg & 2u)
+      src1_value = -src1_value;
+    uint64_t accumulator = amdgpu::RegisterAccess(wf).read_lane64(vdst, lane);
+    uint64_t result = amdgpu::fp_mode::fma_f64(
+        std::bit_cast<uint64_t>(src0_value), std::bit_cast<uint64_t>(src1_value), accumulator,
+        wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64());
+    uint32_t omod = amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(),
+                                                    wf.ieee_mode(), inst_.omod);
+    result = amdgpu::fp_mode::finish_f64(result, wf.fp_round_mode_f16_f64(), omod, inst_.clamp);
+    amdgpu::sdwa::write_lane64<true>(*this, wf, vdst, lane, result);
+  }
 }
 
 void VLshlrevB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2058,55 +2081,25 @@ void VFmacF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                             amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
   ScopedOperandDelegate dpp_src1_binding_(src1, dpp_src1_.get());
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_FMAC_VOP3_TRUE16_FP16(
-      [](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); });
   uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
-  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(util::f32_to_f16_mode(
-          [&]() {
-            float v = [&]() {
-              float v = std::fma(
-                  [&]() {
-                    float sv = util::f16_to_f32(static_cast<uint16_t>(
-                        ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-                    if (inst_.abs & (1u << 0))
-                      sv = std::fabs(sv);
-                    if (inst_.neg & (1u << 0))
-                      sv = -sv;
-                    return sv;
-                  }(),
-                  [&]() {
-                    float sv = util::f16_to_f32(static_cast<uint16_t>(
-                        ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
-                    if (inst_.abs & (1u << 1))
-                      sv = std::fabs(sv);
-                    if (inst_.neg & (1u << 1))
-                      sv = -sv;
-                    return sv;
-                  }(),
-                  util::f16_to_f32(static_cast<uint16_t>((
-                      (opsel & 0x8u) != 0 ? (amdgpu::RegisterAccess(wf).read_lane(vdst, lane) >> 16)
-                                          : amdgpu::RegisterAccess(wf).read_lane(vdst, lane)))));
-              if (inst_.omod == 1)
-                v *= 2.0f;
-              else if (inst_.omod == 2)
-                v *= 4.0f;
-              else if (inst_.omod == 3)
-                v *= 0.5f;
-              return v;
-            }();
-            if (inst_.clamp)
-              v = std::clamp(v, 0.0f, 1.0f);
-            return v;
-          }(),
-          wf.fp16_ovfl())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
-    }
+    uint16_t src0_bits =
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0));
+    uint16_t src1_bits =
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1));
+    uint16_t accumulator = static_cast<uint16_t>(
+        ((opsel & 0x8u) != 0 ? (amdgpu::RegisterAccess(wf).read_lane(vdst, lane) >> 16)
+                             : amdgpu::RegisterAccess(wf).read_lane(vdst, lane)));
+    uint32_t omod = amdgpu::fp_mode::effective_f16_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(),
+                                                        wf.ieee_mode(), false, inst_.omod);
+    uint16_t result = amdgpu::fp_mode::fma_f16(
+        src0_bits, src1_bits, accumulator, inst_.abs & 1u, inst_.abs & 2u, false, inst_.neg & 1u,
+        inst_.neg & 2u, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod,
+        inst_.clamp, wf.fp16_ovfl());
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result, true);
   }
 }
 

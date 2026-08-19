@@ -898,16 +898,9 @@ SIMD_VOP2_TERNARY: dict[str, tuple[str, str, str]] = {
     'v_madak_f32_vop2': ('float32_t', _FMA_K_READ, _FMA_ADDK_F32),
     'v_fmamk_f32_vop2': ('float32_t', _FMA_K_READ, _FMA_MULK_F32),
     'v_madmk_f32_vop2': ('float32_t', _FMA_K_READ, _FMA_MULK_F32),
-    # --- f16 dst-accumulate ---
-    'v_fmac_f16_vop2': ('uint32_t', '0u', _FMA_ACC_F16),
-    'v_mac_f16_vop2': ('uint32_t', '0u', _FMA_ACC_F16),
     # --- f16 inline literal ---
     'v_madak_f16_vop2': ('uint32_t', _FMA_K_READ, _FMA_ADDK_F16),
-    'v_fmamk_f16_vop2': ('uint32_t', _FMA_K_READ, _FMA_MULK_F16),
     'v_madmk_f16_vop2': ('uint32_t', _FMA_K_READ, _FMA_MULK_F16),
-    # v_fmaak_f16 (RDNA only): dst = fma(s0, s1, K), K = f16(simm32).
-    # Same f16 FMA functor as v_madak_f16.
-    'v_fmaak_f16_vop2': ('uint32_t', _FMA_K_READ, _FMA_ADDK_F16),
 }
 
 
@@ -934,10 +927,8 @@ def simd_ternary_literal_operand_name(template_name: str) -> str | None:
 
 
 SIMD_VOP2_TERNARY_ACCUMULATE = {
-    'v_fmac_f16_vop2',
     'v_fmac_f32_vop2',
     'v_fmac_dx9_zero_f32_vop2',
-    'v_mac_f16_vop2',
     'v_mac_f32_vop2',
 }
 
@@ -952,9 +943,7 @@ SIMD_VOP2_TERNARY_ACCUMULATE = {
 # is bit-identical to the scalar std::fma for all finite/Inf inputs; NaN-input lanes
 # may differ in propagated NaN payload (accepted). Guarded by
 # UtilSimd.FmaF64_VectorMatchesScalar_BitExact.
-SIMD_VOP2_FMA_F64: dict[str, str] = {
-    'v_fmac_f64_vop2': '[](auto a, auto b, auto d) { return util::stdx::fma(a, b, d); }',
-}
+SIMD_VOP2_FMA_F64: dict[str, str] = {}
 
 
 # template_name -> cpp_bin_op (over native<double>, no modifiers). VOP2 f64
@@ -1267,10 +1256,10 @@ SIMD_VOP3P_PK_BINARY_FP16: dict[str, str] = {
     'v_pk_min_f16_vop3p': '[](auto a, auto b) { return util::stdx::fmin(a, b); }',
 }
 
-# pk_fma_f16 — 3-source FMA per half. NaN-input payload divergence accepted.
-SIMD_VOP3P_PK_TERNARY_FP16: dict[str, str] = {
-    'v_pk_fma_f16_vop3p': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
-}
+# Packed F16 FMA must round directly to F16. The available SIMD path computes
+# an F32 FMA and then narrows, which can double-round, so fused packed F16 has
+# no SIMD entry until an exact implementation exists.
+SIMD_VOP3P_PK_TERNARY_FP16: dict[str, str] = {}
 
 # VOP3P packed-f32 binary. Each operand is a 64-bit consecutive-VGPR pair of two
 # f32 (lo/hi). Glue extracts each f32 half (narrow32 width), applies neg/neg_hi
@@ -2150,10 +2139,8 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
 # f16 ternary — widen each src to f32, op in f32, narrow back. Same NaN
 # carve-out as the f32 path.
 SIMD_VOP3_TERNARY_FP16: dict[str, str] = {
-    'v_fma_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
     'v_mad_f16_vop3': '[](auto a, auto b, auto c) { return a * b + c; }',
     'v_mad_legacy_f16_vop3': '[](auto a, auto b, auto c) { return a * b + c; }',
-    'v_fma_legacy_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
     # min3/max3/med3 (f16): widened to f32 by the glue; same fmax/fmin
     # composition as the f32 forms (see SIMD_VOP3_TERNARY_FP32).
     'v_max3_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmax(a, b), c); }',
@@ -2181,7 +2168,6 @@ SIMD_VOP3_TERNARY_FP16: dict[str, str] = {
 
 # f64 ternary FMA.
 SIMD_VOP3_TERNARY_FP64: dict[str, str] = {
-    'v_fma_f64_vop3': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
     # v_div_fixup_f64: 64-bit-lane div_fixup cascade (same shape as f32, see
     # SIMD_VOP3_TERNARY_FP32 above).
     'v_div_fixup_f64_vop3': (
@@ -2200,13 +2186,8 @@ SIMD_VOP3_FMAC_FP32: dict[str, str] = {
     'v_mac_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
     'v_fmac_dx9_zero_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
 }
-SIMD_VOP3_FMAC_FP16: dict[str, str] = {
-    'v_fmac_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
-    'v_mac_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
-}
-SIMD_VOP3_FMAC_FP64: dict[str, str] = {
-    'v_fmac_f64_vop3': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
-}
+SIMD_VOP3_FMAC_FP16: dict[str, str] = {}
+SIMD_VOP3_FMAC_FP64: dict[str, str] = {}
 
 # --- VOP3 ldexp (mixed-width: fp src0 + int32 src1 exp) --------------------
 #

@@ -314,6 +314,34 @@ def test_gfx1250_model_sources_do_not_include_execution_headers(
     assert 'shared/dpp_sdwa_ops.h' not in isa_header
 
 
+def test_generated_execution_helper_includes_are_scoped(
+    amdgpu_generated_root: Path,
+    gfx1250_generated_root: Path,
+    execute_shared_path: Path,
+):
+    fp_include = '#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"'
+    vgpr_include = '#include "rocjitsu/isa/arch/amdgpu/shared/vgpr_range.h"'
+
+    for path in (
+        gfx1250_generated_root / 'smem_exec.cpp',
+        amdgpu_generated_root / 'cdna4' / 'smem_exec.cpp',
+        amdgpu_generated_root / 'rdna4' / 'vds_exec.cpp',
+    ):
+        source = path.read_text()
+        assert fp_include not in source, path
+        assert vgpr_include not in source, path
+
+    assert fp_include in (gfx1250_generated_root / 'vop2_exec.cpp').read_text()
+    assert vgpr_include in (gfx1250_generated_root / 'vop1_exec.cpp').read_text()
+    assert (
+        vgpr_include in (amdgpu_generated_root / 'cdna4' / 'vop3_exec.cpp').read_text()
+    )
+
+    shared = execute_shared_path.read_text()
+    assert fp_include in shared
+    assert vgpr_include not in shared
+
+
 def test_gfx1250_model_include_graph_does_not_reach_vm(
     rocjitsu_source_root: Path,
     gfx1250_generated_root: Path,
@@ -820,6 +848,67 @@ def test_gfx1250_parser_injects_s_waitcnt_compat_once_in_opcode_order():
         sum(inst.name == 'S_WAITCNT' and inst.opcode == 9 for inst in sopp.insts) == 1
     )
     assert dte.sub_decode_funcs[9] == 'decodeSWaitcntSopp'
+
+
+def test_gfx1250_parser_injects_permlane64_compat_once():
+    parser = object.__new__(Parser)
+    vop1 = SimpleNamespace(
+        insts=[
+            Instruction('V_SWAP_B16', 'ENC_VOP1', 102, []),
+            Instruction('V_NOT_B16', 'ENC_VOP1', 104, []),
+        ],
+        primary_dt_ptrs=[-1] * 128,
+    )
+    vop1.primary_dt_ptrs[102] = 0
+    vop1.primary_dt_ptrs[104] = 0
+    dte = SimpleNamespace(sub_decode_funcs=[None] * 128, decode_func=None)
+    parser.isa_spec = SimpleNamespace(
+        arch_name='gfx1250',
+        encoding_map={'ENC_VOP1': vop1},
+        primary_decode_table=[dte],
+    )
+
+    parser._inject_gfx1250_permlane64_compat()
+    parser._inject_gfx1250_permlane64_compat()
+
+    assert [(inst.name, inst.opcode) for inst in vop1.insts] == [
+        ('V_SWAP_B16', 102),
+        ('V_PERMLANE64_B32', 103),
+        ('V_NOT_B16', 104),
+    ]
+    permlane = vop1.insts[1]
+    assert permlane.available_encodings == frozenset({'ENC_VOP1'})
+    assert [operand.operand_type for operand in permlane.operands] == [
+        'OPR_VGPR',
+        'OPR_SRC_VGPR',
+    ]
+    assert dte.sub_decode_funcs[103] == 'decodeVPermlane64B32Vop1'
+    assert vop1.primary_dt_ptrs[103] == 0
+
+
+def test_gfx1250_parser_permlane64_requires_an_unambiguous_adjacent_route():
+    parser = object.__new__(Parser)
+    vop1 = SimpleNamespace(
+        insts=[Instruction('V_SWAP_B16', 'ENC_VOP1', 102, [])],
+        primary_dt_ptrs=[-1] * 128,
+    )
+    # A unique route elsewhere in the table is not evidence for opcode 103.
+    vop1.primary_dt_ptrs[12] = 0
+    vop1.primary_dt_ptrs[102] = 1
+    vop1.primary_dt_ptrs[104] = 2
+    parser.isa_spec = SimpleNamespace(
+        arch_name='gfx1250',
+        encoding_map={'ENC_VOP1': vop1},
+        primary_decode_table=[
+            SimpleNamespace(sub_decode_funcs=[None] * 128, decode_func=None)
+            for _ in range(3)
+        ],
+    )
+
+    parser._inject_gfx1250_permlane64_compat()
+
+    assert not any(inst.name == 'V_PERMLANE64_B32' for inst in vop1.insts)
+    assert vop1.primary_dt_ptrs[103] == -1
 
 
 def test_s_waitcnt_compat_injection_can_patch_direct_decode_entry():
@@ -1849,8 +1938,8 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     assert 'write_vop3_true16_dst' not in binary
 
     ternary = _shared_execute_body(execute_shared, 'v_fma_f16_vop3', 'v_fma_f32_vop3')
-    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16' in ternary
-    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' not in ternary
+    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16' not in ternary
+    assert 'fp_mode::fma_f16' in ternary
     assert 'read_vop3_true16_src' not in ternary
     assert 'write_vop3_true16_dst' not in ternary
 
@@ -1880,10 +1969,9 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     true16_ternary = _generated_method_body(
         gfx1250_vop3_ternary, 'VFmaF16Vop3', 'VMin3I16Vop3'
     )
-    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' in true16_ternary
-    assert (
-        '[[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);' in true16_ternary
-    )
+    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' not in true16_ternary
+    assert 'fp_mode::fma_f16' in true16_ternary
+    assert 'uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);' in true16_ternary
     assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in true16_ternary
     assert 'read_vop3_true16_src(src1, wf, lane, opsel, 1)' in true16_ternary
     assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in true16_ternary

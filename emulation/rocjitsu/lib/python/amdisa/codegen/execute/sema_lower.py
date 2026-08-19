@@ -1506,8 +1506,8 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     ' for (int i = 0; i < 4; ++i) {{'
     ' uint8_t ab = (a >> (i*8)) & 0xFF;'
     ' uint8_t bb = (b >> (i*8)) & 0xFF;'
-    ' uint8_t cb = (c >> (i*8)) & 0xFF;'
-    ' r |= static_cast<uint32_t>(ab + ((bb - ab) * cb + 128) / 256) << (i*8);'
+    ' uint8_t round_up = (c >> (i*8)) & 1;'
+    ' r |= static_cast<uint32_t>((ab + bb + round_up) >> 1) << (i*8);'
     ' }} return r; }}()',
     'add3': '({0} + {1} + {2})',
     'or3': '({0} | {1} | {2})',
@@ -1566,17 +1566,21 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     'msad_u8': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
     ' uint32_t r = c;'
     ' for (int i = 0; i < 4; ++i) {{'
-    ' uint8_t rb = (a >> (i*8)) & 0xFF;'
-    ' if (rb != 0) {{'
-    ' uint8_t sb = (b >> (i*8)) & 0xFF;'
-    ' r += (rb > sb) ? (rb - sb) : (sb - rb);'
+    ' uint8_t value = (a >> (i*8)) & 0xFF;'
+    ' uint8_t reference = (b >> (i*8)) & 0xFF;'
+    ' if (reference != 0) {{'
+    ' r += (value > reference) ? (value - reference) : (reference - value);'
     ' }}}} return r; }}()',
     'perm': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
     ' uint32_t r = 0; uint64_t src = (static_cast<uint64_t>(a) << 32) | b;'
     ' for (int i = 0; i < 4; ++i) {{'
     ' uint8_t sel = (c >> (i*8)) & 0xFF;'
-    ' uint8_t byte = (sel < 8) ? static_cast<uint8_t>((src >> (sel*8)) & 0xFF)'
-    ' : (sel == 0xC) ? 0u : (sel == 0xD) ? 0xFFu : 0u;'
+    ' uint8_t byte = 0;'
+    ' if (sel < 8) byte = static_cast<uint8_t>((src >> (sel*8)) & 0xFF);'
+    ' else if (sel < 12) {{'
+    ' uint8_t sign_byte = static_cast<uint8_t>((src >> (((sel - 8) * 2 + 1) * 8)) & 0xFF);'
+    ' byte = (sign_byte & 0x80) ? 0xFFu : 0u;'
+    ' }} else if (sel >= 13) byte = 0xFFu;'
     ' r |= static_cast<uint32_t>(byte) << (i*8);'
     ' }} return r; }}()',
     'minimum3': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'

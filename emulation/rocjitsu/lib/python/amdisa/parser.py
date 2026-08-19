@@ -433,6 +433,11 @@ class Parser:
 
     def _inject_compat_insts(self) -> None:
         """Add instructions accepted by LLVM but missing from selected XML specs."""
+        self._inject_s_waitcnt_compat()
+        self._inject_cdna5_permlane64_compat()
+
+    def _inject_s_waitcnt_compat(self) -> None:
+        """Add the legacy monolithic S_WAITCNT accepted by LLVM on GFX12."""
         if self.isa_spec.arch_name not in {'rdna4', 'cdna5'}:
             return
 
@@ -482,6 +487,80 @@ class Parser:
         decode_func = f'decode{inst.fmt_name}'
         if dte.sub_decode_funcs is not None:
             dte.sub_decode_funcs[inst.opcode] = decode_func
+        else:
+            dte.decode_func = decode_func
+            dte.inst_name = inst.fmt_name
+
+    def _inject_cdna5_permlane64_compat(self) -> None:
+        """Add compiler-visible V_PERMLANE64_B32 omitted by the CDNA5 XML."""
+        if self.isa_spec.arch_name != 'cdna5':
+            return
+
+        enc = self.isa_spec.encoding_map.get('ENC_VOP1')
+        if enc is None or enc.primary_dt_ptrs is None:
+            return
+        opcode = 103
+        if any(
+            inst.name == 'V_PERMLANE64_B32' and inst.opcode == opcode
+            for inst in enc.insts
+        ):
+            return
+        if len(enc.primary_dt_ptrs) <= opcode:
+            return
+
+        dt_ptr = enc.primary_dt_ptrs[opcode]
+        if dt_ptr == -1:
+            adjacent_routes = {
+                enc.primary_dt_ptrs[neighbor]
+                for neighbor in (opcode - 1, opcode + 1)
+                if 0 <= neighbor < len(enc.primary_dt_ptrs)
+                and enc.primary_dt_ptrs[neighbor] != -1
+            }
+            if len(adjacent_routes) != 1:
+                return
+            dt_ptr = adjacent_routes.pop()
+            enc.primary_dt_ptrs[opcode] = dt_ptr
+
+        inst = Instruction(
+            'V_PERMLANE64_B32',
+            'ENC_VOP1',
+            opcode,
+            [
+                Operand(
+                    'vdst',
+                    32,
+                    'OPR_VGPR',
+                    False,
+                    True,
+                    False,
+                    True,
+                    1,
+                    'FMT_NUM_B32',
+                ),
+                Operand(
+                    'src0',
+                    32,
+                    'OPR_SRC_VGPR',
+                    True,
+                    False,
+                    False,
+                    True,
+                    2,
+                    'FMT_NUM_B32',
+                ),
+            ],
+            available_encodings=frozenset({'ENC_VOP1'}),
+        )
+        insert_idx = next(
+            (idx for idx, existing in enumerate(enc.insts) if existing.opcode > opcode),
+            len(enc.insts),
+        )
+        enc.insts.insert(insert_idx, inst)
+
+        dte = self.isa_spec.primary_decode_table[dt_ptr]
+        decode_func = f'decode{inst.fmt_name}'
+        if dte.sub_decode_funcs is not None:
+            dte.sub_decode_funcs[opcode] = decode_func
         else:
             dte.decode_func = decode_func
             dte.inst_name = inst.fmt_name
