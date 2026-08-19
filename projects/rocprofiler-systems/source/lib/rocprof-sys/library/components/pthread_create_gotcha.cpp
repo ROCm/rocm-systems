@@ -34,13 +34,10 @@
 
 namespace rocprofsys
 {
-namespace sampling
-{
-std::set<int>
-setup();
-std::set<int>
-shutdown();
-}  // namespace sampling
+// NOTE: sampling::setup() and sampling::shutdown() used to be forward-declared here.
+// shutdown() now takes a defaulted `all_threads` argument, and a local re-declaration
+// without that default makes the call below ambiguous. Both come from
+// library/sampling.hpp, which is already included above.
 
 namespace component
 {

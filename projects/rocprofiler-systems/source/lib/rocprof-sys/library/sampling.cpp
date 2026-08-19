@@ -1088,12 +1088,29 @@ setup()
 }
 
 std::set<int>
-shutdown()
+shutdown(bool all_threads)
 {
     if(is_child_process())
     {
-        for(auto& itr : *sampler_instances::get())
-            itr.release();
+        auto* _samplers = sampler_instances::get();
+        if(_samplers)
+        {
+            if(all_threads)
+            {
+                for(auto& itr : *_samplers)
+                    itr.release();
+            }
+            else
+            {
+                // stable_vector::at() throws when out of range and this runs from a
+                // thread destructor, where an escaping exception would terminate the
+                // process. The pthread gotcha bounds-checks against
+                // utility::get_thread_index(), which is a different counter from
+                // threading::get_id(), so verify the index explicitly here.
+                const auto _tid = static_cast<size_t>(threading::get_id());
+                if(_tid < sampler_instances::size()) _samplers->at(_tid).release();
+            }
+        }
         return std::set<int>{};
     }
 

@@ -32,7 +32,7 @@ std::set<int>
 setup();
 
 std::set<int>
-shutdown();
+shutdown(bool all_threads = false);
 
 void
 block_samples();
