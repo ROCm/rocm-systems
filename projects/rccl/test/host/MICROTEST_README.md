@@ -533,4 +533,4 @@ cmake --build build -j"$(nproc)"
 ```
 
 Disable coverage instrumentation for the standalone host-only test binaries
-with `-DHOST_TEST_COVERAGE=OFF`.
+with `-DHOST_UT_COVERAGE=OFF`.
