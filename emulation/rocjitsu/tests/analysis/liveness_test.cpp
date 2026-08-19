@@ -4732,6 +4732,224 @@ TEST(CfgAnalysis, Gfx1250ScratchSpillRejectsMismatchedReloadAddress) {
             fixups.end());
 }
 
+struct Gfx1250ScratchPreservingCalleeProgram {
+  std::vector<uint32_t> words;
+  uint64_t origin_consumer_offset = 0;
+  uint64_t final_consumer_offset = 0;
+  uint64_t target_offset = 0;
+  uint64_t preserving_callee_offset = 0;
+  uint64_t nested_callee_offset = 0;
+};
+
+enum class Gfx1250ScratchPreservingCalleeMutation {
+  None,
+  OverlappingStore,
+  GenericFrame,
+  NestedFrameClobber,
+};
+
+Gfx1250ScratchPreservingCalleeProgram
+build_gfx1250_scratch_preserving_callee_program(Gfx1250ScratchPreservingCalleeMutation mutation) {
+  constexpr uint16_t kTargetSreg = 0;
+  constexpr uint16_t kOuterReturnSreg = 30;
+  constexpr uint16_t kNestedReturnSreg = 28;
+  constexpr uint16_t kSavedExecSreg = 35;
+  constexpr uint16_t kAbiFrameSreg = 33;
+  constexpr uint16_t kGenericFrameSreg = 20;
+  constexpr uint16_t kReturnCarrierVgpr = 40;
+  constexpr uint16_t kTargetCarrierVgpr = 41;
+  constexpr uint16_t kClobberVgpr = 2;
+  constexpr uint16_t kReturnLowLane = 128;
+  constexpr uint16_t kReturnHighLane = 129;
+  constexpr uint16_t kTargetLowLane = 128 + 12;
+  constexpr uint16_t kTargetHighLane = 128 + 13;
+  constexpr uint32_t kReturnScratchOffset = 224;
+  constexpr uint32_t kTargetScratchOffset = 228;
+  const uint16_t frame_sreg =
+      mutation == Gfx1250ScratchPreservingCalleeMutation::GenericFrame ||
+              mutation == Gfx1250ScratchPreservingCalleeMutation::NestedFrameClobber
+          ? kGenericFrameSreg
+          : kAbiFrameSreg;
+
+  Gfx1250ScratchPreservingCalleeProgram program;
+  const auto append = [&](const auto &encoded) {
+    program.words.insert(program.words.end(), encoded.begin(), encoded.end());
+  };
+  const auto offset = [&] {
+    return static_cast<uint64_t>(program.words.size()) * sizeof(uint32_t);
+  };
+  const auto begin_full_exec_scratch_group = [&] {
+    program.words.push_back(pack_gfx1250_sop1(cdna5::kSOrSaveExecB32Sop1, kSavedExecSreg,
+                                              /*inline -1=*/193));
+  };
+  const auto end_full_exec_scratch_group = [&] {
+    program.words.push_back(cdna5::build_sopp(cdna5::kSWaitXcntSopp, {.simm16 = 0})[0]);
+    program.words.push_back(
+        pack_gfx1250_sop1(cdna5::kSMovB32Sop1, /*exec_lo=*/126, kSavedExecSreg));
+  };
+
+  // Caller: establish one target with an ordinary call, keep it in fixed v41
+  // lanes across a second helper call, then reuse it. The second recovery is
+  // valid only when the helper's complete save/call/restore sequence preserves
+  // both carrier lanes. Select bank one for DST and SRC0 so the v41 selector
+  // names physical v297, outside the ABI's defined v0-v255 callee-saved set;
+  // recovery must therefore use the exact helper-body proof below.
+  program.words.push_back(cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 0x41})[0]);
+  program.words.push_back(pack_gfx1250_sop1(cdna5::kSGetPcI64Sop1, kTargetSreg, 0));
+  const uint64_t target_getpc_next = offset();
+  append(cdna5::build_sop2(cdna5::kSAddNcU64Sop2,
+                           {.ssrc0 = kTargetSreg, .ssrc1 = 254, .sdst = kTargetSreg}));
+  const size_t target_delta_word = program.words.size();
+  program.words.push_back(0);
+  program.words.push_back(0);
+  append(build_gfx1250_writelane(kTargetCarrierVgpr, kTargetSreg, kTargetLowLane));
+  append(build_gfx1250_writelane(kTargetCarrierVgpr, kTargetSreg + 1, kTargetHighLane));
+  program.origin_consumer_offset = offset();
+  program.words.push_back(pack_gfx1250_sop1(cdna5::kSSwapPcI64Sop1, kOuterReturnSreg, kTargetSreg));
+  const size_t preserving_call_word = program.words.size();
+  program.words.push_back(0);
+  append(build_gfx1250_readlane(kTargetSreg, kTargetCarrierVgpr, kTargetLowLane));
+  append(build_gfx1250_readlane(kTargetSreg + 1, kTargetCarrierVgpr, kTargetHighLane));
+  program.final_consumer_offset = offset();
+  program.words.push_back(pack_gfx1250_sop1(cdna5::kSSwapPcI64Sop1, kOuterReturnSreg, kTargetSreg));
+  program.words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+
+  program.target_offset = offset();
+  program.words.push_back(pack_gfx1250_sop1(cdna5::kSSetPcI64Sop1, 0, kOuterReturnSreg));
+
+  // Preserving helper: LLVM saves the incoming return PC in v40, groups the
+  // callee-saved v40/v41 spills under one all-EXEC window, and makes a nested
+  // call while the only surviving copies are in private scratch. This is the
+  // compact form of hip_moi's close_current_epoch sequence.
+  program.preserving_callee_offset = offset();
+  append(build_gfx1250_writelane(kReturnCarrierVgpr, kOuterReturnSreg, kReturnLowLane));
+  append(build_gfx1250_writelane(kReturnCarrierVgpr, kOuterReturnSreg + 1, kReturnHighLane));
+  begin_full_exec_scratch_group();
+  append(build_scratch_store_b32_saddr(kReturnCarrierVgpr, frame_sreg, kReturnScratchOffset,
+                                       ROCJITSU_CODE_ARCH_GFX1250)
+             .value());
+  append(build_scratch_store_b32_saddr(kTargetCarrierVgpr, frame_sreg, kTargetScratchOffset,
+                                       ROCJITSU_CODE_ARCH_GFX1250)
+             .value());
+  end_full_exec_scratch_group();
+  program.words.push_back(cdna5::build_vop1(
+      cdna5::kVMovB32Vop1, {.src0 = /*inline 0=*/128, .vdst = kReturnCarrierVgpr})[0]);
+  program.words.push_back(cdna5::build_vop1(
+      cdna5::kVMovB32Vop1, {.src0 = /*inline 0=*/128, .vdst = kTargetCarrierVgpr})[0]);
+
+  if (mutation == Gfx1250ScratchPreservingCalleeMutation::OverlappingStore) {
+    begin_full_exec_scratch_group();
+    append(cdna5::build_vscratch(cdna5::kScratchStoreB16Vscratch,
+                                 {.saddr = static_cast<uint8_t>(frame_sreg),
+                                  .vsrc = kClobberVgpr,
+                                  .ioffset = kTargetScratchOffset + 1}));
+    end_full_exec_scratch_group();
+  }
+
+  const size_t nested_call_word = program.words.size();
+  program.words.push_back(0);
+  begin_full_exec_scratch_group();
+  append(build_scratch_load_b32_saddr(kReturnCarrierVgpr, frame_sreg, kReturnScratchOffset,
+                                      ROCJITSU_CODE_ARCH_GFX1250)
+             .value());
+  append(build_scratch_load_b32_saddr(kTargetCarrierVgpr, frame_sreg, kTargetScratchOffset,
+                                      ROCJITSU_CODE_ARCH_GFX1250)
+             .value());
+  end_full_exec_scratch_group();
+  append(build_gfx1250_readlane(kOuterReturnSreg, kReturnCarrierVgpr, kReturnLowLane));
+  append(build_gfx1250_readlane(kOuterReturnSreg + 1, kReturnCarrierVgpr, kReturnHighLane));
+  program.words.push_back(pack_gfx1250_sop1(cdna5::kSSetPcI64Sop1, 0, kOuterReturnSreg));
+
+  program.nested_callee_offset = offset();
+  if (mutation == Gfx1250ScratchPreservingCalleeMutation::NestedFrameClobber) {
+    program.words.push_back(pack_gfx1250_sop1(cdna5::kSMovB32Sop1, frame_sreg,
+                                              /*inline 0=*/128));
+  }
+  program.words.push_back(pack_gfx1250_sop1(cdna5::kSSetPcI64Sop1, 0, kNestedReturnSreg));
+
+  const uint64_t target_delta = program.target_offset - target_getpc_next;
+  program.words[target_delta_word] = static_cast<uint32_t>(target_delta);
+  program.words[target_delta_word + 1] = static_cast<uint32_t>(target_delta >> 32);
+  const auto patch_direct_call = [&](size_t word_index, uint64_t target, uint16_t return_sreg) {
+    const int64_t call_next = static_cast<int64_t>(word_index + 1u) * sizeof(uint32_t);
+    const int64_t delta = static_cast<int64_t>(target) - call_next;
+    program.words[word_index] = rocjitsu::build_s_call_b64(
+        return_sreg, static_cast<int16_t>(delta / sizeof(uint32_t)), ROCJITSU_CODE_ARCH_GFX1250);
+  };
+  patch_direct_call(preserving_call_word, program.preserving_callee_offset, kOuterReturnSreg);
+  patch_direct_call(nested_call_word, program.nested_callee_offset, kNestedReturnSreg);
+  return program;
+}
+
+TEST(CfgAnalysis, Gfx1250GroupedScratchCalleePreservesLaneSavedTargetAcrossNestedCall) {
+  const auto program =
+      build_gfx1250_scratch_preserving_callee_program(Gfx1250ScratchPreservingCalleeMutation::None);
+  const std::array leaders{uint64_t{0}, program.target_offset, program.preserving_callee_offset,
+                           program.nested_callee_offset};
+  const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
+      program.words, ROCJITSU_CODE_ARCH_GFX1250, leaders, /*wavefront_size=*/32u);
+  const auto origin = std::ranges::find_if(fixups, [&](const IndirectCallFixup &fixup) {
+    return fixup.source_call_offset == program.origin_consumer_offset;
+  });
+  ASSERT_NE(origin, fixups.end());
+  EXPECT_EQ(origin->source_target_offset, program.target_offset);
+  const auto consumer = std::ranges::find_if(fixups, [&](const IndirectCallFixup &fixup) {
+    return fixup.source_call_offset == program.final_consumer_offset;
+  });
+  ASSERT_NE(consumer, fixups.end());
+  EXPECT_EQ(consumer->source_target_offset, program.target_offset);
+  EXPECT_FALSE(consumer->source_incomplete);
+  EXPECT_TRUE(consumer->source_targets_exhaustive);
+}
+
+TEST(CfgAnalysis, Gfx1250GroupedScratchCalleeProvesGenericFrameAcrossNestedCall) {
+  const auto program = build_gfx1250_scratch_preserving_callee_program(
+      Gfx1250ScratchPreservingCalleeMutation::GenericFrame);
+  const std::array leaders{uint64_t{0}, program.target_offset, program.preserving_callee_offset,
+                           program.nested_callee_offset};
+  const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
+      program.words, ROCJITSU_CODE_ARCH_GFX1250, leaders, /*wavefront_size=*/32u);
+  const auto consumer = std::ranges::find_if(fixups, [&](const IndirectCallFixup &fixup) {
+    return fixup.source_call_offset == program.final_consumer_offset;
+  });
+  ASSERT_NE(consumer, fixups.end());
+  EXPECT_EQ(consumer->source_target_offset, program.target_offset);
+  EXPECT_FALSE(consumer->source_incomplete);
+  EXPECT_TRUE(consumer->source_targets_exhaustive);
+}
+
+TEST(CfgAnalysis, Gfx1250GroupedScratchCalleeRejectsOverlappingSavedTargetStore) {
+  const auto program = build_gfx1250_scratch_preserving_callee_program(
+      Gfx1250ScratchPreservingCalleeMutation::OverlappingStore);
+  const std::array leaders{uint64_t{0}, program.target_offset, program.preserving_callee_offset,
+                           program.nested_callee_offset};
+  const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
+      program.words, ROCJITSU_CODE_ARCH_GFX1250, leaders, /*wavefront_size=*/32u);
+  EXPECT_TRUE(std::ranges::any_of(fixups, [&](const IndirectCallFixup &fixup) {
+    return fixup.source_call_offset == program.origin_consumer_offset &&
+           fixup.source_target_offset == program.target_offset;
+  }));
+  EXPECT_TRUE(std::ranges::none_of(fixups, [&](const IndirectCallFixup &fixup) {
+    return fixup.source_call_offset == program.final_consumer_offset;
+  }));
+}
+
+TEST(CfgAnalysis, Gfx1250GroupedScratchCalleeRejectsNestedFrameClobber) {
+  const auto program = build_gfx1250_scratch_preserving_callee_program(
+      Gfx1250ScratchPreservingCalleeMutation::NestedFrameClobber);
+  const std::array leaders{uint64_t{0}, program.target_offset, program.preserving_callee_offset,
+                           program.nested_callee_offset};
+  const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
+      program.words, ROCJITSU_CODE_ARCH_GFX1250, leaders, /*wavefront_size=*/32u);
+  EXPECT_TRUE(std::ranges::any_of(fixups, [&](const IndirectCallFixup &fixup) {
+    return fixup.source_call_offset == program.origin_consumer_offset &&
+           fixup.source_target_offset == program.target_offset;
+  }));
+  EXPECT_TRUE(std::ranges::none_of(fixups, [&](const IndirectCallFixup &fixup) {
+    return fixup.source_call_offset == program.final_consumer_offset;
+  }));
+}
+
 Gfx1250ScratchLaneTargetProgram
 build_gfx1250_unsummarized_call_mode_program(std::optional<uint16_t> callee_mode_write) {
   constexpr uint16_t kTargetSreg = 0;

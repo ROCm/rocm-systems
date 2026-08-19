@@ -2842,6 +2842,60 @@ struct Gfx1250ScratchDword {
   bool load = false;
 };
 
+struct Gfx1250ScratchRange {
+  uint16_t saddr = 0;
+  uint32_t byte_offset = 0;
+  uint32_t byte_size = 0;
+};
+
+/// @brief Whether a GFX1250 scratch scalar base is restored by the device-call ABI.
+///
+/// @details LLVM reserves s32 and s33 as its stack- and frame-offset registers.
+/// A generated nested callee may establish its own frame from them, but must
+/// restore both values before returning. Other scalar scratch bases have no
+/// such contract and require an exact nested-callee preservation proof.
+[[nodiscard]] bool gfx1250_call_preserves_scratch_base(uint16_t saddr) {
+  return saddr == 32 || saddr == 33;
+}
+
+/// @brief Decode a fixed-offset scratch store without a vector address.
+///
+/// @details Callee-preservation analysis only needs to know whether an
+/// unrelated store overlaps a previously saved dword. It can therefore model
+/// the complete family of fixed-width stores without interpreting their data
+/// operands.
+[[nodiscard]] std::optional<Gfx1250ScratchRange>
+gfx1250_scratch_store_range(const Instruction &inst) {
+  const std::string_view mnemonic = inst.mnemonic();
+  uint32_t byte_size = 0;
+  if (mnemonic == "scratch_store_b8" || mnemonic == "scratch_store_d16_hi_b8")
+    byte_size = 1;
+  else if (mnemonic == "scratch_store_b16" || mnemonic == "scratch_store_d16_hi_b16")
+    byte_size = 2;
+  else if (mnemonic == "scratch_store_b32")
+    byte_size = 4;
+  else if (mnemonic == "scratch_store_b64")
+    byte_size = 8;
+  else if (mnemonic == "scratch_store_b96")
+    byte_size = 12;
+  else if (mnemonic == "scratch_store_b128")
+    byte_size = 16;
+  else
+    return std::nullopt;
+
+  if (inst.raw_encoding() == nullptr ||
+      inst.size() != static_cast<int>(sizeof(cdna5::VscratchMachineInst)))
+    return std::nullopt;
+  std::array<uint32_t, 3> words;
+  std::memcpy(words.data(), inst.raw_encoding(), sizeof(words));
+  const cdna5::VscratchMachineInst raw = std::bit_cast<cdna5::VscratchMachineInst>(words);
+  if (raw.vaddr != 0 || raw.scale_offset != 0)
+    return std::nullopt;
+  return Gfx1250ScratchRange{.saddr = static_cast<uint16_t>(raw.saddr),
+                             .byte_offset = raw.ioffset,
+                             .byte_size = byte_size};
+}
+
 /// @brief Decode the narrow scratch form used for compiler VGPR spills.
 ///
 /// @details Only an address-free vector operand and an unscaled immediate are
@@ -2878,11 +2932,27 @@ struct Gfx1250ScratchDword {
 /// completes before the compiler restores the old EXEC mask.
 [[nodiscard]] bool gfx1250_full_exec_scratch_transfer(const AnalysisContext &ctx,
                                                       const AnalysisBlock &block, size_t index) {
-  if (index == block.first_index || index + 2 > block.last_index)
+  if (index < block.first_index || index > block.last_index)
     return false;
-  const Instruction &save = *ctx.insts[index - 1];
-  const Instruction &wait = *ctx.insts[index + 1];
-  const Instruction &restore = *ctx.insts[index + 2];
+
+  // LLVM groups adjacent callee-saved spills under one temporary all-EXEC
+  // region. Find the complete group rather than requiring this dword transfer
+  // to be its only member.
+  const auto is_scratch_transfer = [&](size_t candidate) {
+    return ctx.insts[candidate]->mnemonic().starts_with("scratch_");
+  };
+  size_t first_transfer = index;
+  while (first_transfer > block.first_index && is_scratch_transfer(first_transfer - 1))
+    --first_transfer;
+  size_t last_transfer = index;
+  while (last_transfer < block.last_index && is_scratch_transfer(last_transfer + 1))
+    ++last_transfer;
+  if (first_transfer == block.first_index || last_transfer + 2 > block.last_index)
+    return false;
+
+  const Instruction &save = *ctx.insts[first_transfer - 1];
+  const Instruction &wait = *ctx.insts[last_transfer + 1];
+  const Instruction &restore = *ctx.insts[last_transfer + 2];
   if (save.mnemonic() != "s_or_saveexec_b32" || save.num_dst_operands() < 1 ||
       save.num_src_operands() < 1 || (wait.flags() & WAITCNT) == 0 ||
       wait.raw_encoding() == nullptr || (wait.raw_encoding()[0] & 0xffffu) != 0 ||
@@ -4217,13 +4287,14 @@ compute_analysis_dominators(const AnalysisContext &ctx, const std::vector<Analys
 ///
 /// @details Values zero and one are the halves of the incoming return PC. The
 /// remaining values are caller VGPR lanes that must be restored unchanged.
-/// Keeping exact SGPR and VGPR-lane locations explicit proves the actual
-/// save/restore chain instead of assuming a named return pair or a
-/// register-preservation ABI. Joins retain only copies proven on every incoming
-/// path. EXEC-gated or memory-backed transfers fail closed.
+/// Keeping exact SGPR, VGPR-lane, and proven private-scratch locations explicit
+/// proves the actual save/restore chain instead of assuming a named return pair
+/// or a register-preservation ABI. Joins retain only copies proven on every
+/// incoming path. EXEC-gated or otherwise unproven memory transfers fail closed.
 struct ValueCopies {
   std::array<bool, REGISTER_SET_MAX_SGPRS> sgprs{};
   std::vector<VgprLane> vgpr_lanes;
+  std::vector<ScratchLaneSlot> scratch_lanes;
 
   friend bool operator==(const ValueCopies &, const ValueCopies &) = default;
 };
@@ -4254,6 +4325,9 @@ void meet_callee_value_state(CalleeValueState &dst, const CalleeValueState &src)
     std::erase_if(dst.values[value].vgpr_lanes, [&](VgprLane lane) {
       return !contains_copy(src.values[value].vgpr_lanes, lane);
     });
+    std::erase_if(dst.values[value].scratch_lanes, [&](ScratchLaneSlot slot) {
+      return !contains_copy(src.values[value].scratch_lanes, slot);
+    });
   }
 }
 
@@ -4263,10 +4337,20 @@ void meet_callee_value_state(CalleeValueState &dst, const CalleeValueState &src)
   return state.values[0].sgprs.at(pair_lo) && state.values[1].sgprs.at(pair_lo + 1u);
 }
 
-void transfer_callee_value_state(AnalysisContext &ctx, size_t inst_index, CalleeValueState &state) {
+void transfer_callee_value_state(AnalysisContext &ctx, const AnalysisBlock &block,
+                                 size_t inst_index, CalleeValueState &state) {
+  const Instruction &inst = *ctx.insts[inst_index];
   const auto lane_transfer = fixed_lane_transfer(*ctx.insts[inst_index], ctx.wavefront_size);
+  const auto scratch =
+      ctx.arch == ROCJITSU_CODE_ARCH_GFX1250 ? gfx1250_scratch_dword(inst) : std::nullopt;
+  const auto scratch_store =
+      ctx.arch == ROCJITSU_CODE_ARCH_GFX1250 ? gfx1250_scratch_store_range(inst) : std::nullopt;
+  const bool full_exec_scratch =
+      scratch && gfx1250_full_exec_scratch_transfer(ctx, block, inst_index);
 
   std::vector<bool> lane_sources(state.values.size(), false);
+  std::vector<std::vector<uint8_t>> scratch_store_lanes(state.values.size());
+  std::vector<std::vector<uint8_t>> scratch_load_lanes(state.values.size());
   for (size_t value = 0; value < state.values.size(); ++value) {
     if (lane_transfer) {
       lane_sources[value] =
@@ -4274,6 +4358,19 @@ void transfer_callee_value_state(AnalysisContext &ctx, size_t inst_index, Callee
               ? lane_transfer->sgpr < REGISTER_SET_MAX_SGPRS &&
                     state.values[value].sgprs[lane_transfer->sgpr]
               : contains_copy(state.values[value].vgpr_lanes, lane_transfer->lane);
+    }
+    if (!full_exec_scratch)
+      continue;
+    if (!scratch->load) {
+      for (VgprLane lane : state.values[value].vgpr_lanes) {
+        if (lane.vgpr == scratch->vgpr)
+          scratch_store_lanes[value].push_back(lane.lane);
+      }
+    } else {
+      for (ScratchLaneSlot slot : state.values[value].scratch_lanes) {
+        if (slot.saddr == scratch->saddr && slot.byte_offset == scratch->byte_offset)
+          scratch_load_lanes[value].push_back(slot.lane);
+      }
     }
   }
 
@@ -4286,6 +4383,25 @@ void transfer_callee_value_state(AnalysisContext &ctx, size_t inst_index, Callee
     std::erase_if(copies.vgpr_lanes, [&](VgprLane lane) {
       return !instruction_preserves_vgpr_lane(ctx, inst_index, lane);
     });
+    std::erase_if(copies.scratch_lanes, [&](ScratchLaneSlot slot) {
+      return ctx.facts[inst_index].written_sgprs.contains(slot.saddr);
+    });
+    if (inst.mnemonic().starts_with("scratch_store")) {
+      if (!scratch_store) {
+        copies.scratch_lanes.clear();
+      } else {
+        std::erase_if(copies.scratch_lanes, [&](ScratchLaneSlot slot) {
+          const uint64_t slot_begin = slot.byte_offset;
+          const uint64_t slot_end = slot_begin + sizeof(uint32_t);
+          const uint64_t store_begin = scratch_store->byte_offset;
+          const uint64_t store_end = store_begin + scratch_store->byte_size;
+          return slot.saddr != scratch_store->saddr ||
+                 (slot_begin < store_end && store_begin < slot_end);
+        });
+      }
+    } else if (inst.mnemonic().starts_with("scratch_atomic")) {
+      copies.scratch_lanes.clear();
+    }
   }
 
   for (size_t value = 0; value < state.values.size(); ++value) {
@@ -4297,22 +4413,52 @@ void transfer_callee_value_state(AnalysisContext &ctx, size_t inst_index, Callee
         copies.sgprs[lane_transfer->sgpr] = true;
       }
     }
+    if (full_exec_scratch && !scratch->load) {
+      for (uint8_t lane : scratch_store_lanes[value]) {
+        add_copy(copies.scratch_lanes, ScratchLaneSlot{.saddr = scratch->saddr,
+                                                       .byte_offset = scratch->byte_offset,
+                                                       .lane = lane});
+      }
+    }
+    if (full_exec_scratch && scratch->load) {
+      for (uint8_t lane : scratch_load_lanes[value])
+        add_copy(copies.vgpr_lanes, VgprLane{.vgpr = scratch->vgpr, .lane = lane});
+    }
   }
 }
 
-[[nodiscard]] std::optional<std::vector<VgprLane>>
+struct CalleeCallProtection {
+  std::vector<VgprLane> vgpr_lanes;
+  std::vector<uint16_t> scratch_saddrs;
+};
+
+[[nodiscard]] std::optional<CalleeCallProtection>
 prepare_callee_value_state_for_call(CalleeValueState &state) {
-  std::vector<VgprLane> protected_lanes;
+  CalleeCallProtection protection;
   for (ValueCopies &copies : state.values) {
     copies.sgprs.fill(false);
-    if (copies.vgpr_lanes.empty())
+    if (copies.vgpr_lanes.empty() && copies.scratch_lanes.empty())
       return std::nullopt;
+    // A proven private-scratch copy survives the nested call independently of
+    // every live VGPR copy of the same value, so no callee-body proof is needed
+    // for those redundant registers. Without a scratch copy, recursively prove
+    // every live carrier lane; do not substitute an architecture-specific ABI
+    // assumption into this exact cross-architecture analysis.
+    if (!copies.scratch_lanes.empty()) {
+      for (ScratchLaneSlot slot : copies.scratch_lanes) {
+        if (!gfx1250_call_preserves_scratch_base(slot.saddr) &&
+            !contains_copy(protection.scratch_saddrs, slot.saddr)) {
+          protection.scratch_saddrs.push_back(slot.saddr);
+        }
+      }
+      continue;
+    }
     for (VgprLane lane : copies.vgpr_lanes) {
-      if (!contains_copy(protected_lanes, lane))
-        protected_lanes.push_back(lane);
+      if (!contains_copy(protection.vgpr_lanes, lane))
+        protection.vgpr_lanes.push_back(lane);
     }
   }
-  return protected_lanes;
+  return protection;
 }
 
 [[nodiscard]] bool
@@ -4320,6 +4466,7 @@ callee_preserves_vgpr_lanes(AnalysisContext &ctx, const std::vector<AnalysisBloc
                             const AnalysisBlockIndex &block_by_offset,
                             std::span<const IndirectCallFixup> recovered, uint64_t target_offset,
                             uint16_t return_sreg, std::span<const VgprLane> lanes,
+                            std::span<const uint16_t> protected_sgprs,
                             std::vector<std::pair<uint64_t, uint16_t>> &active_callees) {
   const std::pair key{target_offset, return_sreg};
   if (std::ranges::find(active_callees, key) != active_callees.end())
@@ -4334,11 +4481,17 @@ callee_preserves_vgpr_lanes(AnalysisContext &ctx, const std::vector<AnalysisBloc
     CalleeValueState entry_state;
     if (return_sreg >= kMaxTrackedSgprPair)
       return false;
-    entry_state.values.resize(2u + lanes.size());
+    entry_state.values.resize(2u + lanes.size() + protected_sgprs.size());
     entry_state.values[0].sgprs[return_sreg] = true;
     entry_state.values[1].sgprs[return_sreg + 1u] = true;
     for (size_t lane_index = 0; lane_index < lanes.size(); ++lane_index)
       entry_state.values[2u + lane_index].vgpr_lanes.push_back(lanes[lane_index]);
+    for (size_t sgpr_index = 0; sgpr_index < protected_sgprs.size(); ++sgpr_index) {
+      const uint16_t sgpr = protected_sgprs[sgpr_index];
+      if (sgpr >= REGISTER_SET_MAX_SGPRS)
+        return false;
+      entry_state.values[2u + lanes.size() + sgpr_index].sgprs[sgpr] = true;
+    }
 
     std::vector<size_t> worklist{entry_it->second};
     std::vector<std::optional<CalleeValueState>> incoming(blocks.size());
@@ -4371,7 +4524,7 @@ callee_preserves_vgpr_lanes(AnalysisContext &ctx, const std::vector<AnalysisBloc
       const AnalysisBlock &block = blocks[block_index];
       CalleeValueState state = *incoming[block_index];
       for (size_t index = block.first_index; index <= block.last_index; ++index)
-        transfer_callee_value_state(ctx, index, state);
+        transfer_callee_value_state(ctx, block, index, state);
 
       const size_t term_index = block.last_index;
       const Instruction &term = *ctx.insts[term_index];
@@ -4384,11 +4537,13 @@ callee_preserves_vgpr_lanes(AnalysisContext &ctx, const std::vector<AnalysisBloc
           return false;
         const int64_t nested_target =
             static_cast<int64_t>(continuation_offset) + static_cast<int64_t>(*delta);
-        const auto protected_lanes = prepare_callee_value_state_for_call(state);
-        if (!protected_lanes || nested_target < 0 ||
-            !callee_preserves_vgpr_lanes(ctx, blocks, block_by_offset, recovered,
-                                         static_cast<uint64_t>(nested_target), *facts.call_sdst,
-                                         *protected_lanes, active_callees)) {
+        const auto protection = prepare_callee_value_state_for_call(state);
+        if (!protection || nested_target < 0 ||
+            ((!protection->vgpr_lanes.empty() || !protection->scratch_saddrs.empty()) &&
+             !callee_preserves_vgpr_lanes(ctx, blocks, block_by_offset, recovered,
+                                          static_cast<uint64_t>(nested_target), *facts.call_sdst,
+                                          protection->vgpr_lanes, protection->scratch_saddrs,
+                                          active_callees))) {
           return false;
         }
         const auto continuation = block_by_offset.find(continuation_offset);
@@ -4399,17 +4554,19 @@ callee_preserves_vgpr_lanes(AnalysisContext &ctx, const std::vector<AnalysisBloc
 
       if (facts.swappc_sdst) {
         bool found_target = false;
-        const auto protected_lanes = prepare_callee_value_state_for_call(state);
-        if (!protected_lanes)
+        const auto protection = prepare_callee_value_state_for_call(state);
+        if (!protection)
           return false;
         for (const IndirectCallFixup &fixup : recovered) {
           if (fixup.source_call_offset != term.src_loc() || !fixup.source_is_call ||
               fixup.source_return_selector != *facts.swappc_sdst)
             continue;
           found_target = true;
-          if (!callee_preserves_vgpr_lanes(ctx, blocks, block_by_offset, recovered,
+          if ((!protection->vgpr_lanes.empty() || !protection->scratch_saddrs.empty()) &&
+              !callee_preserves_vgpr_lanes(ctx, blocks, block_by_offset, recovered,
                                            fixup.source_target_offset, fixup.source_return_selector,
-                                           *protected_lanes, active_callees)) {
+                                           protection->vgpr_lanes, protection->scratch_saddrs,
+                                           active_callees)) {
             return false;
           }
         }
@@ -4429,6 +4586,11 @@ callee_preserves_vgpr_lanes(AnalysisContext &ctx, const std::vector<AnalysisBloc
           if (!contains_copy(state.values[2u + lane_index].vgpr_lanes, lanes[lane_index])) {
             return false;
           }
+        }
+        for (size_t sgpr_index = 0; sgpr_index < protected_sgprs.size(); ++sgpr_index) {
+          const uint16_t sgpr = protected_sgprs[sgpr_index];
+          if (!state.values[2u + lanes.size() + sgpr_index].sgprs[sgpr])
+            return false;
         }
         found_return = true;
         continue;
@@ -4660,7 +4822,7 @@ void recover_lane_saved_call_targets(AnalysisContext &ctx, const std::vector<Ana
         if (target < 0 ||
             !callee_preserves_vgpr_lanes(ctx, blocks, block_by_offset, known_recovered,
                                          static_cast<uint64_t>(target), *facts.call_sdst, lanes,
-                                         active_callees)) {
+                                         std::span<const uint16_t>{}, active_callees)) {
           path_preserves = false;
           break;
         }
@@ -4674,7 +4836,7 @@ void recover_lane_saved_call_targets(AnalysisContext &ctx, const std::vector<Ana
           std::vector<std::pair<uint64_t, uint16_t>> active_callees;
           if (!callee_preserves_vgpr_lanes(ctx, blocks, block_by_offset, known_recovered,
                                            fixup.source_target_offset, fixup.source_return_selector,
-                                           lanes, active_callees)) {
+                                           lanes, std::span<const uint16_t>{}, active_callees)) {
             path_preserves = false;
             break;
           }
@@ -4695,7 +4857,7 @@ void recover_lane_saved_call_targets(AnalysisContext &ctx, const std::vector<Ana
       std::vector<std::pair<uint64_t, uint16_t>> active_callees;
       if (!callee_preserves_vgpr_lanes(ctx, blocks, block_by_offset, known_recovered,
                                        fixup->source_target_offset, *consumer_facts.swappc_sdst,
-                                       lanes, active_callees)) {
+                                       lanes, std::span<const uint16_t>{}, active_callees)) {
         complete = false;
         break;
       }
