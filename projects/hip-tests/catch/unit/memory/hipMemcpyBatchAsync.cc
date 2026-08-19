@@ -799,6 +799,8 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Functional) {
  * hipMemcpyFlagExtOpSwap across generated per-side allocation types, copy counts, and sizes.
  */
 HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Swap) {
+  skipMemcpyBatchAsyncIfAnyGfx1250();
+
   const size_t count = GENERATE(2, 3, 8);
   const size_t size_in_bytes = GENERATE(as<size_t>{}, 1, 63, 4096);
   const LinearAllocs allocTypeA =
