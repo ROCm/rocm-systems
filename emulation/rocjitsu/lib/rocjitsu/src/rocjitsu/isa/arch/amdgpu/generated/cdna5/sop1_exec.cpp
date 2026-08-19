@@ -324,20 +324,51 @@ void SSendmsgRtnB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SBarrierSignalSop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_barrier_signal_sop1(*this, wf);
+  uint32_t source = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
+  bool source_is_m0 = ssrc0.encoding_value() == OpSelSsrcBarrierId::OPR_SSRC_BARRIER_ID_M0;
+  int32_t barrier_id =
+      source_is_m0 ? static_cast<int32_t>(source & 0x1fu) : static_cast<int32_t>(source);
+  uint32_t member_count = source_is_m0 ? ((source >> 16) & 0x7fu) : 0;
+  wf.barrier_signal(barrier_id, member_count);
 }
 
 void SBarrierSignalIsfirstSop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_barrier_signal_isfirst_sop1(*this, wf);
+  uint32_t source = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
+  bool source_is_m0 = ssrc0.encoding_value() == OpSelSsrcBarrierId::OPR_SSRC_BARRIER_ID_M0;
+  int32_t barrier_id =
+      source_is_m0 ? static_cast<int32_t>(source & 0x1fu) : static_cast<int32_t>(source);
+  uint32_t member_count = source_is_m0 ? ((source >> 16) & 0x7fu) : 0;
+  bool barrier_valid = (wf.barrier_state(barrier_id) & 1u) != 0;
+  bool is_first = wf.barrier_signal(barrier_id, member_count);
+  if (barrier_valid)
+    wf.write_scc(is_first);
 }
 
 void SGetBarrierStateSop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::RegisterAccess(wf).write_scalar(sdst, 0);
+  uint32_t source = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
+  bool source_is_m0 = ssrc0.encoding_value() == OpSelSsrcBarrierId::OPR_SSRC_BARRIER_ID_M0;
+  int32_t barrier_id =
+      source_is_m0 ? static_cast<int32_t>(source & 0x1fu) : static_cast<int32_t>(source);
+  amdgpu::RegisterAccess(wf).write_scalar(sdst, wf.barrier_state(barrier_id));
 }
 
-void SBarrierInitSop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBarrierInitSop1::execute_impl(amdgpu::Wavefront &wf) {
+  uint32_t source = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
+  bool source_is_m0 = ssrc0.encoding_value() == OpSelSsrcBarrierId::OPR_SSRC_BARRIER_ID_M0;
+  int32_t barrier_id =
+      source_is_m0 ? static_cast<int32_t>(source & 0x1fu) : static_cast<int32_t>(source);
+  uint32_t member_source = wf.m0();
+  uint32_t member_count = (member_source >> 16) & 0x7fu;
+  wf.barrier_init(barrier_id, member_count);
+}
 
-void SBarrierJoinSop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBarrierJoinSop1::execute_impl(amdgpu::Wavefront &wf) {
+  uint32_t source = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
+  bool source_is_m0 = ssrc0.encoding_value() == OpSelSsrcBarrierId::OPR_SSRC_BARRIER_ID_M0;
+  int32_t barrier_id =
+      source_is_m0 ? static_cast<int32_t>(source & 0x1fu) : static_cast<int32_t>(source);
+  wf.barrier_join(barrier_id);
+}
 
 void SAllocVgprSop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_alloc_vgpr_sop1(*this, wf);
