@@ -1233,6 +1233,17 @@ ib_recv_dev_list:
       for (int i = 0; i < comm->base.vProps.ndevs; i++) {
         NCCLCHECK(wrap_ibv_destroy_cq(comm->devs[i].base.cq));
         comm->devs[i].base.cq = existingSlot->primaryCq;
+
+        // This comm's own PD ref, taken by IbCastInitCommDevBase above, is
+        // unused: as a SECONDARY it borrows the primary's QPs and CQ instead
+        // of its own. Release it now so the group's PD refcount reflects one
+        // owner (the PRIMARY), matching the single release
+        // IbCastCleanupGroupCqs performs at the group's last close.
+        int secondaryIbDevN = comm->base.vProps.devs[i];
+        std::lock_guard<std::mutex> pdLock(IbCastDevs[secondaryIbDevN].mutex);
+        if (0 == --IbCastDevs[secondaryIbDevN].pdRefs) {
+          NCCLCHECK(wrap_ibv_dealloc_pd(IbCastDevs[secondaryIbDevN].pd));
+        }
       }
       existingSlot->cqRefcount++;
 
@@ -2097,6 +2108,17 @@ ib_recv:
       for (int i = 0; i < rComm->base.vProps.ndevs; i++) {
         NCCLCHECK(wrap_ibv_destroy_cq(rComm->devs[i].base.cq));
         rComm->devs[i].base.cq = recvExistingSlot->primaryCq;
+
+        // This comm's own PD ref, taken by IbCastInitCommDevBase above, is
+        // unused: as a SECONDARY it borrows the primary's QPs and CQ instead
+        // of its own. Release it now so the group's PD refcount reflects one
+        // owner (the PRIMARY), matching the single release
+        // IbCastCleanupGroupCqs performs at the group's last close.
+        int secondaryIbDevN = rComm->base.vProps.devs[i];
+        std::lock_guard<std::mutex> pdLock(IbCastDevs[secondaryIbDevN].mutex);
+        if (0 == --IbCastDevs[secondaryIbDevN].pdRefs) {
+          NCCLCHECK(wrap_ibv_dealloc_pd(IbCastDevs[secondaryIbDevN].pd));
+        }
       }
       recvExistingSlot->cqRefcount++;
 
