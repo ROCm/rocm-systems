@@ -479,42 +479,8 @@ jobs:
             done
             echo "=== probe results ===" >&2
             grep -hE '^(OK|BAD) ' "${probe_dir}"/*.out 2>/dev/null >&2 || true
-            python3 - "${need}" "${probe_dir}" <<'PY'
-import os, sys
-from collections import defaultdict
-need = int(sys.argv[1])
-probe_dir = sys.argv[2]
-ok = []
-for name in sorted(os.listdir(probe_dir)):
-    if not name.endswith(".out"):
-        continue
-    path = os.path.join(probe_dir, name)
-    try:
-        lines = open(path, encoding="utf-8", errors="replace").read().splitlines()
-    except OSError:
-        continue
-    for line in lines:
-        if not line.startswith("OK "):
-            continue
-        kv = {}
-        for tok in line.split():
-            if "=" in tok:
-                k, v = tok.split("=", 1)
-                kv[k] = v
-        if kv.get("host") and kv.get("fp"):
-            ok.append(kv)
-groups = defaultdict(list)
-for row in ok:
-    if row["host"] not in groups[row["fp"]]:
-        groups[row["fp"]].append(row["host"])
-for fp, hosts in sorted(groups.items(), key=lambda kv: -len(kv[1])):
-    print(f"symmetric group fp={fp[:12]} n={len(hosts)} hosts={','.join(hosts)}", file=sys.stderr)
-    if len(hosts) >= need:
-        print(",".join(hosts[:need]))
-        sys.exit(0)
-print("no symmetric pair with 8 GPUs and ionic_0..7", file=sys.stderr)
-sys.exit(1)
-PY
+            python3 "${GITHUB_WORKSPACE}/${TEST_RUNNER_DIR}/scripts/crusoe_pick_symmetric.py" \
+              "${need}" "${probe_dir}"
           }
 
           echo "Submitting sbatch job (account=${SALLOC_ACCOUNT} partition=${SALLOC_PARTITION} nodes=${SALLOC_NODES} time=${SALLOC_TIME})..."
