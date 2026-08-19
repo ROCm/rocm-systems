@@ -6,13 +6,13 @@
 
 // Reusable stubs for the RCCL device-runtime layer -- the `devr`, `gin`,
 // `rma`, `team`, shadow-pool, space-allocator and symmetric-kernel symbols a
-// host-only micro-test references when it #includes a production TU such as
+// host-only references when it #includes a production TU such as
 // src/dev_runtime.cc.
 //
-// These are not p2p-specific and carry no controllable seams: every entry is
-// an inert success stub (out-params zeroed) that lets the binary link without
-// librccl.so or a GPU. Generic `nccl*`/`bootstrap*` symbols live in
-// nccl_fakes.{h,cc}; HIP runtime seams live in hip_fakes.{h,cc}.
+// Every entry is an inert success stub (out-params zeroed) that lets the
+// binary link without librccl.so or a GPU. Generic `nccl*`/`bootstrap*`
+// symbols live in nccl_fakes.{h,cc}; HIP runtime seams live in
+// hip_fakes.{h,cc}.
 //
 // There is intentionally no reset/seam API here -- if a future test needs to
 // control one of these, promote it to a std::function seam following the

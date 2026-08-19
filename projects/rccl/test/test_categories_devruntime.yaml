@@ -1,7 +1,5 @@
 # rccl-UnitTestsDevRuntime — shared/ctest schema.
-# Host-only micro-tests for src/dev_runtime.cc (no GPU, no librccl/HIP runtime);
-# build in Release and Debug.
-# RCCL does not support Windows: exclude_windows matches all tests so generated suites are empty on Windows.
+# Host-only tests for src/dev_runtime.cc (no GPU, no librccl/HIP runtime);
 #
 # Tiers:
 #   quick — canonical anchor.
@@ -11,7 +9,7 @@
 
 test_categories:
   quick: &devruntime_quick
-    description: "Smoke — host-only dev_runtime symMemory/finalize micro-tests, sub-second."
+    description: "Smoke — host-only dev_runtime symMemory/finalize tests, sub-second."
     test_patterns:
       - "SymMemoryObtainTest.*"
       - "DevrFinalizeDrainTest.*"
@@ -22,28 +20,24 @@ test_categories:
       - "quick"
       - "smoke"
       - "precheck"
-      - "microtest"
   standard:
     <<: *devruntime_quick
     labels:
       - "rccl"
       - "standard"
       - "regression"
-      - "microtest"
   comprehensive:
     <<: *devruntime_quick
     labels:
       - "rccl"
       - "comprehensive"
       - "comprehensive_regression"
-      - "microtest"
   full:
     <<: *devruntime_quick
     labels:
       - "rccl"
       - "full"
       - "full_regression"
-      - "microtest"
 
 execution_settings:
   timeout_multiplier: 1

@@ -620,7 +620,7 @@ target_link_libraries(rccl-UnitTestsMicro PRIVATE
   fmt::fmt-header-only
 )
 
-# --- Standalone dev_runtime micro-test binary ---------------------------
+# --- Standalone dev_runtime test binary ---------------------------
 # rccl-UnitTestsDevRuntime: sibling of rccl-UnitTestsMicro that #includes
 # the hipified src/dev_runtime.cc directly (via DEV_RUNTIME_CC_PATH). Kept a
 # separate binary rather than folded in: both would #include a whole production
