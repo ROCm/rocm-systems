@@ -60,7 +60,7 @@ struct IbCastSharedQp* IbCastFindSharedQpByQpn(uint32_t qpn, bool isSend) {
 
 struct IbCastSharedQp* IbCastRegisterSharedQp(const IbCastSharedQpKey* key,
     struct ibv_qp* qp, struct ibv_cq* primaryCq,
-    struct ncclIbNetCommDevBase* primaryDevBase, int devIndex, int initialRefcount) {
+    int primaryIbDevN, int devIndex, int initialRefcount) {
 
     if (g_IbCastSharedQpPoolCount >= IBCAST_MAX_SHARED_QPS) {
         WARN("IB CAST QP Sharing: pool full (%d entries)", IBCAST_MAX_SHARED_QPS);
@@ -70,7 +70,7 @@ struct IbCastSharedQp* IbCastRegisterSharedQp(const IbCastSharedQpKey* key,
     entry->key = *key;
     entry->qp = qp;
     entry->primaryCq = primaryCq;
-    entry->primaryDevBase = primaryDevBase;
+    entry->primaryIbDevN = primaryIbDevN;
     entry->devIndex = devIndex;
     entry->refcount = initialRefcount;
     entry->cqRefcount = 0;
@@ -197,8 +197,8 @@ void IbCastCleanupGroupCqs(struct IbCastSharedQp* slot0Entry) {
                      g_IbCastSharedQpPool[i].key.qpIdx, g_IbCastSharedQpPool[i].refcount);
             }
             destroyedCqs[nDestroyed++] = cq;
-            if (g_IbCastSharedQpPool[i].primaryDevBase) {
-                int ibDevN2 = g_IbCastSharedQpPool[i].primaryDevBase->ibDevN;
+            {
+                int ibDevN2 = g_IbCastSharedQpPool[i].primaryIbDevN;
                 std::lock_guard<std::mutex> lock(IbCastDevs[ibDevN2].mutex);
                 INFO(NCCL_NET, "IB CAST TEARDOWN: pdRefs ibDevN=%d: %d->%d %s",
                      ibDevN2, IbCastDevs[ibDevN2].pdRefs, IbCastDevs[ibDevN2].pdRefs - 1,
