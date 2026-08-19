@@ -1508,9 +1508,11 @@ TEST(ConSanMoi, CdnaRecordReplayEnablesAndCapturesEveryLaunchCoordinate) {
           continue;
         const uint16_t full_source = static_cast<uint16_t>(full_payload_base + dimension);
         if (guest_destination != full_source) {
-          EXPECT_NE(std::ranges::find(prologue_words,
-                                      build_s_mov_b32(guest_destination, full_source, arch)),
-                    prologue_words.end());
+          EXPECT_EQ(std::ranges::count(prologue_words,
+                                       build_s_mov_b32(guest_destination, full_source, arch)),
+                    1u)
+              << "the semantic workgroup-payload repair must be the sole copy; a preceding "
+                 "positional system-SGPR repair would consume overlapping sources";
         }
         ++guest_destination;
       }

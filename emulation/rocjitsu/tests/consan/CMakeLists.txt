@@ -2039,6 +2039,73 @@ function(rj_add_consan_hip_tests)
     endif()
     if(RJ_HIP_RUNTIME_SUPPORTS_GFX950)
         rj_add_consan_device_fixture_targets(gfx950)
+        set(_module_reduction_kernel_source
+            "${CMAKE_CURRENT_SOURCE_DIR}/dbi/consan/device/module_reduction_kernels.hip"
+        )
+        set(_module_reduction_bundle
+            "${CMAKE_CURRENT_BINARY_DIR}/hip_consan_device_module_reduction_gfx950.bundle"
+        )
+        set(_module_reduction_hsaco
+            "${CMAKE_CURRENT_BINARY_DIR}/hip_consan_device_module_reduction_gfx950.hsaco"
+        )
+        find_program(
+            _module_reduction_offload_bundler
+            clang-offload-bundler
+            REQUIRED
+            HINTS
+                "${ROCM_PATH}/lib/llvm/bin"
+                "${ROCM_PATH}/llvm/bin"
+                "${ROCM_PATH}/bin"
+        )
+        set(_module_reduction_compiler_command ${AMDCXX})
+        if(CMAKE_HIP_COMPILER_LAUNCHER)
+            list(
+                PREPEND
+                _module_reduction_compiler_command
+                ${CMAKE_HIP_COMPILER_LAUNCHER}
+            )
+        endif()
+        add_custom_command(
+            OUTPUT "${_module_reduction_bundle}"
+            COMMAND
+                ${_module_reduction_compiler_command} -x hip
+                --cuda-device-only --offload-arch=gfx950
+                --rocm-path=${ROCM_PATH} -std=c++20 -O2 -o
+                "${_module_reduction_bundle}"
+                "${_module_reduction_kernel_source}"
+            DEPENDS "${_module_reduction_kernel_source}"
+            COMMENT "Compiling gfx950 module-loaded ConSan reduction kernels"
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT "${_module_reduction_hsaco}"
+            COMMAND
+                "${_module_reduction_offload_bundler}" --type=o --unbundle
+                --targets=hipv4-amdgcn-amd-amdhsa--gfx950
+                --input=${_module_reduction_bundle}
+                --output=${_module_reduction_hsaco}
+            DEPENDS "${_module_reduction_bundle}"
+            COMMENT "Extracting gfx950 module-loaded ConSan reduction code object"
+            VERBATIM
+        )
+        add_custom_target(
+            hip_consan_device_module_reduction_gfx950_kernels_target
+            ALL
+            DEPENDS "${_module_reduction_hsaco}"
+        )
+        rj_add_hip_test(
+            hip_consan_device_module_reduction_gfx950_test
+            ARCH gfx950
+            SOURCE dbi/consan/device/module_reduction_test.hip
+            COMPILE_DEFINITIONS
+                "RJ_CONSAN_MODULE_REDUCTION_HSACO=\"${_module_reduction_hsaco}\""
+            EXTRA_DEPENDS "${_module_reduction_hsaco}"
+        )
+        add_dependencies(
+            hip_consan_device_module_reduction_gfx950_test_target
+            hip_consan_device_module_reduction_gfx950_kernels_target
+            rocjitsu_dbi_hooks
+        )
         rj_add_consan_device_conformance_cases(
             PREFIX "ConSanDeviceGfx950Sim"
             TARGET gfx950
@@ -2076,6 +2143,62 @@ function(rj_add_consan_hip_tests)
                 PREFIX "ConSanDeviceGfx950Physical"
                 TARGET gfx950
                 PHYSICAL
+            )
+            foreach(_outcome IN ITEMS Correct Incorrect)
+                rj_add_consan_hip_case(
+                    NAME
+                        "ConSanDeviceGfx950Physical.BaselineModuleReduction.${_outcome}"
+                    TARGET hip_consan_device_module_reduction_gfx950_test
+                    FILTER "ConSanDeviceModuleReductionTest.${_outcome}"
+                    TIMEOUT 60
+                    LABELS
+                        consan consan-device gfx950 physical module-load
+                        baseline
+                )
+            endforeach()
+            rj_add_consan_hip_case(
+                NAME
+                    "ConSanDeviceGfx950Physical.RecordReplayModuleReduction.Correct"
+                TARGET hip_consan_device_module_reduction_gfx950_test
+                FILTER "ConSanDeviceModuleReductionTest.Correct"
+                TIMEOUT 60
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_MODE=record-replay"
+                    "RJ_CONSAN_POLICY=strict"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=1"
+                    "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
+                    "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
+                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                    "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                    "RJ_CONSAN_MOI_FORBID_OVERFLOW=1"
+                LABELS
+                    consan consan-device gfx950 physical module-load
+                    record-replay clean
+            )
+            rj_add_consan_hip_case(
+                NAME
+                    "ConSanDeviceGfx950Physical.RecordReplayModuleReduction.Incorrect"
+                TARGET hip_consan_device_module_reduction_gfx950_test
+                FILTER "ConSanDeviceModuleReductionTest.Incorrect"
+                TIMEOUT 60
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_MODE=record-replay"
+                    "RJ_CONSAN_POLICY=strict"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=1"
+                    "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
+                    "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
+                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                    "RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT=1"
+                    "RJ_CONSAN_MOI_FORBID_OVERFLOW=1"
+                LABELS
+                    consan consan-device gfx950 physical module-load
+                    record-replay incorrect racy
             )
             # Per-site resource plans are debug diagnostics. Cases whose pass
             # regex matches site/source/owner details must request log level 3.

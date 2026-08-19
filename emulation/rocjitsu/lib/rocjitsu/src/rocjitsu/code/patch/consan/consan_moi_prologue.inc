@@ -110,8 +110,18 @@ struct MoiEntryScalarBackup {
     }
     words.insert(words.end(), encode_nonzero->begin(), encode_nonzero->end());
   }
-  for (uint16_t destination = plan.first_shifted_guest_sgpr;
-       destination < plan.first_shifted_guest_sgpr + plan.shifted_guest_sgpr_count; ++destination) {
+  uint32_t shifted_guest_end =
+      static_cast<uint32_t>(plan.first_shifted_guest_sgpr) + plan.shifted_guest_sgpr_count;
+  if (!restore_system_sgprs) {
+    // The ordinary preload plan describes the system SGPRs as the tail of one
+    // shifted guest range.  A full workgroup-payload plan restores that tail
+    // separately according to the guest's sparse X/Y/Z/info mask.  Stop this
+    // positional repair at the user-SGPR boundary so it neither duplicates
+    // nor destroys the authoritative full payload before the semantic copy.
+    shifted_guest_end = std::min<uint32_t>(shifted_guest_end, plan.original_user_sgpr_count);
+  }
+  for (uint16_t destination = plan.first_shifted_guest_sgpr; destination < shifted_guest_end;
+       ++destination) {
     const auto source = consan_moi_dispatch_id_restore_source(plan, destination);
     if (!source || *source >= kMaxSgprs) {
       errors.emplace_back("ConSan MOI dispatch-ID prologue has an invalid guest restore source");
@@ -194,8 +204,77 @@ append_cdna_full_workgroup_payload_restore(std::vector<uint32_t> &words,
     const uint16_t source = static_cast<uint16_t>(*sources.cdna_full_payload_base + 3u);
     if (destination != source &&
         !append_moi_entry_salu_write(words, build_s_mov_b32(destination, source, arch), arch)) {
-      errors.emplace_back("ConSan MOI could not restore the guest CDNA workgroup-info SGPR");
+      errors.emplace_back("ConSan MOI could not restore the guest AMDHSA workgroup-info SGPR");
       return false;
+    }
+  }
+  return true;
+}
+
+[[nodiscard]] bool
+append_record_replay_workgroup_capture(std::vector<uint32_t> &words,
+                                       ConSanMoiPersistentWorkgroupRegisters scalar_destinations,
+                                       ConSanMoiPersistentWorkgroupRegisters vector_destinations,
+                                       const ConSanMoiWorkgroupSources &sources,
+                                       rj_code_arch_t arch, std::vector<std::string> &errors) {
+  if ((!scalar_destinations.empty() && !scalar_destinations.complete()) ||
+      (!vector_destinations.empty() && !vector_destinations.complete()) ||
+      (scalar_destinations.complete() && vector_destinations.complete())) {
+    errors.emplace_back(
+        "ConSan MOI exact workgroup-tuple prologue requires one complete register tuple");
+    return false;
+  }
+  if (!scalar_destinations.complete() && !vector_destinations.complete())
+    return true;
+
+  const std::array<const ConSanMoiWorkgroupSource *, 3> source_tuple = {&sources.x, &sources.y,
+                                                                        &sources.z};
+  const std::array<std::optional<uint16_t>, 3> scalar_tuple = {
+      scalar_destinations.x, scalar_destinations.y, scalar_destinations.z};
+  const std::array<std::optional<uint16_t>, 3> vector_tuple = {
+      vector_destinations.x, vector_destinations.y, vector_destinations.z};
+  for (size_t index = 0; index < source_tuple.size(); ++index) {
+    const ConSanMoiWorkgroupSource &source = *source_tuple[index];
+    if (!source.is_well_formed() || !source.has_value()) {
+      errors.emplace_back(
+          "ConSan MOI exact workgroup-tuple prologue requires all launch coordinates");
+      return false;
+    }
+    if (scalar_tuple[index]) {
+      if (!source.scalar_src) {
+        errors.emplace_back(
+            "ConSan MOI exact scalar workgroup tuple requires scalar launch sources");
+        return false;
+      }
+      const uint16_t destination = *scalar_tuple[index];
+      const uint16_t source_operand = *source.scalar_src;
+      if (!append_moi_entry_salu_write(words, build_s_mov_b32(destination, source_operand, arch),
+                                       arch) ||
+          (source.mask_low_16 &&
+           (!append_moi_entry_salu_write(
+                words,
+                build_s_lshl_b32(destination, destination, scalar_positive_inline_u32(16), arch),
+                arch) ||
+            !append_moi_entry_salu_write(
+                words,
+                build_s_lshr_b32(destination, destination, scalar_positive_inline_u32(16), arch),
+                arch))) ||
+          (source.shift_right_16 &&
+           !append_moi_entry_salu_write(
+               words,
+               build_s_lshr_b32(destination, destination, scalar_positive_inline_u32(16), arch),
+               arch))) {
+        errors.emplace_back(
+            "ConSan MOI exact scalar workgroup-tuple prologue could not copy a launch source");
+        return false;
+      }
+    } else if (vector_tuple[index]) {
+      const uint16_t destination = *vector_tuple[index];
+      if (!consan_detail::append_workgroup_source_value(words, source, destination, arch)) {
+        errors.emplace_back(
+            "ConSan MOI exact vector workgroup-tuple prologue could not copy a launch source");
+        return false;
+      }
     }
   }
   return true;
@@ -713,6 +792,19 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
                                                              /*restore=*/false, arch, errors)) {
     return std::nullopt;
   }
+  // A newly inserted dispatch-ID preload shifts CDNA system SGPRs upward. The
+  // dispatch repair below copies those values back to the guest ABI locations
+  // and therefore overwrites part of the shifted tuple. Persist the exact
+  // workgroup identity before that destructive repair.
+  const bool capture_workgroup_before_dispatch =
+      dispatch_plan && workgroup_sources && workgroup_sources->cdna_full_payload_base &&
+      (record_replay_workgroup_sgprs.complete() || record_replay_workgroup_vgprs.complete());
+  if (capture_workgroup_before_dispatch &&
+      !append_record_replay_workgroup_capture(words, record_replay_workgroup_sgprs,
+                                              record_replay_workgroup_vgprs, *workgroup_sources,
+                                              arch, errors)) {
+    return std::nullopt;
+  }
   if (dispatch_plan &&
       !append_dispatch_id_capture_and_restore(
           words, *dispatch_plan, dispatch_capture,
@@ -788,74 +880,16 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
                               return_pc_sgpr, arch, errors)) {
     return std::nullopt;
   }
-  if ((!record_replay_workgroup_sgprs.empty() && !record_replay_workgroup_sgprs.complete()) ||
-      (!record_replay_workgroup_vgprs.empty() && !record_replay_workgroup_vgprs.complete()) ||
-      (record_replay_workgroup_sgprs.complete() && record_replay_workgroup_vgprs.complete())) {
-    errors.emplace_back(
-        "ConSan MOI exact workgroup-tuple prologue requires one complete register tuple");
-    return std::nullopt;
-  }
-  if (record_replay_workgroup_sgprs.complete() || record_replay_workgroup_vgprs.complete()) {
+  if (!capture_workgroup_before_dispatch &&
+      (record_replay_workgroup_sgprs.complete() || record_replay_workgroup_vgprs.complete())) {
     if (!workgroup_sources) {
       errors.emplace_back("ConSan MOI exact workgroup-tuple prologue requires launch sources");
       return std::nullopt;
     }
-    const std::array<const ConSanMoiWorkgroupSource *, 3> sources = {
-        &workgroup_sources->x, &workgroup_sources->y, &workgroup_sources->z};
-    const std::array<std::optional<uint16_t>, 3> scalar_destinations = {
-        record_replay_workgroup_sgprs.x, record_replay_workgroup_sgprs.y,
-        record_replay_workgroup_sgprs.z};
-    const std::array<std::optional<uint16_t>, 3> vector_destinations = {
-        record_replay_workgroup_vgprs.x, record_replay_workgroup_vgprs.y,
-        record_replay_workgroup_vgprs.z};
-    for (size_t index = 0; index < sources.size(); ++index) {
-      const ConSanMoiWorkgroupSource &source = *sources[index];
-      if (!source.is_well_formed() || !source.has_value()) {
-        errors.emplace_back(
-            "ConSan MOI exact workgroup-tuple prologue requires all launch coordinates");
-        return std::nullopt;
-      }
-      if (scalar_destinations[index]) {
-        if (!source.scalar_src) {
-          errors.emplace_back(
-              "ConSan MOI exact scalar workgroup tuple requires scalar launch sources");
-          return std::nullopt;
-        }
-        const uint16_t destination = *scalar_destinations[index];
-        const uint16_t source_operand = *source.scalar_src;
-        if (!append_moi_entry_salu_write(words, build_s_mov_b32(destination, source_operand, arch),
-                                         arch) ||
-            (source.mask_low_16 &&
-             (!append_moi_entry_salu_write(
-                  words,
-                  build_s_lshl_b32(destination, destination, scalar_positive_inline_u32(16), arch),
-                  arch) ||
-              !append_moi_entry_salu_write(
-                  words,
-                  build_s_lshr_b32(destination, destination, scalar_positive_inline_u32(16), arch),
-                  arch))) ||
-            (source.shift_right_16 &&
-             !append_moi_entry_salu_write(
-                 words,
-                 build_s_lshr_b32(destination, destination, scalar_positive_inline_u32(16), arch),
-                 arch))) {
-          errors.emplace_back(
-              "ConSan MOI exact scalar workgroup-tuple prologue could not copy a launch source");
-          return std::nullopt;
-        }
-      } else if (vector_destinations[index]) {
-        const uint16_t destination = *vector_destinations[index];
-        if (source.has_value()) {
-          if (!consan_detail::append_workgroup_source_value(words, source, destination, arch)) {
-            errors.emplace_back(
-                "ConSan MOI exact vector workgroup-tuple prologue could not copy a launch source");
-            return std::nullopt;
-          }
-        } else {
-          words.push_back(build_v_mov_b32_e32(destination, scalar_positive_inline_u32(0u), arch));
-        }
-      }
-    }
+    if (!append_record_replay_workgroup_capture(words, record_replay_workgroup_sgprs,
+                                                record_replay_workgroup_vgprs, *workgroup_sources,
+                                                arch, errors))
+      return std::nullopt;
   }
   if (persistent_workgroup_key_sgpr) {
     if (!workgroup_sources || !return_pc_sgpr) {
@@ -990,6 +1024,12 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
       return std::nullopt;
     words.push_back(*restore_exec);
   }
+  // The generic dispatch repair treats system SGPRs as one contiguous suffix.
+  // That is not sufficient for a sparse guest workgroup payload: after we
+  // enable X/Y/Z for ConSan, a Y-only guest still expects Y in its first
+  // system-SGPR slot rather than the newly inserted X value.  Always perform
+  // the semantic full-to-guest mapping after the generic repair.  It emits no
+  // move when the layouts already coincide.
   if (workgroup_sources &&
       !append_cdna_full_workgroup_payload_restore(words, *workgroup_sources, arch, errors)) {
     return std::nullopt;
