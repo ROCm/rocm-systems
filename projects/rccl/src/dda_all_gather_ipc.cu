@@ -104,10 +104,10 @@ bool ncclAllGatherDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
   return true;
 }
 
-int ncclAllGatherDdaIpcBlocks(ncclComm* comm, size_t sendcount, ncclDataType_t datatype) {
+uint32_t ncclAllGatherDdaIpcBlocks(ncclComm* comm, size_t sendcount, ncclDataType_t datatype) {
   (void)comm;
   const auto grid = ddaAllGatherIpcGeom(sendcount * ncclTypeSize(datatype)).first;
-  return (int)(grid.x * grid.y);
+  return grid.x * grid.y;
 }
 
 ncclResult_t ncclAllGatherDdaIpc(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,

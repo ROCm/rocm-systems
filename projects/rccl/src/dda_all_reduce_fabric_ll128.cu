@@ -170,9 +170,9 @@ bool ncclAllReduceDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, v
   return true;
 }
 
-int ncclAllReduceDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
+uint32_t ncclAllReduceDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
   const auto grid = ddaAllReduceFabricLL128Geom(comm, count, ncclTypeSize(datatype)).first;
-  return (int)(grid.x * grid.y);
+  return grid.x * grid.y;
 }
 
 ncclResult_t ncclAllReduceDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,

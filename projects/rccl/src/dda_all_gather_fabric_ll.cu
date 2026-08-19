@@ -72,13 +72,13 @@ static ncclResult_t ncclAllGatherDdaFabricLLTyped(
   auto gridBlock = ddaAllGatherFabricLLGeom(comm, perRankBytes);
   const dim3 grid = gridBlock.first;
   const dim3 block = gridBlock.second;
-  const int blocksPerPeer = (int)grid.y;
+  const uint32_t blocksPerPeer = grid.y;
 
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
 
-  INFO(NCCL_COLL, "DDA fabric AllGather LL: nRanks=%d perRankBytes=%zu grid=%ux%u block=%u (block-per-peer, bpp=%d)",
+  INFO(NCCL_COLL, "DDA fabric AllGather LL: nRanks=%d perRankBytes=%zu grid=%ux%u block=%u (block-per-peer, bpp=%u)",
        nRanks, perRankBytes, grid.x, grid.y, block.x, blocksPerPeer);
 
   // NRANKS_CT 4/8: unrolled; 0: runtime fallback.
@@ -141,9 +141,9 @@ bool ncclAllGatherDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void
   return true;
 }
 
-int ncclAllGatherDdaFabricLLBlocks(ncclComm* comm, size_t sendcount, ncclDataType_t datatype) {
+uint32_t ncclAllGatherDdaFabricLLBlocks(ncclComm* comm, size_t sendcount, ncclDataType_t datatype) {
   const auto grid = ddaAllGatherFabricLLGeom(comm, sendcount * ncclTypeSize(datatype)).first;
-  return (int)(grid.x * grid.y);
+  return grid.x * grid.y;
 }
 
 ncclResult_t ncclAllGatherDdaFabricLL(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,

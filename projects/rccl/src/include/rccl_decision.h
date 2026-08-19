@@ -23,6 +23,8 @@ THE SOFTWARE.
 #ifndef RCCL_DECISION_H_
 #define RCCL_DECISION_H_
 
+#include <cstdint>
+
 // Single, self-contained description of which implementation RCCL selected for a
 // collective. This is the one source of truth that both the dispatch path
 // (ncclXxx_impl / taskAppend) and the reporting path (rcclGetCollImplInfo, used
@@ -37,7 +39,7 @@ THE SOFTWARE.
 struct rcclCollDecision {
   int algo;             // NCCL_ALGO_* or rcclAddonAlgos_t
   int protocol;         // NCCL_PROTO_*
-  int nMaxChannels;     // reporting: channels for the kernel path (0 = N/A)
+  uint32_t nMaxChannels; // reporting: channels for the kernel path (0 = N/A)
   // Runtime bits computed once at the decision point and carried into
   // taskAppend() so it never recomputes graph-capture state for AllReduce.
   bool ceCapturing;

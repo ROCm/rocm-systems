@@ -1096,7 +1096,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
         intraProto = task.protocol;
         intraChan = task.nMaxChannels;
       }
-      INFO(NCCL_COLL, "Hierarchical AG inter: proto=%d channels=%d, intra: proto=%d channels=%d", decision->protocol,
+      INFO(NCCL_COLL, "Hierarchical AG inter: proto=%d channels=%u, intra: proto=%d channels=%d", decision->protocol,
            decision->nMaxChannels, intraProto, intraChan);
     }
     return ncclSuccess;
