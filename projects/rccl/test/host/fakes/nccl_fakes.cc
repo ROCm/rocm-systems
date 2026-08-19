@@ -24,12 +24,9 @@
 #include "proxy.h"        // ncclProxy* family
 #include "register.h"     // ncclRegLocalIsValid
 #include "shm.h"          // ncclShm*
-#include "comm.h"         // ncclCommGraphRegister / Deregister, ncclCommEnsureReady
+#include "comm.h"         // ncclCommGraphRegister / Deregister
 #include "strongstream.h" // ncclStrongStream*
 #include "mem_manager.h"  // ncclMemTrack / ncclMemUntrack / ncclDynMemMarkExportToPeer
-#include "bootstrap.h"    // bootstrapAllGather / Barrier / IntraNode*
-#include "argcheck.h"     // PtrCheck / CommCheck
-#include "group.h"        // ncclGroupStartInternal / EndInternal
 
 #include "nccl_fakes.h"   // controllable seam hooks
 
@@ -78,21 +75,6 @@ void ncclDebugLog(ncclDebugLogLevel /*level*/,
     std::fputc('\n', stderr);
 }
 
-int64_t ncclLoadParam(char const* /*env*/,
-                      int64_t     deftVal,
-                      int64_t     /*uninitialized*/,
-                      int64_t*    cache,
-                      int8_t*     noCache)
-{
-    // Populate cache/noCache with the default so real callers (e.g.
-    // dev_runtime.cc, which invokes ncclLoadParam directly) see the
-    // compile-time default. The NCCL_PARAM bodies that p2p-test.cc
-    // redirects through g_loadParam bypass this entirely.
-    if (cache)   *cache   = deftVal;
-    if (noCache) *noCache = 0;
-    return deftVal;
-}
-
 // Default returns deftVal verbatim -- preserves the pre-hook contract that
 // every param sits at its compile-time default.
 static int64_t DefaultLoadParam(const char* /*env*/, int64_t deftVal)
@@ -101,6 +83,20 @@ static int64_t DefaultLoadParam(const char* /*env*/, int64_t deftVal)
 }
 
 std::function<int64_t(const char*, int64_t)> g_loadParam = DefaultLoadParam;
+
+int64_t ncclLoadParam(char const* env,
+                      int64_t     deftVal,
+                      int64_t     /*uninitialized*/,
+                      int64_t*    cache,
+                      int8_t*     noCache)
+{
+    // Route through the controllable seam so tests can override per-env
+    // values; populate cache/noCache with the resolved value.
+    int64_t const val = g_loadParam(env, deftVal);
+    if (cache)   *cache   = val;
+    if (noCache) *noCache = 0;
+    return val;
+}
 
 // ---------------------------------------------------------------------------
 // Seams worth controlling from tests (return failure by default)
@@ -382,46 +378,19 @@ ncclResult_t ncclProxyClientBatchQueryFdBlocking(struct ncclComm*           /*co
 int64_t ncclParamMultiSegmentRegister() { return 0; }
 
 // ---------------------------------------------------------------------------
-// Generic bootstrap / arg-check / registration / group stubs.
-//
-// Not p2p-specific: any host-only micro-test that #includes a production TU
-// referencing these `nccl*`/`bootstrap*` symbols links them from here rather
-// than redefining its own no-op copies. All are inert success stubs -- no
-// microtest drives a real bootstrap exchange or comm registration.
+// Generic stubs.
 // ---------------------------------------------------------------------------
 
 // Error string. (ncclGetErrorString is the public NCCL accessor.)
 const char* ncclGetErrorString(ncclResult_t) { return "ncclSuccess"; }
 
-// Bootstrap collectives.
-ncclResult_t bootstrapAllGather(void*, void*, int) { return ncclSuccess; }
-ncclResult_t bootstrapBarrier(void*, int, int, int) { return ncclSuccess; }
-ncclResult_t bootstrapIntraNodeBarrier(void*, int*, int, int, int) { return ncclSuccess; }
-ncclResult_t bootstrapIntraNodeAllGather(void*, int*, int, int, void*, int) { return ncclSuccess; }
-
-// Arg checks / comm readiness.
-ncclResult_t PtrCheck(const void*, const char*, const char*) { return ncclSuccess; }
-ncclResult_t CommCheck(struct ncclComm*, const char*, const char*) { return ncclSuccess; }
-ncclResult_t ncclCommEnsureReady(ncclComm_t) { return ncclSuccess; }
-
-// Public registration API.
-ncclResult_t ncclCommRegister(const ncclComm_t, void*, size_t, void**) { return ncclSuccess; }
-ncclResult_t ncclCommDeregister(const ncclComm_t, void*) { return ncclSuccess; }
-ncclResult_t ncclCommWindowDeregister(ncclComm_t, ncclWindow_t) { return ncclSuccess; }
-
-// Group state machine.
-ncclResult_t ncclGroupStartInternal() { return ncclSuccess; }
-ncclResult_t ncclGroupEndInternal(ncclSimInfo_t*) { return ncclSuccess; }
-
-// Thread-local group globals. These pair with ncclGroupStart/EndInternal above
-// and are referenced by production TUs (e.g. dev_runtime.cc) that any host-only
-// micro-test #includes whole. Definitions live here so individual targets need
-// not re-declare them. Not p2p-specific, but harmless to any binary that links
-// nccl_fakes.cc without referencing them (unused symbols).
-thread_local int              ncclGroupDepth = 0;
-thread_local ncclResult_t     ncclGroupError = ncclSuccess;
-thread_local struct ncclComm* ncclGroupCommHead[ncclGroupTaskTypeNum] = {};
-thread_local int              ncclGroupBlocking = 0;
+// NOTE: the bootstrap / arg-check / comm-registration / group-state-machine
+// stubs that used to live here are DevRuntime-only floor -- they now live in
+// devr_fakes.cc. rccl-UnitTestsMicro gets the real group state machine from
+// group.cc (#included by group-test.cc), and rccl-UnitTestsMicroInit provides
+// its own (bootstrap_stubs.cc / nccl_stubs.cc / init_fakes.cc, plus the real
+// init.cc and argcheck.cc), so keeping these in this shared TU produced
+// duplicate-symbol link errors in both binaries.
 
 // ---------------------------------------------------------------------------
 // Reset
