@@ -1071,6 +1071,20 @@
         {"name": "AsymmetricVisibility.CommInitRankAllReduce", "description": "ROCM-27034: RCCL comm init + AllReduce under asymmetric HIP_VISIBLE_DEVICES", "test_filter": "AsymmetricVisibility.CommInitRankAllReduce"}
       ]
     },
+    "plugin_compat_v10": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixturesDebug",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
+      "tests": [
+        {"name": "PluginCompatV10.FinalizeIsNullUntilInitSucceeds", "description": "AICOMRCCL-1891: the v10 compat layer publishes its synthesized finalize only after ncclNet_v10->init() succeeds, so a failed init must leave ncclNet.finalize null and must not count towards the compat refcount", "test_filter": "PluginCompatV10.FinalizeIsNullUntilInitSucceeds"}
+      ]
+    },
     "plugin_compat_v11": {
       "is_gtest": true,
       "binary": "rccl-UnitTestsFixturesDebug",
@@ -1112,7 +1126,10 @@
         {"name": "NetPluginReload.CustomPluginReloadsAfterCommDestroy", "description": "AICOMRCCL-1534: a non-default NCCL_NET_PLUGIN must remain reloadable after the communicator that first used it is destroyed", "test_filter": "NetPluginReload.CustomPluginReloadsAfterCommDestroy"},
         {"name": "NetPluginAssignFail.FinalizesOnFailedAssignment", "description": "NCCL 2.28.7: ncclNetPluginFinalize() runs when plugin init succeeds but assignment fails (incompatible UNPACK version)", "test_filter": "NetPluginAssignFail.FinalizesOnFailedAssignment"},
         {"name": "NetPluginAssignFail.NetNameMismatchSkipsInit", "description": "NCCL 2.28.7: comm config netName mismatch skips external plugin init entirely", "test_filter": "NetPluginAssignFail.NetNameMismatchSkipsInit"},
-        {"name": "NetPluginAssignFail.SurvivesMultipleCommCycles", "description": "NCCL 2.28.7: failed assignment cleanup leaves no orphaned state across multiple comm cycles", "test_filter": "NetPluginAssignFail.SurvivesMultipleCommCycles"}
+        {"name": "NetPluginAssignFail.SurvivesMultipleCommCycles", "description": "NCCL 2.28.7: failed assignment cleanup leaves no orphaned state across multiple comm cycles", "test_filter": "NetPluginAssignFail.SurvivesMultipleCommCycles"},
+        {"name": "NetPluginInitFail.DoesNotFinalizeAfterFailedInit", "description": "AICOMRCCL-1891 / NCCL 2.29.7: ncclNetPluginInit() must not call finalize() for a plugin whose init() failed (crashes on v10 and older, where the compat layer leaves ncclNet.finalize null until init() succeeds)", "test_filter": "NetPluginInitFail.DoesNotFinalizeAfterFailedInit"},
+        {"name": "NetPluginInitFail.FailedPluginIsNotRetriedOrFinalized", "description": "AICOMRCCL-1891 / NCCL 2.29.7: a plugin disabled by a failed init() is neither re-inited nor finalized by later comm cycles", "test_filter": "NetPluginInitFail.FailedPluginIsNotRetriedOrFinalized"},
+        {"name": "NetPluginInitFail.FinalizesWhenDevicesFailsAfterInit", "description": "AICOMRCCL-1891 / NCCL 2.29.7: the finalize() guard must not suppress cleanup when init() succeeded and devices() failed", "test_filter": "NetPluginInitFail.FinalizesWhenDevicesFailsAfterInit"}
       ]
     },
     "debug_tests": {
@@ -3904,6 +3921,12 @@
       "name": "Unit Tests - Fixtures (Debug)",
       "description": "Non-MPI unit tests accessing internal symbols (Debug only)",
       "config": "unit_tests_fixtures_debug",
+      "enabled": true
+    },
+    {
+      "name": "Plugin Compat v10 - Finalize After Failed Init",
+      "description": "AICOMRCCL-1891: v10 net plugin compat layer leaves finalize null after a failed init, so RCCL must not call it (Debug only)",
+      "config": "plugin_compat_v10",
       "enabled": true
     },
     {

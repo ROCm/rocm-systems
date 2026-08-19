@@ -145,10 +145,10 @@ void BasicBlock::add_static_pc_address_builder(PcAddressBuilder builder) {
   static_pc_address_builders_.push_back(builder);
 }
 
-std::vector<std::unique_ptr<BasicBlock>>
+FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
 BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
-                  std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
-                  std::span<const uint64_t> extra_split_points) {
+                  DecodeErrorEmitter emit_error, std::span<const uint64_t> extra_leaders,
+                  ExternalEntryPolicy entry_policy, std::span<const uint64_t> extra_split_points) {
   std::vector<std::unique_ptr<BasicBlock>> blocks;
 
   for (const auto *sec : co.text_sections()) {
@@ -169,14 +169,15 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
         continue;
       }
 
-      Instruction *raw_inst = nullptr;
-      try {
-        raw_inst = decoder.decode(&inst_data[pc], byte_offset);
-      } catch (const util::InvalidInst &error) {
-        throw util::InvalidInst(
-            std::string(error.what()) + " at .text byte offset " + std::to_string(byte_offset), "");
-      }
-      std::unique_ptr<Instruction> inst(raw_inst);
+      auto emit_at_offset = [&](std::string_view message) {
+        emit_error.emit() << message << " at .text byte offset " << byte_offset;
+      };
+      const DecodeErrorEmitter decode_error =
+          emit_error.ignores_messages() ? DecodeErrorEmitter{} : DecodeErrorEmitter(emit_at_offset);
+      DecodeResult decode_result = decoder.decode(&inst_data[pc], byte_offset, decode_error);
+      if (decode_result.failed())
+        return Result::failure();
+      std::unique_ptr<Instruction> inst = std::move(decode_result).value();
       uint32_t inst_size_bytes = static_cast<uint32_t>(inst->size());
       uint32_t inst_words = inst_size_bytes / sizeof(uint32_t);
 

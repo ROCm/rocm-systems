@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "decode_test_util.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
@@ -538,7 +539,7 @@ TEST(RelocationFunctionTable, ResolvesDynamicDispatchThroughGotAndTableLoads) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
   std::array<uint64_t, 1> leaders{40};
-  const auto blocks = BasicBlock::build(object, *decoder, ROCJITSU_CODE_ARCH_GFX1250, leaders);
+  const auto blocks = build_valid_blocks(object, *decoder, ROCJITSU_CODE_ARCH_GFX1250, leaders);
   const auto dispatches = analyze_relocation_pairs(blocks, tables, 0x1000).dispatches;
   ASSERT_EQ(dispatches.size(), 1u);
   EXPECT_EQ(dispatches[0].table_index, 0u);
@@ -563,7 +564,7 @@ TEST(RelocationFunctionTable, ResolvesRcclDirectIndexedTableDispatch) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
   std::array<uint64_t, 1> leaders{32};
-  const auto blocks = BasicBlock::build(object, *decoder, ROCJITSU_CODE_ARCH_GFX1250, leaders);
+  const auto blocks = build_valid_blocks(object, *decoder, ROCJITSU_CODE_ARCH_GFX1250, leaders);
   const auto analysis = analyze_relocation_pairs(blocks, tables, 0x1000);
   const auto &dispatches = analysis.dispatches;
   ASSERT_EQ(dispatches.size(), 1u);
@@ -602,7 +603,7 @@ TEST(RelocationFunctionTable, RejectsChainedAddressAddDispatch) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
   std::array<uint64_t, 1> leaders{44};
-  const auto blocks = BasicBlock::build(object, *decoder, ROCJITSU_CODE_ARCH_GFX1250, leaders);
+  const auto blocks = build_valid_blocks(object, *decoder, ROCJITSU_CODE_ARCH_GFX1250, leaders);
   const auto dispatches = analyze_relocation_pairs(blocks, tables, 0x1000).dispatches;
   // The base is built with two literal adds; only one add offset can be relocated,
   // so the dispatch must fail closed rather than resolve to a value whose first
@@ -631,7 +632,7 @@ TEST(RelocationFunctionTable, ResolvesBackwardTableAddress) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
   std::array<uint64_t, 1> leaders{32};
-  const auto blocks = BasicBlock::build(object, *decoder, ROCJITSU_CODE_ARCH_GFX1250, leaders);
+  const auto blocks = build_valid_blocks(object, *decoder, ROCJITSU_CODE_ARCH_GFX1250, leaders);
   const auto dispatches = analyze_relocation_pairs(blocks, tables, kAssumedTextVaddr).dispatches;
   ASSERT_EQ(dispatches.size(), 1u);
   EXPECT_EQ(dispatches[0].table_index, 0u);

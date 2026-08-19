@@ -7,7 +7,6 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/mtbuf.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h"
-#include "util/except.h"
 #include <memory>
 
 namespace rocjitsu {
@@ -46,7 +45,12 @@ TbufferLoadFormatXMtbuf::TbufferLoadFormatXMtbuf(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeTbufferLoadFormatXMtbuf(const MachineInst *opcode) {
+DecodeResult decodeTbufferLoadFormatXMtbuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mtbuf::validate_encoding(
+      "tbuffer_load_format_x", reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<TbufferLoadFormatXMtbuf>(opcode);
 }
 } // namespace detail
@@ -74,7 +78,12 @@ TbufferLoadFormatXyMtbuf::TbufferLoadFormatXyMtbuf(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeTbufferLoadFormatXyMtbuf(const MachineInst *opcode) {
+DecodeResult decodeTbufferLoadFormatXyMtbuf(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Mtbuf::validate_encoding(
+      "tbuffer_load_format_xy", reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<TbufferLoadFormatXyMtbuf>(opcode);
 }
 } // namespace detail
@@ -102,7 +111,12 @@ TbufferLoadFormatXyzMtbuf::TbufferLoadFormatXyzMtbuf(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeTbufferLoadFormatXyzMtbuf(const MachineInst *opcode) {
+DecodeResult decodeTbufferLoadFormatXyzMtbuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mtbuf::validate_encoding(
+      "tbuffer_load_format_xyz", reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<TbufferLoadFormatXyzMtbuf>(opcode);
 }
 } // namespace detail
@@ -130,7 +144,12 @@ TbufferLoadFormatXyzwMtbuf::TbufferLoadFormatXyzwMtbuf(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeTbufferLoadFormatXyzwMtbuf(const MachineInst *opcode) {
+DecodeResult decodeTbufferLoadFormatXyzwMtbuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Mtbuf::validate_encoding(
+      "tbuffer_load_format_xyzw", reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<TbufferLoadFormatXyzwMtbuf>(opcode);
 }
 } // namespace detail
@@ -158,7 +177,12 @@ TbufferStoreFormatXMtbuf::TbufferStoreFormatXMtbuf(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeTbufferStoreFormatXMtbuf(const MachineInst *opcode) {
+DecodeResult decodeTbufferStoreFormatXMtbuf(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Mtbuf::validate_encoding(
+      "tbuffer_store_format_x", reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<TbufferStoreFormatXMtbuf>(opcode);
 }
 } // namespace detail
@@ -186,7 +210,12 @@ TbufferStoreFormatXyMtbuf::TbufferStoreFormatXyMtbuf(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeTbufferStoreFormatXyMtbuf(const MachineInst *opcode) {
+DecodeResult decodeTbufferStoreFormatXyMtbuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mtbuf::validate_encoding(
+      "tbuffer_store_format_xy", reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<TbufferStoreFormatXyMtbuf>(opcode);
 }
 } // namespace detail
@@ -214,7 +243,12 @@ TbufferStoreFormatXyzMtbuf::TbufferStoreFormatXyzMtbuf(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeTbufferStoreFormatXyzMtbuf(const MachineInst *opcode) {
+DecodeResult decodeTbufferStoreFormatXyzMtbuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Mtbuf::validate_encoding(
+      "tbuffer_store_format_xyz", reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<TbufferStoreFormatXyzMtbuf>(opcode);
 }
 } // namespace detail
@@ -242,7 +276,12 @@ TbufferStoreFormatXyzwMtbuf::TbufferStoreFormatXyzwMtbuf(const MachineInst *inst
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeTbufferStoreFormatXyzwMtbuf(const MachineInst *opcode) {
+DecodeResult decodeTbufferStoreFormatXyzwMtbuf(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation = Mtbuf::validate_encoding(
+      "tbuffer_store_format_xyzw", reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<TbufferStoreFormatXyzwMtbuf>(opcode);
 }
 } // namespace detail
@@ -270,7 +309,12 @@ TbufferLoadFormatD16XMtbuf::TbufferLoadFormatD16XMtbuf(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeTbufferLoadFormatD16XMtbuf(const MachineInst *opcode) {
+DecodeResult decodeTbufferLoadFormatD16XMtbuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Mtbuf::validate_encoding(
+      "tbuffer_load_format_d16_x", reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<TbufferLoadFormatD16XMtbuf>(opcode);
 }
 } // namespace detail
@@ -304,7 +348,13 @@ TbufferLoadFormatD16XyMtbuf::TbufferLoadFormatD16XyMtbuf(const MachineInst *inst
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeTbufferLoadFormatD16XyMtbuf(const MachineInst *opcode) {
+DecodeResult decodeTbufferLoadFormatD16XyMtbuf(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mtbuf::validate_encoding("tbuffer_load_format_d16_xy",
+                               reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<TbufferLoadFormatD16XyMtbuf>(opcode);
 }
 } // namespace detail
@@ -332,7 +382,13 @@ TbufferLoadFormatD16XyzMtbuf::TbufferLoadFormatD16XyzMtbuf(const MachineInst *in
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeTbufferLoadFormatD16XyzMtbuf(const MachineInst *opcode) {
+DecodeResult decodeTbufferLoadFormatD16XyzMtbuf(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mtbuf::validate_encoding("tbuffer_load_format_d16_xyz",
+                               reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<TbufferLoadFormatD16XyzMtbuf>(opcode);
 }
 } // namespace detail
@@ -366,7 +422,13 @@ TbufferLoadFormatD16XyzwMtbuf::TbufferLoadFormatD16XyzwMtbuf(const MachineInst *
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeTbufferLoadFormatD16XyzwMtbuf(const MachineInst *opcode) {
+DecodeResult decodeTbufferLoadFormatD16XyzwMtbuf(const MachineInst *opcode,
+                                                 const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mtbuf::validate_encoding("tbuffer_load_format_d16_xyzw",
+                               reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<TbufferLoadFormatD16XyzwMtbuf>(opcode);
 }
 } // namespace detail
@@ -394,7 +456,13 @@ TbufferStoreFormatD16XMtbuf::TbufferStoreFormatD16XMtbuf(const MachineInst *inst
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeTbufferStoreFormatD16XMtbuf(const MachineInst *opcode) {
+DecodeResult decodeTbufferStoreFormatD16XMtbuf(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mtbuf::validate_encoding("tbuffer_store_format_d16_x",
+                               reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<TbufferStoreFormatD16XMtbuf>(opcode);
 }
 } // namespace detail
@@ -422,7 +490,13 @@ TbufferStoreFormatD16XyMtbuf::TbufferStoreFormatD16XyMtbuf(const MachineInst *in
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeTbufferStoreFormatD16XyMtbuf(const MachineInst *opcode) {
+DecodeResult decodeTbufferStoreFormatD16XyMtbuf(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mtbuf::validate_encoding("tbuffer_store_format_d16_xy",
+                               reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<TbufferStoreFormatD16XyMtbuf>(opcode);
 }
 } // namespace detail
@@ -450,7 +524,13 @@ TbufferStoreFormatD16XyzMtbuf::TbufferStoreFormatD16XyzMtbuf(const MachineInst *
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeTbufferStoreFormatD16XyzMtbuf(const MachineInst *opcode) {
+DecodeResult decodeTbufferStoreFormatD16XyzMtbuf(const MachineInst *opcode,
+                                                 const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mtbuf::validate_encoding("tbuffer_store_format_d16_xyz",
+                               reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<TbufferStoreFormatD16XyzMtbuf>(opcode);
 }
 } // namespace detail
@@ -478,7 +558,13 @@ TbufferStoreFormatD16XyzwMtbuf::TbufferStoreFormatD16XyzwMtbuf(const MachineInst
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeTbufferStoreFormatD16XyzwMtbuf(const MachineInst *opcode) {
+DecodeResult decodeTbufferStoreFormatD16XyzwMtbuf(const MachineInst *opcode,
+                                                  const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mtbuf::validate_encoding("tbuffer_store_format_d16_xyzw",
+                               reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<TbufferStoreFormatD16XyzwMtbuf>(opcode);
 }
 } // namespace detail
