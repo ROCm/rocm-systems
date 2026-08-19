@@ -48,11 +48,10 @@
 #     runs the batch script on every node; the payload parks extra copies and
 #     mpirun fans out ranks.
 #   - Before the 2-node job, 1-node probes fingerprint idle nodes: 8x gfx950,
-#     ionic_0..7 visible in sysfs and ibv_devices, the same CPU/NUMA/NIC-map
-#     hash, and the same RoCE GID-index-1 subnet. Pin the allocation to a
-#     matching pair. If none are idle, wait and probe again -- do not submit an
-#     asymmetric pair (Rome topo consensus FATAL), a node missing an ionic NIC,
-#     or a cross-leaf pair (IBV_WC_RETRY_EXC_ERR on 16-rank alltoall).
+#     ionic_0..7 visible in sysfs and ibv_devices with GID-index-1 present, and
+#     the same CPU/NUMA/NIC-map hash. Pin the allocation to a matching pair. If
+#     none are idle, wait and probe again -- do not submit an asymmetric pair
+#     (Rome topo consensus FATAL) or a node missing an ionic NIC/GID.
 #   - SPUR has no `scontrol show hostnames`. test_runner expands
 #     SLURM_JOB_NODELIST. OpenMPI's plm slurm is pointed at
 #     scripts/spur_srun.sh (installed as `srun` first on PATH) because SPUR's
@@ -424,8 +423,8 @@ jobs:
           }
 
           # Probe idle GPU nodes. Keep only hosts with 8 gfx950, ionic_0..7 in
-          # both sysfs and ibv_devices, the same CPU/NUMA/NIC fingerprint, and
-          # the same RoCE GID-index-1 subnet.
+          # both sysfs and ibv_devices, GID-index-1 on every ionic, and the same
+          # CPU/NUMA/NIC fingerprint.
           # stdout is host1,host2,... or empty (caller waits and retries).
           probe_symmetric_pair() {
             local need="$1"
