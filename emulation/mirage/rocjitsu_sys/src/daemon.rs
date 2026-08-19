@@ -55,6 +55,35 @@ pub enum DaemonError {
     },
 }
 
+impl DaemonError {
+    /// Whether this is a library that could not be loaded *at all*, as
+    /// opposed to one that loaded and lacks an entry point.
+    ///
+    /// The two failures of [`Daemon::probe`] call for opposite advice and
+    /// only the loader can tell them apart. A library missing
+    /// `rj_daemon_start` is an older rocjitsu: it loads, it emulates a
+    /// workload in-process, and the remedy is to update it or to run
+    /// without a daemon. A library that will not load — a broken
+    /// dependency chain, the wrong architecture, an unreadable file — is
+    /// not usable for anything, and in particular not usable in-process,
+    /// because in-process emulation `LD_PRELOAD`s that same file. Telling
+    /// such a user to "pass `--in-process`" sends them somewhere that
+    /// fails again for the same reason.
+    ///
+    /// True only for [`Self::Load`] whose source is a `dlopen` failure;
+    /// every other variant, symbol resolution included, is `false`.
+    #[must_use]
+    pub fn is_unloadable(&self) -> bool {
+        matches!(
+            self,
+            Self::Load {
+                source: libloading::Error::DlOpen { .. } | libloading::Error::DlOpenUnknown,
+                ..
+            }
+        )
+    }
+}
+
 impl std::fmt::Display for DaemonError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -146,18 +175,38 @@ impl Daemon {
     /// entry point. Answering it costs a `dlopen`, which is why callers ask
     /// once and remember rather than asking per session.
     ///
+    /// # Why the handle is kept rather than dropped
+    ///
+    /// Dropping a [`Lib`] is a `dlclose`, and the probe holds the only
+    /// reference, so the loader would unmap a library whose initialisers
+    /// have just run. An emulator runtime's constructor is exactly the
+    /// kind that registers something process-global — a fault handler, a
+    /// worker thread, an `atexit` entry — and unloading the code those
+    /// point into leaves the dangling mapping to be discovered much later,
+    /// somewhere unrelated. [`Daemon::start`] never unloads for the same
+    /// reason: it keeps its handle for the life of the daemon.
+    ///
+    /// So the probe leaks its handle deliberately. The cost is one mapping
+    /// held for the life of the process; what it buys is that the library
+    /// is loaded at most once — a later [`Daemon::start`] on the same path
+    /// is a refcount bump rather than a second `dlopen` — and never
+    /// unloaded.
+    ///
     /// # Errors
     ///
     /// [`DaemonError::Load`] when the library cannot be loaded or does not
-    /// export the daemon entry points; the loader's own message distinguishes
-    /// the two.
+    /// export the daemon entry points; [`DaemonError::is_unloadable`]
+    /// distinguishes the two.
     pub fn probe(lib_path: &Path) -> Result<(), DaemonError> {
         // SAFETY: the same contract as `Daemon::start` — `lib_path` is a
         // rocjitsu library located by mirage's own discovery, and loading it
-        // runs its initialisers. Nothing is kept: the handle is dropped at
-        // the end of this scope, and no C call is made through it.
+        // runs its initialisers. No C call is made through the handle; it is
+        // parked in a `ManuallyDrop` so the library is never unloaded (see
+        // above) rather than dropped at the end of this scope.
         unsafe { Lib::open(lib_path) }
-            .map(drop)
+            .map(|lib| {
+                let _kept = std::mem::ManuallyDrop::new(lib);
+            })
             .map_err(|source| DaemonError::Load {
                 path: lib_path.to_path_buf(),
                 source,
