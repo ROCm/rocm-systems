@@ -1300,7 +1300,7 @@ qp_sharing_skip_sender:
       int devIdx = q % comm->base.vProps.ndevs;
       struct IbCastSharedQp* entry = IbCastRegisterSharedQp(&key,
           comm->base.qps[q].qp, comm->devs[devIdx].base.cq,
-          &comm->devs[devIdx].base, comm->base.qps[q].devIndex, 1);
+          comm->devs[devIdx].base.ibDevN, comm->base.qps[q].devIndex, 1);
       if (entry && q == 0) {
         entry->cqRefcount = 1;
       }
@@ -2159,7 +2159,7 @@ qp_sharing_skip_recv:
       int devIdx = q % rComm->base.vProps.ndevs;
       struct IbCastSharedQp* entry = IbCastRegisterSharedQp(&recvKey,
           rComm->base.qps[q].qp, rComm->devs[devIdx].base.cq,
-          &rComm->devs[devIdx].base, rComm->base.qps[q].devIndex, 1);
+          rComm->devs[devIdx].base.ibDevN, rComm->base.qps[q].devIndex, 1);
       if (entry) {
         entry->ctsQpSlot = rComm->base.qps[q].ctsQpSlot;
         if (q == 0) {
@@ -2181,7 +2181,7 @@ qp_sharing_skip_recv:
         flushKey.qpIdx = IBCAST_FLUSH_QP_IDX;
 
         IbCastRegisterSharedQp(&flushKey, rComm->devs[i].gpuFlush.qp.qp,
-            rComm->devs[i].base.cq, &rComm->devs[i].base, i, 1);
+            rComm->devs[i].base.cq, rComm->devs[i].base.ibDevN, i, 1);
         INFO(NCCL_NET, "NET/IB: %s: PRIMARY recv registered flush QP qpn=%u dev=%d group=%d commId=%u",
              __func__, rComm->devs[i].gpuFlush.qp.qp->qp_num, i,
              rComm->base.sharedGroupIdx, rComm->base.commId);
