@@ -5,11 +5,10 @@
 
 #include "type_traits/thread_state_policy.hpp"
 
-#include <cstddef>
-#include <functional>
 #include <mutex>
 #include <shared_mutex>
 #include <type_traits>
+#include <utility>
 
 namespace rocprofsys
 {
