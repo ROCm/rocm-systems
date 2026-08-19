@@ -552,6 +552,12 @@ int main(int argc, char *argv[]) {
       cleanup_runtime_files(my_pid);
       return 1;
     }
+#if defined(PR_SET_PTRACER)
+    if (prctl(PR_SET_PTRACER, daemon_pid, 0, 0, 0) != 0) {
+      std::cerr << std::format("rocjitsu: warning: failed to allow daemon process_vm access: {}\n",
+                               strerror(errno));
+    }
+#endif
   } else {
     if (!rocjitsu::config::write_dbt_runtime_config_handoff(abs_config, dbt_guest_config, my_pid)) {
       std::cerr << "rocjitsu: failed to write config file\n";

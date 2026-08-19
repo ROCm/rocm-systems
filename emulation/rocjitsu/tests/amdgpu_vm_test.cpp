@@ -653,6 +653,65 @@ TEST(GpuMemoryTest, UnalignedMappingUsesGpuPageOffsetForHostTranslation) {
   EXPECT_EQ(memory.resolve_host_ptr(kBaseVa + kMappingSize - 1, kPid), nullptr);
 }
 
+TEST(GpuMemoryTest, ResolveHostPtrLargeContiguousRange) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000080;
+  constexpr size_t kMappingSize = 68000;
+
+  KfdProcess process(kPid);
+  std::vector<uint8_t> allocation(kMappingSize);
+  process.map_pages(kBaseVa, allocation.data(), allocation.size());
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  EXPECT_EQ(memory.resolve_host_ptr(kBaseVa, kPid, kMappingSize), allocation.data());
+  EXPECT_EQ(memory.resolve_host_ptr(kBaseVa + KfdProcess::kPageSize - 16, kPid, 32),
+            allocation.data() + KfdProcess::kPageSize - 16);
+  EXPECT_EQ(memory.resolve_host_ptr(kBaseVa, kPid, kMappingSize + 1), nullptr);
+}
+
+TEST(GpuMemoryTest, ReadWriteBlockLargeMappedRange) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000080;
+  constexpr size_t kMappingSize = 68000;
+
+  KfdProcess process(kPid);
+  std::vector<uint8_t> allocation(kMappingSize);
+  std::vector<uint8_t> replacement(kMappingSize);
+  std::vector<uint8_t> observed(kMappingSize);
+  for (size_t i = 0; i < kMappingSize; ++i)
+    replacement[i] = static_cast<uint8_t>((i * 41 + 23) & 0xff);
+  process.map_pages(kBaseVa, allocation.data(), allocation.size());
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  memory.write_block(kBaseVa, std::span<const uint8_t>(replacement), kPid);
+  EXPECT_TRUE(std::equal(replacement.begin(), replacement.end(), allocation.begin()));
+
+  memory.read_block(kBaseVa, std::span<uint8_t>(observed), kPid);
+  EXPECT_EQ(observed, replacement);
+}
+
+TEST(GpuMemoryTest, HasClientMemoryRangeForUnmappedUserPointer) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr size_t kSize = 68000;
+  KfdProcess process(kPid);
+  std::vector<uint8_t> client_allocation(kSize);
+  const auto client_va = reinterpret_cast<uint64_t>(client_allocation.data());
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  EXPECT_FALSE(memory.has_client_memory_range(client_va, kSize, kPid));
+  memory.set_process_client_pid(kPid, getpid());
+  EXPECT_TRUE(memory.has_client_memory_range(client_va, kSize, kPid));
+  EXPECT_FALSE(memory.has_client_memory_range(client_va, kSize, 0));
+  EXPECT_FALSE(memory.has_client_memory_range(0, kSize, kPid));
+  EXPECT_FALSE(memory.has_client_memory_range(std::numeric_limits<uint64_t>::max(), 2, kPid));
+}
+
 TEST(GpuMemoryTest, PartialMappedPageReadsZeroFillAndWritesClipToAllocation) {
   amdgpu::GpuMemory memory("memory");
   constexpr uint32_t kPid = 7;

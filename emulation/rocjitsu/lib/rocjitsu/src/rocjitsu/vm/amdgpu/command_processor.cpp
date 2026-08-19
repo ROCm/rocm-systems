@@ -2308,13 +2308,25 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
     const auto range_fits = [count](uint64_t va) {
       return static_cast<uint64_t>(count - 1) <= std::numeric_limits<uint64_t>::max() - va;
     };
-    const bool source_known = resolve(src_va, count) != nullptr ||
-                              memory_->has_range_mapping(src_va, count, queue.process_id);
-    const bool destinations_known = std::ranges::all_of(dst_vas, [&](uint64_t dst_va) {
-      return range_fits(dst_va) && (resolve(dst_va, count) != nullptr ||
-                                    memory_->has_range_mapping(dst_va, count, queue.process_id));
-    });
-    if (!range_fits(src_va) || !source_known || !destinations_known)
+    const bool source_fits = range_fits(src_va);
+    const bool source_direct = source_fits && resolve(src_va, count) != nullptr;
+    const bool source_range =
+        source_fits && memory_->has_range_mapping(src_va, count, queue.process_id);
+    const bool source_client =
+        source_fits && memory_->has_client_memory_range(src_va, count, queue.process_id);
+    bool destinations_known = true;
+    for (uint64_t dst_va : dst_vas) {
+      const bool dst_fits = range_fits(dst_va);
+      const bool dst_direct = dst_fits && resolve(dst_va, count) != nullptr;
+      const bool dst_range =
+          dst_fits && memory_->has_range_mapping(dst_va, count, queue.process_id);
+      const bool dst_client =
+          dst_fits && memory_->has_client_memory_range(dst_va, count, queue.process_id);
+      if (!dst_fits || (!dst_direct && !dst_range && !dst_client))
+        destinations_known = false;
+    }
+    const bool source_known = source_direct || source_range || source_client;
+    if (!source_fits || !source_known || !destinations_known)
       return false;
 
     std::array<uint8_t, sdma::TRANSFER_SCRATCH_BYTES> copy_buffer{};

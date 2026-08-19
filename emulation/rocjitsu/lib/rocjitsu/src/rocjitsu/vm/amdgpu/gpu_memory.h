@@ -164,6 +164,16 @@ public:
     return mapped;
   }
 
+  /// @brief Return whether an unmapped VA could be accessed as client process memory.
+  bool has_client_memory_range(uint64_t addr, size_t size, uint32_t vmid = 0) const {
+    if (vmid == 0 || addr == 0 || size == 0 ||
+        size - 1 > std::numeric_limits<uint64_t>::max() - addr)
+      return false;
+    if (addr >= kUserSpaceLimit || size > kUserSpaceLimit - addr)
+      return false;
+    return client_pid_for_vmid(vmid) > 0;
+  }
+
   /// @brief Resolve a GPU VA range to its first borrowed host byte.
   /// @details The returned pointer is only valid while page-table remapping and
   /// process teardown are quiesced. Normal memory operations use an internal

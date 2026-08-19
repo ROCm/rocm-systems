@@ -3,6 +3,16 @@
 
 #include "cdna5_sim_test_common.h"
 
+#include <algorithm>
+#include <cerrno>
+#include <cstring>
+#include <linux/prctl.h>
+#include <sys/prctl.h>
+#include <sys/uio.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <vector>
+
 namespace {
 
 using namespace rocjitsu;
@@ -109,6 +119,8 @@ public:
   uint64_t signal_va() const { return kSignalVa; }
   uint64_t poll_va() const { return kPollVa; }
 
+  void set_client_pid(pid_t pid) { sim_.memory->set_process_client_pid(kProcessId, pid); }
+
   void clip_dst_mapping(size_t size) {
     process_.unmap_pages(kDstVa, dst_.size());
     process_.map_pages(kDstVa, dst_.data(), size);
@@ -143,19 +155,19 @@ private:
   static constexpr uint32_t kQueueId = 1251;
   static constexpr uint64_t kRingVa = 0x1000'0000'0000ULL;
   static constexpr uint64_t kQueueStateVa = 0x1000'0000'1000ULL;
-  static constexpr uint64_t kSrcVa = 0x1000'0000'2000ULL;
-  static constexpr uint64_t kDstVa = 0x1000'0000'4000ULL;
-  static constexpr uint64_t kDst2Va = 0x1000'0000'6000ULL;
-  static constexpr uint64_t kSignalVa = 0x1000'0000'8000ULL;
-  static constexpr uint64_t kPollVa = 0x1000'0000'9000ULL;
+  static constexpr uint64_t kSrcVa = 0x1000'0010'0000ULL;
+  static constexpr uint64_t kDstVa = 0x1000'0020'0000ULL;
+  static constexpr uint64_t kDst2Va = 0x1000'0030'0000ULL;
+  static constexpr uint64_t kSignalVa = 0x1000'0040'0000ULL;
+  static constexpr uint64_t kPollVa = 0x1000'0040'1000ULL;
 
   Gfx1250Sim &sim_;
   KfdProcess process_;
   alignas(4096) std::array<uint32_t, 1024> ring_{};
   alignas(4096) std::array<uint64_t, 512> queue_state_{};
-  alignas(4096) std::array<uint8_t, 8192> src_{};
-  alignas(4096) std::array<uint8_t, 8192> dst_{};
-  alignas(4096) std::array<uint8_t, 8192> dst2_{};
+  std::vector<uint8_t> src_ = std::vector<uint8_t>(262144);
+  std::vector<uint8_t> dst_ = std::vector<uint8_t>(262144);
+  std::vector<uint8_t> dst2_ = std::vector<uint8_t>(262144);
   alignas(4096) std::array<int64_t, 512> signal_{};
   alignas(4096) std::array<uint64_t, 512> poll_{};
   std::array<uint64_t, 1> doorbells_{};
@@ -169,6 +181,208 @@ void write_sdma_qword_va(uint32_t *packet, uint32_t lo_dw, uint32_t hi_dw, uint6
 void write_sdma_qword_address(uint32_t *packet, uint32_t lo_dw, uint32_t hi_dw, const void *addr) {
   write_sdma_qword_va(packet, lo_dw, hi_dw, reinterpret_cast<uintptr_t>(addr));
 }
+
+uint8_t client_source_pattern(uint32_t i) { return static_cast<uint8_t>((i * 37 + 19) & 0xff); }
+
+uint8_t mapped_source_pattern(uint32_t i) { return static_cast<uint8_t>((i * 43 + 29) & 0xff); }
+
+bool read_exact(int fd, void *dst, size_t size) {
+  auto *bytes = static_cast<uint8_t *>(dst);
+  while (size > 0) {
+    ssize_t rc = read(fd, bytes, size);
+    if (rc < 0 && errno == EINTR)
+      continue;
+    if (rc <= 0)
+      return false;
+    bytes += rc;
+    size -= static_cast<size_t>(rc);
+  }
+  return true;
+}
+
+bool write_exact(int fd, const void *src, size_t size) {
+  auto *bytes = static_cast<const uint8_t *>(src);
+  while (size > 0) {
+    ssize_t rc = write(fd, bytes, size);
+    if (rc < 0 && errno == EINTR)
+      continue;
+    if (rc <= 0)
+      return false;
+    bytes += rc;
+    size -= static_cast<size_t>(rc);
+  }
+  return true;
+}
+
+enum class ClientBufferMode { Source, Destination };
+
+class ClientBufferProcess {
+public:
+  ClientBufferProcess() = default;
+  ClientBufferProcess(const ClientBufferProcess &) = delete;
+  ClientBufferProcess &operator=(const ClientBufferProcess &) = delete;
+
+  ClientBufferProcess(ClientBufferProcess &&other) noexcept { move_from(other); }
+
+  ClientBufferProcess &operator=(ClientBufferProcess &&other) noexcept {
+    if (this != &other) {
+      cleanup();
+      move_from(other);
+    }
+    return *this;
+  }
+
+  ~ClientBufferProcess() { cleanup(); }
+
+  static ClientBufferProcess start(ClientBufferMode mode, size_t size) {
+    int ready_pipe[2] = {-1, -1};
+    int done_pipe[2] = {-1, -1};
+    if (pipe(ready_pipe) != 0 || pipe(done_pipe) != 0) {
+      if (ready_pipe[0] >= 0)
+        close(ready_pipe[0]);
+      if (ready_pipe[1] >= 0)
+        close(ready_pipe[1]);
+      if (done_pipe[0] >= 0)
+        close(done_pipe[0]);
+      if (done_pipe[1] >= 0)
+        close(done_pipe[1]);
+      return {};
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+      close(ready_pipe[0]);
+      close(ready_pipe[1]);
+      close(done_pipe[0]);
+      close(done_pipe[1]);
+      return {};
+    }
+
+    if (pid == 0) {
+      close(ready_pipe[0]);
+      close(done_pipe[1]);
+
+#if defined(PR_SET_PTRACER)
+      prctl(PR_SET_DUMPABLE, 1, 0, 0, 0);
+      prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY, 0, 0, 0);
+#endif
+
+      std::vector<uint8_t> buffer(size, 0);
+      if (mode == ClientBufferMode::Source) {
+        for (size_t i = 0; i < size; ++i)
+          buffer[i] = client_source_pattern(static_cast<uint32_t>(i));
+      }
+
+      uint64_t addr = reinterpret_cast<uintptr_t>(buffer.data());
+      bool ok = write_exact(ready_pipe[1], &addr, sizeof(addr));
+      close(ready_pipe[1]);
+
+      char done = 0;
+      ok = ok && read_exact(done_pipe[0], &done, sizeof(done));
+      close(done_pipe[0]);
+
+      if (ok && mode == ClientBufferMode::Destination) {
+        for (size_t i = 0; i < size; ++i) {
+          if (buffer[i] != mapped_source_pattern(static_cast<uint32_t>(i))) {
+            ok = false;
+            break;
+          }
+        }
+      }
+      _exit(ok ? 0 : 1);
+    }
+
+    close(ready_pipe[1]);
+    close(done_pipe[0]);
+
+    ClientBufferProcess proc;
+    proc.pid_ = pid;
+    proc.done_fd_ = done_pipe[1];
+    if (!read_exact(ready_pipe[0], &proc.addr_, sizeof(proc.addr_))) {
+      close(ready_pipe[0]);
+      proc.cleanup();
+      return {};
+    }
+    close(ready_pipe[0]);
+    return proc;
+  }
+
+  bool valid() const { return pid_ > 0 && done_fd_ >= 0 && addr_ != 0; }
+  pid_t pid() const { return pid_; }
+  uint64_t addr() const { return addr_; }
+
+  bool can_read_byte() const {
+    if (!valid())
+      return false;
+    uint8_t value = 0;
+    iovec local{&value, sizeof(value)};
+    iovec remote{reinterpret_cast<void *>(addr_), sizeof(value)};
+    return process_vm_readv(pid_, &local, 1, &remote, 1, 0) == static_cast<ssize_t>(sizeof(value));
+  }
+
+  bool can_write_byte() const {
+    if (!can_read_byte())
+      return false;
+    uint8_t value = 0;
+    iovec local_read{&value, sizeof(value)};
+    iovec remote{reinterpret_cast<void *>(addr_), sizeof(value)};
+    if (process_vm_readv(pid_, &local_read, 1, &remote, 1, 0) !=
+        static_cast<ssize_t>(sizeof(value)))
+      return false;
+    iovec local_write{&value, sizeof(value)};
+    return process_vm_writev(pid_, &local_write, 1, &remote, 1, 0) ==
+           static_cast<ssize_t>(sizeof(value));
+  }
+
+  bool finish() {
+    if (pid_ <= 0)
+      return false;
+    char done = 1;
+    bool ok = true;
+    if (done_fd_ >= 0) {
+      ok = write_exact(done_fd_, &done, sizeof(done));
+      close(done_fd_);
+      done_fd_ = -1;
+    }
+    int status = 0;
+    while (waitpid(pid_, &status, 0) < 0) {
+      if (errno == EINTR)
+        continue;
+      ok = false;
+      break;
+    }
+    pid_ = -1;
+    return ok && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+  }
+
+private:
+  void cleanup() {
+    if (done_fd_ >= 0) {
+      close(done_fd_);
+      done_fd_ = -1;
+    }
+    if (pid_ > 0) {
+      int status = 0;
+      while (waitpid(pid_, &status, 0) < 0 && errno == EINTR) {
+      }
+      pid_ = -1;
+    }
+  }
+
+  void move_from(ClientBufferProcess &other) {
+    pid_ = other.pid_;
+    addr_ = other.addr_;
+    done_fd_ = other.done_fd_;
+    other.pid_ = -1;
+    other.addr_ = 0;
+    other.done_fd_ = -1;
+  }
+
+  pid_t pid_ = -1;
+  uint64_t addr_ = 0;
+  int done_fd_ = -1;
+};
+
 TEST(Gfx1250SdmaTest, PollMem64WaitsForFull64BitCondition) {
   Gfx1250Sim sim;
   HostSdmaQueueForTest queue(sim);
@@ -798,6 +1012,80 @@ TEST(Gfx1250SdmaTest, CopyLinearTransfersMultipleScratchChunks) {
   ASSERT_TRUE(sim.engine->step());
   EXPECT_EQ(queue.read_idx(), 7u * sizeof(uint32_t));
   EXPECT_EQ(std::memcmp(queue.dst(), queue.src(), kCopyBytes), 0);
+}
+
+TEST(Gfx1250SdmaTest, CopyLinearTransfersLargeTranslatedRange) {
+  constexpr std::array<uint32_t, 2> kCopySizes = {68000, 262144};
+  for (uint32_t copy_bytes : kCopySizes) {
+    Gfx1250Sim sim;
+    TranslatedSdmaQueueForTest queue(sim);
+    for (uint32_t i = 0; i < copy_bytes; ++i) {
+      queue.src()[i] = static_cast<uint8_t>((i * 37 + 19) & 0xff);
+      queue.dst()[i] = 0;
+    }
+
+    auto *packet = queue.ring();
+    packet[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8);
+    packet[1] = copy_bytes - 1;
+    write_sdma_qword_va(packet, 3, 4, queue.src_va());
+    write_sdma_qword_va(packet, 5, 6, queue.dst_va());
+
+    queue.submit(7);
+    ASSERT_TRUE(sim.engine->step()) << "copy_bytes=" << copy_bytes;
+    EXPECT_EQ(queue.read_idx(), 7u * sizeof(uint32_t)) << "copy_bytes=" << copy_bytes;
+    EXPECT_EQ(std::memcmp(queue.dst(), queue.src(), copy_bytes), 0) << "copy_bytes=" << copy_bytes;
+  }
+}
+
+TEST(Gfx1250SdmaTest, CopyLinearReadsLargeUnmappedClientSource) {
+  Gfx1250Sim sim;
+  TranslatedSdmaQueueForTest queue(sim);
+  constexpr uint32_t kCopyBytes = 68000;
+  auto client = ClientBufferProcess::start(ClientBufferMode::Source, kCopyBytes);
+  ASSERT_TRUE(client.valid());
+  if (!client.can_read_byte())
+    GTEST_SKIP() << "process_vm_readv is denied in this test environment";
+  queue.set_client_pid(client.pid());
+  for (uint32_t i = 0; i < kCopyBytes; ++i) {
+    queue.dst()[i] = 0;
+  }
+
+  auto *packet = queue.ring();
+  packet[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8);
+  packet[1] = kCopyBytes - 1;
+  write_sdma_qword_va(packet, 3, 4, client.addr());
+  write_sdma_qword_va(packet, 5, 6, queue.dst_va());
+
+  queue.submit(7);
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(queue.read_idx(), 7u * sizeof(uint32_t));
+  for (uint32_t i = 0; i < kCopyBytes; ++i)
+    ASSERT_EQ(queue.dst()[i], client_source_pattern(i)) << "offset=" << i;
+  EXPECT_TRUE(client.finish());
+}
+
+TEST(Gfx1250SdmaTest, CopyLinearWritesLargeUnmappedClientDestination) {
+  Gfx1250Sim sim;
+  TranslatedSdmaQueueForTest queue(sim);
+  constexpr uint32_t kCopyBytes = 68000;
+  auto client = ClientBufferProcess::start(ClientBufferMode::Destination, kCopyBytes);
+  ASSERT_TRUE(client.valid());
+  if (!client.can_write_byte())
+    GTEST_SKIP() << "process_vm_writev is denied in this test environment";
+  queue.set_client_pid(client.pid());
+  for (uint32_t i = 0; i < kCopyBytes; ++i)
+    queue.src()[i] = mapped_source_pattern(i);
+
+  auto *packet = queue.ring();
+  packet[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8);
+  packet[1] = kCopyBytes - 1;
+  write_sdma_qword_va(packet, 3, 4, queue.src_va());
+  write_sdma_qword_va(packet, 5, 6, client.addr());
+
+  queue.submit(7);
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(queue.read_idx(), 7u * sizeof(uint32_t));
+  EXPECT_TRUE(client.finish());
 }
 
 TEST(Gfx1250SdmaTest, BroadcastCopyTransfersMultipleScratchChunks) {
