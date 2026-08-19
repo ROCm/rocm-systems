@@ -19,7 +19,6 @@ from tests.integration.common import (
     skip_unsupported_roofline_soc,
     validate,
 )
-from utils import csv_compression
 
 
 @pytest.mark.roofline_validation
@@ -305,7 +304,7 @@ def test_bench_only_basic(binary_handler_profile_rocprof_compute):
     assert not (workload_path / "perfmon").exists()
     assert not (workload_path / "sysinfo.csv").exists()
     assert not (workload_path / "profiling_config.yaml").exists()
-    assert not csv_compression.find_csvs(workload_path, "results_*.csv")
+    assert not sorted(workload_path.glob("results_*.csv.gz"))
     assert not list(workload_path.glob("pmc_perf_*.csv"))
 
 
