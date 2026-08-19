@@ -107,6 +107,7 @@ struct PlaybackContext {
     // after it do — rather than to reproduce a fault.
     bool continue_on_error = false;
     std::atomic<size_t> events_failed{0};
+    std::atomic<size_t> code_objects_failed{0};
     // Sync watchdog: max wall-clock ms to wait for a device synchronize before
     // declaring the GPU wedged (0 = disabled / wait forever). Surfaces hung
     // kernels (e.g. a StreamK producer/consumer flag spin-wait) as a diagnostic

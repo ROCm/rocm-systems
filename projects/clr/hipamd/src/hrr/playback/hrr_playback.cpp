@@ -113,15 +113,10 @@ static int collect_rocm_lib(struct dl_phdr_info* info, size_t, void* out) {
   }
   return 0;
 }
-#endif
 
 // Report the ROCm libraries actually mapped, resolved through any symlink so
-// the version-suffixed real file is what gets named. Linux-only: Windows has
-// no dl_iterate_phdr.
+// the version-suffixed real file is what gets named.
 static void print_loaded_rocm_libs() {
-#ifdef _WIN32
-  return;
-#else
   std::vector<std::string> found;
   dl_iterate_phdr(collect_rocm_lib, &found);
   std::sort(found.begin(), found.end());
@@ -132,8 +127,10 @@ static void print_loaded_rocm_libs() {
     printf("[HRR] %s: %s\n", label, (ec ? fs::path(lib) : real).c_str());
     label = "        ";
   }
-#endif
 }
+#else
+static void print_loaded_rocm_libs() {}
+#endif
 
 static bool env_flag_enabled(const char* name) {
   const char* v = std::getenv(name);
@@ -248,6 +245,9 @@ static std::vector<std::pair<fs::path, ProcessInfo>> collect_process_dirs(
     if (!ent.is_directory()) continue;
     const std::string name = ent.path().filename().string();
     if (name.rfind("pid-", 0) != 0) continue;
+    // A pid-* directory with no events.bin is not a capture: leftover empty
+    // dirs must not be treated as repair failures or listed in the root index.
+    if (!fs::exists(ent.path() / "events.bin")) continue;
     ProcessInfo info{};
     if (!read_process_manifest(ent.path() / "manifest.json", info)) {
       // Keep incomplete/crashed directories visible even if their manifest was
@@ -829,6 +829,7 @@ static bool run_pass(PlaybackContext& ctx,
               fprintf(stderr, "[HRR] Skipping unloadable code object %s "
                       "(--continue-on-error); kernels from it will fail\n", hex.c_str());
               ++preload_failures;
+              ctx.code_objects_failed.fetch_add(1, std::memory_order_relaxed);
               continue;
           }
           fprintf(stderr, "[HRR] Fatal: failed to pre-load code object %s — aborting\n",
@@ -1149,7 +1150,9 @@ static void print_version() {
   printf("  archive format version : %u\n", static_cast<unsigned>(HRR_VERSION));
   printf("  source revision        : %s\n", HRR_BUILD_REV);
   printf("  source branch          : %s\n", HRR_BUILD_BRANCH);
-  printf("  build type             : %s\n", HRR_BUILD_TYPE);
+  const char* build_type = HRR_BUILD_TYPE;
+  if (build_type[0] == '\0') build_type = "unknown";
+  printf("  build type             : %s\n", build_type);
 
   // Flush before the first HIP call. Replay is routinely run against a runtime
   // from a different ROCm than the one it was built against, and when that
@@ -1413,6 +1416,8 @@ int main(int argc, char** argv) {
     ctx.kernel_filter    = filter;
     ctx.kernels_launched = 0;
     ctx.total_kernel_ms  = 0.0;
+    ctx.events_failed.store(0, std::memory_order_relaxed);
+    ctx.code_objects_failed.store(0, std::memory_order_relaxed);
     printf("[HRR] Warm-up done. Running filtered pass...\n");
   }
 
@@ -1522,6 +1527,11 @@ int main(int argc, char** argv) {
   if (ctx.events_failed.load() > 0) {
     printf("[HRR]   Events failed  : %zu (continued past each)\n",
            ctx.events_failed.load());
+    ok = false;
+  }
+  if (ctx.code_objects_failed.load() > 0) {
+    printf("[HRR]   Code objects   : %zu unloadable (continued)\n",
+           ctx.code_objects_failed.load());
     ok = false;
   }
 
