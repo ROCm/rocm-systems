@@ -195,7 +195,8 @@ RCCL_PARAM(RocshmemEnabled, "ROCSHMEM_ENABLE", 1);
 std::unordered_map<ncclComm_t, rocshmem::rocshmem_team_t> ncclCommToRshmemTeam;
 #endif
 
-// RCCL_CHEAP_POST_SEND_FENCE_OFF: 0 = arch-tuned (default), non-zero = force cheap fence off (__threadfence_system)
+// RCCL_CHEAP_POST_SEND_FENCE_OFF: 0 = arch-tuned auto (default; cheap fence on for gfx942/gfx1250, off for gfx950),
+//   1 = force cheap fence off (__threadfence_system), 2 = force cheap fence on (override auto, e.g. re-enable on gfx950)
 RCCL_PARAM(CheapPostSendFenceOff, "CHEAP_POST_SEND_FENCE_OFF", 0);
 
 /**
@@ -594,7 +595,12 @@ static ncclResult_t commFree(ncclComm_t comm) {
 
   NCCLCHECK(ncclRegCleanup(comm));
 
-  NCCLCHECK(ncclDestroySideStream(comm->cudaDev));
+  // Safety net: release the side stream if init failed/aborted before it was
+  // released on the normal init-completion path. No-op after normal success.
+  if (comm->sideStreamAcquired) {
+    NCCLCHECK(ncclSideStreamRelease(comm->cudaDev, comm->sideStreamPriority));
+    comm->sideStreamAcquired = false;
+  }
 
   INFO(NCCL_DESTROY, "comm %p rank %d nranks %d cudaDev %d busId %lx - %s COMPLETE", comm, comm->rank, comm->nRanks,
        comm->cudaDev, comm->busId, abort ? "Abort" : "Destroy");
@@ -751,8 +757,12 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->lastStream = nullptr;
   comm->lastStreamValid = false;
 
-  // RCCL: create persistent stream for calloc
-  NCCLCHECK(ncclCreateSideStream(comm->cudaDev));
+  // RCCL: acquire a scoped side stream for init-time allocations. It is
+  // released once init completes (see ncclCommInitRankFunc) so it does not hold
+  // a scarce GPU hardware queue through the steady-state collective phase.
+  comm->sideStreamPriority = 0;
+  NCCLCHECK(ncclSideStreamAcquire(comm->cudaDev, comm->sideStreamPriority));
+  comm->sideStreamAcquired = true;
 
   if (ncclParamLaunchOrderImplicit()) {
     NCCLCHECK(ncclCudaContextTrack(&comm->context));
@@ -1790,16 +1800,13 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx90a"))
     allGather3Data[rank].nc = std::max(allGather3Data[rank].nc, 4 / ringGraph->nChannels);
   if (ringGraph->nChannels > MAXCHANNELS / 2) allGather3Data[rank].nc = 1;
-  comm->cheapPostSendFenceOff = 1;
+  // cheap fence is only safe with cache bypassing load/store availability in kernel.
+  comm->cheapPostSendFenceOff = rcclComputeCheapPostSendFenceOff(
+      comm->cudaArch, rcclParamCheapPostSendFenceOff(),
 #ifdef HIP_UNCACHED_MEMORY
-  // cheap fence is only safe with cache bypassing load/store availability in kernel
-  // only enabled on gfx942, gfx950 and gfx1250
-  if (!rcclParamCheapPostSendFenceOff()) {
-    if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942") ||
-        IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx950") ||
-        IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250"))
-      comm->cheapPostSendFenceOff = 0;
-  }
+      true);
+#else
+      false);
 #endif
   INFO(NCCL_INIT, "Cheap post-send fence is %s", comm->cheapPostSendFenceOff ? "OFF" : "ON");
   // RCCL: Only use one slice per primitive on some single node gfx9xx systems, only currently enabled for AllReduce, ReduceScatter, and AllGather
@@ -2801,6 +2808,12 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     }
   }
 
+  // RCCL: init-time allocations are done; release the side stream now so its GPU
+  // hardware queue is freed before the steady-state collective phase begins.
+  if (comm->sideStreamAcquired) {
+    NCCLCHECKGOTO(ncclSideStreamRelease(comm->cudaDev, comm->sideStreamPriority), res, fail);
+    comm->sideStreamAcquired = false;
+  }
   timers[TIMER_INIT_TOTAL] = clockNano() - timers[TIMER_INIT_TOTAL];
 
   // Trace this call for replay tool

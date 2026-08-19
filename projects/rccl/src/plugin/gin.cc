@@ -325,6 +325,10 @@ static ncclResult_t ncclGinPluginFinalize(struct ncclComm* comm, int pluginIndex
 }
 
 ncclResult_t ncclGinInit(struct ncclComm* comm) {
+  if (ncclParamGinEnable() == 0) {
+    INFO(NCCL_INIT|NCCL_NET, "GIN disabled by NCCL_GIN_ENABLE=0; skipping GIN plugin init");
+    return ncclSuccess;
+  }
 #if !defined(__HIP_PLATFORM_AMD__)
   if (comm->compCap < 70) {
     /* GIN only supported for Volta and later */

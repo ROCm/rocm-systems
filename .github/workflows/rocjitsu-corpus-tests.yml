@@ -360,7 +360,7 @@ jobs:
           ROCM_PATH="$(rocm-sdk path --root)"
           export ROCM_PATH
           LAUNCHER="${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu"
-          CONFIG="${ROCJITSU_SOURCE_DIR}/configs/gfx1250.json"
+          CONFIG="${ROCJITSU_SOURCE_DIR}/configs/gfx1250_mi455x.json"
           HOTSWAP="${ROCJITSU_BUILD_DIR}/lib/rocjitsu/src/rocjitsu/hooks/libhsa_hotswap_rocjitsu.so"
           test -f "${HOTSWAP}"
           # Disable ROCr's built-in mechanism in both legs. Load the branch-built
@@ -442,7 +442,7 @@ jobs:
           DBT_TRANSLATOR="${DBT_TRANSLATOR_BINARY}"
           if [[ "${{ matrix.verify_dbt_idempotence }}" == "1" ]]; then
             DBT_TRANSLATOR="${RUNNER_TEMP}/rj_dbt_translate-verify-idempotence"
-            printf '#!/usr/bin/env bash\nexec %q --verify-idempotence "$@"\n' \
+            printf '#!/usr/bin/env bash\nexec %q --verify-idempotence --verify-rewrite-discharge "$@"\n' \
               "${DBT_TRANSLATOR_BINARY}" \
               > "${DBT_TRANSLATOR}"
             chmod +x "${DBT_TRANSLATOR}"

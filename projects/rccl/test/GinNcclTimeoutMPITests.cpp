@@ -65,6 +65,22 @@ namespace {
 constexpr uint64_t kHealthyTimeoutCycles = 5000000000ULL;
 constexpr uint64_t kShortTimeoutCycles   = 200000000ULL;
 
+// Every case needs a real inter-node rail, so at least one rank on each of two
+// nodes.
+constexpr int kMinProcessesForGinTimeout = 2;
+constexpr int kMinNodesForGinTimeout     = 2;
+
+// The absent-peer cases withhold the last rail rank, so the rail must hold
+// exactly one other rank for the barrier to have someone to wait on. The
+// healthy cases only need a rail that spans more than one rank.
+constexpr int kAbsentPeerRailRanks    = 2;
+constexpr int kMinNonTrivialRailRanks = 2;
+
+// Named at the call sites so setUpGinDevComm()'s rail requirement does not read
+// as a bare boolean.
+constexpr bool kRequireTwoRankRail = true;
+constexpr bool kAnyUniformRail     = false;
+
 // --- Collective helpers ---
 
 bool allocFill(float** ptr, int n, float val) {
@@ -160,6 +176,9 @@ __global__ void ginBarrierTimeoutKernel(struct ncclDevComm devComm,
         ncclCoopCta(), gin, ncclTeamTagRail{}, /*index=*/0u};
     ncclResult_t r = bar.sync(ncclCoopCta(), cuda::memory_order_relaxed,
                               ncclGinFenceLevel::Relaxed, timeoutCycles);
+    // A timeout can return while signal GFDs are still queued. Drain them
+    // before host-side teardown or a follow-up devComm is created.
+    gin.flush(ncclCoopCta());
     if (threadIdx.x == 0 && blockIdx.x == 0) *outResult = static_cast<int>(r);
 }
 
@@ -174,6 +193,7 @@ __global__ void ginRepeatedBarrierKernel(struct ncclDevComm devComm,
                      ncclGinFenceLevel::Relaxed, timeoutCycles) == ncclSuccess)
             ++successes;
     }
+    gin.flush(ncclCoopCta());
     if (threadIdx.x == 0 && blockIdx.x == 0) *outCount = successes;
 }
 
@@ -474,19 +494,41 @@ class GinBarrierTimeoutMPITest : public MPITestBase {
  protected:
     std::string skipReason_;
 
-    bool setUpGinDevComm(int nBarriers, ncclComm_t* commOut,
-                         hipStream_t* streamOut, ncclDevComm* devCommOut) {
+    bool setUpGinDevComm(int nBarriers, bool requireTwoRankRail,
+                         ncclComm_t* commOut, hipStream_t* streamOut,
+                         ncclDevComm* devCommOut) {
         skipReason_.clear();
         if (auto reason = ginBarrierSkipReason(); !reason.empty()) {
             skipReason_ = reason; return false;
         }
-        if (!validateTestPrerequisites(2, kNoProcessLimit, kNoPowerOfTwoRequired, 1, kNoNodeLimit)) {
-            ADD_FAILURE() << "Test requires at least 2 MPI processes"; return false;
+        if (!validateTestPrerequisites(kMinProcessesForGinTimeout, kNoProcessLimit,
+                                       kNoPowerOfTwoRequired,
+                                       kMinNodesForGinTimeout, kNoNodeLimit)) {
+            skipReason_ = "GIN timeout tests require at least 2 physical nodes";
+            return false;
         }
         if (createTestCommunicator() != ncclSuccess) {
             ADD_FAILURE() << "createTestCommunicator failed"; return false;
         }
         ncclComm_t comm = getActiveCommunicator();
+        ncclTeam_t railTeam = ncclTeamRail(comm);
+        int minRailSize = railTeam.nRanks;
+        int maxRailSize = railTeam.nRanks;
+        MPI_Allreduce(MPI_IN_PLACE, &minRailSize, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+        MPI_Allreduce(MPI_IN_PLACE, &maxRailSize, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+        if (requireTwoRankRail && (minRailSize != kAbsentPeerRailRanks ||
+                                   maxRailSize != kAbsentPeerRailRanks)) {
+            skipReason_ =
+                "GIN absent-peer timeout tests require two-rank rail teams "
+                "(normally exactly two nodes with uniform ranks per node)";
+            return false;
+        }
+        if (!requireTwoRankRail &&
+            (minRailSize < kMinNonTrivialRailRanks || minRailSize != maxRailSize)) {
+            skipReason_ =
+                "Healthy GIN timeout tests require uniform, non-trivial rail teams";
+            return false;
+        }
         ncclResult_t devRc = createGinDevComm(comm, nBarriers, devCommOut);
         if (devRc != ncclSuccess) {
             skipReason_ = std::string("GIN devComm unavailable; ncclDevCommCreate returned ")
@@ -503,7 +545,7 @@ class GinBarrierTimeoutMPITest : public MPITestBase {
 TEST_F(GinBarrierTimeoutMPITest, HealthyBarrierReturnsSuccess)
 {
     ncclComm_t comm{}; hipStream_t stream{}; ncclDevComm devComm{};
-    if (!setUpGinDevComm(1, &comm, &stream, &devComm)) GIN_SETUP_OR_BAIL();
+    if (!setUpGinDevComm(1, kAnyUniformRail, &comm, &stream, &devComm)) GIN_SETUP_OR_BAIL();
     SCOPE_EXIT((void)ncclDevCommDestroy(comm, &devComm));
     MPI_Barrier(MPI_COMM_WORLD);
     ASSERT_MPI_EQ(static_cast<int>(ncclSuccess), runGinBarrier(devComm, stream, kHealthyTimeoutCycles));
@@ -512,7 +554,7 @@ TEST_F(GinBarrierTimeoutMPITest, HealthyBarrierReturnsSuccess)
 TEST_F(GinBarrierTimeoutMPITest, AbsentPeerProducesTimeout)
 {
     ncclComm_t comm{}; hipStream_t stream{}; ncclDevComm devComm{};
-    if (!setUpGinDevComm(1, &comm, &stream, &devComm)) GIN_SETUP_OR_BAIL();
+    if (!setUpGinDevComm(1, kRequireTwoRankRail, &comm, &stream, &devComm)) GIN_SETUP_OR_BAIL();
     SCOPE_EXIT((void)ncclDevCommDestroy(comm, &devComm));
     ncclTeam_t railTeam = ncclTeamRail(comm);
     const bool isAbsent = (railTeam.rank == railTeam.nRanks - 1);
@@ -536,7 +578,7 @@ TEST_F(GinBarrierTimeoutMPITest, AbsentPeerProducesTimeout)
 TEST_F(GinBarrierTimeoutMPITest, ZeroBudgetAbsentPeerTimesOut)
 {
     ncclComm_t comm{}; hipStream_t stream{}; ncclDevComm devComm{};
-    if (!setUpGinDevComm(1, &comm, &stream, &devComm)) GIN_SETUP_OR_BAIL();
+    if (!setUpGinDevComm(1, kRequireTwoRankRail, &comm, &stream, &devComm)) GIN_SETUP_OR_BAIL();
     SCOPE_EXIT((void)ncclDevCommDestroy(comm, &devComm));
     ncclTeam_t railTeam = ncclTeamRail(comm);
     const bool isAbsent = (railTeam.rank == railTeam.nRanks - 1);
@@ -560,7 +602,7 @@ TEST_F(GinBarrierTimeoutMPITest, ZeroBudgetAbsentPeerTimesOut)
 TEST_F(GinBarrierTimeoutMPITest, RepeatedHealthyBarriersSucceed)
 {
     ncclComm_t comm{}; hipStream_t stream{}; ncclDevComm devComm{};
-    if (!setUpGinDevComm(1, &comm, &stream, &devComm)) GIN_SETUP_OR_BAIL();
+    if (!setUpGinDevComm(1, kAnyUniformRail, &comm, &stream, &devComm)) GIN_SETUP_OR_BAIL();
     SCOPE_EXIT((void)ncclDevCommDestroy(comm, &devComm));
     constexpr int kIters = 32;
     int* dCount = nullptr;
@@ -579,7 +621,7 @@ TEST_F(GinBarrierTimeoutMPITest, RepeatedHealthyBarriersSucceed)
 TEST_F(GinBarrierTimeoutMPITest, RecoversAfterTimeout)
 {
     ncclComm_t comm{}; hipStream_t stream{}; ncclDevComm devComm{};
-    if (!setUpGinDevComm(1, &comm, &stream, &devComm)) GIN_SETUP_OR_BAIL();
+    if (!setUpGinDevComm(1, kRequireTwoRankRail, &comm, &stream, &devComm)) GIN_SETUP_OR_BAIL();
     SCOPE_EXIT((void)ncclDevCommDestroy(comm, &devComm));
     ncclTeam_t railTeam = ncclTeamRail(comm);
     const bool isAbsent = (railTeam.rank == railTeam.nRanks - 1);
@@ -605,7 +647,7 @@ TEST_F(GinBarrierTimeoutMPITest, RecoversAfterTimeout)
 TEST_F(GinBarrierTimeoutMPITest, BackToBackTimeouts)
 {
     ncclComm_t comm{}; hipStream_t stream{}; ncclDevComm devComm{};
-    if (!setUpGinDevComm(1, &comm, &stream, &devComm)) GIN_SETUP_OR_BAIL();
+    if (!setUpGinDevComm(1, kRequireTwoRankRail, &comm, &stream, &devComm)) GIN_SETUP_OR_BAIL();
     SCOPE_EXIT((void)ncclDevCommDestroy(comm, &devComm));
     ncclTeam_t railTeam = ncclTeamRail(comm);
     const bool isAbsent = (railTeam.rank == railTeam.nRanks - 1);
