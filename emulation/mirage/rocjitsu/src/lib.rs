@@ -111,17 +111,25 @@ impl EmulatorBackend for Rocjitsu {
         // and deliberately: `--in-process` emulation goes through the
         // interposer and needs none of the daemon API, so calling the
         // host unsupported would refuse a mode that works. What it costs
-        // is multi-process sharing of emulated GPU memory, so the reason
-        // — which is what `mirage emulators -l` prints — says so, rather
-        // than leaving a user to find out at the end of a bring-up.
-        match self.daemon_capability() {
-            Ok(()) => SupportStatus::supported("software emulator; no special hardware required"),
-            Err(e) => SupportStatus::supported(format!(
-                "software emulator; no special hardware required. This host's \
-                 library cannot host the emulator daemon, so runs need \
-                 `--in-process`: {e}"
-            )),
-        }
+        // is multi-process sharing of emulated GPU memory — and that is
+        // reported, but not from here.
+        //
+        // Answering it here would mean `dlopen`ing the interposer to
+        // answer a question about hardware. `registry()` calls this for
+        // every backend, and `registry()` is on the path of every `mirage
+        // run` that carries an override flag, `mirage profile create` and
+        // `mirage emulators` alike — so a probe in this method maps the
+        // KMD interposer into the CLI process of an `--in-process` run
+        // that will never host a daemon, which is the very thing the
+        // `if ctx.daemon` guard in the supervisor exists to avoid. It
+        // would also break the contract this backend's own trait states:
+        // `daemon_capability` must be cheap enough for `health` to ask,
+        // and `supported` must be cheap enough for a listing.
+        //
+        // `mirage emulators -l` asks the capability directly instead, so
+        // the one command whose job is detail is the one that pays for
+        // it. See `emulators_cmd` in `mirage_ctl`.
+        SupportStatus::supported("software emulator; no special hardware required")
     }
 
     fn discover_plugins(&self) -> Vec<PluginsDef> {
@@ -965,32 +973,6 @@ mod tests {
             !msg.contains("Pass `--in-process`"),
             "`--in-process` preloads this same file and fails the same way, \
              so it must not be offered as the way round: {msg}"
-        );
-    }
-
-    #[test]
-    fn an_installed_library_is_not_reported_ready_for_a_daemon_it_cannot_host() {
-        // `health` said "ready" for any located library, which is what
-        // let a doomed run start at all. It is only a session that wants
-        // a daemon that this refuses: `--in-process` needs none of the
-        // daemon API, so the same library is ready for it.
-        //
-        // Driven through `daemon_capability` rather than by pointing the
-        // discovery search at a stand-in, because the located answer is
-        // memoised for the process and an environment override would not
-        // be seen by a second test in the same binary.
-        let backend = Rocjitsu;
-        if !is_installed() {
-            // Nothing located, so `health` is answering the missing
-            // library instead and there is no capability to report.
-            return;
-        }
-        let capable = backend.daemon_capability().is_ok();
-        assert_eq!(
-            capable,
-            backend.supported().reason.find("--in-process").is_none(),
-            "`mirage emulators` must say when the located library cannot \
-             host a daemon"
         );
     }
 

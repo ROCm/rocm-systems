@@ -175,6 +175,25 @@ pub fn default_emulator_name() -> String {
 /// flags and hope the two agreed. The runtime location is held to the
 /// same rule — and, since the text elides the middle of a very long
 /// probe list, the JSON is the complete copy of it.
+/// Why `name`'s located runtime could not host an emulator daemon, when
+/// it could not.
+///
+/// A backend that hosts a daemon may need more of its runtime than the
+/// runtime search can see — rocjitsu's daemon entry points are newer than
+/// the rest of its C API, so an older `librocjitsu.so` is found, is
+/// usable in-process, and cannot host a daemon. A user reading
+/// `mirage emulators -l` on such a host should be told, rather than
+/// finding out at the end of a bring-up.
+///
+/// `None` when the backend can host one, has none to host, or is not
+/// compiled in. Only the first line of the reason, because the rest is a
+/// paragraph meant for a refused run rather than for a listing.
+fn daemon_caveat(name: &str) -> Option<String> {
+    let backend = mirage_core::emulator::get_emulator_backend(name)?;
+    let reason = backend.daemon_capability().err()?.to_string();
+    Some(reason.lines().next().unwrap_or_default().to_string())
+}
+
 fn emulators_cmd(long: bool, json: bool) {
     let specs = registry();
     let default_name = default_emulator_name();
@@ -227,6 +246,21 @@ fn emulators_cmd(long: bool, json: bool) {
                 if spec.support.supported { "yes" } else { "no" },
                 spec.support.reason
             );
+            // Whether the located runtime could host a daemon, asked only
+            // here.
+            //
+            // It is not part of `support`: answering it may mean loading
+            // the backend's runtime library, and `registry()` — which
+            // fills `support` — is on the path of every `mirage run` that
+            // carries an override flag. This is the one command whose job
+            // is detail, so it is the one that pays. Printed only when
+            // the answer is no, and only as its first line: the full
+            // message is a paragraph written for somebody who has just
+            // been refused a run, and it would break this aligned block
+            // apart.
+            if let Some(reason) = daemon_caveat(&spec.name) {
+                println!("  daemon:    no   ({reason})");
+            }
             // The options and plugins this backend will accept, so that a
             // rejected `-o` or `--plugin` can point here for the list
             // rather than only naming it in the error.
