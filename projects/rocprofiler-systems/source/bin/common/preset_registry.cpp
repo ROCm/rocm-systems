@@ -4,6 +4,7 @@
 #include "common/preset_registry.hpp"
 
 #include "common/env_vars.hpp"
+#include "common/path.hpp"
 #include "embedded_presets.hpp"
 
 #include <spdlog/fmt/fmt.h>
@@ -28,21 +29,21 @@ find_preset_directory()
     if(preset_dir_env && std::strlen(preset_dir_env) > 0)
     {
         auto dir = std::string{ preset_dir_env };
-        if(common::path::exists(dir)) return dir;
+        if(path::is_directory(dir)) return dir;
     }
 
     auto root = common::path::get_rocprofsys_root();
     if(!root.empty())
     {
         auto candidate = fmt::format("{}/share/rocprofiler-systems/presets", root);
-        if(common::path::exists(candidate)) return candidate;
+        if(path::is_directory(candidate)) return candidate;
     }
 
     const auto* rocm_path = std::getenv("ROCM_PATH");
     if(rocm_path && std::strlen(rocm_path) > 0)
     {
         auto candidate = fmt::format("{}/share/rocprofiler-systems/presets", rocm_path);
-        if(common::path::exists(candidate)) return candidate;
+        if(path::is_directory(candidate)) return candidate;
     }
 
     return {};
@@ -380,7 +381,7 @@ preset_registry::describe(std::string_view preset_name)
     if(preset_json.contains("tracing"))
     {
         const auto& tracing = preset_json["tracing"];
-        bool        enabled = tracing.value("enabled", false);
+        const bool  enabled = tracing.value("enabled", false);
         std::string entry   = std::string("Tracing:         ") + (enabled ? "ON" : "OFF");
         if(enabled && tracing.contains("buffer_size_kb"))
         {
@@ -398,7 +399,7 @@ preset_registry::describe(std::string_view preset_name)
     if(preset_json.contains("profiling"))
     {
         const auto& profiling = preset_json["profiling"];
-        bool        enabled   = profiling.value("enabled", false);
+        const bool  enabled   = profiling.value("enabled", false);
         std::string entry = std::string("Profiling:       ") + (enabled ? "ON" : "OFF");
         if(enabled && profiling.contains("flat_profile") &&
            profiling["flat_profile"].value("enabled", false))
@@ -410,7 +411,7 @@ preset_registry::describe(std::string_view preset_name)
     if(preset_json.contains("sampling"))
     {
         const auto& sampling = preset_json["sampling"];
-        bool        enabled  = sampling.value("enabled", false);
+        const bool  enabled  = sampling.value("enabled", false);
         std::string entry = std::string("CPU Sampling:    ") + (enabled ? "ON" : "OFF");
         if(enabled && sampling.contains("frequency_hz"))
         {
@@ -496,7 +497,7 @@ preset_registry::describe(std::string_view preset_name)
     oss << description << "\n";
     for(size_t i = 0; i < lines.size(); ++i)
     {
-        bool is_last = (i + 1 == lines.size());
+        const bool is_last = (i + 1 == lines.size());
         oss << "  " << (is_last ? "\u2514\u2500 " : "\u251c\u2500 ") << lines[i];
         if(!is_last) oss << "\n";
     }

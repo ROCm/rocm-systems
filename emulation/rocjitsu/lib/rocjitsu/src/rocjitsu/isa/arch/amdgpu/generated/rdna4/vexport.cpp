@@ -5,20 +5,15 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vexport.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
-#include "util/except.h"
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <limits>
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna4 {
 
 ExportVexport::ExportVexport(const MachineInst *inst)
-    : Vexport("export", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<ExportVexport>()),
+    : Vexport("export", reinterpret_cast<const OpEncoding *>(inst),
+              selected_exec_fn(InstructionExecutionId::ExportVexport)),
       tgt(128, OperandType::OPR_TGT, reinterpret_cast<const OpEncoding *>(inst)->tgt),
       vsrc0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
@@ -38,9 +33,15 @@ ExportVexport::ExportVexport(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
 }
 
-void ExportVexport::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Export: no-op in compute simulation.
+namespace detail {
+DecodeResult decodeExportVexport(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vexport::validate_encoding(
+      "export", reinterpret_cast<const Vexport::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ExportVexport>(opcode);
 }
+} // namespace detail
 
 } // namespace rdna4
 } // namespace rocjitsu

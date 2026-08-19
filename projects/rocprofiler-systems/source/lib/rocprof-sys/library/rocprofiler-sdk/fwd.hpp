@@ -204,7 +204,6 @@ inline const rocprofsys_agent_t*
 client_data::get_agent(rocprofiler_agent_id_t _id) const
 {
     const auto& agent = get_agent_manager_instance().get_agent_by_handle(_id.handle);
-
     return &agent;
 }
 
@@ -273,13 +272,13 @@ as_client_data(void* _ptr)
 #if !defined(ROCPROFILER_CALL)
 #    define ROCPROFILER_CALL(result)                                                     \
         {                                                                                \
-            rocprofiler_status_t ROCPROFSYS_VARIABLE(_rocp_status_, __LINE__) =          \
+            const rocprofiler_status_t ROCPROFSYS_VARIABLE(_rocp_status_, __LINE__) =    \
                 (result);                                                                \
             if(ROCPROFSYS_VARIABLE(_rocp_status_, __LINE__) !=                           \
                ROCPROFILER_STATUS_SUCCESS)                                               \
             {                                                                            \
-                auto        msg        = std::stringstream{};                            \
-                std::string status_msg = rocprofiler_get_status_string(                  \
+                auto              msg        = std::stringstream{};                      \
+                const std::string status_msg = rocprofiler_get_status_string(            \
                     ROCPROFSYS_VARIABLE(_rocp_status_, __LINE__));                       \
                 msg << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] "           \
                     << "rocprofiler-sdk call [" << #result                               \

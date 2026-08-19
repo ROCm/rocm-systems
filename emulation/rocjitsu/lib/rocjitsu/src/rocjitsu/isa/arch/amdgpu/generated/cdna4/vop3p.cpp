@@ -5,18 +5,9 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vop3p.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/mma_exec.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
-#include "rocjitsu/vm/amdgpu/register_access.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
-#include "util/except.h"
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <limits>
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace cdna4 {
@@ -53,7 +44,7 @@ uint32_t mfma_src2_encoding(uint32_t value, bool acc_cd) {
 
 VPkMadI16Vop3p::VPkMadI16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_mad_i16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VPkMadI16Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VPkMadI16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -66,13 +57,19 @@ VPkMadI16Vop3p::VPkMadI16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPkMadI16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_mad_i16_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVPkMadI16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_pk_mad_i16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPkMadI16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkMulLoU16Vop3p::VPkMulLoU16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_mul_lo_u16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VPkMulLoU16Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VPkMulLoU16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -83,13 +80,20 @@ VPkMulLoU16Vop3p::VPkMulLoU16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPkMulLoU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_mul_lo_u16_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVPkMulLoU16Vop3p(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_pk_mul_lo_u16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPkMulLoU16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkAddI16Vop3p::VPkAddI16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_add_i16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VPkAddI16Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VPkAddI16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -100,13 +104,19 @@ VPkAddI16Vop3p::VPkAddI16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPkAddI16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_add_i16_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVPkAddI16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_pk_add_i16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPkAddI16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkSubI16Vop3p::VPkSubI16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_sub_i16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VPkSubI16Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VPkSubI16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -117,13 +127,19 @@ VPkSubI16Vop3p::VPkSubI16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPkSubI16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_sub_i16_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVPkSubI16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_pk_sub_i16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPkSubI16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkLshlrevB16Vop3p::VPkLshlrevB16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_lshlrev_b16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VPkLshlrevB16Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VPkLshlrevB16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -134,13 +150,20 @@ VPkLshlrevB16Vop3p::VPkLshlrevB16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPkLshlrevB16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_lshlrev_b16_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVPkLshlrevB16Vop3p(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_pk_lshlrev_b16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPkLshlrevB16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkLshrrevB16Vop3p::VPkLshrrevB16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_lshrrev_b16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VPkLshrrevB16Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VPkLshrrevB16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -151,13 +174,20 @@ VPkLshrrevB16Vop3p::VPkLshrrevB16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPkLshrrevB16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_lshrrev_b16_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVPkLshrrevB16Vop3p(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_pk_lshrrev_b16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPkLshrrevB16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkAshrrevI16Vop3p::VPkAshrrevI16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_ashrrev_i16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VPkAshrrevI16Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VPkAshrrevI16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -168,13 +198,20 @@ VPkAshrrevI16Vop3p::VPkAshrrevI16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPkAshrrevI16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_ashrrev_i16_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVPkAshrrevI16Vop3p(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_pk_ashrrev_i16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPkAshrrevI16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkMaxI16Vop3p::VPkMaxI16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_max_i16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VPkMaxI16Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VPkMaxI16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -185,13 +222,19 @@ VPkMaxI16Vop3p::VPkMaxI16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPkMaxI16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_max_i16_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVPkMaxI16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_pk_max_i16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPkMaxI16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkMinI16Vop3p::VPkMinI16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_min_i16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VPkMinI16Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VPkMinI16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -202,13 +245,19 @@ VPkMinI16Vop3p::VPkMinI16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPkMinI16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_min_i16_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVPkMinI16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_pk_min_i16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPkMinI16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkMadU16Vop3p::VPkMadU16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_mad_u16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VPkMadU16Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VPkMadU16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -221,13 +270,19 @@ VPkMadU16Vop3p::VPkMadU16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPkMadU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_mad_u16_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVPkMadU16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_pk_mad_u16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPkMadU16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkAddU16Vop3p::VPkAddU16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_add_u16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VPkAddU16Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VPkAddU16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -238,13 +293,19 @@ VPkAddU16Vop3p::VPkAddU16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPkAddU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_add_u16_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVPkAddU16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_pk_add_u16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPkAddU16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkSubU16Vop3p::VPkSubU16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_sub_u16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VPkSubU16Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VPkSubU16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -255,13 +316,19 @@ VPkSubU16Vop3p::VPkSubU16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPkSubU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_sub_u16_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVPkSubU16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_pk_sub_u16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPkSubU16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkMaxU16Vop3p::VPkMaxU16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_max_u16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VPkMaxU16Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VPkMaxU16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -272,13 +339,19 @@ VPkMaxU16Vop3p::VPkMaxU16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPkMaxU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_max_u16_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVPkMaxU16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_pk_max_u16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPkMaxU16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkMinU16Vop3p::VPkMinU16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_min_u16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VPkMinU16Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VPkMinU16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -289,13 +362,19 @@ VPkMinU16Vop3p::VPkMinU16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPkMinU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_min_u16_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVPkMinU16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_pk_min_u16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPkMinU16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkFmaF16Vop3p::VPkFmaF16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_fma_f16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VPkFmaF16Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VPkFmaF16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -308,13 +387,19 @@ VPkFmaF16Vop3p::VPkFmaF16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPkFmaF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_fma_f16_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVPkFmaF16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_pk_fma_f16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPkFmaF16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkAddF16Vop3p::VPkAddF16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VPkAddF16Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VPkAddF16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -325,13 +410,19 @@ VPkAddF16Vop3p::VPkAddF16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPkAddF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_add_f16_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVPkAddF16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_pk_add_f16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPkAddF16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkMulF16Vop3p::VPkMulF16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_mul_f16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VPkMulF16Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VPkMulF16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -342,13 +433,19 @@ VPkMulF16Vop3p::VPkMulF16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPkMulF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_mul_f16_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVPkMulF16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_pk_mul_f16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPkMulF16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkMinF16Vop3p::VPkMinF16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_min_f16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VPkMinF16Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VPkMinF16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -359,13 +456,19 @@ VPkMinF16Vop3p::VPkMinF16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPkMinF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_min_f16_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVPkMinF16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_pk_min_f16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPkMinF16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkMaxF16Vop3p::VPkMaxF16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_max_f16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VPkMaxF16Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VPkMaxF16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -376,13 +479,19 @@ VPkMaxF16Vop3p::VPkMaxF16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPkMaxF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_max_f16_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVPkMaxF16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_pk_max_f16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPkMaxF16Vop3p>(opcode);
 }
+} // namespace detail
 
 VDot2F32Bf16Vop3p::VDot2F32Bf16Vop3p(const MachineInst *inst)
     : Vop3p("v_dot2_f32_bf16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VDot2F32Bf16Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VDot2F32Bf16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -395,13 +504,20 @@ VDot2F32Bf16Vop3p::VDot2F32Bf16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VDot2F32Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_dot2_f32_bf16_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVDot2F32Bf16Vop3p(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_dot2_f32_bf16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VDot2F32Bf16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkMinimum3F16Vop3p::VPkMinimum3F16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_minimum3_f16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VPkMinimum3F16Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VPkMinimum3F16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -414,63 +530,20 @@ VPkMinimum3F16Vop3p::VPkMinimum3F16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPkMinimum3F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
-    bool sel0_lo = (inst_.op_sel >> 0) & 1;
-    bool sel1_lo = (inst_.op_sel >> 1) & 1;
-    bool sel2_lo = (inst_.op_sel >> 2) & 1;
-    bool sel0_hi = (inst_.op_sel_hi >> 0) & 1;
-    bool sel1_hi = (inst_.op_sel_hi >> 1) & 1;
-    bool sel2_hi = inst_.op_sel_hi_2;
-    float a_lo = util::f16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));
-    float b_lo = util::f16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));
-    float c_lo = util::f16_to_f32(static_cast<uint16_t>(sel2_lo ? (raw2 >> 16) : raw2));
-    float a_hi = util::f16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));
-    float b_hi = util::f16_to_f32(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));
-    float c_hi = util::f16_to_f32(static_cast<uint16_t>(sel2_hi ? (raw2 >> 16) : raw2));
-    if (inst_.neg & 1) {
-      a_lo = -a_lo;
-    }
-    if (inst_.neg & 2) {
-      b_lo = -b_lo;
-    }
-    if (inst_.neg & 4) {
-      c_lo = -c_lo;
-    }
-    if (inst_.neg_hi & 1) {
-      a_hi = -a_hi;
-    }
-    if (inst_.neg_hi & 2) {
-      b_hi = -b_hi;
-    }
-    if (inst_.neg_hi & 4) {
-      c_hi = -c_hi;
-    }
-    auto ieee_min = [](float x, float y) -> float {
-      if (std::isnan(x) || std::isnan(y))
-        return std::numeric_limits<float>::quiet_NaN();
-      if (x == y)
-        return std::signbit(x) ? x : y;
-      return x < y ? x : y;
-    };
-    float rlo = ieee_min(ieee_min(a_lo, b_lo), c_lo);
-    float rhi = ieee_min(ieee_min(a_hi, b_hi), c_hi);
-    amdgpu::sdwa::write_lane<true>(
-        *this, wf, vdst, lane,
-        util::f32_to_f16_mode(rlo, wf.fp16_ovfl()) |
-            (static_cast<uint32_t>(util::f32_to_f16_mode(rhi, wf.fp16_ovfl())) << 16));
-  }
+namespace detail {
+DecodeResult decodeVPkMinimum3F16Vop3p(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_pk_minimum3_f16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPkMinimum3F16Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkMaximum3F16Vop3p::VPkMaximum3F16Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_maximum3_f16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VPkMaximum3F16Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VPkMaximum3F16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -483,63 +556,20 @@ VPkMaximum3F16Vop3p::VPkMaximum3F16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPkMaximum3F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
-    bool sel0_lo = (inst_.op_sel >> 0) & 1;
-    bool sel1_lo = (inst_.op_sel >> 1) & 1;
-    bool sel2_lo = (inst_.op_sel >> 2) & 1;
-    bool sel0_hi = (inst_.op_sel_hi >> 0) & 1;
-    bool sel1_hi = (inst_.op_sel_hi >> 1) & 1;
-    bool sel2_hi = inst_.op_sel_hi_2;
-    float a_lo = util::f16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));
-    float b_lo = util::f16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));
-    float c_lo = util::f16_to_f32(static_cast<uint16_t>(sel2_lo ? (raw2 >> 16) : raw2));
-    float a_hi = util::f16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));
-    float b_hi = util::f16_to_f32(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));
-    float c_hi = util::f16_to_f32(static_cast<uint16_t>(sel2_hi ? (raw2 >> 16) : raw2));
-    if (inst_.neg & 1) {
-      a_lo = -a_lo;
-    }
-    if (inst_.neg & 2) {
-      b_lo = -b_lo;
-    }
-    if (inst_.neg & 4) {
-      c_lo = -c_lo;
-    }
-    if (inst_.neg_hi & 1) {
-      a_hi = -a_hi;
-    }
-    if (inst_.neg_hi & 2) {
-      b_hi = -b_hi;
-    }
-    if (inst_.neg_hi & 4) {
-      c_hi = -c_hi;
-    }
-    auto ieee_max = [](float x, float y) -> float {
-      if (std::isnan(x) || std::isnan(y))
-        return std::numeric_limits<float>::quiet_NaN();
-      if (x == y)
-        return std::signbit(x) ? y : x;
-      return x > y ? x : y;
-    };
-    float rlo = ieee_max(ieee_max(a_lo, b_lo), c_lo);
-    float rhi = ieee_max(ieee_max(a_hi, b_hi), c_hi);
-    amdgpu::sdwa::write_lane<true>(
-        *this, wf, vdst, lane,
-        util::f32_to_f16_mode(rlo, wf.fp16_ovfl()) |
-            (static_cast<uint32_t>(util::f32_to_f16_mode(rhi, wf.fp16_ovfl())) << 16));
-  }
+namespace detail {
+DecodeResult decodeVPkMaximum3F16Vop3p(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_pk_maximum3_f16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPkMaximum3F16Vop3p>(opcode);
 }
+} // namespace detail
 
 VMadMixF32Vop3p::VMadMixF32Vop3p(const MachineInst *inst)
     : Vop3p("v_mad_mix_f32", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VMadMixF32Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VMadMixF32Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -552,13 +582,20 @@ VMadMixF32Vop3p::VMadMixF32Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VMadMixF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mad_mix_f32_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVMadMixF32Vop3p(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_mad_mix_f32", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMadMixF32Vop3p>(opcode);
 }
+} // namespace detail
 
 VMadMixloF16Vop3p::VMadMixloF16Vop3p(const MachineInst *inst)
     : Vop3p("v_mad_mixlo_f16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VMadMixloF16Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VMadMixloF16Vop3p)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -571,6 +608,17 @@ VMadMixloF16Vop3p::VMadMixloF16Vop3p(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 1;
 }
+
+namespace detail {
+DecodeResult decodeVMadMixloF16Vop3p(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_mad_mixlo_f16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMadMixloF16Vop3p>(opcode);
+}
+} // namespace detail
 
 void VMadMixloF16Vop3p::implicit_uses(RegisterSet &uses) const {
   Vop3p::implicit_uses(uses);
@@ -578,13 +626,9 @@ void VMadMixloF16Vop3p::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VMadMixloF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mad_mixlo_f16_vop3p(*this, wf);
-}
-
 VMadMixhiF16Vop3p::VMadMixhiF16Vop3p(const MachineInst *inst)
     : Vop3p("v_mad_mixhi_f16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VMadMixhiF16Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VMadMixhiF16Vop3p)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -598,19 +642,26 @@ VMadMixhiF16Vop3p::VMadMixhiF16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+namespace detail {
+DecodeResult decodeVMadMixhiF16Vop3p(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_mad_mixhi_f16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMadMixhiF16Vop3p>(opcode);
+}
+} // namespace detail
+
 void VMadMixhiF16Vop3p::implicit_uses(RegisterSet &uses) const {
   Vop3p::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
 }
 
-void VMadMixhiF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mad_mixhi_f16_vop3p(*this, wf);
-}
-
 VDot2F32F16Vop3p::VDot2F32F16Vop3p(const MachineInst *inst)
     : Vop3p("v_dot2_f32_f16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VDot2F32F16Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VDot2F32F16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -623,13 +674,20 @@ VDot2F32F16Vop3p::VDot2F32F16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VDot2F32F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_dot2_f32_f16_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVDot2F32F16Vop3p(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_dot2_f32_f16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VDot2F32F16Vop3p>(opcode);
 }
+} // namespace detail
 
 VDot2I32I16Vop3p::VDot2I32I16Vop3p(const MachineInst *inst)
     : Vop3p("v_dot2_i32_i16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VDot2I32I16Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VDot2I32I16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -642,13 +700,20 @@ VDot2I32I16Vop3p::VDot2I32I16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VDot2I32I16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_dot2_i32_i16_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVDot2I32I16Vop3p(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_dot2_i32_i16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VDot2I32I16Vop3p>(opcode);
 }
+} // namespace detail
 
 VDot2U32U16Vop3p::VDot2U32U16Vop3p(const MachineInst *inst)
     : Vop3p("v_dot2_u32_u16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VDot2U32U16Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VDot2U32U16Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -661,13 +726,20 @@ VDot2U32U16Vop3p::VDot2U32U16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VDot2U32U16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_dot2_u32_u16_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVDot2U32U16Vop3p(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_dot2_u32_u16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VDot2U32U16Vop3p>(opcode);
 }
+} // namespace detail
 
 VDot4I32I8Vop3p::VDot4I32I8Vop3p(const MachineInst *inst)
     : Vop3p("v_dot4_i32_i8", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VDot4I32I8Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VDot4I32I8Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -680,13 +752,20 @@ VDot4I32I8Vop3p::VDot4I32I8Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VDot4I32I8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_dot4_i32_i8_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVDot4I32I8Vop3p(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_dot4_i32_i8", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VDot4I32I8Vop3p>(opcode);
 }
+} // namespace detail
 
 VDot4U32U8Vop3p::VDot4U32U8Vop3p(const MachineInst *inst)
     : Vop3p("v_dot4_u32_u8", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VDot4U32U8Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VDot4U32U8Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -699,13 +778,20 @@ VDot4U32U8Vop3p::VDot4U32U8Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VDot4U32U8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_dot4_u32_u8_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVDot4U32U8Vop3p(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_dot4_u32_u8", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VDot4U32U8Vop3p>(opcode);
 }
+} // namespace detail
 
 VDot8I32I4Vop3p::VDot8I32I4Vop3p(const MachineInst *inst)
     : Vop3p("v_dot8_i32_i4", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VDot8I32I4Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VDot8I32I4Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -718,13 +804,20 @@ VDot8I32I4Vop3p::VDot8I32I4Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VDot8I32I4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_dot8_i32_i4_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVDot8I32I4Vop3p(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_dot8_i32_i4", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VDot8I32I4Vop3p>(opcode);
 }
+} // namespace detail
 
 VDot8U32U4Vop3p::VDot8U32U4Vop3p(const MachineInst *inst)
     : Vop3p("v_dot8_u32_u4", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VDot8U32U4Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VDot8U32U4Vop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -737,13 +830,20 @@ VDot8U32U4Vop3p::VDot8U32U4Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VDot8U32U4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_dot8_u32_u4_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVDot8U32U4Vop3p(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_dot8_u32_u4", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VDot8U32U4Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkFmaF32Vop3p::VPkFmaF32Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_fma_f32", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VPkFmaF32Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VPkFmaF32Vop3p)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -756,13 +856,19 @@ VPkFmaF32Vop3p::VPkFmaF32Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPkFmaF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_fma_f32_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVPkFmaF32Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_pk_fma_f32", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPkFmaF32Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkMulF32Vop3p::VPkMulF32Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_mul_f32", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VPkMulF32Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VPkMulF32Vop3p)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -773,13 +879,19 @@ VPkMulF32Vop3p::VPkMulF32Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPkMulF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_mul_f32_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVPkMulF32Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_pk_mul_f32", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPkMulF32Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkAddF32Vop3p::VPkAddF32Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_add_f32", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VPkAddF32Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VPkAddF32Vop3p)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -790,13 +902,19 @@ VPkAddF32Vop3p::VPkAddF32Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPkAddF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_add_f32_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVPkAddF32Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_pk_add_f32", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPkAddF32Vop3p>(opcode);
 }
+} // namespace detail
 
 VPkMovB32Vop3p::VPkMovB32Vop3p(const MachineInst *inst)
     : Vop3p("v_pk_mov_b32", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VPkMovB32Vop3p>()),
+            selected_exec_fn(InstructionExecutionId::VPkMovB32Vop3p)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -807,13 +925,19 @@ VPkMovB32Vop3p::VPkMovB32Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VPkMovB32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_mov_b32_vop3p(*this, wf);
+namespace detail {
+DecodeResult decodeVPkMovB32Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_pk_mov_b32", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPkMovB32Vop3p>(opcode);
 }
+} // namespace detail
 
 VAccvgprReadVop3p::VAccvgprReadVop3p(const MachineInst *inst)
     : Vop3p("v_accvgpr_read", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VAccvgprReadVop3p>()),
+            selected_exec_fn(InstructionExecutionId::VAccvgprReadVop3p)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->src0 >= 256
@@ -826,19 +950,20 @@ VAccvgprReadVop3p::VAccvgprReadVop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VAccvgprReadVop3p::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane,
-                                    amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-  }
+namespace detail {
+DecodeResult decodeVAccvgprReadVop3p(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_accvgpr_read", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAccvgprReadVop3p>(opcode);
 }
+} // namespace detail
 
 VAccvgprWriteVop3p::VAccvgprWriteVop3p(const MachineInst *inst)
     : Vop3p("v_accvgpr_write", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<VAccvgprWriteVop3p>()),
+            selected_exec_fn(InstructionExecutionId::VAccvgprWriteVop3p)),
       vdst(32, OperandType::OPR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst + OpSelAccvgpr::OPR_ACCVGPR_ACC_MIN)),
       src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -848,20 +973,21 @@ VAccvgprWriteVop3p::VAccvgprWriteVop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VAccvgprWriteVop3p::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane,
-                                    amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-  }
+namespace detail {
+DecodeResult decodeVAccvgprWriteVop3p(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3p::validate_encoding(
+      "v_accvgpr_write", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAccvgprWriteVop3p>(opcode);
 }
+} // namespace detail
 
 VMfmaF3216x16x128F8f6f4Vop3pMfma::VMfmaF3216x16x128F8f6f4Vop3pMfma(const MachineInst *inst,
                                                                    bool has_vop3px2_prefix)
     : Vop3pMfma("v_mfma_f32_16x16x128_f8f6f4", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF3216x16x128F8f6f4Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF3216x16x128F8f6f4Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -900,39 +1026,22 @@ VMfmaF3216x16x128F8f6f4Vop3pMfma::VMfmaF3216x16x128F8f6f4Vop3pMfma(const Machine
   }
 }
 
-void VMfmaF3216x16x128F8f6f4Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  bool dispatched;
-  if (!(inst_.abid & 1u)) {
-    dispatched = amdgpu::dispatch_matrix_fmt_pair(
-        inst_.cbsz, inst_.blgp, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
-          amdgpu::exec_f32_mixed(cu, 16, 16, 128, 1, a_bits, b_bits, dst, s0b, s1b, s2, ea, eb,
-                                 const_acc);
-        });
-  } else {
-    uint32_t sa_base = amdgpu::src_base(vb, raw_words_[1] & 0x1FFu);
-    uint32_t sb_base = amdgpu::src_base(vb, (raw_words_[1] >> 9) & 0x1FFu);
-    dispatched = amdgpu::dispatch_matrix_fmt_pair(
-        inst_.cbsz, inst_.blgp, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
-          amdgpu::exec_f32_scaled_mixed(cu, 16, 16, 128, 1, a_bits, b_bits, dst, s0b, s1b, s2, ea,
-                                        eb, const_acc, sa_base, sb_base);
-        });
-  }
-  if (!dispatched)
-    throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeVMfmaF3216x16x128F8f6f4Vop3pMfma(const MachineInst *opcode,
+                                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_16x16x128_f8f6f4", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF3216x16x128F8f6f4Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF3232x32x64F8f6f4Vop3pMfma::VMfmaF3232x32x64F8f6f4Vop3pMfma(const MachineInst *inst,
                                                                  bool has_vop3px2_prefix)
     : Vop3pMfma("v_mfma_f32_32x32x64_f8f6f4", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF3232x32x64F8f6f4Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF3232x32x64F8f6f4Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -971,38 +1080,21 @@ VMfmaF3232x32x64F8f6f4Vop3pMfma::VMfmaF3232x32x64F8f6f4Vop3pMfma(const MachineIn
   }
 }
 
-void VMfmaF3232x32x64F8f6f4Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  bool dispatched;
-  if (!(inst_.abid & 1u)) {
-    dispatched = amdgpu::dispatch_matrix_fmt_pair(
-        inst_.cbsz, inst_.blgp, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
-          amdgpu::exec_f32_mixed(cu, 32, 32, 64, 1, a_bits, b_bits, dst, s0b, s1b, s2, ea, eb,
-                                 const_acc);
-        });
-  } else {
-    uint32_t sa_base = amdgpu::src_base(vb, raw_words_[1] & 0x1FFu);
-    uint32_t sb_base = amdgpu::src_base(vb, (raw_words_[1] >> 9) & 0x1FFu);
-    dispatched = amdgpu::dispatch_matrix_fmt_pair(
-        inst_.cbsz, inst_.blgp, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
-          amdgpu::exec_f32_scaled_mixed(cu, 32, 32, 64, 1, a_bits, b_bits, dst, s0b, s1b, s2, ea,
-                                        eb, const_acc, sa_base, sb_base);
-        });
-  }
-  if (!dispatched)
-    throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeVMfmaF3232x32x64F8f6f4Vop3pMfma(const MachineInst *opcode,
+                                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_32x32x64_f8f6f4", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF3232x32x64F8f6f4Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF3216x16x32Bf16Vop3pMfma::VMfmaF3216x16x32Bf16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_16x16x32_bf16", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF3216x16x32Bf16Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF3216x16x32Bf16Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -1032,21 +1124,21 @@ VMfmaF3216x16x32Bf16Vop3pMfma::VMfmaF3216x16x32Bf16Vop3pMfma(const MachineInst *
   flags_ |= MFMA;
 }
 
-void VMfmaF3216x16x32Bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f32_mfma_bf16_spec<16, 16, 32>(cu, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                                              amdgpu::src_base(vb, src1.encoding_value_), s2,
-                                              const_acc, inst_.cbsz, inst_.abid, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF3216x16x32Bf16Vop3pMfma(const MachineInst *opcode,
+                                                 const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_16x16x32_bf16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF3216x16x32Bf16Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaI3216x16x64I8Vop3pMfma::VMfmaI3216x16x64I8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_i32_16x16x64_i8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaI3216x16x64I8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaI3216x16x64I8Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -1076,21 +1168,21 @@ VMfmaI3216x16x64I8Vop3pMfma::VMfmaI3216x16x64I8Vop3pMfma(const MachineInst *inst
   flags_ |= MFMA;
 }
 
-void VMfmaI3216x16x64I8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_i32_i8(cu, 16, 16, 64, 1, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                      amdgpu::src_base(vb, src1.encoding_value_), s2, const_acc, inst_.cbsz,
-                      inst_.abid, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaI3216x16x64I8Vop3pMfma(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_i32_16x16x64_i8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaI3216x16x64I8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF3232x32x16Bf16Vop3pMfma::VMfmaF3232x32x16Bf16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_32x32x16_bf16", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF3232x32x16Bf16Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF3232x32x16Bf16Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -1120,21 +1212,21 @@ VMfmaF3232x32x16Bf16Vop3pMfma::VMfmaF3232x32x16Bf16Vop3pMfma(const MachineInst *
   flags_ |= MFMA;
 }
 
-void VMfmaF3232x32x16Bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f32_mfma_bf16_spec<32, 32, 16>(cu, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                                              amdgpu::src_base(vb, src1.encoding_value_), s2,
-                                              const_acc, inst_.cbsz, inst_.abid, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF3232x32x16Bf16Vop3pMfma(const MachineInst *opcode,
+                                                 const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_32x32x16_bf16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF3232x32x16Bf16Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaI3232x32x32I8Vop3pMfma::VMfmaI3232x32x32I8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_i32_32x32x32_i8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaI3232x32x32I8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaI3232x32x32I8Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -1164,21 +1256,21 @@ VMfmaI3232x32x32I8Vop3pMfma::VMfmaI3232x32x32I8Vop3pMfma(const MachineInst *inst
   flags_ |= MFMA;
 }
 
-void VMfmaI3232x32x32I8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_i32_i8(cu, 32, 32, 32, 1, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                      amdgpu::src_base(vb, src1.encoding_value_), s2, const_acc, inst_.cbsz,
-                      inst_.abid, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaI3232x32x32I8Vop3pMfma(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_i32_32x32x32_i8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaI3232x32x32I8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacF3216x16x64Bf16Vop3pMfma::VSmfmacF3216x16x64Bf16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_16x16x64_bf16", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacF3216x16x64Bf16Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacF3216x16x64Bf16Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -1207,19 +1299,21 @@ VSmfmacF3216x16x64Bf16Vop3pMfma::VSmfmacF3216x16x64Bf16Vop3pMfma(const MachineIn
   flags_ |= MFMA;
 }
 
-void VSmfmacF3216x16x64Bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
-  amdgpu::exec_smfmac_f32_16x16x64_f16(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf16);
+namespace detail {
+DecodeResult decodeVSmfmacF3216x16x64Bf16Vop3pMfma(const MachineInst *opcode,
+                                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_f32_16x16x64_bf16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacF3216x16x64Bf16Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacI3216x16x128I8Vop3pMfma::VSmfmacI3216x16x128I8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_i32_16x16x128_i8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacI3216x16x128I8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacI3216x16x128I8Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -1248,15 +1342,21 @@ VSmfmacI3216x16x128I8Vop3pMfma::VSmfmacI3216x16x128I8Vop3pMfma(const MachineInst
   flags_ |= MFMA;
 }
 
-void VSmfmacI3216x16x128I8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // SMFMAC stub: V_SMFMAC_I32_16X16X128_I8 (I32 result, no cross-lane helper)
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeVSmfmacI3216x16x128I8Vop3pMfma(const MachineInst *opcode,
+                                                  const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_i32_16x16x128_i8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacI3216x16x128I8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacF3216x16x128Bf8Bf8Vop3pMfma::VSmfmacF3216x16x128Bf8Bf8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_16x16x128_bf8_bf8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacF3216x16x128Bf8Bf8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacF3216x16x128Bf8Bf8Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -1285,20 +1385,21 @@ VSmfmacF3216x16x128Bf8Bf8Vop3pMfma::VSmfmacF3216x16x128Bf8Bf8Vop3pMfma(const Mac
   flags_ |= MFMA;
 }
 
-void VSmfmacF3216x16x128Bf8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
-  amdgpu::exec_smfmac_f32_16x16x128_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf8,
-                                        amdgpu::smfmac_read_bf8);
+namespace detail {
+DecodeResult decodeVSmfmacF3216x16x128Bf8Bf8Vop3pMfma(const MachineInst *opcode,
+                                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_f32_16x16x128_bf8_bf8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacF3216x16x128Bf8Bf8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacF3216x16x128Bf8Fp8Vop3pMfma::VSmfmacF3216x16x128Bf8Fp8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_16x16x128_bf8_fp8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacF3216x16x128Bf8Fp8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacF3216x16x128Bf8Fp8Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -1327,20 +1428,21 @@ VSmfmacF3216x16x128Bf8Fp8Vop3pMfma::VSmfmacF3216x16x128Bf8Fp8Vop3pMfma(const Mac
   flags_ |= MFMA;
 }
 
-void VSmfmacF3216x16x128Bf8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
-  amdgpu::exec_smfmac_f32_16x16x128_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf8,
-                                        amdgpu::smfmac_read_fp8);
+namespace detail {
+DecodeResult decodeVSmfmacF3216x16x128Bf8Fp8Vop3pMfma(const MachineInst *opcode,
+                                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_f32_16x16x128_bf8_fp8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacF3216x16x128Bf8Fp8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacF3216x16x128Fp8Bf8Vop3pMfma::VSmfmacF3216x16x128Fp8Bf8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_16x16x128_fp8_bf8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacF3216x16x128Fp8Bf8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacF3216x16x128Fp8Bf8Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -1369,20 +1471,21 @@ VSmfmacF3216x16x128Fp8Bf8Vop3pMfma::VSmfmacF3216x16x128Fp8Bf8Vop3pMfma(const Mac
   flags_ |= MFMA;
 }
 
-void VSmfmacF3216x16x128Fp8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
-  amdgpu::exec_smfmac_f32_16x16x128_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_fp8,
-                                        amdgpu::smfmac_read_bf8);
+namespace detail {
+DecodeResult decodeVSmfmacF3216x16x128Fp8Bf8Vop3pMfma(const MachineInst *opcode,
+                                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_f32_16x16x128_fp8_bf8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacF3216x16x128Fp8Bf8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF3232x32x12bF32Vop3pMfma::VMfmaF3232x32x12bF32Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_32x32x1_2b_f32", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF3232x32x12bF32Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF3232x32x12bF32Vop3pMfma)),
       vdst(1024, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -1412,21 +1515,21 @@ VMfmaF3232x32x12bF32Vop3pMfma::VMfmaF3232x32x12bF32Vop3pMfma(const MachineInst *
   flags_ |= MFMA;
 }
 
-void VMfmaF3232x32x12bF32Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f32_mfma_f32_spec<32, 32, 1, 2>(cu, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                                               amdgpu::src_base(vb, src1.encoding_value_), s2,
-                                               const_acc, inst_.cbsz, inst_.abid, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF3232x32x12bF32Vop3pMfma(const MachineInst *opcode,
+                                                 const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_32x32x1_2b_f32", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF3232x32x12bF32Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF3216x16x14bF32Vop3pMfma::VMfmaF3216x16x14bF32Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_16x16x1_4b_f32", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF3216x16x14bF32Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF3216x16x14bF32Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -1456,21 +1559,21 @@ VMfmaF3216x16x14bF32Vop3pMfma::VMfmaF3216x16x14bF32Vop3pMfma(const MachineInst *
   flags_ |= MFMA;
 }
 
-void VMfmaF3216x16x14bF32Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f32_mfma_f32_spec<16, 16, 1, 4>(cu, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                                               amdgpu::src_base(vb, src1.encoding_value_), s2,
-                                               const_acc, inst_.cbsz, inst_.abid, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF3216x16x14bF32Vop3pMfma(const MachineInst *opcode,
+                                                 const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_16x16x1_4b_f32", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF3216x16x14bF32Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF324x4x116bF32Vop3pMfma::VMfmaF324x4x116bF32Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_4x4x1_16b_f32", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF324x4x116bF32Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF324x4x116bF32Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -1500,21 +1603,21 @@ VMfmaF324x4x116bF32Vop3pMfma::VMfmaF324x4x116bF32Vop3pMfma(const MachineInst *in
   flags_ |= MFMA;
 }
 
-void VMfmaF324x4x116bF32Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f32(cu, 4, 4, 1, 16, 32, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                   amdgpu::src_base(vb, src1.encoding_value_), s2, amdgpu::extract_f32,
-                   amdgpu::extract_f32, const_acc, inst_.cbsz, inst_.abid, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF324x4x116bF32Vop3pMfma(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_4x4x1_16b_f32", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF324x4x116bF32Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacF3216x16x128Fp8Fp8Vop3pMfma::VSmfmacF3216x16x128Fp8Fp8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_16x16x128_fp8_fp8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacF3216x16x128Fp8Fp8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacF3216x16x128Fp8Fp8Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -1543,20 +1646,21 @@ VSmfmacF3216x16x128Fp8Fp8Vop3pMfma::VSmfmacF3216x16x128Fp8Fp8Vop3pMfma(const Mac
   flags_ |= MFMA;
 }
 
-void VSmfmacF3216x16x128Fp8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
-  amdgpu::exec_smfmac_f32_16x16x128_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_fp8,
-                                        amdgpu::smfmac_read_fp8);
+namespace detail {
+DecodeResult decodeVSmfmacF3216x16x128Fp8Fp8Vop3pMfma(const MachineInst *opcode,
+                                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_f32_16x16x128_fp8_fp8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacF3216x16x128Fp8Fp8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF3232x32x2F32Vop3pMfma::VMfmaF3232x32x2F32Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_32x32x2_f32", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF3232x32x2F32Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF3232x32x2F32Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -1586,21 +1690,21 @@ VMfmaF3232x32x2F32Vop3pMfma::VMfmaF3232x32x2F32Vop3pMfma(const MachineInst *inst
   flags_ |= MFMA;
 }
 
-void VMfmaF3232x32x2F32Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f32_mfma_f32_spec<32, 32, 2, 1>(cu, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                                               amdgpu::src_base(vb, src1.encoding_value_), s2,
-                                               const_acc, inst_.cbsz, inst_.abid, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF3232x32x2F32Vop3pMfma(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_32x32x2_f32", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF3232x32x2F32Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF3216x16x4F32Vop3pMfma::VMfmaF3216x16x4F32Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_16x16x4_f32", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF3216x16x4F32Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF3216x16x4F32Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -1630,21 +1734,21 @@ VMfmaF3216x16x4F32Vop3pMfma::VMfmaF3216x16x4F32Vop3pMfma(const MachineInst *inst
   flags_ |= MFMA;
 }
 
-void VMfmaF3216x16x4F32Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f32_mfma_f32_spec<16, 16, 4, 1>(cu, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                                               amdgpu::src_base(vb, src1.encoding_value_), s2,
-                                               const_acc, inst_.cbsz, inst_.abid, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF3216x16x4F32Vop3pMfma(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_16x16x4_f32", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF3216x16x4F32Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacF3232x32x32Bf16Vop3pMfma::VSmfmacF3232x32x32Bf16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_32x32x32_bf16", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacF3232x32x32Bf16Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacF3232x32x32Bf16Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -1673,19 +1777,21 @@ VSmfmacF3232x32x32Bf16Vop3pMfma::VSmfmacF3232x32x32Bf16Vop3pMfma(const MachineIn
   flags_ |= MFMA;
 }
 
-void VSmfmacF3232x32x32Bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
-  amdgpu::exec_smfmac_f32_32x32x32_f16(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf16);
+namespace detail {
+DecodeResult decodeVSmfmacF3232x32x32Bf16Vop3pMfma(const MachineInst *opcode,
+                                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_f32_32x32x32_bf16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacF3232x32x32Bf16Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacI3232x32x64I8Vop3pMfma::VSmfmacI3232x32x64I8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_i32_32x32x64_i8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacI3232x32x64I8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacI3232x32x64I8Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -1714,15 +1820,21 @@ VSmfmacI3232x32x64I8Vop3pMfma::VSmfmacI3232x32x64I8Vop3pMfma(const MachineInst *
   flags_ |= MFMA;
 }
 
-void VSmfmacI3232x32x64I8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // SMFMAC stub: V_SMFMAC_I32_32X32X64_I8 (I32 result, no cross-lane helper)
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeVSmfmacI3232x32x64I8Vop3pMfma(const MachineInst *opcode,
+                                                 const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_i32_32x32x64_i8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacI3232x32x64I8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF3232x32x42bF16Vop3pMfma::VMfmaF3232x32x42bF16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_32x32x4_2b_f16", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF3232x32x42bF16Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF3232x32x42bF16Vop3pMfma)),
       vdst(1024, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -1752,21 +1864,21 @@ VMfmaF3232x32x42bF16Vop3pMfma::VMfmaF3232x32x42bF16Vop3pMfma(const MachineInst *
   flags_ |= MFMA;
 }
 
-void VMfmaF3232x32x42bF16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f32_mfma_f16_spec<32, 32, 4, 2>(cu, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                                               amdgpu::src_base(vb, src1.encoding_value_), s2,
-                                               const_acc, inst_.cbsz, inst_.abid, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF3232x32x42bF16Vop3pMfma(const MachineInst *opcode,
+                                                 const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_32x32x4_2b_f16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF3232x32x42bF16Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF3216x16x44bF16Vop3pMfma::VMfmaF3216x16x44bF16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_16x16x4_4b_f16", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF3216x16x44bF16Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF3216x16x44bF16Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -1796,21 +1908,21 @@ VMfmaF3216x16x44bF16Vop3pMfma::VMfmaF3216x16x44bF16Vop3pMfma(const MachineInst *
   flags_ |= MFMA;
 }
 
-void VMfmaF3216x16x44bF16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f32_mfma_f16_spec<16, 16, 4, 4>(cu, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                                               amdgpu::src_base(vb, src1.encoding_value_), s2,
-                                               const_acc, inst_.cbsz, inst_.abid, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF3216x16x44bF16Vop3pMfma(const MachineInst *opcode,
+                                                 const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_16x16x4_4b_f16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF3216x16x44bF16Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF324x4x416bF16Vop3pMfma::VMfmaF324x4x416bF16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_4x4x4_16b_f16", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF324x4x416bF16Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF324x4x416bF16Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -1840,21 +1952,21 @@ VMfmaF324x4x416bF16Vop3pMfma::VMfmaF324x4x416bF16Vop3pMfma(const MachineInst *in
   flags_ |= MFMA;
 }
 
-void VMfmaF324x4x416bF16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f32(cu, 4, 4, 4, 16, 16, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                   amdgpu::src_base(vb, src1.encoding_value_), s2, amdgpu::extract_f16,
-                   amdgpu::extract_f16, const_acc, inst_.cbsz, inst_.abid, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF324x4x416bF16Vop3pMfma(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_4x4x4_16b_f16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF324x4x416bF16Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacF3232x32x64Bf8Bf8Vop3pMfma::VSmfmacF3232x32x64Bf8Bf8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_32x32x64_bf8_bf8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacF3232x32x64Bf8Bf8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacF3232x32x64Bf8Bf8Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -1883,20 +1995,21 @@ VSmfmacF3232x32x64Bf8Bf8Vop3pMfma::VSmfmacF3232x32x64Bf8Bf8Vop3pMfma(const Machi
   flags_ |= MFMA;
 }
 
-void VSmfmacF3232x32x64Bf8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
-  amdgpu::exec_smfmac_f32_32x32x64_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf8,
-                                       amdgpu::smfmac_read_bf8);
+namespace detail {
+DecodeResult decodeVSmfmacF3232x32x64Bf8Bf8Vop3pMfma(const MachineInst *opcode,
+                                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_f32_32x32x64_bf8_bf8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacF3232x32x64Bf8Bf8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF3232x32x8F16Vop3pMfma::VMfmaF3232x32x8F16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_32x32x8_f16", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF3232x32x8F16Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF3232x32x8F16Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -1926,21 +2039,21 @@ VMfmaF3232x32x8F16Vop3pMfma::VMfmaF3232x32x8F16Vop3pMfma(const MachineInst *inst
   flags_ |= MFMA;
 }
 
-void VMfmaF3232x32x8F16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f32_mfma_f16_spec<32, 32, 8>(cu, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                                            amdgpu::src_base(vb, src1.encoding_value_), s2,
-                                            const_acc, inst_.cbsz, inst_.abid, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF3232x32x8F16Vop3pMfma(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_32x32x8_f16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF3232x32x8F16Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF3216x16x16F16Vop3pMfma::VMfmaF3216x16x16F16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_16x16x16_f16", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF3216x16x16F16Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF3216x16x16F16Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -1970,21 +2083,21 @@ VMfmaF3216x16x16F16Vop3pMfma::VMfmaF3216x16x16F16Vop3pMfma(const MachineInst *in
   flags_ |= MFMA;
 }
 
-void VMfmaF3216x16x16F16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f32_mfma_f16_spec<16, 16, 16>(cu, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                                             amdgpu::src_base(vb, src1.encoding_value_), s2,
-                                             const_acc, inst_.cbsz, inst_.abid, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF3216x16x16F16Vop3pMfma(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_16x16x16_f16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF3216x16x16F16Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacF3232x32x64Bf8Fp8Vop3pMfma::VSmfmacF3232x32x64Bf8Fp8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_32x32x64_bf8_fp8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacF3232x32x64Bf8Fp8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacF3232x32x64Bf8Fp8Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -2013,20 +2126,21 @@ VSmfmacF3232x32x64Bf8Fp8Vop3pMfma::VSmfmacF3232x32x64Bf8Fp8Vop3pMfma(const Machi
   flags_ |= MFMA;
 }
 
-void VSmfmacF3232x32x64Bf8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
-  amdgpu::exec_smfmac_f32_32x32x64_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf8,
-                                       amdgpu::smfmac_read_fp8);
+namespace detail {
+DecodeResult decodeVSmfmacF3232x32x64Bf8Fp8Vop3pMfma(const MachineInst *opcode,
+                                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_f32_32x32x64_bf8_fp8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacF3232x32x64Bf8Fp8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacF3232x32x64Fp8Bf8Vop3pMfma::VSmfmacF3232x32x64Fp8Bf8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_32x32x64_fp8_bf8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacF3232x32x64Fp8Bf8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacF3232x32x64Fp8Bf8Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -2055,20 +2169,21 @@ VSmfmacF3232x32x64Fp8Bf8Vop3pMfma::VSmfmacF3232x32x64Fp8Bf8Vop3pMfma(const Machi
   flags_ |= MFMA;
 }
 
-void VSmfmacF3232x32x64Fp8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
-  amdgpu::exec_smfmac_f32_32x32x64_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_fp8,
-                                       amdgpu::smfmac_read_bf8);
+namespace detail {
+DecodeResult decodeVSmfmacF3232x32x64Fp8Bf8Vop3pMfma(const MachineInst *opcode,
+                                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_f32_32x32x64_fp8_bf8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacF3232x32x64Fp8Bf8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaI3232x32x42bI8Vop3pMfma::VMfmaI3232x32x42bI8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_i32_32x32x4_2b_i8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaI3232x32x42bI8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaI3232x32x42bI8Vop3pMfma)),
       vdst(1024, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -2098,21 +2213,21 @@ VMfmaI3232x32x42bI8Vop3pMfma::VMfmaI3232x32x42bI8Vop3pMfma(const MachineInst *in
   flags_ |= MFMA;
 }
 
-void VMfmaI3232x32x42bI8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_i32_i8(cu, 32, 32, 4, 2, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                      amdgpu::src_base(vb, src1.encoding_value_), s2, const_acc, inst_.cbsz,
-                      inst_.abid, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaI3232x32x42bI8Vop3pMfma(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_i32_32x32x4_2b_i8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaI3232x32x42bI8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaI3216x16x44bI8Vop3pMfma::VMfmaI3216x16x44bI8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_i32_16x16x4_4b_i8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaI3216x16x44bI8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaI3216x16x44bI8Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -2142,21 +2257,21 @@ VMfmaI3216x16x44bI8Vop3pMfma::VMfmaI3216x16x44bI8Vop3pMfma(const MachineInst *in
   flags_ |= MFMA;
 }
 
-void VMfmaI3216x16x44bI8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_i32_i8(cu, 16, 16, 4, 4, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                      amdgpu::src_base(vb, src1.encoding_value_), s2, const_acc, inst_.cbsz,
-                      inst_.abid, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaI3216x16x44bI8Vop3pMfma(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_i32_16x16x4_4b_i8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaI3216x16x44bI8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaI324x4x416bI8Vop3pMfma::VMfmaI324x4x416bI8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_i32_4x4x4_16b_i8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaI324x4x416bI8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaI324x4x416bI8Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -2186,21 +2301,21 @@ VMfmaI324x4x416bI8Vop3pMfma::VMfmaI324x4x416bI8Vop3pMfma(const MachineInst *inst
   flags_ |= MFMA;
 }
 
-void VMfmaI324x4x416bI8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_i32_i8(cu, 4, 4, 4, 16, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                      amdgpu::src_base(vb, src1.encoding_value_), s2, const_acc, inst_.cbsz,
-                      inst_.abid, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaI324x4x416bI8Vop3pMfma(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_i32_4x4x4_16b_i8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaI324x4x416bI8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacF3232x32x64Fp8Fp8Vop3pMfma::VSmfmacF3232x32x64Fp8Fp8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_32x32x64_fp8_fp8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacF3232x32x64Fp8Fp8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacF3232x32x64Fp8Fp8Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -2229,20 +2344,21 @@ VSmfmacF3232x32x64Fp8Fp8Vop3pMfma::VSmfmacF3232x32x64Fp8Fp8Vop3pMfma(const Machi
   flags_ |= MFMA;
 }
 
-void VSmfmacF3232x32x64Fp8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
-  amdgpu::exec_smfmac_f32_32x32x64_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_fp8,
-                                       amdgpu::smfmac_read_fp8);
+namespace detail {
+DecodeResult decodeVSmfmacF3232x32x64Fp8Fp8Vop3pMfma(const MachineInst *opcode,
+                                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_f32_32x32x64_fp8_fp8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacF3232x32x64Fp8Fp8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF3216x16x32F16Vop3pMfma::VMfmaF3216x16x32F16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_16x16x32_f16", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF3216x16x32F16Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF3216x16x32F16Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -2272,21 +2388,21 @@ VMfmaF3216x16x32F16Vop3pMfma::VMfmaF3216x16x32F16Vop3pMfma(const MachineInst *in
   flags_ |= MFMA;
 }
 
-void VMfmaF3216x16x32F16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f32_mfma_f16_spec<16, 16, 32>(cu, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                                             amdgpu::src_base(vb, src1.encoding_value_), s2,
-                                             const_acc, inst_.cbsz, inst_.abid, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF3216x16x32F16Vop3pMfma(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_16x16x32_f16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF3216x16x32F16Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF3232x32x16F16Vop3pMfma::VMfmaF3232x32x16F16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_32x32x16_f16", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF3232x32x16F16Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF3232x32x16F16Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -2316,21 +2432,21 @@ VMfmaF3232x32x16F16Vop3pMfma::VMfmaF3232x32x16F16Vop3pMfma(const MachineInst *in
   flags_ |= MFMA;
 }
 
-void VMfmaF3232x32x16F16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f32_mfma_f16_spec<32, 32, 16>(cu, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                                             amdgpu::src_base(vb, src1.encoding_value_), s2,
-                                             const_acc, inst_.cbsz, inst_.abid, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF3232x32x16F16Vop3pMfma(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_32x32x16_f16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF3232x32x16F16Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaI3232x32x16I8Vop3pMfma::VMfmaI3232x32x16I8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_i32_32x32x16_i8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaI3232x32x16I8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaI3232x32x16I8Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -2360,21 +2476,21 @@ VMfmaI3232x32x16I8Vop3pMfma::VMfmaI3232x32x16I8Vop3pMfma(const MachineInst *inst
   flags_ |= MFMA;
 }
 
-void VMfmaI3232x32x16I8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_i32_i8(cu, 32, 32, 16, 1, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                      amdgpu::src_base(vb, src1.encoding_value_), s2, const_acc, inst_.cbsz,
-                      inst_.abid, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaI3232x32x16I8Vop3pMfma(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_i32_32x32x16_i8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaI3232x32x16I8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaI3216x16x32I8Vop3pMfma::VMfmaI3216x16x32I8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_i32_16x16x32_i8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaI3216x16x32I8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaI3216x16x32I8Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -2404,21 +2520,21 @@ VMfmaI3216x16x32I8Vop3pMfma::VMfmaI3216x16x32I8Vop3pMfma(const MachineInst *inst
   flags_ |= MFMA;
 }
 
-void VMfmaI3216x16x32I8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_i32_i8(cu, 16, 16, 32, 1, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                      amdgpu::src_base(vb, src1.encoding_value_), s2, const_acc, inst_.cbsz,
-                      inst_.abid, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaI3216x16x32I8Vop3pMfma(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_i32_16x16x32_i8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaI3216x16x32I8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacF3216x16x64F16Vop3pMfma::VSmfmacF3216x16x64F16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_16x16x64_f16", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacF3216x16x64F16Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacF3216x16x64F16Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -2447,19 +2563,21 @@ VSmfmacF3216x16x64F16Vop3pMfma::VSmfmacF3216x16x64F16Vop3pMfma(const MachineInst
   flags_ |= MFMA;
 }
 
-void VSmfmacF3216x16x64F16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
-  amdgpu::exec_smfmac_f32_16x16x64_f16(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_f16);
+namespace detail {
+DecodeResult decodeVSmfmacF3216x16x64F16Vop3pMfma(const MachineInst *opcode,
+                                                  const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_f32_16x16x64_f16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacF3216x16x64F16Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacF3232x32x32F16Vop3pMfma::VSmfmacF3232x32x32F16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_32x32x32_f16", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacF3232x32x32F16Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacF3232x32x32F16Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -2488,19 +2606,21 @@ VSmfmacF3232x32x32F16Vop3pMfma::VSmfmacF3232x32x32F16Vop3pMfma(const MachineInst
   flags_ |= MFMA;
 }
 
-void VSmfmacF3232x32x32F16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
-  amdgpu::exec_smfmac_f32_32x32x32_f16(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_f16);
+namespace detail {
+DecodeResult decodeVSmfmacF3232x32x32F16Vop3pMfma(const MachineInst *opcode,
+                                                  const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_f32_32x32x32_f16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacF3232x32x32F16Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF3232x32x42bBf16Vop3pMfma::VMfmaF3232x32x42bBf16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_32x32x4_2b_bf16", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF3232x32x42bBf16Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF3232x32x42bBf16Vop3pMfma)),
       vdst(1024, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -2530,21 +2650,21 @@ VMfmaF3232x32x42bBf16Vop3pMfma::VMfmaF3232x32x42bBf16Vop3pMfma(const MachineInst
   flags_ |= MFMA;
 }
 
-void VMfmaF3232x32x42bBf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f32_mfma_bf16_spec<32, 32, 4, 2>(cu, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                                                amdgpu::src_base(vb, src1.encoding_value_), s2,
-                                                const_acc, inst_.cbsz, inst_.abid, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF3232x32x42bBf16Vop3pMfma(const MachineInst *opcode,
+                                                  const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_32x32x4_2b_bf16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF3232x32x42bBf16Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF3216x16x44bBf16Vop3pMfma::VMfmaF3216x16x44bBf16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_16x16x4_4b_bf16", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF3216x16x44bBf16Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF3216x16x44bBf16Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -2574,21 +2694,21 @@ VMfmaF3216x16x44bBf16Vop3pMfma::VMfmaF3216x16x44bBf16Vop3pMfma(const MachineInst
   flags_ |= MFMA;
 }
 
-void VMfmaF3216x16x44bBf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f32_mfma_bf16_spec<16, 16, 4, 4>(cu, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                                                amdgpu::src_base(vb, src1.encoding_value_), s2,
-                                                const_acc, inst_.cbsz, inst_.abid, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF3216x16x44bBf16Vop3pMfma(const MachineInst *opcode,
+                                                  const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_16x16x4_4b_bf16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF3216x16x44bBf16Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF324x4x416bBf16Vop3pMfma::VMfmaF324x4x416bBf16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_4x4x4_16b_bf16", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF324x4x416bBf16Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF324x4x416bBf16Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -2618,21 +2738,21 @@ VMfmaF324x4x416bBf16Vop3pMfma::VMfmaF324x4x416bBf16Vop3pMfma(const MachineInst *
   flags_ |= MFMA;
 }
 
-void VMfmaF324x4x416bBf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f32(cu, 4, 4, 4, 16, 16, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                   amdgpu::src_base(vb, src1.encoding_value_), s2, amdgpu::extract_bf16,
-                   amdgpu::extract_bf16, const_acc, inst_.cbsz, inst_.abid, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF324x4x416bBf16Vop3pMfma(const MachineInst *opcode,
+                                                 const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_4x4x4_16b_bf16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF324x4x416bBf16Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF3232x32x8Bf16Vop3pMfma::VMfmaF3232x32x8Bf16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_32x32x8_bf16", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF3232x32x8Bf16Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF3232x32x8Bf16Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -2662,21 +2782,21 @@ VMfmaF3232x32x8Bf16Vop3pMfma::VMfmaF3232x32x8Bf16Vop3pMfma(const MachineInst *in
   flags_ |= MFMA;
 }
 
-void VMfmaF3232x32x8Bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f32_mfma_bf16_spec<32, 32, 8>(cu, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                                             amdgpu::src_base(vb, src1.encoding_value_), s2,
-                                             const_acc, inst_.cbsz, inst_.abid, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF3232x32x8Bf16Vop3pMfma(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_32x32x8_bf16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF3232x32x8Bf16Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF3216x16x16Bf16Vop3pMfma::VMfmaF3216x16x16Bf16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_16x16x16_bf16", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF3216x16x16Bf16Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF3216x16x16Bf16Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -2706,21 +2826,21 @@ VMfmaF3216x16x16Bf16Vop3pMfma::VMfmaF3216x16x16Bf16Vop3pMfma(const MachineInst *
   flags_ |= MFMA;
 }
 
-void VMfmaF3216x16x16Bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f32_mfma_bf16_spec<16, 16, 16>(cu, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                                              amdgpu::src_base(vb, src1.encoding_value_), s2,
-                                              const_acc, inst_.cbsz, inst_.abid, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF3216x16x16Bf16Vop3pMfma(const MachineInst *opcode,
+                                                 const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_16x16x16_bf16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF3216x16x16Bf16Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacF3216x16x32F16Vop3pMfma::VSmfmacF3216x16x32F16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_16x16x32_f16", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacF3216x16x32F16Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacF3216x16x32F16Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -2749,19 +2869,21 @@ VSmfmacF3216x16x32F16Vop3pMfma::VSmfmacF3216x16x32F16Vop3pMfma(const MachineInst
   flags_ |= MFMA;
 }
 
-void VSmfmacF3216x16x32F16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
-  amdgpu::exec_smfmac_f32_16x16x32_f16(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_f16);
+namespace detail {
+DecodeResult decodeVSmfmacF3216x16x32F16Vop3pMfma(const MachineInst *opcode,
+                                                  const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_f32_16x16x32_f16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacF3216x16x32F16Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacF3232x32x16F16Vop3pMfma::VSmfmacF3232x32x16F16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_32x32x16_f16", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacF3232x32x16F16Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacF3232x32x16F16Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -2790,19 +2912,21 @@ VSmfmacF3232x32x16F16Vop3pMfma::VSmfmacF3232x32x16F16Vop3pMfma(const MachineInst
   flags_ |= MFMA;
 }
 
-void VSmfmacF3232x32x16F16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
-  amdgpu::exec_smfmac_f32_32x32x16_f16(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_f16);
+namespace detail {
+DecodeResult decodeVSmfmacF3232x32x16F16Vop3pMfma(const MachineInst *opcode,
+                                                  const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_f32_32x32x16_f16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacF3232x32x16F16Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacF3216x16x32Bf16Vop3pMfma::VSmfmacF3216x16x32Bf16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_16x16x32_bf16", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacF3216x16x32Bf16Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacF3216x16x32Bf16Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -2831,19 +2955,21 @@ VSmfmacF3216x16x32Bf16Vop3pMfma::VSmfmacF3216x16x32Bf16Vop3pMfma(const MachineIn
   flags_ |= MFMA;
 }
 
-void VSmfmacF3216x16x32Bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
-  amdgpu::exec_smfmac_f32_16x16x32_f16(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf16);
+namespace detail {
+DecodeResult decodeVSmfmacF3216x16x32Bf16Vop3pMfma(const MachineInst *opcode,
+                                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_f32_16x16x32_bf16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacF3216x16x32Bf16Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacF3232x32x16Bf16Vop3pMfma::VSmfmacF3232x32x16Bf16Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_32x32x16_bf16", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacF3232x32x16Bf16Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacF3232x32x16Bf16Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -2872,19 +2998,21 @@ VSmfmacF3232x32x16Bf16Vop3pMfma::VSmfmacF3232x32x16Bf16Vop3pMfma(const MachineIn
   flags_ |= MFMA;
 }
 
-void VSmfmacF3232x32x16Bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
-  amdgpu::exec_smfmac_f32_32x32x16_f16(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf16);
+namespace detail {
+DecodeResult decodeVSmfmacF3232x32x16Bf16Vop3pMfma(const MachineInst *opcode,
+                                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_f32_32x32x16_bf16", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacF3232x32x16Bf16Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacI3216x16x64I8Vop3pMfma::VSmfmacI3216x16x64I8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_i32_16x16x64_i8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacI3216x16x64I8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacI3216x16x64I8Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -2913,15 +3041,21 @@ VSmfmacI3216x16x64I8Vop3pMfma::VSmfmacI3216x16x64I8Vop3pMfma(const MachineInst *
   flags_ |= MFMA;
 }
 
-void VSmfmacI3216x16x64I8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // SMFMAC stub: V_SMFMAC_I32_16X16X64_I8 (I32 result, no cross-lane helper)
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeVSmfmacI3216x16x64I8Vop3pMfma(const MachineInst *opcode,
+                                                 const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_i32_16x16x64_i8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacI3216x16x64I8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacI3232x32x32I8Vop3pMfma::VSmfmacI3232x32x32I8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_i32_32x32x32_i8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacI3232x32x32I8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacI3232x32x32I8Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -2950,15 +3084,21 @@ VSmfmacI3232x32x32I8Vop3pMfma::VSmfmacI3232x32x32I8Vop3pMfma(const MachineInst *
   flags_ |= MFMA;
 }
 
-void VSmfmacI3232x32x32I8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // SMFMAC stub: V_SMFMAC_I32_32X32X32_I8 (I32 result, no cross-lane helper)
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeVSmfmacI3232x32x32I8Vop3pMfma(const MachineInst *opcode,
+                                                 const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_i32_32x32x32_i8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacI3232x32x32I8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF6416x16x4F64Vop3pMfma::VMfmaF6416x16x4F64Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f64_16x16x4_f64", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF6416x16x4F64Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF6416x16x4F64Vop3pMfma)),
       vdst(256, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -2988,20 +3128,21 @@ VMfmaF6416x16x4F64Vop3pMfma::VMfmaF6416x16x4F64Vop3pMfma(const MachineInst *inst
   flags_ |= MFMA;
 }
 
-void VMfmaF6416x16x4F64Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f64(cu, 16, 16, 4, 1, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                   amdgpu::src_base(vb, src1.encoding_value_), s2, const_acc, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF6416x16x4F64Vop3pMfma(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f64_16x16x4_f64", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF6416x16x4F64Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF644x4x44bF64Vop3pMfma::VMfmaF644x4x44bF64Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f64_4x4x4_4b_f64", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF644x4x44bF64Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF644x4x44bF64Vop3pMfma)),
       vdst(64, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -3031,20 +3172,21 @@ VMfmaF644x4x44bF64Vop3pMfma::VMfmaF644x4x44bF64Vop3pMfma(const MachineInst *inst
   flags_ |= MFMA;
 }
 
-void VMfmaF644x4x44bF64Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f64(cu, 4, 4, 4, 4, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                   amdgpu::src_base(vb, src1.encoding_value_), s2, const_acc, inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF644x4x44bF64Vop3pMfma(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f64_4x4x4_4b_f64", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF644x4x44bF64Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF3216x16x32Bf8Bf8Vop3pMfma::VMfmaF3216x16x32Bf8Bf8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_16x16x32_bf8_bf8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF3216x16x32Bf8Bf8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF3216x16x32Bf8Bf8Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -3074,22 +3216,21 @@ VMfmaF3216x16x32Bf8Bf8Vop3pMfma::VMfmaF3216x16x32Bf8Bf8Vop3pMfma(const MachineIn
   flags_ |= MFMA;
 }
 
-void VMfmaF3216x16x32Bf8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, false, false>(
-      cu, dst, amdgpu::src_base(vb, src0.encoding_value_),
-      amdgpu::src_base(vb, src1.encoding_value_), s2, const_acc, inst_.cbsz, inst_.abid,
-      inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF3216x16x32Bf8Bf8Vop3pMfma(const MachineInst *opcode,
+                                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_16x16x32_bf8_bf8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF3216x16x32Bf8Bf8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF3216x16x32Bf8Fp8Vop3pMfma::VMfmaF3216x16x32Bf8Fp8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_16x16x32_bf8_fp8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF3216x16x32Bf8Fp8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF3216x16x32Bf8Fp8Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -3119,22 +3260,21 @@ VMfmaF3216x16x32Bf8Fp8Vop3pMfma::VMfmaF3216x16x32Bf8Fp8Vop3pMfma(const MachineIn
   flags_ |= MFMA;
 }
 
-void VMfmaF3216x16x32Bf8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, false, true>(
-      cu, dst, amdgpu::src_base(vb, src0.encoding_value_),
-      amdgpu::src_base(vb, src1.encoding_value_), s2, const_acc, inst_.cbsz, inst_.abid,
-      inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF3216x16x32Bf8Fp8Vop3pMfma(const MachineInst *opcode,
+                                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_16x16x32_bf8_fp8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF3216x16x32Bf8Fp8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF3216x16x32Fp8Bf8Vop3pMfma::VMfmaF3216x16x32Fp8Bf8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_16x16x32_fp8_bf8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF3216x16x32Fp8Bf8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF3216x16x32Fp8Bf8Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -3164,22 +3304,21 @@ VMfmaF3216x16x32Fp8Bf8Vop3pMfma::VMfmaF3216x16x32Fp8Bf8Vop3pMfma(const MachineIn
   flags_ |= MFMA;
 }
 
-void VMfmaF3216x16x32Fp8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, true, false>(
-      cu, dst, amdgpu::src_base(vb, src0.encoding_value_),
-      amdgpu::src_base(vb, src1.encoding_value_), s2, const_acc, inst_.cbsz, inst_.abid,
-      inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF3216x16x32Fp8Bf8Vop3pMfma(const MachineInst *opcode,
+                                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_16x16x32_fp8_bf8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF3216x16x32Fp8Bf8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF3216x16x32Fp8Fp8Vop3pMfma::VMfmaF3216x16x32Fp8Fp8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_16x16x32_fp8_fp8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF3216x16x32Fp8Fp8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF3216x16x32Fp8Fp8Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -3209,22 +3348,21 @@ VMfmaF3216x16x32Fp8Fp8Vop3pMfma::VMfmaF3216x16x32Fp8Fp8Vop3pMfma(const MachineIn
   flags_ |= MFMA;
 }
 
-void VMfmaF3216x16x32Fp8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, true, true>(
-      cu, dst, amdgpu::src_base(vb, src0.encoding_value_),
-      amdgpu::src_base(vb, src1.encoding_value_), s2, const_acc, inst_.cbsz, inst_.abid,
-      inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF3216x16x32Fp8Fp8Vop3pMfma(const MachineInst *opcode,
+                                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_16x16x32_fp8_fp8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF3216x16x32Fp8Fp8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF3232x32x16Bf8Bf8Vop3pMfma::VMfmaF3232x32x16Bf8Bf8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_32x32x16_bf8_bf8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF3232x32x16Bf8Bf8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF3232x32x16Bf8Bf8Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -3254,22 +3392,21 @@ VMfmaF3232x32x16Bf8Bf8Vop3pMfma::VMfmaF3232x32x16Bf8Bf8Vop3pMfma(const MachineIn
   flags_ |= MFMA;
 }
 
-void VMfmaF3232x32x16Bf8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f32_mfma_f8_spec<32, 32, 16, false, false>(
-      cu, dst, amdgpu::src_base(vb, src0.encoding_value_),
-      amdgpu::src_base(vb, src1.encoding_value_), s2, const_acc, inst_.cbsz, inst_.abid,
-      inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF3232x32x16Bf8Bf8Vop3pMfma(const MachineInst *opcode,
+                                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_32x32x16_bf8_bf8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF3232x32x16Bf8Bf8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF3232x32x16Bf8Fp8Vop3pMfma::VMfmaF3232x32x16Bf8Fp8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_32x32x16_bf8_fp8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF3232x32x16Bf8Fp8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF3232x32x16Bf8Fp8Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -3299,22 +3436,21 @@ VMfmaF3232x32x16Bf8Fp8Vop3pMfma::VMfmaF3232x32x16Bf8Fp8Vop3pMfma(const MachineIn
   flags_ |= MFMA;
 }
 
-void VMfmaF3232x32x16Bf8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f32_mfma_f8_spec<32, 32, 16, false, true>(
-      cu, dst, amdgpu::src_base(vb, src0.encoding_value_),
-      amdgpu::src_base(vb, src1.encoding_value_), s2, const_acc, inst_.cbsz, inst_.abid,
-      inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF3232x32x16Bf8Fp8Vop3pMfma(const MachineInst *opcode,
+                                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_32x32x16_bf8_fp8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF3232x32x16Bf8Fp8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF3232x32x16Fp8Bf8Vop3pMfma::VMfmaF3232x32x16Fp8Bf8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_32x32x16_fp8_bf8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF3232x32x16Fp8Bf8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF3232x32x16Fp8Bf8Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -3344,22 +3480,21 @@ VMfmaF3232x32x16Fp8Bf8Vop3pMfma::VMfmaF3232x32x16Fp8Bf8Vop3pMfma(const MachineIn
   flags_ |= MFMA;
 }
 
-void VMfmaF3232x32x16Fp8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f32_mfma_f8_spec<32, 32, 16, true, false>(
-      cu, dst, amdgpu::src_base(vb, src0.encoding_value_),
-      amdgpu::src_base(vb, src1.encoding_value_), s2, const_acc, inst_.cbsz, inst_.abid,
-      inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF3232x32x16Fp8Bf8Vop3pMfma(const MachineInst *opcode,
+                                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_32x32x16_fp8_bf8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF3232x32x16Fp8Bf8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VMfmaF3232x32x16Fp8Fp8Vop3pMfma::VMfmaF3232x32x16Fp8Fp8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_mfma_f32_32x32x16_fp8_fp8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VMfmaF3232x32x16Fp8Fp8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VMfmaF3232x32x16Fp8Fp8Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -3389,22 +3524,21 @@ VMfmaF3232x32x16Fp8Fp8Vop3pMfma::VMfmaF3232x32x16Fp8Fp8Vop3pMfma(const MachineIn
   flags_ |= MFMA;
 }
 
-void VMfmaF3232x32x16Fp8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  amdgpu::exec_f32_mfma_f8_spec<32, 32, 16, true, true>(
-      cu, dst, amdgpu::src_base(vb, src0.encoding_value_),
-      amdgpu::src_base(vb, src1.encoding_value_), s2, const_acc, inst_.cbsz, inst_.abid,
-      inst_.blgp);
+namespace detail {
+DecodeResult decodeVMfmaF3232x32x16Fp8Fp8Vop3pMfma(const MachineInst *opcode,
+                                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_mfma_f32_32x32x16_fp8_fp8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMfmaF3232x32x16Fp8Fp8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacF3216x16x64Bf8Bf8Vop3pMfma::VSmfmacF3216x16x64Bf8Bf8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_16x16x64_bf8_bf8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacF3216x16x64Bf8Bf8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacF3216x16x64Bf8Bf8Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -3433,20 +3567,21 @@ VSmfmacF3216x16x64Bf8Bf8Vop3pMfma::VSmfmacF3216x16x64Bf8Bf8Vop3pMfma(const Machi
   flags_ |= MFMA;
 }
 
-void VSmfmacF3216x16x64Bf8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
-  amdgpu::exec_smfmac_f32_16x16x64_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf8,
-                                       amdgpu::smfmac_read_bf8);
+namespace detail {
+DecodeResult decodeVSmfmacF3216x16x64Bf8Bf8Vop3pMfma(const MachineInst *opcode,
+                                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_f32_16x16x64_bf8_bf8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacF3216x16x64Bf8Bf8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacF3216x16x64Bf8Fp8Vop3pMfma::VSmfmacF3216x16x64Bf8Fp8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_16x16x64_bf8_fp8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacF3216x16x64Bf8Fp8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacF3216x16x64Bf8Fp8Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -3475,20 +3610,21 @@ VSmfmacF3216x16x64Bf8Fp8Vop3pMfma::VSmfmacF3216x16x64Bf8Fp8Vop3pMfma(const Machi
   flags_ |= MFMA;
 }
 
-void VSmfmacF3216x16x64Bf8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
-  amdgpu::exec_smfmac_f32_16x16x64_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf8,
-                                       amdgpu::smfmac_read_fp8);
+namespace detail {
+DecodeResult decodeVSmfmacF3216x16x64Bf8Fp8Vop3pMfma(const MachineInst *opcode,
+                                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_f32_16x16x64_bf8_fp8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacF3216x16x64Bf8Fp8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacF3216x16x64Fp8Bf8Vop3pMfma::VSmfmacF3216x16x64Fp8Bf8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_16x16x64_fp8_bf8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacF3216x16x64Fp8Bf8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacF3216x16x64Fp8Bf8Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -3517,20 +3653,21 @@ VSmfmacF3216x16x64Fp8Bf8Vop3pMfma::VSmfmacF3216x16x64Fp8Bf8Vop3pMfma(const Machi
   flags_ |= MFMA;
 }
 
-void VSmfmacF3216x16x64Fp8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
-  amdgpu::exec_smfmac_f32_16x16x64_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_fp8,
-                                       amdgpu::smfmac_read_bf8);
+namespace detail {
+DecodeResult decodeVSmfmacF3216x16x64Fp8Bf8Vop3pMfma(const MachineInst *opcode,
+                                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_f32_16x16x64_fp8_bf8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacF3216x16x64Fp8Bf8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacF3216x16x64Fp8Fp8Vop3pMfma::VSmfmacF3216x16x64Fp8Fp8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_16x16x64_fp8_fp8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacF3216x16x64Fp8Fp8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacF3216x16x64Fp8Fp8Vop3pMfma)),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -3559,20 +3696,21 @@ VSmfmacF3216x16x64Fp8Fp8Vop3pMfma::VSmfmacF3216x16x64Fp8Fp8Vop3pMfma(const Machi
   flags_ |= MFMA;
 }
 
-void VSmfmacF3216x16x64Fp8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
-  amdgpu::exec_smfmac_f32_16x16x64_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_fp8,
-                                       amdgpu::smfmac_read_fp8);
+namespace detail {
+DecodeResult decodeVSmfmacF3216x16x64Fp8Fp8Vop3pMfma(const MachineInst *opcode,
+                                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_f32_16x16x64_fp8_fp8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacF3216x16x64Fp8Fp8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacF3232x32x32Bf8Bf8Vop3pMfma::VSmfmacF3232x32x32Bf8Bf8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_32x32x32_bf8_bf8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacF3232x32x32Bf8Bf8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacF3232x32x32Bf8Bf8Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -3601,20 +3739,21 @@ VSmfmacF3232x32x32Bf8Bf8Vop3pMfma::VSmfmacF3232x32x32Bf8Bf8Vop3pMfma(const Machi
   flags_ |= MFMA;
 }
 
-void VSmfmacF3232x32x32Bf8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
-  amdgpu::exec_smfmac_f32_32x32x32_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf8,
-                                       amdgpu::smfmac_read_bf8);
+namespace detail {
+DecodeResult decodeVSmfmacF3232x32x32Bf8Bf8Vop3pMfma(const MachineInst *opcode,
+                                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_f32_32x32x32_bf8_bf8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacF3232x32x32Bf8Bf8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacF3232x32x32Bf8Fp8Vop3pMfma::VSmfmacF3232x32x32Bf8Fp8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_32x32x32_bf8_fp8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacF3232x32x32Bf8Fp8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacF3232x32x32Bf8Fp8Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -3643,20 +3782,21 @@ VSmfmacF3232x32x32Bf8Fp8Vop3pMfma::VSmfmacF3232x32x32Bf8Fp8Vop3pMfma(const Machi
   flags_ |= MFMA;
 }
 
-void VSmfmacF3232x32x32Bf8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
-  amdgpu::exec_smfmac_f32_32x32x32_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf8,
-                                       amdgpu::smfmac_read_fp8);
+namespace detail {
+DecodeResult decodeVSmfmacF3232x32x32Bf8Fp8Vop3pMfma(const MachineInst *opcode,
+                                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_f32_32x32x32_bf8_fp8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacF3232x32x32Bf8Fp8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacF3232x32x32Fp8Bf8Vop3pMfma::VSmfmacF3232x32x32Fp8Bf8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_32x32x32_fp8_bf8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacF3232x32x32Fp8Bf8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacF3232x32x32Fp8Bf8Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -3685,20 +3825,21 @@ VSmfmacF3232x32x32Fp8Bf8Vop3pMfma::VSmfmacF3232x32x32Fp8Bf8Vop3pMfma(const Machi
   flags_ |= MFMA;
 }
 
-void VSmfmacF3232x32x32Fp8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
-  amdgpu::exec_smfmac_f32_32x32x32_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_fp8,
-                                       amdgpu::smfmac_read_bf8);
+namespace detail {
+DecodeResult decodeVSmfmacF3232x32x32Fp8Bf8Vop3pMfma(const MachineInst *opcode,
+                                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_f32_32x32x32_fp8_bf8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacF3232x32x32Fp8Bf8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 VSmfmacF3232x32x32Fp8Fp8Vop3pMfma::VSmfmacF3232x32x32Fp8Fp8Vop3pMfma(const MachineInst *inst)
     : Vop3pMfma("v_smfmac_f32_32x32x32_fp8_fp8", reinterpret_cast<const OpEncoding *>(inst),
-                make_exec_fn<VSmfmacF3232x32x32Fp8Fp8Vop3pMfma>()),
+                selected_exec_fn(InstructionExecutionId::VSmfmacF3232x32x32Fp8Fp8Vop3pMfma)),
       vdst(512, OperandType::OPR_VGPR_OR_ACCVGPR,
            (reinterpret_cast<const OpEncoding *>(inst)->vdst +
             (reinterpret_cast<const OpEncoding *>(inst)->acc_cd
@@ -3727,16 +3868,17 @@ VSmfmacF3232x32x32Fp8Fp8Vop3pMfma::VSmfmacF3232x32x32Fp8Fp8Vop3pMfma(const Machi
   flags_ |= MFMA;
 }
 
-void VSmfmacF3232x32x32Fp8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  auto &cu = wf.cu();
-  uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
-  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
-  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
-  amdgpu::exec_smfmac_f32_32x32x32_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_fp8,
-                                       amdgpu::smfmac_read_fp8);
+namespace detail {
+DecodeResult decodeVSmfmacF3232x32x32Fp8Fp8Vop3pMfma(const MachineInst *opcode,
+                                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3pMfma::validate_encoding(
+      "v_smfmac_f32_32x32x32_fp8_fp8", reinterpret_cast<const Vop3pMfma::OpEncoding *>(opcode),
+      emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSmfmacF3232x32x32Fp8Fp8Vop3pMfma>(opcode);
 }
+} // namespace detail
 
 } // namespace cdna4
 } // namespace rocjitsu

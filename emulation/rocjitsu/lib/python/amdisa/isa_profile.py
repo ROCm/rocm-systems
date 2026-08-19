@@ -155,7 +155,7 @@ _RDNA4_VOPD_SLOT_OPS = _VOPD_COMMON_F32_SLOT_OPS + (
     VopdSlotOp('VopdAndB32', 18, 'v_dual_and_b32'),
 )
 
-_GFX1250_VOPD_SLOT_OPS = _VOPD_COMMON_F32_SLOT_OPS + (
+_CDNA5_VOPD_SLOT_OPS = _VOPD_COMMON_F32_SLOT_OPS + (
     VopdSlotOp('VopdMaxNumF32', 10, 'v_dual_max_num_f32'),
     VopdSlotOp('VopdMinNumF32', 11, 'v_dual_min_num_f32'),
     VopdSlotOp('VopdAddNcU32', 16, 'v_dual_add_nc_u32'),
@@ -231,7 +231,17 @@ class IsaProfile(ABC):
 
     @property
     def generated_arch_name(self) -> str | None:
-        """Override for the generated C++ architecture namespace/directory."""
+        """Override for the logical architecture name used by code generation."""
+        return None
+
+    @property
+    def generated_dir_name(self) -> str | None:
+        """Override for the generated and handwritten filesystem directory."""
+        return None
+
+    @property
+    def cpp_namespace(self) -> str | None:
+        """Override for the generated C++ architecture namespace."""
         return None
 
     @property
@@ -700,6 +710,15 @@ class _AmdgpuProfileBase(IsaProfile):
 
     _FLAT_SEGMENTS: frozenset[str] = frozenset()
     _SKIP_DPP_SDWA: bool = False
+
+    @property
+    def split_execution_sources(self) -> bool:
+        """Split every built-in AMDGPU target into model and execution sources.
+
+        Custom profiles may override this for compatibility with the generator's
+        non-split fallback, which remains covered independently.
+        """
+        return True
 
     @property
     def flt_name_map(self) -> dict[float, str]:
@@ -1638,6 +1657,14 @@ class Rdna4Profile(_AmdgpuProfileBase):
     def uses_true16_vop3_opsel(self) -> bool:
         return True
 
+    @property
+    def semantic_overrides(self) -> dict[str, tuple[str, ...]]:
+        return {
+            'S_BARRIER_SIGNAL': ('true_nop', '', ''),
+            'S_BARRIER_SIGNAL_ISFIRST': ('true_nop', '', ''),
+            'S_BARRIER_WAIT': ('barrier', '', ''),
+        }
+
     def mnemonic_rule(self, enc_name: str) -> MnemonicRule:
         """RDNA4 mnemonic rules.
 
@@ -1689,17 +1716,36 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return []
 
 
-class Gfx1250Profile(Rdna4Profile):
+class Cdna5Profile(Rdna4Profile):
     """ISA profile for gfx1250.
 
-    The gfx1250 encoding model is RDNA4/GFX12-like. Keep it as a named target
-    profile so generated C++ lands under ``amdgpu/gfx1250`` while reusing the
-    RDNA4 parser/codegen rules.
+    The gfx1250 encoding model is RDNA4/GFX12-like. Use ``cdna5`` as the
+    logical target used by parser/codegen rules while generated and handwritten
+    C++ lives under ``amdgpu/cdna5`` in the ``cdna5`` namespace.
     """
 
     @property
     def generated_arch_name(self) -> str | None:
-        return 'gfx1250'
+        return 'cdna5'
+
+    @property
+    def generated_dir_name(self) -> str | None:
+        return 'cdna5'
+
+    @property
+    def cpp_namespace(self) -> str | None:
+        return 'cdna5'
+
+    @property
+    def semantic_overrides(self) -> dict[str, tuple[str, ...]]:
+        overrides = dict(super().semantic_overrides)
+        for mnemonic in (
+            'S_BARRIER_SIGNAL',
+            'S_BARRIER_SIGNAL_ISFIRST',
+            'S_BARRIER_WAIT',
+        ):
+            overrides.pop(mnemonic, None)
+        return overrides
 
     @property
     def semantic_class_overrides(self) -> dict[str, str]:
@@ -1797,7 +1843,7 @@ class Gfx1250Profile(Rdna4Profile):
 
     @property
     def vopd_slot_ops(self) -> tuple[VopdSlotOp, ...]:
-        return _GFX1250_VOPD_SLOT_OPS
+        return _CDNA5_VOPD_SLOT_OPS
 
     @property
     def vopd_x_slot_opcodes(self) -> frozenset[int]:
@@ -1821,10 +1867,6 @@ class Gfx1250Profile(Rdna4Profile):
 
     @property
     def uses_packed_16bit_e32_source_selectors(self) -> bool:
-        return True
-
-    @property
-    def split_execution_sources(self) -> bool:
         return True
 
     @property

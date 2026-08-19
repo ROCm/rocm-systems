@@ -5,24 +5,16 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/vop3.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
-#include "rocjitsu/vm/amdgpu/register_access.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
-#include "util/except.h"
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <limits>
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna2 {
 
 VInterpP1F32Vop3::VInterpP1F32Vop3(const MachineInst *inst)
     : Vop3("v_interp_p1_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VInterpP1F32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VInterpP1F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src0(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -33,24 +25,23 @@ VInterpP1F32Vop3::VInterpP1F32Vop3(const MachineInst *inst)
   src_operands_[2] = &m0;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   m0.apply_fieldless_caps(false, false, false);
 }
 
-void VInterpP1F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+namespace detail {
+DecodeResult decodeVInterpP1F32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_interp_p1_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VInterpP1F32Vop3>(opcode);
 }
+} // namespace detail
 
 VInterpP2F32Vop3::VInterpP2F32Vop3(const MachineInst *inst)
     : Vop3("v_interp_p2_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VInterpP2F32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VInterpP2F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src0(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -62,24 +53,23 @@ VInterpP2F32Vop3::VInterpP2F32Vop3(const MachineInst *inst)
   src_operands_[3] = &m0;
   num_src_ = 4;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   m0.apply_fieldless_caps(false, false, false);
 }
 
-void VInterpP2F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+namespace detail {
+DecodeResult decodeVInterpP2F32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_interp_p2_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VInterpP2F32Vop3>(opcode);
 }
+} // namespace detail
 
 VInterpMovF32Vop3::VInterpMovF32Vop3(const MachineInst *inst)
     : Vop3("v_interp_mov_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VInterpMovF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VInterpMovF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src1(32, OperandType::OPR_PARAM, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src0(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -90,31 +80,40 @@ VInterpMovF32Vop3::VInterpMovF32Vop3(const MachineInst *inst)
   src_operands_[2] = &m0;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   m0.apply_fieldless_caps(false, false, false);
 }
 
-void VInterpMovF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Interpolation/LDS-direct: no-op in compute simulation.
+namespace detail {
+DecodeResult decodeVInterpMovF32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_interp_mov_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VInterpMovF32Vop3>(opcode);
 }
+} // namespace detail
 
 VNopVop3::VNopVop3(const MachineInst *inst)
-    : Vop3("v_nop", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VNopVop3>()) {
+    : Vop3("v_nop", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VNopVop3)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
 
-void VNopVop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_nop_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVNopVop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_nop", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VNopVop3>(opcode);
+}
+} // namespace detail
 
 VMovB32Vop3::VMovB32Vop3(const MachineInst *inst)
-    : Vop3("v_mov_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMovB32Vop3>()),
+    : Vop3("v_mov_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMovB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -127,38 +126,41 @@ VMovB32Vop3::VMovB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMovB32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_mov_b32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVMovB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mov_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMovB32Vop3>(opcode);
+}
+} // namespace detail
 
 VReadfirstlaneB32Vop3::VReadfirstlaneB32Vop3(const MachineInst *inst)
     : Vop3("v_readfirstlane_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VReadfirstlaneB32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VReadfirstlaneB32Vop3)),
       vdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VReadfirstlaneB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint32_t val = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (exec & (1ULL << lane)) {
-      val = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-      break;
-    }
-  }
-  amdgpu::RegisterAccess(wf).write_scalar(vdst, val);
+namespace detail {
+DecodeResult decodeVReadfirstlaneB32Vop3(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_readfirstlane_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VReadfirstlaneB32Vop3>(opcode);
 }
+} // namespace detail
 
 VCvtI32F64Vop3::VCvtI32F64Vop3(const MachineInst *inst)
     : Vop3("v_cvt_i32_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtI32F64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtI32F64Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -172,13 +174,19 @@ VCvtI32F64Vop3::VCvtI32F64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VCvtI32F64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_i32_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCvtI32F64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_i32_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtI32F64Vop3>(opcode);
 }
+} // namespace detail
 
 VCvtF64I32Vop3::VCvtF64I32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f64_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF64I32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtF64I32Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -191,13 +199,19 @@ VCvtF64I32Vop3::VCvtF64I32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCvtF64I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f64_i32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCvtF64I32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f64_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF64I32Vop3>(opcode);
 }
+} // namespace detail
 
 VCvtF32I32Vop3::VCvtF32I32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f32_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF32I32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtF32I32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -210,13 +224,19 @@ VCvtF32I32Vop3::VCvtF32I32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCvtF32I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f32_i32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCvtF32I32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f32_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF32I32Vop3>(opcode);
 }
+} // namespace detail
 
 VCvtF32U32Vop3::VCvtF32U32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f32_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF32U32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtF32U32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -229,13 +249,19 @@ VCvtF32U32Vop3::VCvtF32U32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCvtF32U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f32_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCvtF32U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f32_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF32U32Vop3>(opcode);
 }
+} // namespace detail
 
 VCvtU32F32Vop3::VCvtU32F32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_u32_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtU32F32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtU32F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -248,13 +274,19 @@ VCvtU32F32Vop3::VCvtU32F32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCvtU32F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_u32_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCvtU32F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_u32_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtU32F32Vop3>(opcode);
 }
+} // namespace detail
 
 VCvtI32F32Vop3::VCvtI32F32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_i32_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtI32F32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtI32F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -267,13 +299,19 @@ VCvtI32F32Vop3::VCvtI32F32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCvtI32F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_i32_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCvtI32F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_i32_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtI32F32Vop3>(opcode);
 }
+} // namespace detail
 
 VCvtF16F32Vop3::VCvtF16F32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF16F32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtF16F32Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -286,19 +324,25 @@ VCvtF16F32Vop3::VCvtF16F32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
+namespace detail {
+DecodeResult decodeVCvtF16F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f16_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF16F32Vop3>(opcode);
+}
+} // namespace detail
+
 void VCvtF16F32Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
 }
 
-void VCvtF16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f16_f32_vop3(*this, wf);
-}
-
 VCvtF32F16Vop3::VCvtF32F16Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f32_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF32F16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtF32F16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -312,13 +356,19 @@ VCvtF32F16Vop3::VCvtF32F16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCvtF32F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f32_f16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCvtF32F16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f32_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF32F16Vop3>(opcode);
 }
+} // namespace detail
 
 VCvtRpiI32F32Vop3::VCvtRpiI32F32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_rpi_i32_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtRpiI32F32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtRpiI32F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -331,13 +381,20 @@ VCvtRpiI32F32Vop3::VCvtRpiI32F32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCvtRpiI32F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_rpi_i32_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCvtRpiI32F32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_rpi_i32_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtRpiI32F32Vop3>(opcode);
 }
+} // namespace detail
 
 VCvtFlrI32F32Vop3::VCvtFlrI32F32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_flr_i32_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtFlrI32F32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtFlrI32F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -350,13 +407,20 @@ VCvtFlrI32F32Vop3::VCvtFlrI32F32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCvtFlrI32F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_flr_i32_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCvtFlrI32F32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_flr_i32_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtFlrI32F32Vop3>(opcode);
 }
+} // namespace detail
 
 VCvtOffF32I4Vop3::VCvtOffF32I4Vop3(const MachineInst *inst)
     : Vop3("v_cvt_off_f32_i4", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtOffF32I4Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtOffF32I4Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -369,13 +433,20 @@ VCvtOffF32I4Vop3::VCvtOffF32I4Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCvtOffF32I4Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_off_f32_i4_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCvtOffF32I4Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_off_f32_i4", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtOffF32I4Vop3>(opcode);
 }
+} // namespace detail
 
 VCvtF32F64Vop3::VCvtF32F64Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f32_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF32F64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtF32F64Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -389,13 +460,19 @@ VCvtF32F64Vop3::VCvtF32F64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VCvtF32F64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f32_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCvtF32F64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f32_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF32F64Vop3>(opcode);
 }
+} // namespace detail
 
 VCvtF64F32Vop3::VCvtF64F32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f64_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF64F32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtF64F32Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -408,13 +485,19 @@ VCvtF64F32Vop3::VCvtF64F32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCvtF64F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f64_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCvtF64F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f64_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF64F32Vop3>(opcode);
 }
+} // namespace detail
 
 VCvtF32Ubyte0Vop3::VCvtF32Ubyte0Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f32_ubyte0", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF32Ubyte0Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtF32Ubyte0Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -427,13 +510,20 @@ VCvtF32Ubyte0Vop3::VCvtF32Ubyte0Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCvtF32Ubyte0Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f32_ubyte0_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCvtF32Ubyte0Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f32_ubyte0", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF32Ubyte0Vop3>(opcode);
 }
+} // namespace detail
 
 VCvtF32Ubyte1Vop3::VCvtF32Ubyte1Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f32_ubyte1", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF32Ubyte1Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtF32Ubyte1Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -446,13 +536,20 @@ VCvtF32Ubyte1Vop3::VCvtF32Ubyte1Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCvtF32Ubyte1Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f32_ubyte1_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCvtF32Ubyte1Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f32_ubyte1", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF32Ubyte1Vop3>(opcode);
 }
+} // namespace detail
 
 VCvtF32Ubyte2Vop3::VCvtF32Ubyte2Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f32_ubyte2", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF32Ubyte2Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtF32Ubyte2Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -465,13 +562,20 @@ VCvtF32Ubyte2Vop3::VCvtF32Ubyte2Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCvtF32Ubyte2Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f32_ubyte2_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCvtF32Ubyte2Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f32_ubyte2", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF32Ubyte2Vop3>(opcode);
 }
+} // namespace detail
 
 VCvtF32Ubyte3Vop3::VCvtF32Ubyte3Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f32_ubyte3", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF32Ubyte3Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtF32Ubyte3Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -484,13 +588,20 @@ VCvtF32Ubyte3Vop3::VCvtF32Ubyte3Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCvtF32Ubyte3Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f32_ubyte3_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCvtF32Ubyte3Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f32_ubyte3", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF32Ubyte3Vop3>(opcode);
 }
+} // namespace detail
 
 VCvtU32F64Vop3::VCvtU32F64Vop3(const MachineInst *inst)
     : Vop3("v_cvt_u32_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtU32F64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtU32F64Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -504,13 +615,19 @@ VCvtU32F64Vop3::VCvtU32F64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VCvtU32F64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_u32_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCvtU32F64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_u32_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtU32F64Vop3>(opcode);
 }
+} // namespace detail
 
 VCvtF64U32Vop3::VCvtF64U32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f64_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF64U32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtF64U32Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -523,13 +640,19 @@ VCvtF64U32Vop3::VCvtF64U32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCvtF64U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f64_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCvtF64U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f64_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF64U32Vop3>(opcode);
 }
+} // namespace detail
 
 VTruncF64Vop3::VTruncF64Vop3(const MachineInst *inst)
     : Vop3("v_trunc_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VTruncF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VTruncF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -543,12 +666,19 @@ VTruncF64Vop3::VTruncF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VTruncF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_trunc_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVTruncF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_trunc_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VTruncF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCeilF64Vop3::VCeilF64Vop3(const MachineInst *inst)
-    : Vop3("v_ceil_f64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCeilF64Vop3>()),
+    : Vop3("v_ceil_f64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VCeilF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -562,13 +692,19 @@ VCeilF64Vop3::VCeilF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VCeilF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_ceil_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCeilF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_ceil_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCeilF64Vop3>(opcode);
 }
+} // namespace detail
 
 VRndneF64Vop3::VRndneF64Vop3(const MachineInst *inst)
     : Vop3("v_rndne_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VRndneF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VRndneF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -582,13 +718,19 @@ VRndneF64Vop3::VRndneF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VRndneF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_rndne_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVRndneF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_rndne_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VRndneF64Vop3>(opcode);
 }
+} // namespace detail
 
 VFloorF64Vop3::VFloorF64Vop3(const MachineInst *inst)
     : Vop3("v_floor_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFloorF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VFloorF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -602,24 +744,36 @@ VFloorF64Vop3::VFloorF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VFloorF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_floor_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVFloorF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_floor_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFloorF64Vop3>(opcode);
 }
+} // namespace detail
 
 VPipeflushVop3::VPipeflushVop3(const MachineInst *inst)
     : Vop3("v_pipeflush", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VPipeflushVop3>()) {
+           selected_exec_fn(InstructionExecutionId::VPipeflushVop3)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
 
-void VPipeflushVop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pipeflush_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVPipeflushVop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_pipeflush", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPipeflushVop3>(opcode);
 }
+} // namespace detail
 
 VFractF32Vop3::VFractF32Vop3(const MachineInst *inst)
     : Vop3("v_fract_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFractF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VFractF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -632,13 +786,19 @@ VFractF32Vop3::VFractF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VFractF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_fract_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVFractF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_fract_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFractF32Vop3>(opcode);
 }
+} // namespace detail
 
 VTruncF32Vop3::VTruncF32Vop3(const MachineInst *inst)
     : Vop3("v_trunc_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VTruncF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VTruncF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -651,12 +811,19 @@ VTruncF32Vop3::VTruncF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VTruncF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_trunc_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVTruncF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_trunc_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VTruncF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCeilF32Vop3::VCeilF32Vop3(const MachineInst *inst)
-    : Vop3("v_ceil_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCeilF32Vop3>()),
+    : Vop3("v_ceil_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VCeilF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -669,13 +836,19 @@ VCeilF32Vop3::VCeilF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCeilF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_ceil_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCeilF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_ceil_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCeilF32Vop3>(opcode);
 }
+} // namespace detail
 
 VRndneF32Vop3::VRndneF32Vop3(const MachineInst *inst)
     : Vop3("v_rndne_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VRndneF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VRndneF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -688,13 +861,19 @@ VRndneF32Vop3::VRndneF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VRndneF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_rndne_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVRndneF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_rndne_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VRndneF32Vop3>(opcode);
 }
+} // namespace detail
 
 VFloorF32Vop3::VFloorF32Vop3(const MachineInst *inst)
     : Vop3("v_floor_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFloorF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VFloorF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -707,12 +886,19 @@ VFloorF32Vop3::VFloorF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VFloorF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_floor_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVFloorF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_floor_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFloorF32Vop3>(opcode);
 }
+} // namespace detail
 
 VExpF32Vop3::VExpF32Vop3(const MachineInst *inst)
-    : Vop3("v_exp_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VExpF32Vop3>()),
+    : Vop3("v_exp_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VExpF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -725,10 +911,19 @@ VExpF32Vop3::VExpF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VExpF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_exp_f32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVExpF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_exp_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VExpF32Vop3>(opcode);
+}
+} // namespace detail
 
 VLogF32Vop3::VLogF32Vop3(const MachineInst *inst)
-    : Vop3("v_log_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VLogF32Vop3>()),
+    : Vop3("v_log_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VLogF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -741,10 +936,19 @@ VLogF32Vop3::VLogF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VLogF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_log_f32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVLogF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_log_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLogF32Vop3>(opcode);
+}
+} // namespace detail
 
 VRcpF32Vop3::VRcpF32Vop3(const MachineInst *inst)
-    : Vop3("v_rcp_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VRcpF32Vop3>()),
+    : Vop3("v_rcp_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VRcpF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -757,11 +961,19 @@ VRcpF32Vop3::VRcpF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VRcpF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_rcp_f32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVRcpF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_rcp_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VRcpF32Vop3>(opcode);
+}
+} // namespace detail
 
 VRcpIflagF32Vop3::VRcpIflagF32Vop3(const MachineInst *inst)
     : Vop3("v_rcp_iflag_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VRcpIflagF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VRcpIflagF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -774,12 +986,20 @@ VRcpIflagF32Vop3::VRcpIflagF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VRcpIflagF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_rcp_iflag_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVRcpIflagF32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_rcp_iflag_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VRcpIflagF32Vop3>(opcode);
 }
+} // namespace detail
 
 VRsqF32Vop3::VRsqF32Vop3(const MachineInst *inst)
-    : Vop3("v_rsq_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VRsqF32Vop3>()),
+    : Vop3("v_rsq_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VRsqF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -792,10 +1012,19 @@ VRsqF32Vop3::VRsqF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VRsqF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_rsq_f32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVRsqF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_rsq_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VRsqF32Vop3>(opcode);
+}
+} // namespace detail
 
 VRcpF64Vop3::VRcpF64Vop3(const MachineInst *inst)
-    : Vop3("v_rcp_f64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VRcpF64Vop3>()),
+    : Vop3("v_rcp_f64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VRcpF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -809,10 +1038,19 @@ VRcpF64Vop3::VRcpF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VRcpF64Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_rcp_f64_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVRcpF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_rcp_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VRcpF64Vop3>(opcode);
+}
+} // namespace detail
 
 VRsqF64Vop3::VRsqF64Vop3(const MachineInst *inst)
-    : Vop3("v_rsq_f64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VRsqF64Vop3>()),
+    : Vop3("v_rsq_f64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VRsqF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -826,10 +1064,19 @@ VRsqF64Vop3::VRsqF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VRsqF64Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_rsq_f64_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVRsqF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_rsq_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VRsqF64Vop3>(opcode);
+}
+} // namespace detail
 
 VSqrtF32Vop3::VSqrtF32Vop3(const MachineInst *inst)
-    : Vop3("v_sqrt_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VSqrtF32Vop3>()),
+    : Vop3("v_sqrt_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VSqrtF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -842,12 +1089,19 @@ VSqrtF32Vop3::VSqrtF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VSqrtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_sqrt_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVSqrtF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sqrt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSqrtF32Vop3>(opcode);
 }
+} // namespace detail
 
 VSqrtF64Vop3::VSqrtF64Vop3(const MachineInst *inst)
-    : Vop3("v_sqrt_f64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VSqrtF64Vop3>()),
+    : Vop3("v_sqrt_f64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VSqrtF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -861,12 +1115,19 @@ VSqrtF64Vop3::VSqrtF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VSqrtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_sqrt_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVSqrtF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sqrt_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSqrtF64Vop3>(opcode);
 }
+} // namespace detail
 
 VSinF32Vop3::VSinF32Vop3(const MachineInst *inst)
-    : Vop3("v_sin_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VSinF32Vop3>()),
+    : Vop3("v_sin_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VSinF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -879,10 +1140,19 @@ VSinF32Vop3::VSinF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VSinF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sin_f32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVSinF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sin_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSinF32Vop3>(opcode);
+}
+} // namespace detail
 
 VCosF32Vop3::VCosF32Vop3(const MachineInst *inst)
-    : Vop3("v_cos_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCosF32Vop3>()),
+    : Vop3("v_cos_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VCosF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -895,10 +1165,19 @@ VCosF32Vop3::VCosF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCosF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_cos_f32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVCosF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cos_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCosF32Vop3>(opcode);
+}
+} // namespace detail
 
 VNotB32Vop3::VNotB32Vop3(const MachineInst *inst)
-    : Vop3("v_not_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VNotB32Vop3>()),
+    : Vop3("v_not_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VNotB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -911,11 +1190,19 @@ VNotB32Vop3::VNotB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VNotB32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_not_b32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVNotB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_not_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VNotB32Vop3>(opcode);
+}
+} // namespace detail
 
 VBfrevB32Vop3::VBfrevB32Vop3(const MachineInst *inst)
     : Vop3("v_bfrev_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VBfrevB32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VBfrevB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -928,12 +1215,19 @@ VBfrevB32Vop3::VBfrevB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VBfrevB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_bfrev_b32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVBfrevB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_bfrev_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VBfrevB32Vop3>(opcode);
 }
+} // namespace detail
 
 VFfbhU32Vop3::VFfbhU32Vop3(const MachineInst *inst)
-    : Vop3("v_ffbh_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VFfbhU32Vop3>()),
+    : Vop3("v_ffbh_u32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VFfbhU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -946,12 +1240,19 @@ VFfbhU32Vop3::VFfbhU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VFfbhU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_ffbh_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVFfbhU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_ffbh_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFfbhU32Vop3>(opcode);
 }
+} // namespace detail
 
 VFfblB32Vop3::VFfblB32Vop3(const MachineInst *inst)
-    : Vop3("v_ffbl_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VFfblB32Vop3>()),
+    : Vop3("v_ffbl_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VFfblB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -964,12 +1265,19 @@ VFfblB32Vop3::VFfblB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VFfblB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_ffbl_b32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVFfblB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_ffbl_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFfblB32Vop3>(opcode);
 }
+} // namespace detail
 
 VFfbhI32Vop3::VFfbhI32Vop3(const MachineInst *inst)
-    : Vop3("v_ffbh_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VFfbhI32Vop3>()),
+    : Vop3("v_ffbh_i32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VFfbhI32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -982,13 +1290,19 @@ VFfbhI32Vop3::VFfbhI32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VFfbhI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_ffbh_i32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVFfbhI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_ffbh_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFfbhI32Vop3>(opcode);
 }
+} // namespace detail
 
 VFrexpExpI32F64Vop3::VFrexpExpI32F64Vop3(const MachineInst *inst)
     : Vop3("v_frexp_exp_i32_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFrexpExpI32F64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VFrexpExpI32F64Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1002,13 +1316,20 @@ VFrexpExpI32F64Vop3::VFrexpExpI32F64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VFrexpExpI32F64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_frexp_exp_i32_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVFrexpExpI32F64Vop3(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_frexp_exp_i32_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFrexpExpI32F64Vop3>(opcode);
 }
+} // namespace detail
 
 VFrexpMantF64Vop3::VFrexpMantF64Vop3(const MachineInst *inst)
     : Vop3("v_frexp_mant_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFrexpMantF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VFrexpMantF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1022,13 +1343,20 @@ VFrexpMantF64Vop3::VFrexpMantF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VFrexpMantF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_frexp_mant_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVFrexpMantF64Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_frexp_mant_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFrexpMantF64Vop3>(opcode);
 }
+} // namespace detail
 
 VFractF64Vop3::VFractF64Vop3(const MachineInst *inst)
     : Vop3("v_fract_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFractF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VFractF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1042,13 +1370,19 @@ VFractF64Vop3::VFractF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VFractF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_fract_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVFractF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_fract_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFractF64Vop3>(opcode);
 }
+} // namespace detail
 
 VFrexpExpI32F32Vop3::VFrexpExpI32F32Vop3(const MachineInst *inst)
     : Vop3("v_frexp_exp_i32_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFrexpExpI32F32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VFrexpExpI32F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1061,13 +1395,20 @@ VFrexpExpI32F32Vop3::VFrexpExpI32F32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VFrexpExpI32F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_frexp_exp_i32_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVFrexpExpI32F32Vop3(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_frexp_exp_i32_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFrexpExpI32F32Vop3>(opcode);
 }
+} // namespace detail
 
 VFrexpMantF32Vop3::VFrexpMantF32Vop3(const MachineInst *inst)
     : Vop3("v_frexp_mant_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFrexpMantF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VFrexpMantF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1080,23 +1421,37 @@ VFrexpMantF32Vop3::VFrexpMantF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VFrexpMantF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_frexp_mant_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVFrexpMantF32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_frexp_mant_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFrexpMantF32Vop3>(opcode);
 }
+} // namespace detail
 
 VClrexcpVop3::VClrexcpVop3(const MachineInst *inst)
-    : Vop3("v_clrexcp", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VClrexcpVop3>()) {
+    : Vop3("v_clrexcp", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VClrexcpVop3)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
 
-void VClrexcpVop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_clrexcp_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVClrexcpVop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_clrexcp", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VClrexcpVop3>(opcode);
 }
+} // namespace detail
 
 VMovreldB32Vop3::VMovreldB32Vop3(const MachineInst *inst)
     : Vop3("v_movreld_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMovreldB32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VMovreldB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       m0(32, OperandType::OPR_SDST_M0, 124) {
@@ -1112,26 +1467,20 @@ VMovreldB32Vop3::VMovreldB32Vop3(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
 }
 
-void VMovreldB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  auto rel_dst_base = Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
-  if (!rel_dst_base)
-    throw util::UnimplementedInst(mnemonic());
-  int64_t rel_dst_index = static_cast<int64_t>(*rel_dst_base) + static_cast<int32_t>(wf.m0());
-  if (rel_dst_index < 0 || static_cast<uint64_t>(rel_dst_index) >= wf.vgpr_alloc().count)
-    throw util::UnimplementedInst(mnemonic());
-  Operand rel_dst(32, OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    amdgpu::sdwa::write_lane<false>(*this, wf, rel_dst, lane,
-                                    amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-  }
+namespace detail {
+DecodeResult decodeVMovreldB32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_movreld_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMovreldB32Vop3>(opcode);
 }
+} // namespace detail
 
 VMovrelsB32Vop3::VMovrelsB32Vop3(const MachineInst *inst)
     : Vop3("v_movrels_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMovrelsB32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VMovrelsB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       m0(32, OperandType::OPR_SDST_M0, 124) {
@@ -1140,33 +1489,23 @@ VMovrelsB32Vop3::VMovrelsB32Vop3(const MachineInst *inst)
   src_operands_[1] = &m0;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   m0.apply_fieldless_caps(false, false, false);
 }
 
-void VMovrelsB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  auto rel_src_base = Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  if (!rel_src_base)
-    throw util::UnimplementedInst(mnemonic());
-  int64_t rel_src_index = static_cast<int64_t>(*rel_src_base) + static_cast<int32_t>(wf.m0());
-  if (rel_src_index < 0 || static_cast<uint64_t>(rel_src_index) >= wf.vgpr_alloc().count)
-    throw util::UnimplementedInst(mnemonic());
-  Operand rel_src(32, OperandType::OPR_VGPR, static_cast<int>(rel_src_index));
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane,
-                                    amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));
-  }
+namespace detail {
+DecodeResult decodeVMovrelsB32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_movrels_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMovrelsB32Vop3>(opcode);
 }
+} // namespace detail
 
 VMovrelsdB32Vop3::VMovrelsdB32Vop3(const MachineInst *inst)
     : Vop3("v_movrelsd_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMovrelsdB32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VMovrelsdB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       m0(32, OperandType::OPR_SDST_M0, 124) {
@@ -1175,21 +1514,23 @@ VMovrelsdB32Vop3::VMovrelsdB32Vop3(const MachineInst *inst)
   src_operands_[1] = &m0;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   m0.apply_fieldless_caps(false, false, false);
 }
 
-void VMovrelsdB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeVMovrelsdB32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_movrelsd_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMovrelsdB32Vop3>(opcode);
 }
+} // namespace detail
 
 VMovrelsd2B32Vop3::VMovrelsd2B32Vop3(const MachineInst *inst)
     : Vop3("v_movrelsd_2_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMovrelsd2B32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VMovrelsd2B32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       m0(32, OperandType::OPR_SDST_M0, 124) {
@@ -1198,21 +1539,23 @@ VMovrelsd2B32Vop3::VMovrelsd2B32Vop3(const MachineInst *inst)
   src_operands_[1] = &m0;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   m0.apply_fieldless_caps(false, false, false);
 }
 
-void VMovrelsd2B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeVMovrelsd2B32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_movrelsd_2_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMovrelsd2B32Vop3>(opcode);
 }
+} // namespace detail
 
 VCvtF16U16Vop3::VCvtF16U16Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f16_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF16U16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtF16U16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1225,6 +1568,16 @@ VCvtF16U16Vop3::VCvtF16U16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVCvtF16U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f16_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF16U16Vop3>(opcode);
+}
+} // namespace detail
 
 void VCvtF16U16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1232,13 +1585,9 @@ void VCvtF16U16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VCvtF16U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f16_u16_vop3(*this, wf);
-}
-
 VCvtF16I16Vop3::VCvtF16I16Vop3(const MachineInst *inst)
     : Vop3("v_cvt_f16_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtF16I16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtF16I16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1251,6 +1600,16 @@ VCvtF16I16Vop3::VCvtF16I16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVCvtF16I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_f16_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtF16I16Vop3>(opcode);
+}
+} // namespace detail
 
 void VCvtF16I16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1258,13 +1617,9 @@ void VCvtF16I16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VCvtF16I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f16_i16_vop3(*this, wf);
-}
-
 VCvtU16F16Vop3::VCvtU16F16Vop3(const MachineInst *inst)
     : Vop3("v_cvt_u16_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtU16F16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtU16F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1277,6 +1632,16 @@ VCvtU16F16Vop3::VCvtU16F16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVCvtU16F16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_u16_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtU16F16Vop3>(opcode);
+}
+} // namespace detail
 
 void VCvtU16F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1284,13 +1649,9 @@ void VCvtU16F16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VCvtU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_u16_f16_vop3(*this, wf);
-}
-
 VCvtI16F16Vop3::VCvtI16F16Vop3(const MachineInst *inst)
     : Vop3("v_cvt_i16_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtI16F16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtI16F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1303,6 +1664,16 @@ VCvtI16F16Vop3::VCvtI16F16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVCvtI16F16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_i16_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtI16F16Vop3>(opcode);
+}
+} // namespace detail
 
 void VCvtI16F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1310,12 +1681,9 @@ void VCvtI16F16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VCvtI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_i16_f16_vop3(*this, wf);
-}
-
 VRcpF16Vop3::VRcpF16Vop3(const MachineInst *inst)
-    : Vop3("v_rcp_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VRcpF16Vop3>()),
+    : Vop3("v_rcp_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VRcpF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1328,6 +1696,16 @@ VRcpF16Vop3::VRcpF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVRcpF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_rcp_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VRcpF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VRcpF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1335,10 +1713,9 @@ void VRcpF16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VRcpF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_rcp_f16_vop3(*this, wf); }
-
 VSqrtF16Vop3::VSqrtF16Vop3(const MachineInst *inst)
-    : Vop3("v_sqrt_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VSqrtF16Vop3>()),
+    : Vop3("v_sqrt_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VSqrtF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1351,6 +1728,16 @@ VSqrtF16Vop3::VSqrtF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVSqrtF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sqrt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSqrtF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VSqrtF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1358,12 +1745,9 @@ void VSqrtF16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VSqrtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_sqrt_f16_vop3(*this, wf);
-}
-
 VRsqF16Vop3::VRsqF16Vop3(const MachineInst *inst)
-    : Vop3("v_rsq_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VRsqF16Vop3>()),
+    : Vop3("v_rsq_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VRsqF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1376,6 +1760,16 @@ VRsqF16Vop3::VRsqF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVRsqF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_rsq_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VRsqF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VRsqF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1383,10 +1777,9 @@ void VRsqF16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VRsqF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_rsq_f16_vop3(*this, wf); }
-
 VLogF16Vop3::VLogF16Vop3(const MachineInst *inst)
-    : Vop3("v_log_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VLogF16Vop3>()),
+    : Vop3("v_log_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VLogF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1399,6 +1792,16 @@ VLogF16Vop3::VLogF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVLogF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_log_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLogF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VLogF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1406,10 +1809,9 @@ void VLogF16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VLogF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_log_f16_vop3(*this, wf); }
-
 VExpF16Vop3::VExpF16Vop3(const MachineInst *inst)
-    : Vop3("v_exp_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VExpF16Vop3>()),
+    : Vop3("v_exp_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VExpF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1422,6 +1824,16 @@ VExpF16Vop3::VExpF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVExpF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_exp_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VExpF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VExpF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1429,11 +1841,9 @@ void VExpF16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VExpF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_exp_f16_vop3(*this, wf); }
-
 VFrexpMantF16Vop3::VFrexpMantF16Vop3(const MachineInst *inst)
     : Vop3("v_frexp_mant_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFrexpMantF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VFrexpMantF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1446,6 +1856,17 @@ VFrexpMantF16Vop3::VFrexpMantF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVFrexpMantF16Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_frexp_mant_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFrexpMantF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VFrexpMantF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1453,13 +1874,9 @@ void VFrexpMantF16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VFrexpMantF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_frexp_mant_f16_vop3(*this, wf);
-}
-
 VFrexpExpI16F16Vop3::VFrexpExpI16F16Vop3(const MachineInst *inst)
     : Vop3("v_frexp_exp_i16_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFrexpExpI16F16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VFrexpExpI16F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1472,6 +1889,17 @@ VFrexpExpI16F16Vop3::VFrexpExpI16F16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVFrexpExpI16F16Vop3(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_frexp_exp_i16_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFrexpExpI16F16Vop3>(opcode);
+}
+} // namespace detail
 
 void VFrexpExpI16F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1479,13 +1907,9 @@ void VFrexpExpI16F16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VFrexpExpI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_frexp_exp_i16_f16_vop3(*this, wf);
-}
-
 VFloorF16Vop3::VFloorF16Vop3(const MachineInst *inst)
     : Vop3("v_floor_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFloorF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VFloorF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1498,6 +1922,16 @@ VFloorF16Vop3::VFloorF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVFloorF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_floor_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFloorF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VFloorF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1505,12 +1939,9 @@ void VFloorF16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VFloorF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_floor_f16_vop3(*this, wf);
-}
-
 VCeilF16Vop3::VCeilF16Vop3(const MachineInst *inst)
-    : Vop3("v_ceil_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCeilF16Vop3>()),
+    : Vop3("v_ceil_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VCeilF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1523,6 +1954,16 @@ VCeilF16Vop3::VCeilF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVCeilF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_ceil_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCeilF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VCeilF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1530,13 +1971,9 @@ void VCeilF16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VCeilF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_ceil_f16_vop3(*this, wf);
-}
-
 VTruncF16Vop3::VTruncF16Vop3(const MachineInst *inst)
     : Vop3("v_trunc_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VTruncF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VTruncF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1549,6 +1986,16 @@ VTruncF16Vop3::VTruncF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVTruncF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_trunc_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VTruncF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VTruncF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1556,13 +2003,9 @@ void VTruncF16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VTruncF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_trunc_f16_vop3(*this, wf);
-}
-
 VRndneF16Vop3::VRndneF16Vop3(const MachineInst *inst)
     : Vop3("v_rndne_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VRndneF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VRndneF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1575,6 +2018,16 @@ VRndneF16Vop3::VRndneF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVRndneF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_rndne_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VRndneF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VRndneF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1582,13 +2035,9 @@ void VRndneF16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VRndneF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_rndne_f16_vop3(*this, wf);
-}
-
 VFractF16Vop3::VFractF16Vop3(const MachineInst *inst)
     : Vop3("v_fract_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFractF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VFractF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1601,6 +2050,16 @@ VFractF16Vop3::VFractF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVFractF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_fract_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFractF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VFractF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1608,12 +2067,9 @@ void VFractF16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VFractF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_fract_f16_vop3(*this, wf);
-}
-
 VSinF16Vop3::VSinF16Vop3(const MachineInst *inst)
-    : Vop3("v_sin_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VSinF16Vop3>()),
+    : Vop3("v_sin_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VSinF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1626,6 +2082,16 @@ VSinF16Vop3::VSinF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVSinF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sin_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSinF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VSinF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1633,10 +2099,9 @@ void VSinF16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VSinF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sin_f16_vop3(*this, wf); }
-
 VCosF16Vop3::VCosF16Vop3(const MachineInst *inst)
-    : Vop3("v_cos_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCosF16Vop3>()),
+    : Vop3("v_cos_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VCosF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1650,17 +2115,25 @@ VCosF16Vop3::VCosF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVCosF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cos_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCosF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VCosF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
 }
 
-void VCosF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_cos_f16_vop3(*this, wf); }
-
 VSatPkU8I16Vop3::VSatPkU8I16Vop3(const MachineInst *inst)
     : Vop3("v_sat_pk_u8_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VSatPkU8I16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VSatPkU8I16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1673,14 +2146,20 @@ VSatPkU8I16Vop3::VSatPkU8I16Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VSatPkU8I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeVSatPkU8I16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sat_pk_u8_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSatPkU8I16Vop3>(opcode);
 }
+} // namespace detail
 
 VCvtNormI16F16Vop3::VCvtNormI16F16Vop3(const MachineInst *inst)
     : Vop3("v_cvt_norm_i16_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtNormI16F16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtNormI16F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1693,6 +2172,17 @@ VCvtNormI16F16Vop3::VCvtNormI16F16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVCvtNormI16F16Vop3(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_norm_i16_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtNormI16F16Vop3>(opcode);
+}
+} // namespace detail
 
 void VCvtNormI16F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -1700,13 +2190,9 @@ void VCvtNormI16F16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VCvtNormI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_norm_i16_f16_vop3(*this, wf);
-}
-
 VCvtNormU16F16Vop3::VCvtNormU16F16Vop3(const MachineInst *inst)
     : Vop3("v_cvt_norm_u16_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtNormU16F16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtNormU16F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1720,19 +2206,26 @@ VCvtNormU16F16Vop3::VCvtNormU16F16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVCvtNormU16F16Vop3(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_norm_u16_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtNormU16F16Vop3>(opcode);
+}
+} // namespace detail
+
 void VCvtNormU16F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
 }
 
-void VCvtNormU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_norm_u16_f16_vop3(*this, wf);
-}
-
 VCndmaskB32Vop3::VCndmaskB32Vop3(const MachineInst *inst)
     : Vop3("v_cndmask_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCndmaskB32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCndmaskB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -1751,19 +2244,22 @@ VCndmaskB32Vop3::VCndmaskB32Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand::make_literal32(
-        64,
-        static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
-        Operand::Literal32Widening::ZeroExtend);
 }
 
-void VCndmaskB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cndmask_b32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCndmaskB32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cndmask_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCndmaskB32Vop3>(opcode);
 }
+} // namespace detail
 
 VAddF32Vop3::VAddF32Vop3(const MachineInst *inst)
-    : Vop3("v_add_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VAddF32Vop3>()),
+    : Vop3("v_add_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VAddF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -1782,10 +2278,19 @@ VAddF32Vop3::VAddF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VAddF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_add_f32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVAddF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_add_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAddF32Vop3>(opcode);
+}
+} // namespace detail
 
 VSubF32Vop3::VSubF32Vop3(const MachineInst *inst)
-    : Vop3("v_sub_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VSubF32Vop3>()),
+    : Vop3("v_sub_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VSubF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -1804,11 +2309,19 @@ VSubF32Vop3::VSubF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VSubF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sub_f32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVSubF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sub_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSubF32Vop3>(opcode);
+}
+} // namespace detail
 
 VSubrevF32Vop3::VSubrevF32Vop3(const MachineInst *inst)
     : Vop3("v_subrev_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VSubrevF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VSubrevF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -1827,13 +2340,19 @@ VSubrevF32Vop3::VSubrevF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VSubrevF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_subrev_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVSubrevF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_subrev_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSubrevF32Vop3>(opcode);
 }
+} // namespace detail
 
 VFmacLegacyF32Vop3::VFmacLegacyF32Vop3(const MachineInst *inst)
     : Vop3("v_fmac_legacy_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFmacLegacyF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VFmacLegacyF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -1853,49 +2372,20 @@ VFmacLegacyF32Vop3::VFmacLegacyF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VFmacLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    amdgpu::sdwa::write_lane<true>(*this, wf, vdst, lane, std::bit_cast<uint32_t>([&]() {
-      float v = [&]() {
-        float v = std::fma(
-            [&]() {
-              float sv = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-              if (inst_.abs & (1u << 0))
-                sv = std::fabs(sv);
-              if (inst_.neg & (1u << 0))
-                sv = -sv;
-              return sv;
-            }(),
-            [&]() {
-              float sv = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-              if (inst_.abs & (1u << 1))
-                sv = std::fabs(sv);
-              if (inst_.neg & (1u << 1))
-                sv = -sv;
-              return sv;
-            }(),
-            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vdst, lane)));
-        if (inst_.omod == 1)
-          v *= 2.0f;
-        else if (inst_.omod == 2)
-          v *= 4.0f;
-        else if (inst_.omod == 3)
-          v *= 0.5f;
-        return v;
-      }();
-      if (inst_.clamp)
-        v = std::clamp(v, 0.0f, 1.0f);
-      return v;
-    }()));
-  }
+namespace detail {
+DecodeResult decodeVFmacLegacyF32Vop3(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_fmac_legacy_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFmacLegacyF32Vop3>(opcode);
 }
+} // namespace detail
 
 VMulLegacyF32Vop3::VMulLegacyF32Vop3(const MachineInst *inst)
     : Vop3("v_mul_legacy_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMulLegacyF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VMulLegacyF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -1914,12 +2404,20 @@ VMulLegacyF32Vop3::VMulLegacyF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMulLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mul_legacy_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVMulLegacyF32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mul_legacy_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMulLegacyF32Vop3>(opcode);
 }
+} // namespace detail
 
 VMulF32Vop3::VMulF32Vop3(const MachineInst *inst)
-    : Vop3("v_mul_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMulF32Vop3>()),
+    : Vop3("v_mul_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMulF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -1938,11 +2436,19 @@ VMulF32Vop3::VMulF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMulF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_mul_f32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVMulF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mul_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMulF32Vop3>(opcode);
+}
+} // namespace detail
 
 VMulI32I24Vop3::VMulI32I24Vop3(const MachineInst *inst)
     : Vop3("v_mul_i32_i24", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMulI32I24Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VMulI32I24Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -1961,13 +2467,19 @@ VMulI32I24Vop3::VMulI32I24Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMulI32I24Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mul_i32_i24_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVMulI32I24Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mul_i32_i24", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMulI32I24Vop3>(opcode);
 }
+} // namespace detail
 
 VMulHiI32I24Vop3::VMulHiI32I24Vop3(const MachineInst *inst)
     : Vop3("v_mul_hi_i32_i24", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMulHiI32I24Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VMulHiI32I24Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -1986,13 +2498,20 @@ VMulHiI32I24Vop3::VMulHiI32I24Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMulHiI32I24Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mul_hi_i32_i24_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVMulHiI32I24Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mul_hi_i32_i24", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMulHiI32I24Vop3>(opcode);
 }
+} // namespace detail
 
 VMulU32U24Vop3::VMulU32U24Vop3(const MachineInst *inst)
     : Vop3("v_mul_u32_u24", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMulU32U24Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VMulU32U24Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2011,13 +2530,19 @@ VMulU32U24Vop3::VMulU32U24Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMulU32U24Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mul_u32_u24_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVMulU32U24Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mul_u32_u24", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMulU32U24Vop3>(opcode);
 }
+} // namespace detail
 
 VMulHiU32U24Vop3::VMulHiU32U24Vop3(const MachineInst *inst)
     : Vop3("v_mul_hi_u32_u24", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMulHiU32U24Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VMulHiU32U24Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2036,12 +2561,20 @@ VMulHiU32U24Vop3::VMulHiU32U24Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMulHiU32U24Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mul_hi_u32_u24_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVMulHiU32U24Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mul_hi_u32_u24", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMulHiU32U24Vop3>(opcode);
 }
+} // namespace detail
 
 VMinF32Vop3::VMinF32Vop3(const MachineInst *inst)
-    : Vop3("v_min_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMinF32Vop3>()),
+    : Vop3("v_min_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMinF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2060,10 +2593,19 @@ VMinF32Vop3::VMinF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMinF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_min_f32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVMinF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_min_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMinF32Vop3>(opcode);
+}
+} // namespace detail
 
 VMaxF32Vop3::VMaxF32Vop3(const MachineInst *inst)
-    : Vop3("v_max_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMaxF32Vop3>()),
+    : Vop3("v_max_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMaxF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2082,10 +2624,19 @@ VMaxF32Vop3::VMaxF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMaxF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_max_f32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVMaxF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_max_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMaxF32Vop3>(opcode);
+}
+} // namespace detail
 
 VMinI32Vop3::VMinI32Vop3(const MachineInst *inst)
-    : Vop3("v_min_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMinI32Vop3>()),
+    : Vop3("v_min_i32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMinI32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2104,10 +2655,19 @@ VMinI32Vop3::VMinI32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMinI32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_min_i32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVMinI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_min_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMinI32Vop3>(opcode);
+}
+} // namespace detail
 
 VMaxI32Vop3::VMaxI32Vop3(const MachineInst *inst)
-    : Vop3("v_max_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMaxI32Vop3>()),
+    : Vop3("v_max_i32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMaxI32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2126,10 +2686,19 @@ VMaxI32Vop3::VMaxI32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMaxI32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_max_i32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVMaxI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_max_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMaxI32Vop3>(opcode);
+}
+} // namespace detail
 
 VMinU32Vop3::VMinU32Vop3(const MachineInst *inst)
-    : Vop3("v_min_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMinU32Vop3>()),
+    : Vop3("v_min_u32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMinU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2148,10 +2717,19 @@ VMinU32Vop3::VMinU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMinU32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_min_u32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVMinU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_min_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMinU32Vop3>(opcode);
+}
+} // namespace detail
 
 VMaxU32Vop3::VMaxU32Vop3(const MachineInst *inst)
-    : Vop3("v_max_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMaxU32Vop3>()),
+    : Vop3("v_max_u32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMaxU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2170,11 +2748,19 @@ VMaxU32Vop3::VMaxU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMaxU32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_max_u32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVMaxU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_max_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMaxU32Vop3>(opcode);
+}
+} // namespace detail
 
 VLshrrevB32Vop3::VLshrrevB32Vop3(const MachineInst *inst)
     : Vop3("v_lshrrev_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VLshrrevB32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VLshrrevB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2193,13 +2779,20 @@ VLshrrevB32Vop3::VLshrrevB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VLshrrevB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_lshrrev_b32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVLshrrevB32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_lshrrev_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLshrrevB32Vop3>(opcode);
 }
+} // namespace detail
 
 VAshrrevI32Vop3::VAshrrevI32Vop3(const MachineInst *inst)
     : Vop3("v_ashrrev_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VAshrrevI32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VAshrrevI32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2218,13 +2811,20 @@ VAshrrevI32Vop3::VAshrrevI32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VAshrrevI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_ashrrev_i32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVAshrrevI32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_ashrrev_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAshrrevI32Vop3>(opcode);
 }
+} // namespace detail
 
 VLshlrevB32Vop3::VLshlrevB32Vop3(const MachineInst *inst)
     : Vop3("v_lshlrev_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VLshlrevB32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VLshlrevB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2243,12 +2843,20 @@ VLshlrevB32Vop3::VLshlrevB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VLshlrevB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_lshlrev_b32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVLshlrevB32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_lshlrev_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLshlrevB32Vop3>(opcode);
 }
+} // namespace detail
 
 VAndB32Vop3::VAndB32Vop3(const MachineInst *inst)
-    : Vop3("v_and_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VAndB32Vop3>()),
+    : Vop3("v_and_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VAndB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2267,10 +2875,19 @@ VAndB32Vop3::VAndB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VAndB32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_and_b32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVAndB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_and_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAndB32Vop3>(opcode);
+}
+} // namespace detail
 
 VOrB32Vop3::VOrB32Vop3(const MachineInst *inst)
-    : Vop3("v_or_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VOrB32Vop3>()),
+    : Vop3("v_or_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VOrB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2289,10 +2906,19 @@ VOrB32Vop3::VOrB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VOrB32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_or_b32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVOrB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_or_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VOrB32Vop3>(opcode);
+}
+} // namespace detail
 
 VXorB32Vop3::VXorB32Vop3(const MachineInst *inst)
-    : Vop3("v_xor_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VXorB32Vop3>()),
+    : Vop3("v_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VXorB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2311,10 +2937,19 @@ VXorB32Vop3::VXorB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VXorB32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_xor_b32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVXorB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_xor_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VXorB32Vop3>(opcode);
+}
+} // namespace detail
 
 VXnorB32Vop3::VXnorB32Vop3(const MachineInst *inst)
-    : Vop3("v_xnor_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VXnorB32Vop3>()),
+    : Vop3("v_xnor_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VXnorB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2333,13 +2968,19 @@ VXnorB32Vop3::VXnorB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VXnorB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_xnor_b32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVXnorB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_xnor_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VXnorB32Vop3>(opcode);
 }
+} // namespace detail
 
 VAddNcU32Vop3::VAddNcU32Vop3(const MachineInst *inst)
     : Vop3("v_add_nc_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VAddNcU32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VAddNcU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2358,13 +2999,19 @@ VAddNcU32Vop3::VAddNcU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VAddNcU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_add_nc_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVAddNcU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_add_nc_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAddNcU32Vop3>(opcode);
 }
+} // namespace detail
 
 VSubNcU32Vop3::VSubNcU32Vop3(const MachineInst *inst)
     : Vop3("v_sub_nc_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VSubNcU32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VSubNcU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2383,13 +3030,19 @@ VSubNcU32Vop3::VSubNcU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VSubNcU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_sub_nc_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVSubNcU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sub_nc_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSubNcU32Vop3>(opcode);
 }
+} // namespace detail
 
 VSubrevNcU32Vop3::VSubrevNcU32Vop3(const MachineInst *inst)
     : Vop3("v_subrev_nc_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VSubrevNcU32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VSubrevNcU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2408,12 +3061,20 @@ VSubrevNcU32Vop3::VSubrevNcU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VSubrevNcU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_subrev_nc_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVSubrevNcU32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_subrev_nc_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSubrevNcU32Vop3>(opcode);
 }
+} // namespace detail
 
 VFmacF32Vop3::VFmacF32Vop3(const MachineInst *inst)
-    : Vop3("v_fmac_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VFmacF32Vop3>()),
+    : Vop3("v_fmac_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VFmacF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2433,13 +3094,19 @@ VFmacF32Vop3::VFmacF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VFmacF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_fmac_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVFmacF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_fmac_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFmacF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCvtPkrtzF16F32Vop3::VCvtPkrtzF16F32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_pkrtz_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtPkrtzF16F32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtPkrtzF16F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2458,12 +3125,20 @@ VCvtPkrtzF16F32Vop3::VCvtPkrtzF16F32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCvtPkrtzF16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_pkrtz_f16_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCvtPkrtzF16F32Vop3(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_pkrtz_f16_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtPkrtzF16F32Vop3>(opcode);
 }
+} // namespace detail
 
 VAddF16Vop3::VAddF16Vop3(const MachineInst *inst)
-    : Vop3("v_add_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VAddF16Vop3>()),
+    : Vop3("v_add_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VAddF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2483,6 +3158,16 @@ VAddF16Vop3::VAddF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVAddF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_add_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAddF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VAddF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -2490,10 +3175,9 @@ void VAddF16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VAddF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_add_f16_vop3(*this, wf); }
-
 VSubF16Vop3::VSubF16Vop3(const MachineInst *inst)
-    : Vop3("v_sub_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VSubF16Vop3>()),
+    : Vop3("v_sub_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VSubF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2514,17 +3198,25 @@ VSubF16Vop3::VSubF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVSubF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sub_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSubF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VSubF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
 }
 
-void VSubF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sub_f16_vop3(*this, wf); }
-
 VSubrevF16Vop3::VSubrevF16Vop3(const MachineInst *inst)
     : Vop3("v_subrev_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VSubrevF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VSubrevF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2545,18 +3237,25 @@ VSubrevF16Vop3::VSubrevF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVSubrevF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_subrev_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSubrevF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VSubrevF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
 }
 
-void VSubrevF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_subrev_f16_vop3(*this, wf);
-}
-
 VMulF16Vop3::VMulF16Vop3(const MachineInst *inst)
-    : Vop3("v_mul_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMulF16Vop3>()),
+    : Vop3("v_mul_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMulF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2577,16 +3276,25 @@ VMulF16Vop3::VMulF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVMulF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mul_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMulF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMulF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
 }
 
-void VMulF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_mul_f16_vop3(*this, wf); }
-
 VFmacF16Vop3::VFmacF16Vop3(const MachineInst *inst)
-    : Vop3("v_fmac_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VFmacF16Vop3>()),
+    : Vop3("v_fmac_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VFmacF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2608,18 +3316,25 @@ VFmacF16Vop3::VFmacF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVFmacF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_fmac_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFmacF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VFmacF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
 }
 
-void VFmacF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_fmac_f16_vop3(*this, wf);
-}
-
 VMaxF16Vop3::VMaxF16Vop3(const MachineInst *inst)
-    : Vop3("v_max_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMaxF16Vop3>()),
+    : Vop3("v_max_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMaxF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2639,6 +3354,16 @@ VMaxF16Vop3::VMaxF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVMaxF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_max_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMaxF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMaxF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -2646,10 +3371,9 @@ void VMaxF16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VMaxF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_max_f16_vop3(*this, wf); }
-
 VMinF16Vop3::VMinF16Vop3(const MachineInst *inst)
-    : Vop3("v_min_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMinF16Vop3>()),
+    : Vop3("v_min_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMinF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2669,6 +3393,16 @@ VMinF16Vop3::VMinF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVMinF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_min_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMinF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMinF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -2676,11 +3410,9 @@ void VMinF16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VMinF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_min_f16_vop3(*this, wf); }
-
 VLdexpF16Vop3::VLdexpF16Vop3(const MachineInst *inst)
     : Vop3("v_ldexp_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VLdexpF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VLdexpF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2701,19 +3433,25 @@ VLdexpF16Vop3::VLdexpF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVLdexpF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_ldexp_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLdexpF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VLdexpF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
 }
 
-void VLdexpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_ldexp_f16_vop3(*this, wf);
-}
-
 VFmaLegacyF32Vop3::VFmaLegacyF32Vop3(const MachineInst *inst)
     : Vop3("v_fma_legacy_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VFmaLegacyF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VFmaLegacyF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2738,56 +3476,20 @@ VFmaLegacyF32Vop3::VFmaLegacyF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VFmaLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    amdgpu::sdwa::write_lane<true>(*this, wf, vdst, lane, std::bit_cast<uint32_t>([&]() {
-      float v = [&]() {
-        float v = std::fma(
-            [&]() {
-              float sv = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-              if (inst_.abs & (1u << 0))
-                sv = std::fabs(sv);
-              if (inst_.neg & (1u << 0))
-                sv = -sv;
-              return sv;
-            }(),
-            [&]() {
-              float sv = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-              if (inst_.abs & (1u << 1))
-                sv = std::fabs(sv);
-              if (inst_.neg & (1u << 1))
-                sv = -sv;
-              return sv;
-            }(),
-            [&]() {
-              float sv = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
-              if (inst_.abs & (1u << 2))
-                sv = std::fabs(sv);
-              if (inst_.neg & (1u << 2))
-                sv = -sv;
-              return sv;
-            }());
-        if (inst_.omod == 1)
-          v *= 2.0f;
-        else if (inst_.omod == 2)
-          v *= 4.0f;
-        else if (inst_.omod == 3)
-          v *= 0.5f;
-        return v;
-      }();
-      if (inst_.clamp)
-        v = std::clamp(v, 0.0f, 1.0f);
-      return v;
-    }()));
-  }
+namespace detail {
+DecodeResult decodeVFmaLegacyF32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_fma_legacy_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFmaLegacyF32Vop3>(opcode);
 }
+} // namespace detail
 
 VMadI32I24Vop3::VMadI32I24Vop3(const MachineInst *inst)
     : Vop3("v_mad_i32_i24", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMadI32I24Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VMadI32I24Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2812,13 +3514,19 @@ VMadI32I24Vop3::VMadI32I24Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMadI32I24Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mad_i32_i24_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVMadI32I24Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mad_i32_i24", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMadI32I24Vop3>(opcode);
 }
+} // namespace detail
 
 VMadU32U24Vop3::VMadU32U24Vop3(const MachineInst *inst)
     : Vop3("v_mad_u32_u24", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMadU32U24Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VMadU32U24Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2843,13 +3551,19 @@ VMadU32U24Vop3::VMadU32U24Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMadU32U24Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mad_u32_u24_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVMadU32U24Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mad_u32_u24", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMadU32U24Vop3>(opcode);
 }
+} // namespace detail
 
 VCubeidF32Vop3::VCubeidF32Vop3(const MachineInst *inst)
     : Vop3("v_cubeid_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCubeidF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCubeidF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2874,13 +3588,19 @@ VCubeidF32Vop3::VCubeidF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCubeidF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cubeid_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCubeidF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cubeid_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCubeidF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCubescF32Vop3::VCubescF32Vop3(const MachineInst *inst)
     : Vop3("v_cubesc_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCubescF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCubescF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2905,13 +3625,19 @@ VCubescF32Vop3::VCubescF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCubescF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cubesc_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCubescF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cubesc_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCubescF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCubetcF32Vop3::VCubetcF32Vop3(const MachineInst *inst)
     : Vop3("v_cubetc_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCubetcF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCubetcF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2936,13 +3662,19 @@ VCubetcF32Vop3::VCubetcF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCubetcF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cubetc_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCubetcF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cubetc_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCubetcF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCubemaF32Vop3::VCubemaF32Vop3(const MachineInst *inst)
     : Vop3("v_cubema_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCubemaF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCubemaF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2967,12 +3699,19 @@ VCubemaF32Vop3::VCubemaF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCubemaF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cubema_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCubemaF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cubema_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCubemaF32Vop3>(opcode);
 }
+} // namespace detail
 
 VBfeU32Vop3::VBfeU32Vop3(const MachineInst *inst)
-    : Vop3("v_bfe_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VBfeU32Vop3>()),
+    : Vop3("v_bfe_u32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VBfeU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2997,10 +3736,19 @@ VBfeU32Vop3::VBfeU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VBfeU32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_bfe_u32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVBfeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_bfe_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VBfeU32Vop3>(opcode);
+}
+} // namespace detail
 
 VBfeI32Vop3::VBfeI32Vop3(const MachineInst *inst)
-    : Vop3("v_bfe_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VBfeI32Vop3>()),
+    : Vop3("v_bfe_i32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VBfeI32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3025,10 +3773,19 @@ VBfeI32Vop3::VBfeI32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VBfeI32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_bfe_i32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVBfeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_bfe_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VBfeI32Vop3>(opcode);
+}
+} // namespace detail
 
 VBfiB32Vop3::VBfiB32Vop3(const MachineInst *inst)
-    : Vop3("v_bfi_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VBfiB32Vop3>()),
+    : Vop3("v_bfi_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VBfiB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3053,10 +3810,19 @@ VBfiB32Vop3::VBfiB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VBfiB32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_bfi_b32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVBfiB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_bfi_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VBfiB32Vop3>(opcode);
+}
+} // namespace detail
 
 VFmaF32Vop3::VFmaF32Vop3(const MachineInst *inst)
-    : Vop3("v_fma_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VFmaF32Vop3>()),
+    : Vop3("v_fma_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VFmaF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3081,10 +3847,19 @@ VFmaF32Vop3::VFmaF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VFmaF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_fma_f32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVFmaF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_fma_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFmaF32Vop3>(opcode);
+}
+} // namespace detail
 
 VFmaF64Vop3::VFmaF64Vop3(const MachineInst *inst)
-    : Vop3("v_fma_f64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VFmaF64Vop3>()),
+    : Vop3("v_fma_f64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VFmaF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3112,10 +3887,19 @@ VFmaF64Vop3::VFmaF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VFmaF64Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_fma_f64_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVFmaF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_fma_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFmaF64Vop3>(opcode);
+}
+} // namespace detail
 
 VLerpU8Vop3::VLerpU8Vop3(const MachineInst *inst)
-    : Vop3("v_lerp_u8", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VLerpU8Vop3>()),
+    : Vop3("v_lerp_u8", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VLerpU8Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3140,11 +3924,19 @@ VLerpU8Vop3::VLerpU8Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VLerpU8Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_lerp_u8_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVLerpU8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_lerp_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLerpU8Vop3>(opcode);
+}
+} // namespace detail
 
 VAlignbitB32Vop3::VAlignbitB32Vop3(const MachineInst *inst)
     : Vop3("v_alignbit_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VAlignbitB32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VAlignbitB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3169,13 +3961,20 @@ VAlignbitB32Vop3::VAlignbitB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VAlignbitB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_alignbit_b32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVAlignbitB32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_alignbit_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAlignbitB32Vop3>(opcode);
 }
+} // namespace detail
 
 VAlignbyteB32Vop3::VAlignbyteB32Vop3(const MachineInst *inst)
     : Vop3("v_alignbyte_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VAlignbyteB32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VAlignbyteB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3200,13 +3999,20 @@ VAlignbyteB32Vop3::VAlignbyteB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VAlignbyteB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_alignbyte_b32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVAlignbyteB32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_alignbyte_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAlignbyteB32Vop3>(opcode);
 }
+} // namespace detail
 
 VMullitF32Vop3::VMullitF32Vop3(const MachineInst *inst)
     : Vop3("v_mullit_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMullitF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VMullitF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3231,13 +4037,19 @@ VMullitF32Vop3::VMullitF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMullitF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeVMullitF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mullit_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMullitF32Vop3>(opcode);
 }
+} // namespace detail
 
 VMin3F32Vop3::VMin3F32Vop3(const MachineInst *inst)
-    : Vop3("v_min3_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMin3F32Vop3>()),
+    : Vop3("v_min3_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMin3F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3262,12 +4074,19 @@ VMin3F32Vop3::VMin3F32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMin3F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_min3_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVMin3F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_min3_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMin3F32Vop3>(opcode);
 }
+} // namespace detail
 
 VMin3I32Vop3::VMin3I32Vop3(const MachineInst *inst)
-    : Vop3("v_min3_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMin3I32Vop3>()),
+    : Vop3("v_min3_i32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMin3I32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3292,12 +4111,19 @@ VMin3I32Vop3::VMin3I32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMin3I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_min3_i32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVMin3I32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_min3_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMin3I32Vop3>(opcode);
 }
+} // namespace detail
 
 VMin3U32Vop3::VMin3U32Vop3(const MachineInst *inst)
-    : Vop3("v_min3_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMin3U32Vop3>()),
+    : Vop3("v_min3_u32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMin3U32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3322,12 +4148,19 @@ VMin3U32Vop3::VMin3U32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMin3U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_min3_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVMin3U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_min3_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMin3U32Vop3>(opcode);
 }
+} // namespace detail
 
 VMax3F32Vop3::VMax3F32Vop3(const MachineInst *inst)
-    : Vop3("v_max3_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMax3F32Vop3>()),
+    : Vop3("v_max3_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMax3F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3352,12 +4185,19 @@ VMax3F32Vop3::VMax3F32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMax3F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_max3_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVMax3F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_max3_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMax3F32Vop3>(opcode);
 }
+} // namespace detail
 
 VMax3I32Vop3::VMax3I32Vop3(const MachineInst *inst)
-    : Vop3("v_max3_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMax3I32Vop3>()),
+    : Vop3("v_max3_i32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMax3I32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3382,12 +4222,19 @@ VMax3I32Vop3::VMax3I32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMax3I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_max3_i32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVMax3I32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_max3_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMax3I32Vop3>(opcode);
 }
+} // namespace detail
 
 VMax3U32Vop3::VMax3U32Vop3(const MachineInst *inst)
-    : Vop3("v_max3_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMax3U32Vop3>()),
+    : Vop3("v_max3_u32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMax3U32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3412,12 +4259,19 @@ VMax3U32Vop3::VMax3U32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMax3U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_max3_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVMax3U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_max3_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMax3U32Vop3>(opcode);
 }
+} // namespace detail
 
 VMed3F32Vop3::VMed3F32Vop3(const MachineInst *inst)
-    : Vop3("v_med3_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMed3F32Vop3>()),
+    : Vop3("v_med3_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMed3F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3442,12 +4296,19 @@ VMed3F32Vop3::VMed3F32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMed3F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_med3_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVMed3F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_med3_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMed3F32Vop3>(opcode);
 }
+} // namespace detail
 
 VMed3I32Vop3::VMed3I32Vop3(const MachineInst *inst)
-    : Vop3("v_med3_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMed3I32Vop3>()),
+    : Vop3("v_med3_i32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMed3I32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3472,12 +4333,19 @@ VMed3I32Vop3::VMed3I32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMed3I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_med3_i32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVMed3I32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_med3_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMed3I32Vop3>(opcode);
 }
+} // namespace detail
 
 VMed3U32Vop3::VMed3U32Vop3(const MachineInst *inst)
-    : Vop3("v_med3_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMed3U32Vop3>()),
+    : Vop3("v_med3_u32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMed3U32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3502,12 +4370,19 @@ VMed3U32Vop3::VMed3U32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMed3U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_med3_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVMed3U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_med3_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMed3U32Vop3>(opcode);
 }
+} // namespace detail
 
 VSadU8Vop3::VSadU8Vop3(const MachineInst *inst)
-    : Vop3("v_sad_u8", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VSadU8Vop3>()),
+    : Vop3("v_sad_u8", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VSadU8Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3532,10 +4407,19 @@ VSadU8Vop3::VSadU8Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VSadU8Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sad_u8_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVSadU8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sad_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSadU8Vop3>(opcode);
+}
+} // namespace detail
 
 VSadHiU8Vop3::VSadHiU8Vop3(const MachineInst *inst)
-    : Vop3("v_sad_hi_u8", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VSadHiU8Vop3>()),
+    : Vop3("v_sad_hi_u8", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VSadHiU8Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3560,12 +4444,19 @@ VSadHiU8Vop3::VSadHiU8Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VSadHiU8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_sad_hi_u8_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVSadHiU8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sad_hi_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSadHiU8Vop3>(opcode);
 }
+} // namespace detail
 
 VSadU16Vop3::VSadU16Vop3(const MachineInst *inst)
-    : Vop3("v_sad_u16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VSadU16Vop3>()),
+    : Vop3("v_sad_u16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VSadU16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3590,10 +4481,19 @@ VSadU16Vop3::VSadU16Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VSadU16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sad_u16_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVSadU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sad_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSadU16Vop3>(opcode);
+}
+} // namespace detail
 
 VSadU32Vop3::VSadU32Vop3(const MachineInst *inst)
-    : Vop3("v_sad_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VSadU32Vop3>()),
+    : Vop3("v_sad_u32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VSadU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3618,11 +4518,19 @@ VSadU32Vop3::VSadU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VSadU32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_sad_u32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVSadU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sad_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSadU32Vop3>(opcode);
+}
+} // namespace detail
 
 VCvtPkU8F32Vop3::VCvtPkU8F32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_pk_u8_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtPkU8F32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtPkU8F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3647,13 +4555,20 @@ VCvtPkU8F32Vop3::VCvtPkU8F32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCvtPkU8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_pk_u8_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCvtPkU8F32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_pk_u8_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtPkU8F32Vop3>(opcode);
 }
+} // namespace detail
 
 VDivFixupF32Vop3::VDivFixupF32Vop3(const MachineInst *inst)
     : Vop3("v_div_fixup_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VDivFixupF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VDivFixupF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3678,13 +4593,20 @@ VDivFixupF32Vop3::VDivFixupF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VDivFixupF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_div_fixup_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVDivFixupF32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_div_fixup_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VDivFixupF32Vop3>(opcode);
 }
+} // namespace detail
 
 VDivFixupF64Vop3::VDivFixupF64Vop3(const MachineInst *inst)
     : Vop3("v_div_fixup_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VDivFixupF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VDivFixupF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3712,12 +4634,20 @@ VDivFixupF64Vop3::VDivFixupF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VDivFixupF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_div_fixup_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVDivFixupF64Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_div_fixup_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VDivFixupF64Vop3>(opcode);
 }
+} // namespace detail
 
 VAddF64Vop3::VAddF64Vop3(const MachineInst *inst)
-    : Vop3("v_add_f64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VAddF64Vop3>()),
+    : Vop3("v_add_f64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VAddF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -3738,10 +4668,19 @@ VAddF64Vop3::VAddF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VAddF64Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_add_f64_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVAddF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_add_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAddF64Vop3>(opcode);
+}
+} // namespace detail
 
 VMulF64Vop3::VMulF64Vop3(const MachineInst *inst)
-    : Vop3("v_mul_f64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMulF64Vop3>()),
+    : Vop3("v_mul_f64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMulF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -3762,10 +4701,19 @@ VMulF64Vop3::VMulF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VMulF64Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_mul_f64_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVMulF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mul_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMulF64Vop3>(opcode);
+}
+} // namespace detail
 
 VMinF64Vop3::VMinF64Vop3(const MachineInst *inst)
-    : Vop3("v_min_f64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMinF64Vop3>()),
+    : Vop3("v_min_f64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMinF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -3786,10 +4734,19 @@ VMinF64Vop3::VMinF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VMinF64Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_min_f64_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVMinF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_min_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMinF64Vop3>(opcode);
+}
+} // namespace detail
 
 VMaxF64Vop3::VMaxF64Vop3(const MachineInst *inst)
-    : Vop3("v_max_f64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMaxF64Vop3>()),
+    : Vop3("v_max_f64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMaxF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -3810,11 +4767,19 @@ VMaxF64Vop3::VMaxF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VMaxF64Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_max_f64_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVMaxF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_max_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMaxF64Vop3>(opcode);
+}
+} // namespace detail
 
 VLdexpF64Vop3::VLdexpF64Vop3(const MachineInst *inst)
     : Vop3("v_ldexp_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VLdexpF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VLdexpF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -3834,13 +4799,19 @@ VLdexpF64Vop3::VLdexpF64Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VLdexpF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_ldexp_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVLdexpF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_ldexp_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLdexpF64Vop3>(opcode);
 }
+} // namespace detail
 
 VMulLoU32Vop3::VMulLoU32Vop3(const MachineInst *inst)
     : Vop3("v_mul_lo_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMulLoU32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VMulLoU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -3859,13 +4830,19 @@ VMulLoU32Vop3::VMulLoU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMulLoU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mul_lo_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVMulLoU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mul_lo_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMulLoU32Vop3>(opcode);
 }
+} // namespace detail
 
 VMulHiU32Vop3::VMulHiU32Vop3(const MachineInst *inst)
     : Vop3("v_mul_hi_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMulHiU32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VMulHiU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -3884,13 +4861,19 @@ VMulHiU32Vop3::VMulHiU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMulHiU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mul_hi_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVMulHiU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mul_hi_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMulHiU32Vop3>(opcode);
 }
+} // namespace detail
 
 VMulHiI32Vop3::VMulHiI32Vop3(const MachineInst *inst)
     : Vop3("v_mul_hi_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMulHiI32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VMulHiI32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -3909,13 +4892,19 @@ VMulHiI32Vop3::VMulHiI32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMulHiI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mul_hi_i32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVMulHiI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mul_hi_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMulHiI32Vop3>(opcode);
 }
+} // namespace detail
 
 VDivFmasF32Vop3::VDivFmasF32Vop3(const MachineInst *inst)
     : Vop3("v_div_fmas_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VDivFmasF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VDivFmasF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3943,13 +4932,20 @@ VDivFmasF32Vop3::VDivFmasF32Vop3(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VDivFmasF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_div_fmas_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVDivFmasF32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_div_fmas_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VDivFmasF32Vop3>(opcode);
 }
+} // namespace detail
 
 VDivFmasF64Vop3::VDivFmasF64Vop3(const MachineInst *inst)
     : Vop3("v_div_fmas_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VDivFmasF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VDivFmasF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3980,12 +4976,20 @@ VDivFmasF64Vop3::VDivFmasF64Vop3(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
 }
 
-void VDivFmasF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_div_fmas_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVDivFmasF64Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_div_fmas_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VDivFmasF64Vop3>(opcode);
 }
+} // namespace detail
 
 VMsadU8Vop3::VMsadU8Vop3(const MachineInst *inst)
-    : Vop3("v_msad_u8", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMsadU8Vop3>()),
+    : Vop3("v_msad_u8", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMsadU8Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4010,11 +5014,19 @@ VMsadU8Vop3::VMsadU8Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMsadU8Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_msad_u8_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVMsadU8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_msad_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMsadU8Vop3>(opcode);
+}
+} // namespace detail
 
 VQsadPkU16U8Vop3::VQsadPkU16U8Vop3(const MachineInst *inst)
     : Vop3("v_qsad_pk_u16_u8", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VQsadPkU16U8Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VQsadPkU16U8Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4041,14 +5053,20 @@ VQsadPkU16U8Vop3::VQsadPkU16U8Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
 }
 
-void VQsadPkU16U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeVQsadPkU16U8Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_qsad_pk_u16_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VQsadPkU16U8Vop3>(opcode);
 }
+} // namespace detail
 
 VMqsadPkU16U8Vop3::VMqsadPkU16U8Vop3(const MachineInst *inst)
     : Vop3("v_mqsad_pk_u16_u8", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMqsadPkU16U8Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VMqsadPkU16U8Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4075,14 +5093,20 @@ VMqsadPkU16U8Vop3::VMqsadPkU16U8Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
 }
 
-void VMqsadPkU16U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeVMqsadPkU16U8Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mqsad_pk_u16_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMqsadPkU16U8Vop3>(opcode);
 }
+} // namespace detail
 
 VTrigPreopF64Vop3::VTrigPreopF64Vop3(const MachineInst *inst)
     : Vop3("v_trig_preop_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VTrigPreopF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VTrigPreopF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4102,14 +5126,20 @@ VTrigPreopF64Vop3::VTrigPreopF64Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VTrigPreopF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeVTrigPreopF64Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_trig_preop_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VTrigPreopF64Vop3>(opcode);
 }
+} // namespace detail
 
 VMqsadU32U8Vop3::VMqsadU32U8Vop3(const MachineInst *inst)
     : Vop3("v_mqsad_u32_u8", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMqsadU32U8Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VMqsadU32U8Vop3)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4129,19 +5159,22 @@ VMqsadU32U8Vop3::VMqsadU32U8Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(
-        128, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMqsadU32U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeVMqsadU32U8Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mqsad_u32_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMqsadU32U8Vop3>(opcode);
 }
+} // namespace detail
 
 VXor3B32Vop3::VXor3B32Vop3(const MachineInst *inst)
-    : Vop3("v_xor3_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VXor3B32Vop3>()),
+    : Vop3("v_xor3_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VXor3B32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4166,13 +5199,19 @@ VXor3B32Vop3::VXor3B32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VXor3B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_xor3_b32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVXor3B32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_xor3_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VXor3B32Vop3>(opcode);
 }
+} // namespace detail
 
 VLshlrevB64Vop3::VLshlrevB64Vop3(const MachineInst *inst)
     : Vop3("v_lshlrev_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VLshlrevB64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VLshlrevB64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4192,13 +5231,20 @@ VLshlrevB64Vop3::VLshlrevB64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
 }
 
-void VLshlrevB64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_lshlrev_b64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVLshlrevB64Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_lshlrev_b64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLshlrevB64Vop3>(opcode);
 }
+} // namespace detail
 
 VLshrrevB64Vop3::VLshrrevB64Vop3(const MachineInst *inst)
     : Vop3("v_lshrrev_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VLshrrevB64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VLshrrevB64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4218,13 +5264,20 @@ VLshrrevB64Vop3::VLshrrevB64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
 }
 
-void VLshrrevB64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_lshrrev_b64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVLshrrevB64Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_lshrrev_b64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLshrrevB64Vop3>(opcode);
 }
+} // namespace detail
 
 VAshrrevI64Vop3::VAshrrevI64Vop3(const MachineInst *inst)
     : Vop3("v_ashrrev_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VAshrrevI64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VAshrrevI64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4244,13 +5297,20 @@ VAshrrevI64Vop3::VAshrrevI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
 }
 
-void VAshrrevI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_ashrrev_i64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVAshrrevI64Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_ashrrev_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAshrrevI64Vop3>(opcode);
 }
+} // namespace detail
 
 VAddNcU16Vop3::VAddNcU16Vop3(const MachineInst *inst)
     : Vop3("v_add_nc_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VAddNcU16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VAddNcU16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4270,6 +5330,16 @@ VAddNcU16Vop3::VAddNcU16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVAddNcU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_add_nc_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAddNcU16Vop3>(opcode);
+}
+} // namespace detail
 
 void VAddNcU16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -4277,13 +5347,9 @@ void VAddNcU16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VAddNcU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_add_nc_u16_vop3(*this, wf);
-}
-
 VSubNcU16Vop3::VSubNcU16Vop3(const MachineInst *inst)
     : Vop3("v_sub_nc_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VSubNcU16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VSubNcU16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4303,6 +5369,16 @@ VSubNcU16Vop3::VSubNcU16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVSubNcU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sub_nc_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSubNcU16Vop3>(opcode);
+}
+} // namespace detail
 
 void VSubNcU16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -4310,13 +5386,9 @@ void VSubNcU16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VSubNcU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_sub_nc_u16_vop3(*this, wf);
-}
-
 VMulLoU16Vop3::VMulLoU16Vop3(const MachineInst *inst)
     : Vop3("v_mul_lo_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMulLoU16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VMulLoU16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4336,6 +5408,16 @@ VMulLoU16Vop3::VMulLoU16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVMulLoU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mul_lo_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMulLoU16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMulLoU16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -4343,13 +5425,9 @@ void VMulLoU16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VMulLoU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mul_lo_u16_vop3(*this, wf);
-}
-
 VLshrrevB16Vop3::VLshrrevB16Vop3(const MachineInst *inst)
     : Vop3("v_lshrrev_b16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VLshrrevB16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VLshrrevB16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4369,6 +5447,17 @@ VLshrrevB16Vop3::VLshrrevB16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVLshrrevB16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_lshrrev_b16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLshrrevB16Vop3>(opcode);
+}
+} // namespace detail
 
 void VLshrrevB16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -4376,13 +5465,9 @@ void VLshrrevB16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VLshrrevB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_lshrrev_b16_vop3(*this, wf);
-}
-
 VAshrrevI16Vop3::VAshrrevI16Vop3(const MachineInst *inst)
     : Vop3("v_ashrrev_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VAshrrevI16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VAshrrevI16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4402,6 +5487,17 @@ VAshrrevI16Vop3::VAshrrevI16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVAshrrevI16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_ashrrev_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAshrrevI16Vop3>(opcode);
+}
+} // namespace detail
 
 void VAshrrevI16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -4409,12 +5505,9 @@ void VAshrrevI16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VAshrrevI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_ashrrev_i16_vop3(*this, wf);
-}
-
 VMaxU16Vop3::VMaxU16Vop3(const MachineInst *inst)
-    : Vop3("v_max_u16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMaxU16Vop3>()),
+    : Vop3("v_max_u16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMaxU16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4434,6 +5527,16 @@ VMaxU16Vop3::VMaxU16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVMaxU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_max_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMaxU16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMaxU16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -4441,10 +5544,9 @@ void VMaxU16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VMaxU16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_max_u16_vop3(*this, wf); }
-
 VMaxI16Vop3::VMaxI16Vop3(const MachineInst *inst)
-    : Vop3("v_max_i16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMaxI16Vop3>()),
+    : Vop3("v_max_i16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMaxI16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4464,6 +5566,16 @@ VMaxI16Vop3::VMaxI16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVMaxI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_max_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMaxI16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMaxI16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -4471,10 +5583,9 @@ void VMaxI16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VMaxI16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_max_i16_vop3(*this, wf); }
-
 VMinU16Vop3::VMinU16Vop3(const MachineInst *inst)
-    : Vop3("v_min_u16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMinU16Vop3>()),
+    : Vop3("v_min_u16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMinU16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4494,6 +5605,16 @@ VMinU16Vop3::VMinU16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVMinU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_min_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMinU16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMinU16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -4501,10 +5622,9 @@ void VMinU16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VMinU16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_min_u16_vop3(*this, wf); }
-
 VMinI16Vop3::VMinI16Vop3(const MachineInst *inst)
-    : Vop3("v_min_i16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMinI16Vop3>()),
+    : Vop3("v_min_i16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMinI16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4524,6 +5644,16 @@ VMinI16Vop3::VMinI16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVMinI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_min_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMinI16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMinI16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -4531,11 +5661,9 @@ void VMinI16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VMinI16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_min_i16_vop3(*this, wf); }
-
 VAddNcI16Vop3::VAddNcI16Vop3(const MachineInst *inst)
     : Vop3("v_add_nc_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VAddNcI16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VAddNcI16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4555,6 +5683,16 @@ VAddNcI16Vop3::VAddNcI16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVAddNcI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_add_nc_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAddNcI16Vop3>(opcode);
+}
+} // namespace detail
 
 void VAddNcI16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -4562,13 +5700,9 @@ void VAddNcI16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VAddNcI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_add_nc_i16_vop3(*this, wf);
-}
-
 VSubNcI16Vop3::VSubNcI16Vop3(const MachineInst *inst)
     : Vop3("v_sub_nc_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VSubNcI16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VSubNcI16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4589,19 +5723,25 @@ VSubNcI16Vop3::VSubNcI16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVSubNcI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sub_nc_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSubNcI16Vop3>(opcode);
+}
+} // namespace detail
+
 void VSubNcI16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
 }
 
-void VSubNcI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_sub_nc_i16_vop3(*this, wf);
-}
-
 VPackB32F16Vop3::VPackB32F16Vop3(const MachineInst *inst)
     : Vop3("v_pack_b32_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VPackB32F16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VPackB32F16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4622,13 +5762,20 @@ VPackB32F16Vop3::VPackB32F16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VPackB32F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pack_b32_f16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVPackB32F16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_pack_b32_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPackB32F16Vop3>(opcode);
 }
+} // namespace detail
 
 VCvtPknormI16F16Vop3::VCvtPknormI16F16Vop3(const MachineInst *inst)
     : Vop3("v_cvt_pknorm_i16_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtPknormI16F16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtPknormI16F16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4649,14 +5796,20 @@ VCvtPknormI16F16Vop3::VCvtPknormI16F16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCvtPknormI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeVCvtPknormI16F16Vop3(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_pknorm_i16_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtPknormI16F16Vop3>(opcode);
 }
+} // namespace detail
 
 VCvtPknormU16F16Vop3::VCvtPknormU16F16Vop3(const MachineInst *inst)
     : Vop3("v_cvt_pknorm_u16_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtPknormU16F16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtPknormU16F16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4677,14 +5830,20 @@ VCvtPknormU16F16Vop3::VCvtPknormU16F16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCvtPknormU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeVCvtPknormU16F16Vop3(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_pknorm_u16_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtPknormU16F16Vop3>(opcode);
 }
+} // namespace detail
 
 VLshlrevB16Vop3::VLshlrevB16Vop3(const MachineInst *inst)
     : Vop3("v_lshlrev_b16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VLshlrevB16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VLshlrevB16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4705,18 +5864,26 @@ VLshlrevB16Vop3::VLshlrevB16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVLshlrevB16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_lshlrev_b16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLshlrevB16Vop3>(opcode);
+}
+} // namespace detail
+
 void VLshlrevB16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
 }
 
-void VLshlrevB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_lshlrev_b16_vop3(*this, wf);
-}
-
 VMadU16Vop3::VMadU16Vop3(const MachineInst *inst)
-    : Vop3("v_mad_u16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMadU16Vop3>()),
+    : Vop3("v_mad_u16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMadU16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4744,17 +5911,25 @@ VMadU16Vop3::VMadU16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVMadU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mad_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMadU16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMadU16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
 }
 
-void VMadU16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_mad_u16_vop3(*this, wf); }
-
 VInterpP1llF16Vop3::VInterpP1llF16Vop3(const MachineInst *inst)
     : Vop3("v_interp_p1ll_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VInterpP1llF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VInterpP1llF16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src0(16, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -4763,25 +5938,22 @@ VInterpP1llF16Vop3::VInterpP1llF16Vop3(const MachineInst *inst)
   src_operands_[1] = &src0;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 =
-        Operand(16, OperandType::OPR_SIMM32,
-                static_cast<int>((
-                    reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VInterpP1llF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeVInterpP1llF16Vop3(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_interp_p1ll_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VInterpP1llF16Vop3>(opcode);
 }
+} // namespace detail
 
 VInterpP1lvF16Vop3::VInterpP1lvF16Vop3(const MachineInst *inst)
     : Vop3("v_interp_p1lv_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VInterpP1lvF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VInterpP1lvF16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src0(16, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4792,28 +5964,22 @@ VInterpP1lvF16Vop3::VInterpP1lvF16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 =
-        Operand(16, OperandType::OPR_SIMM32,
-                static_cast<int>((
-                    reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VInterpP1lvF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeVInterpP1lvF16Vop3(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_interp_p1lv_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VInterpP1lvF16Vop3>(opcode);
 }
+} // namespace detail
 
 VPermB32Vop3::VPermB32Vop3(const MachineInst *inst)
-    : Vop3("v_perm_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VPermB32Vop3>()),
+    : Vop3("v_perm_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VPermB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4838,12 +6004,19 @@ VPermB32Vop3::VPermB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VPermB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_perm_b32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVPermB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_perm_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPermB32Vop3>(opcode);
 }
+} // namespace detail
 
 VXadU32Vop3::VXadU32Vop3(const MachineInst *inst)
-    : Vop3("v_xad_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VXadU32Vop3>()),
+    : Vop3("v_xad_u32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VXadU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4868,11 +6041,19 @@ VXadU32Vop3::VXadU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VXadU32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_xad_u32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVXadU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_xad_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VXadU32Vop3>(opcode);
+}
+} // namespace detail
 
 VLshlAddU32Vop3::VLshlAddU32Vop3(const MachineInst *inst)
     : Vop3("v_lshl_add_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VLshlAddU32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VLshlAddU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4897,13 +6078,20 @@ VLshlAddU32Vop3::VLshlAddU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VLshlAddU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_lshl_add_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVLshlAddU32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_lshl_add_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLshlAddU32Vop3>(opcode);
 }
+} // namespace detail
 
 VAddLshlU32Vop3::VAddLshlU32Vop3(const MachineInst *inst)
     : Vop3("v_add_lshl_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VAddLshlU32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VAddLshlU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4928,12 +6116,20 @@ VAddLshlU32Vop3::VAddLshlU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VAddLshlU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_add_lshl_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVAddLshlU32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_add_lshl_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAddLshlU32Vop3>(opcode);
 }
+} // namespace detail
 
 VFmaF16Vop3::VFmaF16Vop3(const MachineInst *inst)
-    : Vop3("v_fma_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VFmaF16Vop3>()),
+    : Vop3("v_fma_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VFmaF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4960,6 +6156,16 @@ VFmaF16Vop3::VFmaF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVFmaF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_fma_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VFmaF16Vop3>(opcode);
+}
+} // namespace detail
 
 void VFmaF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -4967,10 +6173,9 @@ void VFmaF16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VFmaF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_fma_f16_vop3(*this, wf); }
-
 VMin3F16Vop3::VMin3F16Vop3(const MachineInst *inst)
-    : Vop3("v_min3_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMin3F16Vop3>()),
+    : Vop3("v_min3_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMin3F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4997,6 +6202,16 @@ VMin3F16Vop3::VMin3F16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVMin3F16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_min3_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMin3F16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMin3F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -5004,12 +6219,9 @@ void VMin3F16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VMin3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_min3_f16_vop3(*this, wf);
-}
-
 VMin3I16Vop3::VMin3I16Vop3(const MachineInst *inst)
-    : Vop3("v_min3_i16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMin3I16Vop3>()),
+    : Vop3("v_min3_i16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMin3I16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -5036,6 +6248,16 @@ VMin3I16Vop3::VMin3I16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVMin3I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_min3_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMin3I16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMin3I16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -5043,12 +6265,9 @@ void VMin3I16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VMin3I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_min3_i16_vop3(*this, wf);
-}
-
 VMin3U16Vop3::VMin3U16Vop3(const MachineInst *inst)
-    : Vop3("v_min3_u16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMin3U16Vop3>()),
+    : Vop3("v_min3_u16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMin3U16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -5075,6 +6294,16 @@ VMin3U16Vop3::VMin3U16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVMin3U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_min3_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMin3U16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMin3U16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -5082,12 +6311,9 @@ void VMin3U16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VMin3U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_min3_u16_vop3(*this, wf);
-}
-
 VMax3F16Vop3::VMax3F16Vop3(const MachineInst *inst)
-    : Vop3("v_max3_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMax3F16Vop3>()),
+    : Vop3("v_max3_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMax3F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -5114,6 +6340,16 @@ VMax3F16Vop3::VMax3F16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVMax3F16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_max3_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMax3F16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMax3F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -5121,12 +6357,9 @@ void VMax3F16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VMax3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_max3_f16_vop3(*this, wf);
-}
-
 VMax3I16Vop3::VMax3I16Vop3(const MachineInst *inst)
-    : Vop3("v_max3_i16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMax3I16Vop3>()),
+    : Vop3("v_max3_i16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMax3I16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -5153,6 +6386,16 @@ VMax3I16Vop3::VMax3I16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVMax3I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_max3_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMax3I16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMax3I16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -5160,12 +6403,9 @@ void VMax3I16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VMax3I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_max3_i16_vop3(*this, wf);
-}
-
 VMax3U16Vop3::VMax3U16Vop3(const MachineInst *inst)
-    : Vop3("v_max3_u16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMax3U16Vop3>()),
+    : Vop3("v_max3_u16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMax3U16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -5192,6 +6432,16 @@ VMax3U16Vop3::VMax3U16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVMax3U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_max3_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMax3U16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMax3U16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -5199,12 +6449,9 @@ void VMax3U16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VMax3U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_max3_u16_vop3(*this, wf);
-}
-
 VMed3F16Vop3::VMed3F16Vop3(const MachineInst *inst)
-    : Vop3("v_med3_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMed3F16Vop3>()),
+    : Vop3("v_med3_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMed3F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -5231,6 +6478,16 @@ VMed3F16Vop3::VMed3F16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVMed3F16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_med3_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMed3F16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMed3F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -5238,12 +6495,9 @@ void VMed3F16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VMed3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_med3_f16_vop3(*this, wf);
-}
-
 VMed3I16Vop3::VMed3I16Vop3(const MachineInst *inst)
-    : Vop3("v_med3_i16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMed3I16Vop3>()),
+    : Vop3("v_med3_i16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMed3I16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -5270,6 +6524,16 @@ VMed3I16Vop3::VMed3I16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVMed3I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_med3_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMed3I16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMed3I16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -5277,12 +6541,9 @@ void VMed3I16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VMed3I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_med3_i16_vop3(*this, wf);
-}
-
 VMed3U16Vop3::VMed3U16Vop3(const MachineInst *inst)
-    : Vop3("v_med3_u16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMed3U16Vop3>()),
+    : Vop3("v_med3_u16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMed3U16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -5310,19 +6571,25 @@ VMed3U16Vop3::VMed3U16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVMed3U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_med3_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMed3U16Vop3>(opcode);
+}
+} // namespace detail
+
 void VMed3U16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
 }
 
-void VMed3U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_med3_u16_vop3(*this, wf);
-}
-
 VInterpP2F16Vop3::VInterpP2F16Vop3(const MachineInst *inst)
     : Vop3("v_interp_p2_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VInterpP2F16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VInterpP2F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src0(16, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5333,20 +6600,18 @@ VInterpP2F16Vop3::VInterpP2F16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 =
-        Operand(16, OperandType::OPR_SIMM32,
-                static_cast<int>((
-                    reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
+
+namespace detail {
+DecodeResult decodeVInterpP2F16Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_interp_p2_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VInterpP2F16Vop3>(opcode);
+}
+} // namespace detail
 
 void VInterpP2F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -5354,13 +6619,9 @@ void VInterpP2F16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VInterpP2F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
-
 VMadI16Vop3::VMadI16Vop3(const MachineInst *inst)
-    : Vop3("v_mad_i16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VMadI16Vop3>()),
+    : Vop3("v_mad_i16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMadI16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -5387,6 +6648,16 @@ VMadI16Vop3::VMadI16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
+
+namespace detail {
+DecodeResult decodeVMadI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mad_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMadI16Vop3>(opcode);
+}
+} // namespace detail
 
 void VMadI16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
@@ -5394,11 +6665,9 @@ void VMadI16Vop3::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
-void VMadI16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_mad_i16_vop3(*this, wf); }
-
 VDivFixupF16Vop3::VDivFixupF16Vop3(const MachineInst *inst)
     : Vop3("v_div_fixup_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VDivFixupF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VDivFixupF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -5426,19 +6695,26 @@ VDivFixupF16Vop3::VDivFixupF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
+namespace detail {
+DecodeResult decodeVDivFixupF16Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_div_fixup_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VDivFixupF16Vop3>(opcode);
+}
+} // namespace detail
+
 void VDivFixupF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
   if (auto r = vdst.to_register_ref())
     uses.expand(*r);
 }
 
-void VDivFixupF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_div_fixup_f16_vop3(*this, wf);
-}
-
 VReadlaneB32Vop3::VReadlaneB32Vop3(const MachineInst *inst)
     : Vop3("v_readlane_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VReadlaneB32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VReadlaneB32Vop3)),
       vdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SSRC_LANESEL, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -5447,24 +6723,22 @@ VReadlaneB32Vop3::VReadlaneB32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VReadlaneB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t lane = amdgpu::RegisterAccess(wf).read_scalar(src1);
-  amdgpu::RegisterAccess(wf).write_scalar(vdst, amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+namespace detail {
+DecodeResult decodeVReadlaneB32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_readlane_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VReadlaneB32Vop3>(opcode);
 }
+} // namespace detail
 
 VWritelaneB32Vop3::VWritelaneB32Vop3(const MachineInst *inst)
     : Vop3("v_writelane_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VWritelaneB32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VWritelaneB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SSRC_LANESEL, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -5478,21 +6752,22 @@ VWritelaneB32Vop3::VWritelaneB32Vop3(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VWritelaneB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t val = amdgpu::RegisterAccess(wf).read_scalar(src0);
-  uint32_t lane = amdgpu::RegisterAccess(wf).read_scalar(src1);
-  amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, val);
+namespace detail {
+DecodeResult decodeVWritelaneB32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_writelane_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VWritelaneB32Vop3>(opcode);
 }
+} // namespace detail
 
 VLdexpF32Vop3::VLdexpF32Vop3(const MachineInst *inst)
     : Vop3("v_ldexp_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VLdexpF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VLdexpF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -5511,12 +6786,19 @@ VLdexpF32Vop3::VLdexpF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VLdexpF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_ldexp_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVLdexpF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_ldexp_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLdexpF32Vop3>(opcode);
 }
+} // namespace detail
 
 VBfmB32Vop3::VBfmB32Vop3(const MachineInst *inst)
-    : Vop3("v_bfm_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VBfmB32Vop3>()),
+    : Vop3("v_bfm_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VBfmB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -5535,11 +6817,19 @@ VBfmB32Vop3::VBfmB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VBfmB32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_bfm_b32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVBfmB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_bfm_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VBfmB32Vop3>(opcode);
+}
+} // namespace detail
 
 VBcntU32B32Vop3::VBcntU32B32Vop3(const MachineInst *inst)
     : Vop3("v_bcnt_u32_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VBcntU32B32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VBcntU32B32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -5558,13 +6848,20 @@ VBcntU32B32Vop3::VBcntU32B32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VBcntU32B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_bcnt_u32_b32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVBcntU32B32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_bcnt_u32_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VBcntU32B32Vop3>(opcode);
 }
+} // namespace detail
 
 VMbcntLoU32B32Vop3::VMbcntLoU32B32Vop3(const MachineInst *inst)
     : Vop3("v_mbcnt_lo_u32_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMbcntLoU32B32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VMbcntLoU32B32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -5583,13 +6880,20 @@ VMbcntLoU32B32Vop3::VMbcntLoU32B32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMbcntLoU32B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mbcnt_lo_u32_b32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVMbcntLoU32B32Vop3(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mbcnt_lo_u32_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMbcntLoU32B32Vop3>(opcode);
 }
+} // namespace detail
 
 VMbcntHiU32B32Vop3::VMbcntHiU32B32Vop3(const MachineInst *inst)
     : Vop3("v_mbcnt_hi_u32_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMbcntHiU32B32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VMbcntHiU32B32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -5608,13 +6912,20 @@ VMbcntHiU32B32Vop3::VMbcntHiU32B32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMbcntHiU32B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mbcnt_hi_u32_b32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVMbcntHiU32B32Vop3(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mbcnt_hi_u32_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMbcntHiU32B32Vop3>(opcode);
 }
+} // namespace detail
 
 VCvtPknormI16F32Vop3::VCvtPknormI16F32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_pknorm_i16_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtPknormI16F32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtPknormI16F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -5633,13 +6944,20 @@ VCvtPknormI16F32Vop3::VCvtPknormI16F32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCvtPknormI16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_pknorm_i16_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCvtPknormI16F32Vop3(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_pknorm_i16_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtPknormI16F32Vop3>(opcode);
 }
+} // namespace detail
 
 VCvtPknormU16F32Vop3::VCvtPknormU16F32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_pknorm_u16_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtPknormU16F32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtPknormU16F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -5658,13 +6976,20 @@ VCvtPknormU16F32Vop3::VCvtPknormU16F32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCvtPknormU16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_pknorm_u16_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCvtPknormU16F32Vop3(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_pknorm_u16_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtPknormU16F32Vop3>(opcode);
 }
+} // namespace detail
 
 VCvtPkU16U32Vop3::VCvtPkU16U32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_pk_u16_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtPkU16U32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtPkU16U32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -5683,13 +7008,20 @@ VCvtPkU16U32Vop3::VCvtPkU16U32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCvtPkU16U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_pk_u16_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCvtPkU16U32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_pk_u16_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtPkU16U32Vop3>(opcode);
 }
+} // namespace detail
 
 VCvtPkI16I32Vop3::VCvtPkI16I32Vop3(const MachineInst *inst)
     : Vop3("v_cvt_pk_i16_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCvtPkI16I32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCvtPkI16I32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -5708,12 +7040,20 @@ VCvtPkI16I32Vop3::VCvtPkI16I32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCvtPkI16I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_pk_i16_i32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCvtPkI16I32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cvt_pk_i16_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCvtPkI16I32Vop3>(opcode);
 }
+} // namespace detail
 
 VAdd3U32Vop3::VAdd3U32Vop3(const MachineInst *inst)
-    : Vop3("v_add3_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VAdd3U32Vop3>()),
+    : Vop3("v_add3_u32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VAdd3U32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -5738,13 +7078,19 @@ VAdd3U32Vop3::VAdd3U32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VAdd3U32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_add3_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVAdd3U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_add3_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAdd3U32Vop3>(opcode);
 }
+} // namespace detail
 
 VLshlOrB32Vop3::VLshlOrB32Vop3(const MachineInst *inst)
     : Vop3("v_lshl_or_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VLshlOrB32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VLshlOrB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -5769,13 +7115,19 @@ VLshlOrB32Vop3::VLshlOrB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VLshlOrB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_lshl_or_b32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVLshlOrB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_lshl_or_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLshlOrB32Vop3>(opcode);
 }
+} // namespace detail
 
 VAndOrB32Vop3::VAndOrB32Vop3(const MachineInst *inst)
     : Vop3("v_and_or_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VAndOrB32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VAndOrB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -5800,12 +7152,19 @@ VAndOrB32Vop3::VAndOrB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VAndOrB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_and_or_b32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVAndOrB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_and_or_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAndOrB32Vop3>(opcode);
 }
+} // namespace detail
 
 VOr3B32Vop3::VOr3B32Vop3(const MachineInst *inst)
-    : Vop3("v_or3_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VOr3B32Vop3>()),
+    : Vop3("v_or3_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VOr3B32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -5830,11 +7189,19 @@ VOr3B32Vop3::VOr3B32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VOr3B32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_or3_b32_vop3(*this, wf); }
+namespace detail {
+DecodeResult decodeVOr3B32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_or3_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VOr3B32Vop3>(opcode);
+}
+} // namespace detail
 
 VMadU32U16Vop3::VMadU32U16Vop3(const MachineInst *inst)
     : Vop3("v_mad_u32_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMadU32U16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VMadU32U16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -5861,13 +7228,19 @@ VMadU32U16Vop3::VMadU32U16Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMadU32U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mad_u32_u16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVMadU32U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mad_u32_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMadU32U16Vop3>(opcode);
 }
+} // namespace detail
 
 VMadI32I16Vop3::VMadI32I16Vop3(const MachineInst *inst)
     : Vop3("v_mad_i32_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VMadI32I16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VMadI32I16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -5894,13 +7267,19 @@ VMadI32I16Vop3::VMadI32I16Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VMadI32I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mad_i32_i16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVMadI32I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_mad_i32_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMadI32I16Vop3>(opcode);
 }
+} // namespace detail
 
 VSubNcI32Vop3::VSubNcI32Vop3(const MachineInst *inst)
     : Vop3("v_sub_nc_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VSubNcI32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VSubNcI32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -5919,13 +7298,19 @@ VSubNcI32Vop3::VSubNcI32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VSubNcI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_sub_nc_i32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVSubNcI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_sub_nc_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSubNcI32Vop3>(opcode);
 }
+} // namespace detail
 
 VPermlane16B32Vop3::VPermlane16B32Vop3(const MachineInst *inst)
     : Vop3("v_permlane16_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VPermlane16B32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VPermlane16B32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SSRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -5936,10 +7321,6 @@ VPermlane16B32Vop3::VPermlane16B32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -5950,36 +7331,20 @@ VPermlane16B32Vop3::VPermlane16B32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VPermlane16B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  bool fi = (inst_.op_sel & 0x1u) != 0;
-  bool bound_ctrl = (inst_.op_sel & 0x2u) != 0;
-  uint64_t exec = wf.exec();
-  uint32_t snap[64];
-  for (uint32_t i = 0; i < wf.wf_size(); ++i)
-    snap[i] = amdgpu::RegisterAccess(wf).read_lane(src0, i);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t sub = lane & 0xF;
-    uint32_t sel_word = (sub < 8u) ? amdgpu::RegisterAccess(wf).read_scalar(src1)
-                                   : amdgpu::RegisterAccess(wf).read_scalar(src2);
-    uint32_t sel = (sel_word >> ((sub & 7u) * 4u)) & 0xF;
-    uint32_t src_lane = (lane & ~0xFu) | sel;
-    if (src_lane >= wf.wf_size())
-      continue;
-    bool src_active = (exec & (1ULL << src_lane)) != 0;
-    if (!src_active && !fi) {
-      if (bound_ctrl)
-        amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, 0);
-      continue;
-    }
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, snap[src_lane]);
-  }
+namespace detail {
+DecodeResult decodeVPermlane16B32Vop3(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_permlane16_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPermlane16B32Vop3>(opcode);
 }
+} // namespace detail
 
 VPermlanex16B32Vop3::VPermlanex16B32Vop3(const MachineInst *inst)
     : Vop3("v_permlanex16_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VPermlanex16B32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VPermlanex16B32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SSRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -5990,10 +7355,6 @@ VPermlanex16B32Vop3::VPermlanex16B32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -6004,38 +7365,20 @@ VPermlanex16B32Vop3::VPermlanex16B32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VPermlanex16B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  bool fi = (inst_.op_sel & 0x1u) != 0;
-  bool bound_ctrl = (inst_.op_sel & 0x2u) != 0;
-  uint64_t exec = wf.exec();
-  uint32_t snap[64];
-  for (uint32_t i = 0; i < wf.wf_size(); ++i)
-    snap[i] = amdgpu::RegisterAccess(wf).read_lane(src0, i);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t sub = lane & 0xF;
-    uint32_t sel_word = (sub < 8u) ? amdgpu::RegisterAccess(wf).read_scalar(src1)
-                                   : amdgpu::RegisterAccess(wf).read_scalar(src2);
-    uint32_t sel = (sel_word >> ((sub & 7u) * 4u)) & 0xF;
-    uint32_t row_base = lane & ~0x1Fu;
-    uint32_t half = (lane ^ 0x10u) & 0x10u;
-    uint32_t src_lane = row_base | half | sel;
-    if (src_lane >= wf.wf_size())
-      continue;
-    bool src_active = (exec & (1ULL << src_lane)) != 0;
-    if (!src_active && !fi) {
-      if (bound_ctrl)
-        amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, 0);
-      continue;
-    }
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, snap[src_lane]);
-  }
+namespace detail {
+DecodeResult decodeVPermlanex16B32Vop3(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_permlanex16_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VPermlanex16B32Vop3>(opcode);
 }
+} // namespace detail
 
 VAddNcI32Vop3::VAddNcI32Vop3(const MachineInst *inst)
     : Vop3("v_add_nc_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VAddNcI32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VAddNcI32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -6054,12 +7397,19 @@ VAddNcI32Vop3::VAddNcI32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VAddNcI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_add_nc_i32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVAddNcI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_add_nc_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAddNcI32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpFF32Vop3::VCmpFF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_f_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpFF32Vop3>()),
+    : Vop3("v_cmp_f_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VCmpFF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -6078,13 +7428,19 @@ VCmpFF32Vop3::VCmpFF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpFF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_f_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpFF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_f_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpFF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpLtF32Vop3::VCmpLtF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lt_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLtF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLtF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -6103,13 +7459,19 @@ VCmpLtF32Vop3::VCmpLtF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpLtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_lt_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpLtF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_lt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLtF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpEqF32Vop3::VCmpEqF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_eq_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpEqF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpEqF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -6128,13 +7490,19 @@ VCmpEqF32Vop3::VCmpEqF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpEqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_eq_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpEqF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_eq_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpEqF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpLeF32Vop3::VCmpLeF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_le_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLeF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLeF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -6153,13 +7521,19 @@ VCmpLeF32Vop3::VCmpLeF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpLeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_le_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpLeF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_le_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLeF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpGtF32Vop3::VCmpGtF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_gt_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGtF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGtF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -6178,13 +7552,19 @@ VCmpGtF32Vop3::VCmpGtF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpGtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_gt_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpGtF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_gt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGtF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpLgF32Vop3::VCmpLgF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lg_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLgF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLgF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -6203,13 +7583,19 @@ VCmpLgF32Vop3::VCmpLgF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpLgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_lg_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpLgF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_lg_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLgF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpGeF32Vop3::VCmpGeF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ge_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGeF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGeF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -6228,12 +7614,19 @@ VCmpGeF32Vop3::VCmpGeF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpGeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_ge_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpGeF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ge_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGeF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpOF32Vop3::VCmpOF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_o_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpOF32Vop3>()),
+    : Vop3("v_cmp_o_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VCmpOF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -6252,12 +7645,19 @@ VCmpOF32Vop3::VCmpOF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpOF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_o_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpOF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_o_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpOF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpUF32Vop3::VCmpUF32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_u_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpUF32Vop3>()),
+    : Vop3("v_cmp_u_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VCmpUF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -6276,13 +7676,19 @@ VCmpUF32Vop3::VCmpUF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpUF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_u_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpUF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_u_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpUF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpNgeF32Vop3::VCmpNgeF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nge_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNgeF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNgeF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -6301,13 +7707,19 @@ VCmpNgeF32Vop3::VCmpNgeF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpNgeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_nge_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpNgeF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_nge_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNgeF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpNlgF32Vop3::VCmpNlgF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nlg_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNlgF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNlgF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -6326,13 +7738,19 @@ VCmpNlgF32Vop3::VCmpNlgF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpNlgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_nlg_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpNlgF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_nlg_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNlgF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpNgtF32Vop3::VCmpNgtF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ngt_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNgtF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNgtF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -6351,13 +7769,19 @@ VCmpNgtF32Vop3::VCmpNgtF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpNgtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_ngt_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpNgtF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ngt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNgtF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpNleF32Vop3::VCmpNleF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nle_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNleF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNleF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -6376,13 +7800,19 @@ VCmpNleF32Vop3::VCmpNleF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpNleF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_nle_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpNleF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_nle_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNleF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpNeqF32Vop3::VCmpNeqF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_neq_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNeqF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNeqF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -6401,13 +7831,19 @@ VCmpNeqF32Vop3::VCmpNeqF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpNeqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_neq_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpNeqF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_neq_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNeqF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpNltF32Vop3::VCmpNltF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nlt_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNltF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNltF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -6426,13 +7862,19 @@ VCmpNltF32Vop3::VCmpNltF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpNltF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_nlt_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpNltF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_nlt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNltF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpTruF32Vop3::VCmpTruF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_tru_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpTruF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpTruF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -6451,13 +7893,19 @@ VCmpTruF32Vop3::VCmpTruF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpTruF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_tru_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpTruF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_tru_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpTruF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxFF32Vop3::VCmpxFF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_f_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxFF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxFF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -6480,20 +7928,19 @@ VCmpxFF32Vop3::VCmpxFF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxFF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    (void)lane;
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxFF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_f_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxFF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxLtF32Vop3::VCmpxLtF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_lt_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLtF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLtF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -6516,31 +7963,19 @@ VCmpxLtF32Vop3::VCmpxLtF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxLtF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_lt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLtF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxEqF32Vop3::VCmpxEqF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_eq_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxEqF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxEqF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -6563,31 +7998,19 @@ VCmpxEqF32Vop3::VCmpxEqF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxEqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxEqF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_eq_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxEqF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxLeF32Vop3::VCmpxLeF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_le_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLeF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLeF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -6610,31 +8033,19 @@ VCmpxLeF32Vop3::VCmpxLeF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxLeF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_le_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLeF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxGtF32Vop3::VCmpxGtF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_gt_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGtF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGtF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -6657,31 +8068,19 @@ VCmpxGtF32Vop3::VCmpxGtF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxGtF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_gt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGtF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxLgF32Vop3::VCmpxLgF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_lg_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLgF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLgF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -6704,31 +8103,19 @@ VCmpxLgF32Vop3::VCmpxLgF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 < s1 || s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxLgF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_lg_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLgF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxGeF32Vop3::VCmpxGeF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ge_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGeF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGeF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -6751,31 +8138,19 @@ VCmpxGeF32Vop3::VCmpxGeF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxGeF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ge_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGeF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxOF32Vop3::VCmpxOF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_o_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxOF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxOF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -6798,31 +8173,19 @@ VCmpxOF32Vop3::VCmpxOF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxOF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!std::isnan(s0) && !std::isnan(s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxOF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_o_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxOF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxUF32Vop3::VCmpxUF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_u_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxUF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxUF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -6845,31 +8208,19 @@ VCmpxUF32Vop3::VCmpxUF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxUF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (std::isnan(s0) || std::isnan(s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxUF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_u_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxUF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxNgeF32Vop3::VCmpxNgeF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_nge_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNgeF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNgeF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -6892,31 +8243,20 @@ VCmpxNgeF32Vop3::VCmpxNgeF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNgeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 >= s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxNgeF32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_nge_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNgeF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxNlgF32Vop3::VCmpxNlgF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_nlg_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNlgF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNlgF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -6939,31 +8279,20 @@ VCmpxNlgF32Vop3::VCmpxNlgF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNlgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 < s1 || s0 > s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxNlgF32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_nlg_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNlgF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxNgtF32Vop3::VCmpxNgtF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ngt_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNgtF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNgtF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -6986,31 +8315,20 @@ VCmpxNgtF32Vop3::VCmpxNgtF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNgtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 > s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxNgtF32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ngt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNgtF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxNleF32Vop3::VCmpxNleF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_nle_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNleF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNleF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -7033,31 +8351,20 @@ VCmpxNleF32Vop3::VCmpxNleF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNleF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 <= s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxNleF32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_nle_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNleF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxNeqF32Vop3::VCmpxNeqF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_neq_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNeqF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNeqF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -7080,31 +8387,20 @@ VCmpxNeqF32Vop3::VCmpxNeqF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNeqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxNeqF32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_neq_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNeqF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxNltF32Vop3::VCmpxNltF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_nlt_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNltF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNltF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -7127,31 +8423,20 @@ VCmpxNltF32Vop3::VCmpxNltF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNltF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 < s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxNltF32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_nlt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNltF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxTruF32Vop3::VCmpxTruF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_tru_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxTruF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxTruF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -7174,19 +8459,20 @@ VCmpxTruF32Vop3::VCmpxTruF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxTruF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxTruF32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_tru_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxTruF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpFF64Vop3::VCmpFF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_f_f64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpFF64Vop3>()),
+    : Vop3("v_cmp_f_f64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VCmpFF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -7207,13 +8493,19 @@ VCmpFF64Vop3::VCmpFF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VCmpFF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_f_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpFF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_f_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpFF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpLtF64Vop3::VCmpLtF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lt_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLtF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLtF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -7234,13 +8526,19 @@ VCmpLtF64Vop3::VCmpLtF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VCmpLtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_lt_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpLtF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_lt_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLtF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpEqF64Vop3::VCmpEqF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_eq_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpEqF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpEqF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -7261,13 +8559,19 @@ VCmpEqF64Vop3::VCmpEqF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VCmpEqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_eq_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpEqF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_eq_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpEqF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpLeF64Vop3::VCmpLeF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_le_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLeF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLeF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -7288,13 +8592,19 @@ VCmpLeF64Vop3::VCmpLeF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VCmpLeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_le_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpLeF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_le_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLeF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpGtF64Vop3::VCmpGtF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_gt_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGtF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGtF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -7315,13 +8625,19 @@ VCmpGtF64Vop3::VCmpGtF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VCmpGtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_gt_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpGtF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_gt_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGtF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpLgF64Vop3::VCmpLgF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lg_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLgF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLgF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -7342,13 +8658,19 @@ VCmpLgF64Vop3::VCmpLgF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VCmpLgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_lg_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpLgF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_lg_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLgF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpGeF64Vop3::VCmpGeF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ge_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGeF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGeF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -7369,12 +8691,19 @@ VCmpGeF64Vop3::VCmpGeF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VCmpGeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_ge_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpGeF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ge_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGeF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpOF64Vop3::VCmpOF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_o_f64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpOF64Vop3>()),
+    : Vop3("v_cmp_o_f64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VCmpOF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -7395,12 +8724,19 @@ VCmpOF64Vop3::VCmpOF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VCmpOF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_o_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpOF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_o_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpOF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpUF64Vop3::VCmpUF64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_u_f64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpUF64Vop3>()),
+    : Vop3("v_cmp_u_f64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VCmpUF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -7421,13 +8757,19 @@ VCmpUF64Vop3::VCmpUF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VCmpUF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_u_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpUF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_u_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpUF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpNgeF64Vop3::VCmpNgeF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nge_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNgeF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNgeF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -7448,13 +8790,19 @@ VCmpNgeF64Vop3::VCmpNgeF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VCmpNgeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_nge_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpNgeF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_nge_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNgeF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpNlgF64Vop3::VCmpNlgF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nlg_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNlgF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNlgF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -7475,13 +8823,19 @@ VCmpNlgF64Vop3::VCmpNlgF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VCmpNlgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_nlg_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpNlgF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_nlg_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNlgF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpNgtF64Vop3::VCmpNgtF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ngt_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNgtF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNgtF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -7502,13 +8856,19 @@ VCmpNgtF64Vop3::VCmpNgtF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VCmpNgtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_ngt_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpNgtF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ngt_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNgtF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpNleF64Vop3::VCmpNleF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nle_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNleF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNleF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -7529,13 +8889,19 @@ VCmpNleF64Vop3::VCmpNleF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VCmpNleF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_nle_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpNleF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_nle_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNleF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpNeqF64Vop3::VCmpNeqF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_neq_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNeqF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNeqF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -7556,13 +8922,19 @@ VCmpNeqF64Vop3::VCmpNeqF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VCmpNeqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_neq_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpNeqF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_neq_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNeqF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpNltF64Vop3::VCmpNltF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nlt_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNltF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNltF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -7583,13 +8955,19 @@ VCmpNltF64Vop3::VCmpNltF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VCmpNltF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_nlt_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpNltF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_nlt_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNltF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpTruF64Vop3::VCmpTruF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_tru_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpTruF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpTruF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -7610,13 +8988,19 @@ VCmpTruF64Vop3::VCmpTruF64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VCmpTruF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_tru_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpTruF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_tru_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpTruF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxFF64Vop3::VCmpxFF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_f_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxFF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxFF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -7641,20 +9025,19 @@ VCmpxFF64Vop3::VCmpxFF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxFF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    (void)lane;
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxFF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_f_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxFF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxLtF64Vop3::VCmpxLtF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_lt_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLtF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLtF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -7679,31 +9062,19 @@ VCmpxLtF64Vop3::VCmpxLtF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxLtF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_lt_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLtF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxEqF64Vop3::VCmpxEqF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_eq_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxEqF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxEqF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -7728,31 +9099,19 @@ VCmpxEqF64Vop3::VCmpxEqF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxEqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxEqF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_eq_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxEqF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxLeF64Vop3::VCmpxLeF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_le_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLeF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLeF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -7777,31 +9136,19 @@ VCmpxLeF64Vop3::VCmpxLeF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxLeF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_le_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLeF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxGtF64Vop3::VCmpxGtF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_gt_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGtF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGtF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -7826,31 +9173,19 @@ VCmpxGtF64Vop3::VCmpxGtF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxGtF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_gt_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGtF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxLgF64Vop3::VCmpxLgF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_lg_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLgF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLgF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -7875,31 +9210,19 @@ VCmpxLgF64Vop3::VCmpxLgF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 < s1 || s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxLgF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_lg_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLgF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxGeF64Vop3::VCmpxGeF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ge_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGeF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGeF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -7924,31 +9247,19 @@ VCmpxGeF64Vop3::VCmpxGeF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxGeF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ge_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGeF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxOF64Vop3::VCmpxOF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_o_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxOF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxOF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -7973,31 +9284,19 @@ VCmpxOF64Vop3::VCmpxOF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxOF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!std::isnan(s0) && !std::isnan(s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxOF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_o_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxOF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxUF64Vop3::VCmpxUF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_u_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxUF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxUF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -8022,31 +9321,19 @@ VCmpxUF64Vop3::VCmpxUF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxUF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (std::isnan(s0) || std::isnan(s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxUF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_u_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxUF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxNgeF64Vop3::VCmpxNgeF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_nge_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNgeF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNgeF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -8071,31 +9358,20 @@ VCmpxNgeF64Vop3::VCmpxNgeF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNgeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 >= s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxNgeF64Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_nge_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNgeF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxNlgF64Vop3::VCmpxNlgF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_nlg_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNlgF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNlgF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -8120,31 +9396,20 @@ VCmpxNlgF64Vop3::VCmpxNlgF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNlgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 < s1 || s0 > s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxNlgF64Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_nlg_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNlgF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxNgtF64Vop3::VCmpxNgtF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ngt_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNgtF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNgtF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -8169,31 +9434,20 @@ VCmpxNgtF64Vop3::VCmpxNgtF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNgtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 > s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxNgtF64Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ngt_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNgtF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxNleF64Vop3::VCmpxNleF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_nle_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNleF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNleF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -8218,31 +9472,20 @@ VCmpxNleF64Vop3::VCmpxNleF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNleF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 <= s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxNleF64Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_nle_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNleF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxNeqF64Vop3::VCmpxNeqF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_neq_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNeqF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNeqF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -8267,31 +9510,20 @@ VCmpxNeqF64Vop3::VCmpxNeqF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNeqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxNeqF64Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_neq_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNeqF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxNltF64Vop3::VCmpxNltF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_nlt_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNltF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNltF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -8316,31 +9548,20 @@ VCmpxNltF64Vop3::VCmpxNltF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNltF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 < s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxNltF64Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_nlt_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNltF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxTruF64Vop3::VCmpxTruF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_tru_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxTruF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxTruF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -8365,19 +9586,20 @@ VCmpxTruF64Vop3::VCmpxTruF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxTruF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxTruF64Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_tru_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxTruF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpFI32Vop3::VCmpFI32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_f_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpFI32Vop3>()),
+    : Vop3("v_cmp_f_i32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VCmpFI32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -8396,13 +9618,19 @@ VCmpFI32Vop3::VCmpFI32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpFI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_f_i32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpFI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_f_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpFI32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpLtI32Vop3::VCmpLtI32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lt_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLtI32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLtI32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -8421,13 +9649,19 @@ VCmpLtI32Vop3::VCmpLtI32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpLtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_lt_i32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpLtI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_lt_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLtI32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpEqI32Vop3::VCmpEqI32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_eq_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpEqI32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpEqI32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -8446,13 +9680,19 @@ VCmpEqI32Vop3::VCmpEqI32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpEqI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_eq_i32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpEqI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_eq_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpEqI32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpLeI32Vop3::VCmpLeI32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_le_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLeI32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLeI32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -8471,13 +9711,19 @@ VCmpLeI32Vop3::VCmpLeI32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpLeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_le_i32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpLeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_le_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLeI32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpGtI32Vop3::VCmpGtI32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_gt_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGtI32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGtI32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -8496,13 +9742,19 @@ VCmpGtI32Vop3::VCmpGtI32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpGtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_gt_i32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpGtI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_gt_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGtI32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpNeI32Vop3::VCmpNeI32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ne_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNeI32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNeI32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -8521,13 +9773,19 @@ VCmpNeI32Vop3::VCmpNeI32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpNeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_ne_i32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpNeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ne_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNeI32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpGeI32Vop3::VCmpGeI32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ge_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGeI32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGeI32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -8546,12 +9804,19 @@ VCmpGeI32Vop3::VCmpGeI32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpGeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_ge_i32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpGeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ge_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGeI32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpTI32Vop3::VCmpTI32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_t_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpTI32Vop3>()),
+    : Vop3("v_cmp_t_i32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VCmpTI32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -8570,13 +9835,19 @@ VCmpTI32Vop3::VCmpTI32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpTI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_t_i32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpTI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_t_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpTI32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpClassF32Vop3::VCmpClassF32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_class_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpClassF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpClassF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -8595,13 +9866,20 @@ VCmpClassF32Vop3::VCmpClassF32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpClassF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_class_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpClassF32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_class_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpClassF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpLtI16Vop3::VCmpLtI16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lt_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLtI16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLtI16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -8622,13 +9900,19 @@ VCmpLtI16Vop3::VCmpLtI16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpLtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_lt_i16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpLtI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_lt_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLtI16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpEqI16Vop3::VCmpEqI16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_eq_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpEqI16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpEqI16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -8649,13 +9933,19 @@ VCmpEqI16Vop3::VCmpEqI16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpEqI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_eq_i16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpEqI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_eq_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpEqI16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpLeI16Vop3::VCmpLeI16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_le_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLeI16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLeI16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -8676,13 +9966,19 @@ VCmpLeI16Vop3::VCmpLeI16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpLeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_le_i16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpLeI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_le_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLeI16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpGtI16Vop3::VCmpGtI16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_gt_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGtI16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGtI16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -8703,13 +9999,19 @@ VCmpGtI16Vop3::VCmpGtI16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpGtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_gt_i16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpGtI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_gt_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGtI16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpNeI16Vop3::VCmpNeI16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ne_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNeI16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNeI16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -8730,13 +10032,19 @@ VCmpNeI16Vop3::VCmpNeI16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpNeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_ne_i16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpNeI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ne_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNeI16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpGeI16Vop3::VCmpGeI16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ge_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGeI16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGeI16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -8757,13 +10065,19 @@ VCmpGeI16Vop3::VCmpGeI16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpGeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_ge_i16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpGeI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ge_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGeI16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpClassF16Vop3::VCmpClassF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_class_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpClassF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpClassF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -8784,13 +10098,20 @@ VCmpClassF16Vop3::VCmpClassF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpClassF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_class_f16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpClassF16Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_class_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpClassF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxFI32Vop3::VCmpxFI32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_f_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxFI32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxFI32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -8813,20 +10134,19 @@ VCmpxFI32Vop3::VCmpxFI32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxFI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    (void)lane;
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxFI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_f_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxFI32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxLtI32Vop3::VCmpxLtI32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_lt_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLtI32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLtI32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -8849,23 +10169,19 @@ VCmpxLtI32Vop3::VCmpxLtI32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxLtI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_lt_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLtI32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxEqI32Vop3::VCmpxEqI32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_eq_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxEqI32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxEqI32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -8888,23 +10204,19 @@ VCmpxEqI32Vop3::VCmpxEqI32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxEqI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxEqI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_eq_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxEqI32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxLeI32Vop3::VCmpxLeI32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_le_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLeI32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLeI32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -8927,23 +10239,19 @@ VCmpxLeI32Vop3::VCmpxLeI32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxLeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_le_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLeI32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxGtI32Vop3::VCmpxGtI32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_gt_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGtI32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGtI32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -8966,23 +10274,19 @@ VCmpxGtI32Vop3::VCmpxGtI32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxGtI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_gt_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGtI32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxNeI32Vop3::VCmpxNeI32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ne_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNeI32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNeI32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -9005,23 +10309,19 @@ VCmpxNeI32Vop3::VCmpxNeI32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    if (s0 != s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxNeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ne_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNeI32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxGeI32Vop3::VCmpxGeI32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ge_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGeI32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGeI32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -9044,23 +10344,19 @@ VCmpxGeI32Vop3::VCmpxGeI32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src1, lane));
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxGeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ge_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGeI32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxTI32Vop3::VCmpxTI32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_t_i32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxTI32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxTI32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -9083,20 +10379,19 @@ VCmpxTI32Vop3::VCmpxTI32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxTI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxTI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_t_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxTI32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxClassF32Vop3::VCmpxClassF32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_class_f32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxClassF32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxClassF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -9119,50 +10414,20 @@ VCmpxClassF32Vop3::VCmpxClassF32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxClassF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    uint32_t mask = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    bool match = false;
-    if ((mask & 0x001) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) == 0)
-      match = true;
-    if ((mask & 0x002) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) != 0)
-      match = true;
-    if ((mask & 0x004) && std::isinf(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        std::signbit(s0))
-      match = true;
-    if ((mask & 0x020) && s0 == 0.0f && std::signbit(s0))
-      match = true;
-    if ((mask & 0x040) && s0 == 0.0f && !std::signbit(s0))
-      match = true;
-    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        !std::signbit(s0))
-      match = true;
-    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0)
-      match = true;
-    if ((mask & 0x200) && std::isinf(s0) && s0 > 0)
-      match = true;
-    if (match)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxClassF32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_class_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxClassF32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxLtI16Vop3::VCmpxLtI16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_lt_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLtI16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLtI16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -9187,30 +10452,19 @@ VCmpxLtI16Vop3::VCmpxLtI16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
-    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxLtI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_lt_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLtI16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxEqI16Vop3::VCmpxEqI16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_eq_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxEqI16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxEqI16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -9235,30 +10489,19 @@ VCmpxEqI16Vop3::VCmpxEqI16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxEqI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
-    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxEqI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_eq_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxEqI16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxLeI16Vop3::VCmpxLeI16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_le_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLeI16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLeI16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -9283,30 +10526,19 @@ VCmpxLeI16Vop3::VCmpxLeI16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
-    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxLeI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_le_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLeI16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxGtI16Vop3::VCmpxGtI16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_gt_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGtI16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGtI16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -9331,30 +10563,19 @@ VCmpxGtI16Vop3::VCmpxGtI16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
-    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxGtI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_gt_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGtI16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxNeI16Vop3::VCmpxNeI16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ne_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNeI16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNeI16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -9379,30 +10600,19 @@ VCmpxNeI16Vop3::VCmpxNeI16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
-    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
-    if (s0 != s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxNeI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ne_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNeI16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxGeI16Vop3::VCmpxGeI16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ge_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGeI16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGeI16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -9427,30 +10637,19 @@ VCmpxGeI16Vop3::VCmpxGeI16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
-    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxGeI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ge_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGeI16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxClassF16Vop3::VCmpxClassF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_class_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxClassF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxClassF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -9475,57 +10674,20 @@ VCmpxClassF16Vop3::VCmpxClassF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxClassF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint16_t s0_raw =
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0));
-    if (inst_.abs & (1u << 0))
-      s0_raw &= 0x7FFFu;
-    if (inst_.neg & (1u << 0))
-      s0_raw ^= 0x8000u;
-    uint32_t mask = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
-    bool match = false;
-    uint16_t f16_exp = (s0_raw >> 10) & 0x1F;
-    uint16_t f16_mant = s0_raw & 0x3FF;
-    bool f16_sign = (s0_raw & 0x8000) != 0;
-    bool is_nan = (f16_exp == 0x1F) && (f16_mant != 0);
-    bool is_inf = (f16_exp == 0x1F) && (f16_mant == 0);
-    bool is_zero = (f16_exp == 0) && (f16_mant == 0);
-    bool is_denorm = (f16_exp == 0) && (f16_mant != 0);
-    bool is_normal = (f16_exp >= 1) && (f16_exp <= 30);
-    if ((mask & 0x001) && is_nan && (s0_raw & 0x0200) == 0)
-      match = true;
-    if ((mask & 0x002) && is_nan && (s0_raw & 0x0200) != 0)
-      match = true;
-    if ((mask & 0x004) && is_inf && f16_sign)
-      match = true;
-    if ((mask & 0x008) && is_normal && f16_sign)
-      match = true;
-    if ((mask & 0x010) && is_denorm && f16_sign)
-      match = true;
-    if ((mask & 0x020) && is_zero && f16_sign)
-      match = true;
-    if ((mask & 0x040) && is_zero && !f16_sign)
-      match = true;
-    if ((mask & 0x080) && is_denorm && !f16_sign)
-      match = true;
-    if ((mask & 0x100) && is_normal && !f16_sign)
-      match = true;
-    if ((mask & 0x200) && is_inf && !f16_sign)
-      match = true;
-    if (match)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxClassF16Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_class_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxClassF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpFI64Vop3::VCmpFI64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_f_i64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpFI64Vop3>()),
+    : Vop3("v_cmp_f_i64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VCmpFI64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -9546,13 +10708,19 @@ VCmpFI64Vop3::VCmpFI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
 }
 
-void VCmpFI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_f_i64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpFI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_f_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpFI64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpLtI64Vop3::VCmpLtI64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lt_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLtI64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLtI64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -9573,13 +10741,19 @@ VCmpLtI64Vop3::VCmpLtI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
 }
 
-void VCmpLtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_lt_i64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpLtI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_lt_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLtI64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpEqI64Vop3::VCmpEqI64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_eq_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpEqI64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpEqI64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -9600,13 +10774,19 @@ VCmpEqI64Vop3::VCmpEqI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
 }
 
-void VCmpEqI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_eq_i64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpEqI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_eq_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpEqI64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpLeI64Vop3::VCmpLeI64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_le_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLeI64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLeI64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -9627,13 +10807,19 @@ VCmpLeI64Vop3::VCmpLeI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
 }
 
-void VCmpLeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_le_i64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpLeI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_le_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLeI64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpGtI64Vop3::VCmpGtI64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_gt_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGtI64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGtI64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -9654,13 +10840,19 @@ VCmpGtI64Vop3::VCmpGtI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
 }
 
-void VCmpGtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_gt_i64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpGtI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_gt_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGtI64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpNeI64Vop3::VCmpNeI64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ne_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNeI64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNeI64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -9681,13 +10873,19 @@ VCmpNeI64Vop3::VCmpNeI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
 }
 
-void VCmpNeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_ne_i64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpNeI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ne_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNeI64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpGeI64Vop3::VCmpGeI64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ge_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGeI64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGeI64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -9708,12 +10906,19 @@ VCmpGeI64Vop3::VCmpGeI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
 }
 
-void VCmpGeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_ge_i64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpGeI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ge_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGeI64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpTI64Vop3::VCmpTI64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_t_i64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpTI64Vop3>()),
+    : Vop3("v_cmp_t_i64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VCmpTI64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -9734,13 +10939,19 @@ VCmpTI64Vop3::VCmpTI64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
 }
 
-void VCmpTI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_t_i64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpTI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_t_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpTI64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpClassF64Vop3::VCmpClassF64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_class_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpClassF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpClassF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -9760,13 +10971,20 @@ VCmpClassF64Vop3::VCmpClassF64Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpClassF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_class_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpClassF64Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_class_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpClassF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpLtU16Vop3::VCmpLtU16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lt_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLtU16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLtU16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -9787,13 +11005,19 @@ VCmpLtU16Vop3::VCmpLtU16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpLtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_lt_u16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpLtU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_lt_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLtU16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpEqU16Vop3::VCmpEqU16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_eq_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpEqU16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpEqU16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -9814,13 +11038,19 @@ VCmpEqU16Vop3::VCmpEqU16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpEqU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_eq_u16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpEqU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_eq_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpEqU16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpLeU16Vop3::VCmpLeU16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_le_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLeU16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLeU16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -9841,13 +11071,19 @@ VCmpLeU16Vop3::VCmpLeU16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpLeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_le_u16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpLeU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_le_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLeU16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpGtU16Vop3::VCmpGtU16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_gt_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGtU16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGtU16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -9868,13 +11104,19 @@ VCmpGtU16Vop3::VCmpGtU16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpGtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_gt_u16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpGtU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_gt_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGtU16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpNeU16Vop3::VCmpNeU16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ne_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNeU16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNeU16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -9895,13 +11137,19 @@ VCmpNeU16Vop3::VCmpNeU16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpNeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_ne_u16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpNeU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ne_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNeU16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpGeU16Vop3::VCmpGeU16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ge_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGeU16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGeU16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -9922,13 +11170,19 @@ VCmpGeU16Vop3::VCmpGeU16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpGeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_ge_u16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpGeU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ge_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGeU16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxFI64Vop3::VCmpxFI64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_f_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxFI64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxFI64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -9953,20 +11207,19 @@ VCmpxFI64Vop3::VCmpxFI64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxFI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    (void)lane;
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxFI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_f_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxFI64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxLtI64Vop3::VCmpxLtI64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_lt_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLtI64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLtI64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -9991,23 +11244,19 @@ VCmpxLtI64Vop3::VCmpxLtI64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    int64_t s1 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane));
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxLtI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_lt_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLtI64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxEqI64Vop3::VCmpxEqI64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_eq_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxEqI64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxEqI64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -10032,23 +11281,19 @@ VCmpxEqI64Vop3::VCmpxEqI64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxEqI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    int64_t s1 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane));
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxEqI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_eq_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxEqI64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxLeI64Vop3::VCmpxLeI64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_le_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLeI64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLeI64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -10073,23 +11318,19 @@ VCmpxLeI64Vop3::VCmpxLeI64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    int64_t s1 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane));
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxLeI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_le_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLeI64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxGtI64Vop3::VCmpxGtI64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_gt_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGtI64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGtI64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -10114,23 +11355,19 @@ VCmpxGtI64Vop3::VCmpxGtI64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    int64_t s1 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane));
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxGtI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_gt_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGtI64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxNeI64Vop3::VCmpxNeI64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ne_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNeI64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNeI64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -10155,23 +11392,19 @@ VCmpxNeI64Vop3::VCmpxNeI64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    int64_t s1 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane));
-    if (s0 != s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxNeI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ne_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNeI64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxGeI64Vop3::VCmpxGeI64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ge_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGeI64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGeI64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -10196,23 +11429,19 @@ VCmpxGeI64Vop3::VCmpxGeI64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    int64_t s0 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    int64_t s1 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(src1, lane));
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxGeI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ge_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGeI64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxTI64Vop3::VCmpxTI64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_t_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxTI64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxTI64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -10237,20 +11466,19 @@ VCmpxTI64Vop3::VCmpxTI64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxTI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxTI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_t_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxTI64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxClassF64Vop3::VCmpxClassF64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_class_f64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxClassF64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxClassF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -10274,52 +11502,20 @@ VCmpxClassF64Vop3::VCmpxClassF64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxClassF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    uint32_t mask = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    bool match = false;
-    if ((mask & 0x001) && std::isnan(s0) &&
-        (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) == 0)
-      match = true;
-    if ((mask & 0x002) && std::isnan(s0) &&
-        (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) != 0)
-      match = true;
-    if ((mask & 0x004) && std::isinf(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 &&
-        std::signbit(s0))
-      match = true;
-    if ((mask & 0x020) && s0 == 0.0 && std::signbit(s0))
-      match = true;
-    if ((mask & 0x040) && s0 == 0.0 && !std::signbit(s0))
-      match = true;
-    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 &&
-        !std::signbit(s0))
-      match = true;
-    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0)
-      match = true;
-    if ((mask & 0x200) && std::isinf(s0) && s0 > 0)
-      match = true;
-    if (match)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxClassF64Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_class_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxClassF64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxLtU16Vop3::VCmpxLtU16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_lt_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLtU16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLtU16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -10344,30 +11540,19 @@ VCmpxLtU16Vop3::VCmpxLtU16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    uint16_t s0 = static_cast<uint16_t>(s0_raw);
-    uint16_t s1 = static_cast<uint16_t>(s1_raw);
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxLtU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_lt_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLtU16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxEqU16Vop3::VCmpxEqU16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_eq_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxEqU16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxEqU16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -10392,30 +11577,19 @@ VCmpxEqU16Vop3::VCmpxEqU16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxEqU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    uint16_t s0 = static_cast<uint16_t>(s0_raw);
-    uint16_t s1 = static_cast<uint16_t>(s1_raw);
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxEqU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_eq_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxEqU16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxLeU16Vop3::VCmpxLeU16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_le_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLeU16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLeU16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -10440,30 +11614,19 @@ VCmpxLeU16Vop3::VCmpxLeU16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    uint16_t s0 = static_cast<uint16_t>(s0_raw);
-    uint16_t s1 = static_cast<uint16_t>(s1_raw);
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxLeU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_le_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLeU16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxGtU16Vop3::VCmpxGtU16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_gt_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGtU16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGtU16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -10488,30 +11651,19 @@ VCmpxGtU16Vop3::VCmpxGtU16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    uint16_t s0 = static_cast<uint16_t>(s0_raw);
-    uint16_t s1 = static_cast<uint16_t>(s1_raw);
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxGtU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_gt_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGtU16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxNeU16Vop3::VCmpxNeU16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ne_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNeU16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNeU16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -10536,30 +11688,19 @@ VCmpxNeU16Vop3::VCmpxNeU16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    uint16_t s0 = static_cast<uint16_t>(s0_raw);
-    uint16_t s1 = static_cast<uint16_t>(s1_raw);
-    if (s0 != s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxNeU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ne_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNeU16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxGeU16Vop3::VCmpxGeU16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ge_u16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGeU16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGeU16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -10584,29 +11725,19 @@ VCmpxGeU16Vop3::VCmpxGeU16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (opsel & (1u << 0))
-      s0_raw >>= 16;
-    if (opsel & (1u << 1))
-      s1_raw >>= 16;
-    uint16_t s0 = static_cast<uint16_t>(s0_raw);
-    uint16_t s1 = static_cast<uint16_t>(s1_raw);
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxGeU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ge_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGeU16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpFU32Vop3::VCmpFU32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_f_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpFU32Vop3>()),
+    : Vop3("v_cmp_f_u32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VCmpFU32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -10625,13 +11756,19 @@ VCmpFU32Vop3::VCmpFU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpFU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_f_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpFU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_f_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpFU32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpLtU32Vop3::VCmpLtU32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lt_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLtU32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLtU32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -10650,13 +11787,19 @@ VCmpLtU32Vop3::VCmpLtU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpLtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_lt_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpLtU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_lt_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLtU32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpEqU32Vop3::VCmpEqU32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_eq_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpEqU32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpEqU32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -10675,13 +11818,19 @@ VCmpEqU32Vop3::VCmpEqU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpEqU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_eq_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpEqU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_eq_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpEqU32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpLeU32Vop3::VCmpLeU32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_le_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLeU32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLeU32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -10700,13 +11849,19 @@ VCmpLeU32Vop3::VCmpLeU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpLeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_le_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpLeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_le_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLeU32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpGtU32Vop3::VCmpGtU32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_gt_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGtU32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGtU32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -10725,13 +11880,19 @@ VCmpGtU32Vop3::VCmpGtU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpGtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_gt_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpGtU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_gt_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGtU32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpNeU32Vop3::VCmpNeU32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ne_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNeU32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNeU32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -10750,13 +11911,19 @@ VCmpNeU32Vop3::VCmpNeU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpNeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_ne_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpNeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ne_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNeU32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpGeU32Vop3::VCmpGeU32Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ge_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGeU32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGeU32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -10775,12 +11942,19 @@ VCmpGeU32Vop3::VCmpGeU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpGeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_ge_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpGeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ge_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGeU32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpTU32Vop3::VCmpTU32Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_t_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpTU32Vop3>()),
+    : Vop3("v_cmp_t_u32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VCmpTU32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -10799,12 +11973,19 @@ VCmpTU32Vop3::VCmpTU32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VCmpTU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_t_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpTU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_t_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpTU32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpFF16Vop3::VCmpFF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_f_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpFF16Vop3>()),
+    : Vop3("v_cmp_f_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VCmpFF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -10825,13 +12006,19 @@ VCmpFF16Vop3::VCmpFF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpFF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_f_f16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpFF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_f_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpFF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpLtF16Vop3::VCmpLtF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lt_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLtF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLtF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -10852,13 +12039,19 @@ VCmpLtF16Vop3::VCmpLtF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpLtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_lt_f16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpLtF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_lt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLtF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpEqF16Vop3::VCmpEqF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_eq_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpEqF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpEqF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -10879,13 +12072,19 @@ VCmpEqF16Vop3::VCmpEqF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpEqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_eq_f16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpEqF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_eq_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpEqF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpLeF16Vop3::VCmpLeF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_le_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLeF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLeF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -10906,13 +12105,19 @@ VCmpLeF16Vop3::VCmpLeF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpLeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_le_f16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpLeF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_le_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLeF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpGtF16Vop3::VCmpGtF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_gt_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGtF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGtF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -10933,13 +12138,19 @@ VCmpGtF16Vop3::VCmpGtF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpGtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_gt_f16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpGtF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_gt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGtF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpLgF16Vop3::VCmpLgF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lg_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLgF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLgF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -10960,13 +12171,19 @@ VCmpLgF16Vop3::VCmpLgF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_lg_f16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpLgF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_lg_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLgF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpGeF16Vop3::VCmpGeF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ge_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGeF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGeF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -10987,12 +12204,19 @@ VCmpGeF16Vop3::VCmpGeF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpGeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_ge_f16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpGeF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ge_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGeF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpOF16Vop3::VCmpOF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_o_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpOF16Vop3>()),
+    : Vop3("v_cmp_o_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VCmpOF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -11013,13 +12237,19 @@ VCmpOF16Vop3::VCmpOF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpOF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_o_f16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpOF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_o_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpOF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxFU32Vop3::VCmpxFU32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_f_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxFU32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxFU32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -11042,20 +12272,19 @@ VCmpxFU32Vop3::VCmpxFU32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxFU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    (void)lane;
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxFU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_f_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxFU32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxLtU32Vop3::VCmpxLtU32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_lt_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLtU32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLtU32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -11078,23 +12307,19 @@ VCmpxLtU32Vop3::VCmpxLtU32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxLtU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_lt_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLtU32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxEqU32Vop3::VCmpxEqU32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_eq_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxEqU32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxEqU32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -11117,23 +12342,19 @@ VCmpxEqU32Vop3::VCmpxEqU32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxEqU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxEqU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_eq_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxEqU32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxLeU32Vop3::VCmpxLeU32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_le_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLeU32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLeU32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -11156,23 +12377,19 @@ VCmpxLeU32Vop3::VCmpxLeU32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxLeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_le_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLeU32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxGtU32Vop3::VCmpxGtU32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_gt_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGtU32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGtU32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -11195,23 +12412,19 @@ VCmpxGtU32Vop3::VCmpxGtU32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxGtU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_gt_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGtU32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxNeU32Vop3::VCmpxNeU32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ne_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNeU32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNeU32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -11234,23 +12447,19 @@ VCmpxNeU32Vop3::VCmpxNeU32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (s0 != s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxNeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ne_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNeU32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxGeU32Vop3::VCmpxGeU32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ge_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGeU32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGeU32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -11273,23 +12482,19 @@ VCmpxGeU32Vop3::VCmpxGeU32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxGeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ge_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGeU32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxTU32Vop3::VCmpxTU32Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_t_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxTU32Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxTU32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -11312,20 +12517,19 @@ VCmpxTU32Vop3::VCmpxTU32Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxTU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxTU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_t_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxTU32Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxFF16Vop3::VCmpxFF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_f_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxFF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxFF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -11350,20 +12554,19 @@ VCmpxFF16Vop3::VCmpxFF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxFF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    (void)lane;
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxFF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_f_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxFF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxLtF16Vop3::VCmpxLtF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_lt_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLtF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLtF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -11388,34 +12591,19 @@ VCmpxLtF16Vop3::VCmpxLtF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-    float s1 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxLtF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_lt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLtF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxEqF16Vop3::VCmpxEqF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_eq_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxEqF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxEqF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -11440,34 +12628,19 @@ VCmpxEqF16Vop3::VCmpxEqF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxEqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-    float s1 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxEqF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_eq_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxEqF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxLeF16Vop3::VCmpxLeF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_le_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLeF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLeF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -11492,34 +12665,19 @@ VCmpxLeF16Vop3::VCmpxLeF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-    float s1 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxLeF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_le_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLeF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxGtF16Vop3::VCmpxGtF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_gt_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGtF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGtF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -11544,34 +12702,19 @@ VCmpxGtF16Vop3::VCmpxGtF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-    float s1 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxGtF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_gt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGtF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxLgF16Vop3::VCmpxLgF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_lg_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLgF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLgF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -11596,34 +12739,19 @@ VCmpxLgF16Vop3::VCmpxLgF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-    float s1 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 < s1 || s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxLgF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_lg_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLgF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxGeF16Vop3::VCmpxGeF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ge_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGeF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGeF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -11648,34 +12776,19 @@ VCmpxGeF16Vop3::VCmpxGeF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-    float s1 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxGeF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ge_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGeF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxOF16Vop3::VCmpxOF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_o_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxOF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxOF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -11700,33 +12813,19 @@ VCmpxOF16Vop3::VCmpxOF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxOF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-    float s1 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!std::isnan(s0) && !std::isnan(s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxOF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_o_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxOF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpFU64Vop3::VCmpFU64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_f_u64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpFU64Vop3>()),
+    : Vop3("v_cmp_f_u64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VCmpFU64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -11747,13 +12846,19 @@ VCmpFU64Vop3::VCmpFU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
 }
 
-void VCmpFU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_f_u64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpFU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_f_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpFU64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpLtU64Vop3::VCmpLtU64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_lt_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLtU64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLtU64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -11774,13 +12879,19 @@ VCmpLtU64Vop3::VCmpLtU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
 }
 
-void VCmpLtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_lt_u64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpLtU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_lt_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLtU64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpEqU64Vop3::VCmpEqU64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_eq_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpEqU64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpEqU64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -11801,13 +12912,19 @@ VCmpEqU64Vop3::VCmpEqU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
 }
 
-void VCmpEqU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_eq_u64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpEqU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_eq_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpEqU64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpLeU64Vop3::VCmpLeU64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_le_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpLeU64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpLeU64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -11828,13 +12945,19 @@ VCmpLeU64Vop3::VCmpLeU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
 }
 
-void VCmpLeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_le_u64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpLeU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_le_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpLeU64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpGtU64Vop3::VCmpGtU64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_gt_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGtU64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGtU64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -11855,13 +12978,19 @@ VCmpGtU64Vop3::VCmpGtU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
 }
 
-void VCmpGtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_gt_u64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpGtU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_gt_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGtU64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpNeU64Vop3::VCmpNeU64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ne_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNeU64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNeU64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -11882,13 +13011,19 @@ VCmpNeU64Vop3::VCmpNeU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
 }
 
-void VCmpNeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_ne_u64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpNeU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ne_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNeU64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpGeU64Vop3::VCmpGeU64Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ge_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpGeU64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpGeU64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -11909,12 +13044,19 @@ VCmpGeU64Vop3::VCmpGeU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
 }
 
-void VCmpGeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_ge_u64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpGeU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ge_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpGeU64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpTU64Vop3::VCmpTU64Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_t_u64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpTU64Vop3>()),
+    : Vop3("v_cmp_t_u64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VCmpTU64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -11935,12 +13077,19 @@ VCmpTU64Vop3::VCmpTU64Vop3(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
 }
 
-void VCmpTU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_t_u64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpTU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_t_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpTU64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpUF16Vop3::VCmpUF16Vop3(const MachineInst *inst)
-    : Vop3("v_cmp_u_f16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VCmpUF16Vop3>()),
+    : Vop3("v_cmp_u_f16", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VCmpUF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -11961,13 +13110,19 @@ VCmpUF16Vop3::VCmpUF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpUF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_u_f16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpUF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_u_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpUF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpNgeF16Vop3::VCmpNgeF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nge_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNgeF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNgeF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -11988,13 +13143,19 @@ VCmpNgeF16Vop3::VCmpNgeF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpNgeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_nge_f16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpNgeF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_nge_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNgeF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpNlgF16Vop3::VCmpNlgF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nlg_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNlgF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNlgF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -12015,13 +13176,19 @@ VCmpNlgF16Vop3::VCmpNlgF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_nlg_f16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpNlgF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_nlg_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNlgF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpNgtF16Vop3::VCmpNgtF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_ngt_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNgtF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNgtF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -12042,13 +13209,19 @@ VCmpNgtF16Vop3::VCmpNgtF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpNgtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_ngt_f16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpNgtF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_ngt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNgtF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpNleF16Vop3::VCmpNleF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nle_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNleF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNleF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -12069,13 +13242,19 @@ VCmpNleF16Vop3::VCmpNleF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpNleF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_nle_f16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpNleF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_nle_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNleF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpNeqF16Vop3::VCmpNeqF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_neq_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNeqF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNeqF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -12096,13 +13275,19 @@ VCmpNeqF16Vop3::VCmpNeqF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpNeqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_neq_f16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpNeqF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_neq_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNeqF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpNltF16Vop3::VCmpNltF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_nlt_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpNltF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpNltF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -12123,13 +13308,19 @@ VCmpNltF16Vop3::VCmpNltF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpNltF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_nlt_f16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpNltF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_nlt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpNltF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpTruF16Vop3::VCmpTruF16Vop3(const MachineInst *inst)
     : Vop3("v_cmp_tru_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpTruF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpTruF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -12150,13 +13341,19 @@ VCmpTruF16Vop3::VCmpTruF16Vop3(const MachineInst *inst)
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void VCmpTruF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_tru_f16_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVCmpTruF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmp_tru_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpTruF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxFU64Vop3::VCmpxFU64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_f_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxFU64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxFU64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -12181,20 +13378,19 @@ VCmpxFU64Vop3::VCmpxFU64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxFU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    (void)lane;
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxFU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_f_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxFU64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxLtU64Vop3::VCmpxLtU64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_lt_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLtU64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLtU64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -12219,23 +13415,19 @@ VCmpxLtU64Vop3::VCmpxLtU64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (s0 < s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxLtU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_lt_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLtU64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxEqU64Vop3::VCmpxEqU64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_eq_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxEqU64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxEqU64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -12260,23 +13452,19 @@ VCmpxEqU64Vop3::VCmpxEqU64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxEqU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (s0 == s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxEqU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_eq_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxEqU64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxLeU64Vop3::VCmpxLeU64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_le_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxLeU64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxLeU64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -12301,23 +13489,19 @@ VCmpxLeU64Vop3::VCmpxLeU64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxLeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (s0 <= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxLeU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_le_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxLeU64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxGtU64Vop3::VCmpxGtU64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_gt_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGtU64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGtU64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -12342,23 +13526,19 @@ VCmpxGtU64Vop3::VCmpxGtU64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (s0 > s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxGtU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_gt_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGtU64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxNeU64Vop3::VCmpxNeU64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ne_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNeU64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNeU64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -12383,23 +13563,19 @@ VCmpxNeU64Vop3::VCmpxNeU64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (s0 != s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxNeU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ne_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNeU64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxGeU64Vop3::VCmpxGeU64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ge_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxGeU64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxGeU64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -12424,23 +13600,19 @@ VCmpxGeU64Vop3::VCmpxGeU64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxGeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
-    uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(src1, lane);
-    if (s0 >= s1)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxGeU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ge_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxGeU64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxTU64Vop3::VCmpxTU64Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_t_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxTU64Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxTU64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -12465,20 +13637,19 @@ VCmpxTU64Vop3::VCmpxTU64Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxTU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxTU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_t_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxTU64Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxUF16Vop3::VCmpxUF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_u_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxUF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxUF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -12503,34 +13674,19 @@ VCmpxUF16Vop3::VCmpxUF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxUF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-    float s1 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (std::isnan(s0) || std::isnan(s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxUF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_u_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxUF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxNgeF16Vop3::VCmpxNgeF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_nge_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNgeF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNgeF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -12555,34 +13711,20 @@ VCmpxNgeF16Vop3::VCmpxNgeF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNgeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-    float s1 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 >= s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxNgeF16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_nge_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNgeF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxNlgF16Vop3::VCmpxNlgF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_nlg_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNlgF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNlgF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -12607,34 +13749,20 @@ VCmpxNlgF16Vop3::VCmpxNlgF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-    float s1 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 < s1 || s0 > s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxNlgF16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_nlg_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNlgF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxNgtF16Vop3::VCmpxNgtF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_ngt_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNgtF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNgtF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -12659,34 +13787,20 @@ VCmpxNgtF16Vop3::VCmpxNgtF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNgtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-    float s1 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 > s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxNgtF16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_ngt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNgtF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxNleF16Vop3::VCmpxNleF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_nle_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNleF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNleF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -12711,34 +13825,20 @@ VCmpxNleF16Vop3::VCmpxNleF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNleF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-    float s1 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 <= s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxNleF16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_nle_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNleF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxNeqF16Vop3::VCmpxNeqF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_neq_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNeqF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNeqF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -12763,34 +13863,20 @@ VCmpxNeqF16Vop3::VCmpxNeqF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNeqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-    float s1 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxNeqF16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_neq_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNeqF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxNltF16Vop3::VCmpxNltF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_nlt_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxNltF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxNltF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -12815,34 +13901,20 @@ VCmpxNltF16Vop3::VCmpxNltF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxNltF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-    float s1 = util::f16_to_f32(
-        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
-    if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
-    if (inst_.neg & (1u << 0))
-      s0 = -s0;
-    if (inst_.abs & (1u << 1))
-      s1 = std::fabs(s1);
-    if (inst_.neg & (1u << 1))
-      s1 = -s1;
-    if (!(s0 < s1))
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxNltF16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_nlt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxNltF16Vop3>(opcode);
 }
+} // namespace detail
 
 VCmpxTruF16Vop3::VCmpxTruF16Vop3(const MachineInst *inst)
     : Vop3("v_cmpx_tru_f16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<VCmpxTruF16Vop3>()),
+           selected_exec_fn(InstructionExecutionId::VCmpxTruF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -12867,20 +13939,20 @@ VCmpxTruF16Vop3::VCmpxTruF16Vop3(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void VCmpxTruF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+namespace detail {
+DecodeResult decodeVCmpxTruF16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_cmpx_tru_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VCmpxTruF16Vop3>(opcode);
 }
+} // namespace detail
 
 VAddCoCiU32Vop3SdstEnc::VAddCoCiU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_add_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst),
-                  make_exec_fn<VAddCoCiU32Vop3SdstEnc>()),
+                  selected_exec_fn(InstructionExecutionId::VAddCoCiU32Vop3SdstEnc)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -12901,21 +13973,22 @@ VAddCoCiU32Vop3SdstEnc::VAddCoCiU32Vop3SdstEnc(const MachineInst *inst)
     src1 = Operand(32, OperandType::OPR_SIMM32,
                    static_cast<int>(
                        reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand::make_literal32(
-        64,
-        static_cast<uint32_t>(
-            reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32),
-        Operand::Literal32Widening::ZeroExtend);
 }
 
-void VAddCoCiU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_add_co_ci_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVAddCoCiU32Vop3SdstEnc(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3SdstEnc::validate_encoding(
+      "v_add_co_ci_u32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAddCoCiU32Vop3SdstEnc>(opcode);
 }
+} // namespace detail
 
 VSubCoCiU32Vop3SdstEnc::VSubCoCiU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_sub_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst),
-                  make_exec_fn<VSubCoCiU32Vop3SdstEnc>()),
+                  selected_exec_fn(InstructionExecutionId::VSubCoCiU32Vop3SdstEnc)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -12936,21 +14009,22 @@ VSubCoCiU32Vop3SdstEnc::VSubCoCiU32Vop3SdstEnc(const MachineInst *inst)
     src1 = Operand(32, OperandType::OPR_SIMM32,
                    static_cast<int>(
                        reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand::make_literal32(
-        64,
-        static_cast<uint32_t>(
-            reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32),
-        Operand::Literal32Widening::ZeroExtend);
 }
 
-void VSubCoCiU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_sub_co_ci_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVSubCoCiU32Vop3SdstEnc(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3SdstEnc::validate_encoding(
+      "v_sub_co_ci_u32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSubCoCiU32Vop3SdstEnc>(opcode);
 }
+} // namespace detail
 
 VSubrevCoCiU32Vop3SdstEnc::VSubrevCoCiU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_subrev_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst),
-                  make_exec_fn<VSubrevCoCiU32Vop3SdstEnc>()),
+                  selected_exec_fn(InstructionExecutionId::VSubrevCoCiU32Vop3SdstEnc)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -12971,21 +14045,22 @@ VSubrevCoCiU32Vop3SdstEnc::VSubrevCoCiU32Vop3SdstEnc(const MachineInst *inst)
     src1 = Operand(32, OperandType::OPR_SIMM32,
                    static_cast<int>(
                        reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand::make_literal32(
-        64,
-        static_cast<uint32_t>(
-            reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32),
-        Operand::Literal32Widening::ZeroExtend);
 }
 
-void VSubrevCoCiU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_subrev_co_ci_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVSubrevCoCiU32Vop3SdstEnc(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3SdstEnc::validate_encoding(
+      "v_subrev_co_ci_u32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSubrevCoCiU32Vop3SdstEnc>(opcode);
 }
+} // namespace detail
 
 VDivScaleF32Vop3SdstEnc::VDivScaleF32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_div_scale_f32", reinterpret_cast<const OpEncoding *>(inst),
-                  make_exec_fn<VDivScaleF32Vop3SdstEnc>()),
+                  selected_exec_fn(InstructionExecutionId::VDivScaleF32Vop3SdstEnc)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -13012,13 +14087,20 @@ VDivScaleF32Vop3SdstEnc::VDivScaleF32Vop3SdstEnc(const MachineInst *inst)
                        reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VDivScaleF32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_div_scale_f32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVDivScaleF32Vop3SdstEnc(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3SdstEnc::validate_encoding(
+      "v_div_scale_f32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VDivScaleF32Vop3SdstEnc>(opcode);
 }
+} // namespace detail
 
 VDivScaleF64Vop3SdstEnc::VDivScaleF64Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_div_scale_f64", reinterpret_cast<const OpEncoding *>(inst),
-                  make_exec_fn<VDivScaleF64Vop3SdstEnc>()),
+                  selected_exec_fn(InstructionExecutionId::VDivScaleF64Vop3SdstEnc)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -13051,13 +14133,20 @@ VDivScaleF64Vop3SdstEnc::VDivScaleF64Vop3SdstEnc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
 }
 
-void VDivScaleF64Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_div_scale_f64_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVDivScaleF64Vop3SdstEnc(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3SdstEnc::validate_encoding(
+      "v_div_scale_f64", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VDivScaleF64Vop3SdstEnc>(opcode);
 }
+} // namespace detail
 
 VMadU64U32Vop3SdstEnc::VMadU64U32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_mad_u64_u32", reinterpret_cast<const OpEncoding *>(inst),
-                  make_exec_fn<VMadU64U32Vop3SdstEnc>()),
+                  selected_exec_fn(InstructionExecutionId::VMadU64U32Vop3SdstEnc)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -13086,13 +14175,20 @@ VMadU64U32Vop3SdstEnc::VMadU64U32Vop3SdstEnc(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
 }
 
-void VMadU64U32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mad_u64_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVMadU64U32Vop3SdstEnc(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3SdstEnc::validate_encoding(
+      "v_mad_u64_u32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMadU64U32Vop3SdstEnc>(opcode);
 }
+} // namespace detail
 
 VMadI64I32Vop3SdstEnc::VMadI64I32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_mad_i64_i32", reinterpret_cast<const OpEncoding *>(inst),
-                  make_exec_fn<VMadI64I32Vop3SdstEnc>()),
+                  selected_exec_fn(InstructionExecutionId::VMadI64I32Vop3SdstEnc)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -13121,13 +14217,20 @@ VMadI64I32Vop3SdstEnc::VMadI64I32Vop3SdstEnc(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
 }
 
-void VMadI64I32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_mad_i64_i32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVMadI64I32Vop3SdstEnc(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3SdstEnc::validate_encoding(
+      "v_mad_i64_i32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMadI64I32Vop3SdstEnc>(opcode);
 }
+} // namespace detail
 
 VAddCoU32Vop3SdstEnc::VAddCoU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_add_co_u32", reinterpret_cast<const OpEncoding *>(inst),
-                  make_exec_fn<VAddCoU32Vop3SdstEnc>()),
+                  selected_exec_fn(InstructionExecutionId::VAddCoU32Vop3SdstEnc)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -13148,13 +14251,20 @@ VAddCoU32Vop3SdstEnc::VAddCoU32Vop3SdstEnc(const MachineInst *inst)
                        reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VAddCoU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_add_co_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVAddCoU32Vop3SdstEnc(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3SdstEnc::validate_encoding(
+      "v_add_co_u32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VAddCoU32Vop3SdstEnc>(opcode);
 }
+} // namespace detail
 
 VSubCoU32Vop3SdstEnc::VSubCoU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_sub_co_u32", reinterpret_cast<const OpEncoding *>(inst),
-                  make_exec_fn<VSubCoU32Vop3SdstEnc>()),
+                  selected_exec_fn(InstructionExecutionId::VSubCoU32Vop3SdstEnc)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -13175,13 +14285,20 @@ VSubCoU32Vop3SdstEnc::VSubCoU32Vop3SdstEnc(const MachineInst *inst)
                        reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VSubCoU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_sub_co_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVSubCoU32Vop3SdstEnc(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3SdstEnc::validate_encoding(
+      "v_sub_co_u32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSubCoU32Vop3SdstEnc>(opcode);
 }
+} // namespace detail
 
 VSubrevCoU32Vop3SdstEnc::VSubrevCoU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_subrev_co_u32", reinterpret_cast<const OpEncoding *>(inst),
-                  make_exec_fn<VSubrevCoU32Vop3SdstEnc>()),
+                  selected_exec_fn(InstructionExecutionId::VSubrevCoU32Vop3SdstEnc)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       src0(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -13202,9 +14319,16 @@ VSubrevCoU32Vop3SdstEnc::VSubrevCoU32Vop3SdstEnc(const MachineInst *inst)
                        reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32));
 }
 
-void VSubrevCoU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_subrev_co_u32_vop3(*this, wf);
+namespace detail {
+DecodeResult decodeVSubrevCoU32Vop3SdstEnc(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3SdstEnc::validate_encoding(
+      "v_subrev_co_u32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VSubrevCoU32Vop3SdstEnc>(opcode);
 }
+} // namespace detail
 
 } // namespace rdna2
 } // namespace rocjitsu

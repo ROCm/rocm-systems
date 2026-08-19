@@ -5,21 +5,15 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/mimg.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
-#include "util/except.h"
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <limits>
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna3_5 {
 
 ImageLoadMimg::ImageLoadMimg(const MachineInst *inst)
-    : Mimg("image_load", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<ImageLoadMimg>()),
+    : Mimg("image_load", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::ImageLoadMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -30,14 +24,19 @@ ImageLoadMimg::ImageLoadMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageLoadMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+namespace detail {
+DecodeResult decodeImageLoadMimg(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_load", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageLoadMimg>(opcode);
 }
+} // namespace detail
 
 ImageLoadMipMimg::ImageLoadMipMimg(const MachineInst *inst)
     : Mimg("image_load_mip", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageLoadMipMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageLoadMipMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -48,14 +47,20 @@ ImageLoadMipMimg::ImageLoadMipMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageLoadMipMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+namespace detail {
+DecodeResult decodeImageLoadMipMimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_load_mip", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageLoadMipMimg>(opcode);
 }
+} // namespace detail
 
 ImageLoadPckMimg::ImageLoadPckMimg(const MachineInst *inst)
     : Mimg("image_load_pck", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageLoadPckMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageLoadPckMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -66,14 +71,20 @@ ImageLoadPckMimg::ImageLoadPckMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageLoadPckMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+namespace detail {
+DecodeResult decodeImageLoadPckMimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_load_pck", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageLoadPckMimg>(opcode);
 }
+} // namespace detail
 
 ImageLoadPckSgnMimg::ImageLoadPckSgnMimg(const MachineInst *inst)
     : Mimg("image_load_pck_sgn", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageLoadPckSgnMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageLoadPckSgnMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -84,14 +95,20 @@ ImageLoadPckSgnMimg::ImageLoadPckSgnMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageLoadPckSgnMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+namespace detail {
+DecodeResult decodeImageLoadPckSgnMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_load_pck_sgn", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageLoadPckSgnMimg>(opcode);
 }
+} // namespace detail
 
 ImageLoadMipPckMimg::ImageLoadMipPckMimg(const MachineInst *inst)
     : Mimg("image_load_mip_pck", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageLoadMipPckMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageLoadMipPckMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -102,14 +119,20 @@ ImageLoadMipPckMimg::ImageLoadMipPckMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageLoadMipPckMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+namespace detail {
+DecodeResult decodeImageLoadMipPckMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_load_mip_pck", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageLoadMipPckMimg>(opcode);
 }
+} // namespace detail
 
 ImageLoadMipPckSgnMimg::ImageLoadMipPckSgnMimg(const MachineInst *inst)
     : Mimg("image_load_mip_pck_sgn", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageLoadMipPckSgnMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageLoadMipPckSgnMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -120,14 +143,20 @@ ImageLoadMipPckSgnMimg::ImageLoadMipPckSgnMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageLoadMipPckSgnMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+namespace detail {
+DecodeResult decodeImageLoadMipPckSgnMimg(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_load_mip_pck_sgn", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageLoadMipPckSgnMimg>(opcode);
 }
+} // namespace detail
 
 ImageStoreMimg::ImageStoreMimg(const MachineInst *inst)
     : Mimg("image_store", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageStoreMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageStoreMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -138,14 +167,19 @@ ImageStoreMimg::ImageStoreMimg(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void ImageStoreMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image store stub — not yet implemented.
-  (void)wf;
+namespace detail {
+DecodeResult decodeImageStoreMimg(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_store", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageStoreMimg>(opcode);
 }
+} // namespace detail
 
 ImageStoreMipMimg::ImageStoreMipMimg(const MachineInst *inst)
     : Mimg("image_store_mip", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageStoreMipMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageStoreMipMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -156,14 +190,20 @@ ImageStoreMipMimg::ImageStoreMipMimg(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void ImageStoreMipMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image store stub — not yet implemented.
-  (void)wf;
+namespace detail {
+DecodeResult decodeImageStoreMipMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_store_mip", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageStoreMipMimg>(opcode);
 }
+} // namespace detail
 
 ImageStorePckMimg::ImageStorePckMimg(const MachineInst *inst)
     : Mimg("image_store_pck", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageStorePckMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageStorePckMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -174,14 +214,20 @@ ImageStorePckMimg::ImageStorePckMimg(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void ImageStorePckMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image store stub — not yet implemented.
-  (void)wf;
+namespace detail {
+DecodeResult decodeImageStorePckMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_store_pck", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageStorePckMimg>(opcode);
 }
+} // namespace detail
 
 ImageStoreMipPckMimg::ImageStoreMipPckMimg(const MachineInst *inst)
     : Mimg("image_store_mip_pck", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageStoreMipPckMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageStoreMipPckMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -192,14 +238,20 @@ ImageStoreMipPckMimg::ImageStoreMipPckMimg(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void ImageStoreMipPckMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image store stub — not yet implemented.
-  (void)wf;
+namespace detail {
+DecodeResult decodeImageStoreMipPckMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_store_mip_pck", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageStoreMipPckMimg>(opcode);
 }
+} // namespace detail
 
 ImageAtomicSwapMimg::ImageAtomicSwapMimg(const MachineInst *inst)
     : Mimg("image_atomic_swap", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageAtomicSwapMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageAtomicSwapMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -211,13 +263,20 @@ ImageAtomicSwapMimg::ImageAtomicSwapMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageAtomicSwapMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageAtomicSwapMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_swap", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicSwapMimg>(opcode);
 }
+} // namespace detail
 
 ImageAtomicCmpswapMimg::ImageAtomicCmpswapMimg(const MachineInst *inst)
     : Mimg("image_atomic_cmpswap", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageAtomicCmpswapMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageAtomicCmpswapMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -229,13 +288,20 @@ ImageAtomicCmpswapMimg::ImageAtomicCmpswapMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageAtomicCmpswapMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageAtomicCmpswapMimg(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_cmpswap", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicCmpswapMimg>(opcode);
 }
+} // namespace detail
 
 ImageAtomicAddMimg::ImageAtomicAddMimg(const MachineInst *inst)
     : Mimg("image_atomic_add", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageAtomicAddMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageAtomicAddMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -247,13 +313,20 @@ ImageAtomicAddMimg::ImageAtomicAddMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageAtomicAddMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageAtomicAddMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_add", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicAddMimg>(opcode);
 }
+} // namespace detail
 
 ImageAtomicSubMimg::ImageAtomicSubMimg(const MachineInst *inst)
     : Mimg("image_atomic_sub", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageAtomicSubMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageAtomicSubMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -265,13 +338,20 @@ ImageAtomicSubMimg::ImageAtomicSubMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageAtomicSubMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageAtomicSubMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_sub", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicSubMimg>(opcode);
 }
+} // namespace detail
 
 ImageAtomicSminMimg::ImageAtomicSminMimg(const MachineInst *inst)
     : Mimg("image_atomic_smin", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageAtomicSminMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageAtomicSminMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -283,13 +363,20 @@ ImageAtomicSminMimg::ImageAtomicSminMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageAtomicSminMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageAtomicSminMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_smin", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicSminMimg>(opcode);
 }
+} // namespace detail
 
 ImageAtomicUminMimg::ImageAtomicUminMimg(const MachineInst *inst)
     : Mimg("image_atomic_umin", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageAtomicUminMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageAtomicUminMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -301,13 +388,20 @@ ImageAtomicUminMimg::ImageAtomicUminMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageAtomicUminMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageAtomicUminMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_umin", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicUminMimg>(opcode);
 }
+} // namespace detail
 
 ImageAtomicSmaxMimg::ImageAtomicSmaxMimg(const MachineInst *inst)
     : Mimg("image_atomic_smax", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageAtomicSmaxMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageAtomicSmaxMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -319,13 +413,20 @@ ImageAtomicSmaxMimg::ImageAtomicSmaxMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageAtomicSmaxMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageAtomicSmaxMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_smax", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicSmaxMimg>(opcode);
 }
+} // namespace detail
 
 ImageAtomicUmaxMimg::ImageAtomicUmaxMimg(const MachineInst *inst)
     : Mimg("image_atomic_umax", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageAtomicUmaxMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageAtomicUmaxMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -337,13 +438,20 @@ ImageAtomicUmaxMimg::ImageAtomicUmaxMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageAtomicUmaxMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageAtomicUmaxMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_umax", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicUmaxMimg>(opcode);
 }
+} // namespace detail
 
 ImageAtomicAndMimg::ImageAtomicAndMimg(const MachineInst *inst)
     : Mimg("image_atomic_and", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageAtomicAndMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageAtomicAndMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -355,13 +463,20 @@ ImageAtomicAndMimg::ImageAtomicAndMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageAtomicAndMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageAtomicAndMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_and", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicAndMimg>(opcode);
 }
+} // namespace detail
 
 ImageAtomicOrMimg::ImageAtomicOrMimg(const MachineInst *inst)
     : Mimg("image_atomic_or", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageAtomicOrMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageAtomicOrMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -373,13 +488,20 @@ ImageAtomicOrMimg::ImageAtomicOrMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageAtomicOrMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageAtomicOrMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_or", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicOrMimg>(opcode);
 }
+} // namespace detail
 
 ImageAtomicXorMimg::ImageAtomicXorMimg(const MachineInst *inst)
     : Mimg("image_atomic_xor", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageAtomicXorMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageAtomicXorMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -391,13 +513,20 @@ ImageAtomicXorMimg::ImageAtomicXorMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageAtomicXorMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageAtomicXorMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_xor", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicXorMimg>(opcode);
 }
+} // namespace detail
 
 ImageAtomicIncMimg::ImageAtomicIncMimg(const MachineInst *inst)
     : Mimg("image_atomic_inc", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageAtomicIncMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageAtomicIncMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -409,13 +538,20 @@ ImageAtomicIncMimg::ImageAtomicIncMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageAtomicIncMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageAtomicIncMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_inc", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicIncMimg>(opcode);
 }
+} // namespace detail
 
 ImageAtomicDecMimg::ImageAtomicDecMimg(const MachineInst *inst)
     : Mimg("image_atomic_dec", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageAtomicDecMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageAtomicDecMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -427,13 +563,20 @@ ImageAtomicDecMimg::ImageAtomicDecMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageAtomicDecMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageAtomicDecMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_dec", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageAtomicDecMimg>(opcode);
 }
+} // namespace detail
 
 ImageGetResinfoMimg::ImageGetResinfoMimg(const MachineInst *inst)
     : Mimg("image_get_resinfo", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageGetResinfoMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageGetResinfoMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -444,13 +587,20 @@ ImageGetResinfoMimg::ImageGetResinfoMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageGetResinfoMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageGetResinfoMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_get_resinfo", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGetResinfoMimg>(opcode);
 }
+} // namespace detail
 
 ImageMsaaLoadMimg::ImageMsaaLoadMimg(const MachineInst *inst)
     : Mimg("image_msaa_load", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageMsaaLoadMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageMsaaLoadMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -461,14 +611,20 @@ ImageMsaaLoadMimg::ImageMsaaLoadMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageMsaaLoadMimg::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+namespace detail {
+DecodeResult decodeImageMsaaLoadMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_msaa_load", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageMsaaLoadMimg>(opcode);
 }
+} // namespace detail
 
 ImageBvhIntersectRayMimg::ImageBvhIntersectRayMimg(const MachineInst *inst)
     : Mimg("image_bvh_intersect_ray", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageBvhIntersectRayMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageBvhIntersectRayMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(352, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -479,13 +635,20 @@ ImageBvhIntersectRayMimg::ImageBvhIntersectRayMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageBvhIntersectRayMimg::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_image_bvh_intersect_ray_mimg(*this, wf);
+namespace detail {
+DecodeResult decodeImageBvhIntersectRayMimg(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_bvh_intersect_ray", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageBvhIntersectRayMimg>(opcode);
 }
+} // namespace detail
 
 ImageBvh64IntersectRayMimg::ImageBvh64IntersectRayMimg(const MachineInst *inst)
     : Mimg("image_bvh64_intersect_ray", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageBvh64IntersectRayMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageBvh64IntersectRayMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(384, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
@@ -496,14 +659,20 @@ ImageBvh64IntersectRayMimg::ImageBvh64IntersectRayMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageBvh64IntersectRayMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeImageBvh64IntersectRayMimg(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_bvh64_intersect_ray", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageBvh64IntersectRayMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleMimg::ImageSampleMimg(const MachineInst *inst)
     : Mimg("image_sample", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -516,13 +685,20 @@ ImageSampleMimg::ImageSampleMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleMimg(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleDMimg::ImageSampleDMimg(const MachineInst *inst)
     : Mimg("image_sample_d", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleDMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleDMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(288, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -535,13 +711,20 @@ ImageSampleDMimg::ImageSampleDMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleDMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleDMimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_d", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleDMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleLMimg::ImageSampleLMimg(const MachineInst *inst)
     : Mimg("image_sample_l", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleLMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleLMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -554,13 +737,20 @@ ImageSampleLMimg::ImageSampleLMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleLMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleLMimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_l", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleLMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleBMimg::ImageSampleBMimg(const MachineInst *inst)
     : Mimg("image_sample_b", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleBMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleBMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -573,13 +763,20 @@ ImageSampleBMimg::ImageSampleBMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleBMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleBMimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_b", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleBMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleLzMimg::ImageSampleLzMimg(const MachineInst *inst)
     : Mimg("image_sample_lz", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleLzMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleLzMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -592,13 +789,20 @@ ImageSampleLzMimg::ImageSampleLzMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleLzMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleLzMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_lz", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleLzMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleCMimg::ImageSampleCMimg(const MachineInst *inst)
     : Mimg("image_sample_c", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleCMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleCMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -611,13 +815,20 @@ ImageSampleCMimg::ImageSampleCMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleCMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleCMimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleCDMimg::ImageSampleCDMimg(const MachineInst *inst)
     : Mimg("image_sample_c_d", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleCDMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleCDMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(320, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -630,13 +841,20 @@ ImageSampleCDMimg::ImageSampleCDMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleCDMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleCDMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_d", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCDMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleCLMimg::ImageSampleCLMimg(const MachineInst *inst)
     : Mimg("image_sample_c_l", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleCLMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleCLMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -649,13 +867,20 @@ ImageSampleCLMimg::ImageSampleCLMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleCLMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleCLMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_l", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCLMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleCBMimg::ImageSampleCBMimg(const MachineInst *inst)
     : Mimg("image_sample_c_b", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleCBMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleCBMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -668,13 +893,20 @@ ImageSampleCBMimg::ImageSampleCBMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleCBMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleCBMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_b", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCBMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleCLzMimg::ImageSampleCLzMimg(const MachineInst *inst)
     : Mimg("image_sample_c_lz", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleCLzMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleCLzMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -687,13 +919,20 @@ ImageSampleCLzMimg::ImageSampleCLzMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleCLzMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleCLzMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_lz", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCLzMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleOMimg::ImageSampleOMimg(const MachineInst *inst)
     : Mimg("image_sample_o", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleOMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleOMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -706,13 +945,20 @@ ImageSampleOMimg::ImageSampleOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleOMimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleOMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleDOMimg::ImageSampleDOMimg(const MachineInst *inst)
     : Mimg("image_sample_d_o", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleDOMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleDOMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(320, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -725,13 +971,20 @@ ImageSampleDOMimg::ImageSampleDOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleDOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleDOMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_d_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleDOMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleLOMimg::ImageSampleLOMimg(const MachineInst *inst)
     : Mimg("image_sample_l_o", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleLOMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleLOMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -744,13 +997,20 @@ ImageSampleLOMimg::ImageSampleLOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleLOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleLOMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_l_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleLOMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleBOMimg::ImageSampleBOMimg(const MachineInst *inst)
     : Mimg("image_sample_b_o", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleBOMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleBOMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -763,13 +1023,20 @@ ImageSampleBOMimg::ImageSampleBOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleBOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleBOMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_b_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleBOMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleLzOMimg::ImageSampleLzOMimg(const MachineInst *inst)
     : Mimg("image_sample_lz_o", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleLzOMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleLzOMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -782,13 +1049,20 @@ ImageSampleLzOMimg::ImageSampleLzOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleLzOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleLzOMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_lz_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleLzOMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleCOMimg::ImageSampleCOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_o", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleCOMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleCOMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -801,13 +1075,20 @@ ImageSampleCOMimg::ImageSampleCOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleCOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleCOMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCOMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleCDOMimg::ImageSampleCDOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_d_o", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleCDOMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleCDOMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(352, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -820,13 +1101,20 @@ ImageSampleCDOMimg::ImageSampleCDOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleCDOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleCDOMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_d_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCDOMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleCLOMimg::ImageSampleCLOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_l_o", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleCLOMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleCLOMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -839,13 +1127,20 @@ ImageSampleCLOMimg::ImageSampleCLOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleCLOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleCLOMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_l_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCLOMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleCBOMimg::ImageSampleCBOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_b_o", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleCBOMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleCBOMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -858,13 +1153,20 @@ ImageSampleCBOMimg::ImageSampleCBOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleCBOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleCBOMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_b_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCBOMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleCLzOMimg::ImageSampleCLzOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_lz_o", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleCLzOMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleCLzOMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -877,13 +1179,20 @@ ImageSampleCLzOMimg::ImageSampleCLzOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleCLzOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleCLzOMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_lz_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCLzOMimg>(opcode);
 }
+} // namespace detail
 
 ImageGather4Mimg::ImageGather4Mimg(const MachineInst *inst)
     : Mimg("image_gather4", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageGather4Mimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageGather4Mimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -896,13 +1205,20 @@ ImageGather4Mimg::ImageGather4Mimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageGather4Mimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageGather4Mimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4Mimg>(opcode);
 }
+} // namespace detail
 
 ImageGather4LMimg::ImageGather4LMimg(const MachineInst *inst)
     : Mimg("image_gather4_l", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageGather4LMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageGather4LMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -915,13 +1231,20 @@ ImageGather4LMimg::ImageGather4LMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageGather4LMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageGather4LMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_l", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4LMimg>(opcode);
 }
+} // namespace detail
 
 ImageGather4BMimg::ImageGather4BMimg(const MachineInst *inst)
     : Mimg("image_gather4_b", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageGather4BMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageGather4BMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -934,13 +1257,20 @@ ImageGather4BMimg::ImageGather4BMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageGather4BMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageGather4BMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_b", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4BMimg>(opcode);
 }
+} // namespace detail
 
 ImageGather4LzMimg::ImageGather4LzMimg(const MachineInst *inst)
     : Mimg("image_gather4_lz", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageGather4LzMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageGather4LzMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -953,13 +1283,20 @@ ImageGather4LzMimg::ImageGather4LzMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageGather4LzMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageGather4LzMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_lz", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4LzMimg>(opcode);
 }
+} // namespace detail
 
 ImageGather4CMimg::ImageGather4CMimg(const MachineInst *inst)
     : Mimg("image_gather4_c", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageGather4CMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageGather4CMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -972,13 +1309,20 @@ ImageGather4CMimg::ImageGather4CMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageGather4CMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageGather4CMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_c", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4CMimg>(opcode);
 }
+} // namespace detail
 
 ImageGather4CLzMimg::ImageGather4CLzMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_lz", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageGather4CLzMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageGather4CLzMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -991,13 +1335,20 @@ ImageGather4CLzMimg::ImageGather4CLzMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageGather4CLzMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageGather4CLzMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_c_lz", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4CLzMimg>(opcode);
 }
+} // namespace detail
 
 ImageGather4OMimg::ImageGather4OMimg(const MachineInst *inst)
     : Mimg("image_gather4_o", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageGather4OMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageGather4OMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1010,13 +1361,20 @@ ImageGather4OMimg::ImageGather4OMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageGather4OMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageGather4OMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4OMimg>(opcode);
 }
+} // namespace detail
 
 ImageGather4LzOMimg::ImageGather4LzOMimg(const MachineInst *inst)
     : Mimg("image_gather4_lz_o", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageGather4LzOMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageGather4LzOMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1029,13 +1387,20 @@ ImageGather4LzOMimg::ImageGather4LzOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageGather4LzOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageGather4LzOMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_lz_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4LzOMimg>(opcode);
 }
+} // namespace detail
 
 ImageGather4CLzOMimg::ImageGather4CLzOMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_lz_o", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageGather4CLzOMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageGather4CLzOMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1048,13 +1413,20 @@ ImageGather4CLzOMimg::ImageGather4CLzOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageGather4CLzOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageGather4CLzOMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_c_lz_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4CLzOMimg>(opcode);
 }
+} // namespace detail
 
 ImageGetLodMimg::ImageGetLodMimg(const MachineInst *inst)
     : Mimg("image_get_lod", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageGetLodMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageGetLodMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1067,13 +1439,20 @@ ImageGetLodMimg::ImageGetLodMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageGetLodMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageGetLodMimg(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_get_lod", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGetLodMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleDG16Mimg::ImageSampleDG16Mimg(const MachineInst *inst)
     : Mimg("image_sample_d_g16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleDG16Mimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleDG16Mimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(224, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1086,13 +1465,20 @@ ImageSampleDG16Mimg::ImageSampleDG16Mimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleDG16Mimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleDG16Mimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_d_g16", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleDG16Mimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleCDG16Mimg::ImageSampleCDG16Mimg(const MachineInst *inst)
     : Mimg("image_sample_c_d_g16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleCDG16Mimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleCDG16Mimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1105,13 +1491,20 @@ ImageSampleCDG16Mimg::ImageSampleCDG16Mimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleCDG16Mimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleCDG16Mimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_d_g16", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCDG16Mimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleDOG16Mimg::ImageSampleDOG16Mimg(const MachineInst *inst)
     : Mimg("image_sample_d_o_g16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleDOG16Mimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleDOG16Mimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1124,13 +1517,20 @@ ImageSampleDOG16Mimg::ImageSampleDOG16Mimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleDOG16Mimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleDOG16Mimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_d_o_g16", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleDOG16Mimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleCDOG16Mimg::ImageSampleCDOG16Mimg(const MachineInst *inst)
     : Mimg("image_sample_c_d_o_g16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleCDOG16Mimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleCDOG16Mimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(288, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1143,13 +1543,20 @@ ImageSampleCDOG16Mimg::ImageSampleCDOG16Mimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleCDOG16Mimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleCDOG16Mimg(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_d_o_g16", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCDOG16Mimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleClMimg::ImageSampleClMimg(const MachineInst *inst)
     : Mimg("image_sample_cl", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleClMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleClMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1162,13 +1569,20 @@ ImageSampleClMimg::ImageSampleClMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleClMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleClMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleClMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleDClMimg::ImageSampleDClMimg(const MachineInst *inst)
     : Mimg("image_sample_d_cl", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleDClMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleDClMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(320, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1181,13 +1595,20 @@ ImageSampleDClMimg::ImageSampleDClMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleDClMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleDClMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_d_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleDClMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleBClMimg::ImageSampleBClMimg(const MachineInst *inst)
     : Mimg("image_sample_b_cl", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleBClMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleBClMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1200,13 +1621,20 @@ ImageSampleBClMimg::ImageSampleBClMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleBClMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleBClMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_b_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleBClMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleCClMimg::ImageSampleCClMimg(const MachineInst *inst)
     : Mimg("image_sample_c_cl", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleCClMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleCClMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1219,13 +1647,20 @@ ImageSampleCClMimg::ImageSampleCClMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleCClMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleCClMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCClMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleCDClMimg::ImageSampleCDClMimg(const MachineInst *inst)
     : Mimg("image_sample_c_d_cl", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleCDClMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleCDClMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(352, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1238,13 +1673,20 @@ ImageSampleCDClMimg::ImageSampleCDClMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleCDClMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleCDClMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_d_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCDClMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleCBClMimg::ImageSampleCBClMimg(const MachineInst *inst)
     : Mimg("image_sample_c_b_cl", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleCBClMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleCBClMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1257,13 +1699,20 @@ ImageSampleCBClMimg::ImageSampleCBClMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleCBClMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleCBClMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_b_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCBClMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleClOMimg::ImageSampleClOMimg(const MachineInst *inst)
     : Mimg("image_sample_cl_o", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleClOMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleClOMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1276,13 +1725,20 @@ ImageSampleClOMimg::ImageSampleClOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleClOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleClOMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleClOMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleDClOMimg::ImageSampleDClOMimg(const MachineInst *inst)
     : Mimg("image_sample_d_cl_o", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleDClOMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleDClOMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(352, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1295,13 +1751,20 @@ ImageSampleDClOMimg::ImageSampleDClOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleDClOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleDClOMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_d_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleDClOMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleBClOMimg::ImageSampleBClOMimg(const MachineInst *inst)
     : Mimg("image_sample_b_cl_o", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleBClOMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleBClOMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1314,13 +1777,20 @@ ImageSampleBClOMimg::ImageSampleBClOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleBClOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleBClOMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_b_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleBClOMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleCClOMimg::ImageSampleCClOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_cl_o", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleCClOMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleCClOMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1333,13 +1803,20 @@ ImageSampleCClOMimg::ImageSampleCClOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleCClOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleCClOMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCClOMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleCDClOMimg::ImageSampleCDClOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_d_cl_o", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleCDClOMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleCDClOMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(384, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1352,13 +1829,20 @@ ImageSampleCDClOMimg::ImageSampleCDClOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleCDClOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleCDClOMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_d_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCDClOMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleCBClOMimg::ImageSampleCBClOMimg(const MachineInst *inst)
     : Mimg("image_sample_c_b_cl_o", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleCBClOMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleCBClOMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(224, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1371,13 +1855,20 @@ ImageSampleCBClOMimg::ImageSampleCBClOMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleCBClOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleCBClOMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_b_cl_o", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCBClOMimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleCDClG16Mimg::ImageSampleCDClG16Mimg(const MachineInst *inst)
     : Mimg("image_sample_c_d_cl_g16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleCDClG16Mimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleCDClG16Mimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(288, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1390,13 +1881,20 @@ ImageSampleCDClG16Mimg::ImageSampleCDClG16Mimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleCDClG16Mimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleCDClG16Mimg(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_d_cl_g16", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCDClG16Mimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleDClOG16Mimg::ImageSampleDClOG16Mimg(const MachineInst *inst)
     : Mimg("image_sample_d_cl_o_g16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleDClOG16Mimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleDClOG16Mimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(288, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1409,13 +1907,20 @@ ImageSampleDClOG16Mimg::ImageSampleDClOG16Mimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleDClOG16Mimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleDClOG16Mimg(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_d_cl_o_g16", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleDClOG16Mimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleCDClOG16Mimg::ImageSampleCDClOG16Mimg(const MachineInst *inst)
     : Mimg("image_sample_c_d_cl_o_g16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleCDClOG16Mimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleCDClOG16Mimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(320, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1428,13 +1933,20 @@ ImageSampleCDClOG16Mimg::ImageSampleCDClOG16Mimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleCDClOG16Mimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleCDClOG16Mimg(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_c_d_cl_o_g16", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleCDClOG16Mimg>(opcode);
 }
+} // namespace detail
 
 ImageSampleDClG16Mimg::ImageSampleDClG16Mimg(const MachineInst *inst)
     : Mimg("image_sample_d_cl_g16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageSampleDClG16Mimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageSampleDClG16Mimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1447,13 +1959,20 @@ ImageSampleDClG16Mimg::ImageSampleDClG16Mimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageSampleDClG16Mimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageSampleDClG16Mimg(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample_d_cl_g16", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageSampleDClG16Mimg>(opcode);
 }
+} // namespace detail
 
 ImageGather4ClMimg::ImageGather4ClMimg(const MachineInst *inst)
     : Mimg("image_gather4_cl", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageGather4ClMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageGather4ClMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1466,13 +1985,20 @@ ImageGather4ClMimg::ImageGather4ClMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageGather4ClMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageGather4ClMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4ClMimg>(opcode);
 }
+} // namespace detail
 
 ImageGather4BClMimg::ImageGather4BClMimg(const MachineInst *inst)
     : Mimg("image_gather4_b_cl", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageGather4BClMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageGather4BClMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1485,13 +2011,20 @@ ImageGather4BClMimg::ImageGather4BClMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageGather4BClMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageGather4BClMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_b_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4BClMimg>(opcode);
 }
+} // namespace detail
 
 ImageGather4CClMimg::ImageGather4CClMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_cl", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageGather4CClMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageGather4CClMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1504,13 +2037,20 @@ ImageGather4CClMimg::ImageGather4CClMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageGather4CClMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageGather4CClMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_c_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4CClMimg>(opcode);
 }
+} // namespace detail
 
 ImageGather4CLMimg::ImageGather4CLMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_l", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageGather4CLMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageGather4CLMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1523,13 +2063,20 @@ ImageGather4CLMimg::ImageGather4CLMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageGather4CLMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageGather4CLMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_c_l", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4CLMimg>(opcode);
 }
+} // namespace detail
 
 ImageGather4CBMimg::ImageGather4CBMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_b", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageGather4CBMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageGather4CBMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1542,13 +2089,20 @@ ImageGather4CBMimg::ImageGather4CBMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageGather4CBMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageGather4CBMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_c_b", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4CBMimg>(opcode);
 }
+} // namespace detail
 
 ImageGather4CBClMimg::ImageGather4CBClMimg(const MachineInst *inst)
     : Mimg("image_gather4_c_b_cl", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageGather4CBClMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageGather4CBClMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1561,13 +2115,20 @@ ImageGather4CBClMimg::ImageGather4CBClMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageGather4CBClMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageGather4CBClMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4_c_b_cl", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4CBClMimg>(opcode);
 }
+} // namespace detail
 
 ImageGather4hMimg::ImageGather4hMimg(const MachineInst *inst)
     : Mimg("image_gather4h", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<ImageGather4hMimg>()),
+           selected_exec_fn(InstructionExecutionId::ImageGather4hMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
@@ -1580,9 +2141,16 @@ ImageGather4hMimg::ImageGather4hMimg(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void ImageGather4hMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+namespace detail {
+DecodeResult decodeImageGather4hMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_gather4h", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<ImageGather4hMimg>(opcode);
 }
+} // namespace detail
 
 } // namespace rdna3_5
 } // namespace rocjitsu

@@ -76,13 +76,13 @@ wait_pid(pid_t _pid, int _opts)
 int
 diagnose_status(pid_t _pid, int _status, [[maybe_unused]] int _verbose)
 {
-    bool _normal_exit      = (WIFEXITED(_status) > 0);
-    bool _unhandled_signal = (WIFSIGNALED(_status) > 0);
-    bool _core_dump        = (WCOREDUMP(_status) > 0);
-    bool _stopped          = (WIFSTOPPED(_status) > 0);
-    int  _exit_status      = WEXITSTATUS(_status);
-    int  _stop_signal      = (_stopped) ? WSTOPSIG(_status) : 0;
-    int  _ec               = (_unhandled_signal) ? WTERMSIG(_status) : 0;
+    const bool _normal_exit      = (WIFEXITED(_status) > 0);
+    const bool _unhandled_signal = (WIFSIGNALED(_status) > 0);
+    const bool _core_dump        = (WCOREDUMP(_status) > 0);
+    const bool _stopped          = (WIFSTOPPED(_status) > 0);
+    int        _exit_status      = WEXITSTATUS(_status);
+    int        _stop_signal      = (_stopped) ? WSTOPSIG(_status) : 0;
+    int        _ec               = (_unhandled_signal) ? WTERMSIG(_status) : 0;
 
     LOG_TRACE("diagnosing status for process {} :: status: {}... normal exit: {}, "
               "unhandled signal: {}, core dump: {}, stopped: {}, exit status: {}, stop "

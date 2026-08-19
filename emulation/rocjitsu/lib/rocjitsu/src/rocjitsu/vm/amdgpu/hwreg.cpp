@@ -285,7 +285,7 @@ constexpr HwregDescriptor GFX1250_HWREGS[] = {
     // gfx1250 XML follows the RDNA4/GFX12 naming pattern. Where XML omits
     // privilege policy, inherit RDNA4 prose unless contradicted by gfx1250
     // data; this is intentionally decoupled from the MODE[27] profile
-    // departure recorded in gfx1250::Isa.
+    // departure recorded in cdna5::Isa.
     {1, "WAVE_MODE", HwregState::Mode, HwregWritePolicy::UserWritable},
     {2, "WAVE_STATUS", HwregState::Status, HwregWritePolicy::ReadOnly},
     {4, "WAVE_STATE_PRIV", HwregState::Unsupported, HwregWritePolicy::Privileged},
@@ -337,7 +337,7 @@ HwregTable table_for_arch(rj_code_arch_t arch) {
     return make_table(RDNA3_HWREGS);
   case ROCJITSU_CODE_ARCH_RDNA4:
     return make_table(RDNA4_HWREGS);
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return make_table(GFX1250_HWREGS);
   default:
     return {nullptr, 0};

@@ -5,22 +5,9 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/mubuf.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/addr_calc.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx940_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/vm/amdgpu/compute_unit.h"
-#include "rocjitsu/vm/amdgpu/mem_state.h"
-#include "rocjitsu/vm/amdgpu/register_access.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
-#include "util/except.h"
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <cstring>
-#include <limits>
 #include <memory>
 
 namespace rocjitsu {
@@ -38,7 +25,7 @@ template <typename BufferMachineInst> uint32_t buffer_vaddr_bits(const BufferMac
 
 BufferLoadFormatXMubuf::BufferLoadFormatXMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_format_x", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadFormatXMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferLoadFormatXMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -58,36 +45,20 @@ BufferLoadFormatXMubuf::BufferLoadFormatXMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadFormatXMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds) {
-    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-    d->elem_size = 4;
-    d->num_elems = 1;
-    d->is_load = true;
-    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-    d->lds_dst = true;
-    d->lds_base = wf.m0() + wf.lds_base();
-    d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-    d->non_temporal = inst_.nt;
-    mubuf_calculate_addresses(inst_, wf, *d);
-    set_data(std::move(d));
-    return;
-  }
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferLoadFormatXMubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_format_x", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadFormatXMubuf>(opcode);
 }
+} // namespace detail
 
 BufferLoadFormatXyMubuf::BufferLoadFormatXyMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_format_xy", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadFormatXyMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferLoadFormatXyMubuf)),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -107,36 +78,20 @@ BufferLoadFormatXyMubuf::BufferLoadFormatXyMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadFormatXyMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds) {
-    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-    d->elem_size = 4;
-    d->num_elems = 2;
-    d->is_load = true;
-    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-    d->lds_dst = true;
-    d->lds_base = wf.m0() + wf.lds_base();
-    d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-    d->non_temporal = inst_.nt;
-    mubuf_calculate_addresses(inst_, wf, *d);
-    set_data(std::move(d));
-    return;
-  }
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 2;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferLoadFormatXyMubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_format_xy", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadFormatXyMubuf>(opcode);
 }
+} // namespace detail
 
 BufferLoadFormatXyzMubuf::BufferLoadFormatXyzMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadFormatXyzMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferLoadFormatXyzMubuf)),
       vdata(96, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -156,36 +111,20 @@ BufferLoadFormatXyzMubuf::BufferLoadFormatXyzMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadFormatXyzMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds) {
-    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-    d->elem_size = 4;
-    d->num_elems = 3;
-    d->is_load = true;
-    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-    d->lds_dst = true;
-    d->lds_base = wf.m0() + wf.lds_base();
-    d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-    d->non_temporal = inst_.nt;
-    mubuf_calculate_addresses(inst_, wf, *d);
-    set_data(std::move(d));
-    return;
-  }
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 3;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferLoadFormatXyzMubuf(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_format_xyz", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadFormatXyzMubuf>(opcode);
 }
+} // namespace detail
 
 BufferLoadFormatXyzwMubuf::BufferLoadFormatXyzwMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadFormatXyzwMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferLoadFormatXyzwMubuf)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -205,36 +144,20 @@ BufferLoadFormatXyzwMubuf::BufferLoadFormatXyzwMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadFormatXyzwMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds) {
-    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-    d->elem_size = 4;
-    d->num_elems = 4;
-    d->is_load = true;
-    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-    d->lds_dst = true;
-    d->lds_base = wf.m0() + wf.lds_base();
-    d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-    d->non_temporal = inst_.nt;
-    mubuf_calculate_addresses(inst_, wf, *d);
-    set_data(std::move(d));
-    return;
-  }
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 4;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferLoadFormatXyzwMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_format_xyzw", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadFormatXyzwMubuf>(opcode);
 }
+} // namespace detail
 
 BufferStoreFormatXMubuf::BufferStoreFormatXMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_format_x", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreFormatXMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferStoreFormatXMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -254,31 +177,20 @@ BufferStoreFormatXMubuf::BufferStoreFormatXMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferStoreFormatXMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferStoreFormatXMubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_format_x", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreFormatXMubuf>(opcode);
 }
+} // namespace detail
 
 BufferStoreFormatXyMubuf::BufferStoreFormatXyMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_format_xy", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreFormatXyMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferStoreFormatXyMubuf)),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -298,33 +210,20 @@ BufferStoreFormatXyMubuf::BufferStoreFormatXyMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferStoreFormatXyMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 2;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferStoreFormatXyMubuf(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_format_xy", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreFormatXyMubuf>(opcode);
 }
+} // namespace detail
 
 BufferStoreFormatXyzMubuf::BufferStoreFormatXyzMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreFormatXyzMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferStoreFormatXyzMubuf)),
       vdata(96, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -344,35 +243,20 @@ BufferStoreFormatXyzMubuf::BufferStoreFormatXyzMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferStoreFormatXyzMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 3;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 12);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 12 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 12 + 4], &val1, 4);
-    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 2, lane);
-    std::memcpy(&d->store_data[lane * 12 + 8], &val2, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferStoreFormatXyzMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_format_xyz", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreFormatXyzMubuf>(opcode);
 }
+} // namespace detail
 
 BufferStoreFormatXyzwMubuf::BufferStoreFormatXyzwMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreFormatXyzwMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferStoreFormatXyzwMubuf)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -392,37 +276,20 @@ BufferStoreFormatXyzwMubuf::BufferStoreFormatXyzwMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferStoreFormatXyzwMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 4;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 16);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 2, lane);
-    std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 3, lane);
-    std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferStoreFormatXyzwMubuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_format_xyzw", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreFormatXyzwMubuf>(opcode);
 }
+} // namespace detail
 
 BufferLoadFormatD16XMubuf::BufferLoadFormatD16XMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_format_d16_x", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadFormatD16XMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferLoadFormatD16XMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -441,6 +308,17 @@ BufferLoadFormatD16XMubuf::BufferLoadFormatD16XMubuf(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferLoadFormatD16XMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_format_d16_x", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadFormatD16XMubuf>(opcode);
+}
+} // namespace detail
 
 void BufferLoadFormatD16XMubuf::implicit_uses(RegisterSet &uses) const {
   Mubuf::implicit_uses(uses);
@@ -449,14 +327,9 @@ void BufferLoadFormatD16XMubuf::implicit_uses(RegisterSet &uses) const {
       uses.expand(*r);
 }
 
-void BufferLoadFormatD16XMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
-
 BufferLoadFormatD16XyMubuf::BufferLoadFormatD16XyMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_format_d16_xy", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadFormatD16XyMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferLoadFormatD16XyMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -476,14 +349,20 @@ BufferLoadFormatD16XyMubuf::BufferLoadFormatD16XyMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadFormatD16XyMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeBufferLoadFormatD16XyMubuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_format_d16_xy", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadFormatD16XyMubuf>(opcode);
 }
+} // namespace detail
 
 BufferLoadFormatD16XyzMubuf::BufferLoadFormatD16XyzMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_format_d16_xyz", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadFormatD16XyzMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferLoadFormatD16XyzMubuf)),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -502,6 +381,18 @@ BufferLoadFormatD16XyzMubuf::BufferLoadFormatD16XyzMubuf(const MachineInst *inst
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferLoadFormatD16XyzMubuf(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mubuf::validate_encoding("buffer_load_format_d16_xyz",
+                               reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadFormatD16XyzMubuf>(opcode);
+}
+} // namespace detail
 
 void BufferLoadFormatD16XyzMubuf::implicit_uses(RegisterSet &uses) const {
   Mubuf::implicit_uses(uses);
@@ -510,14 +401,9 @@ void BufferLoadFormatD16XyzMubuf::implicit_uses(RegisterSet &uses) const {
       uses.expand(RegisterRef{r->cls, static_cast<uint16_t>(r->index + 1), 1});
 }
 
-void BufferLoadFormatD16XyzMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
-
 BufferLoadFormatD16XyzwMubuf::BufferLoadFormatD16XyzwMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_format_d16_xyzw", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadFormatD16XyzwMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferLoadFormatD16XyzwMubuf)),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -537,14 +423,21 @@ BufferLoadFormatD16XyzwMubuf::BufferLoadFormatD16XyzwMubuf(const MachineInst *in
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadFormatD16XyzwMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeBufferLoadFormatD16XyzwMubuf(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mubuf::validate_encoding("buffer_load_format_d16_xyzw",
+                               reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadFormatD16XyzwMubuf>(opcode);
 }
+} // namespace detail
 
 BufferStoreFormatD16XMubuf::BufferStoreFormatD16XMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_format_d16_x", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreFormatD16XMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferStoreFormatD16XMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -564,14 +457,20 @@ BufferStoreFormatD16XMubuf::BufferStoreFormatD16XMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferStoreFormatD16XMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeBufferStoreFormatD16XMubuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_format_d16_x", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreFormatD16XMubuf>(opcode);
 }
+} // namespace detail
 
 BufferStoreFormatD16XyMubuf::BufferStoreFormatD16XyMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_format_d16_xy", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreFormatD16XyMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferStoreFormatD16XyMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -591,14 +490,21 @@ BufferStoreFormatD16XyMubuf::BufferStoreFormatD16XyMubuf(const MachineInst *inst
   flags_ |= MEMORY_OP;
 }
 
-void BufferStoreFormatD16XyMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeBufferStoreFormatD16XyMubuf(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mubuf::validate_encoding("buffer_store_format_d16_xy",
+                               reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreFormatD16XyMubuf>(opcode);
 }
+} // namespace detail
 
 BufferStoreFormatD16XyzMubuf::BufferStoreFormatD16XyzMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_format_d16_xyz", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreFormatD16XyzMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferStoreFormatD16XyzMubuf)),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -618,14 +524,21 @@ BufferStoreFormatD16XyzMubuf::BufferStoreFormatD16XyzMubuf(const MachineInst *in
   flags_ |= MEMORY_OP;
 }
 
-void BufferStoreFormatD16XyzMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeBufferStoreFormatD16XyzMubuf(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mubuf::validate_encoding("buffer_store_format_d16_xyz",
+                               reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreFormatD16XyzMubuf>(opcode);
 }
+} // namespace detail
 
 BufferStoreFormatD16XyzwMubuf::BufferStoreFormatD16XyzwMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_format_d16_xyzw", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreFormatD16XyzwMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferStoreFormatD16XyzwMubuf)),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -645,14 +558,21 @@ BufferStoreFormatD16XyzwMubuf::BufferStoreFormatD16XyzwMubuf(const MachineInst *
   flags_ |= MEMORY_OP;
 }
 
-void BufferStoreFormatD16XyzwMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeBufferStoreFormatD16XyzwMubuf(const MachineInst *opcode,
+                                                 const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mubuf::validate_encoding("buffer_store_format_d16_xyzw",
+                               reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreFormatD16XyzwMubuf>(opcode);
 }
+} // namespace detail
 
 BufferLoadUbyteMubuf::BufferLoadUbyteMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_ubyte", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadUbyteMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferLoadUbyteMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -672,36 +592,20 @@ BufferLoadUbyteMubuf::BufferLoadUbyteMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadUbyteMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds) {
-    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-    d->elem_size = 1;
-    d->num_elems = 1;
-    d->is_load = true;
-    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-    d->lds_dst = true;
-    d->lds_base = wf.m0() + wf.lds_base();
-    d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-    d->non_temporal = inst_.nt;
-    mubuf_calculate_addresses(inst_, wf, *d);
-    set_data(std::move(d));
-    return;
-  }
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 1;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferLoadUbyteMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_ubyte", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadUbyteMubuf>(opcode);
 }
+} // namespace detail
 
 BufferLoadSbyteMubuf::BufferLoadSbyteMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_sbyte", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadSbyteMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferLoadSbyteMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -721,37 +625,20 @@ BufferLoadSbyteMubuf::BufferLoadSbyteMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadSbyteMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds) {
-    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-    d->elem_size = 1;
-    d->num_elems = 1;
-    d->is_load = true;
-    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-    d->lds_dst = true;
-    d->lds_base = wf.m0() + wf.lds_base();
-    d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-    d->non_temporal = inst_.nt;
-    mubuf_calculate_addresses(inst_, wf, *d);
-    set_data(std::move(d));
-    return;
-  }
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 1;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->sign_extend = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferLoadSbyteMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_sbyte", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadSbyteMubuf>(opcode);
 }
+} // namespace detail
 
 BufferLoadUshortMubuf::BufferLoadUshortMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_ushort", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadUshortMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferLoadUshortMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -771,36 +658,20 @@ BufferLoadUshortMubuf::BufferLoadUshortMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadUshortMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds) {
-    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-    d->elem_size = 2;
-    d->num_elems = 1;
-    d->is_load = true;
-    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-    d->lds_dst = true;
-    d->lds_base = wf.m0() + wf.lds_base();
-    d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-    d->non_temporal = inst_.nt;
-    mubuf_calculate_addresses(inst_, wf, *d);
-    set_data(std::move(d));
-    return;
-  }
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 2;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferLoadUshortMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_ushort", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadUshortMubuf>(opcode);
 }
+} // namespace detail
 
 BufferLoadSshortMubuf::BufferLoadSshortMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_sshort", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadSshortMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferLoadSshortMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -820,37 +691,20 @@ BufferLoadSshortMubuf::BufferLoadSshortMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadSshortMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds) {
-    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-    d->elem_size = 2;
-    d->num_elems = 1;
-    d->is_load = true;
-    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-    d->lds_dst = true;
-    d->lds_base = wf.m0() + wf.lds_base();
-    d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-    d->non_temporal = inst_.nt;
-    mubuf_calculate_addresses(inst_, wf, *d);
-    set_data(std::move(d));
-    return;
-  }
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 2;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->sign_extend = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferLoadSshortMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_sshort", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadSshortMubuf>(opcode);
 }
+} // namespace detail
 
 BufferLoadDwordMubuf::BufferLoadDwordMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_dword", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadDwordMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferLoadDwordMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -870,36 +724,20 @@ BufferLoadDwordMubuf::BufferLoadDwordMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadDwordMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds) {
-    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-    d->elem_size = 4;
-    d->num_elems = 1;
-    d->is_load = true;
-    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-    d->lds_dst = true;
-    d->lds_base = wf.m0() + wf.lds_base();
-    d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-    d->non_temporal = inst_.nt;
-    mubuf_calculate_addresses(inst_, wf, *d);
-    set_data(std::move(d));
-    return;
-  }
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferLoadDwordMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_dword", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadDwordMubuf>(opcode);
 }
+} // namespace detail
 
 BufferLoadDwordx2Mubuf::BufferLoadDwordx2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_load_dwordx2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadDwordx2Mubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferLoadDwordx2Mubuf)),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -919,36 +757,20 @@ BufferLoadDwordx2Mubuf::BufferLoadDwordx2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadDwordx2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds) {
-    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-    d->elem_size = 4;
-    d->num_elems = 2;
-    d->is_load = true;
-    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-    d->lds_dst = true;
-    d->lds_base = wf.m0() + wf.lds_base();
-    d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-    d->non_temporal = inst_.nt;
-    mubuf_calculate_addresses(inst_, wf, *d);
-    set_data(std::move(d));
-    return;
-  }
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 2;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferLoadDwordx2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_dwordx2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadDwordx2Mubuf>(opcode);
 }
+} // namespace detail
 
 BufferLoadDwordx3Mubuf::BufferLoadDwordx3Mubuf(const MachineInst *inst)
     : Mubuf("buffer_load_dwordx3", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadDwordx3Mubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferLoadDwordx3Mubuf)),
       vdata(96, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -968,36 +790,20 @@ BufferLoadDwordx3Mubuf::BufferLoadDwordx3Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadDwordx3Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds) {
-    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-    d->elem_size = 4;
-    d->num_elems = 3;
-    d->is_load = true;
-    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-    d->lds_dst = true;
-    d->lds_base = wf.m0() + wf.lds_base();
-    d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-    d->non_temporal = inst_.nt;
-    mubuf_calculate_addresses(inst_, wf, *d);
-    set_data(std::move(d));
-    return;
-  }
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 3;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferLoadDwordx3Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_dwordx3", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadDwordx3Mubuf>(opcode);
 }
+} // namespace detail
 
 BufferLoadDwordx4Mubuf::BufferLoadDwordx4Mubuf(const MachineInst *inst)
     : Mubuf("buffer_load_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadDwordx4Mubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferLoadDwordx4Mubuf)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -1017,36 +823,20 @@ BufferLoadDwordx4Mubuf::BufferLoadDwordx4Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferLoadDwordx4Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds) {
-    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-    d->elem_size = 4;
-    d->num_elems = 4;
-    d->is_load = true;
-    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-    d->lds_dst = true;
-    d->lds_base = wf.m0() + wf.lds_base();
-    d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-    d->non_temporal = inst_.nt;
-    mubuf_calculate_addresses(inst_, wf, *d);
-    set_data(std::move(d));
-    return;
-  }
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 4;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferLoadDwordx4Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_dwordx4", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadDwordx4Mubuf>(opcode);
 }
+} // namespace detail
 
 BufferStoreByteMubuf::BufferStoreByteMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_byte", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreByteMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferStoreByteMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -1066,31 +856,20 @@ BufferStoreByteMubuf::BufferStoreByteMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferStoreByteMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 1;
-  d->num_elems = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 1);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
-    d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferStoreByteMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_byte", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreByteMubuf>(opcode);
 }
+} // namespace detail
 
 BufferStoreByteD16HiMubuf::BufferStoreByteD16HiMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_byte_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreByteD16HiMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferStoreByteD16HiMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -1110,32 +889,20 @@ BufferStoreByteD16HiMubuf::BufferStoreByteD16HiMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferStoreByteD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 1;
-  d->num_elems = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 1);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
-    val0 >>= 16;
-    d->store_data[lane * 1 + 0] = static_cast<uint8_t>(val0);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferStoreByteD16HiMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_byte_d16_hi", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreByteD16HiMubuf>(opcode);
 }
+} // namespace detail
 
 BufferStoreShortMubuf::BufferStoreShortMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_short", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreShortMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferStoreShortMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -1155,31 +922,20 @@ BufferStoreShortMubuf::BufferStoreShortMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferStoreShortMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 2;
-  d->num_elems = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 2);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
-    std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferStoreShortMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_short", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreShortMubuf>(opcode);
 }
+} // namespace detail
 
 BufferStoreShortD16HiMubuf::BufferStoreShortD16HiMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_short_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreShortD16HiMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferStoreShortD16HiMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -1199,32 +955,20 @@ BufferStoreShortD16HiMubuf::BufferStoreShortD16HiMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferStoreShortD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 2;
-  d->num_elems = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 2);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
-    val0 >>= 16;
-    std::memcpy(&d->store_data[lane * 2 + 0], &val0, 2);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferStoreShortD16HiMubuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_short_d16_hi", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreShortD16HiMubuf>(opcode);
 }
+} // namespace detail
 
 BufferStoreDwordMubuf::BufferStoreDwordMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_dword", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreDwordMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferStoreDwordMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -1244,31 +988,20 @@ BufferStoreDwordMubuf::BufferStoreDwordMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferStoreDwordMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferStoreDwordMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_dword", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreDwordMubuf>(opcode);
 }
+} // namespace detail
 
 BufferStoreDwordx2Mubuf::BufferStoreDwordx2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_store_dwordx2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreDwordx2Mubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferStoreDwordx2Mubuf)),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -1288,33 +1021,20 @@ BufferStoreDwordx2Mubuf::BufferStoreDwordx2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferStoreDwordx2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 2;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferStoreDwordx2Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_dwordx2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreDwordx2Mubuf>(opcode);
 }
+} // namespace detail
 
 BufferStoreDwordx3Mubuf::BufferStoreDwordx3Mubuf(const MachineInst *inst)
     : Mubuf("buffer_store_dwordx3", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreDwordx3Mubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferStoreDwordx3Mubuf)),
       vdata(96, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -1334,35 +1054,20 @@ BufferStoreDwordx3Mubuf::BufferStoreDwordx3Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferStoreDwordx3Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 3;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 12);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 12 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 12 + 4], &val1, 4);
-    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 2, lane);
-    std::memcpy(&d->store_data[lane * 12 + 8], &val2, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferStoreDwordx3Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_dwordx3", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreDwordx3Mubuf>(opcode);
 }
+} // namespace detail
 
 BufferStoreDwordx4Mubuf::BufferStoreDwordx4Mubuf(const MachineInst *inst)
     : Mubuf("buffer_store_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreDwordx4Mubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferStoreDwordx4Mubuf)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -1382,37 +1087,20 @@ BufferStoreDwordx4Mubuf::BufferStoreDwordx4Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferStoreDwordx4Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->elem_size = 4;
-  d->num_elems = 4;
-  d->is_load = false;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 16);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 2, lane);
-    std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 3, lane);
-    std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferStoreDwordx4Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_store_dwordx4", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreDwordx4Mubuf>(opcode);
 }
+} // namespace detail
 
 BufferLoadUbyteD16Mubuf::BufferLoadUbyteD16Mubuf(const MachineInst *inst)
     : Mubuf("buffer_load_ubyte_d16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadUbyteD16Mubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferLoadUbyteD16Mubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -1431,6 +1119,17 @@ BufferLoadUbyteD16Mubuf::BufferLoadUbyteD16Mubuf(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferLoadUbyteD16Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_ubyte_d16", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadUbyteD16Mubuf>(opcode);
+}
+} // namespace detail
 
 void BufferLoadUbyteD16Mubuf::implicit_uses(RegisterSet &uses) const {
   Mubuf::implicit_uses(uses);
@@ -1439,37 +1138,9 @@ void BufferLoadUbyteD16Mubuf::implicit_uses(RegisterSet &uses) const {
       uses.expand(*r);
 }
 
-void BufferLoadUbyteD16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds) {
-    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-    d->elem_size = 1;
-    d->num_elems = 1;
-    d->is_load = true;
-    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-    d->lds_dst = true;
-    d->lds_base = wf.m0() + wf.lds_base();
-    d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-    d->non_temporal = inst_.nt;
-    mubuf_calculate_addresses(inst_, wf, *d);
-    set_data(std::move(d));
-    return;
-  }
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 1;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->d16_lo = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
-}
-
 BufferLoadUbyteD16HiMubuf::BufferLoadUbyteD16HiMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_ubyte_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadUbyteD16HiMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferLoadUbyteD16HiMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -1488,6 +1159,17 @@ BufferLoadUbyteD16HiMubuf::BufferLoadUbyteD16HiMubuf(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferLoadUbyteD16HiMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_ubyte_d16_hi", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadUbyteD16HiMubuf>(opcode);
+}
+} // namespace detail
 
 void BufferLoadUbyteD16HiMubuf::implicit_uses(RegisterSet &uses) const {
   Mubuf::implicit_uses(uses);
@@ -1496,37 +1178,9 @@ void BufferLoadUbyteD16HiMubuf::implicit_uses(RegisterSet &uses) const {
       uses.expand(*r);
 }
 
-void BufferLoadUbyteD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds) {
-    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-    d->elem_size = 1;
-    d->num_elems = 1;
-    d->is_load = true;
-    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-    d->lds_dst = true;
-    d->lds_base = wf.m0() + wf.lds_base();
-    d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-    d->non_temporal = inst_.nt;
-    mubuf_calculate_addresses(inst_, wf, *d);
-    set_data(std::move(d));
-    return;
-  }
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 1;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->d16_hi = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
-}
-
 BufferLoadSbyteD16Mubuf::BufferLoadSbyteD16Mubuf(const MachineInst *inst)
     : Mubuf("buffer_load_sbyte_d16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadSbyteD16Mubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferLoadSbyteD16Mubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -1545,6 +1199,17 @@ BufferLoadSbyteD16Mubuf::BufferLoadSbyteD16Mubuf(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferLoadSbyteD16Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_sbyte_d16", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadSbyteD16Mubuf>(opcode);
+}
+} // namespace detail
 
 void BufferLoadSbyteD16Mubuf::implicit_uses(RegisterSet &uses) const {
   Mubuf::implicit_uses(uses);
@@ -1553,38 +1218,9 @@ void BufferLoadSbyteD16Mubuf::implicit_uses(RegisterSet &uses) const {
       uses.expand(*r);
 }
 
-void BufferLoadSbyteD16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds) {
-    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-    d->elem_size = 1;
-    d->num_elems = 1;
-    d->is_load = true;
-    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-    d->lds_dst = true;
-    d->lds_base = wf.m0() + wf.lds_base();
-    d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-    d->non_temporal = inst_.nt;
-    mubuf_calculate_addresses(inst_, wf, *d);
-    set_data(std::move(d));
-    return;
-  }
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 1;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->sign_extend = true;
-  d->d16_lo = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
-}
-
 BufferLoadSbyteD16HiMubuf::BufferLoadSbyteD16HiMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_sbyte_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadSbyteD16HiMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferLoadSbyteD16HiMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -1603,6 +1239,17 @@ BufferLoadSbyteD16HiMubuf::BufferLoadSbyteD16HiMubuf(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferLoadSbyteD16HiMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_sbyte_d16_hi", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadSbyteD16HiMubuf>(opcode);
+}
+} // namespace detail
 
 void BufferLoadSbyteD16HiMubuf::implicit_uses(RegisterSet &uses) const {
   Mubuf::implicit_uses(uses);
@@ -1611,38 +1258,9 @@ void BufferLoadSbyteD16HiMubuf::implicit_uses(RegisterSet &uses) const {
       uses.expand(*r);
 }
 
-void BufferLoadSbyteD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds) {
-    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-    d->elem_size = 1;
-    d->num_elems = 1;
-    d->is_load = true;
-    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-    d->lds_dst = true;
-    d->lds_base = wf.m0() + wf.lds_base();
-    d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-    d->non_temporal = inst_.nt;
-    mubuf_calculate_addresses(inst_, wf, *d);
-    set_data(std::move(d));
-    return;
-  }
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 1;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->sign_extend = true;
-  d->d16_hi = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
-}
-
 BufferLoadShortD16Mubuf::BufferLoadShortD16Mubuf(const MachineInst *inst)
     : Mubuf("buffer_load_short_d16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadShortD16Mubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferLoadShortD16Mubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -1661,6 +1279,17 @@ BufferLoadShortD16Mubuf::BufferLoadShortD16Mubuf(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferLoadShortD16Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_short_d16", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadShortD16Mubuf>(opcode);
+}
+} // namespace detail
 
 void BufferLoadShortD16Mubuf::implicit_uses(RegisterSet &uses) const {
   Mubuf::implicit_uses(uses);
@@ -1669,37 +1298,9 @@ void BufferLoadShortD16Mubuf::implicit_uses(RegisterSet &uses) const {
       uses.expand(*r);
 }
 
-void BufferLoadShortD16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds) {
-    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-    d->elem_size = 2;
-    d->num_elems = 1;
-    d->is_load = true;
-    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-    d->lds_dst = true;
-    d->lds_base = wf.m0() + wf.lds_base();
-    d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-    d->non_temporal = inst_.nt;
-    mubuf_calculate_addresses(inst_, wf, *d);
-    set_data(std::move(d));
-    return;
-  }
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 2;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->d16_lo = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
-}
-
 BufferLoadShortD16HiMubuf::BufferLoadShortD16HiMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_short_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadShortD16HiMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferLoadShortD16HiMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -1718,6 +1319,17 @@ BufferLoadShortD16HiMubuf::BufferLoadShortD16HiMubuf(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeBufferLoadShortD16HiMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_load_short_d16_hi", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadShortD16HiMubuf>(opcode);
+}
+} // namespace detail
 
 void BufferLoadShortD16HiMubuf::implicit_uses(RegisterSet &uses) const {
   Mubuf::implicit_uses(uses);
@@ -1726,37 +1338,9 @@ void BufferLoadShortD16HiMubuf::implicit_uses(RegisterSet &uses) const {
       uses.expand(*r);
 }
 
-void BufferLoadShortD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds) {
-    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-    d->elem_size = 2;
-    d->num_elems = 1;
-    d->is_load = true;
-    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-    d->lds_dst = true;
-    d->lds_base = wf.m0() + wf.lds_base();
-    d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-    d->non_temporal = inst_.nt;
-    mubuf_calculate_addresses(inst_, wf, *d);
-    set_data(std::move(d));
-    return;
-  }
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 2;
-  d->num_elems = 1;
-  d->is_load = true;
-  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  d->d16_hi = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  set_data(std::move(d));
-}
-
 BufferLoadFormatD16HiXMubuf::BufferLoadFormatD16HiXMubuf(const MachineInst *inst)
     : Mubuf("buffer_load_format_d16_hi_x", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferLoadFormatD16HiXMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferLoadFormatD16HiXMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -1776,6 +1360,18 @@ BufferLoadFormatD16HiXMubuf::BufferLoadFormatD16HiXMubuf(const MachineInst *inst
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeBufferLoadFormatD16HiXMubuf(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mubuf::validate_encoding("buffer_load_format_d16_hi_x",
+                               reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferLoadFormatD16HiXMubuf>(opcode);
+}
+} // namespace detail
+
 void BufferLoadFormatD16HiXMubuf::implicit_uses(RegisterSet &uses) const {
   Mubuf::implicit_uses(uses);
   if (!inst_.lds)
@@ -1783,14 +1379,9 @@ void BufferLoadFormatD16HiXMubuf::implicit_uses(RegisterSet &uses) const {
       uses.expand(*r);
 }
 
-void BufferLoadFormatD16HiXMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
-}
-
 BufferStoreFormatD16HiXMubuf::BufferStoreFormatD16HiXMubuf(const MachineInst *inst)
     : Mubuf("buffer_store_format_d16_hi_x", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferStoreFormatD16HiXMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferStoreFormatD16HiXMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -1810,36 +1401,56 @@ BufferStoreFormatD16HiXMubuf::BufferStoreFormatD16HiXMubuf(const MachineInst *in
   flags_ |= MEMORY_OP;
 }
 
-void BufferStoreFormatD16HiXMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+namespace detail {
+DecodeResult decodeBufferStoreFormatD16HiXMubuf(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Mubuf::validate_encoding("buffer_store_format_d16_hi_x",
+                               reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferStoreFormatD16HiXMubuf>(opcode);
 }
+} // namespace detail
 
 BufferWbl2Mubuf::BufferWbl2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_wbl2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferWbl2Mubuf>()) {
+            selected_exec_fn(InstructionExecutionId::BufferWbl2Mubuf)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
 
-void BufferWbl2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_buffer_wbl2_mubuf(*this, wf);
+namespace detail {
+DecodeResult decodeBufferWbl2Mubuf(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_wbl2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferWbl2Mubuf>(opcode);
 }
+} // namespace detail
 
 BufferInvMubuf::BufferInvMubuf(const MachineInst *inst)
     : Mubuf("buffer_inv", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferInvMubuf>()) {
+            selected_exec_fn(InstructionExecutionId::BufferInvMubuf)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
 
-void BufferInvMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_buffer_inv_mubuf(*this, wf);
+namespace detail {
+DecodeResult decodeBufferInvMubuf(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_inv", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferInvMubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicSwapMubuf::BufferAtomicSwapMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_swap", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicSwapMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicSwapMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -1861,32 +1472,20 @@ BufferAtomicSwapMubuf::BufferAtomicSwapMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicSwapMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::SWAP;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicSwapMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_swap", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicSwapMubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicCmpswapMubuf::BufferAtomicCmpswapMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_cmpswap", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicCmpswapMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicCmpswapMubuf)),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -1913,34 +1512,20 @@ BufferAtomicCmpswapMubuf::BufferAtomicCmpswapMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicCmpswapMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicCmpswapMubuf(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_cmpswap", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicCmpswapMubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicAddMubuf::BufferAtomicAddMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_add", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicAddMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicAddMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -1962,32 +1547,20 @@ BufferAtomicAddMubuf::BufferAtomicAddMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicAddMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::ADD;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicAddMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_add", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicAddMubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicSubMubuf::BufferAtomicSubMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_sub", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicSubMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicSubMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -2009,32 +1582,20 @@ BufferAtomicSubMubuf::BufferAtomicSubMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicSubMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::SUB;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicSubMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_sub", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicSubMubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicSminMubuf::BufferAtomicSminMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_smin", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicSminMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicSminMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -2056,32 +1617,20 @@ BufferAtomicSminMubuf::BufferAtomicSminMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicSminMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::SMIN;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicSminMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_smin", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicSminMubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicUminMubuf::BufferAtomicUminMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_umin", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicUminMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicUminMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -2103,32 +1652,20 @@ BufferAtomicUminMubuf::BufferAtomicUminMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicUminMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::UMIN;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicUminMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_umin", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicUminMubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicSmaxMubuf::BufferAtomicSmaxMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_smax", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicSmaxMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicSmaxMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -2150,32 +1687,20 @@ BufferAtomicSmaxMubuf::BufferAtomicSmaxMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicSmaxMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::SMAX;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicSmaxMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_smax", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicSmaxMubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicUmaxMubuf::BufferAtomicUmaxMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_umax", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicUmaxMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicUmaxMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -2197,32 +1722,20 @@ BufferAtomicUmaxMubuf::BufferAtomicUmaxMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicUmaxMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::UMAX;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicUmaxMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_umax", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicUmaxMubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicAndMubuf::BufferAtomicAndMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_and", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicAndMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicAndMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -2244,32 +1757,20 @@ BufferAtomicAndMubuf::BufferAtomicAndMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicAndMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::AND;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicAndMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_and", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicAndMubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicOrMubuf::BufferAtomicOrMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_or", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicOrMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicOrMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -2291,32 +1792,20 @@ BufferAtomicOrMubuf::BufferAtomicOrMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicOrMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::OR;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicOrMubuf(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_or", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicOrMubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicXorMubuf::BufferAtomicXorMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_xor", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicXorMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicXorMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -2338,32 +1827,20 @@ BufferAtomicXorMubuf::BufferAtomicXorMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicXorMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::XOR;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicXorMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_xor", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicXorMubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicIncMubuf::BufferAtomicIncMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_inc", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicIncMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicIncMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -2385,32 +1862,20 @@ BufferAtomicIncMubuf::BufferAtomicIncMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicIncMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::INC;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicIncMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_inc", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicIncMubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicDecMubuf::BufferAtomicDecMubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_dec", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicDecMubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicDecMubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -2432,32 +1897,20 @@ BufferAtomicDecMubuf::BufferAtomicDecMubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicDecMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::DEC;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicDecMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_dec", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicDecMubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicAddF32Mubuf::BufferAtomicAddF32Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_add_f32", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicAddF32Mubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicAddF32Mubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -2479,32 +1932,20 @@ BufferAtomicAddF32Mubuf::BufferAtomicAddF32Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicAddF32Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::FADD;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicAddF32Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_add_f32", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicAddF32Mubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicPkAddF16Mubuf::BufferAtomicPkAddF16Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicPkAddF16Mubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicPkAddF16Mubuf)),
       vdata(32, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -2526,32 +1967,20 @@ BufferAtomicPkAddF16Mubuf::BufferAtomicPkAddF16Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicPkAddF16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 4;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::FADD;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 4);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicPkAddF16Mubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_pk_add_f16", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicPkAddF16Mubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicAddF64Mubuf::BufferAtomicAddF64Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_add_f64", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicAddF64Mubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicAddF64Mubuf)),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -2573,34 +2002,20 @@ BufferAtomicAddF64Mubuf::BufferAtomicAddF64Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicAddF64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::FADD;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicAddF64Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_add_f64", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicAddF64Mubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicMinF64Mubuf::BufferAtomicMinF64Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_min_f64", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicMinF64Mubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicMinF64Mubuf)),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -2622,34 +2037,20 @@ BufferAtomicMinF64Mubuf::BufferAtomicMinF64Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicMinF64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::FMIN;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicMinF64Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_min_f64", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicMinF64Mubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicMaxF64Mubuf::BufferAtomicMaxF64Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_max_f64", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicMaxF64Mubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicMaxF64Mubuf)),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -2671,34 +2072,20 @@ BufferAtomicMaxF64Mubuf::BufferAtomicMaxF64Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicMaxF64Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::FMAX;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicMaxF64Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_max_f64", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicMaxF64Mubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicSwapX2Mubuf::BufferAtomicSwapX2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_swap_x2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicSwapX2Mubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicSwapX2Mubuf)),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -2720,34 +2107,20 @@ BufferAtomicSwapX2Mubuf::BufferAtomicSwapX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicSwapX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::SWAP;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicSwapX2Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_swap_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicSwapX2Mubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicCmpswapX2Mubuf::BufferAtomicCmpswapX2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_cmpswap_x2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicCmpswapX2Mubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicCmpswapX2Mubuf)),
       vdata(128, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -2774,38 +2147,20 @@ BufferAtomicCmpswapX2Mubuf::BufferAtomicCmpswapX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicCmpswapX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 16);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 2, lane);
-    std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 3, lane);
-    std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicCmpswapX2Mubuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_cmpswap_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicCmpswapX2Mubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicAddX2Mubuf::BufferAtomicAddX2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_add_x2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicAddX2Mubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicAddX2Mubuf)),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -2827,34 +2182,20 @@ BufferAtomicAddX2Mubuf::BufferAtomicAddX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicAddX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::ADD;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicAddX2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_add_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicAddX2Mubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicSubX2Mubuf::BufferAtomicSubX2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_sub_x2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicSubX2Mubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicSubX2Mubuf)),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -2876,34 +2217,20 @@ BufferAtomicSubX2Mubuf::BufferAtomicSubX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicSubX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::SUB;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicSubX2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_sub_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicSubX2Mubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicSminX2Mubuf::BufferAtomicSminX2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_smin_x2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicSminX2Mubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicSminX2Mubuf)),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -2925,34 +2252,20 @@ BufferAtomicSminX2Mubuf::BufferAtomicSminX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicSminX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::SMIN;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicSminX2Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_smin_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicSminX2Mubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicUminX2Mubuf::BufferAtomicUminX2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_umin_x2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicUminX2Mubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicUminX2Mubuf)),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -2974,34 +2287,20 @@ BufferAtomicUminX2Mubuf::BufferAtomicUminX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicUminX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::UMIN;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicUminX2Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_umin_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicUminX2Mubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicSmaxX2Mubuf::BufferAtomicSmaxX2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_smax_x2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicSmaxX2Mubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicSmaxX2Mubuf)),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -3023,34 +2322,20 @@ BufferAtomicSmaxX2Mubuf::BufferAtomicSmaxX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicSmaxX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::SMAX;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicSmaxX2Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_smax_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicSmaxX2Mubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicUmaxX2Mubuf::BufferAtomicUmaxX2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_umax_x2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicUmaxX2Mubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicUmaxX2Mubuf)),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -3072,34 +2357,20 @@ BufferAtomicUmaxX2Mubuf::BufferAtomicUmaxX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicUmaxX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::UMAX;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicUmaxX2Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_umax_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicUmaxX2Mubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicAndX2Mubuf::BufferAtomicAndX2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_and_x2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicAndX2Mubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicAndX2Mubuf)),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -3121,34 +2392,20 @@ BufferAtomicAndX2Mubuf::BufferAtomicAndX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicAndX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::AND;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicAndX2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_and_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicAndX2Mubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicOrX2Mubuf::BufferAtomicOrX2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_or_x2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicOrX2Mubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicOrX2Mubuf)),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -3170,34 +2427,20 @@ BufferAtomicOrX2Mubuf::BufferAtomicOrX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicOrX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::OR;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicOrX2Mubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_or_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicOrX2Mubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicXorX2Mubuf::BufferAtomicXorX2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_xor_x2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicXorX2Mubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicXorX2Mubuf)),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -3219,34 +2462,20 @@ BufferAtomicXorX2Mubuf::BufferAtomicXorX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicXorX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::XOR;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicXorX2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_xor_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicXorX2Mubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicIncX2Mubuf::BufferAtomicIncX2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_inc_x2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicIncX2Mubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicIncX2Mubuf)),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -3268,34 +2497,20 @@ BufferAtomicIncX2Mubuf::BufferAtomicIncX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicIncX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::INC;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicIncX2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_inc_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicIncX2Mubuf>(opcode);
 }
+} // namespace detail
 
 BufferAtomicDecX2Mubuf::BufferAtomicDecX2Mubuf(const MachineInst *inst)
     : Mubuf("buffer_atomic_dec_x2", reinterpret_cast<const OpEncoding *>(inst),
-            make_exec_fn<BufferAtomicDecX2Mubuf>()),
+            selected_exec_fn(InstructionExecutionId::BufferAtomicDecX2Mubuf)),
       vdata(64, OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -3317,30 +2532,16 @@ BufferAtomicDecX2Mubuf::BufferAtomicDecX2Mubuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void BufferAtomicDecX2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->elem_size = 8;
-  d->num_elems = 1;
-  d->is_load = (inst_.sc0 != 0);
-  d->atomic_op = amdgpu::AtomicOp::DEC;
-  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
-  d->non_temporal = inst_.nt;
-  mubuf_calculate_addresses(inst_, wf, *d);
-  auto &cu = wf.cu();
-  uint64_t exec = wf.exec();
-  uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
-  }
-  set_data(std::move(d));
+namespace detail {
+DecodeResult decodeBufferAtomicDecX2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mubuf::validate_encoding(
+      "buffer_atomic_dec_x2", reinterpret_cast<const Mubuf::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<BufferAtomicDecX2Mubuf>(opcode);
 }
+} // namespace detail
 
 } // namespace cdna3
 } // namespace rocjitsu

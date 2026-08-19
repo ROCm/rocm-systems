@@ -9,7 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
@@ -22,12 +22,46 @@
 
 #include <algorithm>
 #include <cassert>
-#include <cstring>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 
 namespace rocjitsu {
 namespace amdgpu {
+
+namespace {
+constexpr uint32_t kPrivilegedStatusBit = 1u << 5;
+
+bool is_privileged(const Wavefront &wf) { return (wf.status_raw() & kPrivilegedStatusBit) != 0; }
+
+uint32_t pack_barrier_state(uint32_t member_count, uint32_t signal_count,
+                            uint32_t allocation_blocks = 0) {
+  return 1u | ((member_count & 0x7fu) << 4) | ((signal_count & 0x7fu) << 16) |
+         ((allocation_blocks & 0x7u) << 24);
+}
+} // namespace
+
+template <GpuIsa Isa> void validate_compute_unit_config(const ComputeUnitCore::Config &config) {
+  using Limits = IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, Isa>;
+
+  if (config.num_wf_slots > Isa::MAX_WF_SLOTS) {
+    throw util::ConfigError("num_wf_slots exceeds the ISA maximum of " +
+                            std::to_string(Isa::MAX_WF_SLOTS));
+  }
+
+  const uint32_t vgprs_per_block =
+      std::max(config.vgprs_per_wf, Limits::MAX_ACCVGPR_PHYSICAL_LIMIT);
+  if (vgprs_per_block > Limits::MAX_VGPRS_PER_BLOCK) {
+    throw util::ConfigError("effective VGPRs per wavefront exceeds the ISA maximum of " +
+                            std::to_string(Limits::MAX_VGPRS_PER_BLOCK));
+  }
+
+  const uint64_t vgpr_file_registers = static_cast<uint64_t>(config.num_wf_slots) * vgprs_per_block;
+  if (vgpr_file_registers > std::numeric_limits<uint32_t>::max() ||
+      vgpr_file_registers > Limits::MAX_VGPR_FILE_REGISTERS) {
+    throw util::ConfigError("configured VGPR file exceeds the ISA maximum capacity");
+  }
+}
 
 ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory,
                                  L2Cache *l2, uint32_t wf_size)
@@ -63,6 +97,7 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
   // Helper: instantiate the ISA-specific CU for the given execution mode.
 #define ROCJITSU_CU_CASE(ARCH_ENUM, ISA_TYPE)                                                      \
   case ARCH_ENUM:                                                                                  \
+    validate_compute_unit_config<ISA_TYPE>(config);                                                \
     switch (exec_mode) {                                                                           \
     case simdojo::ExecMode::FUNCTIONAL:                                                            \
       return std::make_unique<IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, ISA_TYPE>>(        \
@@ -84,7 +119,7 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
     ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA3, rdna3::Isa);
     ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA3_5, rdna3_5::Isa);
     ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA4, rdna4::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_GFX1250, gfx1250::Isa);
+    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA5, cdna5::Isa);
   default:
     break;
   }
@@ -130,12 +165,6 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
     sgpr_file_.free(static_cast<uint32_t>(sgpr_base));
     return nullptr;
   }
-
-  // Zero the allocated register blocks so reused slots don't inherit stale
-  // values from previous kernel runs.
-  std::fill(&sgpr_file_[sgpr_base], &sgpr_file_[sgpr_base] + config_.sgprs_per_wf, 0u);
-  std::memset(raw_vgpr_data(static_cast<uint32_t>(vgpr_base)), 0,
-              vgpr_allocation_block_size() * wf_size_ * sizeof(uint32_t));
 
   // Invalidate the L1 scalar cache so this wavefront reads fresh kernel
   // arguments from L2/memory rather than stale lines from a prior kernel.
@@ -190,12 +219,231 @@ void ComputeUnitCore::maybe_reset_lds_alloc() {
     reset_lds_alloc();
 }
 
+void ComputeUnitCore::begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint32_t wf_count,
+                                      uint32_t num_named_barriers) {
+  const uint64_t key = wg_key(dispatch_id, wg_id);
+  active_wgs_[key] = wf_count;
+  if (wf_count <= 1) {
+    // Single-wave workgroups are not allocated workgroup or named barriers.
+    barrier_wgs_.erase(key);
+    return;
+  }
+
+  auto &group = barrier_wgs_[key];
+  group = {};
+  group.allocated_count = std::min(num_named_barriers, kMaxNamedBarriers);
+  for (auto &barrier : group.workgroup)
+    barrier.member_count = wf_count;
+}
+
+void ComputeUnitCore::named_barrier_init(Wavefront &wf, int32_t barrier_id, uint32_t member_count) {
+  auto group = barrier_wgs_.find(wg_key(wf.dispatch_id(), wf.wg_id()));
+  if (group == barrier_wgs_.end() || barrier_id <= 0 ||
+      static_cast<uint32_t>(barrier_id) > group->second.allocated_count)
+    return;
+
+  auto &barrier = group->second.named[static_cast<uint32_t>(barrier_id)];
+  if (member_count != 0)
+    barrier.member_count = member_count & 0x7fu;
+  barrier.signal_count = 0;
+}
+
+void ComputeUnitCore::named_barrier_join(Wavefront &wf, int32_t barrier_id) {
+  auto group = barrier_wgs_.find(wg_key(wf.dispatch_id(), wf.wg_id()));
+  if (group == barrier_wgs_.end())
+    return;
+  if (barrier_id == 0) {
+    wf.named_barrier_id_ = 0;
+    wf.barrier_complete_[kNamedBarrierBit] = false;
+    if (wf.waiting_barrier_bit_ == kNamedBarrierBit)
+      wf.waiting_barrier_bit_ = Wavefront::kNoBarrierWait;
+    return;
+  }
+  if (barrier_id < 0 || static_cast<uint32_t>(barrier_id) > group->second.allocated_count)
+    return;
+  wf.named_barrier_id_ = static_cast<uint32_t>(barrier_id);
+  wf.barrier_complete_[kNamedBarrierBit] = false;
+  if (wf.waiting_barrier_bit_ == kNamedBarrierBit)
+    wf.waiting_barrier_bit_ = Wavefront::kNoBarrierWait;
+}
+
+bool ComputeUnitCore::barrier_signal(Wavefront &wf, int32_t barrier_id, uint32_t member_count) {
+  if (barrier_id == kClusterBarrierId || barrier_id == kClusterTrapBarrierId) {
+    if (barrier_id == kClusterTrapBarrierId && !is_privileged(wf))
+      return false;
+    return cp_ ? cp_->cluster_barrier_signal(wf, barrier_id) : false;
+  }
+
+  auto group = barrier_wgs_.find(wg_key(wf.dispatch_id(), wf.wg_id()));
+  if (group == barrier_wgs_.end() || barrier_id == 0 || barrier_id < kWorkgroupTrapBarrierId)
+    return false;
+
+  BarrierCounter *barrier = nullptr;
+  uint8_t completion_bit = kNamedBarrierBit;
+  uint32_t named_id = 0;
+  if (barrier_id > 0) {
+    named_id = static_cast<uint32_t>(barrier_id);
+    if (named_id > group->second.allocated_count)
+      return false;
+    barrier = &group->second.named[named_id];
+    if (member_count != 0)
+      barrier->member_count = member_count & 0x7fu;
+  } else {
+    if (barrier_id == kWorkgroupTrapBarrierId && !is_privileged(wf))
+      return false;
+    completion_bit = static_cast<uint8_t>(-barrier_id);
+    barrier = &group->second.workgroup[completion_bit - kWorkgroupBarrierBit];
+  }
+
+  if (barrier->member_count == 0)
+    return false;
+  const bool is_first = barrier->signal_count == 0;
+  barrier->signal_count = std::min(barrier->signal_count + 1, 0x7fu);
+  if (barrier->signal_count < barrier->member_count)
+    return is_first;
+
+  barrier->signal_count = 0;
+  auto members = complete_barrier(wf.dispatch_id(), wf.wg_id(), completion_bit, named_id);
+  notify_barrier_complete(members);
+  return is_first;
+}
+
+std::vector<Wavefront *> ComputeUnitCore::complete_barrier(uint32_t dispatch_id, uint32_t wg_id,
+                                                           uint8_t completion_bit,
+                                                           uint32_t named_barrier_id) {
+  std::vector<Wavefront *> members;
+  for (const auto &candidate : wfs_) {
+    if (candidate->is_halted() || candidate->dispatch_id() != dispatch_id ||
+        candidate->wg_id() != wg_id)
+      continue;
+    if (completion_bit == kNamedBarrierBit && candidate->named_barrier_id_ != named_barrier_id)
+      continue;
+    candidate->barrier_complete_[completion_bit] = true;
+    members.push_back(candidate.get());
+  }
+  for (auto *member : members) {
+    if (member->state() == WfState::BARRIER && member->waiting_barrier_bit_ == completion_bit) {
+      member->barrier_complete_[completion_bit] = false;
+      member->waiting_barrier_bit_ = Wavefront::kNoBarrierWait;
+      member->set_state(WfState::RUNNING);
+      member->set_ready_cycle(cycle_counter_);
+    }
+  }
+  return members;
+}
+
+void ComputeUnitCore::notify_barrier_complete(std::span<Wavefront *> members) {
+  if (!members.empty())
+    plugin_group_->onAmdgpuBarrierResolved(members);
+}
+
+uint32_t ComputeUnitCore::barrier_state(const Wavefront &wf, int32_t barrier_id) const {
+  auto group = barrier_wgs_.find(wg_key(wf.dispatch_id(), wf.wg_id()));
+  const uint32_t allocation_blocks =
+      group == barrier_wgs_.end() ? 0 : (group->second.allocated_count + 3) / 4;
+
+  if (barrier_id == kClusterBarrierId || barrier_id == kClusterTrapBarrierId) {
+    if (barrier_id == kClusterTrapBarrierId && !is_privileged(wf))
+      return 0;
+    return cp_ ? cp_->cluster_barrier_state(wf, barrier_id, allocation_blocks) : 0;
+  }
+
+  if (group == barrier_wgs_.end() || barrier_id == 0 || barrier_id < kWorkgroupTrapBarrierId)
+    return 0;
+
+  if (barrier_id < 0) {
+    if (barrier_id == kWorkgroupTrapBarrierId && !is_privileged(wf))
+      return 0;
+    const auto &barrier = group->second.workgroup[static_cast<uint32_t>(-barrier_id - 1)];
+    return pack_barrier_state(barrier.member_count, barrier.signal_count, allocation_blocks);
+  }
+
+  const uint32_t id = static_cast<uint32_t>(barrier_id);
+  if (id > group->second.allocated_count)
+    return 0;
+  const auto &barrier = group->second.named[id];
+  return pack_barrier_state(barrier.member_count, barrier.signal_count, allocation_blocks);
+}
+
+void ComputeUnitCore::barrier_wait(Wavefront &wf, int32_t barrier_id) {
+  uint8_t completion_bit = kNamedBarrierBit;
+  if (barrier_id >= 0) {
+    auto group = barrier_wgs_.find(wg_key(wf.dispatch_id(), wf.wg_id()));
+    if (group == barrier_wgs_.end() || wf.named_barrier_id_ == 0 ||
+        wf.named_barrier_id_ > group->second.allocated_count)
+      return;
+  } else {
+    if (barrier_id < kClusterTrapBarrierId ||
+        ((barrier_id == kWorkgroupTrapBarrierId || barrier_id == kClusterTrapBarrierId) &&
+         !is_privileged(wf)))
+      return;
+    completion_bit = static_cast<uint8_t>(-barrier_id);
+    if (completion_bit <= kWorkgroupTrapBarrierBit) {
+      if (!barrier_wgs_.contains(wg_key(wf.dispatch_id(), wf.wg_id())))
+        return;
+    } else if (!cp_ || !cp_->cluster_barrier_valid(wf, barrier_id)) {
+      return;
+    }
+  }
+
+  if (wf.barrier_complete_[completion_bit]) {
+    wf.barrier_complete_[completion_bit] = false;
+    return;
+  }
+  wf.waiting_barrier_bit_ = completion_bit;
+  wf.set_state(WfState::BARRIER);
+}
+
+bool ComputeUnitCore::named_barrier_leave(Wavefront &wf) {
+  auto group = barrier_wgs_.find(wg_key(wf.dispatch_id(), wf.wg_id()));
+  const uint32_t id = wf.named_barrier_id_;
+  if (group == barrier_wgs_.end())
+    return false;
+  if (id == 0)
+    return true;
+  if (id > group->second.allocated_count)
+    return false;
+
+  wf.named_barrier_id_ = 0;
+  wf.barrier_complete_[kNamedBarrierBit] = false;
+  if (wf.waiting_barrier_bit_ == kNamedBarrierBit)
+    wf.waiting_barrier_bit_ = Wavefront::kNoBarrierWait;
+  auto &barrier = group->second.named[id];
+  if (barrier.member_count != 0)
+    --barrier.member_count;
+  if (barrier.signal_count >= barrier.member_count) {
+    barrier.signal_count = 0;
+    auto members = complete_barrier(wf.dispatch_id(), wf.wg_id(), kNamedBarrierBit, id);
+    notify_barrier_complete(members);
+  }
+  return barrier.member_count == 0;
+}
+
 void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id) {
   auto key = wg_key(dispatch_id, wg_id);
+  auto group = barrier_wgs_.find(key);
+  if (group != barrier_wgs_.end()) {
+    const auto retire_member = [&](BarrierCounter &barrier, uint8_t completion_bit,
+                                   uint32_t joined_id = 0) {
+      if (barrier.member_count == 0)
+        return;
+      --barrier.member_count;
+      if (barrier.member_count == 0 || barrier.signal_count < barrier.member_count)
+        return;
+      barrier.signal_count = 0;
+      auto members = complete_barrier(dispatch_id, wg_id, completion_bit, joined_id);
+      notify_barrier_complete(members);
+    };
+
+    retire_member(group->second.workgroup[0], kWorkgroupBarrierBit);
+    retire_member(group->second.workgroup[1], kWorkgroupTrapBarrierBit);
+  }
+
   auto it = active_wgs_.find(key);
   if (it != active_wgs_.end() && --it->second == 0) {
     plugin_group_->onAmdgpuWorkgroupCompleted(dispatch_id, wg_id);
     active_wgs_.erase(it);
+    barrier_wgs_.erase(key);
     if (cp_)
       cp_->notify_wg_complete(dispatch_id, wg_id);
   }
@@ -216,6 +464,7 @@ void ComputeUnitCore::abort_workgroup(uint32_t dispatch_id, uint32_t wg_id) {
       free_wavefront_resources(*w);
   }
   active_wgs_.erase(wg_key(dispatch_id, wg_id));
+  barrier_wgs_.erase(wg_key(dispatch_id, wg_id));
   maybe_reset_lds_alloc();
 }
 
@@ -318,14 +567,15 @@ void ComputeUnitCore::update_wf_states() {
   }
 
   for (auto &w : wfs_) {
-    if (w->state() != WfState::BARRIER)
+    if (w->state() != WfState::BARRIER || w->waiting_barrier_bit_ != Wavefront::kNoBarrierWait)
       continue;
     uint32_t did = w->dispatch_id();
     uint32_t wg = w->wg_id();
     bool all_at_barrier = true;
     for (auto &w2 : wfs_) {
       if (w2->dispatch_id() == did && w2->wg_id() == wg && w2->state() != WfState::HALTED &&
-          w2->state() != WfState::BARRIER) {
+          (w2->state() != WfState::BARRIER ||
+           w2->waiting_barrier_bit_ != Wavefront::kNoBarrierWait)) {
         all_at_barrier = false;
         break;
       }
@@ -333,7 +583,8 @@ void ComputeUnitCore::update_wf_states() {
     if (all_at_barrier) {
       std::vector<Wavefront *> barrier_wfs;
       for (auto &w2 : wfs_)
-        if (w2->dispatch_id() == did && w2->wg_id() == wg && w2->state() == WfState::BARRIER)
+        if (w2->dispatch_id() == did && w2->wg_id() == wg && w2->state() == WfState::BARRIER &&
+            w2->waiting_barrier_bit_ == Wavefront::kNoBarrierWait)
           barrier_wfs.push_back(w2.get());
       plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(barrier_wfs));
       for (auto *bwf : barrier_wfs) {
@@ -353,23 +604,16 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
 
   active->trace_inst_count_++;
 
-  Instruction *inst = nullptr;
-  try {
-    inst = decoder_->decode(words);
-  } catch (const util::InvalidInst &e) {
-    util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(InvalidInst) pc=0x",
+  util::StringDiagnostic decode_error;
+  DecodeResult decoded = decoder_->decode(words, decode_error.emitter());
+  if (decoded.failed()) {
+    util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(decode rejection) pc=0x",
                      std::hex, active->pc, " words=[0x", words[0], ",0x", words[1], ",0x", words[2],
-                     ",0x", words[3], "]", std::dec, " what=", e.what());
+                     ",0x", words[3], "]", std::dec, " what=", decode_error.message());
     active->halt();
     return;
   }
-  if (!inst) {
-    util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(null decode) pc=0x",
-                     std::hex, active->pc, " words=[0x", words[0], ",0x", words[1], ",0x", words[2],
-                     ",0x", words[3], "]", std::dec);
-    active->halt();
-    return;
-  }
+  Instruction *inst = decoded.value().release();
 
   int inst_size_signed = inst->size();
   assert(inst_size_signed > 0 && "instruction size must be positive");
@@ -506,7 +750,7 @@ ROCJITSU_CU_INSTANTIATE(rdna2::Isa);
 ROCJITSU_CU_INSTANTIATE(rdna3::Isa);
 ROCJITSU_CU_INSTANTIATE(rdna3_5::Isa);
 ROCJITSU_CU_INSTANTIATE(rdna4::Isa);
-ROCJITSU_CU_INSTANTIATE(gfx1250::Isa);
+ROCJITSU_CU_INSTANTIATE(cdna5::Isa);
 
 #undef ROCJITSU_CU_INSTANTIATE
 

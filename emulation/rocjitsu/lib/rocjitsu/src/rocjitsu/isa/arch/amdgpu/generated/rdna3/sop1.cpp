@@ -5,25 +5,15 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/sop1.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/vm/amdgpu/compute_unit.h"
-#include "rocjitsu/vm/amdgpu/register_access.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/data_types.h"
-#include "util/except.h"
-#include "util/log.h"
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <format>
-#include <limits>
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace rdna3 {
 
 SMovB32Sop1::SMovB32Sop1(const MachineInst *inst)
-    : Sop1("s_mov_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SMovB32Sop1>()),
+    : Sop1("s_mov_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SMovB32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -37,10 +27,19 @@ SMovB32Sop1::SMovB32Sop1(const MachineInst *inst)
   flags_ |= RESULT_COPY;
 }
 
-void SMovB32Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mov_b32_sop1(*this, wf); }
+namespace detail {
+DecodeResult decodeSMovB32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_mov_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SMovB32Sop1>(opcode);
+}
+} // namespace detail
 
 SMovB64Sop1::SMovB64Sop1(const MachineInst *inst)
-    : Sop1("s_mov_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SMovB64Sop1>()),
+    : Sop1("s_mov_b64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SMovB64Sop1)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -55,10 +54,19 @@ SMovB64Sop1::SMovB64Sop1(const MachineInst *inst)
   flags_ |= RESULT_COPY;
 }
 
-void SMovB64Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mov_b64_sop1(*this, wf); }
+namespace detail {
+DecodeResult decodeSMovB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_mov_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SMovB64Sop1>(opcode);
+}
+} // namespace detail
 
 SCmovB32Sop1::SCmovB32Sop1(const MachineInst *inst)
-    : Sop1("s_cmov_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SCmovB32Sop1>()),
+    : Sop1("s_cmov_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmovB32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -76,12 +84,19 @@ SCmovB32Sop1::SCmovB32Sop1(const MachineInst *inst)
   flags_ |= PREDICATED_DEF;
 }
 
-void SCmovB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmov_b32_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSCmovB32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_cmov_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SCmovB32Sop1>(opcode);
 }
+} // namespace detail
 
 SCmovB64Sop1::SCmovB64Sop1(const MachineInst *inst)
-    : Sop1("s_cmov_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SCmovB64Sop1>()),
+    : Sop1("s_cmov_b64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SCmovB64Sop1)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -100,12 +115,19 @@ SCmovB64Sop1::SCmovB64Sop1(const MachineInst *inst)
   flags_ |= PREDICATED_DEF;
 }
 
-void SCmovB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmov_b64_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSCmovB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_cmov_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SCmovB64Sop1>(opcode);
 }
+} // namespace detail
 
 SBrevB32Sop1::SBrevB32Sop1(const MachineInst *inst)
-    : Sop1("s_brev_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SBrevB32Sop1>()),
+    : Sop1("s_brev_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SBrevB32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -118,12 +140,19 @@ SBrevB32Sop1::SBrevB32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SBrevB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_brev_b32_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSBrevB32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_brev_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBrevB32Sop1>(opcode);
 }
+} // namespace detail
 
 SBrevB64Sop1::SBrevB64Sop1(const MachineInst *inst)
-    : Sop1("s_brev_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SBrevB64Sop1>()),
+    : Sop1("s_brev_b64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SBrevB64Sop1)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -137,13 +166,19 @@ SBrevB64Sop1::SBrevB64Sop1(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
 }
 
-void SBrevB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_brev_b64_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSBrevB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_brev_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBrevB64Sop1>(opcode);
 }
+} // namespace detail
 
 SCtzI32B32Sop1::SCtzI32B32Sop1(const MachineInst *inst)
     : Sop1("s_ctz_i32_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCtzI32B32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SCtzI32B32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -156,13 +191,19 @@ SCtzI32B32Sop1::SCtzI32B32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SCtzI32B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_ctz_i32_b32_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSCtzI32B32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_ctz_i32_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SCtzI32B32Sop1>(opcode);
 }
+} // namespace detail
 
 SCtzI32B64Sop1::SCtzI32B64Sop1(const MachineInst *inst)
     : Sop1("s_ctz_i32_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SCtzI32B64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SCtzI32B64Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -176,13 +217,19 @@ SCtzI32B64Sop1::SCtzI32B64Sop1(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
 }
 
-void SCtzI32B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_ctz_i32_b64_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSCtzI32B64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_ctz_i32_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SCtzI32B64Sop1>(opcode);
 }
+} // namespace detail
 
 SClzI32U32Sop1::SClzI32U32Sop1(const MachineInst *inst)
     : Sop1("s_clz_i32_u32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SClzI32U32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SClzI32U32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -195,13 +242,19 @@ SClzI32U32Sop1::SClzI32U32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SClzI32U32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_clz_i32_u32_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSClzI32U32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_clz_i32_u32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SClzI32U32Sop1>(opcode);
 }
+} // namespace detail
 
 SClzI32U64Sop1::SClzI32U64Sop1(const MachineInst *inst)
     : Sop1("s_clz_i32_u64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SClzI32U64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SClzI32U64Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -215,12 +268,19 @@ SClzI32U64Sop1::SClzI32U64Sop1(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
 }
 
-void SClzI32U64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_clz_i32_u64_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSClzI32U64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_clz_i32_u64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SClzI32U64Sop1>(opcode);
 }
+} // namespace detail
 
 SClsI32Sop1::SClsI32Sop1(const MachineInst *inst)
-    : Sop1("s_cls_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SClsI32Sop1>()),
+    : Sop1("s_cls_i32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SClsI32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -233,11 +293,19 @@ SClsI32Sop1::SClsI32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SClsI32Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_cls_i32_sop1(*this, wf); }
+namespace detail {
+DecodeResult decodeSClsI32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_cls_i32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SClsI32Sop1>(opcode);
+}
+} // namespace detail
 
 SClsI32I64Sop1::SClsI32I64Sop1(const MachineInst *inst)
     : Sop1("s_cls_i32_i64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SClsI32I64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SClsI32I64Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -251,13 +319,19 @@ SClsI32I64Sop1::SClsI32I64Sop1(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
 }
 
-void SClsI32I64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cls_i32_i64_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSClsI32I64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_cls_i32_i64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SClsI32I64Sop1>(opcode);
 }
+} // namespace detail
 
 SSextI32I8Sop1::SSextI32I8Sop1(const MachineInst *inst)
     : Sop1("s_sext_i32_i8", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SSextI32I8Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SSextI32I8Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -271,13 +345,19 @@ SSextI32I8Sop1::SSextI32I8Sop1(const MachineInst *inst)
                     reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void SSextI32I8Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sext_i32_i8_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSSextI32I8Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_sext_i32_i8", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SSextI32I8Sop1>(opcode);
 }
+} // namespace detail
 
 SSextI32I16Sop1::SSextI32I16Sop1(const MachineInst *inst)
     : Sop1("s_sext_i32_i16", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SSextI32I16Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SSextI32I16Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(16, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -291,13 +371,20 @@ SSextI32I16Sop1::SSextI32I16Sop1(const MachineInst *inst)
                     reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
 }
 
-void SSextI32I16Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sext_i32_i16_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSSextI32I16Sop1(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_sext_i32_i16", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SSextI32I16Sop1>(opcode);
 }
+} // namespace detail
 
 SBitset0B32Sop1::SBitset0B32Sop1(const MachineInst *inst)
     : Sop1("s_bitset0_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBitset0B32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SBitset0B32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   src_operands_[0] = &sdst;
@@ -311,13 +398,20 @@ SBitset0B32Sop1::SBitset0B32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SBitset0B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bitset0_b32_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSBitset0B32Sop1(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_bitset0_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBitset0B32Sop1>(opcode);
 }
+} // namespace detail
 
 SBitset0B64Sop1::SBitset0B64Sop1(const MachineInst *inst)
     : Sop1("s_bitset0_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBitset0B64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SBitset0B64Sop1)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   src_operands_[0] = &sdst;
@@ -331,13 +425,20 @@ SBitset0B64Sop1::SBitset0B64Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SBitset0B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bitset0_b64_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSBitset0B64Sop1(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_bitset0_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBitset0B64Sop1>(opcode);
 }
+} // namespace detail
 
 SBitset1B32Sop1::SBitset1B32Sop1(const MachineInst *inst)
     : Sop1("s_bitset1_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBitset1B32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SBitset1B32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   src_operands_[0] = &sdst;
@@ -351,13 +452,20 @@ SBitset1B32Sop1::SBitset1B32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SBitset1B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bitset1_b32_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSBitset1B32Sop1(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_bitset1_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBitset1B32Sop1>(opcode);
 }
+} // namespace detail
 
 SBitset1B64Sop1::SBitset1B64Sop1(const MachineInst *inst)
     : Sop1("s_bitset1_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBitset1B64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SBitset1B64Sop1)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   src_operands_[0] = &sdst;
@@ -371,13 +479,20 @@ SBitset1B64Sop1::SBitset1B64Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SBitset1B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bitset1_b64_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSBitset1B64Sop1(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_bitset1_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBitset1B64Sop1>(opcode);
 }
+} // namespace detail
 
 SBitreplicateB64B32Sop1::SBitreplicateB64B32Sop1(const MachineInst *inst)
     : Sop1("s_bitreplicate_b64_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBitreplicateB64B32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SBitreplicateB64B32Sop1)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
@@ -390,12 +505,20 @@ SBitreplicateB64B32Sop1::SBitreplicateB64B32Sop1(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SBitreplicateB64B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bitreplicate_b64_b32_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSBitreplicateB64B32Sop1(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_bitreplicate_b64_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBitreplicateB64B32Sop1>(opcode);
 }
+} // namespace detail
 
 SAbsI32Sop1::SAbsI32Sop1(const MachineInst *inst)
-    : Sop1("s_abs_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SAbsI32Sop1>()),
+    : Sop1("s_abs_i32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SAbsI32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -411,11 +534,19 @@ SAbsI32Sop1::SAbsI32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SAbsI32Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_abs_i32_sop1(*this, wf); }
+namespace detail {
+DecodeResult decodeSAbsI32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_abs_i32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAbsI32Sop1>(opcode);
+}
+} // namespace detail
 
 SBcnt0I32B32Sop1::SBcnt0I32B32Sop1(const MachineInst *inst)
     : Sop1("s_bcnt0_i32_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBcnt0I32B32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SBcnt0I32B32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -431,13 +562,20 @@ SBcnt0I32B32Sop1::SBcnt0I32B32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SBcnt0I32B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bcnt0_i32_b32_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSBcnt0I32B32Sop1(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_bcnt0_i32_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBcnt0I32B32Sop1>(opcode);
 }
+} // namespace detail
 
 SBcnt0I32B64Sop1::SBcnt0I32B64Sop1(const MachineInst *inst)
     : Sop1("s_bcnt0_i32_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBcnt0I32B64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SBcnt0I32B64Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -454,13 +592,20 @@ SBcnt0I32B64Sop1::SBcnt0I32B64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SBcnt0I32B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bcnt0_i32_b64_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSBcnt0I32B64Sop1(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_bcnt0_i32_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBcnt0I32B64Sop1>(opcode);
 }
+} // namespace detail
 
 SBcnt1I32B32Sop1::SBcnt1I32B32Sop1(const MachineInst *inst)
     : Sop1("s_bcnt1_i32_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBcnt1I32B32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SBcnt1I32B32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -476,13 +621,20 @@ SBcnt1I32B32Sop1::SBcnt1I32B32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SBcnt1I32B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bcnt1_i32_b32_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSBcnt1I32B32Sop1(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_bcnt1_i32_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBcnt1I32B32Sop1>(opcode);
 }
+} // namespace detail
 
 SBcnt1I32B64Sop1::SBcnt1I32B64Sop1(const MachineInst *inst)
     : Sop1("s_bcnt1_i32_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SBcnt1I32B64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SBcnt1I32B64Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -499,13 +651,20 @@ SBcnt1I32B64Sop1::SBcnt1I32B64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SBcnt1I32B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_bcnt1_i32_b64_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSBcnt1I32B64Sop1(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_bcnt1_i32_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SBcnt1I32B64Sop1>(opcode);
 }
+} // namespace detail
 
 SQuadmaskB32Sop1::SQuadmaskB32Sop1(const MachineInst *inst)
     : Sop1("s_quadmask_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SQuadmaskB32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SQuadmaskB32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -521,13 +680,20 @@ SQuadmaskB32Sop1::SQuadmaskB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SQuadmaskB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_quadmask_b32_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSQuadmaskB32Sop1(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_quadmask_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SQuadmaskB32Sop1>(opcode);
 }
+} // namespace detail
 
 SQuadmaskB64Sop1::SQuadmaskB64Sop1(const MachineInst *inst)
     : Sop1("s_quadmask_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SQuadmaskB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SQuadmaskB64Sop1)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -544,12 +710,20 @@ SQuadmaskB64Sop1::SQuadmaskB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SQuadmaskB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_quadmask_b64_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSQuadmaskB64Sop1(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_quadmask_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SQuadmaskB64Sop1>(opcode);
 }
+} // namespace detail
 
 SWqmB32Sop1::SWqmB32Sop1(const MachineInst *inst)
-    : Sop1("s_wqm_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SWqmB32Sop1>()),
+    : Sop1("s_wqm_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SWqmB32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -565,10 +739,19 @@ SWqmB32Sop1::SWqmB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SWqmB32Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_wqm_b32_sop1(*this, wf); }
+namespace detail {
+DecodeResult decodeSWqmB32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_wqm_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SWqmB32Sop1>(opcode);
+}
+} // namespace detail
 
 SWqmB64Sop1::SWqmB64Sop1(const MachineInst *inst)
-    : Sop1("s_wqm_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SWqmB64Sop1>()),
+    : Sop1("s_wqm_b64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SWqmB64Sop1)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -585,10 +768,19 @@ SWqmB64Sop1::SWqmB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SWqmB64Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_wqm_b64_sop1(*this, wf); }
+namespace detail {
+DecodeResult decodeSWqmB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_wqm_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SWqmB64Sop1>(opcode);
+}
+} // namespace detail
 
 SNotB32Sop1::SNotB32Sop1(const MachineInst *inst)
-    : Sop1("s_not_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SNotB32Sop1>()),
+    : Sop1("s_not_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SNotB32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -604,10 +796,19 @@ SNotB32Sop1::SNotB32Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SNotB32Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_not_b32_sop1(*this, wf); }
+namespace detail {
+DecodeResult decodeSNotB32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_not_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SNotB32Sop1>(opcode);
+}
+} // namespace detail
 
 SNotB64Sop1::SNotB64Sop1(const MachineInst *inst)
-    : Sop1("s_not_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SNotB64Sop1>()),
+    : Sop1("s_not_b64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SNotB64Sop1)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
@@ -624,11 +825,19 @@ SNotB64Sop1::SNotB64Sop1(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
 }
 
-void SNotB64Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_not_b64_sop1(*this, wf); }
+namespace detail {
+DecodeResult decodeSNotB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_not_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SNotB64Sop1>(opcode);
+}
+} // namespace detail
 
 SAndSaveexecB32Sop1::SAndSaveexecB32Sop1(const MachineInst *inst)
     : Sop1("s_and_saveexec_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAndSaveexecB32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SAndSaveexecB32Sop1)),
       sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -651,13 +860,20 @@ SAndSaveexecB32Sop1::SAndSaveexecB32Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void SAndSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_and_saveexec_b32_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSAndSaveexecB32Sop1(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_and_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAndSaveexecB32Sop1>(opcode);
 }
+} // namespace detail
 
 SAndSaveexecB64Sop1::SAndSaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_and_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAndSaveexecB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SAndSaveexecB64Sop1)),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -681,13 +897,20 @@ SAndSaveexecB64Sop1::SAndSaveexecB64Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void SAndSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_and_saveexec_b64_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSAndSaveexecB64Sop1(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_and_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAndSaveexecB64Sop1>(opcode);
 }
+} // namespace detail
 
 SOrSaveexecB32Sop1::SOrSaveexecB32Sop1(const MachineInst *inst)
     : Sop1("s_or_saveexec_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SOrSaveexecB32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SOrSaveexecB32Sop1)),
       sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -711,13 +934,20 @@ SOrSaveexecB32Sop1::SOrSaveexecB32Sop1(const MachineInst *inst)
   flags_ |= RESULT_OR;
 }
 
-void SOrSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_or_saveexec_b32_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSOrSaveexecB32Sop1(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_or_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SOrSaveexecB32Sop1>(opcode);
 }
+} // namespace detail
 
 SOrSaveexecB64Sop1::SOrSaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_or_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SOrSaveexecB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SOrSaveexecB64Sop1)),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -742,13 +972,20 @@ SOrSaveexecB64Sop1::SOrSaveexecB64Sop1(const MachineInst *inst)
   flags_ |= RESULT_OR;
 }
 
-void SOrSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_or_saveexec_b64_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSOrSaveexecB64Sop1(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_or_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SOrSaveexecB64Sop1>(opcode);
 }
+} // namespace detail
 
 SXorSaveexecB32Sop1::SXorSaveexecB32Sop1(const MachineInst *inst)
     : Sop1("s_xor_saveexec_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SXorSaveexecB32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SXorSaveexecB32Sop1)),
       sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -771,13 +1008,20 @@ SXorSaveexecB32Sop1::SXorSaveexecB32Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void SXorSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_xor_saveexec_b32_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSXorSaveexecB32Sop1(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_xor_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SXorSaveexecB32Sop1>(opcode);
 }
+} // namespace detail
 
 SXorSaveexecB64Sop1::SXorSaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_xor_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SXorSaveexecB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SXorSaveexecB64Sop1)),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -801,13 +1045,20 @@ SXorSaveexecB64Sop1::SXorSaveexecB64Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void SXorSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_xor_saveexec_b64_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSXorSaveexecB64Sop1(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_xor_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SXorSaveexecB64Sop1>(opcode);
 }
+} // namespace detail
 
 SNandSaveexecB32Sop1::SNandSaveexecB32Sop1(const MachineInst *inst)
     : Sop1("s_nand_saveexec_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SNandSaveexecB32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SNandSaveexecB32Sop1)),
       sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -830,13 +1081,20 @@ SNandSaveexecB32Sop1::SNandSaveexecB32Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void SNandSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_nand_saveexec_b32_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSNandSaveexecB32Sop1(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_nand_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SNandSaveexecB32Sop1>(opcode);
 }
+} // namespace detail
 
 SNandSaveexecB64Sop1::SNandSaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_nand_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SNandSaveexecB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SNandSaveexecB64Sop1)),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -860,13 +1118,20 @@ SNandSaveexecB64Sop1::SNandSaveexecB64Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void SNandSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_nand_saveexec_b64_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSNandSaveexecB64Sop1(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_nand_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SNandSaveexecB64Sop1>(opcode);
 }
+} // namespace detail
 
 SNorSaveexecB32Sop1::SNorSaveexecB32Sop1(const MachineInst *inst)
     : Sop1("s_nor_saveexec_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SNorSaveexecB32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SNorSaveexecB32Sop1)),
       sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -889,13 +1154,20 @@ SNorSaveexecB32Sop1::SNorSaveexecB32Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void SNorSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_nor_saveexec_b32_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSNorSaveexecB32Sop1(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_nor_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SNorSaveexecB32Sop1>(opcode);
 }
+} // namespace detail
 
 SNorSaveexecB64Sop1::SNorSaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_nor_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SNorSaveexecB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SNorSaveexecB64Sop1)),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -919,13 +1191,20 @@ SNorSaveexecB64Sop1::SNorSaveexecB64Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void SNorSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_nor_saveexec_b64_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSNorSaveexecB64Sop1(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_nor_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SNorSaveexecB64Sop1>(opcode);
 }
+} // namespace detail
 
 SXnorSaveexecB32Sop1::SXnorSaveexecB32Sop1(const MachineInst *inst)
     : Sop1("s_xnor_saveexec_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SXnorSaveexecB32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SXnorSaveexecB32Sop1)),
       sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -948,13 +1227,20 @@ SXnorSaveexecB32Sop1::SXnorSaveexecB32Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void SXnorSaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_xnor_saveexec_b32_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSXnorSaveexecB32Sop1(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_xnor_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SXnorSaveexecB32Sop1>(opcode);
 }
+} // namespace detail
 
 SXnorSaveexecB64Sop1::SXnorSaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_xnor_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SXnorSaveexecB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SXnorSaveexecB64Sop1)),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -978,13 +1264,20 @@ SXnorSaveexecB64Sop1::SXnorSaveexecB64Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void SXnorSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_xnor_saveexec_b64_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSXnorSaveexecB64Sop1(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_xnor_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SXnorSaveexecB64Sop1>(opcode);
 }
+} // namespace detail
 
 SAndNot0SaveexecB32Sop1::SAndNot0SaveexecB32Sop1(const MachineInst *inst)
     : Sop1("s_and_not0_saveexec_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAndNot0SaveexecB32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SAndNot0SaveexecB32Sop1)),
       sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -1007,13 +1300,20 @@ SAndNot0SaveexecB32Sop1::SAndNot0SaveexecB32Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void SAndNot0SaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_and_not0_saveexec_b32_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSAndNot0SaveexecB32Sop1(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_and_not0_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAndNot0SaveexecB32Sop1>(opcode);
 }
+} // namespace detail
 
 SAndNot0SaveexecB64Sop1::SAndNot0SaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_and_not0_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAndNot0SaveexecB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SAndNot0SaveexecB64Sop1)),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -1037,13 +1337,20 @@ SAndNot0SaveexecB64Sop1::SAndNot0SaveexecB64Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void SAndNot0SaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_and_not0_saveexec_b64_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSAndNot0SaveexecB64Sop1(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_and_not0_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAndNot0SaveexecB64Sop1>(opcode);
 }
+} // namespace detail
 
 SOrNot0SaveexecB32Sop1::SOrNot0SaveexecB32Sop1(const MachineInst *inst)
     : Sop1("s_or_not0_saveexec_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SOrNot0SaveexecB32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SOrNot0SaveexecB32Sop1)),
       sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -1066,13 +1373,20 @@ SOrNot0SaveexecB32Sop1::SOrNot0SaveexecB32Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void SOrNot0SaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_or_not0_saveexec_b32_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSOrNot0SaveexecB32Sop1(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_or_not0_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SOrNot0SaveexecB32Sop1>(opcode);
 }
+} // namespace detail
 
 SOrNot0SaveexecB64Sop1::SOrNot0SaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_or_not0_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SOrNot0SaveexecB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SOrNot0SaveexecB64Sop1)),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -1096,13 +1410,20 @@ SOrNot0SaveexecB64Sop1::SOrNot0SaveexecB64Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void SOrNot0SaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_or_not0_saveexec_b64_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSOrNot0SaveexecB64Sop1(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_or_not0_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SOrNot0SaveexecB64Sop1>(opcode);
 }
+} // namespace detail
 
 SAndNot1SaveexecB32Sop1::SAndNot1SaveexecB32Sop1(const MachineInst *inst)
     : Sop1("s_and_not1_saveexec_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAndNot1SaveexecB32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SAndNot1SaveexecB32Sop1)),
       sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -1125,13 +1446,20 @@ SAndNot1SaveexecB32Sop1::SAndNot1SaveexecB32Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void SAndNot1SaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_and_not1_saveexec_b32_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSAndNot1SaveexecB32Sop1(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_and_not1_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAndNot1SaveexecB32Sop1>(opcode);
 }
+} // namespace detail
 
 SAndNot1SaveexecB64Sop1::SAndNot1SaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_and_not1_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAndNot1SaveexecB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SAndNot1SaveexecB64Sop1)),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -1155,13 +1483,20 @@ SAndNot1SaveexecB64Sop1::SAndNot1SaveexecB64Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void SAndNot1SaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_and_not1_saveexec_b64_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSAndNot1SaveexecB64Sop1(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_and_not1_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAndNot1SaveexecB64Sop1>(opcode);
 }
+} // namespace detail
 
 SOrNot1SaveexecB32Sop1::SOrNot1SaveexecB32Sop1(const MachineInst *inst)
     : Sop1("s_or_not1_saveexec_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SOrNot1SaveexecB32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SOrNot1SaveexecB32Sop1)),
       sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -1184,13 +1519,20 @@ SOrNot1SaveexecB32Sop1::SOrNot1SaveexecB32Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void SOrNot1SaveexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_or_not1_saveexec_b32_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSOrNot1SaveexecB32Sop1(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_or_not1_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SOrNot1SaveexecB32Sop1>(opcode);
 }
+} // namespace detail
 
 SOrNot1SaveexecB64Sop1::SOrNot1SaveexecB64Sop1(const MachineInst *inst)
     : Sop1("s_or_not1_saveexec_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SOrNot1SaveexecB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SOrNot1SaveexecB64Sop1)),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -1214,13 +1556,20 @@ SOrNot1SaveexecB64Sop1::SOrNot1SaveexecB64Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void SOrNot1SaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_or_not1_saveexec_b64_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSOrNot1SaveexecB64Sop1(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_or_not1_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SOrNot1SaveexecB64Sop1>(opcode);
 }
+} // namespace detail
 
 SAndNot0WrexecB32Sop1::SAndNot0WrexecB32Sop1(const MachineInst *inst)
     : Sop1("s_and_not0_wrexec_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAndNot0WrexecB32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SAndNot0WrexecB32Sop1)),
       sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -1243,13 +1592,20 @@ SAndNot0WrexecB32Sop1::SAndNot0WrexecB32Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void SAndNot0WrexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_and_not0_wrexec_b32_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSAndNot0WrexecB32Sop1(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_and_not0_wrexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAndNot0WrexecB32Sop1>(opcode);
 }
+} // namespace detail
 
 SAndNot0WrexecB64Sop1::SAndNot0WrexecB64Sop1(const MachineInst *inst)
     : Sop1("s_and_not0_wrexec_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAndNot0WrexecB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SAndNot0WrexecB64Sop1)),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -1273,13 +1629,20 @@ SAndNot0WrexecB64Sop1::SAndNot0WrexecB64Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void SAndNot0WrexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_and_not0_wrexec_b64_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSAndNot0WrexecB64Sop1(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_and_not0_wrexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAndNot0WrexecB64Sop1>(opcode);
 }
+} // namespace detail
 
 SAndNot1WrexecB32Sop1::SAndNot1WrexecB32Sop1(const MachineInst *inst)
     : Sop1("s_and_not1_wrexec_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAndNot1WrexecB32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SAndNot1WrexecB32Sop1)),
       sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -1302,13 +1665,20 @@ SAndNot1WrexecB32Sop1::SAndNot1WrexecB32Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void SAndNot1WrexecB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_and_not1_wrexec_b32_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSAndNot1WrexecB32Sop1(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_and_not1_wrexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAndNot1WrexecB32Sop1>(opcode);
 }
+} // namespace detail
 
 SAndNot1WrexecB64Sop1::SAndNot1WrexecB64Sop1(const MachineInst *inst)
     : Sop1("s_and_not1_wrexec_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SAndNot1WrexecB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SAndNot1WrexecB64Sop1)),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126),
@@ -1332,13 +1702,20 @@ SAndNot1WrexecB64Sop1::SAndNot1WrexecB64Sop1(const MachineInst *inst)
   flags_ |= WRITES_EXEC;
 }
 
-void SAndNot1WrexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_and_not1_wrexec_b64_sop1(*this, wf);
+namespace detail {
+DecodeResult decodeSAndNot1WrexecB64Sop1(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_and_not1_wrexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAndNot1WrexecB64Sop1>(opcode);
 }
+} // namespace detail
 
 SMovrelsB32Sop1::SMovrelsB32Sop1(const MachineInst *inst)
     : Sop1("s_movrels_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SMovrelsB32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SMovrelsB32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       m0(32, OperandType::OPR_SDST_M0, 125) {
@@ -1347,30 +1724,23 @@ SMovrelsB32Sop1::SMovrelsB32Sop1(const MachineInst *inst)
   src_operands_[1] = &m0;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
   m0.apply_fieldless_caps(false, false, false);
 }
 
-void SMovrelsB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t index = wf.m0() & 0xFFu;
-  uint32_t width_words = static_cast<uint32_t>(ssrc0.size_bits() / 32);
-  uint32_t src_reg = static_cast<uint32_t>(ssrc0.encoding_value()) + index * width_words;
-  Operand indexed_src(ssrc0.size_bits(), OperandType::OPR_SSRC, static_cast<int>(src_reg));
-  if (width_words == 2) {
-    amdgpu::RegisterAccess(wf).write_scalar64(
-        sdst, amdgpu::RegisterAccess(wf).read_scalar64(indexed_src));
-  } else {
-    amdgpu::RegisterAccess(wf).write_scalar(sdst,
-                                            amdgpu::RegisterAccess(wf).read_scalar(indexed_src));
-  }
+namespace detail {
+DecodeResult decodeSMovrelsB32Sop1(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_movrels_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SMovrelsB32Sop1>(opcode);
 }
+} // namespace detail
 
 SMovrelsB64Sop1::SMovrelsB64Sop1(const MachineInst *inst)
     : Sop1("s_movrels_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SMovrelsB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SMovrelsB64Sop1)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       m0(32, OperandType::OPR_SDST_M0, 125) {
@@ -1379,31 +1749,23 @@ SMovrelsB64Sop1::SMovrelsB64Sop1(const MachineInst *inst)
   src_operands_[1] = &m0;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand::make_literal32(
-        64,
-        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
-        Operand::Literal32Widening::ZeroExtend);
   m0.apply_fieldless_caps(false, false, false);
 }
 
-void SMovrelsB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t index = wf.m0() & 0xFFu;
-  uint32_t width_words = static_cast<uint32_t>(ssrc0.size_bits() / 32);
-  uint32_t src_reg = static_cast<uint32_t>(ssrc0.encoding_value()) + index * width_words;
-  Operand indexed_src(ssrc0.size_bits(), OperandType::OPR_SSRC, static_cast<int>(src_reg));
-  if (width_words == 2) {
-    amdgpu::RegisterAccess(wf).write_scalar64(
-        sdst, amdgpu::RegisterAccess(wf).read_scalar64(indexed_src));
-  } else {
-    amdgpu::RegisterAccess(wf).write_scalar(sdst,
-                                            amdgpu::RegisterAccess(wf).read_scalar(indexed_src));
-  }
+namespace detail {
+DecodeResult decodeSMovrelsB64Sop1(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_movrels_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SMovrelsB64Sop1>(opcode);
 }
+} // namespace detail
 
 SMovreldB32Sop1::SMovreldB32Sop1(const MachineInst *inst)
     : Sop1("s_movreld_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SMovreldB32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SMovreldB32Sop1)),
       sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       m0(32, OperandType::OPR_SDST_M0, 125) {
@@ -1419,23 +1781,20 @@ SMovreldB32Sop1::SMovreldB32Sop1(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
 }
 
-void SMovreldB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t index = wf.m0() & 0xFFu;
-  uint32_t width_words = static_cast<uint32_t>(sdst.size_bits() / 32);
-  uint32_t dst_reg = static_cast<uint32_t>(sdst.encoding_value()) + index * width_words;
-  Operand indexed_dst(sdst.size_bits(), OperandType::OPR_SDST, static_cast<int>(dst_reg));
-  if (width_words == 2) {
-    amdgpu::RegisterAccess(wf).write_scalar64(indexed_dst,
-                                              amdgpu::RegisterAccess(wf).read_scalar64(ssrc0));
-  } else {
-    amdgpu::RegisterAccess(wf).write_scalar(indexed_dst,
-                                            amdgpu::RegisterAccess(wf).read_scalar(ssrc0));
-  }
+namespace detail {
+DecodeResult decodeSMovreldB32Sop1(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_movreld_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SMovreldB32Sop1>(opcode);
 }
+} // namespace detail
 
 SMovreldB64Sop1::SMovreldB64Sop1(const MachineInst *inst)
     : Sop1("s_movreld_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SMovreldB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SMovreldB64Sop1)),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       m0(32, OperandType::OPR_SDST_M0, 125) {
@@ -1452,23 +1811,20 @@ SMovreldB64Sop1::SMovreldB64Sop1(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
 }
 
-void SMovreldB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t index = wf.m0() & 0xFFu;
-  uint32_t width_words = static_cast<uint32_t>(sdst.size_bits() / 32);
-  uint32_t dst_reg = static_cast<uint32_t>(sdst.encoding_value()) + index * width_words;
-  Operand indexed_dst(sdst.size_bits(), OperandType::OPR_SDST, static_cast<int>(dst_reg));
-  if (width_words == 2) {
-    amdgpu::RegisterAccess(wf).write_scalar64(indexed_dst,
-                                              amdgpu::RegisterAccess(wf).read_scalar64(ssrc0));
-  } else {
-    amdgpu::RegisterAccess(wf).write_scalar(indexed_dst,
-                                            amdgpu::RegisterAccess(wf).read_scalar(ssrc0));
-  }
+namespace detail {
+DecodeResult decodeSMovreldB64Sop1(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_movreld_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SMovreldB64Sop1>(opcode);
 }
+} // namespace detail
 
 SMovrelsd2B32Sop1::SMovrelsd2B32Sop1(const MachineInst *inst)
     : Sop1("s_movrelsd_2_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SMovrelsd2B32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SMovrelsd2B32Sop1)),
       sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       m0(32, OperandType::OPR_SDST_M0, 125) {
@@ -1477,27 +1833,23 @@ SMovrelsd2B32Sop1::SMovrelsd2B32Sop1(const MachineInst *inst)
   src_operands_[1] = &m0;
   num_src_ = 2;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
   m0.apply_fieldless_caps(false, false, false);
 }
 
-void SMovrelsd2B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t src_index = wf.m0() & 0xFFu;
-  uint32_t dst_index = (wf.m0() >> 8) & 0xFFu;
-  uint32_t src_reg = static_cast<uint32_t>(ssrc0.encoding_value()) + src_index;
-  uint32_t dst_reg = static_cast<uint32_t>(sdst.encoding_value()) + dst_index;
-  Operand indexed_src(32, OperandType::OPR_SSRC, static_cast<int>(src_reg));
-  Operand indexed_dst(32, OperandType::OPR_SDST, static_cast<int>(dst_reg));
-  amdgpu::RegisterAccess(wf).write_scalar(indexed_dst,
-                                          amdgpu::RegisterAccess(wf).read_scalar(indexed_src));
+namespace detail {
+DecodeResult decodeSMovrelsd2B32Sop1(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_movrelsd_2_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SMovrelsd2B32Sop1>(opcode);
 }
+} // namespace detail
 
 SGetpcB64Sop1::SGetpcB64Sop1(const MachineInst *inst)
     : Sop1("s_getpc_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SGetpcB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SGetpcB64Sop1)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       pc(64, OperandType::OPR_PC, 0) {
   dst_operands_[0] = &sdst;
@@ -1507,35 +1859,42 @@ SGetpcB64Sop1::SGetpcB64Sop1(const MachineInst *inst)
   pc.apply_fieldless_caps(false, false, false);
 }
 
-void SGetpcB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::RegisterAccess(wf).write_scalar64(sdst, wf.pc + size_);
+namespace detail {
+DecodeResult decodeSGetpcB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_getpc_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SGetpcB64Sop1>(opcode);
 }
+} // namespace detail
 
 SSetpcB64Sop1::SSetpcB64Sop1(const MachineInst *inst)
     : Sop1("s_setpc_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SSetpcB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SSetpcB64Sop1)),
       ssrc0(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       pc(64, OperandType::OPR_PC, 0) {
   src_operands_[0] = &ssrc0;
   dst_operands_[0] = &pc;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand::make_literal32(
-        64,
-        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
-        Operand::Literal32Widening::ZeroExtend);
   pc.apply_fieldless_caps(false, false, false);
   flags_ |= INDIRECT_BRANCH;
 }
 
-void SSetpcB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  wf.pc = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0) - size_;
+namespace detail {
+DecodeResult decodeSSetpcB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_setpc_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SSetpcB64Sop1>(opcode);
 }
+} // namespace detail
 
 SSwappcB64Sop1::SSwappcB64Sop1(const MachineInst *inst)
     : Sop1("s_swappc_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SSwappcB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SSwappcB64Sop1)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       pc(64, OperandType::OPR_PC, 0), pc_in(64, OperandType::OPR_PC, 0) {
@@ -1545,125 +1904,86 @@ SSwappcB64Sop1::SSwappcB64Sop1(const MachineInst *inst)
   src_operands_[1] = &pc_in;
   num_src_ = 2;
   num_dst_ = 2;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand::make_literal32(
-        64,
-        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
-        Operand::Literal32Widening::ZeroExtend);
   pc.apply_fieldless_caps(false, false, false);
   pc_in.apply_fieldless_caps(false, false, false);
   flags_ |= INDIRECT_CALL;
 }
 
-void SSwappcB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t next_pc = wf.pc + size_;
-  wf.pc = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0) - size_;
-  amdgpu::RegisterAccess(wf).write_scalar64(sdst, next_pc);
+namespace detail {
+DecodeResult decodeSSwappcB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_swappc_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SSwappcB64Sop1>(opcode);
 }
+} // namespace detail
 
 SRfeB64Sop1::SRfeB64Sop1(const MachineInst *inst)
-    : Sop1("s_rfe_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SRfeB64Sop1>()),
+    : Sop1("s_rfe_b64", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SRfeB64Sop1)),
       ssrc0(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       pc(64, OperandType::OPR_PC, 0) {
   src_operands_[0] = &ssrc0;
   dst_operands_[0] = &pc;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand::make_literal32(
-        64,
-        static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
-        Operand::Literal32Widening::ZeroExtend);
   pc.apply_fieldless_caps(false, false, false);
 }
 
-void SRfeB64Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_rfe_b64_sop1(*this, wf); }
+namespace detail {
+DecodeResult decodeSRfeB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_rfe_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SRfeB64Sop1>(opcode);
+}
+} // namespace detail
 
 SSendmsgRtnB32Sop1::SSendmsgRtnB32Sop1(const MachineInst *inst)
     : Sop1("s_sendmsg_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SSendmsgRtnB32Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SSendmsgRtnB32Sop1)),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SENDMSG, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SSendmsgRtnB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t msg = static_cast<uint32_t>(ssrc0.encoding_value_);
-  uint64_t value = 0;
-  switch (msg) {
-  case 0x83: {
-    auto *engine = wf.cu().engine();
-    value = engine ? engine->global_time() : 0;
-    break;
-  }
-  case 0x80:
-  case 0x81:
-  case 0x82:
-  case 0x84:
-  case 0x85:
-  case 0x86:
-  case 0x87:
-  case 0x88:
-  case 0x98:
-  default:
-    value = 0;
-    break;
-  }
-  if (sdst.size_bits() == 64)
-    amdgpu::RegisterAccess(wf).write_scalar64(sdst, value);
-  else
-    amdgpu::RegisterAccess(wf).write_scalar(sdst, static_cast<uint32_t>(value));
+namespace detail {
+DecodeResult decodeSSendmsgRtnB32Sop1(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_sendmsg_rtn_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SSendmsgRtnB32Sop1>(opcode);
 }
+} // namespace detail
 
 SSendmsgRtnB64Sop1::SSendmsgRtnB64Sop1(const MachineInst *inst)
     : Sop1("s_sendmsg_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
-           make_exec_fn<SSendmsgRtnB64Sop1>()),
+           selected_exec_fn(InstructionExecutionId::SSendmsgRtnB64Sop1)),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SENDMSG, reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   num_src_ = 1;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
-void SSendmsgRtnB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t msg = static_cast<uint32_t>(ssrc0.encoding_value_);
-  uint64_t value = 0;
-  switch (msg) {
-  case 0x83: {
-    auto *engine = wf.cu().engine();
-    value = engine ? engine->global_time() : 0;
-    break;
-  }
-  case 0x80:
-  case 0x81:
-  case 0x82:
-  case 0x84:
-  case 0x85:
-  case 0x86:
-  case 0x87:
-  case 0x88:
-  case 0x98:
-  default:
-    value = 0;
-    break;
-  }
-  if (sdst.size_bits() == 64)
-    amdgpu::RegisterAccess(wf).write_scalar64(sdst, value);
-  else
-    amdgpu::RegisterAccess(wf).write_scalar(sdst, static_cast<uint32_t>(value));
+namespace detail {
+DecodeResult decodeSSendmsgRtnB64Sop1(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_sendmsg_rtn_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SSendmsgRtnB64Sop1>(opcode);
 }
+} // namespace detail
 
 } // namespace rdna3
 } // namespace rocjitsu
