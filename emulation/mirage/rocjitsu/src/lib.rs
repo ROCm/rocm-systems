@@ -27,7 +27,7 @@ use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::InjectionDef;
 use mirage_core::plugin::PluginsDef;
 use mirage_core::profile::ProfileDef;
-use mirage_core::session::{SessionContext, SessionHealth};
+use mirage_core::session::{SessionContext, SessionHealth, state};
 use mirage_core::topology::TopologyDef;
 
 pub mod dbt;
@@ -141,38 +141,31 @@ impl EmulatorBackend for Rocjitsu {
     }
 
     fn health(&self, ctx: &SessionContext) -> SessionHealth {
-        if !is_installed() {
-            return SessionHealth {
-                healthy: false,
-                state: Some("error".to_string()),
-                terminal: false,
-                message: Some(format!("rocjitsu KMD library ({LIB_NAME}) not found")),
-                ..Default::default()
-            };
-        }
-        // Located is not the same as usable *for this session*. A library
-        // that predates the daemon API emulates a workload in-process
-        // perfectly well and cannot host the daemon a multi-process
-        // session needs, so a session that wants one is not ready however
-        // present the library is — and saying "ready" here is what let
-        // such a run reach its last step before finding out.
-        if ctx.daemon
-            && let Err(e) = self.daemon_capability()
-        {
-            return SessionHealth {
-                healthy: false,
-                state: Some("error".to_string()),
-                terminal: false,
-                message: Some(e.to_string()),
-                ..Default::default()
-            };
-        }
-        SessionHealth {
-            healthy: true,
-            state: Some("ready".to_string()),
-            terminal: false,
-            message: None,
-            ..Default::default()
+        // One problem, decided once, so the snapshot is built in one
+        // place. Built through `SessionHealth::phase` and not a struct
+        // literal: the literal's `..Default::default()` fills `timestamp`
+        // with `DateTime::<Utc>::default()`, which is the Unix epoch, so
+        // every snapshot rocjitsu reported was stamped 1970-01-01 in the
+        // serialized output. `phase` stamps `Utc::now()`.
+        let problem = if is_installed() {
+            // Located is not the same as usable *for this session*. A
+            // library that predates the daemon API emulates a workload
+            // in-process perfectly well and cannot host the daemon a
+            // multi-process session needs, so a session that wants one is
+            // not ready however present the library is.
+            ctx.daemon
+                .then(|| self.daemon_capability().err())
+                .flatten()
+                .map(|e| e.to_string())
+        } else {
+            Some(format!("rocjitsu KMD library ({LIB_NAME}) not found"))
+        };
+        match problem {
+            // Not `state::FAILED`: that one means terminal, and neither of
+            // these is — installing the library or updating it makes the
+            // same session healthy without recreating it.
+            Some(message) => SessionHealth::phase(false, "error", Some(message)),
+            None => SessionHealth::phase(true, state::READY, None),
         }
     }
 
@@ -828,9 +821,28 @@ pub fn is_installed() -> bool {
 /// # Errors
 ///
 /// A reason phrased for a user who has just been refused a run: what is
-/// wrong, what it costs, and the one flag that runs without it.
+/// wrong, what it costs, and the one flag that runs without it — except
+/// for a library that will not load at all, which is told the truth
+/// instead, because no flag runs without a library.
 pub fn daemon_capability_of(lib: &std::path::Path) -> Result<()> {
     rocjitsu_sys::daemon::Daemon::probe(lib).map_err(|e| {
+        // Two failures, opposite advice, and only the loader can tell
+        // them apart. `--in-process` emulation `LD_PRELOAD`s this very
+        // file, so recommending it to somebody whose library does not
+        // load sends them to a second failure with the same cause and a
+        // less obvious message.
+        if e.is_unloadable() {
+            return MirageError::Other(format!(
+                "the rocjitsu library at {} could not be loaded: {e}\n\
+                 This is not a rocjitsu too old for the emulator daemon — \
+                 the file is there and the loader will not take it, which \
+                 usually means a missing dependency or a build for another \
+                 architecture. `--in-process` preloads this same library \
+                 and will fail the same way, so reinstalling rocjitsu (see \
+                 docs/building.md) is the fix.",
+                lib.display()
+            ));
+        }
         MirageError::Other(format!(
             "the rocjitsu library at {} cannot host the emulator daemon: {e}\n\
              The daemon is what lets several processes share emulated GPU \
@@ -902,13 +914,25 @@ mod tests {
         // properties would do; a host with no glibc `libc.so.6` to borrow
         // cannot run this, which is not a failure of the check.
         let libc = std::path::Path::new("libc.so.6");
+
+        // Whether this host *has* a libc to borrow is decided on the typed
+        // error, not by sniffing the rendered message for the loader's
+        // wording. The strings this used to match ("cannot open shared
+        // object", "No such file") are glibc's, not an API: on musl, in
+        // another locale, or after a libloading change the skip would stop
+        // firing and this would fail on a host it was written to tolerate
+        // — or start firing everywhere and pass vacuously.
+        if rocjitsu_sys::daemon::Daemon::probe(libc)
+            .err()
+            .is_some_and(|e| e.is_unloadable())
+        {
+            return;
+        }
+
         let Err(e) = daemon_capability_of(libc) else {
             panic!("libc.so.6 hosts a rocjitsu daemon?");
         };
         let msg = e.to_string();
-        if msg.contains("cannot open shared object") || msg.contains("No such file") {
-            return;
-        }
 
         // The message a user gets is the whole value of failing early, so
         // it has to say which file, what it costs them, and the one flag
@@ -916,6 +940,32 @@ mod tests {
         assert!(msg.contains("libc.so.6"), "{msg}");
         assert!(msg.contains("cannot host the emulator daemon"), "{msg}");
         assert!(msg.contains("--in-process"), "{msg}");
+    }
+
+    #[test]
+    fn a_library_that_will_not_load_is_not_told_to_pass_in_process() {
+        // The other half of the diagnosis, and the one that sent a user
+        // somewhere that fails again: `--in-process` emulation `LD_PRELOAD`s
+        // the very library the loader has just refused, so advising it for
+        // a library that cannot be loaded at all is advice to hit the same
+        // wall from the other side. Only a library that *loads* and lacks
+        // `rj_daemon_start` is an old rocjitsu.
+        let missing = std::path::Path::new("/nonexistent/librocjitsu.so");
+        let Err(e) = daemon_capability_of(missing) else {
+            panic!("a library that is not there hosts a daemon?");
+        };
+        let msg = e.to_string();
+        assert!(msg.contains("could not be loaded"), "{msg}");
+        assert!(
+            !msg.contains("predating the daemon API"),
+            "a library the loader refuses is not a rocjitsu that is merely \
+             too old: {msg}"
+        );
+        assert!(
+            !msg.contains("Pass `--in-process`"),
+            "`--in-process` preloads this same file and fails the same way, \
+             so it must not be offered as the way round: {msg}"
+        );
     }
 
     #[test]
