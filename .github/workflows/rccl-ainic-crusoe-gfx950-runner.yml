@@ -122,12 +122,13 @@ permissions:
   contents: read
 
 env:
-  # Shared CI root on the Crusoe cluster. /it-shared is read-only; artifacts go to /shared_nfs.
+  # Shared CI root on the Crusoe cluster. /it-shared is read-only.
   RCCL_CI_ROOT: /shared_nfs/rccl-ci
   # SPUR (not Slurm): without this the client talks to localhost:6817.
   SPUR_CONTROLLER_ADDR: http://crs-m2m-cpu-spur-005.crusoe.amd.com:6817
   TEST_RUNNER_DIR: projects/rccl/tools/scripts/test_runner
-  DEFAULT_WORKDIR: /shared_nfs/rccl-ci/rocm-systems
+  # Empty => github.workspace. z1_coco cannot write /shared_nfs/rccl-ci/rocm-systems.
+  DEFAULT_WORKDIR: ''
   DEFAULT_MPI_PATH: /opt/openmpi
   DEFAULT_ROCM_PATH: /opt/rocm
   # Prebuilt rccl-tests perf binaries for the rccl-tests-sweeps category (they
@@ -175,7 +176,7 @@ jobs:
         id: run_tests
         continue-on-error: true
         env:
-          WORKDIR: ${{ github.event.inputs.workdir || env.DEFAULT_WORKDIR }}
+          WORKDIR: ${{ github.event.inputs.workdir || github.workspace }}
           MPI_PATH: ${{ github.event.inputs.mpi_path || env.DEFAULT_MPI_PATH }}
           ROCM_PATH: ${{ github.event.inputs.rocm_path || env.DEFAULT_ROCM_PATH }}
           # Fresh build produced by Phase 0 of the batch job (on the compute node).
@@ -210,7 +211,7 @@ jobs:
           export PATH="/usr/local/bin:${PATH}"
 
           # SPUR CLI can wedge; SIGTERM is not enough, so -k is required.
-          spur_cmd() { timeout -k 5 30 "$@"; }
+          spur_cmd() { PATH="/usr/local/bin:/usr/bin:/bin:${PATH:-}" /usr/bin/timeout -k 5 30 "$@"; }
 
           RESV_ARG=""
           if [ -n "${SALLOC_RESERVATION}" ]; then
