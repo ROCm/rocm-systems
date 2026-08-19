@@ -2579,6 +2579,64 @@ TEST(BinaryTranslatorE2E, Gfx1250AdmitsKernargLoadedIndirectCallTarget) {
   EXPECT_TRUE(translate_kernarg_fixture(words, /*enable_kernarg=*/true).ok());
 }
 
+// The admission in an object that DOES define a device function. The fixtures above are
+// kernel-only, so object_defines_only_kernels() already holds and
+// object_admits_kernarg_supplied_transfer is never consulted -- they cannot tell whether that path
+// works. Here an exported body sits past the kernel and no edge reaches it, which is the shape
+// rocPRIM's trampoline_kernel objects have: the admission turns on the strict symbol requirement,
+// so the body has to be adopted or replace_text() refuses the object for a symbol naming nothing.
+// Both halves are asserted, because adopting the body and keeping the partition a fixed point are
+// separate obligations and only the second is visible on a re-translation.
+TEST(BinaryTranslatorE2E, Gfx1250AdmitsKernargTargetInObjectDefiningAnExportedDeviceFunction) {
+  constexpr size_t kFunctionOffsetWords = 4;
+  constexpr size_t kFunctionWords = 2;
+  const std::vector<uint32_t> words = {
+      kernarg_load_word(0),
+      kernarg_load_word(1),
+      rocjitsu::build_s_swappc_b64(kKernargReturnSreg, kKernargTargetSreg,
+                                   ROCJITSU_CODE_ARCH_CDNA5),
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
+      // Unreachable exported body: nothing branches or calls here, so only adoption can emit it.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5),
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
+  };
+  auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      words, kFunctionWords, kFunctionOffsetWords, /*function_pointer_table_target_words=*/
+      std::nullopt, /*name_function_pointer_table_with_symbol=*/true,
+      /*export_text_function=*/true);
+  rocjitsu::enable_kernarg_segment_ptr_sgpr(image);
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  // Non-vacuity, asserted rather than assumed: if this object still looked kernel-only the older
+  // fence would admit the transfer and the case below would prove nothing about the new path.
+  ASSERT_FALSE(rocjitsu::object_defines_only_kernels(source));
+  ASSERT_FALSE(rocjitsu::discover_externally_resolvable_text_function_offsets(source).empty());
+
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto first = translator.translate(source);
+  ASSERT_TRUE(first.ok()) << (first.diagnostics.empty() ? "" : first.diagnostics.front().message);
+
+  // The exported symbol must still name a body rather than have been undefined or dropped.
+  rocjitsu::AmdGpuCodeObject translated(first.elf_bytes.data(), first.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const auto exported = rocjitsu::discover_externally_resolvable_text_function_offsets(translated);
+  EXPECT_FALSE(exported.empty());
+
+  // Adoption keyed off anything the first pass changes would move `.text` here.
+  rocjitsu::BinaryTranslator second_translator(
+      ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto second = second_translator.translate(translated);
+  ASSERT_TRUE(second.ok()) << (second.diagnostics.empty() ? ""
+                                                          : second.diagnostics.front().message);
+  EXPECT_EQ(first.elf_bytes, second.elf_bytes);
+}
+
 // The same words with no kernarg segment pointer in the descriptor. Nothing then supplies the
 // pair, so the transfer has no provenance and must be refused -- this is what separates "the host
 // wrote it" from "this object simply never computed it", which an undefined live-in also satisfies.
@@ -13167,6 +13225,45 @@ TEST(BinaryTranslatorE2E, Gfx1250RecoveredBuilderRewriteNamesTheBuilderPairNotTh
                                                  kBuilderSreg, kBuilderSreg, kLiteral64Operand));
   EXPECT_NE(first, rocjitsu::build_sop2_encoding(ROCJITSU_CODE_ARCH_CDNA5, cdna5::kSAddNcU64Sop2,
                                                  kConsumerSreg, kConsumerSreg, kLiteral64Operand));
+}
+
+TEST(BinaryTranslatorE2E, RecoveredBuilderReuseRejectsDisagreeingBuilderPair) {
+  // The replacement is an add written against the builder's own SGPR pair, so two consumers that
+  // share a range while naming different pairs need different words. Reuse compares a key rather
+  // than the words themselves, so the pair has to be part of that key: without it the second
+  // consumer silently inherits an add against the first consumer's register. A lane-banked
+  // dispatcher produces exactly this shape, because its producer and consumer pairs differ.
+  constexpr uint64_t kWord = sizeof(uint32_t);
+  constexpr uint16_t kConsumerSreg = 8;
+  constexpr uint16_t kBuilderSregA = 4;
+  constexpr uint16_t kBuilderSregB = 56;
+  std::vector<uint8_t> text(8 * kWord, 0);
+  rocjitsu::KernelTextLayout layout;
+  layout.body_end = text.size();
+  layout.blocks.push_back(
+      {.source_start = 0, .source_end = 4 * kWord, .target_start = 0, .target_end = 4 * kWord});
+  layout.blocks.push_back({.source_start = 4 * kWord,
+                           .source_end = 8 * kWord,
+                           .target_start = 4 * kWord,
+                           .target_end = 8 * kWord});
+  layout.recovered_builder_fixups.push_back({.source_target_offset = 4 * kWord,
+                                             .source_call_sreg = kConsumerSreg,
+                                             .source_builder_sreg = kBuilderSregA,
+                                             .target_getpc_offset = 0,
+                                             .target_recovery_begin_offset = kWord,
+                                             .target_recovery_end_offset = 4 * kWord});
+  layout.recovered_builder_fixups.push_back({.source_target_offset = 4 * kWord,
+                                             .source_call_sreg = kConsumerSreg,
+                                             .source_builder_sreg = kBuilderSregB,
+                                             .target_getpc_offset = 0,
+                                             .target_recovery_begin_offset = kWord,
+                                             .target_recovery_end_offset = 4 * kWord});
+
+  const auto patched =
+      rocjitsu::patch_recovered_builder_fixups(text, layout, ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_FALSE(patched.ok);
+  EXPECT_NE(patched.message.find("incompatible replacements"), std::string::npos)
+      << patched.message;
 }
 
 TEST(BinaryTranslatorE2E, RecoveredBuilderReuseRejectsDisagreeingXcntDrain) {

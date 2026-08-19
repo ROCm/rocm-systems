@@ -989,7 +989,7 @@ TextRelocationResult patch_recovered_indirect_fixups(std::vector<uint8_t> &text,
 TextRelocationResult patch_recovered_builder_fixups(std::vector<uint8_t> &text,
                                                     const KernelTextLayout &layout,
                                                     rj_code_arch_t arch) {
-  std::unordered_map<uint64_t, std::tuple<uint64_t, uint64_t, bool>> rewritten_regions;
+  std::unordered_map<uint64_t, std::tuple<uint64_t, uint64_t, bool, uint16_t>> rewritten_regions;
   std::vector<uint64_t> compact_builder_fallbacks;
   for (const IndirectCallFixup &fixup : layout.recovered_builder_fixups) {
     auto target_target = target_for_source_offset(layout, fixup.source_target_offset);
@@ -1012,11 +1012,15 @@ TextRelocationResult patch_recovered_builder_fixups(std::vector<uint8_t> &text,
 
     // One source-side builder may feed multiple consumers. Only the first one
     // rewrites the range, so reuse is valid only when every consumer asks for
-    // the same replacement -- same target, same byte range, and the same drain
-    // requirement, which changes the words emitted.
+    // the same replacement. Every input the emitted words depend on has to be in
+    // this key: the target and byte range, the drain requirement, and the SGPR
+    // pair the add is written against. Omitting the pair let a second consumer
+    // that names a different builder register silently inherit the first
+    // consumer's replacement, which a lane-banked dispatcher can produce because
+    // its producer and consumer pairs differ.
     const auto rewrite_key =
         std::tuple{fixup.target_recovery_end_offset, static_cast<uint64_t>(*target_target),
-                   fixup.source_requires_xcnt_drain};
+                   fixup.source_requires_xcnt_drain, fixup.source_builder_sreg};
     auto [rewrite_it, inserted] =
         rewritten_regions.emplace(fixup.target_recovery_begin_offset, rewrite_key);
     if (!inserted) {

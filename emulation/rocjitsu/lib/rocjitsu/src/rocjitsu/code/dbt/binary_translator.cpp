@@ -2481,10 +2481,13 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   // incoming SGPR-pair facts that call establishes, turning otherwise recoverable getpc flows
   // unresolved.
   const auto text_function_symbol_offsets = discover_text_function_symbol_offsets(obj);
-  // Fences the kernarg admission below. Admitting an externally supplied pointer in an object that
-  // DOES define device functions drags in the rest of that problem -- those bodies would have to be
-  // adopted as roots or they are dropped, and their resource envelope propagated into every
-  // descriptor that can enter them. Where the object defines none, that obligation is vacuous.
+  // One of the two ways the kernarg admission below is satisfied. An object that defines no device
+  // function has nothing a kernarg pointer could name locally, so the admission carries no
+  // obligation at all. An object that DOES define them is no longer fenced off: the obligation --
+  // that those bodies are adopted as roots rather than dropped -- is instead discharged directly,
+  // by adopting every exported body whenever object_admits_kernarg_supplied_transfer holds. See
+  // that predicate for why triggering on the admission's own fact keeps the adopted set stable
+  // across passes.
   // Both walk the whole symbol table, and most objects never reach the code that needs them, so
   // pay for them on first use. Doing it eagerly cost about 2x the translation time across the
   // packaged-HSACO corpus -- enough on its own to exhaust the sanitizer job's budget.
