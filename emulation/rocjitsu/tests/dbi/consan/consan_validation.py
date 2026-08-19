@@ -7625,7 +7625,7 @@ def _empirical_campaign(args: argparse.Namespace) -> int:
         raise ValidationError(
             "the empirical study command currently requires physical gfx1201"
         )
-    workload = selection.require_workload()
+    workload = _resolved_workload(target, selection.require_workload())
     workspace = _workspace_from_environment()
     timeout = args.timeout if args.timeout is not None else workload.run_timeout_seconds
     doctor = _doctor(workspace, target, (workload.id,), args.launcher)
@@ -7955,7 +7955,7 @@ def _empirical_campaign(args: argparse.Namespace) -> int:
 def _run(args: argparse.Namespace) -> int:
     selection = _resolve_workload_selection(args, allow_all=False)
     target = selection.target
-    workload = selection.require_workload()
+    workload = _resolved_workload(target, selection.require_workload())
     workspace = _workspace_from_environment()
     timeout = args.timeout if args.timeout is not None else workload.run_timeout_seconds
     doctor = _doctor(workspace, target, (workload.id,), args.launcher)

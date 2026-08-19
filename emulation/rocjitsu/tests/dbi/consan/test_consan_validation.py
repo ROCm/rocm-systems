@@ -1966,6 +1966,50 @@ class ConSanValidationTest(unittest.TestCase):
             ("barrier-move",),
         )
 
+    def test_run_uses_target_resolved_workload_timeout(self) -> None:
+        with temporary_root() as root:
+            for target, expected_timeout in (("gfx950", 30), ("gfx1250", 60)):
+                with self.subTest(target=target):
+                    args = validation._parse_args(
+                        [
+                            "--target",
+                            target,
+                            "run",
+                            "--workload",
+                            "jakub-attention",
+                            "--profile",
+                            "supercollider",
+                            "--phase",
+                            "clean",
+                            "--artifact-root",
+                            str(root / target),
+                        ]
+                    )
+                    with (
+                        mock.patch.object(
+                            validation,
+                            "_workspace_from_environment",
+                            return_value=root,
+                        ),
+                        mock.patch.object(
+                            validation, "_doctor", return_value={"ok": True}
+                        ),
+                        mock.patch.object(validation, "_write_provenance"),
+                        mock.patch.object(
+                            validation,
+                            "_run_profile",
+                            return_value={"accepted": True},
+                        ) as run_profile,
+                        redirect_stdout(io.StringIO()),
+                    ):
+                        self.assertEqual(validation._run(args), 0)
+
+                    self.assertEqual(run_profile.call_args.args[6], expected_timeout)
+                    self.assertEqual(
+                        run_profile.call_args.args[2].run_timeout_seconds,
+                        expected_timeout,
+                    )
+
     def test_native_gtest_routing_matrix_pins_executables_and_phase_filters(
         self,
     ) -> None:
