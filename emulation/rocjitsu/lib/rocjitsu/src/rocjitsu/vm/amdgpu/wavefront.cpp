@@ -82,10 +82,11 @@ uint32_t Wavefront::hw_id1_raw() const {
   uint32_t shader_array_id = 0;
   uint32_t shader_engine_id = 0;
   if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
-    // GFX12.1 models four SIMDs in each CU and four CUs in each shader
-    // array. Its HW_ID1 layout has no SE_ID field.
+    // GFX12.1 models four SIMDs in each CU and eight CUs in each shader
+    // array. A ShaderEngine component contains both arrays, so its sixteen
+    // CUs split evenly across SA_ID. The HW_ID1 layout has no SE_ID field.
     constexpr uint32_t kSimdsPerCu = 4u;
-    constexpr uint32_t kCusPerShaderArray = 4u;
+    constexpr uint32_t kCusPerShaderArray = 8u;
     wave_id = wf_id_ / kSimdsPerCu;
     simd_id = wf_id_ % kSimdsPerCu;
     shader_array_id = location.compute_unit / kCusPerShaderArray;

@@ -341,15 +341,24 @@ build_cdna3_v_add_u64_literal(uint16_t address_vgpr, uint64_t literal, rj_code_a
   if (low_src == kVopLiteralSource)
     words.push_back(low);
 
+  const uint8_t high_vgpr = static_cast<uint8_t>(address_vgpr + 1u);
   const uint32_t high = static_cast<uint32_t>(literal >> 32u);
-  const uint16_t high_src =
-      high <= 64u ? scalar_positive_inline_u32(static_cast<uint16_t>(high)) : kVopLiteralSource;
-  words.push_back(cdna3::build_vop2(cdna3::kVAddcCoU32Vop2,
-                                    {.src0 = high_src,
-                                     .vsrc1 = static_cast<uint8_t>(address_vgpr + 1u),
-                                     .vdst = static_cast<uint8_t>(address_vgpr + 1u)})[0]);
-  if (high_src == kVopLiteralSource)
+  if (high <= 64u) {
+    words.push_back(cdna3::build_vop2(
+        cdna3::kVAddcCoU32Vop2, {.src0 = scalar_positive_inline_u32(static_cast<uint16_t>(high)),
+                                 .vsrc1 = high_vgpr,
+                                 .vdst = high_vgpr})[0]);
+  } else {
+    // VCC and a literal cannot both use CDNA's scalar constant bus. Preserve
+    // the carry with an inline zero, then add the literal independently.
+    words.push_back(cdna3::build_vop2(
+        cdna3::kVAddcCoU32Vop2,
+        {.src0 = scalar_positive_inline_u32(0), .vsrc1 = high_vgpr, .vdst = high_vgpr})[0]);
+    words.push_back(
+        cdna3::build_vop2(cdna3::kVAddU32Vop2,
+                          {.src0 = kVopLiteralSource, .vsrc1 = high_vgpr, .vdst = high_vgpr})[0]);
     words.push_back(high);
+  }
   return words;
 }
 

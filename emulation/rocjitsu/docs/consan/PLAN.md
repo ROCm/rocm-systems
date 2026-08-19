@@ -13,7 +13,11 @@ rather than five loosely related implementations.
 
 ## 1. Establish a checked-in device-conformance tier
 
-**Status: active design and expansion**
+**Status: common tier implemented; capability-specific expansion remains**
+
+The detailed remaining test work, including the required correct/incorrect
+pairing for every scenario, is tracked in
+[PLAN_DEVICE_TESTS.md](PLAN_DEVICE_TESTS.md).
 
 ### Problem
 
@@ -47,6 +51,11 @@ and run natively whenever matching physical hardware is available. Simulator
 and physical execution are two backends for the same test contract, not two
 unrelated suites. Emulation provides portable integration coverage; native
 execution remains necessary for runtime- and hardware-owned behavior.
+
+The observable contract must survive the Part 3 replacement. Device tests
+therefore assert exact workload results and semantic sanitizer outcomes, not
+prototype mechanisms such as patch counts, chosen registers, helper layouts,
+instruction sequences, or code-cave placement.
 
 The common cross-target suite should cover at least:
 

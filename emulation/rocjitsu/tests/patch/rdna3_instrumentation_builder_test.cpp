@@ -23,8 +23,17 @@ TEST(Rdna3InstrumentationBuilder, ScalarVectorAndWaitEncodingsMatchLlvm) {
   EXPECT_EQ(build_rdna3_s_wait_vmcnt0(kArch), 0xbf8903f7u);
   EXPECT_EQ(build_rdna3_s_wait_lgkmcnt0(kArch), 0xbf89fc07u);
   EXPECT_EQ(build_rdna3_s_wait_vmcnt_lgkmcnt0(kArch), 0xbf890007u);
+  EXPECT_EQ(build_rdna3_s_wait_vscnt0(kArch), 0xbc7c0000u);
   EXPECT_EQ(build_rdna3_s_barrier(kArch), 0xbfbd0000u);
   EXPECT_EQ(build_rdna3_s_trap(2, kArch), 0xbf900002u);
+}
+
+TEST(Rdna3InstrumentationBuilder, LiteralAddressHighWordRespectsConstantBus) {
+  const auto words =
+      build_rdna3_v_add_u64_literal(10, 0x00007eff82d2c0c4ull, ROCJITSU_CODE_ARCH_RDNA3);
+  ASSERT_TRUE(words);
+  EXPECT_EQ(*words, (std::vector<uint32_t>{0xd7006a0au, 0x020214ffu, 0x82d2c0c4u, 0x40161680u,
+                                           0x4a1616ffu, 0x00007effu}));
 }
 
 TEST(Rdna3InstrumentationBuilder, MemoryAndAtomicEncodingsMatchLlvmAndDecoder) {

@@ -173,6 +173,14 @@ TEST(Cdna4InstrumentationBuilder, VectorAddressArithmeticMatchesLlvm) {
   EXPECT_EQ(*negative, (std::vector<uint32_t>{0x321414c4u, 0x381616c1u}));
 }
 
+TEST(Cdna4InstrumentationBuilder, LiteralAddressHighWordRespectsConstantBus) {
+  const auto words =
+      build_cdna4_v_add_u64_literal(10, 0x00007eff82d2c0c4ull, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(words);
+  EXPECT_EQ(*words, (std::vector<uint32_t>{0x321414ffu, 0x82d2c0c4u, 0x38161680u, 0x681616ffu,
+                                           0x00007effu}));
+}
+
 TEST(Cdna4InstrumentationBuilder, VectorLiteralOverlapFailsClosed) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   EXPECT_FALSE(build_cdna4_v_add_u32_literal(10, 7, 10, kArch));

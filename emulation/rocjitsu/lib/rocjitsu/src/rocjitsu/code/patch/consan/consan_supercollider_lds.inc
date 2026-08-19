@@ -287,6 +287,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     uint32_t private_limit = 0;
     uint16_t vgpr_base = 0;
     uint16_t vgpr_count = 0;
+    bool uses_dynamic_stack_frame = false;
+    uint16_t saved_frame_base_sgpr = 0;
+    uint16_t saved_scc_sgpr = 0;
   };
 
   struct ScDenseCallGroup {
@@ -709,6 +712,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     std::optional<uint16_t> min_preferred_vcc_save_sgpr;
     uint32_t max_owner_private_segment_size = 0;
     bool uses_dynamic_stack = false;
+    bool every_owner_uses_dynamic_stack = true;
+    bool every_owner_can_grow_ordinary_vgprs = true;
   };
   std::unordered_map<uint64_t, const ConSanKernelInfo *> kernels_by_descriptor;
   std::unordered_map<uint64_t, KernelMaxRegisterRefs> max_refs_by_descriptor;
@@ -750,7 +755,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       const auto owner_kernel = kernels_by_descriptor.find(owner);
       const auto owner_context = std::ranges::find(
           reservoir_owner_contexts, owner, &ScReservoirOwnerContext::descriptor_file_offset);
-      const auto allocated_vgprs = descriptor_vgpr_allocation_count(original_bytes, owner, arch);
+      const auto allocated_vgprs =
+          descriptor_ordinary_vgpr_allocation_count(original_bytes, owner, arch);
+      const auto unified_vgprs = descriptor_vgpr_allocation_count(original_bytes, owner, arch);
       const Instruction *owner_site_inst =
           owner_context == reservoir_owner_contexts.end()
               ? nullptr
@@ -759,7 +766,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       if (owner_kernel == kernels_by_descriptor.end() ||
           owner_context == reservoir_owner_contexts.end() || owner_context->liveness == nullptr ||
           context.instruction == nullptr || owner_site_inst != context.instruction ||
-          !allocated_vgprs || owner > original_bytes.size() ||
+          !allocated_vgprs || !unified_vgprs || owner > original_bytes.size() ||
           sizeof(KD) > original_bytes.size() - owner ||
           owner_kernel->second->preflight_action == ConSanPreflightAction::Reject) {
         complete = false;
@@ -789,7 +796,11 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       if (refs.sgpr)
         max_owner_sgpr_ref =
             max_owner_sgpr_ref ? std::max(*max_owner_sgpr_ref, *refs.sgpr) : *refs.sgpr;
-      context.uses_dynamic_stack |= owner_kernel->second->uses_dynamic_stack.value_or(false);
+      const bool owner_uses_dynamic_stack =
+          owner_kernel->second->uses_dynamic_stack.value_or(false);
+      context.uses_dynamic_stack |= owner_uses_dynamic_stack;
+      context.every_owner_uses_dynamic_stack &= owner_uses_dynamic_stack;
+      context.every_owner_can_grow_ordinary_vgprs &= *allocated_vgprs == *unified_vgprs;
       first_owner = false;
     }
     if (!complete)
@@ -1021,7 +1032,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         scratch_vgpr = *candidate;
         scratch_selected = true;
       }
-      if (!scratch_selected && !options.scratch_vgpr && max_auto_scratch_vgpr) {
+      if (!scratch_selected && !options.scratch_vgpr && max_auto_scratch_vgpr &&
+          site_context.every_owner_can_grow_ordinary_vgprs) {
         if (const auto candidate = choose_context_scratch(std::nullopt)) {
           scratch_vgpr = *candidate;
           scratch_selected = true;
@@ -1029,7 +1041,68 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       }
       if (!scratch_selected && !options.scratch_vgpr && max_auto_scratch_vgpr) {
         if (site_context.uses_dynamic_stack) {
-          ++dynamic_stack_private_spill_rejection_count;
+          std::optional<uint16_t> saved_frame_base_sgpr;
+          std::optional<uint16_t> saved_scc_sgpr;
+          const auto scalar_is_available = [&](uint16_t sgpr) {
+            if (sgpr == kDynamicStackTopSgpr || sgpr == kDynamicFrameBaseSgpr ||
+                (sgpr >= *vcc_save && sgpr < *vcc_save + vcc_save_sgpr_width))
+              return false;
+            const RegisterRef reg{RegClass::SGPR, sgpr, 1u};
+            return std::ranges::all_of(owner_liveness, [&](const LivenessAnalysis *liveness) {
+              return !liveness->any_live_before(*site_inst, reg);
+            });
+          };
+          if (site_context.every_owner_uses_dynamic_stack) {
+            for (uint16_t sgpr = 0u; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr) {
+              if (!scalar_is_available(sgpr))
+                continue;
+              if (!saved_frame_base_sgpr) {
+                saved_frame_base_sgpr = sgpr;
+              } else {
+                saved_scc_sgpr = sgpr;
+                break;
+              }
+            }
+          }
+          const auto spill_scratch =
+              choose_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs, arch);
+          const auto private_limit = address_free_scratch_private_limit(arch);
+          if (spill_scratch && private_limit && saved_frame_base_sgpr && saved_scc_sgpr) {
+            scratch_vgpr = *spill_scratch;
+            auto spill = build_dynamic_stack_vgpr_spill_sequence(
+                scratch_vgpr, static_cast<uint16_t>(scratch_vgprs), kDynamicStackTopSgpr,
+                kDynamicFrameBaseSgpr, *saved_frame_base_sgpr, *saved_scc_sgpr, arch,
+                /*additional_frame_bytes=*/0u);
+            const uint64_t requested_private_bytes =
+                static_cast<uint64_t>(site_context.max_owner_private_segment_size) +
+                static_cast<uint64_t>(scratch_vgprs) * SpillManager::kSlotBytes;
+            const auto required_private_bytes =
+                requested_private_bytes <= std::numeric_limits<uint32_t>::max()
+                    ? normalize_address_free_scratch_private_size(
+                          arch, static_cast<uint32_t>(requested_private_bytes))
+                    : std::nullopt;
+            if (spill && required_private_bytes && *required_private_bytes <= *private_limit) {
+              spill->total_private_bytes = *required_private_bytes;
+              requested_words += spill->save_words.size() + spill->restore_words.size();
+              private_spill_plans.insert_or_assign(
+                  &site,
+                  ScBracketLocalPrivateSpillPlan{
+                      .owner_descriptor_file_offsets = site_context.owner_descriptor_file_offsets,
+                      .original_private_bytes = site_context.max_owner_private_segment_size,
+                      .private_limit = *private_limit,
+                      .vgpr_base = scratch_vgpr,
+                      .vgpr_count = static_cast<uint16_t>(scratch_vgprs),
+                      .uses_dynamic_stack_frame = true,
+                      .saved_frame_base_sgpr = *saved_frame_base_sgpr,
+                      .saved_scc_sgpr = *saved_scc_sgpr,
+                  });
+              scratch_selected = true;
+            } else {
+              ++private_spill_encoding_failure_count;
+            }
+          } else {
+            ++dynamic_stack_private_spill_rejection_count;
+          }
         } else {
           const auto spill_scratch =
               choose_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs, arch);
@@ -1389,6 +1462,26 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     if (plan == private_spill_plans.end())
       return true;
     const std::vector<uint64_t> &key = plan->second.owner_descriptor_file_offsets;
+    if (plan->second.uses_dynamic_stack_frame) {
+      auto sequence = build_dynamic_stack_vgpr_spill_sequence(
+          plan->second.vgpr_base, plan->second.vgpr_count, kDynamicStackTopSgpr,
+          kDynamicFrameBaseSgpr, plan->second.saved_frame_base_sgpr, plan->second.saved_scc_sgpr,
+          arch, /*additional_frame_bytes=*/0u);
+      const uint64_t requested_private_bytes =
+          static_cast<uint64_t>(plan->second.original_private_bytes) +
+          static_cast<uint64_t>(plan->second.vgpr_count) * SpillManager::kSlotBytes;
+      const auto required_private_bytes =
+          requested_private_bytes <= std::numeric_limits<uint32_t>::max()
+              ? normalize_address_free_scratch_private_size(
+                    arch, static_cast<uint32_t>(requested_private_bytes))
+              : std::nullopt;
+      if (!sequence || !required_private_bytes ||
+          *required_private_bytes > plan->second.private_limit)
+        return false;
+      sequence->total_private_bytes = *required_private_bytes;
+      state.sequences.insert_or_assign(candidate.site, std::move(*sequence));
+      return true;
+    }
     std::optional<SpillManager> manager;
     if (const auto existing = state.managers.find(key); existing != state.managers.end())
       manager = existing->second;
@@ -3289,6 +3382,13 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     planned.info.scalar_vcc_spill_vgpr_count = candidate.scalar_vcc_spill_vgpr ? 1u : 0u;
     planned.info.required_sgpr_count =
         static_cast<uint16_t>(candidate.vcc_save_sgpr + sc_vcc_save_sgpr_width(arch));
+    if (const auto plan = private_spill_plans.find(&site);
+        plan != private_spill_plans.end() && plan->second.uses_dynamic_stack_frame) {
+      planned.info.required_sgpr_count = std::max<uint16_t>(
+          planned.info.required_sgpr_count,
+          static_cast<uint16_t>(
+              std::max(plan->second.saved_frame_base_sgpr, plan->second.saved_scc_sgpr) + 1u));
+    }
     planned.info.owner_descriptor_file_offsets = site.owner_descriptor_file_offsets;
     if (planned.info.owner_descriptor_file_offsets.empty())
       planned.info.owner_descriptor_file_offsets = {candidate.descriptor_file_offset};

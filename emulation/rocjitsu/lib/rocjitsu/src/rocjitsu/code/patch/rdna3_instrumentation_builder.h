@@ -271,7 +271,8 @@ build_rdna3_v_add_co_u32(uint16_t vdst, uint16_t src0, uint16_t src1) {
                                     {.vdst = static_cast<uint8_t>(vdst),
                                      .sdst = static_cast<uint8_t>(rdna3::OPR_SDST_VCC_LO),
                                      .src0 = src0,
-                                     .src1 = src1});
+                                     .src1 = src1,
+                                     .src2 = scalar_positive_inline_u32(0)});
 }
 
 [[nodiscard]] inline std::optional<std::vector<uint32_t>>
@@ -299,21 +300,28 @@ build_rdna3_v_add_u64_literal(uint16_t address_vgpr, uint64_t literal, rj_code_a
                                : kVopLiteralSource;
   const auto low =
       build_rdna3_v_add_co_u32(address_vgpr, low_src, vector_source_vgpr(address_vgpr));
-  const uint32_t high_literal = static_cast<uint32_t>(literal >> 32u);
-  const uint16_t high_src = high_literal <= 64u
-                                ? scalar_positive_inline_u32(static_cast<uint16_t>(high_literal))
-                                : kVopLiteralSource;
-  const auto high =
-      build_rdna3_vop2(rdna3::kVAddCoCiU32Vop2, static_cast<uint16_t>(address_vgpr + 1u), high_src,
-                       static_cast<uint16_t>(address_vgpr + 1u), arch);
-  if (!high)
-    return std::nullopt;
   std::vector<uint32_t> words{low[0], low[1]};
   if (low_src == kVopLiteralSource)
     words.push_back(low_literal);
-  words.push_back(*high);
-  if (high_src == kVopLiteralSource)
+  const uint16_t high_vgpr = static_cast<uint16_t>(address_vgpr + 1u);
+  const uint32_t high_literal = static_cast<uint32_t>(literal >> 32u);
+  if (high_literal <= 64u) {
+    const auto high = build_rdna3_vop2(
+        rdna3::kVAddCoCiU32Vop2, high_vgpr,
+        scalar_positive_inline_u32(static_cast<uint16_t>(high_literal)), high_vgpr, arch);
+    if (!high)
+      return std::nullopt;
+    words.push_back(*high);
+  } else {
+    const auto carry = build_rdna3_vop2(rdna3::kVAddCoCiU32Vop2, high_vgpr,
+                                        scalar_positive_inline_u32(0), high_vgpr, arch);
+    const auto add = build_rdna3_v_add_u32(high_vgpr, kVopLiteralSource, high_vgpr, arch);
+    if (!carry || !add)
+      return std::nullopt;
+    words.push_back(*carry);
+    words.push_back(*add);
     words.push_back(high_literal);
+  }
   return words;
 }
 
@@ -381,6 +389,14 @@ build_rdna3_s_wait_vmcnt_lgkmcnt0(rj_code_arch_t arch) {
   if (!is_rdna3_arch(arch))
     return std::nullopt;
   return build_sopp_encoding(arch, rdna3::kSWaitcntSopp, 0x0007u);
+}
+
+/// @brief Encode gfx11 `s_waitcnt_vscnt null, 0`.
+[[nodiscard]] inline constexpr std::optional<uint32_t>
+build_rdna3_s_wait_vscnt0(rj_code_arch_t arch) {
+  if (!is_rdna3_arch(arch))
+    return std::nullopt;
+  return build_sopk_encoding(arch, rdna3::kSWaitcntVscntSopk, rdna3::OPR_SDST_NULL, 0u);
 }
 
 [[nodiscard]] inline constexpr std::optional<uint32_t> build_rdna3_s_barrier(rj_code_arch_t arch) {

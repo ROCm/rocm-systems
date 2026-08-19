@@ -371,24 +371,44 @@ moi_descriptor_dispatch_id_preload_plan(const KD &desc, rj_code_arch_t arch) {
     return invalid;
   }
   const uint16_t user_sgpr_initialization_limit = arch == ROCJITSU_CODE_ARCH_GFX1250 ? 32u : 16u;
-  ConSanMoiDispatchIdPreloadPlan plan = consan_moi_plan_dispatch_id_preload(
-      original_user_count, system_count, prefix, dispatch_enabled, kMaxSgprs,
-      user_sgpr_initialization_limit);
+  ConSanMoiDispatchIdPreloadPlan plan;
+  if (!dispatch_enabled && original_user_count <= user_sgpr_initialization_limit &&
+      minimum_declared_user_count + 2u <= original_user_count &&
+      static_cast<uint32_t>(original_user_count) + system_count <= kMaxSgprs) {
+    // Some producers reserve a larger user-SGPR window than their named
+    // preloads occupy. Insert dispatch ID into that padding and shift only the
+    // named suffix; neither the declared window nor the following system
+    // SGPRs need to move.
+    plan.support = ConSanMoiDispatchIdPreloadSupport::SupportedInsert;
+    plan.dispatch_id_sgpr = prefix;
+    plan.original_user_sgpr_count = original_user_count;
+    plan.expanded_user_sgpr_count = original_user_count;
+    plan.system_sgpr_count = system_count;
+    plan.first_shifted_guest_sgpr = prefix;
+    plan.shifted_guest_sgpr_count = named_suffix;
+    plan.required_sgpr_count = static_cast<uint16_t>(original_user_count + system_count);
+  } else {
+    plan = consan_moi_plan_dispatch_id_preload(original_user_count, system_count, prefix,
+                                               dispatch_enabled, kMaxSgprs,
+                                               user_sgpr_initialization_limit);
+  }
   const uint16_t preload_length =
       AMDHSA_BITS_GET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH);
   plan.original_kernarg_preload_length = preload_length;
   plan.replacement_kernarg_preload_length = preload_length;
   const auto kernarg_ptr = moi_descriptor_kernarg_segment_ptr_sgpr(desc);
-  // CDNA3/4 initialize at most 16 user SGPRs. When dispatch ID would exceed
-  // that window by one or two dwords, shorten the hardware kernarg preload by
-  // exactly that overflow and recover those guest values from the still-live
-  // kernarg pointer in the entry prologue. System SGPRs move only by the
-  // remaining user-window growth, so record that smaller repair separately.
+  // RDNA3 and CDNA3/4 initialize at most 16 user SGPRs. When dispatch ID would
+  // exceed that window by one or two dwords, shorten the hardware kernarg
+  // preload by exactly that overflow and recover those guest values from the
+  // still-live kernarg pointer in the entry prologue. System SGPRs move only
+  // by the remaining user-window growth, so record that smaller repair
+  // separately.
   const uint16_t overflow =
       original_user_count + 2u > user_sgpr_initialization_limit
           ? static_cast<uint16_t>(original_user_count + 2u - user_sgpr_initialization_limit)
           : 0u;
-  if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+  if ((arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+       arch == ROCJITSU_CODE_ARCH_CDNA4) &&
       plan.support == ConSanMoiDispatchIdPreloadSupport::UserSgprInitializationLimit &&
       !dispatch_enabled && overflow >= 1u && overflow <= 2u && kernarg_ptr &&
       preload_length > overflow && prefix + named_suffix == original_user_count) {
@@ -467,7 +487,8 @@ moi_descriptor_dispatch_id_preload_plan(const KD &desc, rj_code_arch_t arch) {
     };
   }
   if (cdna_full_payload_user_sgpr_count &&
-      (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)) {
+      (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+       arch == ROCJITSU_CODE_ARCH_CDNA4)) {
     const uint16_t full_base = *cdna_full_payload_user_sgpr_count;
     if (static_cast<uint32_t>(full_base) + 3u > kMaxSgprs) {
       errors.emplace_back("ConSan MOI full CDNA workgroup-ID payload exceeds scalar registers");
@@ -562,6 +583,18 @@ record_replay_persistent_workgroup_sources(const ConSanOptions &options, rj_code
   return std::nullopt;
 }
 
+[[nodiscard]] std::optional<ConSanMoiWorkgroupSources>
+moi_persistent_or_descriptor_workgroup_sources(std::span<const uint8_t> image,
+                                               uint64_t descriptor_file_offset,
+                                               const ConSanOptions &options, rj_code_arch_t arch,
+                                               std::vector<std::string> &errors,
+                                               bool uses_gfx1250_cluster_workgroup_id = false) {
+  if (const auto persistent = record_replay_persistent_workgroup_sources(options, arch))
+    return persistent;
+  return moi_descriptor_workgroup_sources(image, descriptor_file_offset, arch, errors,
+                                          uses_gfx1250_cluster_workgroup_id);
+}
+
 [[nodiscard]] uint32_t moi_descriptor_vgpr_granularity(const KD &desc, rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
     return 8;
@@ -584,6 +617,21 @@ record_replay_persistent_workgroup_sources(const ConSanOptions &options, rj_code
   const uint32_t granulated =
       AMDHSA_BITS_GET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
   return (granulated + 1u) * granularity;
+}
+
+[[nodiscard]] uint32_t moi_descriptor_ordinary_vgpr_allocation_count(const KD &desc,
+                                                                     rj_code_arch_t arch) {
+  const uint32_t unified_count = moi_descriptor_vgpr_allocation_count(desc, arch);
+  if (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)
+    return unified_count;
+
+  constexpr uint32_t kAccvgprOffsetGranularity = 4u;
+  const uint32_t encoded_accum_offset =
+      AMDHSA_BITS_GET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
+  if (encoded_accum_offset == 0u)
+    return unified_count;
+  const uint32_t accvgpr_base = (encoded_accum_offset + 1u) * kAccvgprOffsetGranularity;
+  return unified_count > accvgpr_base ? std::min(unified_count, accvgpr_base) : unified_count;
 }
 
 [[nodiscard]] uint32_t moi_descriptor_sgpr_allocation_count(const KD &desc, rj_code_arch_t arch) {
@@ -704,7 +752,8 @@ struct MoiSgprRange {
   KD desc{};
   std::memcpy(&desc, image.data() + kernel.descriptor_file_offset, sizeof(desc));
   if (!grow_moi_descriptor_vgpr_allocation(desc, required_count, arch, kernel.agpr_count == 0u)) {
-    errors.emplace_back("ConSan MOI could not grow descriptor VGPR allocation");
+    errors.emplace_back("ConSan MOI could not grow descriptor VGPR allocation to " +
+                        std::to_string(required_count) + " registers");
     return false;
   }
   if (!patcher.patch_kernel_descriptor(kernel.descriptor_file_offset,
@@ -766,6 +815,14 @@ struct MoiSgprRange {
   // versioned transaction reuses all of its ordinary address temporaries.
   return consan_detail::inline_shadow_loop_scratch_count(candidate.width_bits,
                                                          consan_moi_exact_shadow::granule_bytes);
+}
+
+[[nodiscard]] bool inline_shadow_reserves_scalar_consumer_owner(const ConSanOptions &options) {
+  // Access-time acquired-token filtering needs the current owner in a VGPR.
+  // A scalar-persistent owner therefore occupies one site-local register
+  // beyond the transaction window for the whole diagnostic lifetime.
+  return options.moi_track_atomics && !options.moi_owner_vgpr &&
+         moi_uses_scalar_persistent_state(options);
 }
 
 [[nodiscard]] uint16_t moi_exec_save_sgpr_count(const ConSanOptions &options, rj_code_arch_t arch);
@@ -935,7 +992,9 @@ sampled_access_can_plan_spill_over_guest_operands(const ConSanOptions &options,
           ? 1u
           : 0u;
   return static_cast<uint16_t>(
-      inline_shadow_scratch_count(options) + inline_shadow_loop_scratch_count(options, candidate) +
+      inline_shadow_scratch_count(options) +
+      (inline_shadow_reserves_scalar_consumer_owner(options) ? 1u : 0u) +
+      inline_shadow_loop_scratch_count(options, candidate) +
       (moi_load_clobbers_address(candidate) && flat_offset_address_count == 0u ? 1u : 0u) +
       flat_offset_address_count + dynamic_stack_reservoir_count + two_address_replay_count);
 }
@@ -966,7 +1025,10 @@ sampled_access_can_plan_spill_over_guest_operands(const ConSanOptions &options,
           ? 1u
           : 0u;
   return static_cast<uint16_t>(
-      base_scratch_count + (options.moi_runtime_sample_stride > 1 ? 1u : 0u) +
+      // Reserve the identity-bank register even when address sampling is
+      // disabled. Auto-sized reports use multiple workgroup banks in that
+      // mode, and the persistent owner/epoch tail must not alias the bank.
+      base_scratch_count + 1u +
       (candidate_requires_gfx1250_flat_offset_materialization(candidate) ? 2u
        : moi_load_clobbers_address(candidate)                            ? 1u
                                                                          : 0u) +
@@ -999,7 +1061,11 @@ struct SampledAtomicScratchLayout {
   static constexpr uint16_t kCasResult = kCasCompare + kCasFieldWords;
   static constexpr uint16_t kOwner = kCasResult + kCasFieldWords;
   static constexpr uint16_t kEpoch = kOwner + 1u;
-  static constexpr uint16_t kSavedAddress = kEpoch + 1u;
+  // Keep the materialized address at the scratch tail: the consumer-neutral
+  // atomic address planner deliberately reserves the last pair.  The bank is
+  // live across the report transaction, but it need not follow that pair.
+  static constexpr uint16_t kBank = kEpoch + 1u;
+  static constexpr uint16_t kSavedAddress = kBank + 1u;
   static constexpr uint16_t kSavedAddressCount = 2u;
   static constexpr uint16_t kCount = kSavedAddress + kSavedAddressCount;
 };
@@ -2710,6 +2776,22 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpti
           state, options, ConSanResourceSiteKind::Access, candidate_index, candidate.text_offset,
           candidate.kernel_descriptor_file_offset, spill_scratch_count, &candidate,
           /*atomic_site=*/nullptr, /*require_spill=*/true);
+      // The reduced window omits the dedicated address snapshot because the
+      // original address is expected to be authoritative in that window's
+      // private spill slot. A generic forced-spill plan is free to choose a
+      // different window, though. In that case the reduced plan would place
+      // its fallback snapshot immediately beyond the saved window and could
+      // silently clobber a live guest VGPR. Keep the original, full-width plan
+      // unless this alternative actually spills the clobbered address.
+      if (spill_plan.source == ConSanRegisterAllocationSource::SpillRequired &&
+          (!spill_plan.scratch_vgpr || !candidate.addr_vgpr ||
+           !range_overlaps(*candidate.addr_vgpr, 1u, *spill_plan.scratch_vgpr,
+                           spill_plan.scratch_vgpr_count))) {
+        spill_plan.source = ConSanRegisterAllocationSource::Unsupported;
+        spill_plan.reason = ConSanRegisterPlanReason::ForbiddenOverlap;
+        spill_plan.scratch_vgpr.reset();
+        spill_plan.required_vgpr_count = spill_plan.current_vgpr_count;
+      }
       const bool selected = spill_plan.source == ConSanRegisterAllocationSource::SpillRequired;
       const ConSanResourcePlanAlternative alternative{
           .kind = ConSanResourcePlanAlternativeKind::SpillBackedOperandRecovery,
@@ -4854,8 +4936,10 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
                !plan.owner_descriptor_file_offsets.empty() &&
                plan.site_kind == ConSanResourceSiteKind::Access;
       });
+  const bool is_rdna_dispatch_vgpr_arch =
+      arch == ROCJITSU_CODE_ARCH_RDNA3 || is_rdna4_family_arch(arch);
   const bool needs_persistent_dispatch_vgprs =
-      is_rdna4_family_arch(arch) && has_supported_record_replay_access &&
+      is_rdna_dispatch_vgpr_arch && has_supported_record_replay_access &&
       record_replay_uses_automatic_banked_capture(options) &&
       !moi_has_runtime_hardware_dispatch_id(options);
   const bool needs_workgroup_key = needs_inline_workgroup_key;
@@ -4919,12 +5003,12 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
         "scope");
     return false;
   }
-  if (is_rdna4_family_arch(arch) && options.moi_engine == ConSanMoiEngine::RecordReplay) {
-    // Persistent owner/epoch state and a site-local Record/Replay probe share
-    // the ordinary VGPR file. Keep the tuple above the largest operational
-    // scratch window so a small kernel can still spill v0..vN when no
-    // liveness-dead window exists. Guest access operands may overlap that
-    // spilled window because emission recovers them from the spill frame;
+  if (is_rdna_dispatch_vgpr_arch && (options.moi_engine == ConSanMoiEngine::RecordReplay ||
+                                     options.moi_engine == ConSanMoiEngine::Sampled)) {
+    // Persistent owner/epoch and exact-workgroup state shares the ordinary
+    // VGPR file with site-local Record/Replay and Sampled probes. Keep it above
+    // the largest operational scratch window. Guest operands may overlap a
+    // spill-backed window because emission recovers them from private state;
     // persistent values cannot overlap it because they must survive for the
     // complete dispatch.
     uint32_t scratch_floor = 0;
@@ -5638,16 +5722,20 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
       needs_record_replay_workgroup_tuple && !record_replay_uses_automatic_banked_capture(options);
   const bool prefer_private_epoch =
       !has_dynamic_stack_owner && !prefer_compact_record_replay_barriers && !needs_workgroup_key &&
+      !has_explicit_owner_epoch &&
       (!needs_record_replay_workgroup_tuple || record_replay_private_tuple_supported) &&
       !sampled_requires_persistent_owner &&
       (has_dynamic_lds_owner ||
        (would_grow_descriptor && options.moi_engine != ConSanMoiEngine::InlineShadow));
-  const bool rdna4_needs_scalar_epoch =
-      is_rdna4_family_arch(arch) && !options.force_private_epoch &&
+  const bool rdna_needs_scalar_epoch =
+      (arch == ROCJITSU_CODE_ARCH_RDNA3 || is_rdna4_family_arch(arch)) &&
+      !options.force_private_epoch &&
       (options.moi_engine == ConSanMoiEngine::RecordReplay ||
-       (options.moi_engine == ConSanMoiEngine::Sampled && has_dynamic_stack_owner)) &&
+       ((options.moi_engine == ConSanMoiEngine::Sampled ||
+         options.moi_engine == ConSanMoiEngine::InlineShadow) &&
+        has_dynamic_stack_owner)) &&
       (persistent_end > kMaxVgprs || prefer_private_epoch);
-  if (rdna4_needs_scalar_epoch) {
+  if (rdna_needs_scalar_epoch) {
     if (needs_persistent_dispatch_vgprs) {
       result.outcome = ConSanTransformOutcome::Unsupported;
       result.warnings.emplace_back(

@@ -6124,8 +6124,11 @@ class CodeGenerator:
         L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst', role='Dst')};")
         L.append(f'  d->elem_size = {esz};')
         L.append('  d->num_elems = 1;')
-        # DS atomics always return the old value (like GLC=1).
-        L.append('  d->is_load = true;')
+        # Non-RTN DS atomics update LDS without an architected VGPR result.
+        # The MR ISA operand model exposes vdst only on the RTN form, so use
+        # that semantic distinction instead of the otherwise-unused encoded
+        # vdst bits to decide whether the memory pipeline writes a response.
+        L.append(f"  d->is_load = {str('vdst' in dst).lower()};")
         L.append(f'  d->atomic_op = {op_enum};')
         self._append_wait_counter_type(L, 'ds_atomic')
         L.append('  ds_calculate_addresses(inst_, wf, *d);')

@@ -95,6 +95,12 @@ inline constexpr uint32_t byte_end_minus_one_shift = byte_offset_shift + byte_of
 inline constexpr uint32_t byte_end_minus_one_bits = 2;
 inline constexpr uint32_t lane_plus_one_shift = byte_end_minus_one_shift + byte_end_minus_one_bits;
 inline constexpr uint32_t lane_plus_one_bits = 7;
+inline constexpr uint32_t access_byte_count_minus_one_shift =
+    lane_plus_one_shift + lane_plus_one_bits;
+inline constexpr uint32_t access_byte_count_minus_one_bits = 4;
+inline constexpr uint32_t relative_cell_index_shift =
+    access_byte_count_minus_one_shift + access_byte_count_minus_one_bits;
+inline constexpr uint32_t relative_cell_index_bits = 4;
 inline constexpr uint32_t byte_mask_mask =
     static_cast<uint32_t>(consan_moi_bit_field_mask(byte_mask_shift, byte_mask_bits));
 inline constexpr uint32_t byte_offset_mask =
@@ -103,9 +109,16 @@ inline constexpr uint32_t byte_end_minus_one_mask = static_cast<uint32_t>(
     consan_moi_bit_field_mask(byte_end_minus_one_shift, byte_end_minus_one_bits));
 inline constexpr uint32_t lane_plus_one_mask =
     static_cast<uint32_t>(consan_moi_bit_field_mask(lane_plus_one_shift, lane_plus_one_bits));
-inline constexpr uint32_t packed_mask =
-    byte_mask_mask | byte_offset_mask | byte_end_minus_one_mask | lane_plus_one_mask;
+inline constexpr uint32_t access_byte_count_minus_one_mask = static_cast<uint32_t>(
+    consan_moi_bit_field_mask(access_byte_count_minus_one_shift, access_byte_count_minus_one_bits));
+inline constexpr uint32_t relative_cell_index_mask = static_cast<uint32_t>(
+    consan_moi_bit_field_mask(relative_cell_index_shift, relative_cell_index_bits));
+inline constexpr uint32_t packed_mask = byte_mask_mask | byte_offset_mask |
+                                        byte_end_minus_one_mask | lane_plus_one_mask |
+                                        access_byte_count_minus_one_mask | relative_cell_index_mask;
 inline constexpr uint32_t maximum_lane = 63;
+inline constexpr uint32_t maximum_access_byte_count = 16;
+inline constexpr uint32_t maximum_relative_cell_index = 15;
 
 } // namespace consan_moi_exact_byte_cell
 
@@ -115,6 +128,8 @@ struct ConSanMoiExactByteCellProvenance {
   uint8_t byte_count = 0;
   uint8_t representative_lane = 0;
   bool valid = false;
+  uint8_t access_byte_count = 0;
+  uint8_t relative_cell_index = 0;
 };
 
 [[nodiscard]] constexpr bool consan_moi_exact_byte_cell_mask_is_contiguous(uint32_t byte_mask) {
@@ -209,6 +224,13 @@ decode_consan_moi_exact_byte_cell_provenance(uint32_t packed) {
   const uint32_t byte_end = ((packed & consan_moi_exact_byte_cell::byte_end_minus_one_mask) >>
                              consan_moi_exact_byte_cell::byte_end_minus_one_shift) +
                             1u;
+  const uint32_t access_byte_count =
+      ((packed & consan_moi_exact_byte_cell::access_byte_count_minus_one_mask) >>
+       consan_moi_exact_byte_cell::access_byte_count_minus_one_shift) +
+      1u;
+  const uint32_t relative_cell_index =
+      (packed & consan_moi_exact_byte_cell::relative_cell_index_mask) >>
+      consan_moi_exact_byte_cell::relative_cell_index_shift;
   const bool valid = (packed & ~consan_moi_exact_byte_cell::packed_mask) == 0u &&
                      consan_moi_exact_byte_cell_mask_is_contiguous(byte_mask) &&
                      byte_offset < byte_end && byte_end <= consan_moi_exact_shadow::granule_bytes &&
@@ -221,6 +243,8 @@ decode_consan_moi_exact_byte_cell_provenance(uint32_t packed) {
       static_cast<uint8_t>(valid ? byte_end - byte_offset : 0u),
       static_cast<uint8_t>(valid ? lane_plus_one - 1u : 0u),
       valid,
+      static_cast<uint8_t>(valid ? access_byte_count : 0u),
+      static_cast<uint8_t>(valid ? relative_cell_index : 0u),
   };
 }
 
@@ -1048,7 +1072,8 @@ classify_consan_moi_sampled_snapshot(ConSanMoiSampledSnapshotWords words,
   if (entry.generation != (active_generation & consan_moi_sampled_watchpoint::max_generation))
     return {ConSanMoiSampledSnapshotState::StaleGeneration, entry};
   if (entry.kind != ConSanMoiShadowAccessKind::Read &&
-      entry.kind != ConSanMoiShadowAccessKind::Write)
+      entry.kind != ConSanMoiShadowAccessKind::Write &&
+      entry.kind != ConSanMoiShadowAccessKind::Atomic)
     return {ConSanMoiSampledSnapshotState::Malformed, entry};
   return {ConSanMoiSampledSnapshotState::Stable, entry};
 }

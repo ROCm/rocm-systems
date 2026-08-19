@@ -334,9 +334,11 @@ std::vector<uint32_t> expected_vgpr_spill_words(uint16_t base, uint16_t count, b
   std::vector<uint32_t> words;
   if (!restore) {
     const auto wait = build_s_wait_loadcnt0(ROCJITSU_CODE_ARCH_RDNA4);
-    if (!wait)
+    const auto wait_lds = instrumentation::build_s_wait_lds0(ROCJITSU_CODE_ARCH_RDNA4);
+    if (!wait || !wait_lds)
       return {};
     words.push_back(*wait);
+    words.push_back(*wait_lds);
   }
   for (uint16_t i = 0; i < count; ++i) {
     const auto instruction =

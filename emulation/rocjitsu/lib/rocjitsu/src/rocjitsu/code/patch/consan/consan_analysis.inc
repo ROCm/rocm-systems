@@ -45,6 +45,42 @@ namespace kd = rocr::llvm::amdhsa;
   return static_cast<uint16_t>(std::min<uint32_t>(allocated, REGISTER_SET_MAX_VGPRS));
 }
 
+/// Return the portion of a CDNA unified VGPR allocation that belongs to the
+/// ordinary v-register file. ACCUM_OFFSET is a hard boundary whenever the
+/// rounded descriptor allocation extends beyond it: registers at and above
+/// that point back live AccVGPR storage and are not scratch merely because the
+/// ordinary-register liveness set does not mention them.
+[[nodiscard]] uint16_t descriptor_ordinary_vgpr_allocation_count(const KD &desc,
+                                                                 rj_code_arch_t arch) {
+  const uint16_t unified_count = descriptor_vgpr_allocation_count(desc, arch);
+  if (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)
+    return unified_count;
+
+  constexpr uint32_t kAccvgprOffsetGranularity = 4u;
+  const uint32_t encoded_accum_offset =
+      AMDHSA_BITS_GET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
+  // Zero is the descriptor default for kernels without an accumulator bank.
+  // Treat a boundary as active only when the producer selected a nonzero
+  // ACCUM_OFFSET; this matches the existing resource planner and avoids
+  // truncating ordinary-only kernels to four registers.
+  if (encoded_accum_offset == 0u)
+    return unified_count;
+  const uint32_t accvgpr_base = (encoded_accum_offset + 1u) * kAccvgprOffsetGranularity;
+  return unified_count > accvgpr_base
+             ? static_cast<uint16_t>(std::min<uint32_t>(accvgpr_base, REGISTER_SET_MAX_VGPRS))
+             : unified_count;
+}
+
+[[nodiscard]] std::optional<uint16_t>
+descriptor_ordinary_vgpr_allocation_count(std::span<const uint8_t> image,
+                                          uint64_t descriptor_file_offset, rj_code_arch_t arch) {
+  if (descriptor_file_offset > image.size() || sizeof(KD) > image.size() - descriptor_file_offset)
+    return std::nullopt;
+  KD desc{};
+  std::memcpy(&desc, image.data() + descriptor_file_offset, sizeof(desc));
+  return descriptor_ordinary_vgpr_allocation_count(desc, arch);
+}
+
 [[nodiscard]] std::optional<uint16_t>
 descriptor_vgpr_allocation_count(std::span<const uint8_t> image, uint64_t descriptor_file_offset,
                                  rj_code_arch_t arch) {
@@ -59,8 +95,8 @@ descriptor_vgpr_allocation_count(std::span<const uint8_t> image, uint64_t descri
   constexpr uint32_t kMaxOrdinarySgprs = 106u;
   const uint32_t granulated = AMDHSA_BITS_GET(
       desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
-  return static_cast<uint16_t>(std::min<uint32_t>(
-      amdgpu_kernel_descriptor_sgpr_count(granulated, arch), kMaxOrdinarySgprs));
+  return static_cast<uint16_t>(
+      std::min<uint32_t>(amdgpu_kernel_descriptor_sgpr_count(granulated, arch), kMaxOrdinarySgprs));
 }
 
 [[nodiscard]] bool grow_descriptor_sgpr_allocation(KD &desc, uint16_t required_count,
@@ -84,6 +120,13 @@ descriptor_vgpr_allocation_count(std::span<const uint8_t> image, uint64_t descri
                                                    rj_code_arch_t arch) {
   if (required_count > REGISTER_SET_MAX_VGPRS)
     return false;
+  if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      required_count > descriptor_ordinary_vgpr_allocation_count(desc, arch)) {
+    const uint16_t unified_count = descriptor_vgpr_allocation_count(desc, arch);
+    const uint16_t ordinary_count = descriptor_ordinary_vgpr_allocation_count(desc, arch);
+    if (ordinary_count < unified_count)
+      return false;
+  }
   if (required_count <= descriptor_vgpr_allocation_count(desc, arch))
     return true;
 
@@ -124,8 +167,7 @@ merge_descriptor_sgpr_growths(std::span<const DescriptorSgprGrowth> growths) {
 [[nodiscard]] bool
 apply_descriptor_sgpr_growths_to_patcher(CodeObjectPatcher &patcher,
                                          std::span<const DescriptorSgprGrowth> growths,
-                                         rj_code_arch_t arch,
-                                         std::vector<std::string> &errors) {
+                                         rj_code_arch_t arch, std::vector<std::string> &errors) {
   const std::span<const uint8_t> current_image = patcher.image_bytes();
   for (const auto &[descriptor_file_offset, required_count] :
        merge_descriptor_sgpr_growths(growths)) {
@@ -149,8 +191,7 @@ apply_descriptor_sgpr_growths_to_patcher(CodeObjectPatcher &patcher,
 [[nodiscard]] bool
 apply_descriptor_sgpr_growths_to_bytes(std::span<uint8_t> image,
                                        std::span<const DescriptorSgprGrowth> growths,
-                                       rj_code_arch_t arch,
-                                       std::vector<std::string> &errors) {
+                                       rj_code_arch_t arch, std::vector<std::string> &errors) {
   for (const auto &[descriptor_file_offset, required_count] :
        merge_descriptor_sgpr_growths(growths)) {
     if (descriptor_file_offset > image.size() ||
@@ -1757,7 +1798,7 @@ void record_flat_site(const Instruction &inst, const FlatPointerTracker &tracker
     else if (raw.seg == 2u)
       site.address_space_hint = ConSanFlatAddressSpaceHint::Global;
   } else if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-      instruction_bytes.size() >= sizeof(cdna4::FlatMachineInst)) {
+             instruction_bytes.size() >= sizeof(cdna4::FlatMachineInst)) {
     // CDNA3 and CDNA4 use an identical FLAT bit layout.
     cdna4::FlatMachineInst raw{};
     std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
@@ -1987,8 +2028,8 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
     std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
     fill_rdna3_flat_like_atomic_raw(site, raw);
   } else if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-      mnemonic.starts_with("flat_atomic") &&
-      instruction_bytes.size() >= sizeof(cdna4::FlatMachineInst)) {
+             mnemonic.starts_with("flat_atomic") &&
+             instruction_bytes.size() >= sizeof(cdna4::FlatMachineInst)) {
     // CDNA3 and CDNA4 use identical FLAT bit layouts.
     cdna4::FlatMachineInst raw{};
     std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
@@ -2027,8 +2068,7 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
       fill_buffer_atomic_raw(site, raw);
     }
   } else if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
-    if (mnemonic.starts_with("ds_") &&
-        instruction_bytes.size() >= sizeof(cdna5::VdsMachineInst)) {
+    if (mnemonic.starts_with("ds_") && instruction_bytes.size() >= sizeof(cdna5::VdsMachineInst)) {
       cdna5::VdsMachineInst raw{};
       std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
       fill_ds_atomic_raw(site, raw);
@@ -2071,9 +2111,9 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
       (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
       mnemonic.starts_with("global_atomic") && site.raw_saddr &&
       *site.raw_saddr == kCdnaGlobalNoSaddrEncoding;
-  const bool rdna3_global_no_saddr =
-      arch == ROCJITSU_CODE_ARCH_RDNA3 && mnemonic.starts_with("global_atomic") &&
-      site.raw_saddr && *site.raw_saddr == kRdna3GlobalNoSaddrEncoding;
+  const bool rdna3_global_no_saddr = arch == ROCJITSU_CODE_ARCH_RDNA3 &&
+                                     mnemonic.starts_with("global_atomic") && site.raw_saddr &&
+                                     *site.raw_saddr == kRdna3GlobalNoSaddrEncoding;
   if (cdna_global_no_saddr || rdna3_global_no_saddr) {
     site.saddr_sgpr.reset();
   } else if (mnemonic.starts_with("global_atomic") && !site.saddr_sgpr && site.raw_saddr &&

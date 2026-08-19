@@ -158,9 +158,11 @@ struct SampledAtomicSemantics {
 
 /// Return the first scratch VGPR reserved for a wide-access cell loop.
 [[nodiscard]] constexpr uint16_t
-inline_shadow_loop_counter_vgpr(uint16_t scratch_vgpr, bool has_exec_save, bool track_atomics) {
+inline_shadow_loop_counter_vgpr(uint16_t scratch_vgpr, bool has_exec_save, bool track_atomics,
+                                bool reserve_scalar_consumer_owner = false) {
   return static_cast<uint16_t>(
-      scratch_vgpr + inline_shadow_transaction_scratch_count(has_exec_save, track_atomics));
+      scratch_vgpr + inline_shadow_transaction_scratch_count(has_exec_save, track_atomics) +
+      (reserve_scalar_consumer_owner ? 1u : 0u));
 }
 
 /// Return the transaction register that holds the expected version for CAS.

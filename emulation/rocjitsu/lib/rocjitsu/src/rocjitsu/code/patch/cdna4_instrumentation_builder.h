@@ -386,14 +386,23 @@ build_cdna4_v_add_u64_literal(uint16_t address_vgpr, uint64_t literal, rj_code_a
   if (low_src == kVopLiteralSource)
     words.push_back(low);
 
+  const uint16_t high_vgpr = static_cast<uint16_t>(address_vgpr + 1u);
   const uint32_t high = static_cast<uint32_t>(literal >> 32u);
-  const uint16_t high_src =
-      high <= 64u ? scalar_positive_inline_u32(static_cast<uint16_t>(high)) : kVopLiteralSource;
-  words.push_back(*build_cdna4_vop2(cdna4::kVAddcCoU32Vop2,
-                                    static_cast<uint16_t>(address_vgpr + 1u), high_src,
-                                    static_cast<uint16_t>(address_vgpr + 1u), arch));
-  if (high_src == kVopLiteralSource)
+  if (high <= 64u) {
+    words.push_back(*build_cdna4_vop2(cdna4::kVAddcCoU32Vop2, high_vgpr,
+                                      scalar_positive_inline_u32(static_cast<uint16_t>(high)),
+                                      high_vgpr, arch));
+  } else {
+    // VCC is already a scalar source of v_addc_co_u32. A literal second
+    // scalar source violates CDNA's constant-bus rule and executes
+    // incorrectly on hardware even though the decoder can display it.
+    // Propagate carry first, then add the high literal without VCC.
+    words.push_back(*build_cdna4_vop2(cdna4::kVAddcCoU32Vop2, high_vgpr,
+                                      scalar_positive_inline_u32(0), high_vgpr, arch));
+    words.push_back(
+        *build_cdna4_vop2(cdna4::kVAddU32Vop2, high_vgpr, kVopLiteralSource, high_vgpr, arch));
     words.push_back(high);
+  }
   return words;
 }
 

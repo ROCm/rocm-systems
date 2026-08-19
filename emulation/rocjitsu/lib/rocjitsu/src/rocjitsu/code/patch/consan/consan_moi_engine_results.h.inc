@@ -164,6 +164,24 @@ enum class ConSanMoiSampledSyncOutcome : uint8_t {
 /// typed descriptor.
 inline constexpr uint32_t kConSanMoiSampledSyncPublishingDescriptor = 0xffffffffu;
 
+// One HIP workgroup contains at most 1024 workitems, hence at most 32 wave32
+// owners. Deferred acquires are live per wave until their associated sampled
+// access publishes; banking only by workgroup lets ordinary last-arriver RMWs
+// overwrite or contend with one another.
+inline constexpr uint32_t kConSanMoiSampledPendingAcquireOwnerBankCount = 32u;
+
+[[nodiscard]] constexpr uint32_t
+consan_moi_sampled_pending_acquire_owner_bank_count(uint32_t pending_capacity,
+                                                    uint32_t causal_window_capacity) {
+  if (causal_window_capacity == 0u || pending_capacity % causal_window_capacity != 0u)
+    return 0u;
+  const uint32_t bank_count = pending_capacity / causal_window_capacity;
+  return bank_count != 0u && bank_count <= kConSanMoiSampledPendingAcquireOwnerBankCount &&
+                 std::has_single_bit(bank_count)
+             ? bank_count
+             : 0u;
+}
+
 /// ABI-v7 deferred acquire publication. The acquire executes before its
 /// associated sampled access can publish a causal window, so it transactionally
 /// retains the complete identity and atomic payload in the statically selected

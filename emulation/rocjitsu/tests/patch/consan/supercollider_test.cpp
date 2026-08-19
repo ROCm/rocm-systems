@@ -6808,6 +6808,46 @@ TEST(ConSan, Gfx1250SharedLdsPrivateSpillRejectsAnyDynamicStackOwner) {
   })) << testing::PrintToString(result.warnings);
 }
 
+TEST(ConSan, Cdna3NativeLdsDynamicStackSpillUsesBracketLocalFrame) {
+  constexpr uint32_t kOrdinaryVgprGranulated = 7u;
+  std::vector<uint32_t> text_words = {
+      0xD81A0000u,
+      0x00000201u, // ds_write_b32 v1, v2
+  };
+  text_words.insert(text_words.end(), 128u, build_s_nop(0u, ROCJITSU_CODE_ARCH_CDNA3));
+  for (uint16_t vgpr = 0u; vgpr < 32u; ++vgpr) {
+    text_words.push_back(
+        build_v_mov_b32_e32(vgpr, vector_source_vgpr(vgpr), ROCJITSU_CODE_ARCH_CDNA3));
+  }
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
+  std::vector<uint8_t> bytes = make_cdna3_lds_code_object(
+      text_words, "cdna3_native_lds_dynamic_stack", kOrdinaryVgprGranulated,
+      /*uses_dynamic_stack=*/true);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 7u);
+  });
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.delay_nops = 1u;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &candidate) {
+    return candidate.spilled_vgpr_count != 0u;
+  });
+  ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.patches);
+  EXPECT_GT(patch->spilled_vgpr_count, 0u);
+  EXPECT_EQ(patch->dynamic_private_segment_addend,
+            patch->spilled_vgpr_count * SpillManager::kSlotBytes);
+  EXPECT_GE(patch->required_private_segment_size, patch->dynamic_private_segment_addend);
+  EXPECT_GT(patch->required_sgpr_count, 2u);
+}
+
 TEST(ConSan, Gfx1250SharedLdsPrivateSpillCapacityFailureIsAccounted) {
   const std::vector<uint32_t> helper_words = make_gfx1250_full_pressure_lds_load_words();
   TwoKernelSharedFixtureOptions fixture;

@@ -5155,7 +5155,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   "scalar_vcc_spill_vgpr_count=%u "
                   "private_epoch_offset=%s spilled_vgprs=%u "
                   "private_bytes=%u dynamic_private_addend=%u "
-                  "workgroup_shadow_base=%u workgroup_shadow_bytes=%u group_bytes=%u",
+                  "workgroup_shadow_base=%u workgroup_shadow_bytes=%u group_bytes=%u "
+                  "sampled_first_slot=%u sampled_window_banks=%u sampled_access_kind=%u",
                   static_cast<unsigned long long>(code_object_reader.handle),
                   patch_kind_name(patch.kind), static_cast<unsigned long long>(patch.anchor_offset),
                   static_cast<unsigned long long>(patch.trampoline_offset), patch.original_size,
@@ -5164,7 +5165,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   private_epoch_offset.c_str(), patch.spilled_vgpr_count,
                   patch.required_private_segment_size, patch.dynamic_private_segment_addend,
                   patch.workgroup_shadow_base, patch.workgroup_shadow_size,
-                  patch.required_group_segment_size);
+                  patch.required_group_segment_size, patch.sampled_first_slot,
+                  patch.sampled_window_bank_count,
+                  static_cast<uint32_t>(patch.sampled_access_kind));
     }
     if (config->require_patch && !config->fault_dry_run &&
         !has_consan_site_instrumentation_patch(patch_result)) {

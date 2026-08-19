@@ -243,6 +243,23 @@ def test_gfx1250_dual_atomic_generator_covers_each_variant(
     assert 'd->ds2_store_data' in body
 
 
+def test_ds_atomic_generator_only_writes_back_explicit_return_destination() -> None:
+    codegen = object.__new__(CodeGenerator)
+    codegen._vgpr_base_expr = lambda operand, **_kwargs: operand
+    codegen._append_wait_counter_type = lambda lines, _semantic_class: lines.append(
+        '  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;'
+    )
+    sem = InstructionSemantics(
+        'DS_ADD_U32', 'ds_atomic', operation='add', elem_size=4, num_elems=1
+    )
+
+    nonreturning = codegen._gen_ds_atomic([], [], sem)
+    returning = codegen._gen_ds_atomic(['vdst'], [], sem)
+
+    assert 'd->is_load = false;' in nonreturning
+    assert 'd->is_load = true;' in returning
+
+
 def _generated_constructor_body(cpp: str, class_name: str) -> str:
     start = cpp.index(f'{class_name}::{class_name}(')
     end = cpp.index('\n\n', start)

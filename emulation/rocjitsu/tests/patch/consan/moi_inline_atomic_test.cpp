@@ -36,10 +36,10 @@ enum class InlineAtomicSequenceKind : uint8_t { Release, Acquire, AcquireRelease
   const bool has_acquire = sequence_kind != InlineAtomicSequenceKind::Release;
   if (has_release) {
     if (target.arch == ROCJITSU_CODE_ARCH_RDNA3) {
-      // gfx11 does not expose a standalone release cache operation. Its
-      // compiler-lowered acquire sequence is qualified below, while a release
-      // cannot be inferred from the atomic encoding alone.
-      return {};
+      const auto wait = build_rdna3_s_wait_vscnt0(target.arch);
+      if (!wait)
+        return {};
+      text_words.push_back(*wait);
     } else if (target.arch == ROCJITSU_CODE_ARCH_CDNA3) {
       const auto release = cdna3::build_mubuf(cdna3::kBufferWbl2Mubuf, {.sc1 = 1});
       const auto wait = build_cdna3_s_wait_vmcnt_lgkmcnt0(target.arch);
@@ -160,6 +160,39 @@ TEST(ConSanMoi, Gfx1100InlineAtomicAcquireUsesCompleteGfx11CacheSequence) {
                                           ConSanCapabilityEngine::InlineShadow,
                                           ConSanCapabilityForm::OrderedFlatAtomic),
             ConSanCapabilityDisposition::Supported);
+}
+
+TEST(ConSanMoi, Gfx1100InlineAtomicAcquireReleaseUsesExactVscntBoundary) {
+  const InlineReleaseSequenceTarget target{ROCJITSU_CODE_ARCH_RDNA3, "gfx1100/rdna3",
+                                           /*release_transaction_vsrc=*/12,
+                                           /*token_transaction_vsrc=*/26};
+  std::vector<uint32_t> atomic_words;
+  const std::vector<uint8_t> bytes = make_inline_atomic_sequence_fixture(
+      target, atomic_words, {}, InlineAtomicSequenceKind::AcquireRelease);
+  ASSERT_FALSE(bytes.empty());
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.moi_track_atomics = true;
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 80;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_dispatch_id_sgpr = 20;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 1;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.sync_sequences.size(), 1u);
+  EXPECT_EQ(result.sync_sequences.front().memory_role, ConSanSyncMemoryRole::AcquireRelease);
+  ASSERT_TRUE(result.sync_sequences.front().release_wait_text_offset);
+  EXPECT_EQ(*result.sync_sequences.front().release_wait_text_offset, 0u);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_NE(std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
+                              &ConSanPatchInfo::kind),
+            result.patches.end());
 }
 
 TEST(ConSanMoi, Gfx1100VglobalAtomicAcquireCoversVectorAndScalarAddressForms) {
@@ -863,6 +896,30 @@ TEST(ConSanMoi, InlineAcquiredTokenHashDoesNotAliasDistinctCausalEdgesByConstruc
                                                                   capacity));
     }
   }
+}
+
+TEST(ConSanMoi, InlineAcquiredTokenCapacitySeparatesFourWaveReleaseSequenceAncestors) {
+  constexpr uint32_t workgroup = 1u;
+  constexpr uint32_t first_producer = 1u;
+  constexpr uint32_t second_consumer = 257u;
+  constexpr uint32_t third_consumer = 513u;
+  // Wave owner IDs are spaced by 256. The first and inherited edges in this
+  // ordinary four-wave release sequence collide in the former 64-slot table.
+  EXPECT_EQ(consan_moi_inline_acquired_epoch_token_slot_index(workgroup, second_consumer,
+                                                              first_producer, 64u,
+                                                              /*release_sequence=*/true),
+            consan_moi_inline_acquired_epoch_token_slot_index(workgroup, third_consumer,
+                                                              first_producer, 64u,
+                                                              /*release_sequence=*/true));
+  EXPECT_GE(kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity, 128u);
+  EXPECT_NE(consan_moi_inline_acquired_epoch_token_slot_index(
+                workgroup, second_consumer, first_producer,
+                kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity,
+                /*release_sequence=*/true),
+            consan_moi_inline_acquired_epoch_token_slot_index(
+                workgroup, third_consumer, first_producer,
+                kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity,
+                /*release_sequence=*/true));
 }
 
 TEST(ConSanMoi, InlineAtomicDirectMappedTablePinsLookupAndReplacementContract) {
@@ -2870,7 +2927,8 @@ TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken)
       make_expected_offset_load_words(offsetof(ConSanMoiInlineAtomicReleaseSlot, epoch_plus_one),
                                       /*value_vgpr=*/13, *options.scratch_vgpr)));
   EXPECT_EQ(layout.inline_atomic_release_capacity, 64u);
-  EXPECT_EQ(layout.inline_acquired_epoch_token_capacity, 64u);
+  EXPECT_EQ(layout.inline_acquired_epoch_token_capacity,
+            kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity);
   EXPECT_TRUE(contains_subsequence(
       acquire_words, make_expected_offset_store_words(
                          offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, workgroup_key),
@@ -2912,6 +2970,17 @@ TEST(ConSanMoi, InlineAtomicMixedTablePublishesReleaseAndPairScopedAcquireToken)
   ASSERT_TRUE(token_claim_or_update);
   EXPECT_EQ(count_subsequence(acquire_words, *token_claim_or_update), 15u)
       << "five destinations each have reserve, rollback, and commit CAS bodies";
+  const std::array<uint32_t, 3> rollback_operand_swap = {
+      build_v_mov_b32_e32(/*hash=*/29, vector_source_vgpr(/*journaled prior=*/28),
+                          ROCJITSU_CODE_ARCH_RDNA4),
+      build_v_mov_b32_e32(/*expected=*/28, vector_source_vgpr(/*odd reservation=*/27),
+                          ROCJITSU_CODE_ARCH_RDNA4),
+      build_v_mov_b32_e32(/*new=*/27, vector_source_vgpr(/*saved prior=*/29),
+                          ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  EXPECT_EQ(count_subsequence(acquire_words, rollback_operand_swap), 5u)
+      << "each rollback CAS must restore the journaled even version rather than leave the "
+         "reservation odd";
 
   const auto forbidden_epoch_import =
       build_v_add_nc_u32_e32(*options.moi_epoch_vgpr, scalar_positive_inline_u32(1), /*vsrc1=*/10,
@@ -4519,7 +4588,10 @@ TEST(ConSanMoi, SampledCausalPublicationRejectsWholeMalformedWindow) {
     records[index].cell_count = 1;
     records[index].epoch = 2;
   }
-  records[1].access_kind = static_cast<uint32_t>(ConSanMoiShadowAccessKind::Atomic);
+  // Atomic accesses are valid sampled watchpoints. ReadWrite is intentionally
+  // not a representable sampled entry and therefore makes the whole causal
+  // window malformed.
+  records[1].access_kind = static_cast<uint32_t>(ConSanMoiShadowAccessKind::ReadWrite);
   std::array<uint64_t, 2> entries{};
   std::array<ConSanMoiSampledCausalWindow, 1> windows{};
   const ConSanMoiSampledPublishResult result =

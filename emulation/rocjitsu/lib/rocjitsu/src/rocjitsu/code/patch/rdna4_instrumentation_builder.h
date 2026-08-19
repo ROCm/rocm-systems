@@ -311,7 +311,7 @@ build_v_add_u64_vgpr_offset(uint16_t address_vgpr, uint16_t offset_vgpr, rj_code
           : pack_vop3(rdna4::kVAddCoCiU32Vop3SdstEnc, static_cast<uint8_t>(address_vgpr + 1u),
                       scalar_positive_inline_u32(0),
                       vector_source_vgpr(static_cast<uint16_t>(address_vgpr + 1u)), kVccLo, kVccLo);
-  return std::array<uint32_t, 5>{low[0], low[1], pack_sopp(rdna4::kSWaitAlu, 0xfffdu), high[0],
+  return std::array<uint32_t, 5>{low[0], low[1], pack_sopp(rdna4::kSWaitAlu, 0xff9du), high[0],
                                  high[1]};
 }
 
@@ -346,20 +346,26 @@ build_v_add_u64_literal(uint16_t address_vgpr, uint64_t literal, rj_code_arch_t 
                       vector_source_vgpr(address_vgpr), scalar_positive_inline_u32(0), kVccLo);
 
   const uint32_t high_literal = static_cast<uint32_t>(literal >> 32u);
-  const uint16_t high_src = high_literal <= 64u
-                                ? scalar_positive_inline_u32(static_cast<uint16_t>(high_literal))
-                                : kVopLiteralSource;
   const uint16_t high_op =
       arch == ROCJITSU_CODE_ARCH_GFX1250 ? cdna5::kVAddCoCiU32Vop2 : rdna4::kVAddCoCiU32Vop2;
 
   std::vector<uint32_t> words = {low[0], low[1]};
   if (low_src == kVopLiteralSource)
     words.push_back(low_literal);
-  words.push_back(pack_sopp(rdna4::kSWaitAlu, 0xfffdu));
-  words.push_back(pack_vop2(high_op, static_cast<uint16_t>(address_vgpr + 1u), high_src,
-                            static_cast<uint16_t>(address_vgpr + 1u)));
-  if (high_src == kVopLiteralSource)
+  words.push_back(pack_sopp(rdna4::kSWaitAlu, 0xff9du));
+  const uint16_t high_vgpr = static_cast<uint16_t>(address_vgpr + 1u);
+  if (high_literal <= 64u) {
+    words.push_back(pack_vop2(high_op, high_vgpr,
+                              scalar_positive_inline_u32(static_cast<uint16_t>(high_literal)),
+                              high_vgpr));
+  } else {
+    words.push_back(pack_vop2(high_op, high_vgpr, scalar_positive_inline_u32(0), high_vgpr));
+    const auto high_add = build_v_add_nc_u32_e32_literal(high_vgpr, high_literal, high_vgpr, arch);
+    if (!high_add)
+      return std::nullopt;
+    words.push_back((*high_add)[0]);
     words.push_back(high_literal);
+  }
   return words;
 }
 
@@ -417,7 +423,7 @@ build_v_add_u64_signed_i24(uint16_t address_vgpr, int32_t displacement, rj_code_
                       high_displacement,
                       vector_source_vgpr(static_cast<uint16_t>(address_vgpr + 1u)), kVccLo, kVccLo);
   return std::array<uint32_t, 6>{
-      low[0], low[1], low_extension, pack_sopp(rdna4::kSWaitAlu, 0xfffdu), high[0], high[1]};
+      low[0], low[1], low_extension, pack_sopp(rdna4::kSWaitAlu, 0xff9du), high[0], high[1]};
 }
 
 /// @brief Encode RDNA4 `v_readfirstlane_b32 sdst, vsrc`.

@@ -903,6 +903,11 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   if (result.errors.empty() && !owner_epoch_prologue_applied_early &&
       (!prologue_needs_consumer || result.modified))
     try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options, arch, result);
+  if (result.outcome == ConSanTransformOutcome::Unsupported || !result.errors.empty()) {
+    finalize_moi_site_lowering_outcomes(result);
+    summarize_moi_resource_plans(result);
+    return result;
+  }
   if (result.errors.empty())
     (void)enable_moi_full_workgroup_id_payload(arch, result);
   finalize_moi_site_lowering_outcomes(result);
@@ -1104,18 +1109,27 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
     inventory.inline_compact_token_mapping_count = selected_candidate_count;
 
   if (options.moi_engine == ConSanMoiEngine::Sampled) {
-    const uint64_t bank_count = options.moi_runtime_sample_stride > 1u ? 8u : 1u;
+    // Dynamic-identity banks are required independently of address sampling:
+    // otherwise one workgroup can claim a static site's sole slot while a
+    // related site is claimed by another workgroup, making their evidence
+    // incomparable. The lowering hashes full dispatch/workgroup identity when
+    // multiple banks are available.
+    constexpr uint64_t bank_count = 8u;
     const uint64_t access_banks =
         inventory.access_range_count > std::numeric_limits<uint64_t>::max() / bank_count
             ? std::numeric_limits<uint64_t>::max()
             : inventory.access_range_count * bank_count;
-    // Synchronization metadata is attached to an already selected access
-    // window; atomics do not create independent sampled windows. Sizing from
-    // atomic inventory alone otherwise provisions vacuous capacity for code
-    // objects with no admissible LDS access.
+    // Atomic synchronization metadata is meaningful only in the presence of
+    // an access window, but the lowering reserves one tail slot per admitted
+    // atomic sequence in the shared sampled arrays. Preserve the access-only
+    // zero-capacity behavior while provisioning those lowering slots whenever
+    // at least one access range is present.
     inventory.sampled_range_bank_count = access_banks;
-    inventory.sampled_watchpoint_count = inventory.sampled_range_bank_count;
-    inventory.sampled_bank_count_adaptive = bank_count > 1u;
+    const uint64_t sampled_slots =
+        access_banks == 0u ? 0u : util::saturating_add(access_banks, inventory.atomic_event_count);
+    inventory.sampled_sync_slot_count = sampled_slots;
+    inventory.sampled_watchpoint_count = sampled_slots;
+    inventory.sampled_bank_count_adaptive = true;
     if (options.moi_track_barriers) {
       inventory.barrier_event_count = 0;
       for (const ConSanSyncSequence &sequence : result.sync_sequences) {
@@ -1168,8 +1182,12 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
     inventory.inline_causal_snapshot_count = ordering_capacity;
     inventory.inline_acquired_epoch_token_count =
         std::max<uint64_t>(ordering_capacity, kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity);
-    inventory.diagnostic_count = std::max<uint64_t>(
-        inventory.diagnostic_count, kConSanMoiInlineShadowDefaultDiagnosticCapacity);
+    const uint64_t diagnostic_headroom = util::saturating_mul(
+        inventory.access_range_count,
+        static_cast<uint64_t>(kConSanMoiInlineShadowDiagnosticHeadroomPerAccess));
+    inventory.diagnostic_count =
+        std::max({inventory.diagnostic_count, diagnostic_headroom,
+                  static_cast<uint64_t>(kConSanMoiInlineShadowDefaultDiagnosticCapacity)});
   }
   if (options.moi_engine == ConSanMoiEngine::RecordReplay)
     return fit_consan_moi_record_replay_auto_report_inventory(inventory);

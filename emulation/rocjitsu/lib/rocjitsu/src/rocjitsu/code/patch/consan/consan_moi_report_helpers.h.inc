@@ -181,9 +181,10 @@ consan_moi_direct_sampled_report_buffer_layout_for_bytes(uint64_t report_buffer_
 }
 
 inline constexpr uint32_t kConSanMoiInlineShadowDefaultDiagnosticCapacity = 4;
+inline constexpr uint32_t kConSanMoiInlineShadowDiagnosticHeadroomPerAccess = 64;
 inline constexpr uint32_t kConSanMoiInlineShadowConservativeExactShadowEntries = 16u * 1024u;
 inline constexpr uint32_t kConSanMoiInlineShadowAtomicReleaseSlotCapacity = 64;
-inline constexpr uint32_t kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity = 64;
+inline constexpr uint32_t kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity = 128;
 
 [[nodiscard]] constexpr uint32_t
 consan_moi_inline_atomic_release_slot_index(uint64_t atomic_address, uint32_t table_capacity) {
@@ -451,11 +452,11 @@ consan_moi_inline_shadow_report_buffer_layout_for_bytes(
   const uint64_t payload_bytes = report_buffer_size - sizeof(ConSanMoiReportHeader);
   uint32_t diagnostic_capacity = consan_moi_clamp_u32_capacity(std::min<uint64_t>(
       requested_diagnostic_capacity, payload_bytes / sizeof(ConSanMoiDiagnosticRecord)));
-  constexpr uint64_t metadata_bytes_per_slot = sizeof(ConSanMoiInlineAtomicReleaseSlot) +
-                                               sizeof(ConSanMoiInlineCausalSnapshot) +
-                                               sizeof(ConSanMoiInlineAcquiredEpochTokenSlot);
+  constexpr uint64_t metadata_bytes_per_minimum_slot =
+      sizeof(ConSanMoiInlineAtomicReleaseSlot) + sizeof(ConSanMoiInlineCausalSnapshot) +
+      sizeof(ConSanMoiInlineAcquiredEpochTokenSlot);
   constexpr uint64_t minimum_metadata_bytes =
-      metadata_bytes_per_slot + sizeof(ConSanMoiInlineExactShadowSlot);
+      metadata_bytes_per_minimum_slot + sizeof(ConSanMoiInlineExactShadowSlot);
   while (diagnostic_capacity != 0 && payload_bytes - static_cast<uint64_t>(diagnostic_capacity) *
                                                          sizeof(ConSanMoiDiagnosticRecord) <
                                          minimum_metadata_bytes) {
@@ -465,25 +466,32 @@ consan_moi_inline_shadow_report_buffer_layout_for_bytes(
   const uint64_t diagnostic_bytes =
       static_cast<uint64_t>(diagnostic_capacity) * sizeof(ConSanMoiDiagnosticRecord);
   const uint64_t post_diagnostic_bytes = payload_bytes - diagnostic_bytes;
-  const uint32_t inline_metadata_capacity =
-      post_diagnostic_bytes >=
-              static_cast<uint64_t>(kConSanMoiInlineShadowAtomicReleaseSlotCapacity) *
-                      metadata_bytes_per_slot +
-                  sizeof(ConSanMoiInlineExactShadowSlot)
-          ? kConSanMoiInlineShadowAtomicReleaseSlotCapacity
+  constexpr uint64_t full_metadata_bytes =
+      static_cast<uint64_t>(kConSanMoiInlineShadowAtomicReleaseSlotCapacity) *
+          (sizeof(ConSanMoiInlineAtomicReleaseSlot) + sizeof(ConSanMoiInlineCausalSnapshot)) +
+      static_cast<uint64_t>(kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity) *
+          sizeof(ConSanMoiInlineAcquiredEpochTokenSlot);
+  const bool full_metadata =
+      post_diagnostic_bytes >= full_metadata_bytes + sizeof(ConSanMoiInlineExactShadowSlot);
+  const uint32_t inline_atomic_release_capacity =
+      full_metadata ? kConSanMoiInlineShadowAtomicReleaseSlotCapacity
       : post_diagnostic_bytes >= minimum_metadata_bytes ? 1u
                                                         : 0u;
+  const uint32_t inline_acquired_epoch_token_capacity =
+      full_metadata ? kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity
+                    : inline_atomic_release_capacity;
   const uint64_t inline_atomic_release_slot_bytes =
-      static_cast<uint64_t>(inline_metadata_capacity) * sizeof(ConSanMoiInlineAtomicReleaseSlot);
+      static_cast<uint64_t>(inline_atomic_release_capacity) *
+      sizeof(ConSanMoiInlineAtomicReleaseSlot);
   const uint64_t inline_acquired_epoch_token_slot_bytes =
-      static_cast<uint64_t>(inline_metadata_capacity) *
+      static_cast<uint64_t>(inline_acquired_epoch_token_capacity) *
       sizeof(ConSanMoiInlineAcquiredEpochTokenSlot);
   const uint64_t inline_causal_snapshot_bytes =
-      static_cast<uint64_t>(inline_metadata_capacity) * sizeof(ConSanMoiInlineCausalSnapshot);
+      static_cast<uint64_t>(inline_atomic_release_capacity) * sizeof(ConSanMoiInlineCausalSnapshot);
   layout.diagnostic_capacity = diagnostic_capacity;
-  layout.inline_atomic_release_capacity = inline_metadata_capacity;
-  layout.inline_acquired_epoch_token_capacity = inline_metadata_capacity;
-  layout.inline_causal_snapshot_capacity = inline_metadata_capacity;
+  layout.inline_atomic_release_capacity = inline_atomic_release_capacity;
+  layout.inline_acquired_epoch_token_capacity = inline_acquired_epoch_token_capacity;
+  layout.inline_causal_snapshot_capacity = inline_atomic_release_capacity;
   layout.exact_shadow_entry_capacity = consan_moi_clamp_u32_capacity(
       (payload_bytes - diagnostic_bytes - inline_atomic_release_slot_bytes -
        inline_causal_snapshot_bytes - inline_acquired_epoch_token_slot_bytes) /
@@ -538,8 +546,7 @@ consan_moi_report_layout_has_required_capacities(const ConSanMoiReportBufferLayo
   const uint64_t anticipated_identity_count =
       static_cast<uint64_t>(layout.record_replay_logical_access_range_count) *
       layout.record_replay_access_dispatch_bank_count *
-      layout.record_replay_access_owner_bank_count *
-      layout.record_replay_address_group_headroom;
+      layout.record_replay_access_owner_bank_count * layout.record_replay_address_group_headroom;
   const bool access_table_valid =
       layout.record_replay_dispatch_token_capacity == 0u ||
       (layout.record_replay_logical_access_range_count != 0u &&

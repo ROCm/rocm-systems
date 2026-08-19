@@ -236,7 +236,7 @@ classify_consan_moi_sampled_pending_acquire(const ConSanMoiSampledPendingAcquire
     return view.slot == ConSanMoiSampledPendingAcquireSlot{} ? State::Empty : State::Malformed;
   if ((view.version_after & 1u) != 0)
     return State::Publishing;
-  if (view.slot.version != view.version_after || view.slot.reserved != 0)
+  if (view.slot.version != view.version_after)
     return State::Malformed;
   if (view.slot.selected_slot != key.selected_slot || view.slot.generation != key.generation ||
       view.slot.dispatch_id != key.dispatch_id || view.slot.workgroup_x != key.workgroup_x ||
@@ -1224,7 +1224,39 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
     bool in_barrier_run = false;
   };
   std::vector<ReplayWorkgroupState> workgroups;
-  const size_t synchronization_metadata_capacity = atomic_events.size() + fence_events.size();
+  const auto synchronization_metadata_capacity_for_workgroup =
+      [&](uint64_t generation, uint32_t workgroup_x, uint32_t workgroup_y, uint32_t workgroup_z) {
+        size_t event_count = 0;
+        for (const ConSanMoiRecordReplayAtomicEvent &record : atomic_events) {
+          const uint64_t record_generation =
+              record.generation != 0 ? record.generation : header.generation;
+          if (!is_unpublished_atomic_record(record) && record_generation == generation &&
+              record.workgroup_x == workgroup_x && record.workgroup_y == workgroup_y &&
+              record.workgroup_z == workgroup_z)
+            ++event_count;
+        }
+        for (const ConSanMoiRecordReplayFenceEvent &record : fence_events) {
+          const uint64_t record_generation =
+              record.generation != 0 ? record.generation : header.generation;
+          if (!is_unpublished_fence_record(record) && record_generation == generation &&
+              record.workgroup_x == workgroup_x && record.workgroup_y == workgroup_y &&
+              record.workgroup_z == workgroup_z)
+            ++event_count;
+        }
+
+        // Each event can introduce one owner, and a causal frontier can retain
+        // one component for every ordered producer/consumer pair. Reserving
+        // only one slot per event loses valid acquire-release chains once a
+        // fourth owner imports three predecessors. Bound each workgroup by the
+        // square of its own event count so total storage follows the observed
+        // synchronization distribution rather than multiplying a process-wide
+        // maximum by every workgroup.
+        if (event_count != 0 && event_count > std::numeric_limits<size_t>::max() / event_count) {
+          replay.metadata_full = true;
+          return event_count;
+        }
+        return event_count * event_count;
+      };
   std::optional<size_t> first_workgroup_index;
   auto find_workgroup_state = [&](uint64_t generation, uint32_t workgroup_x, uint32_t workgroup_y,
                                   uint32_t workgroup_z) -> ReplayWorkgroupState & {
@@ -1246,6 +1278,9 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
       state.exported_exact_shadow_entries.resize(exact_shadow_entries.size());
     // Atomic and fence synchronization share one causal clock. A component
     // imported through either mechanism can be published by the other.
+    const size_t synchronization_metadata_capacity =
+        synchronization_metadata_capacity_for_workgroup(generation, workgroup_x, workgroup_y,
+                                                        workgroup_z);
     state.atomic_release_records.resize(synchronization_metadata_capacity);
     state.acquired_epoch_tokens.resize(synchronization_metadata_capacity);
     workgroups.push_back(std::move(state));
@@ -1386,7 +1421,8 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
     uint64_t communication_token = 0;
   };
   std::vector<FenceRelease> fence_releases;
-  fence_releases.reserve(synchronization_metadata_capacity);
+  const size_t total_synchronization_event_count = atomic_events.size() + fence_events.size();
+  fence_releases.reserve(total_synchronization_event_count);
 
   auto publish_fence = [&](const ConSanMoiRecordReplayFenceEvent &record, uint64_t generation,
                            uint32_t epoch,
@@ -1411,7 +1447,8 @@ ConSanMoiRecordReplayResult consan_moi_record_replay_access_records(
       if (!targets[component_index])
         ++new_record_count;
     }
-    if (new_record_count > synchronization_metadata_capacity - fence_releases.size())
+    if (new_record_count > total_synchronization_event_count * total_synchronization_event_count -
+                               fence_releases.size())
       return ConSanMoiAtomicSyncResult{/*metadata_full=*/true, /*updated_record_count=*/0};
 
     ConSanMoiAtomicSyncResult result;
@@ -2142,7 +2179,8 @@ consan_moi_sampled_publish_causal_windows(const ConSanMoiReportHeader &header,
   };
   const auto decode_kind = [](uint32_t value) {
     const auto kind = static_cast<ConSanMoiShadowAccessKind>(value);
-    return kind == ConSanMoiShadowAccessKind::Read || kind == ConSanMoiShadowAccessKind::Write
+    return kind == ConSanMoiShadowAccessKind::Read || kind == ConSanMoiShadowAccessKind::Write ||
+                   kind == ConSanMoiShadowAccessKind::Atomic
                ? kind
                : ConSanMoiShadowAccessKind::Empty;
   };
@@ -2345,7 +2383,8 @@ ConSanMoiSampledReplayResult consan_moi_sampled_replay_causal_windows(
         decode_consan_moi_sampled_watchpoint_entry(sampled_watchpoint_entries[index]);
     if (!entry.valid || entry.consumed ||
         (entry.kind != ConSanMoiShadowAccessKind::Read &&
-         entry.kind != ConSanMoiShadowAccessKind::Write) ||
+         entry.kind != ConSanMoiShadowAccessKind::Write &&
+         entry.kind != ConSanMoiShadowAccessKind::Atomic) ||
         entry.generation != (static_cast<uint32_t>(header.generation) &
                              consan_moi_sampled_watchpoint::max_generation)) {
       replay.invalid_causal_metadata = true;

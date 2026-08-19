@@ -32,7 +32,7 @@ void DsAddU32Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::ADD;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -58,7 +58,7 @@ void DsSubU32Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::SUB;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -84,7 +84,7 @@ void DsRsubU32Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::RSUB;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -110,7 +110,7 @@ void DsIncU32Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::INC;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -136,7 +136,7 @@ void DsDecU32Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::DEC;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -162,7 +162,7 @@ void DsMinI32Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::SMIN;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -188,7 +188,7 @@ void DsMaxI32Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::SMAX;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -214,7 +214,7 @@ void DsMinU32Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::UMIN;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -240,7 +240,7 @@ void DsMaxU32Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::UMAX;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -266,7 +266,7 @@ void DsAndB32Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::AND;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -292,7 +292,7 @@ void DsOrB32Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::OR;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -318,7 +318,7 @@ void DsXorB32Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::XOR;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -466,7 +466,7 @@ void DsCmpstoreB32Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -497,7 +497,7 @@ void DsMinNumF32Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::FMIN;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -523,7 +523,7 @@ void DsMaxNumF32Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::FMAX;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -551,7 +551,7 @@ void DsAddF32Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::FADD;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1346,7 +1346,7 @@ void DsAddU64Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::ADD;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1374,7 +1374,7 @@ void DsSubU64Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::SUB;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1402,7 +1402,7 @@ void DsRsubU64Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::RSUB;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1430,7 +1430,7 @@ void DsIncU64Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::INC;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1458,7 +1458,7 @@ void DsDecU64Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::DEC;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1486,7 +1486,7 @@ void DsMinI64Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::SMIN;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1514,7 +1514,7 @@ void DsMaxI64Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::SMAX;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1542,7 +1542,7 @@ void DsMinU64Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::UMIN;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1570,7 +1570,7 @@ void DsMaxU64Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::UMAX;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1598,7 +1598,7 @@ void DsAndB64Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::AND;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1626,7 +1626,7 @@ void DsOrB64Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::OR;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1654,7 +1654,7 @@ void DsXorB64Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::XOR;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1818,7 +1818,7 @@ void DsCmpstoreB64Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1853,7 +1853,7 @@ void DsMinNumF64Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::FMIN;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1881,7 +1881,7 @@ void DsMaxNumF64Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::FMAX;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1909,7 +1909,7 @@ void DsAddF64Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::FADD;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -2728,7 +2728,7 @@ void DsCondSubU32Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::SUB;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -2754,7 +2754,7 @@ void DsSubClampU32Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::SUB;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -2780,7 +2780,7 @@ void DsPkAddF16Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::FADD;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -2806,7 +2806,7 @@ void DsPkAddBf16Vds::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::FADD;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);

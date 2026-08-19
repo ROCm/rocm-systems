@@ -8,17 +8,18 @@ struct alignas(8) ConSanMoiInlineExactShadowSlot {
 static_assert(sizeof(ConSanMoiInlineExactShadowSlot) == 24);
 static_assert(alignof(ConSanMoiInlineExactShadowSlot) == 8);
 
-/// Select the largest power-of-two dispatch fanout whose full-LDS exact shadow
-/// consumes at most half of the automatic report ceiling. The remaining half
-/// is available to the report header, diagnostics, atomic-release state, and
-/// causal metadata.
+/// Select the largest power-of-two dispatch fanout whose byte-addressable
+/// full-LDS exact shadow consumes at most half of the automatic report
+/// ceiling. Subword objects need one independent slot per LDS byte so an
+/// access to one byte cannot erase provenance for an adjacent byte. Ordinary
+/// four-byte-cell objects use the same conservative allocation and simply
+/// leave the additional slots unused. The remaining half is available to the
+/// report header, diagnostics, atomic-release state, and causal metadata.
 [[nodiscard]] constexpr uint32_t
 consan_moi_inline_exact_dispatch_bank_count_for_lds(uint64_t max_lds_bytes) {
   constexpr uint32_t kMaximumDispatchBankCount = 256u;
-  constexpr uint32_t kGuestLdsGranuleBytes = 4u;
-  const uint64_t lds_cell_count =
-      (static_cast<uint64_t>(max_lds_bytes) + kGuestLdsGranuleBytes - 1u) / kGuestLdsGranuleBytes;
-  const uint64_t exact_bytes_per_bank = lds_cell_count * sizeof(ConSanMoiInlineExactShadowSlot);
+  const uint64_t exact_bytes_per_bank =
+      static_cast<uint64_t>(max_lds_bytes) * sizeof(ConSanMoiInlineExactShadowSlot);
   const uint64_t exact_shadow_budget = kConSanMoiAutoReportBufferCeilingBytes / 2u;
   if (exact_bytes_per_bank > exact_shadow_budget)
     return 0u;

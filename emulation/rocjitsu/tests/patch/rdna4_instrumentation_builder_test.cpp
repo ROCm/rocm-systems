@@ -77,6 +77,17 @@ TEST(InstructionBuilder, AddressFreeScratchOffsetBoundary) {
   EXPECT_FALSE(build_address_free_scratch_store_b32(0, 0, ROCJITSU_CODE_ARCH_CDNA4));
 }
 
+TEST(InstructionBuilder, LiteralAddressHighWordRespectsConstantBus) {
+  constexpr uint64_t kAddress = 0x00007eff82d2c0c4ull;
+  const std::vector<uint32_t> kExpected = {0xd7006a0au, 0x020214ffu, 0x82d2c0c4u, 0xbf88ff9du,
+                                           0x40161680u, 0x4a1616ffu, 0x00007effu};
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_GFX1250}) {
+    const auto words = build_v_add_u64_literal(10, kAddress, arch);
+    ASSERT_TRUE(words);
+    EXPECT_EQ(*words, kExpected);
+  }
+}
+
 TEST(InstructionBuilder, BuildSplitScratchWaits) {
   const auto store_wait = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
   const auto store_ds_wait = build_s_wait_storecnt_dscnt0(ROCJITSU_CODE_ARCH_RDNA4);
@@ -786,37 +797,37 @@ TEST(InstructionBuilder, BuildGfx1250SignedI24AddPinsInlineAndLiteralBoundaries)
        -(1 << 23),
        kVopLiteralSource,
        kScalarInlineNegativeOne,
-       {0xd7006a08u, 0x020210ffu, 0xff800000u, 0xbf88fffdu, 0xd5206a09u, 0x01aa12c1u}},
+       {0xd7006a08u, 0x020210ffu, 0xff800000u, 0xbf88ff9du, 0xd5206a09u, 0x01aa12c1u}},
       {"first negative literal",
        -17,
        kVopLiteralSource,
        kScalarInlineNegativeOne,
-       {0xd7006a08u, 0x020210ffu, 0xffffffefu, 0xbf88fffdu, 0xd5206a09u, 0x01aa12c1u}},
+       {0xd7006a08u, 0x020210ffu, 0xffffffefu, 0xbf88ff9du, 0xd5206a09u, 0x01aa12c1u}},
       {"last negative inline",
        -16,
        kScalarInlineNegativeBase - (-16),
        kScalarInlineNegativeOne,
-       {0xd7006a08u, 0x020210d0u, 0xbf800000u, 0xbf88fffdu, 0xd5206a09u, 0x01aa12c1u}},
+       {0xd7006a08u, 0x020210d0u, 0xbf800000u, 0xbf88ff9du, 0xd5206a09u, 0x01aa12c1u}},
       {"representative negative inline",
        -4,
        kScalarInlineNegativeBase - (-4),
        kScalarInlineNegativeOne,
-       {0xd7006a08u, 0x020210c4u, 0xbf800000u, 0xbf88fffdu, 0xd5206a09u, 0x01aa12c1u}},
+       {0xd7006a08u, 0x020210c4u, 0xbf800000u, 0xbf88ff9du, 0xd5206a09u, 0x01aa12c1u}},
       {"last positive inline",
        64,
        scalar_positive_inline_u32(64),
        scalar_positive_inline_u32(0),
-       {0xd7006a08u, 0x020210c0u, 0xbf800000u, 0xbf88fffdu, 0xd5206a09u, 0x01aa1280u}},
+       {0xd7006a08u, 0x020210c0u, 0xbf800000u, 0xbf88ff9du, 0xd5206a09u, 0x01aa1280u}},
       {"first positive literal",
        65,
        kVopLiteralSource,
        scalar_positive_inline_u32(0),
-       {0xd7006a08u, 0x020210ffu, 0x00000041u, 0xbf88fffdu, 0xd5206a09u, 0x01aa1280u}},
+       {0xd7006a08u, 0x020210ffu, 0x00000041u, 0xbf88ff9du, 0xd5206a09u, 0x01aa1280u}},
       {"signed-24 maximum",
        (1 << 23) - 1,
        kVopLiteralSource,
        scalar_positive_inline_u32(0),
-       {0xd7006a08u, 0x020210ffu, 0x007fffffu, 0xbf88fffdu, 0xd5206a09u, 0x01aa1280u}},
+       {0xd7006a08u, 0x020210ffu, 0x007fffffu, 0xbf88ff9du, 0xd5206a09u, 0x01aa1280u}},
   }};
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);

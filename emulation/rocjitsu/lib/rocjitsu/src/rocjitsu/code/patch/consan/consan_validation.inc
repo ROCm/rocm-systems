@@ -2899,7 +2899,8 @@ validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
       reinterpret_cast<const uint8_t *>(replacement_section->data()), replacement_section->size());
   const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
   const auto validate_entry = [&](const ConSanPatchInfo &patch, uint64_t entry_offset,
-                                  std::string_view kernel_name) {
+                                  std::string_view kernel_name,
+                                  bool has_semantic_system_sgpr_restore) {
     const bool captures_sgpr = patch.dispatch_id_capture_sgpr.has_value();
     const bool captures_vgpr = patch.dispatch_id_capture_vgpr.has_value();
     if (captures_sgpr == captures_vgpr) {
@@ -2917,12 +2918,17 @@ validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
           std::string(kernel_name) + "'");
       return;
     }
-    const uint32_t restore_count =
-        patch.dispatch_id_preload_inserted
-            ? (patch.dispatch_id_kernarg_reload_count != 0
-                   ? patch.dispatch_id_kernarg_reload_sgpr - patch.dispatch_id_source_sgpr
-                   : guest_input_count - patch.dispatch_id_source_sgpr)
-            : 0u;
+    uint32_t restore_count =
+        patch.dispatch_id_preload_inserted ? patch.dispatch_id_shifted_guest_sgpr_count : 0u;
+    if (has_semantic_system_sgpr_restore) {
+      const uint32_t user_restore_capacity =
+          patch.dispatch_id_original_user_sgpr_count > patch.dispatch_id_source_sgpr
+              ? patch.dispatch_id_original_user_sgpr_count - patch.dispatch_id_source_sgpr
+              : 0u;
+      restore_count = std::min(restore_count, user_restore_capacity);
+    }
+    const uint32_t system_restore_count =
+        has_semantic_system_sgpr_restore ? 0u : patch.dispatch_id_shifted_system_sgpr_count;
     const uint64_t reload_words = patch.dispatch_id_kernarg_reload_count != 0
                                       ? 2u * patch.dispatch_id_kernarg_reload_count + 1u
                                       : 0u;
@@ -2963,32 +2969,49 @@ validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
     }
     const uint64_t scalar_backup_prefix_words =
         patch.entry_scalar_backup_vgpr ? 2u * patch.entry_scalar_backup_sgpr_count : 0u;
-    const uint64_t required_words =
-        scalar_backup_prefix_words + capture_prefix.size() +
-        2u * (restore_count + patch.dispatch_id_shifted_system_sgpr_count) + reload_words;
-    const uint64_t required_bytes = required_words * sizeof(uint32_t);
-    if (entry_offset > replacement_text.size() ||
-        required_bytes > replacement_text.size() - entry_offset) {
+    const uint64_t patch_end = patch.trampoline_offset + patch.trampoline_size;
+    if (entry_offset > patch_end || patch_end > replacement_text.size() ||
+        (patch_end - entry_offset) % sizeof(uint32_t) != 0) {
       errors.emplace_back(
           "ConSan final validation found a truncated dispatch-ID entry prologue for kernel '" +
           std::string(kernel_name) + "'");
       return;
     }
-    const auto read_word = [&](uint64_t word_index) {
-      uint32_t word = 0;
-      std::memcpy(&word, replacement_text.data() + entry_offset + word_index * sizeof(uint32_t),
-                  sizeof(word));
-      return word;
-    };
-    uint64_t cursor = scalar_backup_prefix_words;
-    for (uint32_t expected : capture_prefix) {
-      if (read_word(cursor++) != expected) {
-        errors.emplace_back("ConSan final validation found an invalid dispatch-ID capture in "
-                            "kernel '" +
-                            std::string(kernel_name) + "'");
-        break;
-      }
+    const auto entry_words = std::span<const uint32_t>(
+        reinterpret_cast<const uint32_t *>(replacement_text.data() + entry_offset),
+        static_cast<size_t>((patch_end - entry_offset) / sizeof(uint32_t)));
+    if (scalar_backup_prefix_words > entry_words.size()) {
+      errors.emplace_back(
+          "ConSan final validation found a truncated dispatch-ID entry prologue for kernel '" +
+          std::string(kernel_name) + "'");
+      return;
     }
+    // Exact CDNA workgroup identity must be captured before dispatch preload
+    // repair overwrites the shifted system-SGPR tuple. Consequently the
+    // dispatch capture is no longer necessarily the first semantic operation
+    // after an optional scalar backup; locate its exact instruction sequence
+    // within this prologue body and validate every restore immediately after
+    // it.
+    const auto capture =
+        std::search(entry_words.begin() + static_cast<ptrdiff_t>(scalar_backup_prefix_words),
+                    entry_words.end(), capture_prefix.begin(), capture_prefix.end());
+    if (capture == entry_words.end()) {
+      errors.emplace_back(
+          "ConSan final validation found an invalid dispatch-ID capture in kernel '" +
+          std::string(kernel_name) + "'");
+      return;
+    }
+    const uint64_t required_suffix_words =
+        capture_prefix.size() + 2u * (restore_count + system_restore_count) +
+        reload_words;
+    if (required_suffix_words > static_cast<uint64_t>(entry_words.end() - capture)) {
+      errors.emplace_back(
+          "ConSan final validation found a truncated dispatch-ID entry prologue for kernel '" +
+          std::string(kernel_name) + "'");
+      return;
+    }
+    const auto read_word = [&](uint64_t word_index) { return entry_words[word_index]; };
+    uint64_t cursor = static_cast<uint64_t>(capture - entry_words.begin()) + capture_prefix.size();
     const auto expect_write = [&](uint32_t expected, std::string_view what) {
       if (read_word(cursor++) != expected || read_word(cursor++) != *dependency_delay) {
         errors.emplace_back("ConSan final validation found an invalid dispatch-ID " +
@@ -3000,7 +3023,7 @@ validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
       expect_write(build_s_mov_b32(destination, static_cast<uint16_t>(destination + 2u), arch),
                    "ascending guest restore");
     }
-    for (uint16_t i = 0; i < patch.dispatch_id_shifted_system_sgpr_count; ++i) {
+    for (uint16_t i = 0; i < system_restore_count; ++i) {
       const uint16_t destination =
           static_cast<uint16_t>(patch.dispatch_id_original_user_sgpr_count + i);
       expect_write(
@@ -3043,9 +3066,11 @@ validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
       errors.emplace_back("ConSan final validation could not resolve a dispatch-ID prologue owner");
       continue;
     }
+    const bool has_semantic_system_sgpr_restore = std::ranges::binary_search(
+        result.moi_full_workgroup_id_descriptor_offsets, owner->descriptor_file_offset);
     validate_entry(patch,
                    patch.dispatch_id_primary_prologue_offset.value_or(patch.trampoline_offset),
-                   owner->name);
+                   owner->name, has_semantic_system_sgpr_restore);
     KD descriptor{};
     std::memcpy(&descriptor, original.image_data() + owner->descriptor_file_offset,
                 sizeof(descriptor));
@@ -3055,7 +3080,7 @@ validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
       validate_entry(
           patch,
           patch.dispatch_id_secondary_prologue_offset.value_or(patch.trampoline_offset + 256u),
-          owner->name);
+          owner->name, has_semantic_system_sgpr_restore);
     }
   }
   return errors;
@@ -3078,7 +3103,8 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
   const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
   if (replacement.text_sections().size() != 1 ||
       (has_global_exact_patch && !result.resolved_moi_dispatch_id_sgpr &&
-       !result.resolved_moi_dispatch_id_vgpr && !consan_arch_uses_literal_dispatch_identity(arch))) {
+       !result.resolved_moi_dispatch_id_vgpr &&
+       !consan_arch_uses_literal_dispatch_identity(arch))) {
     errors.emplace_back(
         "ConSan final validation found exact-shadow publication without dispatch-ID state");
     return errors;
@@ -3483,9 +3509,9 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
     // the successor release owner. All six stores intentionally use scratch+0
     // and ABI offset 4, so their encodings are identical; release-only
     // transactions retain the single-store shape.
-    const bool claimed_acquire_release_arch = arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-                                              arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-                                              is_rdna4_family_arch(arch);
+    const bool claimed_acquire_release_arch =
+        arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+        arch == ROCJITSU_CODE_ARCH_CDNA4 || is_rdna4_family_arch(arch);
     bool valid = cas_positions.size() == 2u &&
                  (owner_between == 1u || (claimed_acquire_release_arch && owner_between == 6u));
 
@@ -3527,12 +3553,10 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
       const std::vector<size_t> store_positions = positions(*store);
       return store_positions.size() == 1u && !cas_positions.empty() &&
              cas_positions.front() < store_positions.front() &&
-             std::ranges::any_of(
-                 owner_positions,
-                 [&](size_t owner_position) {
-                   return store_positions.front() < owner_position &&
-                          owner_position < cas_positions.back();
-                 });
+             std::ranges::any_of(owner_positions, [&](size_t owner_position) {
+               return store_positions.front() < owner_position &&
+                      owner_position < cas_positions.back();
+             });
     };
     bool snapshot_stores_valid =
         require_snapshot_store(offsetof(ConSanMoiInlineCausalSnapshot, entry_count),
@@ -4246,6 +4270,18 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
   if (!result.errors.empty()) {
     result.outcome = ConSanTransformOutcome::Invalid;
     result.modified = false;
+    result.elf_bytes.clear();
+    result.patches.clear();
+    result.applied_fault_logical_identity.reset();
+    return result;
+  }
+  // A required late transform (notably the owner/epoch entry prologue) may
+  // discover an architectural resource boundary after earlier probes have
+  // already produced a replacement image. Never allow those partial probes
+  // to turn an Unsupported result back into ModifiedValid.
+  if (result.outcome == ConSanTransformOutcome::Unsupported) {
+    result.modified = false;
+    result.final_validation_passed = false;
     result.elf_bytes.clear();
     result.patches.clear();
     result.applied_fault_logical_identity.reset();

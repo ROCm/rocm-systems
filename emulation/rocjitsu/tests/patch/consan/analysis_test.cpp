@@ -2986,6 +2986,45 @@ TEST(ConSan, SyncSequencesUpgradeAcquireWithExactReleaseWaitToAcquireRelease) {
   EXPECT_NE(sequence.identity.find("|acquire-cache="), std::string::npos);
 }
 
+TEST(ConSan, Gfx1100SyncSequencesUpgradeAcquireWithExactVscntReleaseWait) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA3;
+  const auto wait_store = build_rdna3_s_wait_vscnt0(kArch);
+  const auto wait_load = build_rdna3_s_wait_vmcnt0(kArch);
+  ASSERT_TRUE(wait_store && wait_load);
+  const auto gl1 = rdna3::build_mubuf(rdna3::kBufferGl1InvMubuf, {});
+  const auto gl0 = rdna3::build_mubuf(rdna3::kBufferGl0InvMubuf, {});
+  const std::array<uint32_t, 8> text_words = {
+      *wait_store, 0xdcd64000u, 0x01080201u, // global_atomic_add_u32 v1, v1, v2, s[8:9] glc
+      *wait_load,  gl1[0],      gl1[1],      gl0[0], gl0[1],
+  };
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+
+  const ConSanResult result = try_patch_consan(make_rdna3_lds_code_object(text_words), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.sync_sequences.size(), 1u);
+  const ConSanSyncSequence &sequence = result.sync_sequences.front();
+  EXPECT_EQ(sequence.kind, ConSanSyncSequenceKind::Atomic);
+  EXPECT_EQ(sequence.memory_role, ConSanSyncMemoryRole::AcquireRelease);
+  EXPECT_EQ(sequence.memory_role_confidence, ConSanSemanticConfidence::Conservative);
+  ASSERT_TRUE(sequence.release_wait_text_offset);
+  EXPECT_EQ(*sequence.release_wait_text_offset, 0u);
+  EXPECT_EQ(sequence.begin_text_offset, 0u);
+  EXPECT_NE(sequence.identity.find("|release-wait=pc=0x"), std::string::npos);
+  EXPECT_NE(sequence.identity.find("|acquire-cache="), std::string::npos);
+  EXPECT_NE(sequence.identity.find("|acquire-cache-tail="), std::string::npos);
+
+  std::array<uint32_t, 8> nonzero = text_words;
+  nonzero[0] |= 1u;
+  const ConSanResult rejected =
+      try_patch_consan(make_rdna3_lds_code_object(nonzero, "nonzero_vscnt"), options);
+  ASSERT_TRUE(rejected.errors.empty()) << testing::PrintToString(rejected.errors);
+  ASSERT_EQ(rejected.sync_sequences.size(), 1u);
+  EXPECT_EQ(rejected.sync_sequences.front().memory_role, ConSanSyncMemoryRole::Acquire);
+  EXPECT_FALSE(rejected.sync_sequences.front().release_wait_text_offset);
+}
+
 TEST(ConSan, MoiFenceSelectionCarriesUniqueAtomicCommunicationEvent) {
   const auto wait_store = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(wait_store);

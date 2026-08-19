@@ -11,6 +11,7 @@
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/patch/cdna3_instrumentation_builder.h"
 #include "rocjitsu/code/patch/cdna4_instrumentation_builder.h"
+#include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/rdna3_instrumentation_builder.h"
 #include "rocjitsu/code/patch/rdna4_instrumentation_builder.h"
 #include "rocjitsu/isa/decoder.h"
@@ -617,14 +618,15 @@ TEST(SpillManager, BuildsGfx1201VgprSaveRestoreSequence) {
   EXPECT_EQ(sequence->slot_offsets, (std::vector<uint32_t>{0, 4, 8}));
   EXPECT_EQ(sequence->total_private_bytes, 12u);
   EXPECT_EQ(manager.total_private_bytes(), 12u);
-  ASSERT_EQ(sequence->save_words.size(), 11u);
+  ASSERT_EQ(sequence->save_words.size(), 12u);
   ASSERT_EQ(sequence->restore_words.size(), 10u);
   // Pending guest VMEM definitions must complete before any victim is read.
   EXPECT_EQ(sequence->save_words[0], 0xbfc00000u);
-  EXPECT_EQ(sequence->save_words[1], 0xed06807cu);
-  EXPECT_EQ(sequence->save_words[2], 10u << 23u);
-  EXPECT_EQ(sequence->save_words[3], 0u);
-  EXPECT_EQ(sequence->save_words[10], 0xbfc10000u);
+  EXPECT_EQ(sequence->save_words[1], *instrumentation::build_s_wait_lds0(ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(sequence->save_words[2], 0xed06807cu);
+  EXPECT_EQ(sequence->save_words[3], 10u << 23u);
+  EXPECT_EQ(sequence->save_words[4], 0u);
+  EXPECT_EQ(sequence->save_words[11], 0xbfc10000u);
   EXPECT_EQ(sequence->restore_words[0], 0xed05007cu);
   EXPECT_EQ(sequence->restore_words[1], 10u);
   EXPECT_EQ(sequence->restore_words[2], 0u);
@@ -639,13 +641,15 @@ TEST(SpillManager, BuildsGfx1250VgprSaveRestoreSequence) {
   EXPECT_EQ(sequence->slot_offsets, (std::vector<uint32_t>{0, 4, 8}));
   EXPECT_EQ(sequence->total_private_bytes, 12u);
   EXPECT_EQ(manager.total_private_bytes(), 12u);
-  ASSERT_EQ(sequence->save_words.size(), 11u);
+  ASSERT_EQ(sequence->save_words.size(), 12u);
   ASSERT_EQ(sequence->restore_words.size(), 10u);
   EXPECT_EQ(sequence->save_words[0], 0xbfc00000u);
-  EXPECT_EQ(sequence->save_words[1], 0xed06807cu);
-  EXPECT_EQ(sequence->save_words[2], 10u << 23u);
-  EXPECT_EQ(sequence->save_words[3], 0u);
-  EXPECT_EQ(sequence->save_words[10], 0xbfc10000u);
+  EXPECT_EQ(sequence->save_words[1],
+            *instrumentation::build_s_wait_lds0(ROCJITSU_CODE_ARCH_GFX1250));
+  EXPECT_EQ(sequence->save_words[2], 0xed06807cu);
+  EXPECT_EQ(sequence->save_words[3], 10u << 23u);
+  EXPECT_EQ(sequence->save_words[4], 0u);
+  EXPECT_EQ(sequence->save_words[11], 0xbfc10000u);
   EXPECT_EQ(sequence->restore_words[0], 0xed05007cu);
   EXPECT_EQ(sequence->restore_words[1], 10u);
   EXPECT_EQ(sequence->restore_words[2], 0u);
@@ -660,7 +664,7 @@ TEST(SpillManager, BuildsGfx1100VgprSaveRestoreSequence) {
   EXPECT_EQ(sequence->slot_offsets, (std::vector<uint32_t>{0, 4, 8}));
   EXPECT_EQ(sequence->total_private_bytes, 16u);
   EXPECT_EQ(manager.total_private_bytes(), 12u);
-  ASSERT_EQ(sequence->save_words.size(), 8u);
+  ASSERT_EQ(sequence->save_words.size(), 9u);
   ASSERT_EQ(sequence->restore_words.size(), 7u);
   const auto wait = build_rdna3_s_wait_vmcnt0(ROCJITSU_CODE_ARCH_RDNA3);
   const auto store =
@@ -669,7 +673,8 @@ TEST(SpillManager, BuildsGfx1100VgprSaveRestoreSequence) {
       build_rdna3_address_free_scratch_load_b32(/*vdst=*/10, 0, ROCJITSU_CODE_ARCH_RDNA3);
   ASSERT_TRUE(wait && store && load);
   EXPECT_EQ(sequence->save_words.front(), *wait);
-  EXPECT_TRUE(std::ranges::equal(*store, std::span(sequence->save_words).subspan(1u, 2u)));
+  EXPECT_EQ(sequence->save_words[1], *instrumentation::build_s_wait_lds0(ROCJITSU_CODE_ARCH_RDNA3));
+  EXPECT_TRUE(std::ranges::equal(*store, std::span(sequence->save_words).subspan(2u, 2u)));
   EXPECT_EQ(sequence->save_words.back(), *wait);
   EXPECT_TRUE(std::ranges::equal(*load, std::span(sequence->restore_words).first(2u)));
   EXPECT_EQ(sequence->restore_words.back(), *wait);
@@ -683,12 +688,13 @@ TEST(SpillManager, BuildsGfx950VgprSaveRestoreSequence) {
   EXPECT_EQ(sequence->slot_offsets, (std::vector<uint32_t>{0, 4, 8}));
   EXPECT_EQ(sequence->total_private_bytes, 16u);
   EXPECT_EQ(manager.total_private_bytes(), 12u);
-  ASSERT_EQ(sequence->save_words.size(), 8u);
+  ASSERT_EQ(sequence->save_words.size(), 9u);
   ASSERT_EQ(sequence->restore_words.size(), 7u);
   EXPECT_EQ(sequence->save_words[0], 0xbf8c0f70u);
-  EXPECT_EQ(sequence->save_words[1], 0xdc704000u);
-  EXPECT_EQ(sequence->save_words[2], 0x007f0a00u);
-  EXPECT_EQ(sequence->save_words[7], 0xbf8c0f70u);
+  EXPECT_EQ(sequence->save_words[1], *instrumentation::build_s_wait_lds0(ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_EQ(sequence->save_words[2], 0xdc704000u);
+  EXPECT_EQ(sequence->save_words[3], 0x007f0a00u);
+  EXPECT_EQ(sequence->save_words[8], 0xbf8c0f70u);
   EXPECT_EQ(sequence->restore_words[0], 0xdc504000u);
   EXPECT_EQ(sequence->restore_words[1], 0x0a7f0000u);
   EXPECT_EQ(sequence->restore_words[6], 0xbf8c0f70u);
@@ -702,12 +708,13 @@ TEST(SpillManager, BuildsGfx942VgprSaveRestoreSequence) {
   EXPECT_EQ(sequence->slot_offsets, (std::vector<uint32_t>{0, 4, 8}));
   EXPECT_EQ(sequence->total_private_bytes, 16u);
   EXPECT_EQ(manager.total_private_bytes(), 12u);
-  ASSERT_EQ(sequence->save_words.size(), 8u);
+  ASSERT_EQ(sequence->save_words.size(), 9u);
   ASSERT_EQ(sequence->restore_words.size(), 7u);
   EXPECT_EQ(sequence->save_words[0], 0xbf8c0f70u);
-  EXPECT_EQ(sequence->save_words[1], 0xdc704000u);
-  EXPECT_EQ(sequence->save_words[2], 0x007f0a00u);
-  EXPECT_EQ(sequence->save_words[7], 0xbf8c0f70u);
+  EXPECT_EQ(sequence->save_words[1], *instrumentation::build_s_wait_lds0(ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(sequence->save_words[2], 0xdc704000u);
+  EXPECT_EQ(sequence->save_words[3], 0x007f0a00u);
+  EXPECT_EQ(sequence->save_words[8], 0xbf8c0f70u);
   EXPECT_EQ(sequence->restore_words[0], 0xdc504000u);
   EXPECT_EQ(sequence->restore_words[1], 0x0a7f0000u);
   EXPECT_EQ(sequence->restore_words[6], 0xbf8c0f70u);
@@ -732,22 +739,23 @@ TEST(SpillManager, BuildsRdna4FamilySccPreservingDynamicStackVgprFrame) {
     EXPECT_TRUE(sequence->uses_dynamic_stack_frame);
     EXPECT_EQ(sequence->slot_offsets, (std::vector<uint32_t>{0, 4, 8}));
     EXPECT_EQ(sequence->total_private_bytes, 0u);
-    ASSERT_EQ(sequence->save_words.size(), 17u);
+    ASSERT_EQ(sequence->save_words.size(), 18u);
     ASSERT_EQ(sequence->restore_words.size(), 12u);
     EXPECT_EQ(sequence->save_words[0], *build_s_wait_loadcnt0(target.arch));
-    EXPECT_EQ(sequence->save_words[1],
+    EXPECT_EQ(sequence->save_words[1], *instrumentation::build_s_wait_lds0(target.arch));
+    EXPECT_EQ(sequence->save_words[2],
               *build_rdna4_s_cselect_b32(66, scalar_positive_inline_u32(1),
                                          scalar_positive_inline_u32(0), target.arch));
-    EXPECT_EQ(sequence->save_words[2], build_s_mov_b32(80, 33, target.arch));
-    EXPECT_EQ(sequence->save_words[3], build_s_mov_b32(33, 32, target.arch));
-    EXPECT_EQ(sequence->save_words[4], 0xed068021u);
-    EXPECT_EQ(sequence->save_words[5], 10u << 23u);
-    EXPECT_EQ(sequence->save_words[6], 0u);
-    EXPECT_EQ(sequence->save_words[13], *build_s_wait_storecnt0(target.arch));
-    EXPECT_EQ(sequence->save_words[14],
+    EXPECT_EQ(sequence->save_words[3], build_s_mov_b32(80, 33, target.arch));
+    EXPECT_EQ(sequence->save_words[4], build_s_mov_b32(33, 32, target.arch));
+    EXPECT_EQ(sequence->save_words[5], 0xed068021u);
+    EXPECT_EQ(sequence->save_words[6], 10u << 23u);
+    EXPECT_EQ(sequence->save_words[7], 0u);
+    EXPECT_EQ(sequence->save_words[14], *build_s_wait_storecnt0(target.arch));
+    EXPECT_EQ(sequence->save_words[15],
               *build_rdna4_s_add_u32(32, 32, /*literal source=*/255u, target.arch));
-    EXPECT_EQ(sequence->save_words[15], 12u);
-    EXPECT_EQ(sequence->save_words[16],
+    EXPECT_EQ(sequence->save_words[16], 12u);
+    EXPECT_EQ(sequence->save_words[17],
               *build_rdna4_s_cmp_lg_u32(66, scalar_positive_inline_u32(0), target.arch));
     EXPECT_EQ(sequence->restore_words[0], 0xed050021u);
     EXPECT_EQ(sequence->restore_words[1], 10u);
@@ -778,11 +786,12 @@ TEST(SpillManager, BootstrapsDynamicStackSpillFromBorrowedScalarPair) {
     EXPECT_EQ(projected.slot_offsets, sequence->slot_offsets);
     EXPECT_EQ(projected.save_words, sequence->save_words);
     EXPECT_EQ(projected.restore_words, sequence->restore_words);
-    ASSERT_EQ(sequence->save_words.size(), rdna3 ? 20u : 25u);
+    ASSERT_EQ(sequence->save_words.size(), rdna3 ? 21u : 26u);
     ASSERT_EQ(sequence->restore_words.size(), rdna3 ? 17u : 22u);
-    const size_t save_tail = rdna3 ? 11u : 16u;
+    const size_t save_tail = rdna3 ? 12u : 17u;
     ASSERT_TRUE(wait_load && wait_store);
     EXPECT_EQ(sequence->save_words.front(), *wait_load);
+    EXPECT_EQ(sequence->save_words[1], *instrumentation::build_s_wait_lds0(arch));
     EXPECT_EQ(sequence->save_words[save_tail], *wait_store);
     EXPECT_EQ(sequence->save_words[save_tail + 1u],
               rdna3 ? *build_rdna3_v_mov_b32(/*vdst=*/4u, /*s2=*/2u, arch)
@@ -871,18 +880,19 @@ TEST(SpillManager, BuildsCdna4SccPreservingDynamicStackVgprFrame) {
   EXPECT_TRUE(sequence->uses_dynamic_stack_frame);
   EXPECT_EQ(sequence->slot_offsets, (std::vector<uint32_t>{0, 4, 8}));
   EXPECT_EQ(sequence->total_private_bytes, 0u);
-  ASSERT_EQ(sequence->save_words.size(), 14u);
+  ASSERT_EQ(sequence->save_words.size(), 15u);
   ASSERT_EQ(sequence->restore_words.size(), 9u);
   EXPECT_EQ(sequence->save_words[0], 0xbf8c0f70u);
-  EXPECT_EQ(sequence->save_words[1], 0x85428081u);
-  EXPECT_EQ(sequence->save_words[2], 0xbed00021u);
-  EXPECT_EQ(sequence->save_words[3], 0xbea10020u);
-  EXPECT_EQ(sequence->save_words[4], 0xdc704000u);
-  EXPECT_EQ(sequence->save_words[5], 0x00210a00u);
-  EXPECT_EQ(sequence->save_words[10], 0xbf8c0f70u);
-  EXPECT_EQ(sequence->save_words[11], 0x8020ff20u);
-  EXPECT_EQ(sequence->save_words[12], 12u);
-  EXPECT_EQ(sequence->save_words[13], 0xbf078042u);
+  EXPECT_EQ(sequence->save_words[1], *instrumentation::build_s_wait_lds0(ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_EQ(sequence->save_words[2], 0x85428081u);
+  EXPECT_EQ(sequence->save_words[3], 0xbed00021u);
+  EXPECT_EQ(sequence->save_words[4], 0xbea10020u);
+  EXPECT_EQ(sequence->save_words[5], 0xdc704000u);
+  EXPECT_EQ(sequence->save_words[6], 0x00210a00u);
+  EXPECT_EQ(sequence->save_words[11], 0xbf8c0f70u);
+  EXPECT_EQ(sequence->save_words[12], 0x8020ff20u);
+  EXPECT_EQ(sequence->save_words[13], 12u);
+  EXPECT_EQ(sequence->save_words[14], 0xbf078042u);
   EXPECT_EQ(sequence->restore_words[0], 0xdc504000u);
   EXPECT_EQ(sequence->restore_words[1], 0x0a210000u);
   EXPECT_EQ(sequence->restore_words[6], 0xbf8c0f70u);
@@ -1057,16 +1067,17 @@ TEST(SpillManager, BuildsCdna3SccPreservingDynamicStackVgprFrame) {
   ASSERT_TRUE(sequence);
   EXPECT_TRUE(sequence->uses_dynamic_stack_frame);
   EXPECT_EQ(sequence->slot_offsets, (std::vector<uint32_t>{0, 4, 8}));
-  ASSERT_EQ(sequence->save_words.size(), 14u);
+  ASSERT_EQ(sequence->save_words.size(), 15u);
   ASSERT_EQ(sequence->restore_words.size(), 9u);
   EXPECT_EQ(sequence->save_words[0], 0xbf8c0f70u);
-  EXPECT_EQ(sequence->save_words[1], 0x85428081u);
-  EXPECT_EQ(sequence->save_words[4], 0xdc704000u);
-  EXPECT_EQ(sequence->save_words[5], 0x00210a00u);
-  EXPECT_EQ(sequence->save_words[10], 0xbf8c0f70u);
-  EXPECT_EQ(sequence->save_words[11], 0x8020ff20u);
-  EXPECT_EQ(sequence->save_words[12], 12u);
-  EXPECT_EQ(sequence->save_words[13], 0xbf078042u);
+  EXPECT_EQ(sequence->save_words[1], *instrumentation::build_s_wait_lds0(ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(sequence->save_words[2], 0x85428081u);
+  EXPECT_EQ(sequence->save_words[5], 0xdc704000u);
+  EXPECT_EQ(sequence->save_words[6], 0x00210a00u);
+  EXPECT_EQ(sequence->save_words[11], 0xbf8c0f70u);
+  EXPECT_EQ(sequence->save_words[12], 0x8020ff20u);
+  EXPECT_EQ(sequence->save_words[13], 12u);
+  EXPECT_EQ(sequence->save_words[14], 0xbf078042u);
   EXPECT_EQ(sequence->restore_words[0], 0xdc504000u);
   EXPECT_EQ(sequence->restore_words[1], 0x0a210000u);
   EXPECT_EQ(sequence->restore_words[6], 0xbf8c0f70u);

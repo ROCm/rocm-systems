@@ -1185,9 +1185,15 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
         !append_add_literal_field(
             words, base, offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, version), hash, arch))
       return false;
-    words.push_back(
-        build_v_mov_b32_e32(static_cast<uint16_t>(value + 1u), vector_source_vgpr(value), arch));
-    words.push_back(build_v_mov_b32_e32(value, vector_source_vgpr(expected), arch));
+    // The compare-swap source pair is [new, expected]. `expected` currently
+    // contains the journaled prior even version while `value` contains the
+    // current odd reservation. They are adjacent members of that source pair,
+    // so use the now-dead hash temporary to swap them without destroying the
+    // rollback value (the former two-move sequence made both operands odd and
+    // silently left an empty reservation at version 1).
+    words.push_back(build_v_mov_b32_e32(hash, vector_source_vgpr(expected), arch));
+    words.push_back(build_v_mov_b32_e32(expected, vector_source_vgpr(value), arch));
+    words.push_back(build_v_mov_b32_e32(value, vector_source_vgpr(hash), arch));
     const auto rollback = instrumentation::build_flat_atomic_cmpswap_b32(
         base, value, value, /*return_old_value=*/true, kRdna4ScopeDevice, arch);
     if (!rollback)
@@ -1604,8 +1610,10 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   const bool has_dispatch_id = options.moi_dispatch_id_sgpr.has_value() ||
                                consan_arch_uses_literal_dispatch_identity(arch);
   if (!options.scratch_vgpr || !options.moi_exec_save_sgpr || !has_dispatch_id ||
-      !options.moi_owner_vgpr || token_table_capacity == 0 || token_table_capacity > 64u ||
-      snapshot_table_capacity != token_table_capacity)
+      !options.moi_owner_vgpr || token_table_capacity == 0 ||
+      token_table_capacity > kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity ||
+      snapshot_table_capacity == 0 ||
+      (snapshot_table_capacity & (snapshot_table_capacity - 1u)) != 0u)
     return false;
   const uint16_t base = *options.scratch_vgpr;
   const bool cdna = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
@@ -2032,11 +2040,14 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     return false;
   const auto next_index =
       instrumentation::build_v_add_u32(loop_index, scalar_positive_inline_u32(1), loop_index, arch);
+  const auto capacity =
+      instrumentation::build_v_mov_b32_literal(temporary, token_table_capacity, arch);
   const auto finished = instrumentation::build_v_cmp_eq_u32_vcc(
-      scalar_positive_inline_u32(token_table_capacity), loop_index, arch);
-  if (!next_index || !finished)
+      vector_source_vgpr(temporary), loop_index, arch);
+  if (!next_index || !capacity || !finished)
     return false;
   words.insert(words.end(), next_index->begin(), next_index->end());
+  words.insert(words.end(), capacity->begin(), capacity->end());
   words.push_back(*finished);
   const int64_t loop_delta =
       static_cast<int64_t>(loop_begin) - static_cast<int64_t>(words.size()) - 1;

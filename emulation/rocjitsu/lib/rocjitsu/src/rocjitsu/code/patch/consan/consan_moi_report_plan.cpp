@@ -276,31 +276,40 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
 [[nodiscard]] bool plan_sampled(const ConSanMoiAutoReportInventory &inventory,
                                 ConSanMoiAutoReportPlan &plan, uint64_t &cursor) {
   auto &layout = plan.layout;
+  const uint64_t sampled_sync_slot_count =
+      std::max(inventory.sampled_range_bank_count, inventory.sampled_sync_slot_count);
+  // Access-only objects never create deferred acquires, so their historical
+  // one-to-one pending table is sufficient.  Once an atomic is admitted, each
+  // causal slot must be able to retain every wave's acquire until the
+  // associated later access executes.
+  const uint64_t sampled_pending_acquire_owner_bank_count =
+      inventory.atomic_event_count == 0u ? 1u : kConSanMoiSampledPendingAcquireOwnerBankCount;
+  const auto sampled_pending_acquire_count =
+      util::checked_mul(sampled_sync_slot_count, sampled_pending_acquire_owner_bank_count);
+  if (!sampled_pending_acquire_count) {
+    plan.reason = ConSanMoiAutoReportPlanReason::AbiCapacityOverflow;
+    return false;
+  }
   if (!checked_capacity(inventory.diagnostic_count, layout.diagnostic_capacity) ||
-      !checked_capacity(inventory.sampled_range_bank_count,
-                        layout.sampled_causal_window_capacity) ||
+      !checked_capacity(sampled_sync_slot_count, layout.sampled_causal_window_capacity) ||
       !checked_capacity(inventory.sampled_watchpoint_count, layout.sampled_watchpoint_capacity) ||
-      !checked_capacity(inventory.sampled_range_bank_count,
-                        layout.sampled_sync_metadata_capacity) ||
-      !checked_capacity(inventory.sampled_range_bank_count,
-                        layout.sampled_pending_acquire_capacity)) {
+      !checked_capacity(sampled_sync_slot_count, layout.sampled_sync_metadata_capacity) ||
+      !checked_capacity(*sampled_pending_acquire_count, layout.sampled_pending_acquire_capacity)) {
     plan.reason = ConSanMoiAutoReportPlanReason::AbiCapacityOverflow;
     return false;
   }
   return append_region(inventory.diagnostic_count, sizeof(ConSanMoiDiagnosticRecord),
                        alignof(ConSanMoiDiagnosticRecord), cursor,
                        layout.diagnostic_records_offset) &&
-         append_region(inventory.sampled_range_bank_count, sizeof(ConSanMoiSampledCausalWindow),
+         append_region(sampled_sync_slot_count, sizeof(ConSanMoiSampledCausalWindow),
                        alignof(ConSanMoiSampledCausalWindow), cursor,
                        layout.sampled_causal_windows_offset) &&
          append_region(inventory.sampled_watchpoint_count, sizeof(uint64_t), alignof(uint64_t),
                        cursor, layout.sampled_watchpoints_offset) &&
-         append_region(inventory.sampled_range_bank_count,
-                       sizeof(ConSanMoiSampledSyncMetadataPacked),
+         append_region(sampled_sync_slot_count, sizeof(ConSanMoiSampledSyncMetadataPacked),
                        alignof(ConSanMoiSampledSyncMetadataPacked), cursor,
                        layout.sampled_sync_metadata_offset) &&
-         append_region(inventory.sampled_range_bank_count,
-                       sizeof(ConSanMoiSampledPendingAcquireSlot),
+         append_region(*sampled_pending_acquire_count, sizeof(ConSanMoiSampledPendingAcquireSlot),
                        alignof(ConSanMoiSampledPendingAcquireSlot), cursor,
                        layout.sampled_pending_acquires_offset);
 }
@@ -308,13 +317,10 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
 [[nodiscard]] bool plan_inline(const ConSanMoiAutoReportInventory &inventory,
                                ConSanMoiAutoReportPlan &plan, uint64_t &cursor) {
   auto &layout = plan.layout;
-  const auto rounded_lds_bytes = util::checked_add(
-      inventory.inline_lds_bytes, uint64_t{consan_moi_exact_shadow::granule_bytes - 1u});
-  if (!rounded_lds_bytes) {
-    plan.reason = ConSanMoiAutoReportPlanReason::ByteSizeOverflow;
-    return false;
-  }
-  const uint64_t exact_shadow_cells = *rounded_lds_bytes / consan_moi_exact_shadow::granule_bytes;
+  // Provision one external slot per LDS byte. Objects containing subword
+  // traffic use those slots directly; objects that retain four-byte external
+  // cells use a conservative subset of the same bounded allocation.
+  const uint64_t exact_shadow_cells = inventory.inline_lds_bytes;
   if (exact_shadow_cells > std::numeric_limits<uint32_t>::max()) {
     plan.reason = ConSanMoiAutoReportPlanReason::AbiCapacityOverflow;
     return false;
@@ -509,11 +515,16 @@ ConSanMoiAutoReportInventory
 fit_consan_moi_sampled_auto_report_inventory(ConSanMoiAutoReportInventory inventory) {
   if (inventory.engine != ConSanMoiEngine::Sampled || !inventory.sampled_bank_count_adaptive ||
       inventory.access_range_count == 0u ||
-      inventory.sampled_range_bank_count != inventory.sampled_watchpoint_count ||
+      inventory.sampled_watchpoint_count < inventory.sampled_range_bank_count ||
       inventory.sampled_range_bank_count % inventory.access_range_count != 0u) {
     return inventory;
   }
 
+  const uint64_t reserved_sync_slots =
+      std::max(inventory.sampled_sync_slot_count, inventory.sampled_range_bank_count) -
+      inventory.sampled_range_bank_count;
+  const uint64_t extra_watchpoints =
+      inventory.sampled_watchpoint_count - inventory.sampled_range_bank_count;
   uint64_t bank_count = inventory.sampled_range_bank_count / inventory.access_range_count;
   if (bank_count == 0u || bank_count > 8u || (bank_count & (bank_count - 1u)) != 0u)
     return inventory;
@@ -527,7 +538,10 @@ fit_consan_moi_sampled_auto_report_inventory(ConSanMoiAutoReportInventory invent
     }
     bank_count /= 2u;
     inventory.sampled_range_bank_count = inventory.access_range_count * bank_count;
-    inventory.sampled_watchpoint_count = inventory.sampled_range_bank_count;
+    inventory.sampled_sync_slot_count =
+        util::saturating_add(inventory.sampled_range_bank_count, reserved_sync_slots);
+    inventory.sampled_watchpoint_count =
+        util::saturating_add(inventory.sampled_range_bank_count, extra_watchpoints);
   }
   return inventory;
 }
@@ -612,7 +626,20 @@ consan_moi_report_layout_from_override(const ConSanMoiReportLayoutOverride &over
   case ConSanMoiEngine::Sampled:
     inventory.diagnostic_count = override_layout.diagnostic_capacity;
     inventory.sampled_range_bank_count = override_layout.sampled_causal_window_capacity;
+    inventory.sampled_sync_slot_count = override_layout.sampled_causal_window_capacity;
     inventory.sampled_watchpoint_count = override_layout.sampled_watchpoint_capacity;
+    if (override_layout.sampled_causal_window_capacity != 0u &&
+        override_layout.sampled_pending_acquire_capacity /
+                override_layout.sampled_causal_window_capacity ==
+            kConSanMoiSampledPendingAcquireOwnerBankCount &&
+        override_layout.sampled_pending_acquire_capacity %
+                override_layout.sampled_causal_window_capacity ==
+            0u) {
+      // The override carries capacities rather than static event inventory.
+      // Reconstruct the atomic-present layout class so exact auto layouts
+      // round-trip through the ordinary planner.
+      inventory.atomic_event_count = 1u;
+    }
     break;
   case ConSanMoiEngine::InlineShadow:
     if (override_layout.inline_exact_dispatch_bank_count == 0u ||
@@ -627,8 +654,7 @@ consan_moi_report_layout_from_override(const ConSanMoiReportLayoutOverride &over
     inventory.diagnostic_count = override_layout.diagnostic_capacity;
     inventory.inline_lds_bytes =
         (static_cast<uint64_t>(override_layout.exact_shadow_entry_capacity) /
-         override_layout.inline_exact_dispatch_bank_count) *
-        consan_moi_exact_shadow::granule_bytes;
+         override_layout.inline_exact_dispatch_bank_count);
     inventory.inline_atomic_release_count = override_layout.inline_atomic_release_capacity;
     inventory.inline_causal_snapshot_count = override_layout.inline_causal_snapshot_capacity;
     inventory.inline_compact_token_mapping_count =

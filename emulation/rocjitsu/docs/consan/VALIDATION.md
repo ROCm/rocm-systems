@@ -15,6 +15,90 @@ reusable backend is documented in
 [AMDGPU register spilling](../spilling.md), and
 the target-specific status files above are the published result ledgers.
 
+## Checked-in device conformance
+
+The `consan-device` CTest tier is the bounded bridge between host unit tests
+and the external end-to-end campaigns. It compiles small HIP programs into
+real target code objects, passes them through the production interception and
+instrumentation path, and executes them on RocJitsu or a matching physical
+GPU. It needs no model, data set, external workload repository, or prebuilt
+test artifact.
+
+The fixtures reduce device-level properties observed in attention, reduction,
+generated-model, and Stream-K-style workloads. They cover cross-wave LDS
+handoff, a barrier reduction, shared helpers with multiple kernel owners,
+three-dimensional workgroup identity, dynamic private stacks, adjacent
+subword writes with overlapping reads, global atomic arrival, and a
+cross-wave race. Each clean test has an exact host-computed output oracle; the
+racy fixture also preserves exact independent output while requiring the
+applicable sanitizer evidence.
+
+The contract is deliberately independent of the current prototype. Tests may
+require that the intended code object was instrumented, that semantic evidence
+is complete, and that diagnostics match the declared clean or racy outcome.
+They do not assert patch counts, instruction encodings, code-cave use, helper
+layout, register allocation, or any other implementation choice. This lets the
+same suite remain an oracle while Part 3 replaces the implementation.
+
+Every fixture runs as an uninstrumented baseline and under SuperCollider,
+Record/Replay, Sampled, and Inline Shadow. The common matrix is registered for
+CDNA3 (`gfx942`), CDNA4 (`gfx950`), CDNA5 (`gfx1250`), RDNA3 (`gfx1100`), and
+RDNA4 (`gfx1201`). All five simulated targets use RocJitsu directly; no FFM
+path is part of this tier. CDNA4 additionally runs the identical contract on a
+physical `gfx950`, followed by an ordered uninstrumented health check. This is
+200 simulator cases and 41 physical cases at the current workload count.
+
+The initial target-capability disposition is:
+
+| Capability | Device disposition |
+| --- | --- |
+| Native LDS and group-FLAT loads/stores | Covered on all five targets by compiler-native forms. |
+| Target-native workgroup barriers | Covered on all five targets by the handoff and reduction workloads; exact opcode selection is intentionally not pinned. |
+| 8-, 16-, and 32-bit LDS overlap | Covered by the subword and word fixtures on all five targets. |
+| Multi-owner helpers, multidimensional dispatch identity, and dynamic private stacks | Covered on all five targets. |
+| Agent-scope atomic release/acquire and fence inventory | Covered on all five targets by the atomic-arrival workload. |
+| CDNA5 cluster barriers and ordered LDS atomics | Tracked extension gap; the common suite exercises ordinary workgroups and a global arrival atomic. |
+| Wider target-specific LDS forms and native VGLOBAL forms | Tracked extension gap; retain the existing host transformation coverage until an implementation-independent device oracle is reduced from an end-to-end workload. |
+
+“Tracked gap” is preferable to a fixture that merely recognizes the current
+patcher. Add an extension when its program can state a portable workload or
+sanitizer-semantic oracle, and cross-pollinate it to every applicable target.
+
+Run the complete simulator matrix with:
+
+```sh
+ctest --test-dir /path/to/rocjitsu-build \
+  -L consan-device -L simulator --output-on-failure -j16
+```
+
+On a host with the matching physical device, run the native matrix with:
+
+```sh
+ctest --test-dir /path/to/rocjitsu-build \
+  -L consan-device -L physical --output-on-failure -j16
+```
+
+Run every registered simulated target and the physical target, when present,
+in one invocation with:
+
+```sh
+ctest --test-dir /path/to/rocjitsu-build \
+  -L consan-device --output-on-failure -j16
+```
+
+Every test has an isolated `ROCJITSU_RUNTIME_DIR`, so simulator cases and
+architectures have no CTest serialization constraint. Physical cases share a
+target-specific CTest resource lock because they use the same GPU and include
+fault-injection paths. The post-instrumentation physical health test also
+depends on all instrumented physical cases, but neither that dependency nor
+the physical resource lock prevents simulator work from running concurrently.
+
+Individual target, engine, clean/racy, baseline, and health labels can be
+combined with these commands. Failures remain ordinary visible CTest failures;
+known prototype defects are not encoded as expected passes. End-to-end
+campaigns remain the final qualification authority and the source of future
+small reductions.
+
 The compact physical gfx1100 bring-up gate is registered separately from the
 application campaign:
 

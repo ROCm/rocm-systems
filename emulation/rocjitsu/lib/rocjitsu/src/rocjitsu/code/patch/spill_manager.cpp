@@ -7,6 +7,7 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/cdna3_instrumentation_builder.h"
 #include "rocjitsu/code/patch/cdna4_instrumentation_builder.h"
+#include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/rdna3_instrumentation_builder.h"
 #include "rocjitsu/code/patch/rdna4_instrumentation_builder.h"
 #include "util/bit.h"
@@ -186,22 +187,24 @@ std::optional<VgprSpillSequence> build_vgpr_spill_sequence(SpillManager &manager
                          : arch == ROCJITSU_CODE_ARCH_CDNA3 ? build_cdna3_s_wait_vmcnt0(arch)
                          : arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(arch)
                                                             : build_s_wait_loadcnt0(arch);
-  if (!wait_store || !wait_load)
+  const auto wait_lds = instrumentation::build_s_wait_lds0(arch);
+  if (!wait_store || !wait_load || !wait_lds)
     return std::nullopt;
 
   VgprSpillSequence sequence;
   sequence.vgpr_base = vgpr_base;
   sequence.vgpr_count = vgpr_count;
   sequence.slot_offsets.reserve(vgpr_count);
-  // A live VGPR can still have an outstanding asynchronous definition at the
-  // patch point. Drain loads before observing spill victims; otherwise the
-  // later definition can complete after the save and the restore will write
-  // the stale pre-definition value over it. Probe bodies already drain these
-  // counters, so making the drain explicit before the save preserves the
-  // guest value without introducing an additional ordering boundary.
-  sequence.save_words.reserve(static_cast<size_t>(vgpr_count) * 3u + 2u);
+  // A live VGPR can still have an outstanding asynchronous VMEM or LDS
+  // definition at the patch point. Drain both domains before observing spill
+  // victims; otherwise the later definition can complete after the save and
+  // the restore will write the stale pre-definition value over it. This is
+  // especially important when consecutive displaced DS loads use wait-count
+  // values greater than zero in their original continuation.
+  sequence.save_words.reserve(static_cast<size_t>(vgpr_count) * 3u + 3u);
   sequence.restore_words.reserve(static_cast<size_t>(vgpr_count) * 3u + 1u);
   sequence.save_words.push_back(*wait_load);
+  sequence.save_words.push_back(*wait_lds);
   for (uint16_t i = 0; i < vgpr_count; ++i) {
     const uint16_t vgpr = static_cast<uint16_t>(vgpr_base + i);
     const auto offset = planned_manager.offset_for(RegisterRef{RegClass::VGPR, vgpr, 1});
@@ -303,7 +306,8 @@ build_dynamic_stack_vgpr_spill_sequence(uint16_t vgpr_base, uint16_t vgpr_count,
       : arch == ROCJITSU_CODE_ARCH_CDNA4
           ? build_cdna4_s_cmp_lg_u32(saved_scc_sgpr, scalar_positive_inline_u32(0), arch)
           : build_rdna4_s_cmp_lg_u32(saved_scc_sgpr, scalar_positive_inline_u32(0), arch);
-  if (!wait_store || !wait_load || !capture_scc || !advance_stack || !restore_scc)
+  const auto wait_lds = instrumentation::build_s_wait_lds0(arch);
+  if (!wait_store || !wait_load || !wait_lds || !capture_scc || !advance_stack || !restore_scc)
     return std::nullopt;
 
   VgprSpillSequence sequence;
@@ -313,9 +317,10 @@ build_dynamic_stack_vgpr_spill_sequence(uint16_t vgpr_base, uint16_t vgpr_count,
   sequence.dynamic_frame_base_sgpr = frame_base_sgpr;
   sequence.dynamic_frame_bytes = static_cast<uint32_t>(frame_bytes);
   sequence.slot_offsets.reserve(vgpr_count);
-  sequence.save_words.reserve(static_cast<size_t>(vgpr_count) * 3u + 8u);
+  sequence.save_words.reserve(static_cast<size_t>(vgpr_count) * 3u + 9u);
   sequence.restore_words.reserve(static_cast<size_t>(vgpr_count) * 3u + 3u);
   sequence.save_words.push_back(*wait_load);
+  sequence.save_words.push_back(*wait_lds);
   sequence.save_words.push_back(*capture_scc);
   sequence.save_words.push_back(build_s_mov_b32(saved_frame_base_sgpr, frame_base_sgpr, arch));
   sequence.save_words.push_back(build_s_mov_b32(frame_base_sgpr, stack_top_sgpr, arch));
@@ -419,7 +424,8 @@ build_dynamic_stack_borrowed_sgpr_spill_sequence(uint16_t vgpr_base, uint16_t vg
       arch == ROCJITSU_CODE_ARCH_RDNA3
           ? build_rdna3_s_cmp_lg_u32(borrowed_sgpr_base, scalar_positive_inline_u32(0), arch)
           : build_rdna4_s_cmp_lg_u32(borrowed_sgpr_base, scalar_positive_inline_u32(0), arch);
-  if (!wait_store || !wait_load || !capture_scc || !advance_stack || !restore_scc)
+  const auto wait_lds = instrumentation::build_s_wait_lds0(arch);
+  if (!wait_store || !wait_load || !wait_lds || !capture_scc || !advance_stack || !restore_scc)
     return std::nullopt;
 
   DynamicStackBorrowedSgprSpillSequence sequence;
@@ -430,11 +436,12 @@ build_dynamic_stack_borrowed_sgpr_spill_sequence(uint16_t vgpr_base, uint16_t vg
   sequence.total_private_bytes = *total_private_bytes;
   sequence.dynamic_frame_bytes = static_cast<uint32_t>(frame_bytes);
   sequence.slot_offsets.reserve(vgpr_count);
-  sequence.save_words.reserve(static_cast<size_t>(vgpr_count) * 3u + 12u);
+  sequence.save_words.reserve(static_cast<size_t>(vgpr_count) * 3u + 13u);
   sequence.restore_words.reserve(static_cast<size_t>(vgpr_count) * 3u + 9u);
   std::vector<uint32_t> fill_words;
   fill_words.reserve(static_cast<size_t>(vgpr_count) * 3u);
   sequence.save_words.push_back(*wait_load);
+  sequence.save_words.push_back(*wait_lds);
   for (uint16_t i = 0; i < vgpr_count; ++i) {
     const uint16_t vgpr = static_cast<uint16_t>(vgpr_base + i);
     const uint32_t offset = static_cast<uint32_t>(i) * SpillManager::kSlotBytes;

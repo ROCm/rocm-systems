@@ -137,7 +137,8 @@ struct MoiEntryScalarBackup {
     }
   }
   if (plan.requires_kernarg_reload()) {
-    if ((arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4) ||
+    if ((arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
+         arch != ROCJITSU_CODE_ARCH_CDNA4) ||
         plan.kernarg_reload_count > 2u) {
       errors.emplace_back("ConSan MOI dispatch-ID prologue has an unsupported kernarg reload");
       return false;
@@ -171,8 +172,9 @@ append_cdna_full_workgroup_payload_restore(std::vector<uint32_t> &words,
     return true;
   }
   if (!sources.cdna_full_payload_base || !sources.cdna_guest_payload_base ||
-      (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)) {
-    errors.emplace_back("ConSan MOI found an incomplete CDNA workgroup-ID payload repair");
+      (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
+       arch != ROCJITSU_CODE_ARCH_CDNA4)) {
+    errors.emplace_back("ConSan MOI found an incomplete AMDHSA workgroup-ID payload repair");
     return false;
   }
 
@@ -183,7 +185,7 @@ append_cdna_full_workgroup_payload_restore(std::vector<uint32_t> &words,
     const uint16_t source = static_cast<uint16_t>(*sources.cdna_full_payload_base + dimension);
     if (destination != source &&
         !append_moi_entry_salu_write(words, build_s_mov_b32(destination, source, arch), arch)) {
-      errors.emplace_back("ConSan MOI could not restore a guest CDNA workgroup-ID SGPR");
+      errors.emplace_back("ConSan MOI could not restore a guest AMDHSA workgroup-ID SGPR");
       return false;
     }
     ++destination;
@@ -1209,8 +1211,8 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   result.moi_full_workgroup_id_descriptor_offsets.clear();
   if (result.elf_bytes.empty() ||
       (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
-       arch != ROCJITSU_CODE_ARCH_CDNA4 &&
-       arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_GFX1250)) {
+       arch != ROCJITSU_CODE_ARCH_CDNA4 && arch != ROCJITSU_CODE_ARCH_RDNA4 &&
+       arch != ROCJITSU_CODE_ARCH_GFX1250)) {
     return true;
   }
 
@@ -1267,7 +1269,8 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
     }
     KD descriptor{};
     std::memcpy(&descriptor, current_image.data() + descriptor_offset, sizeof(descriptor));
-    if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+        arch == ROCJITSU_CODE_ARCH_CDNA4) {
       const uint32_t user_sgpr_count = moi_descriptor_user_sgpr_count(descriptor);
       const uint32_t required_sgpr_count =
           user_sgpr_count + 3u +
@@ -1277,7 +1280,7 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
                : 0u);
       if (!grow_moi_descriptor_sgpr_allocation(descriptor, required_sgpr_count, arch)) {
         result.errors.emplace_back(
-            "ConSan MOI could not allocate the full CDNA workgroup-ID payload");
+            "ConSan MOI could not allocate the full AMDHSA workgroup-ID payload");
         return false;
       }
     }
@@ -1322,7 +1325,8 @@ grow_moi_kernel_descriptor_registers(CodeObjectPatcher &patcher, const ConSanKer
   std::memcpy(&desc, current_image.data() + kernel.descriptor_file_offset, sizeof(desc));
   if (!grow_moi_descriptor_vgpr_allocation(desc, required_vgpr_count, arch,
                                            kernel.agpr_count == 0u)) {
-    errors.emplace_back("ConSan MOI could not grow descriptor VGPR allocation");
+    errors.emplace_back("ConSan MOI could not grow descriptor VGPR allocation to " +
+                        std::to_string(required_vgpr_count) + " registers");
     return false;
   }
   if (required_sgpr_count != 0 &&
@@ -1430,6 +1434,7 @@ void note_dispatch_id_patch_info(ConSanPatchInfo &info, const ConSanMoiDispatchI
   info.dispatch_id_kernarg_reload_base_sgpr = plan.kernarg_reload_base_sgpr;
   info.dispatch_id_kernarg_reload_offset_dwords = plan.kernarg_reload_offset_dwords;
   info.dispatch_id_kernarg_reload_count = plan.kernarg_reload_count;
+  info.dispatch_id_shifted_guest_sgpr_count = plan.shifted_guest_sgpr_count;
   info.dispatch_id_shifted_system_sgpr_count = plan.shifted_system_sgpr_count;
   info.dispatch_id_system_sgpr_shift = plan.system_sgpr_shift;
   info.dispatch_id_original_kernarg_preload_length = plan.original_kernarg_preload_length;
@@ -1605,7 +1610,8 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
       std::vector<std::string> source_errors;
       std::optional<uint16_t> full_payload_user_sgpr_count;
       if (has_private_record_replay_workgroup &&
-          (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)) {
+          (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+           arch == ROCJITSU_CODE_ARCH_CDNA4)) {
         if (active_kernel->descriptor_file_offset > active_bytes.size() ||
             sizeof(KD) > active_bytes.size() - active_kernel->descriptor_file_offset) {
           result.errors.emplace_back("ConSan MOI private exact-tuple descriptor exceeds ELF bytes");
@@ -1826,6 +1832,35 @@ moi_entry_scalar_backup_preserves_persistent_outputs(const ConSanOptions &option
     conflict |= overlaps(reg);
   }
   return !conflict;
+}
+
+[[nodiscard]] bool moi_owner_epoch_prologue_uses_vgpr(
+    const ConSanOptions &options,
+    const std::optional<ConSanMoiWorkgroupShadowLayout> &workgroup_shadow, uint16_t vgpr,
+    rj_code_arch_t arch) {
+  const auto overlaps = [vgpr](std::optional<uint16_t> base, uint16_t width = 1u) {
+    return base && range_overlaps(vgpr, 1u, *base, width);
+  };
+  if (overlaps(options.moi_owner_vgpr))
+    return true;
+  const uint16_t epoch_width =
+      workgroup_shadow
+          ? static_cast<uint16_t>(options.automatic_moi_persistent_vgprs &&
+                                          arch == ROCJITSU_CODE_ARCH_GFX1250
+                                      ? 4u
+                                      : 2u)
+          : 1u;
+  if (overlaps(options.moi_epoch_vgpr, epoch_width) ||
+      overlaps(options.moi_workgroup_key_vgpr) || overlaps(options.moi_dispatch_id_vgpr, 2u)) {
+    return true;
+  }
+  for (const std::optional<uint16_t> reg : {options.moi_record_replay_workgroup_vgprs.x,
+                                            options.moi_record_replay_workgroup_vgprs.y,
+                                            options.moi_record_replay_workgroup_vgprs.z}) {
+    if (overlaps(reg))
+      return true;
+  }
+  return false;
 }
 
 void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
@@ -2071,7 +2106,8 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
       std::vector<std::string> source_errors;
       std::optional<uint16_t> full_payload_user_sgpr_count;
       if (has_record_replay_workgroup_tuple &&
-          (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)) {
+          (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+           arch == ROCJITSU_CODE_ARCH_CDNA4)) {
         full_payload_user_sgpr_count =
             dispatch_plan ? dispatch_plan->expanded_user_sgpr_count
                           : static_cast<uint16_t>(moi_descriptor_user_sgpr_count(descriptor));
@@ -2085,8 +2121,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
       }
     }
     std::optional<MoiEntryScalarBackup> entry_scalar_backup;
-    const bool needs_branch_only_scalar_backup =
-        kernel_options.moi_inline_branch_only_scalar_spill;
+    const bool needs_branch_only_scalar_backup = kernel_options.moi_inline_branch_only_scalar_spill;
     const bool needs_dynamic_stack_scalar_backup =
         kernel_options.moi_inline_dynamic_stack_borrowed_sgpr.has_value();
     const bool needs_full_entry_scalar_backup =
@@ -2105,9 +2140,8 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
           return;
         }
       }
-      const uint16_t sgpr_base = needs_full_entry_scalar_backup
-                                     ? *kernel_options.moi_exec_save_sgpr
-                                     : *kernel_options.moi_owner_sgpr;
+      const uint16_t sgpr_base = needs_full_entry_scalar_backup ? *kernel_options.moi_exec_save_sgpr
+                                                                : *kernel_options.moi_owner_sgpr;
       const uint16_t sgpr_count =
           needs_full_entry_scalar_backup ? moi_exec_save_sgpr_count(kernel_options, arch) : 1u;
       if (sgpr_count == 0u || !moi_entry_scalar_backup_preserves_persistent_outputs(
@@ -2132,29 +2166,45 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
         return;
       }
 
-      const uint32_t persistent_end =
-          moi_owner_epoch_prologue_required_vgpr_count(kernel_options, workgroup_shadow, arch);
       const uint32_t entry_abi_vgpr_count = *workitem_id_dimensions;
-      const uint32_t entry_dead_floor = std::max(persistent_end, entry_abi_vgpr_count);
       const uint32_t original_allocation =
-          moi_descriptor_vgpr_allocation_count(original_descriptor, arch);
-      uint32_t backup_vgpr = std::max(original_allocation, entry_dead_floor);
-      if (backup_vgpr >= kMaxVgprs) {
-        // Only the enabled workitem-ID tuple is defined at hardware entry.
-        // When the original descriptor already allocates the full vector
-        // file, a non-ABI VGPR is still valid entry-local storage: its value
-        // is dead before the first guest instruction and no persistent
-        // instrumentation state uses it.
-        backup_vgpr = entry_dead_floor;
+          moi_descriptor_ordinary_vgpr_allocation_count(original_descriptor, arch);
+      const uint32_t unified_allocation =
+          moi_descriptor_unified_vgpr_allocation_count(original_descriptor, arch);
+      const bool has_live_accvgpr_bank = original_allocation < unified_allocation;
+      const uint32_t tail_begin = std::max(original_allocation, entry_abi_vgpr_count);
+      const uint32_t tail_end = has_live_accvgpr_bank ? original_allocation : kMaxVgprs;
+      std::optional<uint16_t> backup_vgpr;
+      for (uint32_t candidate = tail_begin; candidate < tail_end; ++candidate) {
+        if (!moi_owner_epoch_prologue_uses_vgpr(
+                kernel_options, workgroup_shadow, static_cast<uint16_t>(candidate), arch)) {
+          backup_vgpr = static_cast<uint16_t>(candidate);
+          break;
+        }
       }
-      if (backup_vgpr >= kMaxVgprs) {
+      // The value of every non-ABI ordinary VGPR is dead at hardware entry.
+      // If an AccVGPR boundary or a full ordinary file leaves no fresh tail,
+      // reuse a lower entry-local carrier while excluding the exact VGPRs
+      // consumed by this prologue. Guest uses are safe because the scalar
+      // window is restored before the displaced guest entry executes.
+      for (uint32_t candidate = entry_abi_vgpr_count;
+           !backup_vgpr && candidate < std::min(original_allocation, kMaxVgprs); ++candidate) {
+        if (!moi_owner_epoch_prologue_uses_vgpr(
+                kernel_options, workgroup_shadow, static_cast<uint16_t>(candidate), arch)) {
+          backup_vgpr = static_cast<uint16_t>(candidate);
+        }
+      }
+      if (!backup_vgpr) {
         result.outcome = ConSanTransformOutcome::Unsupported;
-        result.warnings.emplace_back(
-            "ConSan MOI entry scalar backup has no entry-local VGPR carrier");
+        result.warnings.emplace_back(has_live_accvgpr_bank
+                                         ? "ConSan MOI entry scalar backup has no entry-local "
+                                           "ordinary VGPR below the AccVGPR boundary"
+                                         : "ConSan MOI entry scalar backup has no entry-local "
+                                           "VGPR carrier");
         return;
       }
       entry_scalar_backup = MoiEntryScalarBackup{
-          .vgpr = static_cast<uint16_t>(backup_vgpr),
+          .vgpr = *backup_vgpr,
           .sgpr_base = sgpr_base,
           .sgpr_count = sgpr_count,
       };

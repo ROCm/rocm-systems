@@ -33,7 +33,7 @@ void DsAddU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::ADD;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -57,7 +57,7 @@ void DsSubU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::SUB;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -81,7 +81,7 @@ void DsRsubU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::RSUB;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -105,7 +105,7 @@ void DsIncU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::INC;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -129,7 +129,7 @@ void DsDecU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::DEC;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -153,7 +153,7 @@ void DsMinI32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::SMIN;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -177,7 +177,7 @@ void DsMaxI32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::SMAX;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -201,7 +201,7 @@ void DsMinU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::UMIN;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -225,7 +225,7 @@ void DsMaxU32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::UMAX;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -249,7 +249,7 @@ void DsAndB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::AND;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -273,7 +273,7 @@ void DsOrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::OR;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -297,7 +297,7 @@ void DsXorB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::XOR;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -433,7 +433,7 @@ void DsCmpstB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -460,7 +460,7 @@ void DsCmpstF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -487,7 +487,7 @@ void DsMinF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::FMIN;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -511,7 +511,7 @@ void DsMaxF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::FMAX;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -537,7 +537,7 @@ void DsAddF32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::FADD;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -561,7 +561,7 @@ void DsPkAddF16Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::FADD;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -585,7 +585,7 @@ void DsPkAddBf16Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::FADD;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1324,7 +1324,7 @@ void DsAddU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::ADD;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1350,7 +1350,7 @@ void DsSubU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::SUB;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1376,7 +1376,7 @@ void DsRsubU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::RSUB;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1402,7 +1402,7 @@ void DsIncU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::INC;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1428,7 +1428,7 @@ void DsDecU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::DEC;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1454,7 +1454,7 @@ void DsMinI64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::SMIN;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1480,7 +1480,7 @@ void DsMaxI64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::SMAX;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1506,7 +1506,7 @@ void DsMinU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::UMIN;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1532,7 +1532,7 @@ void DsMaxU64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::UMAX;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1558,7 +1558,7 @@ void DsAndB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::AND;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1584,7 +1584,7 @@ void DsOrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::OR;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1610,7 +1610,7 @@ void DsXorB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::XOR;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1762,7 +1762,7 @@ void DsCmpstB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1793,7 +1793,7 @@ void DsCmpstF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1824,7 +1824,7 @@ void DsMinF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::FMIN;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -1850,7 +1850,7 @@ void DsMaxF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::FMAX;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);
@@ -2008,7 +2008,7 @@ void DsAddF64Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::FADD;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   ds_calculate_addresses(inst_, wf, *d);

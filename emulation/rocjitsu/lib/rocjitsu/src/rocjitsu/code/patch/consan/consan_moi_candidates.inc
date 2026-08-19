@@ -16,16 +16,14 @@ inline constexpr uint32_t kMaxVgprs = kConSanOrdinaryVgprLimit;
 inline constexpr uint32_t kMaxSgprs = 106;
 inline constexpr uint16_t kLegacyHwRegHwId = 4;
 inline constexpr uint16_t kLegacyHwIdResidentWaveBits = 6;
-inline constexpr uint16_t kLegacyMaxResidentWaveOwner =
-    (1u << kLegacyHwIdResidentWaveBits) - 1u;
+inline constexpr uint16_t kLegacyMaxResidentWaveOwner = (1u << kLegacyHwIdResidentWaveBits) - 1u;
 // Keep gfx11 and gfx12 fields separate even while their current values match:
 // they are independently qualified architectural facts and may diverge.
 inline constexpr uint16_t kGfx11HwRegHwId1 = 23;
 inline constexpr uint16_t kGfx11HwIdResidentWaveBits = 10;
 inline constexpr uint16_t kGfx11HwIdWaveMask = 0x1f;
 inline constexpr uint16_t kGfx11HwIdSimdMask = 0x300;
-inline constexpr uint16_t kGfx11MaxResidentWaveOwner =
-    kGfx11HwIdWaveMask | kGfx11HwIdSimdMask;
+inline constexpr uint16_t kGfx11MaxResidentWaveOwner = kGfx11HwIdWaveMask | kGfx11HwIdSimdMask;
 inline constexpr uint16_t kGfx12HwRegHwId1 = 23;
 inline constexpr uint16_t kGfx12HwIdResidentWaveBits = 10;
 inline constexpr uint16_t kGfx12HwIdWaveMask = 0x1f;
@@ -71,8 +69,7 @@ inline constexpr uint32_t kGfx1250VectorFlatNoSaddr = static_cast<uint32_t>(cdna
   words.push_back(*wait);
   return true;
 }
-[[nodiscard]] bool append_moi_global_store_wait(std::vector<uint32_t> &words,
-                                                rj_code_arch_t arch) {
+[[nodiscard]] bool append_moi_global_store_wait(std::vector<uint32_t> &words, rj_code_arch_t arch) {
   const auto wait = instrumentation::build_s_wait_global_store0(arch);
   if (!wait)
     return false;
@@ -80,7 +77,7 @@ inline constexpr uint32_t kGfx1250VectorFlatNoSaddr = static_cast<uint32_t>(cdna
   return true;
 }
 [[nodiscard]] bool append_moi_global_atomic_wait(std::vector<uint32_t> &words,
-                                                rj_code_arch_t arch) {
+                                                 rj_code_arch_t arch) {
   if (!append_moi_global_load_wait(words, arch))
     return false;
   // Returning global atomics have both a result dependency and a memory-side
@@ -143,12 +140,13 @@ resolve_record_replay_report_layout(const ConSanOptions &options, bool include_b
              options, options.moi_report_layout->record_replay_dispatch_token_capacity);
 }
 
-/// Every Record/Replay record is interpreted after the kernel has completed,
-/// so its workgroup identity must come from entry-captured persistent state.
-/// The report layout controls banking and scratch needs, not this lifetime
-/// requirement.
+/// Every Record/Replay record and Sampled watchpoint is interpreted outside
+/// the guest access, so its workgroup identity must come from entry-captured
+/// persistent state. The report layout controls banking and scratch needs,
+/// not this lifetime requirement.
 [[nodiscard]] bool record_replay_requires_entry_workgroup_capture(const ConSanOptions &options) {
-  return options.moi_engine == ConSanMoiEngine::RecordReplay;
+  return options.moi_engine == ConSanMoiEngine::RecordReplay ||
+         options.moi_engine == ConSanMoiEngine::Sampled;
 }
 
 [[nodiscard]] uint8_t record_replay_entry_workgroup_capture_count(const ConSanOptions &options) {
@@ -298,8 +296,7 @@ two_address_native_lds_offset_scale(std::string_view mnemonic);
 [[nodiscard]] bool is_moi_native_lds_candidate(const ConSanLdsSite &site, rj_code_arch_t arch) {
   const bool supported_atomic =
       site.kind == ConSanLdsAccessKind::Atomic &&
-      consan_arch_supports_capability_form(arch,
-                                           ConSanCapabilityForm::RelaxedLdsAtomicAccess) &&
+      consan_arch_supports_capability_form(arch, ConSanCapabilityForm::RelaxedLdsAtomicAccess) &&
       ((arch == ROCJITSU_CODE_ARCH_GFX1250 &&
         equals_any(site.mnemonic, {"ds_add_f32", "ds_add_f64", "ds_add_u32", "ds_add_u64",
                                    "ds_cmpstore_rtn_b32"})) ||
@@ -550,8 +547,8 @@ void append_moi_access_site_dispositions(std::span<const uint8_t> bytes, const C
 
   for (const ConSanLdsSite &site : container.lds_sites) {
     if (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write &&
-        !(consan_arch_supports_capability_form(
-              arch, ConSanCapabilityForm::RelaxedLdsAtomicAccess) &&
+        !(consan_arch_supports_capability_form(arch,
+                                               ConSanCapabilityForm::RelaxedLdsAtomicAccess) &&
           site.kind == ConSanLdsAccessKind::Atomic))
       continue;
     append_moi_access_site_disposition(

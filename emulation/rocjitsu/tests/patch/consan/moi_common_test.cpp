@@ -2043,7 +2043,14 @@ TEST(ConSanMoi, SharedHelperDispatchCaptureUsesPerKernelLayoutsAndOnePersistentP
 
   std::vector<uint8_t> rejected_bytes = make_fixture();
   mutate_kernel_descriptor(rejected_bytes, "shared_owner_1", [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                    kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR, 1u);
+    AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                    kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1u);
+    AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                    kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_SIZE, 1u);
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 15u);
+    AMDHSA_BITS_SET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH, 1u);
   });
   const ConSanResult rejected = try_patch_consan(rejected_bytes, options);
   EXPECT_EQ(rejected.outcome, ConSanTransformOutcome::Unsupported);
@@ -2064,7 +2071,20 @@ TEST(ConSanMoi, DispatchPreloadUnsupportedLayoutsRollbackTransactionally) {
   };
 
   const ConSanResult user_limit = run([](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                    kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER, 1u);
+    AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                    kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR, 1u);
+    AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                    kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR, 1u);
+    AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                    kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1u);
+    AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                    kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_FLAT_SCRATCH_INIT, 1u);
+    AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                    kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_SIZE, 1u);
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 15u);
+    AMDHSA_BITS_SET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH, 1u);
   });
   EXPECT_EQ(user_limit.outcome, ConSanTransformOutcome::Unsupported);
   EXPECT_FALSE(user_limit.modified);
@@ -2382,8 +2402,7 @@ TEST(ConSanMoi, Gfx1250AutoReportUsesRuntimeApertureForDescriptorOpaqueLds) {
   EXPECT_EQ(plan.layout.inline_exact_dispatch_bank_count,
             consan_moi_inline_exact_dispatch_bank_count_for_lds(inventory.inline_lds_bytes));
   EXPECT_EQ(plan.layout.exact_shadow_entry_capacity,
-            kRuntimeLdsBytes / consan_moi_exact_shadow::granule_bytes *
-                plan.layout.inline_exact_dispatch_bank_count);
+            kRuntimeLdsBytes * plan.layout.inline_exact_dispatch_bank_count);
 }
 
 TEST(ConSanMoi, Gfx1250AutoReportCoversFullApertureForDynamicLds) {
@@ -2413,8 +2432,7 @@ TEST(ConSanMoi, Gfx1250AutoReportCoversFullApertureForDynamicLds) {
   EXPECT_EQ(plan.layout.inline_exact_dispatch_bank_count,
             consan_moi_inline_exact_dispatch_bank_count_for_lds(inventory.inline_lds_bytes));
   EXPECT_EQ(plan.layout.exact_shadow_entry_capacity,
-            consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250) /
-                consan_moi_exact_shadow::granule_bytes *
+            consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_GFX1250) *
                 plan.layout.inline_exact_dispatch_bank_count);
 }
 
@@ -2449,6 +2467,7 @@ TEST(ConSanMoi, AutoReportInventoryCoversFullLdsApertureForFlatGroupAccess) {
             consan_moi_inline_exact_dispatch_bank_count_for_lds(inventory.inline_lds_bytes));
   EXPECT_EQ(plan.layout.exact_shadow_entry_capacity,
             kConSanMoiInlineShadowConservativeExactShadowEntries *
+                consan_moi_exact_shadow::granule_bytes *
                 plan.layout.inline_exact_dispatch_bank_count);
 }
 

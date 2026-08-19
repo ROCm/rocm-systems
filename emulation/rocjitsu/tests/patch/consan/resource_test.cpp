@@ -32,7 +32,7 @@ TEST(ConSanInstructionBuilder, EncodesInlineAtomicAddressOperations) {
   const auto add = build_v_add_u64_vgpr_offset(
       /*address_vgpr=*/10, /*offset_vgpr=*/12, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(add);
-  EXPECT_EQ((*add)[2], pack_sopp(rdna4::kSWaitAlu, 0xfffdu));
+  EXPECT_EQ((*add)[2], pack_sopp(rdna4::kSWaitAlu, 0xff9du));
   EXPECT_EQ((*add)[0] & 0xffu, 10u);
   EXPECT_EQ(((*add)[1] >> 18u) & 0x1ffu, scalar_positive_inline_u32(0));
   EXPECT_EQ((*add)[3] & 0xffu, 11u);
@@ -71,7 +71,7 @@ TEST(ConSanInstructionBuilder, EncodesSignedAddressDisplacementWithCarry) {
       build_v_add_u64_signed_i24(/*address_vgpr=*/10, 0x7fffff, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(positive);
   EXPECT_EQ((*positive)[2], 0x007fffffu);
-  EXPECT_EQ((*positive)[3], pack_sopp(rdna4::kSWaitAlu, 0xfffdu));
+  EXPECT_EQ((*positive)[3], pack_sopp(rdna4::kSWaitAlu, 0xff9du));
   EXPECT_EQ((*positive)[0] & 0xffu, 10u);
   EXPECT_EQ((*positive)[4] & 0xffu, 11u);
   EXPECT_EQ(((*positive)[0] >> 8u) & 0x7fu, kRdna4VccLo);

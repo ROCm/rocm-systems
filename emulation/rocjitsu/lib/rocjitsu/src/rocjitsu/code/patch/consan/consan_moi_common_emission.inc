@@ -339,7 +339,10 @@ build_moi_private_epoch_layout(const ConSanResult &result, const ResolvedMoiScra
     const ConSanOptions &options, rj_code_arch_t arch, std::vector<std::string> &warnings) {
   return build_moi_private_epoch_layout(result, resources, arch, warnings,
                                         /*include_owner=*/options.moi_owner_source ==
-                                            ConSanMoiOwnerSource::WorkitemId);
+                                            ConSanMoiOwnerSource::WorkitemId,
+                                        /*include_workgroup_key=*/false,
+                                        /*include_record_replay_workgroup=*/
+                                        record_replay_requires_entry_workgroup_capture(options));
 }
 
 [[nodiscard]] bool append_sampled_private_owner_epoch_load(
@@ -780,9 +783,8 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     return std::nullopt;
   }
 
-  const uint16_t op =
-      load ? (element_dwords == 1u ? cdna5::kDsLoadB32Vds : cdna5::kDsLoadB64Vds)
-           : (element_dwords == 1u ? cdna5::kDsStoreB32Vds : cdna5::kDsStoreB64Vds);
+  const uint16_t op = load ? (element_dwords == 1u ? cdna5::kDsLoadB32Vds : cdna5::kDsLoadB64Vds)
+                           : (element_dwords == 1u ? cdna5::kDsStoreB32Vds : cdna5::kDsStoreB64Vds);
   std::vector<uint32_t> words;
   const auto append_access = [&](const ConSanMoiAccessRange &range, uint16_t data_vgpr) {
     uint16_t address_vgpr = replay_address_vgpr;

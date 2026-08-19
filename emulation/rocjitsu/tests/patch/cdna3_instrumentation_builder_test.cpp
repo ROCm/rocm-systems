@@ -148,6 +148,14 @@ TEST(Cdna3InstrumentationBuilder, ScratchWaitAndAddressRecipesMatchLlvm) {
   EXPECT_EQ(build_cdna3_s_barrier(kArch), 0xbf8a0000u);
 }
 
+TEST(Cdna3InstrumentationBuilder, LiteralAddressHighWordRespectsConstantBus) {
+  const auto words =
+      build_cdna3_v_add_u64_literal(10, 0x00007eff82d2c0c4ull, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(words);
+  EXPECT_EQ(*words, (std::vector<uint32_t>{0x321414ffu, 0x82d2c0c4u, 0x38161680u, 0x681616ffu,
+                                           0x00007effu}));
+}
+
 TEST(Cdna3InstrumentationBuilder, RejectsWrongArchitectureAndInvalidTuples) {
   EXPECT_FALSE(build_cdna3_s_mov_b64(20, 22, ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_FALSE(build_cdna3_v_lshrrev_b32(10, 3, 3, ROCJITSU_CODE_ARCH_CDNA4));

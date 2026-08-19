@@ -3190,17 +3190,19 @@ TEST(AtomicStressTest, DsAddRtnU32_MultiWorkgroup) {
   EXPECT_EQ(final_val, 256u) << "LDS atomic add across 4 workgroups should be 256";
 }
 
-// Non-RTN DS atomic add: verify LDS gets the correct sum even without
-// returning the old value.
+// Non-RTN DS atomic add: verify LDS gets the correct sum and the encoded,
+// non-architected vdst field does not clobber a live VGPR.
 TEST(AtomicStressTest, DsAddU32_NoReturn) {
   VmFixture f("cdna4", 1, 10);
+  auto *snap = f.capture_halts();
 
   using namespace enc;
   const uint32_t code[] = {
+      v_mov_b32(0, INLINE_CONST(42)),
       v_mov_b32(1, INLINE_CONST(1)),
       v_mov_b32(3, INLINE_CONST(0)),
       ds_lo(0),       // ds_add_u32 (op=0), no return
-      ds_hi(0, 1, 3), // vdst unused, data0=v1, addr=v3
+      ds_hi(0, 1, 3), // encoded vdst=0 is ignored, data0=v1, addr=v3
       S_WAITCNT_0,
       S_ENDPGM,
   };
@@ -3214,6 +3216,10 @@ TEST(AtomicStressTest, DsAddU32_NoReturn) {
 
   uint32_t final_val = f.cu()->lds().read32(0);
   EXPECT_EQ(final_val, 228u) << "100 + 128 atomic adds = 228";
+  ASSERT_EQ(snap->snapshots().size(), 2u);
+  for (const auto &wf : snap->snapshots())
+    for (uint32_t lane = 0; lane < wf.wf_size; ++lane)
+      EXPECT_EQ(wf.vgpr(0, lane), 42u) << "lane=" << lane;
 }
 
 // Global (L2) atomic add: multiple wavefronts atomically increment a global

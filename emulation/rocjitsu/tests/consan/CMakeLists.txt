@@ -139,8 +139,9 @@ function(rj_add_consan_hip_case)
         PASS_REGEX
         FAIL_REGEX
         EXPECTED_EXIT
+        RESOURCE_LOCK
     )
-    set(_multi_value_args ENVIRONMENT)
+    set(_multi_value_args ENVIRONMENT LABELS)
     cmake_parse_arguments(
         PARSE_ARGV
         0
@@ -275,6 +276,9 @@ function(rj_add_consan_hip_case)
     if(_case_ENVIRONMENT)
         list(APPEND _test_args ENVIRONMENT ${_case_ENVIRONMENT})
     endif()
+    if(_case_LABELS)
+        list(APPEND _test_args LABELS ${_case_LABELS})
+    endif()
     rj_add_test(${_test_args})
 
     # The checked-output wrapper above keeps an expected diagnostic from
@@ -289,6 +293,455 @@ function(rj_add_consan_hip_case)
     )
     if(_case_RUN_SERIAL)
         set_property(TEST "${_case_NAME}" PROPERTY RUN_SERIAL TRUE)
+    endif()
+    if(_case_RESOURCE_LOCK)
+        set_property(
+            TEST "${_case_NAME}"
+            PROPERTY RESOURCE_LOCK "${_case_RESOURCE_LOCK}"
+        )
+    endif()
+endfunction()
+
+function(rj_add_consan_device_conformance_cases)
+    set(_options PHYSICAL)
+    set(_one_value_args PREFIX TARGET CONFIG)
+    cmake_parse_arguments(
+        PARSE_ARGV
+        0
+        _device
+        "${_options}"
+        "${_one_value_args}"
+        ""
+    )
+    if(_device_UNPARSED_ARGUMENTS)
+        message(
+            FATAL_ERROR
+            "unknown ConSan device-conformance arguments: ${_device_UNPARSED_ARGUMENTS}"
+        )
+    endif()
+    foreach(_required IN ITEMS PREFIX TARGET)
+        if(NOT _device_${_required})
+            message(
+                FATAL_ERROR
+                "ConSan device-conformance cases require ${_required}"
+            )
+        endif()
+    endforeach()
+    if(NOT _device_PHYSICAL AND NOT _device_CONFIG)
+        message(
+            FATAL_ERROR
+            "simulated ConSan device-conformance cases require CONFIG"
+        )
+    endif()
+
+    set(_config_args)
+    set(_backend simulator)
+    if(_device_CONFIG)
+        list(APPEND _config_args CONFIG "${_device_CONFIG}")
+    else()
+        set(_backend physical)
+    endif()
+    set(_labels consan consan-device "${_device_TARGET}" "${_backend}")
+
+    set(
+        _device_workloads
+        "OrderedTileHandoff|ordered_tile_handoff|ConSanDeviceOrderedTileHandoffTest"
+        "Reduction|reduction|ConSanDeviceReductionTest"
+        "SharedHelperOwners|shared_helper_owners|ConSanDeviceSharedHelperOwnersTest"
+        "IndependentWorkgroups|independent_workgroups|ConSanDeviceIndependentWorkgroupsTest"
+        "DynamicPrivateStack|dynamic_private_stack|ConSanDeviceDynamicPrivateStackTest"
+        "OverlappingSubwords|overlapping_subwords|ConSanDeviceOverlappingSubwordsTest"
+        "AtomicArrival|atomic_arrival|ConSanDeviceAtomicArrivalTest|atomics"
+        "StreamKLastArriver|streamk_last_arriver|ConSanDeviceStreamKLastArriverTest|atomics"
+        "TreeAtomicOr|tree_atomic_or|ConSanDeviceTreeAtomicOrTest|atomics"
+        "DoubleBufferedPipeline|double_buffered_pipeline|ConSanDeviceDoubleBufferedPipelineTest"
+        "HistogramScatter|histogram_scatter|ConSanDeviceHistogramScatterTest|atomics"
+        "SegmentedTopK|segmented_topk|ConSanDeviceSegmentedTopKTest"
+        "TwoStageSoftmax|two_stage_softmax|ConSanDeviceTwoStageSoftmaxTest"
+        "BackwardOptimizer|backward_optimizer|ConSanDeviceBackwardOptimizerTest"
+        "MoeRouting|moe_routing|ConSanDeviceMoeRoutingTest|atomics"
+        "ContinuousBatching|continuous_batching|ConSanDeviceContinuousBatchingTest"
+        "VglobalCachePublication|vglobal_cache_publication|ConSanDeviceVglobalCachePublicationTest|atomics"
+    )
+    if(_device_TARGET STREQUAL "gfx942" OR _device_TARGET STREQUAL "gfx950")
+        list(
+            APPEND
+            _device_workloads
+            "CdnaMfmaPipeline|cdna_mfma_pipeline|ConSanDeviceCdnaMfmaPipelineTest"
+            "CdnaFullBankStreamk|cdna_full_bank_streamk|ConSanDeviceCdnaFullBankStreamkTest|atomics"
+        )
+    endif()
+    if(_device_TARGET STREQUAL "gfx950")
+        list(
+            APPEND
+            _device_workloads
+            "CdnaAccvgprB128|cdna_accvgpr_b128|ConSanDeviceCdnaAccvgprB128Test"
+        )
+    endif()
+    if(NOT _device_TARGET STREQUAL "gfx1250")
+        list(
+            APPEND
+            _device_workloads
+            "GroupFlatWide|group_flat_wide|ConSanDeviceGroupFlatWideTest"
+        )
+    endif()
+    if(_device_TARGET STREQUAL "gfx1201" OR _device_TARGET STREQUAL "gfx1250")
+        list(
+            APPEND
+            _device_workloads
+            "RdnaB96Boundary|rdna_b96_boundary|ConSanDeviceRdnaB96BoundaryTest"
+            "OrderedAtomicScope|ordered_atomic_scope|ConSanDeviceOrderedAtomicScopeTest|atomics"
+        )
+    endif()
+    if(_device_TARGET STREQUAL "gfx1250")
+        list(
+            APPEND
+            _device_workloads
+            "Gfx1250ClusterSync|gfx1250_cluster|ConSanDeviceGfx1250ClusterSyncTest"
+            "Gfx1250MultiCluster|gfx1250_cluster|ConSanDeviceGfx1250MultiClusterTest"
+            "Gfx1250TdmWait|gfx1250_cluster|ConSanDeviceGfx1250TdmWaitTest"
+            "Gfx1250ClusterMulticast|gfx1250_cluster|ConSanDeviceGfx1250ClusterMulticastTest"
+        )
+    endif()
+    if(_device_TARGET STREQUAL "gfx1201")
+        list(
+            APPEND
+            _device_workloads
+            "RdnaFp8StagedMatmul|rdna_fp8_staged_matmul|ConSanDeviceRdnaFp8StagedMatmulTest"
+        )
+    endif()
+    if(_device_TARGET STREQUAL "gfx1100" OR _device_TARGET STREQUAL "gfx1201")
+        list(
+            APPEND
+            _device_workloads
+            "RdnaWmmaPipeline|rdna_wmma_pipeline|ConSanDeviceRdnaWmmaPipelineTest"
+        )
+    endif()
+    if(_device_TARGET STREQUAL "gfx1100")
+        list(
+            APPEND
+            _device_workloads
+            "Gfx11ScalarVglobal|gfx11_scalar_vglobal|ConSanDeviceGfx11ScalarVglobalTest|atomics"
+            "Gfx11DispatchIdentity|gfx11_dispatch_identity|ConSanDeviceGfx11DispatchIdentityTest"
+        )
+    endif()
+    foreach(_workload IN LISTS _device_workloads)
+        string(REPLACE "|" ";" _workload_fields "${_workload}")
+        list(GET _workload_fields 0 _workload_name)
+        list(GET _workload_fields 1 _workload_target)
+        list(GET _workload_fields 2 _workload_suite)
+        foreach(_outcome IN ITEMS Correct Incorrect)
+            string(TOLOWER "${_outcome}" _outcome_label)
+            rj_add_consan_hip_case(
+                NAME
+                    "${_device_PREFIX}.Baseline${_workload_name}.${_outcome}"
+                TARGET
+                    hip_consan_device_${_workload_target}_${_device_TARGET}_test
+                FILTER "${_workload_suite}.${_outcome}"
+                ${_config_args}
+                TIMEOUT 60
+                LABELS ${_labels} baseline "${_outcome_label}"
+            )
+        endforeach()
+    endforeach()
+
+    set(_instrumented_tests)
+    foreach(
+        _mode
+        IN
+        ITEMS
+            "SuperCollider|supercollider"
+            "RecordReplay|record-replay"
+            "Sampled|sampled"
+            "InlineShadow|inline-shadow"
+    )
+        string(REPLACE "|" ";" _mode_fields "${_mode}")
+        list(GET _mode_fields 0 _mode_name)
+        list(GET _mode_fields 1 _mode_value)
+
+        foreach(_workload IN LISTS _device_workloads)
+            string(REPLACE "|" ";" _workload_fields "${_workload}")
+            list(GET _workload_fields 0 _workload_name)
+            list(GET _workload_fields 1 _workload_target)
+            list(GET _workload_fields 2 _workload_suite)
+
+            set(_common_environment
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_MODE=${_mode_value}"
+                "RJ_CONSAN_POLICY=strict"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+                "RJ_CONSAN_LOG=1"
+            )
+            set(_correct_environment ${_common_environment})
+            set(_incorrect_environment ${_common_environment})
+            if(NOT _mode_value STREQUAL "supercollider")
+                list(
+                    APPEND
+                    _correct_environment
+                    "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
+                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                    "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                    "RJ_CONSAN_MOI_FORBID_OVERFLOW=1"
+                )
+                list(
+                    APPEND
+                    _incorrect_environment
+                    "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
+                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                    "RJ_CONSAN_MOI_FORBID_OVERFLOW=1"
+                )
+                if(_mode_value STREQUAL "record-replay")
+                    list(
+                        APPEND
+                        _incorrect_environment
+                        "RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT=1"
+                    )
+                else()
+                    list(
+                        APPEND
+                        _incorrect_environment
+                        "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+                    )
+                endif()
+            endif()
+
+            list(LENGTH _workload_fields _workload_field_count)
+            if(_workload_field_count GREATER 3)
+                list(GET _workload_fields 3 _workload_feature)
+                if(_workload_feature STREQUAL "atomics")
+                    list(
+                        APPEND
+                        _correct_environment
+                        "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
+                    )
+                    list(
+                        APPEND
+                        _incorrect_environment
+                        "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
+                    )
+                endif()
+            endif()
+
+            set(
+                _correct_test_name
+                "${_device_PREFIX}.${_mode_name}${_workload_name}.Correct"
+            )
+            rj_add_consan_hip_case(
+                NAME "${_correct_test_name}"
+                TARGET
+                    hip_consan_device_${_workload_target}_${_device_TARGET}_test
+                FILTER "${_workload_suite}.Correct"
+                ${_config_args}
+                TIMEOUT 60
+                ENVIRONMENT ${_correct_environment}
+                LABELS ${_labels} "${_mode_value}" clean
+            )
+            list(APPEND _instrumented_tests "${_correct_test_name}")
+
+            set(
+                _incorrect_test_name
+                "${_device_PREFIX}.${_mode_name}${_workload_name}.Incorrect"
+            )
+            set(_incorrect_labels
+                ${_labels} "${_mode_value}" incorrect racy
+            )
+            if(_mode_value STREQUAL "supercollider")
+                # SuperCollider is a mutation-only flavor with no
+                # happens-before model. Its explicit negative contract is
+                # successful instrumentation and preservation of the
+                # independent workload oracle, not a semantic diagnosis.
+                list(APPEND _incorrect_labels mutation-only)
+            endif()
+            rj_add_consan_hip_case(
+                NAME "${_incorrect_test_name}"
+                TARGET
+                    hip_consan_device_${_workload_target}_${_device_TARGET}_test
+                FILTER "${_workload_suite}.Incorrect"
+                ${_config_args}
+                TIMEOUT 60
+                ENVIRONMENT ${_incorrect_environment}
+                LABELS ${_incorrect_labels}
+            )
+            list(APPEND _instrumented_tests "${_incorrect_test_name}")
+        endforeach()
+    endforeach()
+
+    if(_device_PHYSICAL)
+        set(_health_test_name "${_device_PREFIX}.PostInstrumentationHealth")
+        rj_add_consan_hip_case(
+            NAME "${_health_test_name}"
+            TARGET hip_consan_device_ordered_tile_handoff_${_device_TARGET}_test
+            FILTER "ConSanDeviceOrderedTileHandoffTest.Correct"
+            TIMEOUT 60
+            LABELS ${_labels} health
+        )
+        set_tests_properties(
+            "${_health_test_name}"
+            PROPERTIES DEPENDS "${_instrumented_tests}"
+        )
+    endif()
+endfunction()
+
+function(rj_add_consan_device_fixture_targets target)
+    set(
+        _device_workload_sources
+        "ordered_tile_handoff|ordered_tile_handoff_test.hip"
+        "reduction|reduction_test.hip"
+        "shared_helper_owners|shared_helper_owners_test.hip"
+        "independent_workgroups|independent_workgroups_test.hip"
+        "dynamic_private_stack|dynamic_private_stack_test.hip"
+        "overlapping_subwords|overlapping_subwords_test.hip"
+        "atomic_arrival|atomic_arrival_test.hip"
+        "streamk_last_arriver|streamk_last_arriver_test.hip"
+        "tree_atomic_or|tree_atomic_or_test.hip"
+        "double_buffered_pipeline|double_buffered_pipeline_test.hip"
+        "histogram_scatter|histogram_scatter_test.hip"
+        "segmented_topk|segmented_topk_test.hip"
+        "two_stage_softmax|two_stage_softmax_test.hip"
+        "backward_optimizer|backward_optimizer_test.hip"
+        "moe_routing|moe_routing_test.hip"
+        "continuous_batching|continuous_batching_test.hip"
+        "vglobal_cache_publication|vglobal_cache_publication_test.hip"
+    )
+    if(target STREQUAL "gfx942" OR target STREQUAL "gfx950")
+        list(
+            APPEND
+            _device_workload_sources
+            "cdna_mfma_pipeline|cdna_mfma_pipeline_test.hip"
+            "cdna_full_bank_streamk|cdna_full_bank_streamk_test.hip"
+        )
+    endif()
+    if(target STREQUAL "gfx950")
+        list(
+            APPEND
+            _device_workload_sources
+            "cdna_accvgpr_b128|cdna_accvgpr_b128_test.hip"
+        )
+    endif()
+    if(NOT target STREQUAL "gfx1250")
+        list(
+            APPEND
+            _device_workload_sources
+            "group_flat_wide|group_flat_wide_test.hip"
+        )
+    endif()
+    if(target STREQUAL "gfx1201" OR target STREQUAL "gfx1250")
+        list(
+            APPEND
+            _device_workload_sources
+            "rdna_b96_boundary|rdna_b96_boundary_test.hip"
+            "ordered_atomic_scope|ordered_atomic_scope_test.hip"
+        )
+    endif()
+    if(target STREQUAL "gfx1201")
+        list(
+            APPEND
+            _device_workload_sources
+            "rdna_fp8_staged_matmul|rdna_fp8_staged_matmul_test.hip"
+        )
+    endif()
+    if(target STREQUAL "gfx1100" OR target STREQUAL "gfx1201")
+        list(
+            APPEND
+            _device_workload_sources
+            "rdna_wmma_pipeline|rdna_wmma_pipeline_test.hip"
+        )
+    endif()
+    if(target STREQUAL "gfx1100")
+        list(
+            APPEND
+            _device_workload_sources
+            "gfx11_scalar_vglobal|gfx11_scalar_vglobal_test.hip"
+            "gfx11_dispatch_identity|gfx11_dispatch_identity_test.hip"
+        )
+    endif()
+    foreach(_workload IN LISTS _device_workload_sources)
+        string(REPLACE "|" ";" _workload_fields "${_workload}")
+        list(GET _workload_fields 0 _workload_name)
+        list(GET _workload_fields 1 _workload_source)
+        set(_target "hip_consan_device_${_workload_name}_${target}_test")
+        rj_add_hip_test(
+            ${_target}
+            ARCH ${target}
+            SOURCE "dbi/consan/device/${_workload_source}"
+        )
+        add_dependencies(${_target}_target rocjitsu_dbi_hooks)
+    endforeach()
+
+    if(target STREQUAL "gfx1250")
+        set(_cluster_kernel_source
+            "${CMAKE_CURRENT_SOURCE_DIR}/dbi/consan/device/gfx1250_cluster_device_kernels.hip"
+        )
+        set(_cluster_hsaco
+            "${CMAKE_CURRENT_BINARY_DIR}/hip_consan_device_gfx1250_cluster_kernels.hsaco"
+        )
+        set(_cluster_bundle
+            "${CMAKE_CURRENT_BINARY_DIR}/hip_consan_device_gfx1250_cluster_kernels.bundle"
+        )
+        find_program(
+            _cluster_offload_bundler
+            clang-offload-bundler
+            REQUIRED
+            HINTS
+                "${ROCM_PATH}/lib/llvm/bin"
+                "${ROCM_PATH}/llvm/bin"
+                "${ROCM_PATH}/bin"
+        )
+        set(_cluster_compiler_command ${AMDCXX})
+        if(CMAKE_HIP_COMPILER_LAUNCHER)
+            list(
+                PREPEND
+                _cluster_compiler_command
+                ${CMAKE_HIP_COMPILER_LAUNCHER}
+            )
+        endif()
+        add_custom_command(
+            OUTPUT "${_cluster_bundle}"
+            COMMAND
+                ${_cluster_compiler_command} -x hip --cuda-device-only
+                --offload-arch=gfx1250 --rocm-path=${ROCM_PATH} -std=c++20
+                -O2 -o "${_cluster_bundle}" "${_cluster_kernel_source}"
+            DEPENDS "${_cluster_kernel_source}"
+            COMMENT
+                "Compiling gfx1250 clustered ConSan kernel bundle"
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT "${_cluster_hsaco}"
+            COMMAND
+                "${_cluster_offload_bundler}" --type=o --unbundle
+                --targets=hipv4-amdgcn-amd-amdhsa--gfx1250
+                --input=${_cluster_bundle} --output=${_cluster_hsaco}
+            DEPENDS "${_cluster_bundle}"
+            COMMENT
+                "Extracting gfx1250 clustered ConSan code object"
+            VERBATIM
+        )
+        add_custom_target(
+            hip_consan_device_gfx1250_cluster_kernels_target
+            ALL
+            DEPENDS "${_cluster_hsaco}"
+        )
+        rj_add_hip_test(
+            hip_consan_device_gfx1250_cluster_gfx1250_test
+            ARCH gfx1250
+            SOURCE dbi/consan/device/gfx1250_cluster_device_test.cpp
+            COMPILE_DEFINITIONS
+                "RJ_CONSAN_GFX1250_CLUSTER_HSACO=\"${_cluster_hsaco}\""
+            EXTRA_DEPENDS "${_cluster_hsaco}"
+            EXTRA_LIBS -lhsa-runtime64
+        )
+        add_dependencies(
+            hip_consan_device_gfx1250_cluster_gfx1250_test_target
+            hip_consan_device_gfx1250_cluster_kernels_target
+            rocjitsu_dbi_hooks
+        )
+        if(RJ_INSTALL_TESTS)
+            install(
+                FILES "${_cluster_hsaco}"
+                DESTINATION "${RJ_INSTALL_TEST_BIN_DIR}"
+            )
+        endif()
     endif()
 endfunction()
 
@@ -563,7 +1016,7 @@ function(rj_add_consan_inline_exact_byte_cases prefix target config)
         CONFIG "${config}"
         TIMEOUT 60
         RUN_SERIAL
-        PASS_REGEX "workgroup_shadow_bytes=[1-9][0-9]*"
+        PASS_REGEX "visible_exact_shadow=[1-9][0-9]*"
         FAIL_REGEX "RJ_CONSAN_MOI_(REQUIRE_RECORDS|FORBID_DIAGNOSTICS) requested"
         ENVIRONMENT
             ${_exact_common_environment}
@@ -623,7 +1076,7 @@ function(rj_add_consan_inline_exact_byte_cases prefix target config)
         CONFIG "${config}"
         TIMEOUT 60
         RUN_SERIAL
-        PASS_REGEX "workgroup_shadow_bytes=[1-9][0-9]*"
+        PASS_REGEX "visible_exact_shadow=[1-9][0-9]*"
         FAIL_REGEX "RJ_CONSAN_MOI_(REQUIRE_RECORDS|FORBID_DIAGNOSTICS|FORBID_OVERFLOW) requested"
         ENVIRONMENT
             ${_exact_common_environment}
@@ -1555,6 +2008,12 @@ function(rj_add_consan_hip_tests)
         "${_rj_consan_moi_abi_header};${CMAKE_CURRENT_SOURCE_DIR}/dbi/consan/hip_consan_address_group_test.h"
     )
     if(RJ_HIP_RUNTIME_SUPPORTS_GFX942)
+        rj_add_consan_device_fixture_targets(gfx942)
+        rj_add_consan_device_conformance_cases(
+            PREFIX "ConSanDeviceGfx942Sim"
+            TARGET gfx942
+            CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3_kmd.json"
+        )
         # Keep a native gfx942 code object available on every host so CDNA3
         # ConSan can be exercised through the RocJITsu simulator.
         rj_add_hip_test(
@@ -1579,6 +2038,12 @@ function(rj_add_consan_hip_tests)
         )
     endif()
     if(RJ_HIP_RUNTIME_SUPPORTS_GFX950)
+        rj_add_consan_device_fixture_targets(gfx950)
+        rj_add_consan_device_conformance_cases(
+            PREFIX "ConSanDeviceGfx950Sim"
+            TARGET gfx950
+            CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd.json"
+        )
         rj_add_hip_test(
                 hip_consan_lds_gfx950_test
                 ARCH gfx950
@@ -1607,6 +2072,11 @@ function(rj_add_consan_hip_tests)
         # Keep cross-compiled gfx950 fixtures available on other hosts,
         # but only register native HIP execution when gfx950 is present.
         if(HAS_GFX950_GPU)
+            rj_add_consan_device_conformance_cases(
+                PREFIX "ConSanDeviceGfx950Physical"
+                TARGET gfx950
+                PHYSICAL
+            )
             # Per-site resource plans are debug diagnostics. Cases whose pass
             # regex matches site/source/owner details must request log level 3.
             rj_add_consan_hip_case(
@@ -1670,7 +2140,7 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
-                    "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                    "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_cdna_forced_spill_test_kernel_for_instrumentation"
                     "RJ_CONSAN_LOG=3"
@@ -1745,7 +2215,7 @@ function(rj_add_consan_hip_tests)
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=0"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
-                    "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                    "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
                     "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=moi_cdna_dynamic_stack_inline_spill_kernel_for_instrumentation"
                     "RJ_CONSAN_LOG=3"
@@ -1755,6 +2225,12 @@ function(rj_add_consan_hip_tests)
         endif()
     endif()
     if(RJ_HIP_RUNTIME_SUPPORTS_GFX1100)
+        rj_add_consan_device_fixture_targets(gfx1100)
+        rj_add_consan_device_conformance_cases(
+            PREFIX "ConSanDeviceGfx1100Sim"
+            TARGET gfx1100
+            CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx1100_w7900.json"
+        )
         rj_add_hip_test(
                 hip_consan_lds_gfx1100_test
                 ARCH gfx1100
@@ -1888,6 +2364,12 @@ function(rj_add_consan_hip_tests)
         endif()
     endif()
     if(RJ_HIP_RUNTIME_SUPPORTS_GFX1250)
+        rj_add_consan_device_fixture_targets(gfx1250)
+        rj_add_consan_device_conformance_cases(
+            PREFIX "ConSanDeviceGfx1250Sim"
+            TARGET gfx1250
+            CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx1250.json"
+        )
         # Keep native gfx1250 code objects available on every host so the
         # target-specific ConSan path can be regression-tested in simulation.
         rj_add_hip_test(
@@ -1911,6 +2393,12 @@ function(rj_add_consan_hip_tests)
             CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx1250.json"
         )
     endif()
+    rj_add_consan_device_fixture_targets(gfx1201)
+    rj_add_consan_device_conformance_cases(
+        PREFIX "ConSanDeviceGfx1201Sim"
+        TARGET gfx1201
+        CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx1201_r9700.json"
+    )
     rj_add_hip_test(
             hip_consan_lds_test
             ARCH gfx1201

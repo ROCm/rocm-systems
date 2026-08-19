@@ -359,7 +359,12 @@ TEST(ConSanMoiAutoReportPlan, InlineRoundsDeclaredLdsAndKeepsOrderingTablesIndep
   ASSERT_TRUE(plan.complete());
   const uint32_t expected_dispatch_banks =
       consan_moi_inline_exact_dispatch_bank_count_for_lds(inventory.inline_lds_bytes);
-  const uint64_t expected_exact_shadow_entries = 1025u * expected_dispatch_banks;
+  // The automatic layout must preserve provenance for every LDS byte.  Even
+  // though word-only objects can use the local four-byte mirror, a report
+  // layout is shared by every object in the process and cannot assume that a
+  // later object contains no subword access.
+  const uint64_t expected_exact_shadow_entries =
+      inventory.inline_lds_bytes * expected_dispatch_banks;
   EXPECT_EQ(plan.layout.inline_exact_dispatch_bank_count, expected_dispatch_banks);
   EXPECT_EQ(plan.layout.exact_shadow_entry_capacity, expected_exact_shadow_entries);
   EXPECT_EQ(plan.layout.inline_atomic_release_capacity, 3u);
@@ -396,9 +401,8 @@ TEST(ConSanMoiAutoReportPlan, InlineLdsUsesPerLayoutDispatchBanking) {
   const uint32_t expected_dispatch_banks =
       consan_moi_inline_exact_dispatch_bank_count_for_lds(kFullLdsBytes);
   EXPECT_EQ(plan.layout.inline_exact_dispatch_bank_count, expected_dispatch_banks);
-  EXPECT_EQ(expected_dispatch_banks, 128u);
-  EXPECT_EQ(plan.layout.exact_shadow_entry_capacity,
-            (kFullLdsBytes / consan_moi_exact_shadow::granule_bytes) * expected_dispatch_banks);
+  EXPECT_EQ(expected_dispatch_banks, 32u);
+  EXPECT_EQ(plan.layout.exact_shadow_entry_capacity, kFullLdsBytes * expected_dispatch_banks);
   EXPECT_LE(plan.required_bytes, kConSanMoiAutoReportBufferCeilingBytes);
 }
 
@@ -531,7 +535,7 @@ TEST(ConSanMoiAutoReportPlan, AdaptiveSampledBanksFitWithoutDroppingLogicalRange
             8u * kLogicalRanges);
 }
 
-TEST(ConSanMoiAutoReportPlan, InlineBoundaryChangesOnlyAtWholeLdsCells) {
+TEST(ConSanMoiAutoReportPlan, InlineCapacityChangesAtEveryLdsByte) {
   ConSanMoiAutoReportInventory inventory{
       .engine = ConSanMoiEngine::InlineShadow,
       .inline_lds_bytes = 4096u,
@@ -549,10 +553,14 @@ TEST(ConSanMoiAutoReportPlan, InlineBoundaryChangesOnlyAtWholeLdsCells) {
                 aligned.layout.inline_exact_dispatch_bank_count);
 
   inventory.inline_lds_bytes += consan_moi_exact_shadow::granule_bytes - 1u;
-  const auto same_cell = plan_consan_moi_auto_report(inventory);
-  ASSERT_TRUE(same_cell.complete());
-  EXPECT_EQ(same_cell.layout.exact_shadow_entry_capacity,
-            next_cell.layout.exact_shadow_entry_capacity);
+  const auto later_bytes = plan_consan_moi_auto_report(inventory);
+  ASSERT_TRUE(later_bytes.complete());
+  EXPECT_EQ(later_bytes.layout.inline_exact_dispatch_bank_count,
+            next_cell.layout.inline_exact_dispatch_bank_count);
+  EXPECT_EQ(later_bytes.layout.exact_shadow_entry_capacity,
+            next_cell.layout.exact_shadow_entry_capacity +
+                (consan_moi_exact_shadow::granule_bytes - 1u) *
+                    next_cell.layout.inline_exact_dispatch_bank_count);
 }
 
 TEST(ConSanMoiAutoReportPlan, EveryAbiCapacityRejectsOnePastUint32) {
@@ -580,14 +588,14 @@ TEST(ConSanMoiAutoReportPlan, EveryAbiCapacityRejectsOnePastUint32) {
   }
 }
 
-TEST(ConSanMoiAutoReportPlan, InlineLdsRoundingOverflowIsTyped) {
+TEST(ConSanMoiAutoReportPlan, InlineLdsCapacityOverflowIsTyped) {
   const ConSanMoiAutoReportInventory inventory{
       .engine = ConSanMoiEngine::InlineShadow,
       .inline_lds_bytes = std::numeric_limits<uint64_t>::max(),
   };
   const auto plan = plan_consan_moi_auto_report(inventory);
   EXPECT_EQ(plan.outcome, ConSanMoiAutoReportPlanOutcome::Overflow);
-  EXPECT_EQ(plan.reason, ConSanMoiAutoReportPlanReason::ByteSizeOverflow);
+  EXPECT_EQ(plan.reason, ConSanMoiAutoReportPlanReason::AbiCapacityOverflow);
   EXPECT_EQ(consan_moi_auto_report_plan_outcome_name(plan.outcome), "overflow");
   EXPECT_FALSE(plan.layout.valid);
 }

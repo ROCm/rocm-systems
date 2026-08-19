@@ -7,6 +7,7 @@
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 
 #include <cstdint>
+#include <limits>
 
 namespace rocjitsu {
 
@@ -50,6 +51,52 @@ consan_moi_sampled_join_pending_acquire(const ConSanMoiSampledPendingAcquireView
 
   ConSanMoiSampledSyncDecodeResult decoded =
       decode_consan_moi_sampled_sync_metadata(pending.slot.metadata);
+  decoded.metadata.epoch_before = window.epoch;
+  decoded.metadata.epoch_after = window.epoch;
+  return {.state = state, .sync = decoded};
+}
+
+/// Joins the release half retained by a deferred acquire to the exact earlier
+/// access window selected by static CFG association. The device stores one
+/// plus that absolute slot in the pending record so zero remains the
+/// acquire-only representation.
+[[nodiscard]] inline ConSanMoiSampledPendingJoinResult consan_moi_sampled_join_pending_release(
+    const ConSanMoiSampledPendingAcquireView &pending, const ConSanMoiSampledCausalWindow &window,
+    uint64_t packed_watchpoint, uint32_t release_slot, uint32_t acquire_slot) {
+  const ConSanMoiSampledWatchpointEntry watchpoint =
+      decode_consan_moi_sampled_watchpoint_entry(packed_watchpoint);
+  if (release_slot == std::numeric_limits<uint32_t>::max() ||
+      pending.slot.reserved != release_slot + 1u || pending.slot.source_epoch != window.epoch)
+    return {.state = ConSanMoiSampledPendingAcquireState::IdentityMismatch, .sync = {}};
+  const ConSanMoiSampledPendingAcquireKey key{
+      .generation = window.generation,
+      .dispatch_id = window.dispatch_id,
+      .workgroup_x = window.workgroup_x,
+      .workgroup_y = window.workgroup_y,
+      .workgroup_z = window.workgroup_z,
+      .owner_id = watchpoint.owner_id,
+      .source_epoch = window.epoch,
+      .selected_slot = acquire_slot,
+  };
+  const ConSanMoiSampledPendingAcquireState state =
+      classify_consan_moi_sampled_pending_acquire(pending, key, window.epoch);
+  if (state != ConSanMoiSampledPendingAcquireState::Ready)
+    return {.state = state, .sync = {}};
+  if (!consan_moi_sampled_atomic_attachment_matches(window, packed_watchpoint, release_slot,
+                                                    {.generation = window.generation,
+                                                     .dispatch_id = window.dispatch_id,
+                                                     .workgroup_x = window.workgroup_x,
+                                                     .workgroup_y = window.workgroup_y,
+                                                     .workgroup_z = window.workgroup_z,
+                                                     .epoch = window.epoch,
+                                                     .owner_id = watchpoint.owner_id}))
+    return {.state = ConSanMoiSampledPendingAcquireState::IdentityMismatch, .sync = {}};
+
+  ConSanMoiSampledSyncDecodeResult decoded =
+      decode_consan_moi_sampled_sync_metadata(pending.slot.metadata);
+  constexpr uint32_t release_bit = static_cast<uint32_t>(ConSanMoiSampledSyncRole::Release);
+  if ((static_cast<uint32_t>(decoded.metadata.role) & release_bit) == 0u)
+    return {.state = ConSanMoiSampledPendingAcquireState::Malformed, .sync = {}};
   decoded.metadata.epoch_before = window.epoch;
   decoded.metadata.epoch_after = window.epoch;
   return {.state = state, .sync = decoded};

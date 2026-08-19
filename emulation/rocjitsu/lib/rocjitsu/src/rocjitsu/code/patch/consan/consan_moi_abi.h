@@ -226,6 +226,8 @@ struct alignas(8) ConSanMoiSampledPendingAcquireSlot {
   uint32_t workgroup_z = 0;
   uint32_t owner_id = 0;
   uint32_t source_epoch = 0;
+  // One plus the absolute causal-window slot statically associated with the
+  // release half of an acquire-release RMW. Zero means acquire-only.
   uint32_t reserved = 0;
   ConSanMoiSampledSyncMetadataPacked metadata;
 

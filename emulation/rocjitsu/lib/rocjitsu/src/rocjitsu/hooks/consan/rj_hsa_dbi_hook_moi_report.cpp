@@ -754,6 +754,33 @@ private:
             bytes + expected_layout.sampled_pending_acquires_offset);
     const uint32_t sampled_pending_acquire_capacity =
         entry.direct_sampled ? header->sampled_pending_acquire_capacity : 0;
+    const uint32_t sampled_pending_acquire_owner_bank_count =
+        rocjitsu::consan_moi_sampled_pending_acquire_owner_bank_count(
+            sampled_pending_acquire_capacity, sampled_causal_window_capacity);
+    const auto read_sampled_pending_acquire = [&](uint32_t pending_index) {
+      rocjitsu::ConSanMoiSampledPendingAcquireView view{};
+      if (pending_index >= sampled_pending_acquire_capacity)
+        return view;
+      const volatile auto &pending = sampled_pending_acquires[pending_index];
+      view.version_before = pending.version;
+      view.slot.version = view.version_before;
+      view.slot.selected_slot = pending.selected_slot;
+      view.slot.generation = pending.generation;
+      view.slot.dispatch_id = pending.dispatch_id;
+      view.slot.workgroup_x = pending.workgroup_x;
+      view.slot.workgroup_y = pending.workgroup_y;
+      view.slot.workgroup_z = pending.workgroup_z;
+      view.slot.owner_id = pending.owner_id;
+      view.slot.source_epoch = pending.source_epoch;
+      view.slot.reserved = pending.reserved;
+      view.slot.metadata.address = pending.metadata.address;
+      view.slot.metadata.byte_count = pending.metadata.byte_count;
+      view.slot.metadata.descriptor = pending.metadata.descriptor;
+      view.slot.metadata.epoch_before = pending.metadata.epoch_before;
+      view.slot.metadata.epoch_after = pending.metadata.epoch_after;
+      view.version_after = pending.version;
+      return view;
+    };
     struct ExactShadowEntry {
       uint32_t index = 0;
       rocjitsu::ConSanMoiExactShadowEntry entry;
@@ -958,7 +985,6 @@ private:
       rocjitsu::ConSanMoiSampledSyncMetadataPacked sync_packed{};
       uint32_t sync_descriptor_before = 0;
       uint32_t sync_descriptor_after = 0;
-      rocjitsu::ConSanMoiSampledPendingAcquireView pending_view{};
       if (i < sampled_sync_metadata_capacity) {
         const size_t sync_word = static_cast<size_t>(i) * (sizeof(sync_packed) / sizeof(uint32_t));
         sync_descriptor_before = sampled_sync_words[sync_word + 3u];
@@ -968,26 +994,6 @@ private:
         sync_packed.epoch_before = sampled_sync_words[sync_word + 4u];
         sync_packed.epoch_after = sampled_sync_words[sync_word + 5u];
         sync_descriptor_after = sampled_sync_words[sync_word + 3u];
-      }
-      if (i < sampled_pending_acquire_capacity) {
-        const volatile auto &pending = sampled_pending_acquires[i];
-        pending_view.version_before = pending.version;
-        pending_view.slot.version = pending_view.version_before;
-        pending_view.slot.selected_slot = pending.selected_slot;
-        pending_view.slot.generation = pending.generation;
-        pending_view.slot.dispatch_id = pending.dispatch_id;
-        pending_view.slot.workgroup_x = pending.workgroup_x;
-        pending_view.slot.workgroup_y = pending.workgroup_y;
-        pending_view.slot.workgroup_z = pending.workgroup_z;
-        pending_view.slot.owner_id = pending.owner_id;
-        pending_view.slot.source_epoch = pending.source_epoch;
-        pending_view.slot.reserved = pending.reserved;
-        pending_view.slot.metadata.address = pending.metadata.address;
-        pending_view.slot.metadata.byte_count = pending.metadata.byte_count;
-        pending_view.slot.metadata.descriptor = pending.metadata.descriptor;
-        pending_view.slot.metadata.epoch_before = pending.metadata.epoch_before;
-        pending_view.slot.metadata.epoch_after = pending.metadata.epoch_after;
-        pending_view.version_after = pending.version;
       }
       rocjitsu::ConSanMoiSampledSyncDecodeResult sync =
           i < sampled_sync_metadata_capacity
@@ -1048,7 +1054,51 @@ private:
         continue;
       }
       if (snapshot.state == rocjitsu::ConSanMoiSampledSnapshotState::Stable &&
-          i < sampled_pending_acquire_capacity) {
+          sampled_pending_acquire_owner_bank_count != 0u) {
+        // A deferred acquire-release RMW carries a statically proven route
+        // back to its preceding release-side access. Search only the same
+        // owner's bank for each possible acquire window; exact identity and
+        // route checks keep unrelated hashed entries from qualifying it.
+        if (sync.classification == rocjitsu::ConSanMoiSampledSyncClassification::Empty &&
+            i != std::numeric_limits<uint32_t>::max()) {
+          std::optional<rocjitsu::ConSanMoiSampledSyncDecodeResult> release_sync;
+          for (uint32_t acquire_slot = 0; acquire_slot < sampled_causal_window_capacity;
+               ++acquire_slot) {
+            const uint32_t release_pending_index =
+                acquire_slot * sampled_pending_acquire_owner_bank_count +
+                (snapshot.entry.owner_id & (sampled_pending_acquire_owner_bank_count - 1u));
+            const auto release_pending = read_sampled_pending_acquire(release_pending_index);
+            if (release_pending.slot.reserved != i + 1u)
+              continue;
+            const auto release_join = rocjitsu::consan_moi_sampled_join_pending_release(
+                release_pending,
+                {window_generation, window_dispatch_id, window_x, window_y, window_z, window_epoch,
+                 window_first_entry, window_entry_count, state_after, window_cluster_workgroup_id},
+                static_cast<uint64_t>(low_after) | (static_cast<uint64_t>(high) << 32u), i,
+                acquire_slot);
+            if (release_join.state == rocjitsu::ConSanMoiSampledPendingAcquireState::Ready) {
+              if (release_sync) {
+                ++summary.sampled_malformed_sync_count;
+                sync_snapshot_usable = false;
+                release_sync.reset();
+                break;
+              }
+              release_sync = release_join.sync;
+            }
+          }
+          if (release_sync)
+            sync = *release_sync;
+        }
+
+        const uint32_t pending_index =
+            i * sampled_pending_acquire_owner_bank_count +
+            (snapshot.entry.owner_id & (sampled_pending_acquire_owner_bank_count - 1u));
+        if (pending_index >= sampled_pending_acquire_capacity) {
+          ++summary.sampled_malformed_sync_count;
+          sync_snapshot_usable = false;
+          continue;
+        }
+        const auto pending_view = read_sampled_pending_acquire(pending_index);
         const auto pending_join = rocjitsu::consan_moi_sampled_join_pending_acquire(
             pending_view,
             {window_generation, window_dispatch_id, window_x, window_y, window_z, window_epoch,
@@ -1686,7 +1736,9 @@ private:
                   "ConSan MOI auto sampled reader=%llu index=%u kind=%u owner=%u epoch=%u "
                   "generation=%u cells=[%u,%u) consumed=%s dispatch=0x%llx "
                   "workgroup=(%u,%u,%u) instruction=0x%llx trampoline=0x%llx "
-                  "relocated_guest=0x%llx scratch_vgpr=%u range=%u bank=%u mapped=%s",
+                  "relocated_guest=0x%llx scratch_vgpr=%u range=%u bank=%u mapped=%s "
+                  "sync_class=%u sync_kind=%u sync_role=%u sync_scope=%u sync_outcome=%u "
+                  "sync_address=0x%llx sync_bytes=%u sync_epochs=%u/%u",
                   static_cast<unsigned long long>(entry.reader), sampled_entry.index,
                   static_cast<uint32_t>(sampled_entry.entry.kind), sampled_entry.entry.owner_id,
                   sampled_entry.entry.epoch, sampled_entry.entry.generation,
@@ -1698,7 +1750,15 @@ private:
                   static_cast<unsigned long long>(instruction_offset),
                   static_cast<unsigned long long>(trampoline_offset),
                   static_cast<unsigned long long>(relocated_guest_offset), scratch_vgpr, range,
-                  bank, mapping != entry.sampled_patch_mappings.end() ? "true" : "false");
+                  bank, mapping != entry.sampled_patch_mappings.end() ? "true" : "false",
+                  static_cast<uint32_t>(sampled_entry.sync.classification),
+                  static_cast<uint32_t>(sampled_entry.sync.metadata.kind),
+                  static_cast<uint32_t>(sampled_entry.sync.metadata.role),
+                  static_cast<uint32_t>(sampled_entry.sync.metadata.scope),
+                  static_cast<uint32_t>(sampled_entry.sync.metadata.outcome),
+                  static_cast<unsigned long long>(sampled_entry.sync.metadata.address),
+                  sampled_entry.sync.metadata.byte_count, sampled_entry.sync.metadata.epoch_before,
+                  sampled_entry.sync.metadata.epoch_after);
     }
     if (visible_sampled.size() > kSampledLogLimit)
       log_message(kLogInfo, "ConSan MOI auto sampled reader=%llu omitted=%zu after log limit=%zu",

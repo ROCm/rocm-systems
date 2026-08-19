@@ -390,9 +390,9 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     const VgprSpillSequence *spill, const InlineSgprSpillSequence *scalar_spill,
     rj_code_arch_t arch, uint32_t record_index, uint32_t atomic_record_capacity,
     size_t atomic_records_offset, uint64_t cave_text_offset, uint64_t return_text_offset,
-    bool already_runtime_workgroup_gated,
-    std::optional<uint32_t> private_owner_offset, std::optional<uint16_t> private_owner_shift,
-    uint32_t &guest_instruction_offset, std::vector<std::string> &errors) {
+    bool already_runtime_workgroup_gated, std::optional<uint32_t> private_owner_offset,
+    std::optional<uint16_t> private_owner_shift, uint32_t &guest_instruction_offset,
+    std::vector<std::string> &errors) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI atomic record patch requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
@@ -1010,14 +1010,19 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     std::span<const uint8_t> bytes, const AtomicRecordCandidate &candidate,
     const ConSanMoiAtomicAddressPlan &address_plan, const ConSanOptions &options,
     const VgprSpillSequence *spill, const MoiPrivateEpochLayout *private_layout,
-    rj_code_arch_t arch, uint32_t selected_slot, const ConSanMoiReportBufferLayout &layout,
+    rj_code_arch_t arch, uint32_t selected_slot, uint32_t bank_count,
+    std::optional<uint32_t> release_selected_slot, const ConSanMoiReportBufferLayout &layout,
     uint64_t cave_text_offset, uint64_t return_text_offset, std::vector<std::string> &errors,
     uint32_t *guest_instruction_offset = nullptr) {
+  const uint32_t pending_owner_bank_count = consan_moi_sampled_pending_acquire_owner_bank_count(
+      layout.sampled_pending_acquire_capacity, layout.sampled_causal_window_capacity);
   if (!options.scratch_vgpr || !options.moi_report_buffer_address || !options.moi_owner_vgpr ||
       !options.moi_epoch_vgpr || !options.moi_exec_save_sgpr ||
       static_cast<uint32_t>(*options.scratch_vgpr) + sampled_atomic_scratch_count() > kMaxVgprs ||
-      selected_slot >= layout.sampled_pending_acquire_capacity || !address_plan.supported() ||
-      !candidate.site.raw_scope || candidate.site.width_bits != 32u ||
+      bank_count == 0u || !std::has_single_bit(bank_count) || pending_owner_bank_count == 0u ||
+      selected_slot > layout.sampled_causal_window_capacity ||
+      bank_count > layout.sampled_causal_window_capacity - selected_slot ||
+      !address_plan.supported() || !candidate.site.raw_scope || candidate.site.width_bits != 32u ||
       !candidate.kernel_descriptor_file_offset)
     return std::nullopt;
   const auto role = sampled_atomic_role(candidate.event_kind);
@@ -1026,9 +1031,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       (static_cast<uint32_t>(*role) & static_cast<uint32_t>(ConSanMoiSampledSyncRole::Acquire)) ==
           0u)
     return std::nullopt;
-  const auto workgroup_sources =
-      moi_descriptor_workgroup_sources(bytes, *candidate.kernel_descriptor_file_offset, arch,
-                                       errors, candidate.uses_gfx1250_cluster_workgroup_id);
+  const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
+      bytes, *candidate.kernel_descriptor_file_offset, options, arch, errors,
+      candidate.uses_gfx1250_cluster_workgroup_id);
   if (!workgroup_sources || candidate.site.file_offset > bytes.size() ||
       candidate.site.size > bytes.size() - candidate.site.file_offset)
     return std::nullopt;
@@ -1064,12 +1069,11 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   const uint16_t expected = static_cast<uint16_t>(base + SampledAtomicScratchLayout::kExpected);
   const uint16_t saved_address =
       static_cast<uint16_t>(base + SampledAtomicScratchLayout::kSavedAddress);
+  const uint16_t bank = static_cast<uint16_t>(base + SampledAtomicScratchLayout::kBank);
   const uint16_t original_exec = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u);
   const uint16_t temporary_exec = *options.moi_exec_save_sgpr;
   const uint64_t report_base = *options.moi_report_buffer_address;
-  const uint64_t pending_address =
-      report_base + layout.sampled_pending_acquires_offset +
-      static_cast<uint64_t>(selected_slot) * sizeof(ConSanMoiSampledPendingAcquireSlot);
+  const uint64_t first_pending_address = report_base + layout.sampled_pending_acquires_offset;
 
   std::vector<uint32_t> words;
   SampledAtomicPreludeState prelude;
@@ -1077,6 +1081,18 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
                                      private_layout, arch, saved_address, prelude, errors,
                                      guest_instruction_offset))
     return std::nullopt;
+  if (!append_sampled_window_bank_index(words, options, *workgroup_sources, bank_count, bank,
+                                        expected, arch)) {
+    errors.emplace_back("ConSan MOI sampled pending acquire failed at bank selection");
+    return std::nullopt;
+  }
+  if (selected_slot != 0u) {
+    const auto absolute_slot =
+        instrumentation::build_v_add_u32_literal(bank, expected, selected_slot, bank, arch);
+    if (!absolute_slot)
+      return std::nullopt;
+    words.insert(words.end(), absolute_slot->begin(), absolute_slot->end());
+  }
   InstructionSequence sequence(words);
   ConSanMoiRecordEmitter record(words, base, value, arch);
   const auto contention_label = sequence.make_label();
@@ -1099,15 +1115,34 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   if (!sequence.emit_all(save_exec, active_mask, mbcnt_lo, mbcnt_hi, first, narrow_first))
     return std::nullopt;
 
-  const auto pending_lo =
-      instrumentation::build_v_mov_b32_literal(base, static_cast<uint32_t>(pending_address), arch);
-  const auto pending_hi = instrumentation::build_v_mov_b32_literal(
-      static_cast<uint16_t>(base + 1u), static_cast<uint32_t>(pending_address >> 32u), arch);
   const auto publishing = instrumentation::build_v_mov_b32_literal(value, 1u, arch);
   const auto empty = instrumentation::build_v_mov_b32_literal(expected, 0u, arch);
   const auto claim = instrumentation::build_flat_atomic_cmpswap_b32(
       base, value, value, /*return_old_value=*/true, kRdna4ScopeDevice, arch);
-  if (!sequence.emit_all(pending_lo, pending_hi, publishing, empty, claim) ||
+  // BANK still names the causal-window slot stored in the pending payload.
+  // Address the pending table through a separate (window, owner) index so all
+  // waves at one static last-arriver RMW can retain their exact acquire.
+  const auto append_pending_address = [&]() {
+    if (pending_owner_bank_count > 1u) {
+      const auto scale_window = instrumentation::build_v_mul_lo_u32_literal(
+          value, expected, pending_owner_bank_count, bank, arch);
+      const auto owner_bank = instrumentation::build_v_and_b32_literal(
+          expected, pending_owner_bank_count - 1u, *options.moi_owner_vgpr, arch);
+      const auto combine =
+          instrumentation::build_v_add_u32(value, vector_source_vgpr(value), expected, arch);
+      if (!scale_window || !owner_bank || !combine)
+        return false;
+      words.insert(words.end(), scale_window->begin(), scale_window->end());
+      words.insert(words.end(), owner_bank->begin(), owner_bank->end());
+      words.insert(words.end(), combine->begin(), combine->end());
+    } else {
+      words.push_back(build_v_mov_b32_e32(value, vector_source_vgpr(bank), arch));
+    }
+    return append_sampled_indexed_address(words, first_pending_address,
+                                          sizeof(ConSanMoiSampledPendingAcquireSlot), value, base,
+                                          expected, arch);
+  };
+  if (!append_pending_address() || !sequence.emit_all(publishing, empty, claim) ||
       !append_moi_global_atomic_wait(words, arch)) {
     return std::nullopt;
   }
@@ -1120,8 +1155,19 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   if (!sequence.emit_branch(contention_label, InstructionSequence::BranchKind::SccZero))
     return std::nullopt;
 
-  if (!record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, selected_slot),
-                            selected_slot) ||
+  if (release_selected_slot) {
+    // RESERVED carries release_slot + 1 (zero means no release attachment).
+    // BANK is the absolute acquire slot, so the wrapped unsigned delta also
+    // handles a release window whose static base precedes the acquire window.
+    const uint32_t release_delta = *release_selected_slot - selected_slot + 1u;
+    const auto release_route =
+        instrumentation::build_v_add_u32_literal(expected, value, release_delta, bank, arch);
+    if (!release_route)
+      return std::nullopt;
+    words.insert(words.end(), release_route->begin(), release_route->end());
+  }
+
+  if (!record.store_vgpr(offsetof(ConSanMoiSampledPendingAcquireSlot, selected_slot), bank) ||
       !record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, generation),
                             static_cast<uint32_t>(options.moi_report_generation)) ||
       !record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, generation) + 4u,
@@ -1139,7 +1185,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
                          *options.moi_owner_vgpr) ||
       !record.store_vgpr(offsetof(ConSanMoiSampledPendingAcquireSlot, source_epoch),
                          *options.moi_epoch_vgpr) ||
-      !record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, reserved), 0u) ||
+      !(release_selected_slot
+            ? record.store_vgpr(offsetof(ConSanMoiSampledPendingAcquireSlot, reserved), expected)
+            : record.store_literal(offsetof(ConSanMoiSampledPendingAcquireSlot, reserved), 0u)) ||
       !record.store_vgpr(offsetof(ConSanMoiSampledPendingAcquireSlot, metadata) +
                              offsetof(ConSanMoiSampledSyncMetadataPacked, address),
                          saved_address) ||
@@ -1191,13 +1239,10 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   const auto wait_store = instrumentation::build_s_wait_global_store0(arch);
   const auto ready = instrumentation::build_v_mov_b32_literal(value, 2u, arch);
   const auto expected_publishing = instrumentation::build_v_mov_b32_literal(expected, 1u, arch);
-  const auto commit_lo =
-      instrumentation::build_v_mov_b32_literal(base, static_cast<uint32_t>(pending_address), arch);
-  const auto commit_hi = instrumentation::build_v_mov_b32_literal(
-      static_cast<uint16_t>(base + 1u), static_cast<uint32_t>(pending_address >> 32u), arch);
   const auto commit = instrumentation::build_flat_atomic_cmpswap_b32(
       base, value, value, /*return_old_value=*/true, kRdna4ScopeDevice, arch);
-  if (!sequence.emit_all(wait_store, ready, expected_publishing, commit_lo, commit_hi, commit) ||
+  if (!sequence.emit(wait_store) || !append_pending_address() ||
+      !sequence.emit_all(ready, expected_publishing, commit) ||
       !append_moi_global_atomic_wait(words, arch)) {
     return std::nullopt;
   }
@@ -1254,13 +1299,20 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     std::span<const uint8_t> bytes, const AtomicRecordCandidate &candidate,
     const ConSanMoiAtomicAddressPlan &address_plan, const ConSanOptions &options,
     const VgprSpillSequence *spill, const MoiPrivateEpochLayout *private_layout,
-    rj_code_arch_t arch, uint32_t selected_slot, const ConSanMoiReportBufferLayout &layout,
-    uint64_t cave_text_offset, uint64_t return_text_offset, std::vector<std::string> &errors,
+    rj_code_arch_t arch, uint32_t selected_slot, uint32_t bank_count,
+    const ConSanMoiReportBufferLayout &layout, uint64_t cave_text_offset,
+    uint64_t return_text_offset, std::vector<std::string> &errors,
     uint32_t *guest_instruction_offset = nullptr) {
   if (!options.scratch_vgpr || !options.moi_report_buffer_address || !options.moi_owner_vgpr ||
       !options.moi_epoch_vgpr || !options.moi_exec_save_sgpr ||
       static_cast<uint32_t>(*options.scratch_vgpr) + sampled_atomic_scratch_count() > 256u ||
-      selected_slot >= layout.sampled_sync_metadata_capacity)
+      bank_count == 0u || !std::has_single_bit(bank_count) ||
+      selected_slot > layout.sampled_sync_metadata_capacity ||
+      bank_count > layout.sampled_sync_metadata_capacity - selected_slot ||
+      selected_slot > layout.sampled_causal_window_capacity ||
+      bank_count > layout.sampled_causal_window_capacity - selected_slot ||
+      selected_slot > layout.sampled_watchpoint_capacity ||
+      bank_count > layout.sampled_watchpoint_capacity - selected_slot)
     return std::nullopt;
   if (!address_plan.supported() || !candidate.site.raw_scope || candidate.site.width_bits != 32u)
     return std::nullopt;
@@ -1272,9 +1324,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     errors.emplace_back("ConSan MOI sampled atomic metadata lacks an owning kernel descriptor");
     return std::nullopt;
   }
-  const auto workgroup_sources =
-      moi_descriptor_workgroup_sources(bytes, *candidate.kernel_descriptor_file_offset, arch,
-                                       errors, candidate.uses_gfx1250_cluster_workgroup_id);
+  const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
+      bytes, *candidate.kernel_descriptor_file_offset, options, arch, errors,
+      candidate.uses_gfx1250_cluster_workgroup_id);
   if (!workgroup_sources)
     return std::nullopt;
   if (candidate.site.file_offset > bytes.size() ||
@@ -1319,17 +1371,13 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   const uint16_t expected = static_cast<uint16_t>(base + SampledAtomicScratchLayout::kExpected);
   const uint16_t saved_address =
       static_cast<uint16_t>(base + SampledAtomicScratchLayout::kSavedAddress);
+  const uint16_t bank = static_cast<uint16_t>(base + SampledAtomicScratchLayout::kBank);
   const uint16_t original_exec = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u);
   const uint16_t temporary_exec = *options.moi_exec_save_sgpr;
   const uint64_t report_base = *options.moi_report_buffer_address;
-  const uint64_t window_address =
-      report_base + layout.sampled_causal_windows_offset +
-      static_cast<uint64_t>(selected_slot) * sizeof(ConSanMoiSampledCausalWindow);
-  const uint64_t watchpoint_address = report_base + layout.sampled_watchpoints_offset +
-                                      static_cast<uint64_t>(selected_slot) * sizeof(uint64_t);
-  const uint64_t metadata_address =
-      report_base + layout.sampled_sync_metadata_offset +
-      static_cast<uint64_t>(selected_slot) * sizeof(ConSanMoiSampledSyncMetadataPacked);
+  const uint64_t first_window_address = report_base + layout.sampled_causal_windows_offset;
+  const uint64_t first_watchpoint_address = report_base + layout.sampled_watchpoints_offset;
+  const uint64_t first_metadata_address = report_base + layout.sampled_sync_metadata_offset;
 
   std::vector<uint32_t> words;
   SampledAtomicPreludeState prelude;
@@ -1337,7 +1385,20 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
                                      private_layout, arch, saved_address, prelude, errors,
                                      guest_instruction_offset))
     return std::nullopt;
+  if (!append_sampled_window_bank_index(words, options, *workgroup_sources, bank_count, bank,
+                                        expected, arch)) {
+    errors.emplace_back("ConSan MOI sampled atomic metadata failed at bank selection");
+    return std::nullopt;
+  }
+  if (selected_slot != 0u) {
+    const auto absolute_slot =
+        instrumentation::build_v_add_u32_literal(bank, expected, selected_slot, bank, arch);
+    if (!absolute_slot)
+      return std::nullopt;
+    words.insert(words.end(), absolute_slot->begin(), absolute_slot->end());
+  }
   InstructionSequence sequence(words);
+  ConSanMoiRecordEmitter record(words, base, value, arch);
   const auto collision_label = sequence.make_label();
   const auto restore_label = sequence.make_label();
   if (!append_save_moi_special_state(words, options, arch))
@@ -1347,11 +1408,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     return std::nullopt;
   words.push_back(*save_exec);
 
-  const auto window_lo =
-      instrumentation::build_v_mov_b32_literal(base, static_cast<uint32_t>(window_address), arch);
-  const auto window_hi = instrumentation::build_v_mov_b32_literal(
-      static_cast<uint16_t>(base + 1u), static_cast<uint32_t>(window_address >> 32u), arch);
-  if (!sequence.emit_all(window_lo, window_hi))
+  if (!append_sampled_indexed_address(words, first_window_address,
+                                      sizeof(ConSanMoiSampledCausalWindow), bank, base, expected,
+                                      arch))
     return std::nullopt;
 
   const auto narrow_equal_literal = [&](uint32_t offset, uint32_t literal) -> bool {
@@ -1392,23 +1451,10 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   };
   const auto narrow_equal_workgroup = [&](uint32_t offset,
                                           const ConSanMoiWorkgroupSource &source) -> bool {
-    if (!source.scalar_src)
+    if (!source.has_value())
       return narrow_equal_literal(offset, 0u);
-    words.push_back(build_v_mov_b32_e32(expected, *source.scalar_src, arch));
-    if (source.mask_low_16) {
-      const auto shift_left = instrumentation::build_v_lshlrev_b32(
-          expected, scalar_positive_inline_u32(16), expected, arch);
-      const auto shift_right = instrumentation::build_v_lshrrev_b32(
-          expected, scalar_positive_inline_u32(16), expected, arch);
-      if (!sequence.emit_all(shift_left, shift_right))
-        return false;
-    }
-    if (source.shift_right_16) {
-      const auto shift = instrumentation::build_v_lshrrev_b32(
-          expected, scalar_positive_inline_u32(16), expected, arch);
-      if (!sequence.emit(shift))
-        return false;
-    }
+    if (!consan_detail::append_workgroup_source_value(words, source, expected, arch))
+      return false;
     return narrow_equal_vgpr(offset, expected);
   };
   if (!narrow_equal_literal(offsetof(ConSanMoiSampledCausalWindow, generation),
@@ -1426,7 +1472,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       !narrow_equal_workgroup(offsetof(ConSanMoiSampledCausalWindow, workgroup_z),
                               workgroup_sources->z) ||
       !narrow_equal_vgpr(offsetof(ConSanMoiSampledCausalWindow, epoch), *options.moi_epoch_vgpr) ||
-      !narrow_equal_literal(offsetof(ConSanMoiSampledCausalWindow, first_entry), selected_slot) ||
+      !narrow_equal_vgpr(offsetof(ConSanMoiSampledCausalWindow, first_entry), bank) ||
       !narrow_equal_literal(offsetof(ConSanMoiSampledCausalWindow, entry_count), 1u) ||
       !narrow_equal_literal(offsetof(ConSanMoiSampledCausalWindow, publication_state),
                             static_cast<uint32_t>(ConSanMoiSampledCausalPublicationState::Ready)) ||
@@ -1434,11 +1480,8 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
                               workgroup_sources->cluster_workgroup_id))
     return std::nullopt;
 
-  const auto watch_lo = instrumentation::build_v_mov_b32_literal(
-      base, static_cast<uint32_t>(watchpoint_address), arch);
-  const auto watch_hi = instrumentation::build_v_mov_b32_literal(
-      static_cast<uint16_t>(base + 1u), static_cast<uint32_t>(watchpoint_address >> 32u), arch);
-  if (!sequence.emit_all(watch_lo, watch_hi))
+  if (!append_sampled_indexed_address(words, first_watchpoint_address, sizeof(uint64_t), bank, base,
+                                      expected, arch))
     return std::nullopt;
   const auto narrow_current_vcc = [&]() -> bool {
     const auto narrow =
@@ -1548,23 +1591,16 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     return std::nullopt;
 
   const auto append_publication = [&](uint32_t descriptor) -> bool {
-    const auto descriptor_lo = instrumentation::build_v_mov_b32_literal(
-        base,
-        static_cast<uint32_t>(metadata_address +
-                              offsetof(ConSanMoiSampledSyncMetadataPacked, descriptor)),
-        arch);
-    const auto descriptor_hi = instrumentation::build_v_mov_b32_literal(
-        static_cast<uint16_t>(base + 1u),
-        static_cast<uint32_t>(
-            (metadata_address + offsetof(ConSanMoiSampledSyncMetadataPacked, descriptor)) >> 32u),
-        arch);
     const auto sentinel = instrumentation::build_v_mov_b32_literal(
         value, kConSanMoiSampledSyncPublishingDescriptor, arch);
     const auto zero = instrumentation::build_v_mov_b32_literal(expected, 0, arch);
     const auto claim = instrumentation::build_flat_atomic_cmpswap_b32(base, value, value, true,
                                                                       kRdna4ScopeDevice, arch);
-    if (!sequence.emit_all(descriptor_lo, descriptor_hi, sentinel, zero, claim) ||
-        !append_moi_global_atomic_wait(words, arch)) {
+    if (!append_sampled_indexed_address(
+            words,
+            first_metadata_address + offsetof(ConSanMoiSampledSyncMetadataPacked, descriptor),
+            sizeof(ConSanMoiSampledSyncMetadataPacked), bank, base, expected, arch) ||
+        !sequence.emit_all(sentinel, zero, claim) || !append_moi_global_atomic_wait(words, arch)) {
       return false;
     }
     const auto claimed =
@@ -1575,36 +1611,30 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
       return false;
     if (!sequence.emit_branch(collision_label, InstructionSequence::BranchKind::SccZero))
       return false;
-    if (!append_store_u32_vgpr(words, metadata_address, saved_address, base, arch) ||
-        !append_store_u32_vgpr(words, metadata_address + 4u,
-                               static_cast<uint16_t>(saved_address + 1u), base, arch) ||
-        !append_store_u32_literal(
-            words, metadata_address + offsetof(ConSanMoiSampledSyncMetadataPacked, byte_count), 4u,
-            base, arch) ||
-        !append_store_u32_vgpr(
-            words, metadata_address + offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_before),
-            *options.moi_epoch_vgpr, base, arch) ||
-        !append_store_u32_vgpr(
-            words, metadata_address + offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_after),
-            *options.moi_epoch_vgpr, base, arch))
+    if (!append_sampled_indexed_address(words, first_metadata_address,
+                                        sizeof(ConSanMoiSampledSyncMetadataPacked), bank, base,
+                                        expected, arch) ||
+        !record.store_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, address), saved_address) ||
+        !record.store_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, address) + 4u,
+                           static_cast<uint16_t>(saved_address + 1u)) ||
+        !record.store_literal(offsetof(ConSanMoiSampledSyncMetadataPacked, byte_count), 4u) ||
+        !record.store_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_before),
+                           *options.moi_epoch_vgpr) ||
+        !record.store_vgpr(offsetof(ConSanMoiSampledSyncMetadataPacked, epoch_after),
+                           *options.moi_epoch_vgpr))
       return false;
     const auto wait = instrumentation::build_s_wait_global_store0(arch);
     const auto final_value = instrumentation::build_v_mov_b32_literal(value, descriptor, arch);
     const auto final_expected = instrumentation::build_v_mov_b32_literal(
         expected, kConSanMoiSampledSyncPublishingDescriptor, arch);
-    const auto final_lo = instrumentation::build_v_mov_b32_literal(
-        base,
-        static_cast<uint32_t>(metadata_address +
-                              offsetof(ConSanMoiSampledSyncMetadataPacked, descriptor)),
-        arch);
-    const auto final_hi = instrumentation::build_v_mov_b32_literal(
-        static_cast<uint16_t>(base + 1u),
-        static_cast<uint32_t>(
-            (metadata_address + offsetof(ConSanMoiSampledSyncMetadataPacked, descriptor)) >> 32u),
-        arch);
     const auto commit = instrumentation::build_flat_atomic_cmpswap_b32(base, value, value, true,
                                                                        kRdna4ScopeDevice, arch);
-    if (!sequence.emit_all(wait, final_value, final_expected, final_lo, final_hi, commit) ||
+    if (!sequence.emit(wait) ||
+        !append_sampled_indexed_address(
+            words,
+            first_metadata_address + offsetof(ConSanMoiSampledSyncMetadataPacked, descriptor),
+            sizeof(ConSanMoiSampledSyncMetadataPacked), bank, base, expected, arch) ||
+        !sequence.emit_all(final_value, final_expected, commit) ||
         !append_moi_global_atomic_wait(words, arch)) {
       return false;
     }

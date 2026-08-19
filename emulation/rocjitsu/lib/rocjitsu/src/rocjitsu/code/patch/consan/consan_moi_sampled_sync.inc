@@ -25,26 +25,6 @@ struct SampledCfgForwardDistanceIndex {
   std::unordered_map<BasicBlock *, uint32_t> block_edges;
 };
 
-[[nodiscard]] bool append_sampled_indexed_address(std::vector<uint32_t> &words,
-                                                  uint64_t first_address, uint32_t element_size,
-                                                  uint16_t index_vgpr, uint16_t address_vgpr,
-                                                  uint16_t temporary_vgpr, rj_code_arch_t arch) {
-  const auto low = instrumentation::build_v_mov_b32_literal(
-      address_vgpr, static_cast<uint32_t>(first_address), arch);
-  const auto high = instrumentation::build_v_mov_b32_literal(
-      static_cast<uint16_t>(address_vgpr + 1u), static_cast<uint32_t>(first_address >> 32u), arch);
-  const auto offset = instrumentation::build_v_mul_lo_u32_literal(temporary_vgpr, temporary_vgpr,
-                                                                  element_size, index_vgpr, arch);
-  const auto add = instrumentation::build_v_add_u64_vgpr_offset(address_vgpr, temporary_vgpr, arch);
-  if (!low || !high || !offset || !add)
-    return false;
-  words.insert(words.end(), low->begin(), low->end());
-  words.insert(words.end(), high->begin(), high->end());
-  words.insert(words.end(), offset->begin(), offset->end());
-  words.insert(words.end(), add->begin(), add->end());
-  return true;
-}
-
 [[nodiscard]] std::optional<SampledCfgForwardDistanceIndex>
 build_sampled_cfg_forward_distance_index(const MoiResourcePlanningState &state,
                                          const MoiKernelResourceContext &context,
@@ -141,9 +121,9 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
                window.bank_count > layout.sampled_sync_metadata_capacity - window.first_slot;
       }))
     return std::nullopt;
-  const auto workgroup_sources =
-      moi_descriptor_workgroup_sources(bytes, *candidate.barrier.kernel_descriptor_file_offset,
-                                       arch, errors, candidate.uses_gfx1250_cluster_workgroup_id);
+  const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
+      bytes, *candidate.barrier.kernel_descriptor_file_offset, options, arch, errors,
+      candidate.uses_gfx1250_cluster_workgroup_id);
   if (!workgroup_sources)
     return std::nullopt;
   if (candidate.barrier.site.file_offset > bytes.size() ||
@@ -1278,6 +1258,10 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         const ConSanBarrierSite &site = planned.candidate.barrier.site;
         ConSanOptions candidate_options = options;
         candidate_options.scratch_vgpr = planned.resources.base;
+        if (planned.private_layout) {
+          candidate_options.moi_record_replay_workgroup_private_offsets =
+              planned.private_layout->record_replay_workgroup_offsets;
+        }
         if (!apply_moi_transient_sgpr_assignment(candidate_options,
                                                  planned.resources.owner_descriptor_file_offsets)) {
           result.errors.emplace_back(
@@ -1435,6 +1419,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         if (planned.private_layout) {
           info.persistent_epoch_private_offset = planned.private_layout->epoch_offset;
           info.persistent_owner_private_offset = planned.private_layout->owner_offset;
+          info.persistent_record_replay_workgroup_private_offsets =
+              planned.private_layout->record_replay_workgroup_offsets;
           info.persistent_private_state_end = planned.private_layout->ephemeral_base;
         }
         info.required_private_segment_size = planned.required_private_bytes;
@@ -1464,6 +1450,10 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     const uint64_t cave_offset = new_text.size();
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = planned.resources.base;
+    if (planned.private_layout) {
+      candidate_options.moi_record_replay_workgroup_private_offsets =
+          planned.private_layout->record_replay_workgroup_offsets;
+    }
     if (!apply_moi_transient_sgpr_assignment(candidate_options,
                                              planned.resources.owner_descriptor_file_offsets)) {
       result.errors.emplace_back(
@@ -1555,6 +1545,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     if (planned.private_layout) {
       info.persistent_epoch_private_offset = planned.private_layout->epoch_offset;
       info.persistent_owner_private_offset = planned.private_layout->owner_offset;
+      info.persistent_record_replay_workgroup_private_offsets =
+          planned.private_layout->record_replay_workgroup_offsets;
       info.persistent_private_state_end = planned.private_layout->ephemeral_base;
     }
     info.required_private_segment_size = planned.required_private_bytes;
@@ -1600,12 +1592,14 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     AtomicRecordCandidate atomic;
     consan_detail::SampledAtomicSemantics semantics;
     uint32_t selected_slot = 0;
+    uint32_t bank_count = 1;
     bool deferred_acquire = false;
+    std::optional<uint32_t> release_selected_slot;
   };
   std::vector<Candidate> candidates;
   const MoiSyncInventoryIndex sync_index(result);
-  const bool allow_ordered_lds_atomic = consan_arch_supports_capability_form(
-      result.arch, ConSanCapabilityForm::OrderedLdsAtomic);
+  const bool allow_ordered_lds_atomic =
+      consan_arch_supports_capability_form(result.arch, ConSanCapabilityForm::OrderedLdsAtomic);
   const auto append = [&](std::string_view name, bool in_kernel, std::optional<uint64_t> descriptor,
                           const std::vector<ConSanAtomicSite> &sites) {
     for (const ConSanAtomicSite &site : sites) {
@@ -1639,7 +1633,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                              descriptor, *event_kind},
                             *semantics,
                             0,
-                            false});
+                            1,
+                            false,
+                            std::nullopt});
     }
   };
   for (const ConSanKernelInfo &kernel : result.kernels) {
@@ -1723,6 +1719,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
 
   struct Window {
     uint32_t slot = 0;
+    uint32_t bank_count = 1;
     const ConSanPatchInfo *patch = nullptr;
     ConSanLdsAccessKind access_kind = ConSanLdsAccessKind::Other;
     const MoiKernelResourceContext *owner = nullptr;
@@ -1746,7 +1743,8 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       // an independent causal view in every kernel that can execute it. Those
       // owners are mutually exclusive dispatches, so each may safely attach
       // one synchronization edge to the same metadata slot.
-      windows.push_back({patch.sampled_first_slot, &patch, patch.sampled_access_kind, &context});
+      windows.push_back({patch.sampled_first_slot, std::max(patch.sampled_window_bank_count, 1u),
+                         &patch, patch.sampled_access_kind, &context});
     }
   }
   if (has_multi_range_window) {
@@ -1756,9 +1754,12 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   }
 
   struct Association {
+    enum class Side : uint8_t { Release, Acquire };
+
     size_t candidate_index = 0;
     size_t window_index = 0;
     SampledCfgDistance distance;
+    Side side = Side::Release;
   };
   std::vector<Association> proposed;
   const auto owner_executes_candidate = [&](const MoiKernelResourceContext &owner,
@@ -1797,18 +1798,20 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
           (candidate.semantics.role == ConSanMoiSampledSyncRole::RmwAcquire ||
            candidate.semantics.role == ConSanMoiSampledSyncRole::RmwAcquireRelease);
       std::optional<SampledCfgDistance> distance;
+      Association::Side side = Association::Side::Release;
       if (release_side) {
         distance =
             sampled_cfg_forward_distance(resource_state, *window.owner, window.patch->anchor_offset,
                                          candidate.atomic.site.text_offset);
       } else if (acquire_side) {
+        side = Association::Side::Acquire;
         distance = sampled_cfg_forward_distance(resource_state, *window.owner,
                                                 candidate.atomic.site.text_offset,
                                                 window.patch->anchor_offset);
       }
       if (!distance)
         continue;
-      Association current{candidate_index, window_index, *distance};
+      Association current{candidate_index, window_index, *distance, side};
       if (!best || current.distance < best->distance) {
         best = current;
         ambiguous = false;
@@ -1828,48 +1831,58 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   // by the same kernel; concurrent/static aliases fail through the existing
   // transactional collision path rather than overwriting metadata.
   for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
-    if (std::ranges::any_of(proposed, [&](const Association &association) {
-          return association.candidate_index == candidate_index;
-        }))
-      continue;
     const Candidate &candidate = candidates[candidate_index];
-    std::optional<Association> best;
-    for (size_t window_index = 0; window_index < windows.size(); ++window_index) {
-      const Window &window = windows[window_index];
-      if (!owner_executes_candidate(*window.owner, candidate))
+    for (const Association::Side missing_side :
+         {Association::Side::Release, Association::Side::Acquire}) {
+      if (std::ranges::any_of(proposed, [&](const Association &association) {
+            return association.candidate_index == candidate_index &&
+                   association.side == missing_side;
+          }))
         continue;
-      const bool release_side =
-          (window.access_kind == ConSanLdsAccessKind::Write ||
-           window.access_kind == ConSanLdsAccessKind::Atomic) &&
-          (candidate.semantics.role == ConSanMoiSampledSyncRole::RmwRelease ||
-           candidate.semantics.role == ConSanMoiSampledSyncRole::RmwAcquireRelease);
-      const bool acquire_side =
-          (window.access_kind == ConSanLdsAccessKind::Read ||
-           window.access_kind == ConSanLdsAccessKind::Atomic) &&
-          (candidate.semantics.role == ConSanMoiSampledSyncRole::RmwAcquire ||
-           candidate.semantics.role == ConSanMoiSampledSyncRole::RmwAcquireRelease);
-      if (!release_side && !acquire_side)
+      const bool role_has_side =
+          missing_side == Association::Side::Release
+              ? candidate.semantics.role == ConSanMoiSampledSyncRole::RmwRelease ||
+                    candidate.semantics.role == ConSanMoiSampledSyncRole::RmwAcquireRelease
+              : candidate.semantics.role == ConSanMoiSampledSyncRole::RmwAcquire ||
+                    candidate.semantics.role == ConSanMoiSampledSyncRole::RmwAcquireRelease;
+      if (!role_has_side)
         continue;
-      const uint64_t text_distance =
-          window.patch->anchor_offset < candidate.atomic.site.text_offset
-              ? candidate.atomic.site.text_offset - window.patch->anchor_offset
-              : window.patch->anchor_offset - candidate.atomic.site.text_offset;
-      Association current{
-          candidate_index, window_index, {std::numeric_limits<uint32_t>::max(), text_distance}};
-      if (!best || current.distance < best->distance)
-        best = current;
+      std::optional<Association> best;
+      for (size_t window_index = 0; window_index < windows.size(); ++window_index) {
+        const Window &window = windows[window_index];
+        if (!owner_executes_candidate(*window.owner, candidate))
+          continue;
+        const bool window_has_side = missing_side == Association::Side::Release
+                                         ? window.access_kind == ConSanLdsAccessKind::Write ||
+                                               window.access_kind == ConSanLdsAccessKind::Atomic
+                                         : window.access_kind == ConSanLdsAccessKind::Read ||
+                                               window.access_kind == ConSanLdsAccessKind::Atomic;
+        if (!window_has_side)
+          continue;
+        const uint64_t text_distance =
+            window.patch->anchor_offset < candidate.atomic.site.text_offset
+                ? candidate.atomic.site.text_offset - window.patch->anchor_offset
+                : window.patch->anchor_offset - candidate.atomic.site.text_offset;
+        Association current{candidate_index,
+                            window_index,
+                            {std::numeric_limits<uint32_t>::max(), text_distance},
+                            missing_side};
+        if (!best || current.distance < best->distance)
+          best = current;
+      }
+      if (best)
+        proposed.push_back(*best);
     }
-    if (best)
-      proposed.push_back(*best);
   }
 
-  // A synchronization edge may order only one selected access window. If two
-  // windows independently choose the same edge, retain a strictly closer
-  // owner/CFG match and fail closed on equal-distance aliases.
+  // Each directional half may order only one selected access window. An
+  // acquire-release RMW may legitimately attach its release half to a
+  // preceding write and its acquire half to a later read.
   std::vector<bool> rejected(proposed.size(), false);
   for (size_t i = 0; i < proposed.size(); ++i) {
     for (size_t j = i + 1u; j < proposed.size(); ++j) {
-      if (proposed[i].candidate_index != proposed[j].candidate_index)
+      if (proposed[i].candidate_index != proposed[j].candidate_index ||
+          proposed[i].side != proposed[j].side)
         continue;
       const Window &lhs = windows[proposed[i].window_index];
       const Window &rhs = windows[proposed[j].window_index];
@@ -1889,20 +1902,39 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     }
   }
   std::vector<Candidate> associated;
-  // Metadata capacity limits distinct selected slots, not static attachment
-  // sites. Multiple sites targeting one slot use the transactional collision
-  // path if they execute in the same sampled window.
-  const size_t static_patch_budget = std::min<size_t>(options.max_patches, proposed.size());
-  associated.reserve(std::min(static_patch_budget, proposed.size()));
-  for (size_t i = 0; i < proposed.size() && associated.size() < static_patch_budget; ++i) {
-    if (rejected[i])
+  // One physical atomic patch can carry both directional associations.
+  const size_t static_patch_budget = std::min<size_t>(options.max_patches, candidates.size());
+  associated.reserve(static_patch_budget);
+  for (size_t candidate_index = 0;
+       candidate_index < candidates.size() && associated.size() < static_patch_budget;
+       ++candidate_index) {
+    std::optional<size_t> release_association;
+    std::optional<size_t> acquire_association;
+    for (size_t i = 0; i < proposed.size(); ++i) {
+      if (rejected[i] || proposed[i].candidate_index != candidate_index)
+        continue;
+      if (proposed[i].side == Association::Side::Release)
+        release_association = i;
+      else
+        acquire_association = i;
+    }
+    const std::optional<size_t> primary =
+        acquire_association ? acquire_association : release_association;
+    if (!primary)
       continue;
-    Candidate candidate = candidates[proposed[i].candidate_index];
-    candidate.selected_slot = windows[proposed[i].window_index].slot;
-    candidate.deferred_acquire =
-        windows[proposed[i].window_index].access_kind == ConSanLdsAccessKind::Read ||
-        (windows[proposed[i].window_index].access_kind == ConSanLdsAccessKind::Atomic &&
-         candidate.semantics.role == ConSanMoiSampledSyncRole::RmwAcquire);
+    Candidate candidate = candidates[candidate_index];
+    const Window &primary_window = windows[proposed[*primary].window_index];
+    candidate.selected_slot = primary_window.slot;
+    candidate.bank_count = primary_window.bank_count;
+    candidate.deferred_acquire = acquire_association.has_value();
+    if (candidate.deferred_acquire && release_association) {
+      const Window &release_window = windows[proposed[*release_association].window_index];
+      if (release_window.bank_count == candidate.bank_count)
+        candidate.release_selected_slot = release_window.slot;
+      else
+        result.warnings.emplace_back(
+            "ConSan MOI sampled acquire-release edge has incompatible access-window banks");
+    }
     associated.push_back(std::move(candidate));
   }
   std::ranges::sort(associated, {}, &Candidate::selected_slot);
@@ -2066,6 +2098,13 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     const uint64_t cave_offset = placement_planner.appended_end();
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = planned.resources.base;
+    if (planned.private_layout) {
+      // Sampled probes run after arbitrary guest code.  Use the tuple captured
+      // by the automatic private-state prologue instead of descriptor SGPRs
+      // whose ABI lifetime ended at kernel entry.
+      candidate_options.moi_record_replay_workgroup_private_offsets =
+          planned.private_layout->record_replay_workgroup_offsets;
+    }
     if (!apply_moi_transient_sgpr_assignment(candidate_options,
                                              planned.resources.owner_descriptor_file_offsets)) {
       result.errors.emplace_back(
@@ -2090,14 +2129,16 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                   bytes, planned.candidate.atomic, planned.address_plan, candidate_options,
                   planned.spill ? &*planned.spill : nullptr,
                   planned.private_layout ? &*planned.private_layout : nullptr, arch,
-                  planned.candidate.selected_slot, layout, cave_offset,
+                  planned.candidate.selected_slot, planned.candidate.bank_count,
+                  planned.candidate.release_selected_slot, layout, cave_offset,
                   physical_anchor_offset + site.size, result.errors, &guest_instruction_offset)
             : build_sampled_atomic_sync_cave_words(
                   bytes, planned.candidate.atomic, planned.address_plan, candidate_options,
                   planned.spill ? &*planned.spill : nullptr,
                   planned.private_layout ? &*planned.private_layout : nullptr, arch,
-                  planned.candidate.selected_slot, layout, cave_offset,
-                  physical_anchor_offset + site.size, result.errors, &guest_instruction_offset);
+                  planned.candidate.selected_slot, planned.candidate.bank_count, layout,
+                  cave_offset, physical_anchor_offset + site.size, result.errors,
+                  &guest_instruction_offset);
     if (!cave_words) {
       result.warnings.emplace_back(
           "ConSan MOI sampled atomic sync could not lower associated " +
@@ -2160,11 +2201,15 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
     info.relocated_guest_instruction_offset = cave_offset + guest_instruction_offset;
     info.sampled_access_kind = ConSanLdsAccessKind::Atomic;
+    info.sampled_first_slot = planned.candidate.selected_slot;
+    info.sampled_window_bank_count = planned.candidate.bank_count;
     info.scratch_vgpr = planned.resources.base;
     info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
     if (planned.private_layout) {
       info.persistent_epoch_private_offset = planned.private_layout->epoch_offset;
       info.persistent_owner_private_offset = planned.private_layout->owner_offset;
+      info.persistent_record_replay_workgroup_private_offsets =
+          planned.private_layout->record_replay_workgroup_offsets;
       info.persistent_private_state_end = planned.private_layout->ephemeral_base;
     }
     info.required_private_segment_size = planned.required_private_bytes;
@@ -2243,18 +2288,16 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   std::vector<uint32_t> words;
   const uint64_t displaced_tail_bytes =
       static_cast<uint64_t>(displaced_tail_words.size()) * sizeof(uint32_t);
-  if (displaced_tail_bytes >
-          std::numeric_limits<uint32_t>::max() - candidate.fence.size ||
+  if (displaced_tail_bytes > std::numeric_limits<uint32_t>::max() - candidate.fence.size ||
       candidate.fence.file_offset > bytes.size() ||
-      candidate.fence.size + displaced_tail_bytes >
-          bytes.size() - candidate.fence.file_offset) {
+      candidate.fence.size + displaced_tail_bytes > bytes.size() - candidate.fence.file_offset) {
     errors.emplace_back("ConSan MOI fence record runtime guest exceeds ELF bytes");
     return std::nullopt;
   }
   const bool runtime_workgroup_gate =
-      options.moi_runtime_sample_stride > 1u &&
-      !options.automatic_moi_record_replay_sgpr_spill && workgroup_sources.x.scalar_src &&
-      workgroup_sources.y.scalar_src && workgroup_sources.z.scalar_src;
+      options.moi_runtime_sample_stride > 1u && !options.automatic_moi_record_replay_sgpr_spill &&
+      workgroup_sources.x.scalar_src && workgroup_sources.y.scalar_src &&
+      workgroup_sources.z.scalar_src;
   if (runtime_workgroup_gate) {
     ConSanMoiCandidate fence_guest;
     fence_guest.file_offset = candidate.fence.file_offset;

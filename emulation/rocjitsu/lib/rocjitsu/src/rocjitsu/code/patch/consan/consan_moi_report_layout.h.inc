@@ -190,14 +190,15 @@ struct ConSanMoiAutoReportInventory {
   uint64_t record_replay_access_dispatch_bank_count =
       kConSanMoiRecordReplayMaximumDispatchBankCount;
   uint64_t record_replay_access_owner_bank_count = kConSanMoiRecordReplayMaximumOwnerBankCount;
-  uint64_t record_replay_address_group_headroom =
-      kConSanMoiRecordReplayMaximumAddressGroupsPerWave;
+  uint64_t record_replay_address_group_headroom = kConSanMoiRecordReplayMaximumAddressGroupsPerWave;
   bool record_replay_bank_count_adaptive = false;
 
-  /// Total immutable banks across admitted Sampled logical ranges. One causal
-  /// window, synchronization-metadata slot, and pending-acquire slot are
-  /// reserved per bank. Multi-cell ranges can require more watchpoints.
+  /// Total immutable banks across admitted Sampled logical ranges. Atomic
+  /// synchronization lowering can reserve additional tail slots in the
+  /// causal, synchronization-metadata, and pending-acquire arrays. Multi-cell
+  /// ranges can independently require more watchpoints.
   uint64_t sampled_range_bank_count = 0;
+  uint64_t sampled_sync_slot_count = 0;
   uint64_t sampled_watchpoint_count = 0;
   /// Automatic runtime sampling may reduce the number of independent banks,
   /// while retaining at least one bank for every logical access range, to fit
@@ -207,8 +208,9 @@ struct ConSanMoiAutoReportInventory {
   /// Maximum LDS span covered by an admitted Inline site. Native sites use the
   /// owning kernel's declared segment; generic-flat sites require the full
   /// architectural aperture because their runtime offset is not statically
-  /// bounded by that declaration. The planner rounds this span to four-byte
-  /// guest cells.
+  /// bounded by that declaration. The planner reserves one external exact
+  /// shadow slot per byte so mixed-width objects can use byte-granular
+  /// provenance without a second report layout.
   uint64_t inline_lds_bytes = 0;
   uint64_t inline_atomic_release_count = 0;
   uint64_t inline_causal_snapshot_count = 0;
@@ -221,7 +223,7 @@ using ConSanMoiAutoReportCapacityMember = uint64_t ConSanMoiAutoReportInventory:
 /// Canonical projection of every numeric report-capacity dimension. Keep
 /// capacity comparisons expressed through this list so a dimension cannot
 /// acquire a separate, silently incomplete comparison path.
-inline constexpr std::array<ConSanMoiAutoReportCapacityMember, 16>
+inline constexpr std::array<ConSanMoiAutoReportCapacityMember, 17>
     kConSanMoiAutoReportCapacityMembers = {
         &ConSanMoiAutoReportInventory::access_range_count,
         &ConSanMoiAutoReportInventory::barrier_event_count,
@@ -233,6 +235,7 @@ inline constexpr std::array<ConSanMoiAutoReportCapacityMember, 16>
         &ConSanMoiAutoReportInventory::record_replay_access_owner_bank_count,
         &ConSanMoiAutoReportInventory::record_replay_address_group_headroom,
         &ConSanMoiAutoReportInventory::sampled_range_bank_count,
+        &ConSanMoiAutoReportInventory::sampled_sync_slot_count,
         &ConSanMoiAutoReportInventory::sampled_watchpoint_count,
         &ConSanMoiAutoReportInventory::inline_lds_bytes,
         &ConSanMoiAutoReportInventory::inline_atomic_release_count,

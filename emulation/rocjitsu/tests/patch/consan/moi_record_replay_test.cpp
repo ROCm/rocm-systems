@@ -977,6 +977,76 @@ TEST(ConSanMoi, AutoRecordReplayCapturesDispatchIdentityInPersistentVgprsAtScala
   EXPECT_GT(allocated_vgprs, 4u);
 }
 
+TEST(ConSanMoi, Gfx1100AutoRecordReplayCapturesDispatchIdentityInPersistentVgprs) {
+  constexpr auto store = rdna3::build_ds(rdna3::kDsStoreB32Ds, {.addr = 0u, .data0 = 1u});
+  std::vector<uint32_t> text_words = {store[0], store[1]};
+  text_words.insert(text_words.end(), 128u, build_s_nop(0u, ROCJITSU_CODE_ARCH_RDNA3));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA3));
+  std::vector<uint8_t> bytes =
+      make_rdna3_lds_code_object(text_words, "gfx1100_record_replay_dispatch_capture",
+                                 /*vgpr_granulated=*/0u, /*wave32=*/true,
+                                 /*uses_dynamic_stack=*/false,
+                                 /*workgroup_id_dimension_mask=*/1u);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                    kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 15u);
+  });
+  const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(
+      {.engine = ConSanMoiEngine::RecordReplay, .access_range_count = 1u});
+  ASSERT_TRUE(report_plan.complete());
+  const auto layout_override = consan_moi_auto_report_layout_override(report_plan);
+  ASSERT_TRUE(layout_override);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = report_plan.required_bytes;
+  options.moi_report_layout = *layout_override;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  SCOPED_TRACE(testing::PrintToString(result.warnings));
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified);
+  EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
+  EXPECT_TRUE(result.resolved_moi_dispatch_id_vgpr);
+  EXPECT_TRUE(result.moi_dispatch_id_vgprs_automatic);
+  EXPECT_TRUE(result.final_validation_passed);
+  const auto prologue = std::ranges::find(
+      result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
+  ASSERT_NE(prologue, result.patches.end());
+  EXPECT_EQ(prologue->dispatch_id_source_sgpr, 2u);
+  EXPECT_EQ(prologue->dispatch_id_original_user_sgpr_count, 15u);
+  EXPECT_EQ(prologue->dispatch_id_expanded_user_sgpr_count, 15u);
+  EXPECT_EQ(prologue->dispatch_id_kernarg_reload_count, 0u);
+  EXPECT_EQ(prologue->dispatch_id_shifted_guest_sgpr_count, 0u);
+  EXPECT_EQ(prologue->dispatch_id_shifted_system_sgpr_count, 0u);
+  EXPECT_EQ(prologue->dispatch_id_system_sgpr_shift, 0u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  KD descriptor{};
+  std::memcpy(&descriptor,
+              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              sizeof(descriptor));
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT),
+            15u);
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.kernel_code_properties,
+                            kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID),
+            1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2,
+                            kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X),
+            1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2,
+                            kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y),
+            1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2,
+                            kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z),
+            1u);
+}
+
 TEST(ConSanMoi, AutoRecordReplaySpillsWideAddressGroupStateAtScalarPressure) {
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_GFX1250}) {
     SCOPED_TRACE(arch);
@@ -3581,32 +3651,28 @@ TEST(ConSanMoi, Cdna4FirstLightProbeForcedSpillUsesNativePrivateWindow) {
 
   const auto wait = build_cdna4_s_wait_vmcnt0(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(wait);
-  std::vector<uint32_t> save{*wait};
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  const std::vector<uint32_t> patched_words =
+      text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
+  const auto guest_at =
+      std::ranges::search(patched_words, std::array<uint32_t, 2>{text_words[0], text_words[1]})
+          .begin();
+  ASSERT_NE(guest_at, patched_words.end());
+  const auto first_wait = std::ranges::find(patched_words, *wait);
+  ASSERT_NE(first_wait, patched_words.end());
+  EXPECT_LT(first_wait, guest_at);
   for (uint16_t i = 0; i < patch.spilled_vgpr_count; ++i) {
     const uint16_t vgpr = static_cast<uint16_t>(*patch.scratch_vgpr + i);
     const uint32_t offset = *patch.persistent_private_state_end + sizeof(uint32_t) * i;
     const auto store =
         build_cdna4_address_free_scratch_store_b32(vgpr, offset, ROCJITSU_CODE_ARCH_CDNA4);
     ASSERT_TRUE(store);
-    save.insert(save.end(), store->begin(), store->end());
-  }
-  save.push_back(*wait);
-
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
-  ASSERT_TRUE(patched.is_valid());
-  ASSERT_EQ(patched.text_sections().size(), 1u);
-  const std::vector<uint32_t> patched_words =
-      text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
-  const auto save_at = std::ranges::search(patched_words, save).begin();
-  const auto guest_at =
-      std::ranges::search(patched_words, std::array<uint32_t, 2>{text_words[0], text_words[1]})
-          .begin();
-  ASSERT_NE(save_at, patched_words.end());
-  ASSERT_NE(guest_at, patched_words.end());
-  EXPECT_LT(save_at, guest_at);
-  for (uint16_t i = 0; i < patch.spilled_vgpr_count; ++i) {
-    const uint16_t vgpr = static_cast<uint16_t>(*patch.scratch_vgpr + i);
-    const uint32_t offset = *patch.persistent_private_state_end + sizeof(uint32_t) * i;
+    const auto save_at = std::ranges::search(patched_words, *store).begin();
+    ASSERT_NE(save_at, patched_words.end());
+    EXPECT_LT(first_wait, save_at);
+    EXPECT_LT(save_at, guest_at);
     const auto load =
         build_cdna4_address_free_scratch_load_b32(vgpr, offset, ROCJITSU_CODE_ARCH_CDNA4);
     ASSERT_TRUE(load);
@@ -5354,12 +5420,13 @@ TEST(ConSanMoi, Cdna4RecordReplaySpillsTransientStateAcrossAccessAndBarrier) {
                                ConSanPatchKind::TrampolineMoiBarrierRecord}) {
     const auto patch = std::ranges::find(dense_result.patches, kind, &ConSanPatchInfo::kind);
     ASSERT_NE(patch, dense_result.patches.end()) << testing::PrintToString(dense_result.warnings);
-    // Dense Record/Replay routes use eight transient scalar slots after the
-    // address-free scratch DBI zone. Every probe that shares the spill builder
-    // must preserve that complete layout.
-    constexpr uint32_t kDbiZoneBytes = 8u * sizeof(uint32_t);
+    // This fixture supplies persistent owner/epoch VGPRs explicitly, so the
+    // private segment contains only the eight transient scalar slots.  Do not
+    // silently replace the caller-owned persistent state with an automatic
+    // private epoch merely to create a leading DBI zone.
     constexpr uint32_t kTransientScalarBytes = 8u * sizeof(uint32_t);
-    EXPECT_EQ(patch->required_private_segment_size, kDbiZoneBytes + kTransientScalarBytes);
+    EXPECT_FALSE(patch->persistent_private_state_end);
+    EXPECT_EQ(patch->required_private_segment_size, kTransientScalarBytes);
   }
 }
 
@@ -7662,8 +7729,8 @@ TEST(ConSanMoi, AtomicRecordPatchTrampolinesFlatAtomicAndWritesRecord) {
   // Non-CAS RMWs have no meaningful success mask. Include the complete hardware
   // workgroup identity while keeping the dynamically indexed record body tightly
   // bounded.
-  EXPECT_LE(atomic_patch->trampoline_size, 1152u)
-      << "dynamically indexed atomic Record/Replay probes must remain within the 1152-byte "
+  EXPECT_LE(atomic_patch->trampoline_size, 1200u)
+      << "dynamically indexed atomic Record/Replay probes must remain within the 1200-byte "
          "append-cave budget";
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());

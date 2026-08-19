@@ -1446,15 +1446,15 @@ void build_barrier_move_destination_inventory(
   return expected_offset == after.begin_text_offset;
 }
 
-[[nodiscard]] bool is_rdna3_acquire_cache_pair(
-    const ConSanSyncSequence &first, const ConSanSyncSequence &second,
-    const SyncEventIdentityIndex &events,
-    const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
+[[nodiscard]] bool
+is_rdna3_acquire_cache_pair(const ConSanSyncSequence &first, const ConSanSyncSequence &second,
+                            const SyncEventIdentityIndex &events,
+                            const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
   const ConSanSyncEvent *first_event = first_sequence_event(events, first);
   const ConSanSyncEvent *second_event = first_sequence_event(events, second);
   return first_event != nullptr && second_event != nullptr &&
-         first_event->mnemonic == "buffer_gl1_inv" &&
-         second_event->mnemonic == "buffer_gl0_inv" && has_only_waits_between(first, second, blocks);
+         first_event->mnemonic == "buffer_gl1_inv" && second_event->mnemonic == "buffer_gl0_inv" &&
+         has_only_waits_between(first, second, blocks);
 }
 
 enum class BoundedAcquirePathKind { SameBlock, ExactFallthroughJoin, ExactSelfLoopExit };
@@ -1638,8 +1638,9 @@ atomic_release_wait_boundary(const ConSanSyncSequence &atomic,
   }
   const auto expected_combined = build_s_wait_storecnt_dscnt0(arch);
   const auto expected_store = build_s_wait_storecnt0(arch);
+  const auto expected_rdna3_store = build_rdna3_s_wait_vscnt0(arch);
   BasicBlock *block = blocks[*atomic.basic_block_index].get();
-  if (!expected_combined || !expected_store || block == nullptr)
+  if ((!expected_combined && !expected_store && !expected_rdna3_store) || block == nullptr)
     return std::nullopt;
   std::vector<const Instruction *> preceding;
   for (const Instruction &instruction : block->instructions()) {
@@ -1655,8 +1656,9 @@ atomic_release_wait_boundary(const ConSanSyncSequence &atomic,
       break;
     suffix_begin = (*instruction)->src_loc();
     if (size == static_cast<int>(sizeof(uint32_t)) && (*instruction)->raw_encoding() != nullptr &&
-        ((*instruction)->raw_encoding()[0] == *expected_combined ||
-         (*instruction)->raw_encoding()[0] == *expected_store))
+        ((expected_combined && (*instruction)->raw_encoding()[0] == *expected_combined) ||
+         (expected_store && (*instruction)->raw_encoding()[0] == *expected_store) ||
+         (expected_rdna3_store && (*instruction)->raw_encoding()[0] == *expected_rdna3_store)))
       return (*instruction)->src_loc();
   }
   return std::nullopt;
@@ -1683,8 +1685,7 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
               is_acquire_cache_event(first_sequence_event(events, candidate)) &&
               prove_bounded_acquire_path(atomic, candidate, blocks)) {
             acquire = &candidate;
-          } else if (arch == ROCJITSU_CODE_ARCH_RDNA3 &&
-                     i + 3 < result.sync_sequences.size() &&
+          } else if (arch == ROCJITSU_CODE_ARCH_RDNA3 && i + 3 < result.sync_sequences.size() &&
                      candidate.kind == ConSanSyncSequenceKind::Fence &&
                      result.sync_sequences[i + 3].kind == ConSanSyncSequenceKind::Fence &&
                      prove_bounded_acquire_path(atomic, candidate, blocks) &&
@@ -1715,7 +1716,7 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
           prove_bounded_acquire_path(current, acquire, blocks) &&
           is_rdna3_acquire_cache_pair(acquire, result.sync_sequences[i + 2], events, blocks)) {
         associated.push_back(associate_atomic_cache_sequence(nullptr, current, &acquire,
-                                                              &result.sync_sequences[i + 2]));
+                                                             &result.sync_sequences[i + 2]));
         i += 3;
         continue;
       }

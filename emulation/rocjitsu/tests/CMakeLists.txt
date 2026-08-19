@@ -2570,6 +2570,7 @@ if(RJ_ENABLE_HIP_TESTS)
             set(HIP_TEST_SRC ${CMAKE_CURRENT_SOURCE_DIR}/${TEST_NAME}.cpp)
         endif()
         set(HIP_TEST_BIN ${CMAKE_CURRENT_BINARY_DIR}/${TEST_NAME})
+        set(HIP_TEST_OBJ ${CMAKE_CURRENT_BINARY_DIR}/${TEST_NAME}.o)
         set(HIP_INCLUDE_FLAGS)
         foreach(_rj_include_dir IN LISTS ARG_INCLUDE_DIRS)
             list(APPEND HIP_INCLUDE_FLAGS -I${_rj_include_dir})
@@ -2582,23 +2583,42 @@ if(RJ_ENABLE_HIP_TESTS)
         if(ARG_EXTRA_LIBS)
             set(HIP_EXTRA_LIBS -x none ${ARG_EXTRA_LIBS})
         endif()
+        set(_rj_hip_compiler_command ${AMDCXX})
+        if(CMAKE_HIP_COMPILER_LAUNCHER)
+            list(
+                PREPEND
+                _rj_hip_compiler_command
+                ${CMAKE_HIP_COMPILER_LAUNCHER}
+            )
+        endif()
         add_custom_command(
-            OUTPUT ${HIP_TEST_BIN}
+            OUTPUT ${HIP_TEST_OBJ}
             COMMAND
-                ${AMDCXX} -x hip --offload-arch=${ARG_ARCH}
+                ${_rj_hip_compiler_command} -x hip
+                --offload-arch=${ARG_ARCH}
                 --rocm-path=${ROCM_PATH} -std=c++20 -O2
                 ${RJ_HIP_SANITIZER_FLAGS} -isystem ${GTEST_INC}
                 -I${CMAKE_CURRENT_SOURCE_DIR} ${HIP_INCLUDE_FLAGS}
-                ${HIP_DEFINITION_FLAGS} -o ${HIP_TEST_BIN} ${HIP_TEST_SRC}
-                ${HIP_EXTRA_LIBS} -L${GTEST_LIB_DIR} -lgtest -lpthread
+                ${HIP_DEFINITION_FLAGS} -c -o ${HIP_TEST_OBJ} ${HIP_TEST_SRC}
+            DEPENDS ${HIP_TEST_SRC} ${ARG_EXTRA_DEPENDS}
+            COMMENT
+                "Compiling ${TEST_NAME} with amdclang++ -x hip (${ARG_ARCH})"
+            VERBATIM
+        )
+        add_custom_command(
+            OUTPUT ${HIP_TEST_BIN}
+            COMMAND
+                ${AMDCXX} --offload-arch=${ARG_ARCH}
+                --rocm-path=${ROCM_PATH} -o ${HIP_TEST_BIN} ${HIP_TEST_OBJ}
+                ${HIP_EXTRA_LIBS} -L${GTEST_LIB_DIR} -lgtest
+                -L${RJ_HSA_LIBRARY_DIR} -lamdhip64 -lpthread
                 -Wl,-rpath,${GTEST_LIB_DIR} -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
                 ${RJ_HIP_SANITIZER_LINK_FLAGS}
             DEPENDS
-                ${HIP_TEST_SRC}
-                ${ARG_EXTRA_DEPENDS}
+                ${HIP_TEST_OBJ}
                 GTest::gtest
                 GTest::gtest_main
-            COMMENT "Building ${TEST_NAME} with amdclang++ -x hip (${ARG_ARCH})"
+            COMMENT "Linking ${TEST_NAME} (${ARG_ARCH})"
             VERBATIM
         )
         add_custom_target(${TEST_NAME}_target ALL DEPENDS ${HIP_TEST_BIN})
