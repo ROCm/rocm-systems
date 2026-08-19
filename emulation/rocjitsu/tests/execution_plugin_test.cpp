@@ -53,9 +53,12 @@ RJ_DIAGNOSTIC_POP
 
 #include "halt_snapshot_plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
+#include "rocjitsu/vm/plugins/plugin_config_resolver.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
+#include "rocjitsu/vm/plugins/throughput/plugin.h"
 
+#include <flatbuffers/flexbuffers.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -73,6 +76,7 @@ RJ_DIAGNOSTIC_POP
 #include <map>
 #include <memory>
 #include <set>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -884,6 +888,282 @@ TEST(ExecutionPluginTest, NoPluginNoCrash) {
   PluginFixture f;
   const uint32_t code[] = {S_NOP, S_ENDPGM};
   f.run_kernel(code, 2);
+}
+
+class ThroughputTestInstruction final : public Instruction {
+public:
+  explicit ThroughputTestInstruction(std::string_view mnemonic, uint64_t flags = 0,
+                                     std::unique_ptr<DynamicInstState> state = nullptr)
+      : Instruction(mnemonic, nullptr) {
+    flags_ = flags;
+    set_data(std::move(state));
+  }
+};
+
+struct ParsedThroughputRecord {
+  std::string record;
+  uint64_t dispatch_id = 0;
+  std::string kernel_name;
+  std::string kernel_symbol;
+  uint64_t workgroups = 0;
+  uint64_t waves_per_workgroup = 0;
+  double wall_seconds = 0.0;
+  uint64_t wave_instructions = 0;
+  double mips = 0.0;
+  uint64_t dispatches = 0;
+  double dispatch_seconds_sum = 0.0;
+  plugins::throughput::InstructionCounts family_instructions{};
+  std::array<double, plugins::throughput::kInstructionFamilyCount> execution_seconds{};
+  std::array<double, plugins::throughput::kInstructionFamilyCount> execution_mips{};
+  std::array<double, plugins::throughput::kInstructionFamilyCount> dispatch_mips{};
+};
+
+std::vector<ParsedThroughputRecord> parse_throughput_jsonl(std::string_view jsonl) {
+  std::vector<ParsedThroughputRecord> records;
+  std::istringstream lines{std::string(jsonl)};
+  std::string line;
+  while (std::getline(lines, line)) {
+    if (line.empty())
+      continue;
+
+    flexbuffers::Builder builder;
+    if (!plugin_detail::flexbuffer_from_json(line, builder)) {
+      ADD_FAILURE() << "invalid JSONL record: " << line;
+      continue;
+    }
+    auto root = flexbuffers::GetRoot(builder.GetBuffer());
+    if (!root.IsMap()) {
+      ADD_FAILURE() << "throughput record is not a JSON object";
+      continue;
+    }
+    auto object = root.AsMap();
+    const auto schema = object["schema"];
+    const auto record_type = object["record"];
+    EXPECT_TRUE(schema.IsString()) << "schema must be a string";
+    EXPECT_TRUE(record_type.IsString()) << "record must be a string";
+    if (!schema.IsString() || !record_type.IsString())
+      continue;
+    EXPECT_EQ(schema.AsString().str(), "rocjitsu.throughput.v2");
+
+    ParsedThroughputRecord record;
+    record.record = record_type.AsString().str();
+
+    const auto wall_seconds = object["wall_seconds"];
+    const auto wave_instructions = object["wave_instructions"];
+    const auto throughput_mips = object["mips"];
+    const auto families_value = object["families"];
+    EXPECT_TRUE(wall_seconds.IsNumeric()) << "wall_seconds must be numeric";
+    EXPECT_TRUE(wave_instructions.IsIntOrUint()) << "wave_instructions must be an integer";
+    EXPECT_TRUE(throughput_mips.IsNumeric()) << "mips must be numeric";
+    EXPECT_TRUE(families_value.IsMap()) << "families must be an object";
+    if (!wall_seconds.IsNumeric() || !wave_instructions.IsIntOrUint() ||
+        !throughput_mips.IsNumeric() || !families_value.IsMap())
+      continue;
+    record.wall_seconds = wall_seconds.AsDouble();
+    record.wave_instructions = wave_instructions.AsUInt64();
+    record.mips = throughput_mips.AsDouble();
+
+    if (record.record == "dispatch") {
+      const auto dispatch_id = object["dispatch_id"];
+      const auto kernel_name = object["kernel_name"];
+      const auto kernel_symbol = object["kernel_symbol"];
+      const auto grid = object["grid"];
+      const auto workgroup = object["workgroup"];
+      const auto workgroups = object["workgroups"];
+      const auto waves_per_workgroup = object["waves_per_workgroup"];
+      EXPECT_TRUE(dispatch_id.IsIntOrUint()) << "dispatch_id must be an integer";
+      EXPECT_TRUE(kernel_name.IsString()) << "kernel_name must be a string";
+      EXPECT_TRUE(kernel_symbol.IsString()) << "kernel_symbol must be a string";
+      EXPECT_TRUE(grid.IsAnyVector()) << "grid must be an array";
+      EXPECT_TRUE(workgroup.IsAnyVector()) << "workgroup must be an array";
+      EXPECT_TRUE(workgroups.IsIntOrUint()) << "workgroups must be an integer";
+      EXPECT_TRUE(waves_per_workgroup.IsIntOrUint()) << "waves_per_workgroup must be an integer";
+      if (grid.IsAnyVector()) {
+        const auto values = grid.AsVector();
+        EXPECT_EQ(values.size(), 3u);
+        for (size_t i = 0; i < values.size(); ++i)
+          EXPECT_TRUE(values[i].IsIntOrUint()) << "grid[" << i << "] must be an integer";
+      }
+      if (workgroup.IsAnyVector()) {
+        const auto values = workgroup.AsVector();
+        EXPECT_EQ(values.size(), 3u);
+        for (size_t i = 0; i < values.size(); ++i)
+          EXPECT_TRUE(values[i].IsIntOrUint()) << "workgroup[" << i << "] must be an integer";
+      }
+      if (dispatch_id.IsIntOrUint())
+        record.dispatch_id = dispatch_id.AsUInt64();
+      if (kernel_name.IsString())
+        record.kernel_name = kernel_name.AsString().str();
+      if (kernel_symbol.IsString())
+        record.kernel_symbol = kernel_symbol.AsString().str();
+      if (workgroups.IsIntOrUint())
+        record.workgroups = workgroups.AsUInt64();
+      if (waves_per_workgroup.IsIntOrUint())
+        record.waves_per_workgroup = waves_per_workgroup.AsUInt64();
+    } else if (record.record == "summary") {
+      const auto dispatches = object["dispatches"];
+      const auto dispatch_seconds_sum = object["dispatch_seconds_sum"];
+      EXPECT_TRUE(dispatches.IsIntOrUint()) << "dispatches must be an integer";
+      EXPECT_TRUE(dispatch_seconds_sum.IsNumeric()) << "dispatch_seconds_sum must be numeric";
+      if (dispatches.IsIntOrUint())
+        record.dispatches = dispatches.AsUInt64();
+      if (dispatch_seconds_sum.IsNumeric())
+        record.dispatch_seconds_sum = dispatch_seconds_sum.AsDouble();
+    } else {
+      ADD_FAILURE() << "unknown throughput record type: " << record.record;
+    }
+
+    auto families = families_value.AsMap();
+    for (size_t i = 0; i < plugins::throughput::kInstructionFamilyCount; ++i) {
+      const auto family = static_cast<plugins::throughput::InstructionFamily>(i);
+      const auto family_name = plugins::throughput::ThroughputPlugin::family_name(family);
+      const auto family_value = families[family_name.data()];
+      EXPECT_TRUE(family_value.IsMap()) << "families." << family_name << " must be an object";
+      if (!family_value.IsMap())
+        continue;
+      const auto values = family_value.AsMap();
+      const auto instructions = values["instructions"];
+      const auto execution_seconds = values["execution_seconds"];
+      const auto execution_mips = values["execution_mips"];
+      const auto dispatch_mips = values["dispatch_mips"];
+      EXPECT_TRUE(instructions.IsIntOrUint())
+          << "families." << family_name << ".instructions must be an integer";
+      EXPECT_TRUE(execution_seconds.IsNumeric())
+          << "families." << family_name << ".execution_seconds must be numeric";
+      EXPECT_TRUE(execution_mips.IsNumeric())
+          << "families." << family_name << ".execution_mips must be numeric";
+      EXPECT_TRUE(dispatch_mips.IsNumeric())
+          << "families." << family_name << ".dispatch_mips must be numeric";
+      if (instructions.IsIntOrUint())
+        record.family_instructions[i] = instructions.AsUInt64();
+      if (execution_seconds.IsNumeric())
+        record.execution_seconds[i] = execution_seconds.AsDouble();
+      if (execution_mips.IsNumeric())
+        record.execution_mips[i] = execution_mips.AsDouble();
+      if (dispatch_mips.IsNumeric())
+        record.dispatch_mips[i] = dispatch_mips.AsDouble();
+    }
+    records.push_back(std::move(record));
+  }
+  return records;
+}
+
+uint64_t family_total(const ParsedThroughputRecord &record) {
+  uint64_t total = 0;
+  for (const uint64_t count : record.family_instructions)
+    total += count;
+  return total;
+}
+
+TEST(ThroughputPluginTest, ClassifiesExclusiveInstructionFamilies) {
+  using plugins::throughput::InstructionFamily;
+  using plugins::throughput::ThroughputPlugin;
+
+  EXPECT_EQ(ThroughputPlugin::classify(ThroughputTestInstruction("s_add_u32")),
+            InstructionFamily::Scalar);
+  EXPECT_EQ(ThroughputPlugin::classify(ThroughputTestInstruction("v_add_f32")),
+            InstructionFamily::Vector);
+  EXPECT_EQ(ThroughputPlugin::classify(ThroughputTestInstruction("v_wmma_f32_16x16x16_f16")),
+            InstructionFamily::Matrix);
+  EXPECT_EQ(ThroughputPlugin::classify(ThroughputTestInstruction("v_swmmac_f32_16x16x32_f8")),
+            InstructionFamily::Matrix);
+  EXPECT_EQ(ThroughputPlugin::classify(ThroughputTestInstruction(
+                "ds_read_b32", MEMORY_OP, std::make_unique<VectorMemState>(LOCAL_MEM))),
+            InstructionFamily::Lds);
+  EXPECT_EQ(ThroughputPlugin::classify(ThroughputTestInstruction("ds_read_b32", MEMORY_OP)),
+            InstructionFamily::Lds);
+  EXPECT_EQ(ThroughputPlugin::classify(ThroughputTestInstruction(
+                "s_load_b32", MEMORY_OP, std::make_unique<ScalarMemState>())),
+            InstructionFamily::Global);
+  EXPECT_EQ(ThroughputPlugin::classify(ThroughputTestInstruction("global_load_b32", MEMORY_OP)),
+            InstructionFamily::Global);
+  EXPECT_EQ(
+      ThroughputPlugin::classify(ThroughputTestInstruction("s_branch", BRANCH | IGNORES_EXEC)),
+      InstructionFamily::Control);
+  EXPECT_EQ(ThroughputPlugin::classify(ThroughputTestInstruction("s_endpgm", PROGRAM_TERMINATOR)),
+            InstructionFamily::Control);
+  EXPECT_EQ(ThroughputPlugin::classify(ThroughputTestInstruction("s_nop")),
+            InstructionFamily::Control);
+  EXPECT_EQ(ThroughputPlugin::classify(ThroughputTestInstruction("s_sleep")),
+            InstructionFamily::Control);
+  EXPECT_EQ(ThroughputPlugin::classify(ThroughputTestInstruction("s_delay_alu")),
+            InstructionFamily::Control);
+  EXPECT_EQ(ThroughputPlugin::classify(ThroughputTestInstruction("exp")), InstructionFamily::Other);
+}
+
+TEST(ThroughputPluginTest, ReportsExactWaveInstructionCountsAsJsonl) {
+  using plugins::throughput::InstructionFamily;
+
+  PluginFixture f(/*num_wf_slots=*/1);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<plugins::throughput::ThroughputPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  const uint32_t code[] = {vop1_encode(/*v_mov_b32 opcode=*/1, /*vdst=*/0, /*constant 0=*/128),
+                           S_NOP, S_ENDPGM};
+  f.run_kernel(code, 3);
+  f.shutdown();
+
+  const auto records = parse_throughput_jsonl(sink.str());
+  ASSERT_EQ(records.size(), 2u);
+  const auto &dispatch = records[0];
+  EXPECT_EQ(dispatch.record, "dispatch");
+  EXPECT_GT(dispatch.dispatch_id, 0u);
+  EXPECT_FALSE(dispatch.kernel_name.empty());
+  EXPECT_FALSE(dispatch.kernel_symbol.empty());
+  EXPECT_GT(dispatch.workgroups, 0u);
+  EXPECT_GT(dispatch.waves_per_workgroup, 0u);
+  EXPECT_GT(dispatch.wall_seconds, 0.0);
+  EXPECT_EQ(dispatch.wave_instructions, 3u);
+  EXPECT_GT(dispatch.mips, 0.0);
+  EXPECT_EQ(family_total(dispatch), dispatch.wave_instructions);
+  EXPECT_EQ(dispatch.family_instructions[static_cast<size_t>(InstructionFamily::Vector)], 1u);
+  EXPECT_EQ(dispatch.family_instructions[static_cast<size_t>(InstructionFamily::Control)], 2u);
+  EXPECT_GT(dispatch.execution_seconds[static_cast<size_t>(InstructionFamily::Vector)], 0.0);
+  EXPECT_GT(dispatch.execution_seconds[static_cast<size_t>(InstructionFamily::Control)], 0.0);
+  EXPECT_GT(dispatch.execution_mips[static_cast<size_t>(InstructionFamily::Vector)], 0.0);
+  EXPECT_GT(dispatch.execution_mips[static_cast<size_t>(InstructionFamily::Control)], 0.0);
+  EXPECT_GT(dispatch.dispatch_mips[static_cast<size_t>(InstructionFamily::Vector)], 0.0);
+  EXPECT_GT(dispatch.dispatch_mips[static_cast<size_t>(InstructionFamily::Control)], 0.0);
+
+  const auto &summary = records[1];
+  EXPECT_EQ(summary.record, "summary");
+  EXPECT_EQ(summary.dispatches, 1u);
+  EXPECT_GT(summary.dispatch_seconds_sum, 0.0);
+  EXPECT_GT(summary.wall_seconds, 0.0);
+  EXPECT_GT(summary.mips, 0.0);
+  EXPECT_EQ(summary.wave_instructions, dispatch.wave_instructions);
+  EXPECT_EQ(summary.family_instructions, dispatch.family_instructions);
+  EXPECT_EQ(summary.execution_seconds, dispatch.execution_seconds);
+  EXPECT_EQ(summary.execution_mips, dispatch.execution_mips);
+  EXPECT_EQ(family_total(summary), summary.wave_instructions);
+}
+
+TEST(ThroughputPluginTest, TimesTerminatorWithoutAfterExecuteCallback) {
+  using plugins::throughput::InstructionFamily;
+
+  PluginFixture f(/*num_wf_slots=*/1);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<plugins::throughput::ThroughputPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  const uint32_t code[] = {S_ENDPGM};
+  f.run_kernel(code, 1);
+  f.shutdown();
+
+  const auto records = parse_throughput_jsonl(sink.str());
+  ASSERT_EQ(records.size(), 2u);
+  const auto &dispatch = records[0];
+  const size_t control = static_cast<size_t>(InstructionFamily::Control);
+  EXPECT_EQ(dispatch.wave_instructions, 1u);
+  EXPECT_EQ(dispatch.family_instructions[control], 1u);
+  EXPECT_GT(dispatch.execution_seconds[control], 0.0);
 }
 
 TEST(ExecutionPluginTest, HotHookPolicyComesFromContainedPlugins) {
