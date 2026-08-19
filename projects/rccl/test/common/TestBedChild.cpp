@@ -136,7 +136,6 @@ namespace RcclUnitTesting
       case CHILD_DEALLOCATE_MEM  : status = DeallocateMem();        break;
       case CHILD_DESTROY_COMMS   : status = DestroyComms();         break;
       case CHILD_DESTROY_GRAPHS  : status = DestroyGraphs();        break;
-      case CHILD_WARMUP          : status = Warmup();               break;
       case CHILD_STOP            : goto stop;
       default: exit(0);
       }
@@ -178,26 +177,6 @@ namespace RcclUnitTesting
     memcpy(retValBuf.data(), &id, sizeof(id));
 
     if (this->verbose) TEST_INFO("Child %d finishes GetUniqueId()", this->childId);
-    return TEST_SUCCESS;
-  }
-
-  ErrCode TestBedChild::Warmup()
-  {
-    // Force the RCCL device code object to load for this worker's device by creating and
-    // immediately destroying a throwaway single-rank communicator. Worker d owns device d
-    // (childId == device). All pool workers run this concurrently at pool startup, so the
-    // ~13s per-process code-object load overlaps instead of being paid lazily and serially
-    // as each MP config first touches its worker.
-    int const dev = this->childId;
-    if (this->verbose) TEST_INFO("Child %d begins Warmup() on device %d", this->childId, dev);
-    CHECK_HIP(hipSetDevice(dev));
-    ncclComm_t comm = nullptr;
-    CHILD_NCCL_CALL(ncclCommInitAll(&comm, 1, &dev), "warmup ncclCommInitAll");
-    if (comm != nullptr)
-    {
-      CHILD_NCCL_CALL(ncclCommDestroy(comm), "warmup ncclCommDestroy");
-    }
-    if (this->verbose) TEST_INFO("Child %d finishes Warmup()", this->childId);
     return TEST_SUCCESS;
   }
 

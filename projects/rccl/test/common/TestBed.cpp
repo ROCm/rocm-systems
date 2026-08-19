@@ -130,7 +130,7 @@ namespace RcclUnitTesting
       {
         // Size the pool to the devices that actually exist. numDevicesAvailable comes from
         // UT_MAX_GPUS, which is an unclamped override: if it exceeds the real device count we
-        // would fork workers for nonexistent devices whose Warmup hipSetDevice() then fails.
+        // would fork workers for nonexistent devices that no valid config can ever map to.
         int poolSize = this->numDevicesAvailable;
         int hipDeviceCount = 0;
         if (hipGetDeviceCount(&hipDeviceCount) == hipSuccess && hipDeviceCount > 0 &&
@@ -165,30 +165,13 @@ namespace RcclUnitTesting
           close(this->poolChildren[d]->childWriteFd);
           close(this->poolChildren[d]->childReadFd);
         }
-
-        // Concurrently pre-warm every worker: send WARMUP to all of them first, THEN
-        // collect acks, so each worker's ~13s device-code-object load overlaps across
-        // processes instead of being paid lazily and serially as configs first touch each
-        // worker (that serial chain was ~94s of the ~157s total init).
-        int const warmCmd = TestBedChild::CHILD_WARMUP;
-        for (int d = 0; d < poolSize; ++d)
-        {
-          if (write(this->poolChildren[d]->parentWriteFd, &warmCmd, sizeof(warmCmd)) != (ssize_t)sizeof(warmCmd))
-          {
-            TeardownPool();
-            FAIL() << "Failed to send WARMUP to pool worker " << d;
-          }
-        }
-        for (int d = 0; d < poolSize; ++d)
-        {
-          ErrCode st = TEST_SUCCESS;
-          ssize_t const r = read(this->poolChildren[d]->parentReadFd, &st, sizeof(st));
-          if (r != (ssize_t)sizeof(st) || st != TEST_SUCCESS)
-          {
-            TeardownPool();
-            FAIL() << "Pool worker " << d << " failed to warm up";
-          }
-        }
+        // NOTE: workers are NOT pre-warmed. Each worker loads its device-code object lazily on
+        // its first real InitComms, then keeps it resident for reuse across configs. An earlier
+        // concurrent pre-warm (a throwaway ncclCommInitAll per worker at startup) was removed:
+        // under the test runner's --jobs N parallelism it made every test binary storm
+        // ncclCommInitAll across all GPUs at once, which failed intermittently with code 1. The
+        // reuse speedup does not depend on pre-warming; the runner's own parallelism overlaps
+        // the first-touch loads across binaries.
       }
 
       // Map this config's children onto distinct pool workers by representative device.
