@@ -6,7 +6,6 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/decoder.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/vop3p.h"
-#include "util/except.h"
 #include <array>
 #include <bit>
 #include <format>
@@ -15,1426 +14,1922 @@ namespace rocjitsu {
 namespace rdna1 {
 
 namespace detail {
-std::unique_ptr<Instruction> decodeBufferAtomicAddMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicAddX2Mubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicAndMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicAndX2Mubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicCmpswapMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicCmpswapX2Mubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicDecMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicDecX2Mubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicFcmpswapMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicFcmpswapX2Mubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicFmaxMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicFmaxX2Mubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicFminMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicFminX2Mubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicIncMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicIncX2Mubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicOrMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicOrX2Mubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicSmaxMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicSmaxX2Mubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicSminMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicSminX2Mubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicSubMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicSubX2Mubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicSwapMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicSwapX2Mubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicUmaxMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicUmaxX2Mubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicUminMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicUminX2Mubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicXorMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferAtomicXorX2Mubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferGl0InvMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferGl1InvMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferLoadDwordMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferLoadDwordx2Mubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferLoadDwordx3Mubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferLoadDwordx4Mubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferLoadFormatD16HiXMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferLoadFormatD16XMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferLoadFormatD16XyMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferLoadFormatD16XyzMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferLoadFormatD16XyzwMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferLoadFormatXMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferLoadFormatXyMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferLoadFormatXyzMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferLoadFormatXyzwMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferLoadSbyteD16HiMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferLoadSbyteD16Mubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferLoadSbyteMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferLoadShortD16HiMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferLoadShortD16Mubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferLoadSshortMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferLoadUbyteD16HiMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferLoadUbyteD16Mubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferLoadUbyteMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferLoadUshortMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferStoreByteD16HiMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferStoreByteMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferStoreDwordMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferStoreDwordx2Mubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferStoreDwordx3Mubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferStoreDwordx4Mubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferStoreFormatD16HiXMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferStoreFormatD16XMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferStoreFormatD16XyMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferStoreFormatD16XyzMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferStoreFormatD16XyzwMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferStoreFormatXMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferStoreFormatXyMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferStoreFormatXyzMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferStoreFormatXyzwMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferStoreShortD16HiMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeBufferStoreShortMubuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsAddF32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsAddRtnF32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsAddRtnU32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsAddRtnU64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsAddU32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsAddU64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsAndB32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsAndB64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsAndRtnB32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsAndRtnB64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsAppendDs(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsBpermuteB32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsCmpstB32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsCmpstB64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsCmpstF32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsCmpstF64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsCmpstRtnB32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsCmpstRtnB64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsCmpstRtnF32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsCmpstRtnF64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsCondxchg32RtnB64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsConsumeDs(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsDecRtnU32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsDecRtnU64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsDecU32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsDecU64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsGwsBarrierDs(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsGwsInitDs(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsGwsSemaBrDs(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsGwsSemaPDs(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsGwsSemaReleaseAllDs(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsGwsSemaVDs(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsIncRtnU32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsIncRtnU64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsIncU32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsIncU64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMaxF32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMaxF64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMaxI32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMaxI64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMaxRtnF32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMaxRtnF64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMaxRtnI32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMaxRtnI64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMaxRtnU32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMaxRtnU64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMaxU32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMaxU64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMinF32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMinF64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMinI32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMinI64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMinRtnF32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMinRtnF64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMinRtnI32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMinRtnI64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMinRtnU32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMinRtnU64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMinU32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMinU64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMskorB32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMskorB64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMskorRtnB32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsMskorRtnB64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsNopDs(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsOrB32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsOrB64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsOrRtnB32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsOrRtnB64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsOrderedCountDs(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsPermuteB32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsRead2B32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsRead2B64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsRead2st64B32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsRead2st64B64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsReadAddtidB32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsReadB128Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsReadB32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsReadB64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsReadB96Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsReadI16Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsReadI8D16Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsReadI8D16HiDs(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsReadI8Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsReadU16D16Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsReadU16D16HiDs(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsReadU16Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsReadU8D16Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsReadU8D16HiDs(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsReadU8Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsRsubRtnU32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsRsubRtnU64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsRsubU32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsRsubU64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsSubRtnU32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsSubRtnU64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsSubU32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsSubU64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsSwizzleB32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsWrapRtnB32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsWrite2B32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsWrite2B64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsWrite2st64B32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsWrite2st64B64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsWriteAddtidB32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsWriteB128Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsWriteB16D16HiDs(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsWriteB16Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsWriteB32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsWriteB64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsWriteB8D16HiDs(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsWriteB8Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsWriteB96Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsWrxchg2RtnB32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsWrxchg2RtnB64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsWrxchg2st64RtnB32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsWrxchg2st64RtnB64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsWrxchgRtnB32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsWrxchgRtnB64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsXorB32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsXorB64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsXorRtnB32Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeDsXorRtnB64Ds(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeExpExp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicAddFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicAddX2Flat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicAndFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicAndX2Flat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicCmpswapFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicCmpswapX2Flat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicDecFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicDecX2Flat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicFcmpswapFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicFcmpswapX2Flat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicFmaxFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicFmaxX2Flat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicFminFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicFminX2Flat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicIncFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicIncX2Flat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicOrFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicOrX2Flat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicSmaxFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicSmaxX2Flat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicSminFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicSminX2Flat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicSubFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicSubX2Flat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicSwapFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicSwapX2Flat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicUmaxFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicUmaxX2Flat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicUminFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicUminX2Flat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicXorFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatAtomicXorX2Flat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatLoadDwordFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatLoadDwordx2Flat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatLoadDwordx3Flat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatLoadDwordx4Flat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatLoadSbyteD16Flat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatLoadSbyteD16HiFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatLoadSbyteFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatLoadShortD16Flat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatLoadShortD16HiFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatLoadSshortFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatLoadUbyteD16Flat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatLoadUbyteD16HiFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatLoadUbyteFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatLoadUshortFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatStoreByteD16HiFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatStoreByteFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatStoreDwordFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatStoreDwordx2Flat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatStoreDwordx3Flat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatStoreDwordx4Flat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatStoreShortD16HiFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeFlatStoreShortFlat(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageAtomicAddMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageAtomicAndMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageAtomicCmpswapMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageAtomicDecMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageAtomicFcmpswapMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageAtomicFmaxMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageAtomicFminMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageAtomicIncMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageAtomicOrMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageAtomicSmaxMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageAtomicSminMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageAtomicSubMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageAtomicSwapMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageAtomicUmaxMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageAtomicUminMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageAtomicXorMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGather4BClMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGather4BClOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGather4BMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGather4BOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGather4CBClMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGather4CBClOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGather4CBMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGather4CBOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGather4CClMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGather4CClOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGather4CLMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGather4CLOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGather4CLzMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGather4CLzOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGather4CMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGather4COMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGather4ClMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGather4ClOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGather4LMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGather4LOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGather4LzMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGather4LzOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGather4Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGather4OMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGather4hMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGather4hPckMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGather8hPckMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGetLodMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageGetResinfoMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageLoadBy2Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageLoadBy4Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageLoadMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageLoadMipBy2Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageLoadMipBy4Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageLoadMipMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageLoadMipPck2Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageLoadMipPck4Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageLoadMipPckMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageLoadMipPckSgnMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageLoadPck2Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageLoadPck4Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageLoadPckMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageLoadPckSgnMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageMsaaLoadMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleBClMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleBClOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleBMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleBOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCBClMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCBClOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCBMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCBOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCCdClG16Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCCdClMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCCdClOG16Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCCdClOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCCdG16Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCCdMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCCdOG16Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCCdOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCClMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCClOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCDClG16Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCDClMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCDClOG16Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCDClOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCDG16Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCDMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCDOG16Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCDOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCLMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCLOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCLzMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCLzOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCdClG16Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCdClMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCdClOG16Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCdClOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCdG16Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCdMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCdOG16Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleCdOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleClMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleClOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleDClG16Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleDClMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleDClOG16Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleDClOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleDG16Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleDMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleDOG16Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleDOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleLMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleLOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleLzMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleLzOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageSampleOMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageStoreBy2Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageStoreBy4Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageStoreMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageStoreMipBy2Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageStoreMipBy4Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageStoreMipMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageStoreMipPck2Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageStoreMipPck4Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageStoreMipPckMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageStorePck2Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageStorePck4Mimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeImageStorePckMimg(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSAbsI32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSAbsdiffI32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSAddI32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSAddU32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSAddcU32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSAddkI32Sopk(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSAndB32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSAndB64Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSAndSaveexecB32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSAndSaveexecB64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSAndn1SaveexecB32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSAndn1SaveexecB64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSAndn1WrexecB32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSAndn1WrexecB64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSAndn2B32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSAndn2B64Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSAndn2SaveexecB32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSAndn2SaveexecB64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSAndn2WrexecB32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSAndn2WrexecB64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSAshrI32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSAshrI64Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSAtcProbeBufferSmem(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSAtcProbeSmem(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBarrierSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBcnt0I32B32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBcnt0I32B64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBcnt1I32B32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBcnt1I32B64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBfeI32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBfeI64Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBfeU32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBfeU64Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBfmB32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBfmB64Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBitcmp0B32Sopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBitcmp0B64Sopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBitcmp1B32Sopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBitcmp1B64Sopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBitreplicateB64B32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBitset0B32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBitset0B64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBitset1B32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBitset1B64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBranchSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBrevB32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBrevB64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBufferLoadDwordSmem(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBufferLoadDwordx16Smem(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBufferLoadDwordx2Smem(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBufferLoadDwordx4Smem(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSBufferLoadDwordx8Smem(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCallB64Sopk(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCbranchCdbgsysAndUserSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCbranchCdbgsysOrUserSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCbranchCdbgsysSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCbranchCdbguserSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCbranchExecnzSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCbranchExeczSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCbranchScc0Sopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCbranchScc1Sopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCbranchVccnzSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCbranchVcczSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSClauseSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmovB32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmovB64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmovkI32Sopk(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmpEqI32Sopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmpEqU32Sopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmpEqU64Sopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmpGeI32Sopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmpGeU32Sopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmpGtI32Sopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmpGtU32Sopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmpLeI32Sopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmpLeU32Sopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmpLgI32Sopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmpLgU32Sopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmpLgU64Sopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmpLtI32Sopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmpLtU32Sopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmpkEqI32Sopk(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmpkEqU32Sopk(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmpkGeI32Sopk(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmpkGeU32Sopk(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmpkGtI32Sopk(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmpkGtU32Sopk(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmpkLeI32Sopk(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmpkLeU32Sopk(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmpkLgI32Sopk(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmpkLgU32Sopk(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmpkLtI32Sopk(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCmpkLtU32Sopk(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCodeEndSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCselectB32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSCselectB64Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSDcacheInvSmem(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSDecperflevelSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSDenormModeSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSEndpgmOrderedPsDoneSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSEndpgmSavedSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSEndpgmSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSFf0I32B32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSFf0I32B64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSFf1I32B32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSFf1I32B64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSFlbitI32B32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSFlbitI32B64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSFlbitI32I64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSFlbitI32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSGetWaveidInWorkgroupSmem(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSGetpcB64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSGetregB32Sopk(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSGl1InvSmem(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSIcacheInvSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSIncperflevelSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSInstPrefetchSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSLoadDwordSmem(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSLoadDwordx16Smem(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSLoadDwordx2Smem(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSLoadDwordx4Smem(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSLoadDwordx8Smem(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSLshl1AddU32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSLshl2AddU32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSLshl3AddU32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSLshl4AddU32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSLshlB32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSLshlB64Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSLshrB32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSLshrB64Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSMaxI32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSMaxU32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSMemrealtimeSmem(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSMemtimeSmem(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSMinI32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSMinU32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSMovB32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSMovB64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSMovkI32Sopk(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSMovreldB32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSMovreldB64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSMovrelsB32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSMovrelsB64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSMovrelsd2B32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSMulHiI32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSMulHiU32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSMulI32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSMulkI32Sopk(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSNandB32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSNandB64Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSNandSaveexecB32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSNandSaveexecB64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSNopSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSNorB32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSNorB64Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSNorSaveexecB32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSNorSaveexecB64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSNotB32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSNotB64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSOrB32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSOrB64Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSOrSaveexecB32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSOrSaveexecB64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSOrn1SaveexecB32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSOrn1SaveexecB64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSOrn2B32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSOrn2B64Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSOrn2SaveexecB32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSOrn2SaveexecB64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSPackHhB32B16Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSPackLhB32B16Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSPackLlB32B16Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSQuadmaskB32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSQuadmaskB64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSRfeB64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSRoundModeSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSScratchLoadDwordSmem(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSScratchLoadDwordx2Smem(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSScratchLoadDwordx4Smem(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSSendmsgSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSSendmsghaltSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSSethaltSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSSetkillSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSSetpcB64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSSetprioSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSSetregB32Sopk(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSSetregImm32B32Sopk(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSSextI32I16Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSSextI32I8Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSSleepSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSSubI32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSSubU32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSSubbU32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSSubvectorLoopBeginSopk(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSSubvectorLoopEndSopk(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSSwappcB64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSTrapSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSTtracedataImmSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSTtracedataSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSVersionSopk(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSWaitIdleSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSWaitcntDepctrSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSWaitcntExpcntSopk(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSWaitcntLgkmcntSopk(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSWaitcntSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSWaitcntVmcntSopk(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSWaitcntVscntSopk(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSWakeupSopp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSWqmB32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSWqmB64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSXnorB32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSXnorB64Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSXnorSaveexecB32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSXnorSaveexecB64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSXorB32Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSXorB64Sop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSXorSaveexecB32Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeSXorSaveexecB64Sop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeTbufferLoadFormatD16XMtbuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeTbufferLoadFormatD16XyMtbuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeTbufferLoadFormatD16XyzMtbuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeTbufferLoadFormatD16XyzwMtbuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeTbufferLoadFormatXMtbuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeTbufferLoadFormatXyMtbuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeTbufferLoadFormatXyzMtbuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeTbufferLoadFormatXyzwMtbuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeTbufferStoreFormatD16XMtbuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeTbufferStoreFormatD16XyMtbuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeTbufferStoreFormatD16XyzMtbuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeTbufferStoreFormatD16XyzwMtbuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeTbufferStoreFormatXMtbuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeTbufferStoreFormatXyMtbuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeTbufferStoreFormatXyzMtbuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeTbufferStoreFormatXyzwMtbuf(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVAdd3U32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVAddCoCiU32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVAddCoCiU32Vop3SdstEnc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVAddCoU32Vop3SdstEnc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVAddF16Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVAddF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVAddF32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVAddF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVAddF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVAddLshlU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVAddNcI16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVAddNcI32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVAddNcU16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVAddNcU32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVAddNcU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVAlignbitB32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVAlignbyteB32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVAndB32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVAndB32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVAndOrB32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVAshrrevI16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVAshrrevI32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVAshrrevI32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVAshrrevI64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVBcntU32B32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVBfeI32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVBfeU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVBfiB32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVBfmB32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVBfrevB32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVBfrevB32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCeilF16Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCeilF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCeilF32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCeilF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCeilF64Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCeilF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVClrexcpVop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVClrexcpVop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpClassF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpClassF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpClassF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpClassF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpClassF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpClassF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpEqF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpEqF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpEqF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpEqF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpEqF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpEqF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpEqI16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpEqI16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpEqI32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpEqI32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpEqI64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpEqI64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpEqU16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpEqU16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpEqU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpEqU32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpEqU64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpEqU64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpFF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpFF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpFF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpFF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpFF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpFF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpFI32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpFI32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpFI64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpFI64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpFU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpFU32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpFU64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpFU64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGeF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGeF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGeF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGeF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGeF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGeF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGeI16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGeI16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGeI32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGeI32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGeI64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGeI64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGeU16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGeU16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGeU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGeU32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGeU64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGeU64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGtF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGtF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGtF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGtF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGtF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGtF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGtI16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGtI16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGtI32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGtI32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGtI64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGtI64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGtU16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGtU16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGtU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGtU32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGtU64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpGtU64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLeF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLeF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLeF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLeF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLeF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLeF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLeI16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLeI16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLeI32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLeI32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLeI64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLeI64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLeU16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLeU16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLeU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLeU32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLeU64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLeU64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLgF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLgF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLgF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLgF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLgF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLgF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLtF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLtF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLtF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLtF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLtF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLtF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLtI16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLtI16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLtI32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLtI32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLtI64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLtI64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLtU16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLtU16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLtU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLtU32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLtU64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpLtU64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNeI16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNeI16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNeI32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNeI32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNeI64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNeI64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNeU16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNeU16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNeU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNeU32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNeU64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNeU64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNeqF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNeqF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNeqF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNeqF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNeqF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNeqF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNgeF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNgeF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNgeF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNgeF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNgeF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNgeF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNgtF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNgtF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNgtF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNgtF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNgtF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNgtF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNleF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNleF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNleF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNleF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNleF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNleF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNlgF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNlgF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNlgF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNlgF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNlgF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNlgF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNltF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNltF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNltF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNltF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNltF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpNltF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpOF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpOF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpOF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpOF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpOF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpOF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpTI32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpTI32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpTI64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpTI64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpTU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpTU32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpTU64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpTU64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpTruF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpTruF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpTruF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpTruF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpTruF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpTruF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpUF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpUF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpUF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpUF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpUF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpUF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxClassF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxClassF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxClassF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxClassF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxClassF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxClassF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxEqF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxEqF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxEqF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxEqF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxEqF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxEqF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxEqI16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxEqI16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxEqI32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxEqI32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxEqI64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxEqI64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxEqU16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxEqU16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxEqU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxEqU32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxEqU64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxEqU64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxFF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxFF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxFF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxFF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxFF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxFF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxFI32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxFI32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxFI64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxFI64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxFU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxFU32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxFU64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxFU64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGeF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGeF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGeF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGeF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGeF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGeF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGeI16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGeI16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGeI32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGeI32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGeI64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGeI64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGeU16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGeU16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGeU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGeU32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGeU64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGeU64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGtF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGtF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGtF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGtF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGtF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGtF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGtI16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGtI16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGtI32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGtI32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGtI64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGtI64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGtU16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGtU16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGtU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGtU32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGtU64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxGtU64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLeF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLeF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLeF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLeF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLeF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLeF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLeI16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLeI16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLeI32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLeI32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLeI64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLeI64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLeU16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLeU16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLeU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLeU32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLeU64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLeU64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLgF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLgF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLgF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLgF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLgF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLgF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLtF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLtF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLtF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLtF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLtF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLtF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLtI16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLtI16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLtI32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLtI32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLtI64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLtI64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLtU16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLtU16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLtU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLtU32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLtU64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxLtU64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNeI16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNeI16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNeI32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNeI32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNeI64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNeI64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNeU16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNeU16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNeU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNeU32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNeU64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNeU64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNeqF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNeqF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNeqF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNeqF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNeqF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNeqF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNgeF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNgeF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNgeF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNgeF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNgeF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNgeF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNgtF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNgtF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNgtF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNgtF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNgtF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNgtF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNleF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNleF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNleF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNleF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNleF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNleF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNlgF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNlgF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNlgF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNlgF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNlgF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNlgF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNltF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNltF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNltF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNltF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNltF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxNltF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxOF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxOF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxOF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxOF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxOF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxOF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxTI32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxTI32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxTI64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxTI64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxTU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxTU32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxTU64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxTU64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxTruF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxTruF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxTruF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxTruF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxTruF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxTruF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxUF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxUF16Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxUF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxUF32Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxUF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCmpxUF64Vopc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCndmaskB32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCndmaskB32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCosF16Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCosF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCosF32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCosF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCubeidF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCubemaF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCubescF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCubetcF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF16F32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF16F32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF16I16Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF16I16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF16U16Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF16U16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF32F16Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF32F16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF32F64Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF32F64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF32I32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF32I32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF32U32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF32U32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF32Ubyte0Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF32Ubyte0Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF32Ubyte1Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF32Ubyte1Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF32Ubyte2Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF32Ubyte2Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF32Ubyte3Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF32Ubyte3Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF64F32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF64F32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF64I32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF64I32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF64U32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtF64U32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtFlrI32F32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtFlrI32F32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtI16F16Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtI16F16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtI32F32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtI32F32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtI32F64Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtI32F64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtNormI16F16Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtNormI16F16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtNormU16F16Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtNormU16F16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtOffF32I4Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtOffF32I4Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtPkI16I32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtPkU16U32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtPkU8F32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtPknormI16F16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtPknormI16F32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtPknormU16F16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtPknormU16F32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtPkrtzF16F32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtPkrtzF16F32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtRpiI32F32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtRpiI32F32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtU16F16Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtU16F16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtU32F32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtU32F32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtU32F64Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVCvtU32F64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVDivFixupF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVDivFixupF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVDivFixupF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVDivFmasF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVDivFmasF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVDivScaleF32Vop3SdstEnc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVDivScaleF64Vop3SdstEnc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVDot2F32F16Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVDot2I32I16Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVDot2U32U16Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVDot2cF32F16Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVDot2cF32F16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVDot4I32I8Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVDot4U32U8Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVDot4cI32I8Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVDot4cI32I8Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVDot8I32I4Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVDot8U32U4Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVExpF16Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVExpF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVExpF32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVExpF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFfbhI32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFfbhI32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFfbhU32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFfbhU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFfblB32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFfblB32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFloorF16Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFloorF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFloorF32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFloorF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFloorF64Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFloorF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFmaF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFmaF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFmaF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFmaMixF32Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFmaMixhiF16Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFmaMixloF16Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFmaakF16Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFmaakF32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFmacF16Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFmacF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFmacF32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFmacF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFmamkF16Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFmamkF32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFractF16Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFractF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFractF32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFractF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFractF64Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFractF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFrexpExpI16F16Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFrexpExpI16F16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFrexpExpI32F32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFrexpExpI32F32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFrexpExpI32F64Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFrexpExpI32F64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFrexpMantF16Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFrexpMantF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFrexpMantF32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFrexpMantF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFrexpMantF64Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVFrexpMantF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVInterpMovF32Vintrp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVInterpMovF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVInterpP1F32Vintrp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVInterpP1F32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVInterpP1llF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVInterpP1lvF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVInterpP2F16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVInterpP2F32Vintrp(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVInterpP2F32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVLdexpF16Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVLdexpF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVLdexpF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVLdexpF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVLerpU8Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVLogF16Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVLogF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVLogF32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVLogF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVLshlAddU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVLshlOrB32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVLshlrevB16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVLshlrevB32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVLshlrevB32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVLshlrevB64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVLshrrevB16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVLshrrevB32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVLshrrevB32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVLshrrevB64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMacF32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMacF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMacLegacyF32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMacLegacyF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMadF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMadI16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMadI32I16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMadI32I24Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMadI64I32Vop3SdstEnc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMadLegacyF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMadU16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMadU32U16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMadU32U24Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMadU64U32Vop3SdstEnc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMadakF32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMadmkF32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMax3F16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMax3F32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMax3I16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMax3I32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMax3U16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMax3U32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMaxF16Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMaxF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMaxF32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMaxF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMaxF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMaxI16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMaxI32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMaxI32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMaxU16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMaxU32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMaxU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMbcntHiU32B32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMbcntLoU32B32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMed3F16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMed3F32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMed3I16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMed3I32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMed3U16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMed3U32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMin3F16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMin3F32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMin3I16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMin3I32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMin3U16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMin3U32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMinF16Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMinF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMinF32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMinF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMinF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMinI16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMinI32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMinI32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMinU16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMinU32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMinU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMovB32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMovB32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMovreldB32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMovreldB32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMovrelsB32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMovrelsB32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMovrelsd2B32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMovrelsd2B32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMovrelsdB32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMovrelsdB32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMqsadPkU16U8Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMqsadU32U8Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMsadU8Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMulF16Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMulF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMulF32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMulF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMulF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMulHiI32I24Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMulHiI32I24Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMulHiI32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMulHiU32U24Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMulHiU32U24Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMulHiU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMulI32I24Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMulI32I24Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMulLegacyF32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMulLegacyF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMulLoU16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMulLoU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMulU32U24Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMulU32U24Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVMullitF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVNopVop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVNopVop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVNotB32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVNotB32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVOr3B32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVOrB32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVOrB32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVPackB32F16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVPermB32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVPermlane16B32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVPermlanex16B32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVPipeflushVop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVPipeflushVop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVPkAddF16Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVPkAddI16Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVPkAddU16Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVPkAshrrevI16Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVPkFmaF16Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVPkFmacF16Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVPkLshlrevB16Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVPkLshrrevB16Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVPkMadI16Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVPkMadU16Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVPkMaxF16Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVPkMaxI16Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVPkMaxU16Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVPkMinF16Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVPkMinI16Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVPkMinU16Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVPkMulF16Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVPkMulLoU16Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVPkSubI16Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVPkSubU16Vop3p(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVQsadPkU16U8Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVRcpF16Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVRcpF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVRcpF32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVRcpF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVRcpF64Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVRcpF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVRcpIflagF32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVRcpIflagF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVReadfirstlaneB32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVReadfirstlaneB32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVReadlaneB32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVRndneF16Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVRndneF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVRndneF32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVRndneF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVRndneF64Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVRndneF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVRsqF16Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVRsqF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVRsqF32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVRsqF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVRsqF64Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVRsqF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSadHiU8Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSadU16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSadU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSadU8Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSatPkU8I16Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSatPkU8I16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSinF16Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSinF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSinF32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSinF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSqrtF16Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSqrtF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSqrtF32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSqrtF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSqrtF64Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSqrtF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSubCoCiU32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSubCoCiU32Vop3SdstEnc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSubCoU32Vop3SdstEnc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSubF16Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSubF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSubF32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSubF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSubNcI16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSubNcI32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSubNcU16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSubNcU32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSubNcU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSubrevCoCiU32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSubrevCoCiU32Vop3SdstEnc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSubrevCoU32Vop3SdstEnc(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSubrevF16Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSubrevF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSubrevF32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSubrevF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSubrevNcU32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSubrevNcU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSwapB32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVSwaprelB32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVTrigPreopF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVTruncF16Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVTruncF16Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVTruncF32Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVTruncF32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVTruncF64Vop1(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVTruncF64Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVWritelaneB32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVXadU32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVXnorB32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVXnorB32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVXor3B32Vop3(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVXorB32Vop2(const MachineInst *opcode);
-std::unique_ptr<Instruction> decodeVXorB32Vop3(const MachineInst *opcode);
+DecodeResult decodeBufferAtomicAddMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicAddX2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicAndMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicAndX2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicCmpswapMubuf(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicCmpswapX2Mubuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicDecMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicDecX2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicFcmpswapMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicFcmpswapX2Mubuf(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicFmaxMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicFmaxX2Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicFminMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicFminX2Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicIncMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicIncX2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicOrMubuf(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicOrX2Mubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicSmaxMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicSmaxX2Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicSminMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicSminX2Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicSubMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicSubX2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicSwapMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicSwapX2Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicUmaxMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicUmaxX2Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicUminMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicUminX2Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicXorMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferAtomicXorX2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferGl0InvMubuf(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferGl1InvMubuf(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferLoadDwordMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferLoadDwordx2Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferLoadDwordx3Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferLoadDwordx4Mubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferLoadFormatD16HiXMubuf(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferLoadFormatD16XMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferLoadFormatD16XyMubuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferLoadFormatD16XyzMubuf(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferLoadFormatD16XyzwMubuf(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferLoadFormatXMubuf(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferLoadFormatXyMubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferLoadFormatXyzMubuf(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferLoadFormatXyzwMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferLoadSbyteD16HiMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferLoadSbyteD16Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferLoadSbyteMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferLoadShortD16HiMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferLoadShortD16Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferLoadSshortMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferLoadUbyteD16HiMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferLoadUbyteD16Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferLoadUbyteMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferLoadUshortMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferStoreByteD16HiMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferStoreByteMubuf(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferStoreDwordMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferStoreDwordx2Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferStoreDwordx3Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferStoreDwordx4Mubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferStoreFormatD16HiXMubuf(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferStoreFormatD16XMubuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferStoreFormatD16XyMubuf(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferStoreFormatD16XyzMubuf(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferStoreFormatD16XyzwMubuf(const MachineInst *opcode,
+                                                 const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferStoreFormatXMubuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferStoreFormatXyMubuf(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferStoreFormatXyzMubuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferStoreFormatXyzwMubuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferStoreShortD16HiMubuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error);
+DecodeResult decodeBufferStoreShortMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsAddF32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsAddRtnF32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsAddRtnU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsAddRtnU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsAddU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsAddU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsAndB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsAndB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsAndRtnB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsAndRtnB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsAppendDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsBpermuteB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsCmpstB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsCmpstB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsCmpstF32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsCmpstF64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsCmpstRtnB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsCmpstRtnB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsCmpstRtnF32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsCmpstRtnF64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsCondxchg32RtnB64Ds(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsConsumeDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsDecRtnU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsDecRtnU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsDecU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsDecU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsGwsBarrierDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsGwsInitDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsGwsSemaBrDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsGwsSemaPDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsGwsSemaReleaseAllDs(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsGwsSemaVDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsIncRtnU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsIncRtnU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsIncU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsIncU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMaxF32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMaxF64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMaxI32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMaxI64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMaxRtnF32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMaxRtnF64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMaxRtnI32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMaxRtnI64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMaxRtnU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMaxRtnU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMaxU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMaxU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMinF32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMinF64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMinI32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMinI64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMinRtnF32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMinRtnF64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMinRtnI32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMinRtnI64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMinRtnU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMinRtnU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMinU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMinU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMskorB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMskorB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMskorRtnB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsMskorRtnB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsNopDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsOrB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsOrB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsOrRtnB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsOrRtnB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsOrderedCountDs(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsPermuteB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsRead2B32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsRead2B64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsRead2st64B32Ds(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsRead2st64B64Ds(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsReadAddtidB32Ds(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsReadB128Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsReadB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsReadB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsReadB96Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsReadI16Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsReadI8D16Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsReadI8D16HiDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsReadI8Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsReadU16D16Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsReadU16D16HiDs(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsReadU16Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsReadU8D16Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsReadU8D16HiDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsReadU8Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsRsubRtnU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsRsubRtnU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsRsubU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsRsubU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsSubRtnU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsSubRtnU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsSubU32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsSubU64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsSwizzleB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsWrapRtnB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsWrite2B32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsWrite2B64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsWrite2st64B32Ds(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsWrite2st64B64Ds(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsWriteAddtidB32Ds(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsWriteB128Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsWriteB16D16HiDs(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsWriteB16Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsWriteB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsWriteB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsWriteB8D16HiDs(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsWriteB8Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsWriteB96Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsWrxchg2RtnB32Ds(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsWrxchg2RtnB64Ds(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsWrxchg2st64RtnB32Ds(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsWrxchg2st64RtnB64Ds(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsWrxchgRtnB32Ds(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsWrxchgRtnB64Ds(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsXorB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsXorB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsXorRtnB32Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeDsXorRtnB64Ds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeExpExp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicAddFlat(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicAddX2Flat(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicAndFlat(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicAndX2Flat(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicCmpswapFlat(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicCmpswapX2Flat(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicDecFlat(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicDecX2Flat(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicFcmpswapFlat(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicFcmpswapX2Flat(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicFmaxFlat(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicFmaxX2Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicFminFlat(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicFminX2Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicIncFlat(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicIncX2Flat(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicOrFlat(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicOrX2Flat(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicSmaxFlat(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicSmaxX2Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicSminFlat(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicSminX2Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicSubFlat(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicSubX2Flat(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicSwapFlat(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicSwapX2Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicUmaxFlat(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicUmaxX2Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicUminFlat(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicUminX2Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicXorFlat(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatAtomicXorX2Flat(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatLoadDwordFlat(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatLoadDwordx2Flat(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatLoadDwordx3Flat(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatLoadDwordx4Flat(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatLoadSbyteD16Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatLoadSbyteD16HiFlat(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatLoadSbyteFlat(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatLoadShortD16Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatLoadShortD16HiFlat(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatLoadSshortFlat(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatLoadUbyteD16Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatLoadUbyteD16HiFlat(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatLoadUbyteFlat(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatLoadUshortFlat(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatStoreByteD16HiFlat(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatStoreByteFlat(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatStoreDwordFlat(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatStoreDwordx2Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatStoreDwordx3Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatStoreDwordx4Flat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatStoreShortD16HiFlat(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeFlatStoreShortFlat(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageAtomicAddMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageAtomicAndMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageAtomicCmpswapMimg(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageAtomicDecMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageAtomicFcmpswapMimg(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageAtomicFmaxMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageAtomicFminMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageAtomicIncMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageAtomicOrMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageAtomicSmaxMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageAtomicSminMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageAtomicSubMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageAtomicSwapMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageAtomicUmaxMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageAtomicUminMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageAtomicXorMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGather4BClMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGather4BClOMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGather4BMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGather4BOMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGather4CBClMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGather4CBClOMimg(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGather4CBMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGather4CBOMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGather4CClMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGather4CClOMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGather4CLMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGather4CLOMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGather4CLzMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGather4CLzOMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGather4CMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGather4COMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGather4ClMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGather4ClOMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGather4LMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGather4LOMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGather4LzMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGather4LzOMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGather4Mimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGather4OMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGather4hMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGather4hPckMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGather8hPckMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGetLodMimg(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageGetResinfoMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageLoadBy2Mimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageLoadBy4Mimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageLoadMimg(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageLoadMipBy2Mimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageLoadMipBy4Mimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageLoadMipMimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageLoadMipPck2Mimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageLoadMipPck4Mimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageLoadMipPckMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageLoadMipPckSgnMimg(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageLoadPck2Mimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageLoadPck4Mimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageLoadPckMimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageLoadPckSgnMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageMsaaLoadMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleBClMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleBClOMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleBMimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleBOMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCBClMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCBClOMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCBMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCBOMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCCdClG16Mimg(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCCdClMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCCdClOG16Mimg(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCCdClOMimg(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCCdG16Mimg(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCCdMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCCdOG16Mimg(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCCdOMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCClMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCClOMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCDClG16Mimg(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCDClMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCDClOG16Mimg(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCDClOMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCDG16Mimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCDMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCDOG16Mimg(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCDOMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCLMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCLOMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCLzMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCLzOMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCMimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCOMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCdClG16Mimg(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCdClMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCdClOG16Mimg(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCdClOMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCdG16Mimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCdMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCdOG16Mimg(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleCdOMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleClMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleClOMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleDClG16Mimg(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleDClMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleDClOG16Mimg(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleDClOMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleDG16Mimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleDMimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleDOG16Mimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleDOMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleLMimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleLOMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleLzMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleLzOMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleMimg(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageSampleOMimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageStoreBy2Mimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageStoreBy4Mimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageStoreMimg(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageStoreMipBy2Mimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageStoreMipBy4Mimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageStoreMipMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageStoreMipPck2Mimg(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageStoreMipPck4Mimg(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageStoreMipPckMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageStorePck2Mimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageStorePck4Mimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeImageStorePckMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSAbsI32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSAbsdiffI32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSAddI32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSAddU32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSAddcU32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSAddkI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSAndB32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSAndB64Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSAndSaveexecB32Sop1(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSAndSaveexecB64Sop1(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSAndn1SaveexecB32Sop1(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSAndn1SaveexecB64Sop1(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSAndn1WrexecB32Sop1(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSAndn1WrexecB64Sop1(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSAndn2B32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSAndn2B64Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSAndn2SaveexecB32Sop1(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSAndn2SaveexecB64Sop1(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSAndn2WrexecB32Sop1(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSAndn2WrexecB64Sop1(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSAshrI32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSAshrI64Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSAtcProbeBufferSmem(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSAtcProbeSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBarrierSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBcnt0I32B32Sop1(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBcnt0I32B64Sop1(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBcnt1I32B32Sop1(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBcnt1I32B64Sop1(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBfeI32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBfeI64Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBfeU32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBfeU64Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBfmB32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBfmB64Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBitcmp0B32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBitcmp0B64Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBitcmp1B32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBitcmp1B64Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBitreplicateB64B32Sop1(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBitset0B32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBitset0B64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBitset1B32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBitset1B64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBranchSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBrevB32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBrevB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBufferLoadDwordSmem(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBufferLoadDwordx16Smem(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBufferLoadDwordx2Smem(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBufferLoadDwordx4Smem(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSBufferLoadDwordx8Smem(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCallB64Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCbranchCdbgsysAndUserSopp(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCbranchCdbgsysOrUserSopp(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCbranchCdbgsysSopp(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCbranchCdbguserSopp(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCbranchExecnzSopp(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCbranchExeczSopp(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCbranchScc0Sopp(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCbranchScc1Sopp(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCbranchVccnzSopp(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCbranchVcczSopp(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSClauseSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmovB32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmovB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmovkI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmpEqI32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmpEqU32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmpEqU64Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmpGeI32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmpGeU32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmpGtI32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmpGtU32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmpLeI32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmpLeU32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmpLgI32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmpLgU32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmpLgU64Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmpLtI32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmpLtU32Sopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmpkEqI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmpkEqU32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmpkGeI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmpkGeU32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmpkGtI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmpkGtU32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmpkLeI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmpkLeU32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmpkLgI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmpkLgU32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmpkLtI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCmpkLtU32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCodeEndSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCselectB32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSCselectB64Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSDcacheInvSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSDecperflevelSopp(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSDenormModeSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSEndpgmOrderedPsDoneSopp(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSEndpgmSavedSopp(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSEndpgmSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSFf0I32B32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSFf0I32B64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSFf1I32B32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSFf1I32B64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSFlbitI32B32Sop1(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSFlbitI32B64Sop1(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSFlbitI32I64Sop1(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSFlbitI32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSGetWaveidInWorkgroupSmem(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSGetpcB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSGetregB32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSGl1InvSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSIcacheInvSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSIncperflevelSopp(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSInstPrefetchSopp(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSLoadDwordSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSLoadDwordx16Smem(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSLoadDwordx2Smem(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSLoadDwordx4Smem(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSLoadDwordx8Smem(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSLshl1AddU32Sop2(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSLshl2AddU32Sop2(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSLshl3AddU32Sop2(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSLshl4AddU32Sop2(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSLshlB32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSLshlB64Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSLshrB32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSLshrB64Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSMaxI32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSMaxU32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSMemrealtimeSmem(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSMemtimeSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSMinI32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSMinU32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSMovB32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSMovB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSMovkI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSMovreldB32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSMovreldB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSMovrelsB32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSMovrelsB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSMovrelsd2B32Sop1(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSMulHiI32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSMulHiU32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSMulI32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSMulkI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSNandB32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSNandB64Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSNandSaveexecB32Sop1(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSNandSaveexecB64Sop1(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSNopSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSNorB32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSNorB64Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSNorSaveexecB32Sop1(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSNorSaveexecB64Sop1(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSNotB32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSNotB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSOrB32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSOrB64Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSOrSaveexecB32Sop1(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSOrSaveexecB64Sop1(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSOrn1SaveexecB32Sop1(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSOrn1SaveexecB64Sop1(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSOrn2B32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSOrn2B64Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSOrn2SaveexecB32Sop1(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSOrn2SaveexecB64Sop1(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSPackHhB32B16Sop2(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSPackLhB32B16Sop2(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSPackLlB32B16Sop2(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSQuadmaskB32Sop1(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSQuadmaskB64Sop1(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSRfeB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSRoundModeSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSScratchLoadDwordSmem(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSScratchLoadDwordx2Smem(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSScratchLoadDwordx4Smem(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSSendmsgSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSSendmsghaltSopp(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSSethaltSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSSetkillSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSSetpcB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSSetprioSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSSetregB32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSSetregImm32B32Sopk(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSSextI32I16Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSSextI32I8Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSSleepSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSSubI32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSSubU32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSSubbU32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSSubvectorLoopBeginSopk(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSSubvectorLoopEndSopk(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSSwappcB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSTrapSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSTtracedataImmSopp(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSTtracedataSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSVersionSopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSWaitIdleSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSWaitcntDepctrSopp(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSWaitcntExpcntSopk(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSWaitcntLgkmcntSopk(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSWaitcntSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSWaitcntVmcntSopk(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSWaitcntVscntSopk(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSWakeupSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSWqmB32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSWqmB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSXnorB32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSXnorB64Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSXnorSaveexecB32Sop1(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSXnorSaveexecB64Sop1(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSXorB32Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSXorB64Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSXorSaveexecB32Sop1(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeSXorSaveexecB64Sop1(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeTbufferLoadFormatD16XMtbuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error);
+DecodeResult decodeTbufferLoadFormatD16XyMtbuf(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error);
+DecodeResult decodeTbufferLoadFormatD16XyzMtbuf(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error);
+DecodeResult decodeTbufferLoadFormatD16XyzwMtbuf(const MachineInst *opcode,
+                                                 const DecodeErrorEmitter &emit_error);
+DecodeResult decodeTbufferLoadFormatXMtbuf(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeTbufferLoadFormatXyMtbuf(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error);
+DecodeResult decodeTbufferLoadFormatXyzMtbuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error);
+DecodeResult decodeTbufferLoadFormatXyzwMtbuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error);
+DecodeResult decodeTbufferStoreFormatD16XMtbuf(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error);
+DecodeResult decodeTbufferStoreFormatD16XyMtbuf(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error);
+DecodeResult decodeTbufferStoreFormatD16XyzMtbuf(const MachineInst *opcode,
+                                                 const DecodeErrorEmitter &emit_error);
+DecodeResult decodeTbufferStoreFormatD16XyzwMtbuf(const MachineInst *opcode,
+                                                  const DecodeErrorEmitter &emit_error);
+DecodeResult decodeTbufferStoreFormatXMtbuf(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error);
+DecodeResult decodeTbufferStoreFormatXyMtbuf(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error);
+DecodeResult decodeTbufferStoreFormatXyzMtbuf(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error);
+DecodeResult decodeTbufferStoreFormatXyzwMtbuf(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVAdd3U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVAddCoCiU32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVAddCoCiU32Vop3SdstEnc(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVAddCoU32Vop3SdstEnc(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVAddF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVAddF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVAddF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVAddF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVAddF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVAddLshlU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVAddNcI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVAddNcI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVAddNcU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVAddNcU32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVAddNcU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVAlignbitB32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVAlignbyteB32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVAndB32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVAndB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVAndOrB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVAshrrevI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVAshrrevI32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVAshrrevI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVAshrrevI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVBcntU32B32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVBfeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVBfeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVBfiB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVBfmB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVBfrevB32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVBfrevB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCeilF16Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCeilF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCeilF32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCeilF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCeilF64Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCeilF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVClrexcpVop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVClrexcpVop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpClassF16Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpClassF16Vopc(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpClassF32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpClassF32Vopc(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpClassF64Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpClassF64Vopc(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpEqF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpEqF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpEqF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpEqF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpEqF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpEqF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpEqI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpEqI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpEqI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpEqI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpEqI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpEqI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpEqU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpEqU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpEqU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpEqU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpEqU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpEqU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpFF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpFF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpFF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpFF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpFF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpFF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpFI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpFI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpFI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpFI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpFU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpFU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpFU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpFU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGeF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGeF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGeF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGeF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGeF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGeF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGeI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGeI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGeI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGeI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGeI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGeU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGeU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGeU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGeU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGeU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGtF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGtF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGtF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGtF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGtF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGtF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGtI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGtI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGtI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGtI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGtI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGtI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGtU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGtU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGtU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGtU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGtU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpGtU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLeF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLeF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLeF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLeF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLeF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLeF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLeI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLeI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLeI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLeI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLeI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLeU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLeU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLeU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLeU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLeU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLgF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLgF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLgF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLgF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLgF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLgF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLtF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLtF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLtF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLtF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLtF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLtF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLtI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLtI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLtI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLtI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLtI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLtI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLtU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLtU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLtU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLtU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLtU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpLtU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNeI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNeI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNeI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNeI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNeI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNeU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNeU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNeU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNeU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNeU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNeqF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNeqF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNeqF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNeqF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNeqF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNeqF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNgeF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNgeF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNgeF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNgeF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNgeF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNgeF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNgtF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNgtF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNgtF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNgtF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNgtF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNgtF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNleF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNleF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNleF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNleF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNleF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNleF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNlgF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNlgF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNlgF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNlgF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNlgF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNlgF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNltF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNltF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNltF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNltF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNltF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpNltF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpOF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpOF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpOF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpOF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpOF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpOF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpTI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpTI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpTI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpTI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpTU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpTU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpTU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpTU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpTruF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpTruF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpTruF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpTruF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpTruF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpTruF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpUF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpUF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpUF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpUF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpUF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpUF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxClassF16Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxClassF16Vopc(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxClassF32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxClassF32Vopc(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxClassF64Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxClassF64Vopc(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxEqF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxEqF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxEqF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxEqF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxEqF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxEqF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxEqI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxEqI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxEqI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxEqI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxEqI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxEqI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxEqU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxEqU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxEqU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxEqU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxEqU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxEqU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxFF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxFF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxFF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxFF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxFF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxFF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxFI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxFI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxFI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxFI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxFU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxFU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxFU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxFU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGeF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGeF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGeF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGeF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGeF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGeF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGeI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGeI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGeI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGeI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGeI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGeU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGeU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGeU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGeU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGeU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGtF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGtF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGtF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGtF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGtF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGtF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGtI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGtI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGtI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGtI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGtI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGtI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGtU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGtU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGtU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGtU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGtU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxGtU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLeF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLeF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLeF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLeF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLeF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLeF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLeI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLeI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLeI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLeI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLeI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLeU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLeU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLeU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLeU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLeU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLgF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLgF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLgF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLgF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLgF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLgF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLtF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLtF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLtF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLtF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLtF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLtF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLtI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLtI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLtI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLtI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLtI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLtI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLtU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLtU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLtU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLtU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLtU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxLtU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNeI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNeI16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNeI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNeI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNeI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNeU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNeU16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNeU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNeU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNeU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNeqF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNeqF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNeqF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNeqF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNeqF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNeqF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNgeF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNgeF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNgeF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNgeF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNgeF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNgeF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNgtF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNgtF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNgtF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNgtF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNgtF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNgtF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNleF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNleF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNleF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNleF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNleF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNleF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNlgF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNlgF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNlgF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNlgF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNlgF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNlgF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNltF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNltF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNltF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNltF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNltF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxNltF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxOF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxOF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxOF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxOF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxOF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxOF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxTI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxTI32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxTI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxTI64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxTU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxTU32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxTU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxTU64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxTruF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxTruF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxTruF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxTruF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxTruF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxTruF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxUF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxUF16Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxUF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxUF32Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxUF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCmpxUF64Vopc(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCndmaskB32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCndmaskB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCosF16Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCosF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCosF32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCosF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCubeidF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCubemaF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCubescF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCubetcF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF16F32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF16F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF16I16Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF16I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF16U16Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF16U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF32F16Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF32F16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF32F64Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF32F64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF32I32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF32I32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF32U32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF32U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF32Ubyte0Vop1(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF32Ubyte0Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF32Ubyte1Vop1(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF32Ubyte1Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF32Ubyte2Vop1(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF32Ubyte2Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF32Ubyte3Vop1(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF32Ubyte3Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF64F32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF64F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF64I32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF64I32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF64U32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtF64U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtFlrI32F32Vop1(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtFlrI32F32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtI16F16Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtI16F16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtI32F32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtI32F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtI32F64Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtI32F64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtNormI16F16Vop1(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtNormI16F16Vop3(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtNormU16F16Vop1(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtNormU16F16Vop3(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtOffF32I4Vop1(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtOffF32I4Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtPkI16I32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtPkU16U32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtPkU8F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtPknormI16F16Vop3(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtPknormI16F32Vop3(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtPknormU16F16Vop3(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtPknormU16F32Vop3(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtPkrtzF16F32Vop2(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtPkrtzF16F32Vop3(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtRpiI32F32Vop1(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtRpiI32F32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtU16F16Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtU16F16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtU32F32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtU32F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtU32F64Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVCvtU32F64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVDivFixupF16Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVDivFixupF32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVDivFixupF64Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVDivFmasF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVDivFmasF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVDivScaleF32Vop3SdstEnc(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVDivScaleF64Vop3SdstEnc(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVDot2F32F16Vop3p(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVDot2I32I16Vop3p(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVDot2U32U16Vop3p(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVDot2cF32F16Vop2(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVDot2cF32F16Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVDot4I32I8Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVDot4U32U8Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVDot4cI32I8Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVDot4cI32I8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVDot8I32I4Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVDot8U32U4Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVExpF16Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVExpF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVExpF32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVExpF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFfbhI32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFfbhI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFfbhU32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFfbhU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFfblB32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFfblB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFloorF16Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFloorF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFloorF32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFloorF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFloorF64Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFloorF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFmaF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFmaF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFmaF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFmaMixF32Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFmaMixhiF16Vop3p(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFmaMixloF16Vop3p(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFmaakF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFmaakF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFmacF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFmacF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFmacF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFmacF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFmamkF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFmamkF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFractF16Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFractF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFractF32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFractF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFractF64Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFractF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFrexpExpI16F16Vop1(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFrexpExpI16F16Vop3(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFrexpExpI32F32Vop1(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFrexpExpI32F32Vop3(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFrexpExpI32F64Vop1(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFrexpExpI32F64Vop3(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFrexpMantF16Vop1(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFrexpMantF16Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFrexpMantF32Vop1(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFrexpMantF32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFrexpMantF64Vop1(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVFrexpMantF64Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVInterpMovF32Vintrp(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVInterpMovF32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVInterpP1F32Vintrp(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVInterpP1F32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVInterpP1llF16Vop3(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVInterpP1lvF16Vop3(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVInterpP2F16Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVInterpP2F32Vintrp(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVInterpP2F32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVLdexpF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVLdexpF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVLdexpF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVLdexpF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVLerpU8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVLogF16Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVLogF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVLogF32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVLogF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVLshlAddU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVLshlOrB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVLshlrevB16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVLshlrevB32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVLshlrevB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVLshlrevB64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVLshrrevB16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVLshrrevB32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVLshrrevB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVLshrrevB64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMacF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMacF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMacLegacyF32Vop2(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMacLegacyF32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMadF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMadI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMadI32I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMadI32I24Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMadI64I32Vop3SdstEnc(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMadLegacyF32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMadU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMadU32U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMadU32U24Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMadU64U32Vop3SdstEnc(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMadakF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMadmkF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMax3F16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMax3F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMax3I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMax3I32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMax3U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMax3U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMaxF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMaxF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMaxF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMaxF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMaxF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMaxI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMaxI32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMaxI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMaxU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMaxU32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMaxU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMbcntHiU32B32Vop3(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMbcntLoU32B32Vop3(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMed3F16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMed3F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMed3I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMed3I32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMed3U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMed3U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMin3F16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMin3F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMin3I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMin3I32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMin3U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMin3U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMinF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMinF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMinF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMinF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMinF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMinI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMinI32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMinI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMinU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMinU32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMinU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMovB32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMovB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMovreldB32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMovreldB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMovrelsB32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMovrelsB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMovrelsd2B32Vop1(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMovrelsd2B32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMovrelsdB32Vop1(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMovrelsdB32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMqsadPkU16U8Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMqsadU32U8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMsadU8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMulF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMulF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMulF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMulF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMulF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMulHiI32I24Vop2(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMulHiI32I24Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMulHiI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMulHiU32U24Vop2(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMulHiU32U24Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMulHiU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMulI32I24Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMulI32I24Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMulLegacyF32Vop2(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMulLegacyF32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMulLoU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMulLoU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMulU32U24Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMulU32U24Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVMullitF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVNopVop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVNopVop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVNotB32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVNotB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVOr3B32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVOrB32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVOrB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPackB32F16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPermB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPermlane16B32Vop3(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPermlanex16B32Vop3(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPipeflushVop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPipeflushVop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkAddF16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkAddI16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkAddU16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkAshrrevI16Vop3p(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkFmaF16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkFmacF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkLshlrevB16Vop3p(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkLshrrevB16Vop3p(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkMadI16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkMadU16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkMaxF16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkMaxI16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkMaxU16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkMinF16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkMinI16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkMinU16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkMulF16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkMulLoU16Vop3p(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkSubI16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVPkSubU16Vop3p(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVQsadPkU16U8Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVRcpF16Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVRcpF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVRcpF32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVRcpF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVRcpF64Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVRcpF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVRcpIflagF32Vop1(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVRcpIflagF32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVReadfirstlaneB32Vop1(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVReadfirstlaneB32Vop3(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVReadlaneB32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVRndneF16Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVRndneF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVRndneF32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVRndneF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVRndneF64Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVRndneF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVRsqF16Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVRsqF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVRsqF32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVRsqF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVRsqF64Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVRsqF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSadHiU8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSadU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSadU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSadU8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSatPkU8I16Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSatPkU8I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSinF16Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSinF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSinF32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSinF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSqrtF16Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSqrtF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSqrtF32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSqrtF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSqrtF64Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSqrtF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSubCoCiU32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSubCoCiU32Vop3SdstEnc(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSubCoU32Vop3SdstEnc(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSubF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSubF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSubF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSubF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSubNcI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSubNcI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSubNcU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSubNcU32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSubNcU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSubrevCoCiU32Vop2(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSubrevCoCiU32Vop3SdstEnc(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSubrevCoU32Vop3SdstEnc(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSubrevF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSubrevF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSubrevF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSubrevF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSubrevNcU32Vop2(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSubrevNcU32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSwapB32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVSwaprelB32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVTrigPreopF64Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVTruncF16Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVTruncF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVTruncF32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVTruncF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVTruncF64Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVTruncF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVWritelaneB32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVXadU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVXnorB32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVXnorB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVXor3B32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVXorB32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVXorB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 } // namespace detail
 
 struct DecoderImpl {
 public:
-  static std::unique_ptr<Instruction> decode(const MachineInst *opcode);
+  static DecodeResult decode(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 
 private:
-  using DecodeFunc = std::unique_ptr<Instruction> (*)(const MachineInst *);
-  static std::unique_ptr<Instruction> decodeInvalid(const MachineInst *opcode);
-  static std::unique_ptr<Instruction> subDecodeVopc(const MachineInst *opcode);
-  static std::unique_ptr<Instruction> subDecodeVop1(const MachineInst *opcode);
-  static std::unique_ptr<Instruction> subDecodeSop1(const MachineInst *opcode);
-  static std::unique_ptr<Instruction> subDecodeSopc(const MachineInst *opcode);
-  static std::unique_ptr<Instruction> subDecodeSopp(const MachineInst *opcode);
-  static std::unique_ptr<Instruction> subDecodeVintrp(const MachineInst *opcode);
-  static std::unique_ptr<Instruction> subDecodeVop3p(const MachineInst *opcode);
-  static std::unique_ptr<Instruction> subDecodeVop3(const MachineInst *opcode);
-  static std::unique_ptr<Instruction> subDecodeDs(const MachineInst *opcode);
-  static std::unique_ptr<Instruction> subDecodeFlat(const MachineInst *opcode);
-  static std::unique_ptr<Instruction> subDecodeMubuf(const MachineInst *opcode);
-  static std::unique_ptr<Instruction> subDecodeMtbuf(const MachineInst *opcode);
-  static std::unique_ptr<Instruction> subDecodeMimg(const MachineInst *opcode);
-  static std::unique_ptr<Instruction> subDecodeSmem(const MachineInst *opcode);
+  using DecodeFunc = DecodeResult (*)(const MachineInst *, const DecodeErrorEmitter &);
+  static DecodeResult decodeInvalid(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+  static DecodeResult subDecodeVopc(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+  static DecodeResult subDecodeVop1(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+  static DecodeResult subDecodeSop1(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+  static DecodeResult subDecodeSopc(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+  static DecodeResult subDecodeSopp(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+  static DecodeResult subDecodeVintrp(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error);
+  static DecodeResult subDecodeVop3p(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+  static DecodeResult subDecodeVop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+  static DecodeResult subDecodeDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+  static DecodeResult subDecodeFlat(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+  static DecodeResult subDecodeMubuf(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+  static DecodeResult subDecodeMtbuf(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+  static DecodeResult subDecodeMimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
+  static DecodeResult subDecodeSmem(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error);
   static const std::array<DecodeFunc, 512> primary_decode_table;
   static const std::array<DecodeFunc, 256> sub_decode_vopc;
   static const std::array<DecodeFunc, 256> sub_decode_vop1;
@@ -1452,88 +1947,102 @@ private:
   static const std::array<DecodeFunc, 256> sub_decode_smem;
 };
 
-std::unique_ptr<Instruction> Decoder::decode(const MachineInst *opcode) {
-  return DecoderImpl::decode(opcode);
+DecodeResult Decoder::decode(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  return DecoderImpl::decode(opcode, emit_error);
 }
 
-std::unique_ptr<Instruction> DecoderImpl::decode(const MachineInst *opcode) {
+DecodeResult DecoderImpl::decode(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Sop1MachineInst op = std::bit_cast<decltype(op)>(*opcode);
-  return primary_decode_table[op.encoding](opcode);
+  return primary_decode_table[op.encoding](opcode, emit_error);
 }
 
-std::unique_ptr<Instruction> DecoderImpl::decodeInvalid(const MachineInst *opcode) {
-  throw util::InvalidInst(std::format("{:X}", *opcode));
-  return nullptr;
+DecodeResult DecoderImpl::decodeInvalid(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  return emit_error.emit() << "Invalid instruction opcode: " << std::format("{:X}", *opcode);
 }
 
-std::unique_ptr<Instruction> DecoderImpl::subDecodeVopc(const MachineInst *opcode) {
+DecodeResult DecoderImpl::subDecodeVopc(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
   Vopc::OpEncoding op = *reinterpret_cast<const decltype(op) *>(opcode);
-  return sub_decode_vopc[op.op](opcode);
+  return sub_decode_vopc[op.op](opcode, emit_error);
 }
 
-std::unique_ptr<Instruction> DecoderImpl::subDecodeVop1(const MachineInst *opcode) {
+DecodeResult DecoderImpl::subDecodeVop1(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
   Vop1::OpEncoding op = *reinterpret_cast<const decltype(op) *>(opcode);
-  return sub_decode_vop1[op.op](opcode);
+  return sub_decode_vop1[op.op](opcode, emit_error);
 }
 
-std::unique_ptr<Instruction> DecoderImpl::subDecodeSop1(const MachineInst *opcode) {
+DecodeResult DecoderImpl::subDecodeSop1(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
   Sop1::OpEncoding op = *reinterpret_cast<const decltype(op) *>(opcode);
-  return sub_decode_sop1[op.op](opcode);
+  return sub_decode_sop1[op.op](opcode, emit_error);
 }
 
-std::unique_ptr<Instruction> DecoderImpl::subDecodeSopc(const MachineInst *opcode) {
+DecodeResult DecoderImpl::subDecodeSopc(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
   Sopc::OpEncoding op = *reinterpret_cast<const decltype(op) *>(opcode);
-  return sub_decode_sopc[op.op](opcode);
+  return sub_decode_sopc[op.op](opcode, emit_error);
 }
 
-std::unique_ptr<Instruction> DecoderImpl::subDecodeSopp(const MachineInst *opcode) {
+DecodeResult DecoderImpl::subDecodeSopp(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
   Sopp::OpEncoding op = *reinterpret_cast<const decltype(op) *>(opcode);
-  return sub_decode_sopp[op.op](opcode);
+  return sub_decode_sopp[op.op](opcode, emit_error);
 }
 
-std::unique_ptr<Instruction> DecoderImpl::subDecodeVintrp(const MachineInst *opcode) {
+DecodeResult DecoderImpl::subDecodeVintrp(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
   Vintrp::OpEncoding op = *reinterpret_cast<const decltype(op) *>(opcode);
-  return sub_decode_vintrp[op.op](opcode);
+  return sub_decode_vintrp[op.op](opcode, emit_error);
 }
 
-std::unique_ptr<Instruction> DecoderImpl::subDecodeVop3p(const MachineInst *opcode) {
+DecodeResult DecoderImpl::subDecodeVop3p(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
   Vop3p::OpEncoding op = *reinterpret_cast<const decltype(op) *>(opcode);
-  return sub_decode_vop3p[op.op](opcode);
+  return sub_decode_vop3p[op.op](opcode, emit_error);
 }
 
-std::unique_ptr<Instruction> DecoderImpl::subDecodeVop3(const MachineInst *opcode) {
+DecodeResult DecoderImpl::subDecodeVop3(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
   Vop3::OpEncoding op = *reinterpret_cast<const decltype(op) *>(opcode);
-  return sub_decode_vop3[op.op](opcode);
+  return sub_decode_vop3[op.op](opcode, emit_error);
 }
 
-std::unique_ptr<Instruction> DecoderImpl::subDecodeDs(const MachineInst *opcode) {
+DecodeResult DecoderImpl::subDecodeDs(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
   Ds::OpEncoding op = *reinterpret_cast<const decltype(op) *>(opcode);
-  return sub_decode_ds[op.op](opcode);
+  return sub_decode_ds[op.op](opcode, emit_error);
 }
 
-std::unique_ptr<Instruction> DecoderImpl::subDecodeFlat(const MachineInst *opcode) {
+DecodeResult DecoderImpl::subDecodeFlat(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
   Flat::OpEncoding op = *reinterpret_cast<const decltype(op) *>(opcode);
-  return sub_decode_flat[op.op](opcode);
+  return sub_decode_flat[op.op](opcode, emit_error);
 }
 
-std::unique_ptr<Instruction> DecoderImpl::subDecodeMubuf(const MachineInst *opcode) {
+DecodeResult DecoderImpl::subDecodeMubuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
   Mubuf::OpEncoding op = *reinterpret_cast<const decltype(op) *>(opcode);
-  return sub_decode_mubuf[op.op](opcode);
+  return sub_decode_mubuf[op.op](opcode, emit_error);
 }
 
-std::unique_ptr<Instruction> DecoderImpl::subDecodeMtbuf(const MachineInst *opcode) {
+DecodeResult DecoderImpl::subDecodeMtbuf(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
   Mtbuf::OpEncoding op = *reinterpret_cast<const decltype(op) *>(opcode);
-  return sub_decode_mtbuf[op.op](opcode);
+  return sub_decode_mtbuf[op.op](opcode, emit_error);
 }
 
-std::unique_ptr<Instruction> DecoderImpl::subDecodeMimg(const MachineInst *opcode) {
+DecodeResult DecoderImpl::subDecodeMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
   Mimg::OpEncoding op = *reinterpret_cast<const decltype(op) *>(opcode);
-  return sub_decode_mimg[op.op](opcode);
+  return sub_decode_mimg[op.op](opcode, emit_error);
 }
 
-std::unique_ptr<Instruction> DecoderImpl::subDecodeSmem(const MachineInst *opcode) {
+DecodeResult DecoderImpl::subDecodeSmem(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
   Smem::OpEncoding op = *reinterpret_cast<const decltype(op) *>(opcode);
-  return sub_decode_smem[op.op](opcode);
+  return sub_decode_smem[op.op](opcode, emit_error);
 }
 
 const std::array<DecoderImpl::DecodeFunc, 512> DecoderImpl::primary_decode_table = {

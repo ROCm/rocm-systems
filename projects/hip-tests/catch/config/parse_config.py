@@ -74,6 +74,13 @@ def create_test_definition(
     else:
         tags_str += f"[{arch}]"
 
+    # Promote every disable reason to a distinct tag so a runner can query which
+    # specific labels a test is disabled for (incl. OS labels dropped above).
+    # Prefix is "exclude_" (not "disabled_") so it does not substring-match a
+    # ctest -LE disabled filter; consumers should match anchored ^exclude_<entry>$.
+    for entry in disabled:
+        tags_str += f"[exclude_{entry}]"
+
     return f'#define {case_name} "{case_name}", "{tags_str}"'
 
 

@@ -18,12 +18,14 @@
 #include "nccl.h"
 #include "net.h"
 #include "plugin/nccl_net.h"
+#include <atomic>
 #include <vector>
 #include <memory>
 #include <cstring>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -31,11 +33,15 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <mutex>
 #include <set>
 #include <sstream>
 #include <string>
+#include <condition_variable>
 #include <dirent.h>
 #include <unistd.h>
+#include <thread>
+#include <functional>
 
 #ifdef MPI_TESTS_ENABLED
 
@@ -123,6 +129,22 @@ struct NetMHandleDeleter {
     }
 };
 
+// Worker threads must not invoke TEST_INFO or any helper that can call MPI.
+// This deleter is used only by the threaded test bodies; errors are surfaced
+// by the surrounding transfer operation and resource-leak checks.
+struct NetMHandleWorkerDeleter {
+    ncclNet_t* net;
+    void* comm;
+
+    NetMHandleWorkerDeleter(ncclNet_t* n = nullptr, void* c = nullptr) : net(n), comm(c) {}
+
+    void operator()(void* mhandle) const {
+        if (mhandle && net && comm) {
+            (void)net->deregMr(comm, mhandle);
+        }
+    }
+};
+
 // NET IB connection guard
 class NetConnectionGuard {
 private:
@@ -157,6 +179,7 @@ public:
 
 // Type alias for NetMHandleGuard using ResourceGuard
 using NetMHandleGuard = RCCLTestGuards::ResourceGuard<void*, NetMHandleDeleter>;
+using NetMHandleWorkerGuard = RCCLTestGuards::ResourceGuard<void*, NetMHandleWorkerDeleter>;
 
 // Test fixture for NET IB tests
 class NetIbMPITest : public MPITestBase {
@@ -315,7 +338,11 @@ protected:
         void* sendComm = nullptr;
         void* recvComm = nullptr;
         void* listenComm = nullptr;
-        ncclNetHandle_t handle;
+        // Zero-initialized: SetupConnectionForThread sends the handle
+        // unconditionally (so a listen() failure can't strand the peer's
+        // MPI_Recv), which would otherwise put uninitialized stack bytes on
+        // the wire and trip sanitizers.
+        ncclNetHandle_t handle{};
     };
 
     ncclResult_t SetupConnection(int dev, ConnectionPair& pair, int rank, int peerRank) {
@@ -758,6 +785,323 @@ protected:
     }
 
     // ===============================================================
+    // Multithreading helpers
+    //
+    // `rccl-tests -t` gives every host worker a distinct communicator. NetIB
+    // validation follows that contract: workers operate on independent
+    // send/recv comm pairs, not concurrently on one comm object. The latter
+    // is outside the NCCL communicator thread-safety contract and would turn
+    // a test into a C++ data race instead of useful validation.
+    //
+    // All MPI calls remain on the GTest/main thread. This avoids requiring
+    // MPI_THREAD_MULTIPLE and gives every phase an explicit rank-wide failure
+    // handshake before a peer can be stranded in a blocking MPI operation.
+    // Worker bodies must not call fatal GTest macros (ASSERT_*/FAIL()); they
+    // return ThreadResult and are reported after all workers join.
+    // ===============================================================
+
+    struct ThreadResult {
+        bool ok = true;
+        std::string msg;
+    };
+
+    struct ThreadConnection {
+        void* ctx = nullptr;
+        ConnectionPair pair;
+    };
+
+    class ThreadStartGate {
+    public:
+        explicit ThreadStartGate(int expected) : expected_(expected) {}
+
+        bool ArriveAndWait() {
+            std::unique_lock<std::mutex> lock(mutex_);
+            if (cancelled_) return false;
+            if (++arrived_ == expected_) {
+                released_ = true;
+                condition_.notify_all();
+                return true;
+            }
+            condition_.wait(lock, [&] { return released_ || cancelled_; });
+            return !cancelled_;
+        }
+
+        void Cancel() {
+            std::lock_guard<std::mutex> lock(mutex_);
+            cancelled_ = true;
+            condition_.notify_all();
+        }
+
+    private:
+        const int expected_;
+        int arrived_ = 0;
+        bool released_ = false;
+        bool cancelled_ = false;
+        std::mutex mutex_;
+        std::condition_variable condition_;
+    };
+
+    struct ThreadWorkerRun {
+        std::vector<ThreadResult> results;
+        std::vector<std::thread::id> threadIds;
+        int maxConcurrentWorkers = 0;
+    };
+
+    // MPI tags used by the main-thread handle exchanges for independently
+    // created connections. MPI only guarantees MPI_TAG_UB >= 32767.
+    static constexpr int kThreadTagStride = 1000;
+    static constexpr int kMaxThreadTagOffset = 1; // listener-ready flag + handle
+    static constexpr int kMpiGuaranteedTagUb = 32767;
+
+    static_assert((MPIEnvironment::kMaxThreads - 1) * kThreadTagStride + kMaxThreadTagOffset
+                      <= kMpiGuaranteedTagUb,
+                  "worst-case per-thread MPI tag must fit in the tag range every "
+                  "MPI implementation is required to provide");
+
+    static void UpdateMaximum(std::atomic<int>& maximum, int value) {
+        int observed = maximum.load(std::memory_order_relaxed);
+        while (observed < value
+               && !maximum.compare_exchange_weak(observed, value, std::memory_order_relaxed)) {
+        }
+    }
+
+    ThreadWorkerRun RunThreadWorkers(int nThreads, std::function<ThreadResult(int)> body) {
+        ThreadWorkerRun run;
+        run.results.resize(nThreads);
+        run.threadIds.resize(nThreads);
+
+        ThreadStartGate startGate(nThreads);
+        ThreadStartGate bodyGate(nThreads);
+        std::atomic<int> inFlight{0};
+        std::atomic<int> maxInFlight{0};
+        auto worker = [&](int threadIdx) {
+            run.threadIds[threadIdx] = std::this_thread::get_id();
+            if (!startGate.ArriveAndWait()) {
+                run.results[threadIdx].ok = false;
+                run.results[threadIdx].msg = "worker launch was cancelled";
+                return;
+            }
+            const int active = inFlight.fetch_add(1, std::memory_order_relaxed) + 1;
+            UpdateMaximum(maxInFlight, active);
+            // Do not let an eagerly scheduled worker complete its body before
+            // the other workers have actually entered it. This makes the
+            // concurrency assertion deterministic rather than scheduler-timing
+            // dependent.
+            if (!bodyGate.ArriveAndWait()) {
+                inFlight.fetch_sub(1, std::memory_order_relaxed);
+                run.results[threadIdx].ok = false;
+                run.results[threadIdx].msg = "worker body start was cancelled";
+                return;
+            }
+            try {
+                run.results[threadIdx] = body(threadIdx);
+            } catch (const std::exception& error) {
+                run.results[threadIdx].ok = false;
+                run.results[threadIdx].msg = std::string("worker threw: ") + error.what();
+            } catch (...) {
+                run.results[threadIdx].ok = false;
+                run.results[threadIdx].msg = "worker threw a non-standard exception";
+            }
+            inFlight.fetch_sub(1, std::memory_order_relaxed);
+        };
+
+        std::vector<std::thread> workers;
+        try {
+            for (int t = nThreads - 1; t >= 1; --t) workers.emplace_back(worker, t);
+            worker(0);
+        } catch (const std::exception& error) {
+            startGate.Cancel();
+            bodyGate.Cancel();
+            run.results[0].ok = false;
+            run.results[0].msg = std::string("failed to launch worker: ") + error.what();
+        }
+        for (auto& workerThread : workers) workerThread.join();
+
+        run.maxConcurrentWorkers = maxInFlight.load(std::memory_order_relaxed);
+        return run;
+    }
+
+    void VerifyThreadFanOut(const ThreadWorkerRun& run, int nThreads) {
+        const std::set<std::thread::id> distinct(run.threadIds.begin(), run.threadIds.end());
+        if (static_cast<int>(distinct.size()) != nThreads) {
+            ADD_FAILURE() << "expected " << nThreads
+                          << " distinct worker threads, observed " << distinct.size()
+                          << " — thread fan-out did not happen";
+        }
+        // bodyGate holds every worker at the top of the body until all N have
+        // arrived, so the peak is deterministically N rather than merely ">= 2".
+        // Asserting the exact value also catches a regression in the gate itself
+        // (a gate that stopped blocking would still let two workers overlap by
+        // chance and satisfy a ">= 2" check).
+        if (nThreads > 1 && run.maxConcurrentWorkers != nThreads) {
+            ADD_FAILURE() << "expected " << nThreads
+                          << " workers concurrently inside the body, observed at most "
+                          << run.maxConcurrentWorkers
+                          << " — the start/body gate did not hold all workers";
+        }
+    }
+
+    bool SynchronizeThreadResults(const std::vector<ThreadResult>& results, const char* phase) {
+        int localFailed = 0;
+        for (const auto& result : results)
+            if (!result.ok) localFailed = 1;
+
+        int globalFailed = 0;
+        if (MPI_Allreduce(&localFailed, &globalFailed, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD) != MPI_SUCCESS) {
+            ADD_FAILURE() << phase << ": MPI_Allreduce failed";
+            return false;
+        }
+        if (!globalFailed) return true;
+
+        for (size_t threadIdx = 0; threadIdx < results.size(); ++threadIdx) {
+            if (!results[threadIdx].ok)
+                ADD_FAILURE() << phase << ", thread " << threadIdx << ": " << results[threadIdx].msg;
+        }
+        if (!localFailed)
+            ADD_FAILURE() << phase << " failed on a peer rank";
+        return false;
+    }
+
+    ncclResult_t InitNetIbCtx(void** ctxOut) {
+        ncclNetCommConfig_t commConfig = {};
+        commConfig.trafficClass = NCCL_NET_TRAFFIC_CLASS_UNDEF;
+        return net_->init(ctxOut, 0, &commConfig, nullptr, nullptr);
+    }
+
+    ncclResult_t CreateListenCommCtx(void* ctx, int dev, ncclNetHandle_t* handle, void** listenComm) {
+        return net_->listen(ctx, dev, handle, listenComm);
+    }
+
+    ncclResult_t ConnectToRemoteCtx(void* ctx, int dev, ncclNetHandle_t* handle, void** sendComm) {
+        return net_->connect(ctx, dev, handle, sendComm, nullptr);
+    }
+
+    // Runs on the main thread only. The listener-ready flag lets the connector
+    // stop cleanly when listen() failed rather than interpreting a zeroed
+    // handle and blocking indefinitely in connect().
+    ThreadResult SetupConnectionForThread(void* ctx, int dev, ConnectionPair& pair,
+                                          int rank, int peerRank, int mpiTag) {
+        ThreadResult result;
+        int listenerReady = 0;
+        if (rank == 0) {
+            if (CreateListenCommCtx(ctx, dev, &pair.handle, &pair.listenComm) == ncclSuccess) {
+                listenerReady = 1;
+            } else {
+                result.ok = false;
+                result.msg = "CreateListenComm failed";
+            }
+
+            MPI_Send(&listenerReady, 1, MPI_INT, peerRank, mpiTag, MPI_COMM_WORLD);
+            MPI_Send(&pair.handle, sizeof(ncclNetHandle_t), MPI_BYTE, peerRank, mpiTag + 1, MPI_COMM_WORLD);
+            if (listenerReady) {
+                for (int attempts = 0; pair.recvComm == nullptr; ++attempts) {
+                    if (AcceptConnection(pair.listenComm, &pair.recvComm) != ncclSuccess) {
+                        result.ok = false;
+                        result.msg = "AcceptConnection error";
+                        break;
+                    }
+                    if (pair.recvComm == nullptr) {
+                        if (attempts >= kMaxRetryAttempts) {
+                            result.ok = false;
+                            result.msg = "AcceptConnection timed out";
+                            break;
+                        }
+                        usleep(kPollIntervalUs);
+                    }
+                }
+            }
+        } else {
+            MPI_Recv(&listenerReady, 1, MPI_INT, peerRank, mpiTag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(&pair.handle, sizeof(ncclNetHandle_t), MPI_BYTE, peerRank, mpiTag + 1,
+                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            if (!listenerReady) {
+                result.ok = false;
+                result.msg = "peer CreateListenComm failed";
+            } else {
+                for (int attempts = 0; pair.sendComm == nullptr; ++attempts) {
+                    if (ConnectToRemoteCtx(ctx, dev, &pair.handle, &pair.sendComm) != ncclSuccess) {
+                        result.ok = false;
+                        result.msg = "ConnectToRemote error";
+                        break;
+                    }
+                    if (pair.sendComm == nullptr) {
+                        if (attempts >= kMaxRetryAttempts) {
+                            result.ok = false;
+                            result.msg = "ConnectToRemote timed out";
+                            break;
+                        }
+                        usleep(kPollIntervalUs);
+                    }
+                }
+            }
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+        return result;
+    }
+
+    void TeardownConnectionForThread(ThreadConnection& connection, int rank) {
+        if (rank == 0) {
+            if (connection.pair.recvComm) net_->closeRecv(connection.pair.recvComm);
+            if (connection.pair.listenComm) net_->closeListen(connection.pair.listenComm);
+        } else {
+            if (connection.pair.sendComm) net_->closeSend(connection.pair.sendComm);
+        }
+        if (connection.ctx) net_->finalize(connection.ctx);
+        connection = ThreadConnection{};
+    }
+
+    void TeardownThreadConnections(std::vector<ThreadConnection>& connections, int rank) {
+        for (auto& connection : connections) TeardownConnectionForThread(connection, rank);
+    }
+
+    // Mirrors the normal rccl-tests -t execution model: contexts and
+    // communicators are established by the main thread, then workers drive
+    // independent comms concurrently. MPI is used only between phases.
+    void RunMultiThreadedIndependent(int dev, int nThreads,
+                                     std::function<ThreadResult(int, ConnectionPair&)> body) {
+        const int rank     = MPIEnvironment::world_rank;
+        const int peerRank = (rank + 1) % 2;
+        std::vector<ThreadConnection> connections(nThreads);
+        std::vector<ThreadResult> initResults(nThreads);
+
+        for (int threadIdx = 0; threadIdx < nThreads; ++threadIdx) {
+            if (InitNetIbCtx(&connections[threadIdx].ctx) != ncclSuccess
+                || connections[threadIdx].ctx == nullptr) {
+                initResults[threadIdx].ok = false;
+                initResults[threadIdx].msg = "InitNetIb failed or returned a null context";
+            }
+        }
+        if (!SynchronizeThreadResults(initResults, "NetIB context initialization")) {
+            MPI_Barrier(MPI_COMM_WORLD);
+            TeardownThreadConnections(connections, rank);
+            MPI_Barrier(MPI_COMM_WORLD);
+            return;
+        }
+
+        std::vector<ThreadResult> setupResults(nThreads);
+        for (int threadIdx = 0; threadIdx < nThreads; ++threadIdx) {
+            setupResults[threadIdx] = SetupConnectionForThread(
+                connections[threadIdx].ctx, dev, connections[threadIdx].pair, rank, peerRank,
+                threadIdx * kThreadTagStride);
+        }
+        if (!SynchronizeThreadResults(setupResults, "NetIB connection setup")) {
+            MPI_Barrier(MPI_COMM_WORLD);
+            TeardownThreadConnections(connections, rank);
+            MPI_Barrier(MPI_COMM_WORLD);
+            return;
+        }
+
+        ThreadWorkerRun run = RunThreadWorkers(
+            nThreads, [&](int threadIdx) { return body(threadIdx, connections[threadIdx].pair); });
+        VerifyThreadFanOut(run, nThreads);
+        SynchronizeThreadResults(run.results, "NetIB threaded data path");
+
+        MPI_Barrier(MPI_COMM_WORLD);
+        TeardownThreadConnections(connections, rank);
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+    // ===============================================================
     // Stress test infrastructure
     // ===============================================================
 
@@ -786,15 +1130,6 @@ protected:
         return out;
     }
 
-    static int CountNonEmptyLines(const std::string& text) {
-        std::istringstream iss(text);
-        std::string line;
-        int count = 0;
-        while (std::getline(iss, line))
-            if (!line.empty()) count++;
-        return count;
-    }
-
     RdmaResourceCounts CaptureRdmaResources() {
         RdmaResourceCounts counts;
         std::string probe =
@@ -803,26 +1138,31 @@ protected:
                              "rdma resource show mr >/dev/null 2>&1 && "
                              "rdma resource show pd >/dev/null 2>&1 && echo OK'");
         if (probe.find("OK") == std::string::npos) return counts;
-        // Filter to objects owned by this PID so concurrent processes on shared
-        // nodes do not cause spurious leak reports.
-        // `rdma resource show` lines contain "pid <N>"; grep for our PID.
-        // If the output format doesn't include "pid", fall back to system-wide count.
+        // Count only objects owned by this PID, so concurrent processes on a
+        // shared node cannot perturb the before/after comparison.
+        //
+        // `rdma resource show` emits one line per object. Kernel-owned objects
+        // carry "comm [ib_core]" and no pid field at all; objects owned by a
+        // userspace process carry " pid <N> comm <name> ". A process holding no
+        // RDMA objects therefore matches zero lines, which is the correct answer
+        // (zero), not a signal that the filter failed.
+        //
+        // Deliberately no fall back to a system-wide count when nothing matches:
+        // that would make the two snapshots use different counting modes
+        // whenever the process acquires or releases its last object between
+        // them, turning a real leak into a nonsensical negative delta and an
+        // unrelated neighbour process into a spurious leak failure.
         const std::string pid = std::to_string(getpid());
         const std::string pidFilter = " pid " + pid + " ";
         auto countOwned = [&](const char* resource) -> int {
             std::string raw = ExecShellCommand(
                 (std::string("rdma resource show ") + resource + " 2>/dev/null").c_str());
-            // If any line contains our pid, count only those lines.
-            if (raw.find(pidFilter) != std::string::npos) {
-                std::istringstream iss(raw);
-                std::string line;
-                int n = 0;
-                while (std::getline(iss, line))
-                    if (!line.empty() && line.find(pidFilter) != std::string::npos) n++;
-                return n;
-            }
-            // PID not in output — fall back to system-wide count.
-            return CountNonEmptyLines(raw);
+            std::istringstream iss(raw);
+            std::string line;
+            int n = 0;
+            while (std::getline(iss, line))
+                if (!line.empty() && line.find(pidFilter) != std::string::npos) n++;
+            return n;
         };
         counts.qp = countOwned("qp");
         counts.cq = countOwned("cq");

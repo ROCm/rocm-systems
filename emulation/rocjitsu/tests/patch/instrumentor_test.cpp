@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "decode_test_util.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -892,7 +893,7 @@ TEST(InstrumentorPatch, PatchesEightByteAnchorEndToEnd) {
   auto decode_at = [&](uint64_t off) {
     std::array<rj_code_binary_inst_t, 2> w{};
     std::memcpy(w.data(), text->data() + off, w.size() * sizeof(rj_code_binary_inst_t));
-    return std::unique_ptr<Instruction>(decoder->decode(w.data()));
+    return std::unique_ptr<Instruction>(decode_valid(*decoder, w.data()));
   };
 
   // Patched anchor decodes as a forward s_branch.
@@ -1186,7 +1187,7 @@ protected:
   std::unique_ptr<Instruction> decode_word(const Section *section, size_t byte_offset) {
     rj_code_binary_inst_t word = 0;
     std::memcpy(&word, section->data() + byte_offset, sizeof(word));
-    return std::unique_ptr<Instruction>(decoder_->decode(&word));
+    return std::unique_ptr<Instruction>(decode_valid(*decoder_, &word));
   }
 
   // Byte size of the original .text before instrumentation. The trampoline cave

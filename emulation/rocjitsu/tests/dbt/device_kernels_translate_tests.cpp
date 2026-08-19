@@ -9,6 +9,7 @@
 #endif
 
 #include "../test_paths.h"
+#include "decode_test_util.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -188,24 +189,17 @@ TEST(BinaryTranslatorE2E, TranslateVectorAddCdna4ToCdna3) {
     const size_t words = sec->size() / sizeof(uint32_t);
     size_t pc = 0;
     while (pc < words) {
-      try {
-        std::unique_ptr<rocjitsu::Instruction> inst(decoder->decode(&data[pc]));
-        if (!inst) {
-          ++decode_failures;
-          ++pc;
-          continue;
-        }
-        const std::string_view mnemonic(inst->mnemonic());
-        if (mnemonic.starts_with("v_add_"))
-          has_vector_add = true;
-        pc += inst->size() / 4;
-        ++inst_count;
-      } catch (const std::exception &e) {
-        std::cerr << "  decode fail at 0x" << std::hex << pc * 4 << " word=0x" << data[pc] << ": "
-                  << e.what() << "\n";
+      std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, &data[pc]));
+      if (!inst) {
         ++decode_failures;
         ++pc;
+        continue;
       }
+      const std::string_view mnemonic(inst->mnemonic());
+      if (mnemonic.starts_with("v_add_"))
+        has_vector_add = true;
+      pc += inst->size() / 4;
+      ++inst_count;
     }
   }
   EXPECT_GT(inst_count, 0) << "Translated text section should contain instructions";
@@ -614,7 +608,7 @@ TEST(BinaryTranslatorE2E,
   ASSERT_LT(original_info->entry_text_offset, text->size());
 
   std::unique_ptr<rocjitsu::Instruction> original_entry(
-      decoder->decode(&words[original_info->entry_text_offset / sizeof(uint32_t)]));
+      decode_valid(*decoder, &words[original_info->entry_text_offset / sizeof(uint32_t)]));
   ASSERT_NE(original_entry, nullptr);
   EXPECT_NE(std::string_view(original_entry->mnemonic()), "s_branch")
       << "Original kernel entry should not be replaced by a prologue branch stub";
@@ -626,7 +620,7 @@ TEST(BinaryTranslatorE2E,
 
   const auto *redirected_words = reinterpret_cast<const uint32_t *>(text->data());
   std::unique_ptr<rocjitsu::Instruction> redirected_entry(
-      decoder->decode(&redirected_words[redirected_section_offset / sizeof(uint32_t)]));
+      decode_valid(*decoder, &redirected_words[redirected_section_offset / sizeof(uint32_t)]));
   ASSERT_NE(redirected_entry, nullptr);
   EXPECT_EQ(std::string_view(redirected_entry->mnemonic()), "s_mov_b32")
       << "Redirected kernel entry should begin with the descriptor ABI prologue";
@@ -726,7 +720,7 @@ TEST(BinaryTranslatorE2E, OutputDecodesAsValidRdna4) {
     size_t pc = 0;
     while (pc < words) {
       try {
-        std::unique_ptr<rocjitsu::Instruction> inst(decoder->decode(&data[pc]));
+        std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, &data[pc]));
         if (!inst) {
           ++decode_failures;
           ++pc;
@@ -768,7 +762,7 @@ TEST(BinaryTranslatorE2E, NoGfx9WaitcntInOutput) {
     size_t pc = 0;
     while (pc < words) {
       try {
-        std::unique_ptr<rocjitsu::Instruction> inst(decoder->decode(&data[pc]));
+        std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, &data[pc]));
         if (!inst) {
           ++pc;
           continue;
@@ -852,7 +846,7 @@ TEST(BinaryTranslatorE2E, DumpTranslation) {
     printf("\n--- %s (%zu bytes, %zu words) ---\n", label, size, words);
     while (pc < words) {
       try {
-        std::unique_ptr<rocjitsu::Instruction> inst(dec->decode(&data[pc]));
+        std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*dec, &data[pc]));
         if (!inst) {
           printf("  0x%04zx: ???\n", pc * 4);
           ++pc;
