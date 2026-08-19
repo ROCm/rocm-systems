@@ -306,6 +306,7 @@ if(BUILD_TESTS)
       RomeTopoConsensusTests.cpp
       EnqueueCountTests.cpp
       DdaCollCommonTests.cpp
+      CheapPostSendFenceTests.cpp
       VersionInfoTests.cpp
       device/TestOp128.cpp
       device/TestTDM.cpp
@@ -466,6 +467,7 @@ if(BUILD_TESTS)
       TopoEnvPolicyTests.cpp
       TopoNicFusionTests.cpp
       NetSocketTests.cpp
+      PluginCompatV10_test.cpp
       PluginCompatV11_test.cpp
       ProxyTests.cpp
       RcclWrapTests.cpp
@@ -508,9 +510,11 @@ if(BUILD_TESTS)
     target_compile_definitions(rccl-UnitTestsFixturesDebug PRIVATE
       RCCL_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
-    # PluginCompatV11_test.cpp resolves its in-process mock plugin symbols via
-    # dlsym(dlopen(NULL), ...), which only sees the executable's dynamic symbols.
+    # PluginCompatV10_test.cpp / PluginCompatV11_test.cpp resolve their in-process
+    # mock plugin symbols via dlsym(dlopen(NULL), ...), which only sees the
+    # executable's dynamic symbols.
     target_link_options(rccl-UnitTestsFixturesDebug PRIVATE
+      -Wl,--export-dynamic-symbol=ncclNetPlugin_v10
       -Wl,--export-dynamic-symbol=ncclNetPlugin_v11
       -Wl,--export-dynamic-symbol=ncclCollNetPlugin_v11)
   endif()
@@ -666,6 +670,7 @@ if(BUILD_TESTS)
       ce/CeInternalMPITests.cpp
       GrowMPITests.cpp
       GinNcclTimeoutMPITests.cpp
+      InspectorPromP2pMPITests.cpp
       SymmetricKernelMPITests.cpp
       SymmetricWindowMPITests.cpp
       DeviceApiMPITests.cpp
@@ -675,6 +680,14 @@ if(BUILD_TESTS)
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsMPI)
+
+    # Hand the in-tree Inspector plugin to InspectorPromP2pMPITests so it can
+    # load a profiler without the caller setting NCCL_INSPECTOR_PLUGIN_SO.
+    if(TARGET rccl-profiler-inspector)
+      add_dependencies(rccl-UnitTestsMPI rccl-profiler-inspector)
+      target_compile_definitions(rccl-UnitTestsMPI PRIVATE
+        RCCL_INSPECTOR_PLUGIN_SO="$<TARGET_FILE:rccl-profiler-inspector>")
+    endif()
   endif()
 
   foreach(test_executable IN LISTS RCCL_TEST_EXECUTABLES)

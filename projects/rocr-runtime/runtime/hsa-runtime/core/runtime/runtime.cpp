@@ -4109,6 +4109,19 @@ void Runtime::ReleaseMemoryHandle(Runtime::MemoryHandle* handle) {
   memory_handles.erase(MemoryHandle::Convert(handle));
 }
 
+Agent* Runtime::LowestDrmMinorGpu() {
+  auto drm_minor = [](const core::Agent* a) {
+    return static_cast<const AMD::GpuAgent*>(a)->properties().DrmRenderMinor;
+  };
+  core::Agent* selected = nullptr;
+  for (const auto* pool : {&gpu_agents_, &disabled_gpu_agents_}) {
+    for (auto* candidate : *pool) {
+      if (selected == nullptr || drm_minor(candidate) < drm_minor(selected)) selected = candidate;
+    }
+  }
+  return selected;
+}
+
 hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t size,
                                           MemoryRegion::AllocateFlags alloc_flags,
                                           uint64_t flags_unused,
@@ -4133,12 +4146,11 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
     core::Agent* agent_for_drm = agentOwner;
     core::Agent* drm_owner = nullptr;
     if (agentOwner->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-      const auto& gpus = core::Runtime::runtime_singleton_->gpu_agents();
-      if (gpus.empty()) {
+      agent_for_drm = core::Runtime::runtime_singleton_->LowestDrmMinorGpu();
+      if (agent_for_drm == nullptr) {
         region->Free(driver_handle);
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
       }
-      agent_for_drm = gpus.front();
       drm_owner = agent_for_drm;
     }
 
@@ -4345,9 +4357,9 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
     /* For imported handles, we don't have a region/owner, but we can use any GPU agent for mmap.
      * The driver_handle created during import should have the correct mmap_offset. */
     if (mappedHandle->mem_handle->imported) {
-      const auto& gpus = core::Runtime::runtime_singleton_->gpu_agents();
-      if (!gpus.empty()) {
-        agent = gpus.front();
+      core::Agent* drm_agent = core::Runtime::runtime_singleton_->LowestDrmMinorGpu();
+      if (drm_agent != nullptr) {
+        agent = drm_agent;
         agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
       }
     } else if (mappedHandle->mem_handle->region) {
