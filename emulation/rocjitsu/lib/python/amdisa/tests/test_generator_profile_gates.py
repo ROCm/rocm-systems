@@ -249,6 +249,18 @@ def _generated_constructor_body(cpp: str, class_name: str) -> str:
     return cpp[start:end]
 
 
+def _generated_bool_method_body(cpp: str, class_name: str, method: str) -> str:
+    start = cpp.index(f'bool {class_name}::{method}() const')
+    end = cpp.index('\n\n', start)
+    return cpp[start:end]
+
+
+def _generated_decode_body(cpp: str, class_name: str) -> str:
+    start = cpp.index(f'DecodeResult decode{class_name}(')
+    end = cpp.index('\n}\n} // namespace detail', start)
+    return cpp[start : end + 2]
+
+
 def _execution_source_path(path: Path, profile) -> Path:
     """Return the source containing execution bodies for a generated file."""
     if not profile.split_execution_sources:
@@ -406,14 +418,9 @@ def test_generated_scc_accesses_match_mrisa(isa_name, profile_type):
     }
     assert set(mrisa_scc_accesses) == active_keys
     mismatches = []
-    excluded = {
-        'S_ALLOC_VGPR',
-        'S_BARRIER_LEAVE',
-        'S_BARRIER_SIGNAL_ISFIRST',
-    }
     expected_exclusions = {
         'rdna4': {'S_ALLOC_VGPR', 'S_BARRIER_SIGNAL_ISFIRST'},
-        'gfx1250': excluded,
+        'gfx1250': {'S_ALLOC_VGPR'},
     }
     checked_exclusions = set()
     checked = 0
@@ -428,7 +435,7 @@ def test_generated_scc_accesses_match_mrisa(isa_name, profile_type):
 
             mrisa_reads_scc, mrisa_writes_scc = mrisa_scc_accesses[key]
             sem = semantics.instructions.get(inst.name)
-            if inst.name in excluded:
+            if inst.name in expected_exclusions.get(isa_name, set()):
                 assert (
                     mrisa_writes_scc
                 ), f'{isa_name}: stale SCC exclusion for {inst.name}'
@@ -1936,15 +1943,15 @@ def test_generated_pseudo_scalar_vop3_paths_ignore_exec_and_f16_opsel(
             'VSSqrtF16Vop3',
         ]
         for class_name in pseudo_scalar_constructors:
-            constructor = _generated_constructor_body(constructor_source, class_name)
-            assert '>= OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO' in constructor
-            assert 'has an invalid SReg_32_XEXEC destination' in constructor
-            assert 'may not use VCC as a destination' not in constructor
-            assert constructor.index(
+            decode_body = _generated_decode_body(constructor_source, class_name)
+            assert 'OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO' in decode_body
+            assert 'has an invalid SReg_32_XEXEC destination' in decode_body
+            assert 'may not use VCC as a destination' not in decode_body
+            assert decode_body.index(
                 'has an invalid SReg_32_XEXEC destination'
-            ) < constructor.index('does not support DPP')
-            assert '->opsel' not in constructor
-            assert 'vop3_opsel' not in constructor
+            ) < decode_body.index('does not support DPP')
+            assert '->opsel' not in decode_body
+            assert 'vop3_opsel' not in decode_body
         assert constructor_source.count(
             'has an invalid SReg_32_XEXEC destination'
         ) == len(pseudo_scalar_constructors)
@@ -2099,15 +2106,16 @@ def test_generated_literal32_widening_shapes_cover_gfx1250_and_cdna_vopc(
     assert 'src0 = Operand::make_literal32' in cdna_vopc_ctor
     assert 'Operand::Literal32Widening::SignExtend' in cdna_vopc_ctor
 
-    effective_32bit_ctors = (
+    scalar_mask_ctors = (
         _generated_constructor_body(gfx_vop3_data, 'VCndmaskB32Vop3'),
         _generated_constructor_body(gfx_vop3_data, 'VCndmaskB16Vop3'),
         _generated_constructor_body(gfx_vop3_alu, 'VAddCoCiU32Vop3SdstEnc'),
         _generated_constructor_body(gfx_vop3_alu, 'VSubCoCiU32Vop3SdstEnc'),
         _generated_constructor_body(gfx_vop3_alu, 'VSubrevCoCiU32Vop3SdstEnc'),
     )
-    for constructor in effective_32bit_ctors:
-        assert re.search(r'src2\s*=\s*Operand::make_literal32\(\s*32\s*,', constructor)
+    for constructor in scalar_mask_ctors:
+        assert 'src2 = Operand::make_literal32' not in constructor
+        assert 'src2 = Operand(32, OperandType::OPR_SIMM64' not in constructor
 
 
 def test_generated_rdna4_local_vop3_pack_paths_use_selected_halves(
@@ -2157,6 +2165,179 @@ def test_gfx1250_generated_vop3_auxiliary_masks_are_wave32(
         assert 'sdst(32, OperandType::OPR_SREG' in ctor
 
 
+def test_generated_operand_validates_scalar_register_selector_intervals(
+    amdgpu_generated_root: Path,
+):
+    for arch in ('rdna1', 'rdna2'):
+        operand = ''.join(
+            (amdgpu_generated_root / arch / 'operand.cpp').read_text().split()
+        )
+        assert (
+            'caseOperandType::OPR_SREG:'
+            'if(!((encoding_value>=0&&encoding_value<=123)||'
+            '(encoding_value>=125&&encoding_value<=125))' in operand
+        )
+        assert (
+            'defer_encoding_error(EncodingError::InvalidScalarRegisterSelector);'
+            in operand
+        )
+
+
+def test_generated_operand_validates_scalar_register_selector_variants(
+    gfx1250_generated_root: Path, rdna4_generated_root: Path
+):
+    gfx1250_operand = ''.join(
+        (gfx1250_generated_root / 'operand.cpp').read_text().split()
+    )
+    assert 'caseOperandType::OPR_SREG_M0:' in gfx1250_operand
+
+    rdna4_operand = ''.join((rdna4_generated_root / 'operand.cpp').read_text().split())
+    assert (
+        'caseOperandType::OPR_SREG_LITERAL:'
+        'if(!((encoding_value>=0&&encoding_value<=124)||'
+        '(encoding_value>=255&&encoding_value<=255))' in rdna4_operand
+    )
+
+
+def test_generated_operand_validates_scalar_selector_families(
+    amdgpu_generated_root: Path,
+):
+    operand = ''.join(
+        (amdgpu_generated_root / 'cdna1' / 'operand.cpp').read_text().split()
+    )
+
+    assert (
+        'caseOperandType::OPR_SDST:'
+        'if(!((encoding_value>=0&&encoding_value<=124)||'
+        '(encoding_value>=126&&encoding_value<=127))' in operand
+    )
+    assert (
+        'caseOperandType::OPR_SSRC_NOLIT:'
+        'if(!((encoding_value>=0&&encoding_value<=124)||'
+        '(encoding_value>=126&&encoding_value<=208)||'
+        '(encoding_value>=235&&encoding_value<=248)||'
+        '(encoding_value>=251&&encoding_value<=253))' in operand
+    )
+    assert 'defer_encoding_error(EncodingError::InvalidSelector);' in operand
+    assert (
+        'defer_encoding_error(EncodingError::InvalidScalarSourceSelector);' in operand
+    )
+
+
+def test_generated_operand_validates_barrier_id_selectors(
+    gfx1250_generated_root: Path, rdna4_generated_root: Path
+):
+    for root, negative_max in (
+        (gfx1250_generated_root, 196),
+        (rdna4_generated_root, 194),
+    ):
+        operand = ''.join((root / 'operand.cpp').read_text().split())
+        assert 'caseOperandType::OPR_SSRC_BARRIER_ID:' in operand
+        assert '(encoding_value>=125&&encoding_value<=125)' in operand
+        assert '(encoding_value>=128&&encoding_value<=159)' in operand
+        assert f'(encoding_value>=193&&encoding_value<={negative_max})' in operand
+
+        test_encodings = (root / 'test_encodings.h').read_text()
+        assert '"s_barrier_signal_isfirst", {0xBE804F80U' in test_encodings
+
+    gfx1250_test_encodings = (gfx1250_generated_root / 'test_encodings.h').read_text()
+    assert '"s_get_barrier_state", {0xBE805080U' in gfx1250_test_encodings
+
+
+def test_gfx1250_barrier_init_reads_member_count_from_implicit_m0(
+    gfx1250_generated_root: Path,
+):
+    sop1_exec = (gfx1250_generated_root / 'sop1_exec.cpp').read_text()
+    body = _generated_method_body(sop1_exec, 'SBarrierInitSop1', 'SBarrierJoinSop1')
+
+    assert 'read_scalar(ssrc0)' in body
+    assert 'uint32_t member_source = wf.m0();' in body
+    assert 'member_count = (member_source >> 16) & 0x7fu' in body
+
+
+def test_generated_operand_validates_direct_selector_namespaces(
+    amdgpu_generated_root: Path, gfx1250_generated_root: Path
+):
+    gfx1250_operand = ''.join(
+        (gfx1250_generated_root / 'operand.cpp').read_text().split()
+    )
+    assert 'caseOperandType::OPR_SRC:' in gfx1250_operand
+    assert '(encoding_value>=209&&encoding_value<=229)' not in gfx1250_operand
+    assert 'caseOperandType::OPR_SRC_VGPR_OR_INLINE:' in gfx1250_operand
+    assert '(encoding_value>=128&&encoding_value<=208)' in gfx1250_operand
+    assert '(encoding_value>=240&&encoding_value<=248)' in gfx1250_operand
+    assert '(encoding_value>=256&&encoding_value<=511)' in gfx1250_operand
+
+    cdna1_operand = ''.join(
+        (amdgpu_generated_root / 'cdna1' / 'operand.cpp').read_text().split()
+    )
+    assert (
+        'caseOperandType::OPR_SMEM_OFFSET:'
+        'if(!((encoding_value>=0&&encoding_value<=124))' in cdna1_operand
+    )
+
+
+def test_generated_restricted_operands_do_not_apply_literal_fixups(
+    gfx1250_generated_root: Path,
+):
+    vop3_data = (gfx1250_generated_root / 'vop3_data.cpp').read_text()
+    vop3p = (gfx1250_generated_root / 'vop3p.cpp').read_text()
+    sop1 = (gfx1250_generated_root / 'sop1.cpp').read_text()
+
+    readfirstlane = _generated_constructor_body(vop3_data, 'VReadfirstlaneB32Vop3')
+    readlane = _generated_constructor_body(vop3_data, 'VReadlaneB32Vop3')
+    wmma = _generated_constructor_body(vop3p, 'VWmmaF3216x16x128F8f6f4Vop3p')
+    generic_accumulator_wmma = _generated_constructor_body(
+        vop3p, 'VWmmaF3216x16x128Fp8Fp8Vop3p'
+    )
+    barrier = _generated_constructor_body(sop1, 'SBarrierSignalIsfirstSop1')
+
+    for body in (readfirstlane, readlane, wmma, barrier):
+        assert 'OperandType::OPR_SIMM32' not in body
+        assert 'OperandType::OPR_SIMM64' not in body
+    assert 'src0 == 255' not in readfirstlane
+    assert 'src0 == 254' not in readfirstlane
+    assert 'src0 == 255' not in readlane
+    assert 'src0 == 254' not in readlane
+    assert 'src1 == 255' not in readlane
+    assert 'src1 == 254' not in readlane
+    assert 'src2 == 255' not in wmma
+    assert 'src2 == 254' not in wmma
+    assert 'OperandType::OPR_SRC' in generic_accumulator_wmma
+    generic_accumulator_decode = _generated_decode_body(
+        vop3p, 'VWmmaF3216x16x128Fp8Fp8Vop3p'
+    )
+    assert 'has an invalid accumulator selector' in generic_accumulator_decode
+    assert 'src2 == 255' not in generic_accumulator_wmma
+    assert 'src2 == 254' not in generic_accumulator_wmma
+    assert 'OperandType::OPR_SIMM32' not in generic_accumulator_wmma
+    assert 'OperandType::OPR_SIMM64' not in generic_accumulator_wmma
+    assert 'ssrc0 == 255' not in barrier
+    assert 'ssrc0 == 254' not in barrier
+
+
+def test_gfx1250_generated_operand_validates_lane_selectors(
+    gfx1250_generated_root: Path,
+):
+    operand_types = (gfx1250_generated_root / 'operand_types.h').read_text()
+    operand = (gfx1250_generated_root / 'operand.cpp').read_text()
+
+    assert 'OPR_SSRC_LANESEL_POS_INT_MAX = 191' in operand_types
+    assert '#include "util/except.h"' not in operand
+    assert 'case OperandType::OPR_SSRC_LANESEL:' in operand
+    assert 'EncodingError::InvalidLaneSelector' in operand
+
+
+def test_gfx1250_generated_operand_rejects_invalid_exec_selector(
+    gfx1250_generated_root: Path,
+):
+    operand = (gfx1250_generated_root / 'operand.cpp').read_text()
+    assert '#include "util/except.h"' not in operand
+    assert 'case OperandType::OPR_EXEC:' in operand
+    assert '(encoding_value >= 126 && encoding_value <= 126)' in operand
+    assert 'EncodingError::InvalidExecSelector' in operand
+
+
 def test_gfx1250_generated_vop3_add_f16_applies_dpp(
     gfx1250_generated_root: Path,
 ):
@@ -2176,15 +2357,18 @@ def test_gfx1250_generated_vop3_add_f16_applies_dpp(
     assert 'std::array<uint32_t, 3> raw_words_{};' in vop3_base
 
     vop3_encoding_ctor = _generated_constructor_body(encodings_cpp, 'Vop3')
+    vop3_validation = vop3_base
     assert 'inst_.src0 == amdgpu::SRC_DPP' in vop3_encoding_ctor
     assert 'amdgpu::dpp::is_src_dpp8(inst_.src0)' in vop3_encoding_ctor
-    assert 'DPP and literal operands cannot be combined' in vop3_encoding_ctor
-    assert vop3_encoding_ctor.index('DPP and literal operands cannot be combined') < (
-        vop3_encoding_ctor.index('std::memcpy(raw_words_.data(), inst, size_);')
-    )
+    assert 'DPP and literal operands cannot be combined' in vop3_validation
     assert 'size_ += sizeof(MachineInst);' in vop3_encoding_ctor
     assert 'std::memcpy(raw_words_.data(), inst, size_);' in vop3_encoding_ctor
     assert 'raw_encoding_ = raw_words_.data();' in vop3_encoding_ctor
+
+    decode = _generated_decode_body(vop3_alu, 'VAddF16Vop3')
+    assert 'Result validation = Vop3::validate_encoding(' in decode
+    assert decode.index('validate_encoding(') < decode.index('validation.failed()')
+    assert decode.index('validation.failed()') < decode.index('std::make_unique')
 
     ctor = _generated_constructor_body(vop3_alu, 'VAddF16Vop3')
     assert 'Vop3VopDpp16MachineInst' in ctor
@@ -2198,6 +2382,18 @@ def test_gfx1250_generated_vop3_add_f16_applies_dpp(
     assert 'ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());' in body
     assert 'src0.set_delegate(' not in body
     assert 'src0.clear_delegate();' not in body
+
+
+def test_noop_format_validation_is_inherited(amdgpu_generated_root: Path):
+    encodings_h = (amdgpu_generated_root / 'rdna4' / 'encodings.h').read_text()
+
+    sopp_start = encodings_h.index('class Sopp ')
+    sopp = encodings_h[sopp_start : encodings_h.index('\n};', sopp_start)]
+    assert 'validate_encoding' not in sopp
+
+    vop3_start = encodings_h.index('class Vop3 ')
+    vop3 = encodings_h[vop3_start : encodings_h.index('\n};', vop3_start)]
+    assert 'validate_encoding' in vop3
 
 
 def test_generated_dpp8_disassembly_uses_encoding_state(
@@ -2239,12 +2435,14 @@ def test_gfx1250_generated_vop3_rejects_literal64_selectors(
     assert 'src0 == 254' in vop1_ctor
     assert 'OperandType::OPR_SIMM64' in vop1_ctor
 
+    vop3_decode = _generated_decode_body(vop3_alu, 'VSqrtF16Vop3')
+    assert 'LiteralSupport::Literal32, 1' in vop3_decode
     vop3_ctor = _generated_constructor_body(vop3_alu, 'VSqrtF16Vop3')
-    assert 'LiteralSupport::Literal32, 1' in vop3_ctor
     assert 'OperandType::OPR_SIMM64' not in vop3_ctor
 
+    vop3p_decode = _generated_decode_body(vop3p, 'VFmaMixF32Vop3p')
+    assert 'LiteralSupport::Literal32' in vop3p_decode
     vop3p_ctor = _generated_constructor_body(vop3p, 'VFmaMixF32Vop3p')
-    assert 'LiteralSupport::Literal32' in vop3p_ctor
     assert 'OperandType::OPR_SIMM64' not in vop3p_ctor
 
 
@@ -2255,15 +2453,21 @@ def test_gfx1250_generated_literal_validation(gfx1250_generated_root: Path):
     vopd = (gfx1250_generated_root / 'vopd.cpp').read_text()
 
     sop1_encoding_ctor = _generated_constructor_body(encodings, 'Sop1')
-    assert 'inst_.op != 76 && inst_.op != 77' in sop1_encoding_ctor
+    assert 'has_encoded_literal32()' in sop1_encoding_ctor
+    sop1_literal_helper = _generated_bool_method_body(
+        encodings, 'Sop1', 'has_encoded_literal32'
+    )
+    assert 'case 76:' not in sop1_literal_helper
+    assert 'case 77:' not in sop1_literal_helper
 
+    barrier_decode = _generated_decode_body(sop1, 'SBarrierSignalSop1')
+    assert 'LiteralSupport::None' in barrier_decode
     barrier_ctor = _generated_constructor_body(sop1, 'SBarrierSignalSop1')
-    assert 'LiteralSupport::None' in barrier_ctor
     assert 'OperandType::OPR_SIMM32' not in barrier_ctor
     assert 'OperandType::OPR_SIMM64' not in barrier_ctor
 
-    sop2_ctor = _generated_constructor_body(sop2, 'SAddCoU32Sop2')
-    assert 'may not mix 32-bit and 64-bit literals' in sop2_ctor
+    sop2_decode = _generated_decode_body(sop2, 'SAddCoU32Sop2')
+    assert 'may not mix 32-bit and 64-bit literals' in sop2_decode
     assert vopd.count('VOPD does not support 64-bit literals') == 1
     assert 'srcx0 == 254 || srcx0 == 255 || srcy0 == 254 || srcy0 == 255' in vopd
     assert 'VOPD3 does not support literal selectors' in vopd
@@ -2279,21 +2483,26 @@ def test_generated_sendmsg_return_selectors_are_not_literals(
     sop1 = (generated_root / 'sop1.cpp').read_text()
 
     sop1_encoding_ctor = _generated_constructor_body(encodings, 'Sop1')
-    assert 'inst_.op != 76 && inst_.op != 77' in sop1_encoding_ctor
+    assert 'has_encoded_literal32()' in sop1_encoding_ctor
+    sop1_literal_helper = _generated_bool_method_body(
+        encodings, 'Sop1', 'has_encoded_literal32'
+    )
+    assert 'case 76:' not in sop1_literal_helper
+    assert 'case 77:' not in sop1_literal_helper
 
     for class_name in ('SSendmsgRtnB32Sop1', 'SSendmsgRtnB64Sop1'):
         sendmsg_ctor = _generated_constructor_body(sop1, class_name)
         assert 'OperandType::OPR_SIMM32' not in sendmsg_ctor
         assert 'OperandType::OPR_SIMM64' not in sendmsg_ctor
         if arch == 'gfx1250':
-            assert 'LiteralSupport::None, 0' in sendmsg_ctor
+            sendmsg_decode = _generated_decode_body(sop1, class_name)
+            assert 'LiteralSupport::None, 0' in sendmsg_decode
 
 
 def test_gfx1250_compact_literal_policy_precedes_extension_sizing(
     gfx1250_generated_root: Path,
 ):
     encodings_h = (gfx1250_generated_root / 'encodings.h').read_text()
-    encodings_cpp = (gfx1250_generated_root / 'encodings.cpp').read_text()
     vop1 = (gfx1250_generated_root / 'vop1.cpp').read_text()
     vop2 = (gfx1250_generated_root / 'vop2.cpp').read_text()
 
@@ -2301,17 +2510,28 @@ def test_gfx1250_compact_literal_policy_precedes_extension_sizing(
     assert 'LiteralSupport::Both' in encodings_h
 
     for class_name in ('Vop1', 'Vop2', 'Vopc'):
-        body = _generated_constructor_body(encodings_cpp, class_name)
+        start = encodings_h.index(f'class {class_name} ')
+        body = encodings_h[start : encodings_h.index('\n};', start)]
         assert 'supports_literal(literal_support, LiteralSupport::Literal32)' in body
         assert 'supports_literal(literal_support, LiteralSupport::Literal64)' in body
-        assert body.index('supports_literal(') < body.index('if (has_lit64()')
+        assert 'static Result validate_encoding' in body
 
-    readfirstlane = _generated_constructor_body(vop1, 'VReadfirstlaneB32Vop1')
+    readfirstlane = _generated_decode_body(vop1, 'VReadfirstlaneB32Vop1')
     assert 'LiteralSupport::None' in readfirstlane
+    assert readfirstlane.index('validate_encoding(') < readfirstlane.index(
+        'validation.failed()'
+    )
+    assert readfirstlane.index('validation.failed()') < readfirstlane.index(
+        'std::make_unique'
+    )
 
-    fmamk_f64 = _generated_constructor_body(vop2, 'VFmamkF64Vop2')
+    fmamk_f64 = _generated_decode_body(vop2, 'VFmamkF64Vop2')
     assert 'LiteralSupport::Literal64' in fmamk_f64
-    fmamk_f32 = _generated_constructor_body(vop2, 'VFmamkF32Vop2')
+    assert fmamk_f64.index('validate_encoding(') < fmamk_f64.index(
+        'validation.failed()'
+    )
+    assert fmamk_f64.index('validation.failed()') < fmamk_f64.index('std::make_unique')
+    fmamk_f32 = _generated_decode_body(vop2, 'VFmamkF32Vop2')
     assert 'LiteralSupport::Literal32' in fmamk_f32
 
 
@@ -2332,6 +2552,8 @@ def test_generated_sdwa_uses_shared_source_staging(
             assert 'amdgpu::sdwa::stage_source(' in generated
             assert 'sdwa_src_select(' not in generated
             assert 'std::make_unique<DppOperand>' not in generated
+        encodings = (amdgpu_generated_root / arch / 'encodings.cpp').read_text()
+        assert '#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"' in encodings
     assert checked_sdwa_files > 0
 
 
@@ -2590,16 +2812,19 @@ def test_cdna4_generated_vop1_sdwa_availability_is_instruction_specific(
     amdgpu_generated_root: Path,
 ):
     vop1 = (amdgpu_generated_root / 'cdna4' / 'vop1.cpp').read_text()
+    encodings_h = (amdgpu_generated_root / 'cdna4' / 'encodings.h').read_text()
 
     supported = _generated_constructor_body(vop1, 'VMovB32Vop1')
-    unsupported = _generated_constructor_body(vop1, 'VCvtF64I32Vop1')
+    unsupported = _generated_decode_body(vop1, 'VCvtF64I32Vop1')
 
     assert 'reinterpret_cast<const Vop1VopSdwaMachineInst *>' in supported
+    assert 'sdwa_mnemonic' not in vop1
+    assert re.search(r'\? "v_floor_f32_sdwa"\s*: "v_floor_f32_e32"', vop1)
+    vop1_class = re.search(r'class Vop1\b.*?\n};', encodings_h, flags=re.DOTALL)
+    assert vop1_class is not None
+    assert 'owned_mnemonic_' not in vop1_class.group()
     assert 'V_MOV_B32 does not support SDWA' not in supported
-    assert (
-        'throw util::InvalidInst("V_CVT_F64_I32 does not support SDWA", "");'
-        in unsupported
-    )
+    assert 'emit_error.emit() << "V_CVT_F64_I32 does not support SDWA"' in unsupported
 
 
 def test_gfx1250_generated_vop1_dpp8_availability_is_instruction_specific(
@@ -2607,13 +2832,11 @@ def test_gfx1250_generated_vop1_dpp8_availability_is_instruction_specific(
 ):
     vop1 = (gfx1250_generated_root / 'vop1.cpp').read_text()
     constructor = _generated_constructor_body(vop1, 'VCvtF64I32Vop1')
+    decode_body = _generated_decode_body(vop1, 'VCvtF64I32Vop1')
 
     assert 'reinterpret_cast<const Vop1VopDpp16MachineInst *>' in constructor
     assert 'reinterpret_cast<const Vop1VopDpp8MachineInst *>' not in constructor
-    assert (
-        'throw util::InvalidInst("V_CVT_F64_I32 does not support DPP8", "");'
-        in constructor
-    )
+    assert 'emit_error.emit() << "V_CVT_F64_I32 does not support DPP8"' in decode_body
 
 
 def test_rdna4_generated_vop3_dpp_availability_is_instruction_specific(
@@ -2623,19 +2846,15 @@ def test_rdna4_generated_vop3_dpp_availability_is_instruction_specific(
     vop3p = (rdna4_generated_root / 'vop3p.cpp').read_text()
 
     supported = _generated_constructor_body(vop3, 'VAddF32Vop3')
-    unsupported_vop3 = _generated_constructor_body(vop3, 'VAddF64Vop3')
-    unsupported_vop3p = _generated_constructor_body(vop3p, 'VPkAddF16Vop3p')
+    unsupported_vop3 = _generated_decode_body(vop3, 'VAddF64Vop3')
+    unsupported_vop3p = _generated_decode_body(vop3p, 'VPkAddF16Vop3p')
 
     assert 'reinterpret_cast<const Vop3VopDpp16MachineInst *>' in supported
     assert 'reinterpret_cast<const Vop3VopDpp8MachineInst *>' in supported
     assert 'V_ADD_F32 does not support DPP' not in supported
+    assert 'emit_error.emit() << "V_ADD_F64 does not support DPP"' in unsupported_vop3
     assert (
-        'throw util::InvalidInst("V_ADD_F64 does not support DPP", "");'
-        in unsupported_vop3
-    )
-    assert (
-        'throw util::InvalidInst("V_PK_ADD_F16 does not support DPP", "");'
-        in unsupported_vop3p
+        'emit_error.emit() << "V_PK_ADD_F16 does not support DPP"' in unsupported_vop3p
     )
 
 
@@ -2662,18 +2881,15 @@ def test_gfx1250_packed_f32_execute_uses_local_simd_probe(
 def test_gfx1250_vop3p_rejects_unencoded_literal64_selectors(
     gfx1250_generated_root: Path,
 ):
-    encodings = (gfx1250_generated_root / 'encodings.cpp').read_text()
+    encodings_h = (gfx1250_generated_root / 'encodings.h').read_text()
     vop3p = (gfx1250_generated_root / 'vop3p.cpp').read_text()
-    ctor_start = encodings.index('Vop3p::Vop3p(')
-    ctor_end = encodings.index('void Vop3p::implicit_uses', ctor_start)
-    vop3p_ctor = encodings[ctor_start:ctor_end]
+    class_start = encodings_h.index('class Vop3p ')
+    validation = encodings_h[class_start : encodings_h.index('\n};', class_start)]
 
-    assert 'num_encoded_sources > 0 && inst_.src0 == 254' in vop3p_ctor
-    assert 'num_encoded_sources > 1 && inst_.src1 == 254' in vop3p_ctor
-    assert 'num_encoded_sources > 2 && inst_.src2 == 254' in vop3p_ctor
-    assert (
-        'throw util::InvalidInst("Vop3p does not support Literal64", "")' in vop3p_ctor
-    )
+    assert 'num_encoded_sources > 0 && inst_.src0 == 254' in validation
+    assert 'num_encoded_sources > 1 && inst_.src1 == 254' in validation
+    assert 'num_encoded_sources > 2 && inst_.src2 == 254' in validation
+    assert 'emit_error.emit() << "Vop3p does not support Literal64"' in validation
 
     for class_name in ('VPkAddF32Vop3p', 'VPkMulF32Vop3p', 'VPkFmaF32Vop3p'):
         body = _generated_constructor_body(vop3p, class_name)
@@ -2681,16 +2897,11 @@ def test_gfx1250_vop3p_rejects_unencoded_literal64_selectors(
         assert 'literal_word + 1' not in body
 
     for class_name in ('VPkAddF32Vop3p', 'VPkMulF32Vop3p'):
-        body = _generated_constructor_body(vop3p, class_name)
-        assert (
-            f'selected_exec_fn(InstructionExecutionId::{class_name}), '
-            'LiteralSupport::Literal32, 2)' in body
-        )
-    fma_body = _generated_constructor_body(vop3p, 'VPkFmaF32Vop3p')
-    assert (
-        'selected_exec_fn(InstructionExecutionId::VPkFmaF32Vop3p), '
-        'LiteralSupport::Literal32)' in fma_body
-    )
+        body = _generated_decode_body(vop3p, class_name)
+        assert 'LiteralSupport::Literal32,' in body
+        assert '2);' in body
+    fma_body = _generated_decode_body(vop3p, 'VPkFmaF32Vop3p')
+    assert 'LiteralSupport::Literal32);' in fma_body
 
 
 def test_split_execution_ids_name_and_match_callbacks(
@@ -2835,14 +3046,9 @@ def test_rdna1_2_generated_vopc_dpp_is_explicitly_unsupported(
         assert 'amdgpu::dpp::apply_dpp' not in vopc_exec, arch
         assert 'dpp_write_mask' not in vopc_exec, arch
 
-        ctor = _generated_constructor_body(vopc_model, 'VCmpEqU32Vopc')
-        assert (
-            'throw util::InvalidInst("V_CMP_EQ_U32 does not support DPP", "");' in ctor
-        ), arch
-        assert (
-            'amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)'
-            in ctor
-        ), arch
+        ctor = _generated_decode_body(vopc_model, 'VCmpEqU32Vopc')
+        assert 'emit_error.emit() << "V_CMP_EQ_U32 does not support DPP"' in ctor, arch
+        assert 'amdgpu::dpp::is_src_dpp8(' in ctor, arch
         assert 'reinterpret_cast<const Vop1VopDpp16MachineInst *>' not in ctor, arch
 
         body = _generated_method_body(vopc_exec, 'VCmpEqU32Vopc', 'VCmpLeU32Vopc')
@@ -3135,6 +3341,16 @@ def test_gfx1250_generated_fp8_vop3_byte_select_uses_local_inst_member(
     assert '((amdgpu::vop3_opsel(inst_) & 0x1u) << 1)' not in body
 
 
+def test_gfx1250_generated_operand_rejects_reserved_scalar_source_selectors(
+    gfx1250_generated_root: Path,
+):
+    operand = (gfx1250_generated_root / 'operand.cpp').read_text()
+
+    assert 'case OperandType::OPR_SSRC:' in operand
+    assert '(encoding_value >= 209 && encoding_value <= 229)' not in operand
+    assert 'EncodingError::InvalidScalarSourceSelector' in operand
+
+
 def test_generated_execute_shared_calls_have_definitions(
     amdgpu_root: Path, amdgpu_generated_root: Path
 ):
@@ -3186,7 +3402,6 @@ def test_gfx1250_helper_blocks_emit_scaled_wmma_table_decoder(
     assert (
         'reinterpret_cast<const OpEncoding *>(inst + 2), '
         'selected_exec_fn(InstructionExecutionId::VWmmaScaleF32Vop3px2), '
-        'LiteralSupport::Both, 3, '
         'Vop3p::ExtensionDecodePolicy::Skip),'
     ) in model_impl
 
@@ -3196,11 +3411,154 @@ def test_gfx1250_helper_blocks_emit_scaled_wmma_table_decoder(
 
     decoder = (gfx1250_generated_root / 'decoder.cpp').read_text()
     decode_body = decoder.split(
-        'std::unique_ptr<Instruction> Decoder::decode(const MachineInst *opcode) {'
-    )[1].split('std::unique_ptr<Instruction> Decoder::decodeInvalid', 1)[0]
+        'DecodeResult DecoderImpl::decode(const MachineInst *opcode, '
+        'const DecodeErrorEmitter &emit_error) {'
+    )[1].split('DecodeResult DecoderImpl::decodeInvalid', 1)[0]
     assert 'isWmmaScaleF32Vop3px2' not in decode_body
-    assert decoder.count('&Decoder::decodeVWmmaScaleF32Vop3px2,') == 2
+    assert decoder.count('&DecoderImpl::decodeVWmmaScaleF32Vop3px2,') == 2
     assert 'if (!isVop3pOp(opcode[2], 0x33)' in decoder
+
+
+def test_generated_decoders_publish_instruction_lookahead_bounds(
+    amdgpu_generated_root: Path,
+) -> None:
+    expected_bounds = {
+        'cdna1': 4,
+        'cdna2': 4,
+        'cdna3': 4,
+        'cdna4': 4,
+        'cdna5': 4,
+        'rdna1': 3,
+        'rdna2': 3,
+        'rdna3': 3,
+        'rdna3_5': 3,
+        'rdna4': 3,
+    }
+    emitted_bounds = {}
+    for decoder_path in amdgpu_generated_root.glob('*/decoder.h'):
+        match = re.search(r'kMaxInstructionWords\s*=\s*(\d+)', decoder_path.read_text())
+        assert match is not None, decoder_path
+        emitted_bounds[decoder_path.parent.name] = int(match.group(1))
+
+    assert emitted_bounds == expected_bounds
+
+
+@pytest.mark.parametrize(
+    ('arch_name', 'profile_type', 'expected_bound'),
+    [
+        ('cdna1', Cdna1Profile, 4),
+        ('cdna2', Cdna2Profile, 4),
+        ('cdna3', CdnaProfile, 4),
+        ('cdna4', CdnaProfile, 4),
+        ('gfx1250', Gfx1250Profile, 4),
+        ('rdna1', Rdna1Profile, 3),
+        ('rdna2', Rdna2Profile, 3),
+        ('rdna3', Rdna3Profile, 3),
+        ('rdna3_5', Rdna3_5Profile, 3),
+        ('rdna4', Rdna4Profile, 3),
+    ],
+)
+def test_instruction_lookahead_bound_is_derived_from_isa(
+    arch_name: str, profile_type, expected_bound: int
+) -> None:
+    isa_xml = _mrisa_dir() / f'amdgpu_isa_{arch_name}.xml'
+    if not isa_xml.is_file():
+        pytest.skip(f'{arch_name} semantics XML not available')
+    spec = Parser(str(isa_xml), profile_type()).parse()
+    generator = CodeGenerator(spec, '', derive_all_semantics(spec))
+    assert generator._max_instruction_word_count() == expected_bound
+
+
+def test_instruction_lookahead_derivation_covers_each_width_source() -> None:
+    def generator_for(
+        *,
+        bit_count: int = 32,
+        conditions=(),
+        implied_words=(),
+        size_overrides=None,
+        has_vopd: bool = False,
+        arch_name: str = 'synthetic',
+        scaled_wmma: bool = False,
+        owns_dpp_extension: bool = False,
+    ) -> CodeGenerator:
+        instruction = SimpleNamespace(
+            name='SYNTHETIC',
+            enc_name='SYNTHETIC_INST',
+            is_implied_literal_enc=False,
+        )
+        implied = dict(implied_words)
+        encoding = SimpleNamespace(
+            enc_name='SYNTHETIC_ENC',
+            bit_cnt=bit_count,
+            insts=[instruction],
+            enc_conds=list(conditions),
+            has_implied_literal_ops=bool(implied),
+            implied_literal_ops=implied,
+        )
+        profile = SimpleNamespace(
+            inst_size_overrides=size_overrides or {},
+            has_vopd=has_vopd,
+            generate_scaled_wmma_vop3px2=scaled_wmma,
+        )
+        generator = object.__new__(CodeGenerator)
+        generator.isa_spec = SimpleNamespace(
+            arch_name=arch_name,
+            profile=profile,
+            inst_encodings=[encoding],
+        )
+        generator._vop_dpp_struct_names = lambda _name: (
+            ('SyntheticDppMachineInst', None) if owns_dpp_extension else (None, None)
+        )
+        return generator
+
+    assert generator_for(bit_count=96)._max_instruction_word_count() == 3
+    assert generator_for(owns_dpp_extension=True)._max_instruction_word_count() == 2
+    assert (
+        generator_for(
+            conditions=(('default_encoding', 'inst.op == 0'),)
+        )._max_instruction_word_count()
+        == 2
+    )
+    assert (
+        generator_for(
+            conditions=(('has_literal', 'inst.src0 == 255'),)
+        )._max_instruction_word_count()
+        == 2
+    )
+    assert (
+        generator_for(conditions=(('has_lit64', 'true'),))._max_instruction_word_count()
+        == 3
+    )
+    assert generator_for(implied_words=((1, 3),))._max_instruction_word_count() == 4
+    assert (
+        generator_for(size_overrides={'SYNTHETIC': 20})._max_instruction_word_count()
+        == 5
+    )
+    assert generator_for(has_vopd=True)._max_instruction_word_count() == 3
+    assert generator_for(arch_name='cdna4')._max_instruction_word_count() == 4
+    assert (
+        generator_for(
+            arch_name='gfx1250', scaled_wmma=True
+        )._max_instruction_word_count()
+        == 4
+    )
+
+
+def test_cdna4_vop3px2_prefix_decoder_validates_suffix(cdna4_generated_root: Path):
+    decoder = (cdna4_generated_root / 'decoder.cpp').read_text()
+    decode_body = decoder.split(
+        'DecodeResult DecoderImpl::decode(const MachineInst *opcode, '
+        'const DecodeErrorEmitter &emit_error) {'
+    )[1].split('DecodeResult DecoderImpl::decodeInvalid', 1)[0]
+
+    assert 'isMfmaScaleF8f6f4Vop3px2' not in decode_body
+    assert 'suffix_encoding != encoding::kVop3pMfma' in decoder
+    assert 'kVMfmaF3216x16x128F8f6f4Vop3pMfma' in decoder
+    assert 'kVMfmaF3232x32x64F8f6f4Vop3pMfma' in decoder
+    assert 'return decodeInvalid(opcode, emit_error);' in decoder
+    assert 'VMfmaF3216x16x128F8f6f4Vop3pMfma>(opcode + 2, true)' in decoder
+    assert 'VMfmaF3232x32x64F8f6f4Vop3pMfma>(opcode + 2, true)' in decoder
+    assert '#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"' in decoder
 
 
 @pytest.mark.parametrize(
@@ -3220,27 +3578,55 @@ def test_vopd_dispatch_uses_primary_decode_table(
     arch_root = amdgpu_generated_root / _generated_dir_name(arch_name)
     decoder = (arch_root / 'decoder.cpp').read_text()
     decode_body = decoder.split(
-        'std::unique_ptr<Instruction> Decoder::decode(const MachineInst *opcode) {'
-    )[1].split('std::unique_ptr<Instruction> Decoder::decodeInvalid', 1)[0]
+        'DecodeResult DecoderImpl::decode(const MachineInst *opcode, '
+        'const DecodeErrorEmitter &emit_error) {'
+    )[1].split('DecodeResult DecoderImpl::decodeInvalid', 1)[0]
 
     assert 'Vopd::is_vopd' not in decode_body
-    primary_table = decoder.split('Decoder::primary_decode_table = {', 1)[1].split(
+    primary_table = decoder.split('DecoderImpl::primary_decode_table = {', 1)[1].split(
         '\n};', 1
     )[0]
-    primary_entries = [
-        line.strip().removesuffix(',')
-        for line in primary_table.splitlines()
-        if line.strip()
-    ]
+    primary_entries = re.findall(
+        r'&(?:DecoderImpl|detail)::[A-Za-z0-9_]+', primary_table
+    )
+    assert len(primary_entries) == 512
     actual_vopd_indices = {
         index
         for index, entry in enumerate(primary_entries)
-        if entry == '&Decoder::decodeVopd'
+        if entry == '&DecoderImpl::decodeVopd'
     }
     assert actual_vopd_indices == expected_vopd_indices
-    assert 'Decoder::decodeVopd(const MachineInst *opcode)' in decoder
+    assert re.search(
+        r'DecoderImpl::decodeVopd\(const MachineInst \*opcode,\s+'
+        r'const DecodeErrorEmitter &emit_error\)',
+        decoder,
+    )
+    assert 'Result validation = Vopd::validate_encoding(opcode, emit_error);' in decoder
     assert 'is_vopd' not in (arch_root / 'vopd.h').read_text()
     assert 'is_vopd' not in (arch_root / 'vopd.cpp').read_text()
+
+
+def test_decoder_header_keeps_dispatch_details_private(
+    amdgpu_generated_root: Path,
+):
+    for arch_name in (
+        'cdna1',
+        'cdna2',
+        'cdna3',
+        'cdna4',
+        'gfx1250',
+        'rdna1',
+        'rdna2',
+        'rdna3',
+        'rdna3_5',
+        'rdna4',
+    ):
+        arch_root = amdgpu_generated_root / _generated_dir_name(arch_name)
+        decoder_header = (arch_root / 'decoder.h').read_text()
+        assert 'DecodeFunc' not in decoder_header
+        assert 'decodeInvalid' not in decoder_header
+        assert 'primary_decode_table' not in decoder_header
+        assert decoder_header.count('static DecodeResult decode(') == 1
 
 
 def test_gfx1250_scaled_wmma_skips_vop3p_extension_decode(
@@ -3263,8 +3649,7 @@ def test_gfx1250_scaled_wmma_skips_vop3p_extension_decode(
     guarded_body, constructor_suffix = guarded_suffix.rsplit('\n  }\n}', 1)
     assert not constructor_suffix.strip()
     for extension_step in (
-        'throw util::InvalidInst("Vop3p does not support Literal64", "")',
-        'has_lit_0()',
+        'has_encoded_literal32()',
         'inst_.src0 == amdgpu::SRC_DPP',
         'amdgpu::dpp::is_src_dpp8(inst_.src0)',
         'std::memcpy(raw_words_.data(), inst, size_)',
@@ -3272,9 +3657,14 @@ def test_gfx1250_scaled_wmma_skips_vop3p_extension_decode(
     ):
         assert extension_step in guarded_body
 
+    validation_start = encodings_h.index('class Vop3p ')
+    validation = encodings_h[
+        validation_start : encodings_h.index('\n};', validation_start)
+    ]
+    assert 'emit_error.emit() << "Vop3p does not support Literal64"' in validation
+
     assert (
         'selected_exec_fn(InstructionExecutionId::VWmmaScaleF32Vop3px2), '
-        'LiteralSupport::Both, 3, '
         'Vop3p::ExtensionDecodePolicy::Skip)'
     ) in vop3p_cpp
 
@@ -3439,10 +3829,12 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     assert 'make_src0(y_bits, true, false, 0, srcy0)' in cpp
     assert 'make_src0(x_bits, false, has_literal_, literal_, srcx0)' in cpp
     assert 'make_src0(y_bits, false, has_literal_, literal_, srcy0)' in cpp
-    assert 'if (!is_valid_opcode(opx_, kVopdXOpcodeMask))' in cpp
-    assert 'if (!is_valid_opcode(opy_, kVopdYOpcodeMask))' in cpp
-    assert 'if (!is_valid_opcode(opx_, kVopd3XOpcodeMask))' in cpp
-    assert 'if (!is_valid_opcode(opy_, kVopd3YOpcodeMask))' in cpp
+    assert 'if (!is_valid_opcode(opx, kVopdXOpcodeMask))' in cpp
+    assert 'if (!is_valid_opcode(opy, kVopdYOpcodeMask))' in cpp
+    assert 'if (!is_valid_opcode(opx, kVopd3XOpcodeMask))' in cpp
+    assert 'if (!is_valid_opcode(opy, kVopd3YOpcodeMask))' in cpp
+    assert 'return emit_error.emit() << "invalid VOPD X opcode";' in cpp
+    assert 'throw util::InvalidInst' not in cpp
     assert 'if (vdstx < y_end && vdsty < x_end)' in cpp
     assert 'case 3:\n              case 7:' not in cpp
     assert 'if (lhs == 0.0f || rhs == 0.0f)' in exec_cpp
@@ -3734,6 +4126,88 @@ def test_gfx1250_cluster_load_generators_force_request_l1_bypass():
     assert 'd->request_force_l1_bypass = true;' not in global_async_body
 
 
+def test_gfx1250_async_lds_generators_apply_signed_ioffset():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='gfx1250',
+        profile=Gfx1250Profile(),
+    )
+
+    expected_load_address = (
+        'd->per_lane_lds_addr[lane] = '
+        'async_lds_lane_address(inst_, wf, lane_lds_addr, 4);'
+    )
+
+    global_async = SimpleNamespace(
+        name='GLOBAL_LOAD_ASYNC_TO_LDS_B32',
+        elem_size=4,
+        num_elems=1,
+    )
+    global_async_body = codegen._gen_global_load_async_to_lds([], [], global_async)
+    assert expected_load_address in global_async_body
+
+    cluster_async_cases = [
+        ('CLUSTER_LOAD_ASYNC_TO_LDS_B8', 1, 1),
+        ('CLUSTER_LOAD_ASYNC_TO_LDS_B32', 4, 1),
+        ('CLUSTER_LOAD_ASYNC_TO_LDS_B64', 4, 2),
+        ('CLUSTER_LOAD_ASYNC_TO_LDS_B128', 4, 4),
+    ]
+    for name, elem_size, num_elems in cluster_async_cases:
+        cluster_async = SimpleNamespace(
+            name=name,
+            elem_size=elem_size,
+            num_elems=num_elems,
+        )
+        cluster_async_body = codegen._gen_global_load_async_to_lds(
+            [], [], cluster_async
+        )
+        assert (
+            'd->per_lane_lds_addr[lane] = '
+            f'async_lds_lane_address(inst_, wf, lane_lds_addr, {elem_size * num_elems});'
+            in cluster_async_body
+        )
+
+    global_store_cases = [
+        ('GLOBAL_STORE_ASYNC_FROM_LDS_B8', 1, 1),
+        ('GLOBAL_STORE_ASYNC_FROM_LDS_B32', 4, 1),
+        ('GLOBAL_STORE_ASYNC_FROM_LDS_B64', 4, 2),
+        ('GLOBAL_STORE_ASYNC_FROM_LDS_B128', 4, 4),
+    ]
+    for name, elem_size, num_elems in global_store_cases:
+        global_store = SimpleNamespace(
+            name=name,
+            elem_size=elem_size,
+            num_elems=num_elems,
+        )
+        global_store_body = codegen._gen_global_store_async_from_lds(
+            [], [], global_store
+        )
+        assert (
+            'uint32_t lds_addr = '
+            f'async_lds_lane_address(inst_, wf, lane_lds_addr, {elem_size * num_elems});'
+            in global_store_body
+        )
+
+    addtid_lines = []
+    codegen._append_global_addtid_addresses(addtid_lines)
+    assert (
+        '    int64_t offset = static_cast<int64_t>(signed_ioffset(inst_.ioffset));'
+        in addtid_lines
+    )
+
+    rdna4_codegen = object.__new__(CodeGenerator)
+    rdna4_codegen.isa_spec = SimpleNamespace(
+        arch_name='gfx1201',
+        profile=Rdna4Profile(),
+    )
+    rdna4_addtid_lines = []
+    rdna4_codegen._append_global_addtid_addresses(rdna4_addtid_lines)
+    assert (
+        '    int64_t offset = static_cast<int64_t>('
+        'static_cast<int32_t>(inst_.ioffset << 8) >> 8);' in rdna4_addtid_lines
+    )
+
+
 def test_gfx1250_buffer_cmpswap_payload_width_is_independent_of_element_width():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
@@ -3811,6 +4285,56 @@ def test_ev124_125_arch_gating_in_generated_operand(
     assert 'if (ev == m0_ev)\n    return wf.m0();' in shared_resolve
 
 
+def test_generated_operands_validate_vgpr_source_selectors(
+    amdgpu_generated_root: Path,
+):
+    validation = (
+        'case OperandType::OPR_SRC_VGPR:\n'
+        '    if (!((encoding_value >= 256 && encoding_value <= 511)))\n'
+        '      defer_encoding_error(EncodingError::InvalidVgprSourceSelector);\n'
+        '    break;'
+    )
+    for arch in (
+        'cdna1',
+        'cdna2',
+        'cdna3',
+        'cdna4',
+        'cdna5',
+        'rdna1',
+        'rdna2',
+        'rdna3',
+        'rdna3_5',
+        'rdna4',
+    ):
+        operand = (amdgpu_generated_root / arch / 'operand.cpp').read_text()
+        assert validation in operand
+
+
+def test_generated_operand_validation_switch_is_shared_by_constructors(
+    amdgpu_generated_root: Path,
+):
+    literal16_constructor = (
+        'Operand::Operand(int size_bits, OperandType opr_type, int encoding_value,\n'
+        '                 uint16_t literal16_display_value, bool has_literal16_display)\n'
+        '    : Operand(size_bits, opr_type, encoding_value) {'
+    )
+    for arch in (
+        'cdna1',
+        'cdna2',
+        'cdna3',
+        'cdna4',
+        'cdna5',
+        'rdna1',
+        'rdna2',
+        'rdna3',
+        'rdna3_5',
+        'rdna4',
+    ):
+        operand = (amdgpu_generated_root / arch / 'operand.cpp').read_text()
+        assert operand.count('switch (opr_type) {') == 1
+        assert literal16_constructor in operand
+
+
 def test_cdna4_mfma_f8f6f4_accepts_standalone_and_prefixed_encodings(
     amdgpu_generated_root: Path,
 ):
@@ -3819,7 +4343,8 @@ def test_cdna4_mfma_f8f6f4_accepts_standalone_and_prefixed_encodings(
     source = (amdgpu_generated_root / 'cdna4' / 'vop3p.cpp').read_text()
 
     assert 'VMfmaF3216x16x128F8f6f4Vop3pMfma>(opcode + 2, true)' in decoder
-    assert 'Decoder::decodeVMfmaF3216x16x128F8f6f4Vop3pMfma' in decoder
+    assert 'decodeVMfmaF3216x16x128F8f6f4Vop3pMfma(const MachineInst *opcode,' in source
+    assert 'decodeVMfmaF3216x16x128F8f6f4Vop3pMfma' in decoder
     assert 'bool has_vop3px2_prefix = false' in header
     assert 'if (has_vop3px2_prefix)' in source
     assert 'cdna4_matrix_fmt_element_bits' in source

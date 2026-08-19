@@ -9,6 +9,8 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/register_set.h"
+#include "rocjitsu/result.h"
+#include "util/diagnostic.h"
 
 #include <cassert>
 #include <cstdint>
@@ -85,6 +87,14 @@ public:
   Operand(int size_bits, int encoding_value)
       : size_bits_(size_bits), encoding_value_(encoding_value) {}
   virtual ~Operand() = default;
+
+  /// Validate encoding constraints deferred until the complete instruction is
+  /// decoded. Literal sentinels may replace their provisional operands first.
+  Result validate_encoding(const util::DiagnosticEmitter &emit_error = {}) const {
+    if (encoding_error_ == EncodingError::None) [[likely]]
+      return Result::success();
+    return emit_encoding_error(emit_error);
+  }
 
   /// @brief Human-readable name for this operand (e.g. "v0", "s4", or a literal).
   virtual std::string name() const { return std::to_string(encoding_value_); }
@@ -191,6 +201,8 @@ public:
   }
 
 private:
+  Result emit_encoding_error(const util::DiagnosticEmitter &emit_error) const;
+
   // Value access is intentionally private. Instruction implementations use
   // RegisterAccess; Operand remains the ISA-specific resolver/backend.
 
@@ -300,6 +312,18 @@ public:
   amdgpu::VgprMsbRole vgpr_msb_role_ = amdgpu::VgprMsbRole::None;
 
 protected:
+  enum class EncodingError : uint8_t {
+    None,
+    InvalidSelector,
+    InvalidScalarRegisterSelector,
+    InvalidLaneSelector,
+    InvalidExecSelector,
+    InvalidVgprSourceSelector,
+    InvalidScalarSourceSelector,
+  };
+
+  void defer_encoding_error(EncodingError error) { encoding_error_ = error; }
+
   /// @brief Capability/role flags, set once at construction and never
   /// mutated afterward. Subclass constructors set is_vgpr_; fieldless
   /// operands get their (reads_value, writable, is_vgpr) triple from
@@ -314,6 +338,7 @@ protected:
   bool reads_value_ = true;
   bool writable_ = true;
   bool fieldless_ = false;
+  EncodingError encoding_error_ = EncodingError::None;
 
 private:
   // Private SIMD fast-path backend for RegisterAccess.
