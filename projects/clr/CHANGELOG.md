@@ -2,6 +2,13 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
+## HIP 10.2.0 for ROCm 10.2.0
+
+### Added
+* New HIP APIs
+    - Module Management: support for API parity with corresponding CUDA API.
+      * `hipModuleEnumerateFunctions` returns the function handles defined in a loaded module.
+
 ## HIP 10.1.0 for ROCm 10.1.0
 
 ### Added

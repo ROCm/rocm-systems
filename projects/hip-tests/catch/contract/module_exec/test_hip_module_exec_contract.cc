@@ -9,6 +9,7 @@
 #include <hip_test_common.hh>
 #include <contract_cleanup.hh>
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -139,6 +140,76 @@ HIP_TEST_CASE(Contract_ModuleExec_HipModuleGetFunctionCount_NullCount_IsRejected
   // succeed. The exact error code is backend-specific, so only a non-success
   // status is required.
   const hipError_t status = hipModuleGetFunctionCount(nullptr, module);
+  REQUIRE(status != hipSuccess);
+}
+
+// @asserts: hipModuleEnumerateFunctions - enumerating with a max of zero writes nothing into the caller buffer
+HIP_TEST_CASE(Contract_ModuleExec_HipModuleEnumerateFunctions_ZeroMax_LeavesBufferUntouched) {
+  hip::contract::ContractCleanup cleanup;
+  hipModule_t module = nullptr;
+  LoadContractModule(module);
+  cleanup.Add([module] { (void)hipModuleUnload(module); });
+
+  // Enumerating with a maximum of zero must not write into the caller's buffer.
+  // A sentinel guard slot is used to detect an out-of-contract write.
+  hipFunction_t guard = reinterpret_cast<hipFunction_t>(static_cast<uintptr_t>(0xDEADBEEF));
+  hipFunction_t buffer[1] = {guard};
+  HIP_CHECK(hipModuleEnumerateFunctions(buffer, 0, module));
+  REQUIRE(buffer[0] == guard);
+}
+
+// @asserts: hipModuleEnumerateFunctions - every enumerated function handle is non-null and includes the known module symbol
+HIP_TEST_CASE(Contract_ModuleExec_HipModuleEnumerateFunctions_Default_IncludesKnownSymbol) {
+  hip::contract::ContractCleanup cleanup;
+  hipModule_t module = nullptr;
+  LoadContractModule(module);
+  cleanup.Add([module] { (void)hipModuleUnload(module); });
+
+  unsigned int count = 0;
+  HIP_CHECK(hipModuleGetFunctionCount(&count, module));
+  REQUIRE(count >= 1);
+
+  hipFunction_t by_name = nullptr;
+  ResolveWriteValue(module, by_name);
+
+  // Every enumerated function handle must be non-null, and the set must include
+  // the handle returned by hipModuleGetFunction for a known symbol.
+  std::vector<hipFunction_t> functions(count, nullptr);
+  HIP_CHECK(hipModuleEnumerateFunctions(functions.data(), count, module));
+  bool found = false;
+  for (unsigned int i = 0; i < count; ++i) {
+    REQUIRE(functions[i] != nullptr);
+    int max_threads = 0;
+    HIP_CHECK(hipFuncGetAttribute(&max_threads, HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK,
+                                  functions[i]));
+    REQUIRE(max_threads > 0);
+    if (functions[i] == by_name) {
+      found = true;
+    }
+  }
+  REQUIRE(found);
+}
+
+// @asserts: hipModuleEnumerateFunctions - a null functions out-pointer is rejected with a non-success status
+HIP_TEST_CASE(Contract_ModuleExec_HipModuleEnumerateFunctions_NullFunctions_IsRejected) {
+  hip::contract::ContractCleanup cleanup;
+  hipModule_t module = nullptr;
+  LoadContractModule(module);
+  cleanup.Add([module] { (void)hipModuleUnload(module); });
+
+  // Enumerating into a null out buffer must not silently succeed. The exact error
+  // code is backend-specific, so only a non-success status is required.
+  const hipError_t status = hipModuleEnumerateFunctions(nullptr, 1, module);
+  REQUIRE(status != hipSuccess);
+}
+
+// @asserts: hipModuleEnumerateFunctions - a null module handle is rejected with a non-success status
+HIP_TEST_CASE(Contract_ModuleExec_HipModuleEnumerateFunctions_NullModule_IsRejected) {
+  hipFunction_t function = nullptr;
+
+  // Enumerating functions from a null module must not silently succeed. The exact
+  // error code is backend-specific, so only a non-success status is required.
+  const hipError_t status = hipModuleEnumerateFunctions(&function, 1, nullptr);
   REQUIRE(status != hipSuccess);
 }
 

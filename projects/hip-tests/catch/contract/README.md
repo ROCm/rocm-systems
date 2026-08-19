@@ -119,7 +119,7 @@ The first domains are:
 - `module`: HIPRTC-backed module load, function, global, launch, and function-attribute contracts
 - `module_load_ex`: HIPRTC-backed module load-data-with-options contracts
 - `module_load_file`: module load-from-file and fat-binary invalid-input contracts
-- `module_exec`: HIPRTC-backed module function-count, occupancy, and cooperative launch contracts
+- `module_exec`: HIPRTC-backed module function-count, enumeration, occupancy, and cooperative launch contracts
 - `jit_link`: AMD-gated JIT linker lifecycle and invalid-input contracts
 - `library`: AMD-gated HIPRTC-backed library load, kernel, global, and kernel-object contracts
 - `kernel_object_attributes`: AMD-gated HIPRTC-backed hipKernel_t attribute and parameter-info contracts

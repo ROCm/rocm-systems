@@ -110,6 +110,7 @@ class DynCO : public CodeObject {
   // Gets GlobalVar/Functions from a dynamically loaded code object
   hipError_t getDynFunc(hipFunction_t* hfunc, const std::string& func_name);
   hipError_t getFuncCount(unsigned int* count);
+  hipError_t enumerateFunctions(hipFunction_t* functions, unsigned int numFunctions);
   bool isValidDynFunc(const void* hfunc);
   hipError_t GetDeviceVar(amd::Memory** mem, const std::string& var_name);
   hip::Var* getVar(const std::string& var_name);
