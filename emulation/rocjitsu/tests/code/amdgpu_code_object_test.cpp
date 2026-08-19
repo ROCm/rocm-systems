@@ -1025,6 +1025,29 @@ TEST(AmdGpuCodeObjectAccounting, MovedPatcherMeasuresDestinationImage) {
             moved.image_bytes().size());
 }
 
+TEST(AmdGpuCodeObjectPatcher, MovedPatcherRetainsSelectedTextSectionForReplacement) {
+  const auto image = make_elf_with_kds({{"kernel", 0}});
+  AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+
+  CodeObjectPatcher patcher(object);
+  std::vector<uint8_t> replacement(patcher.text_bytes().begin(), patcher.text_bytes().end());
+  ASSERT_FALSE(replacement.empty());
+  replacement.front() ^= 1u;
+
+  CodeObjectPatcher moved(std::move(patcher));
+  ASSERT_TRUE(moved.replace_text(replacement));
+  EXPECT_TRUE(std::ranges::equal(moved.text_bytes(), replacement));
+
+  AmdGpuCodeObject replaced(moved.image_bytes().data(), moved.image_bytes().size());
+  ASSERT_TRUE(replaced.is_valid());
+  ASSERT_EQ(replaced.text_sections().size(), 1u);
+  const Section *text = replaced.text_sections().front();
+  const std::span<const uint8_t> replaced_text(reinterpret_cast<const uint8_t *>(text->data()),
+                                               text->size());
+  EXPECT_TRUE(std::ranges::equal(replaced_text, replacement));
+}
+
 TEST(AmdGpuCodeObjectAccounting, SectionClassificationCrossesWordBoundaries) {
   std::array<uint64_t, 2> words{};
   for (const uint64_t index : {1u, 63u, 64u, 70u})
@@ -1489,8 +1512,11 @@ TEST(AmdGpuCodeObjectValidation, RejectsAggregateSectionNameAmplificationBeforeA
   sections[0].sh_type = SHT_STRTAB;
   sections[0].sh_offset = kStringTableOffset;
   sections[0].sh_size = kImageBytes - kStringTableOffset;
-  for (Elf64_Shdr &section : sections)
+  for (Elf64_Shdr &section : sections) {
     section.sh_name = 1;
+    section.sh_type = SHT_PROGBITS;
+  }
+  sections[0].sh_type = SHT_STRTAB;
   std::memcpy(image.data() + kSectionTableOffset, sections.data(), sizeof(sections));
 
   AmdGpuCodeObject obj(image.data(), image.size());
@@ -1976,6 +2002,8 @@ TEST(AmdGpuCodeObjectSections, ContinuesToSkipOrdinaryNobits) {
   AmdGpuCodeObject obj(image.data(), image.size());
   ASSERT_TRUE(obj.is_valid());
   ASSERT_EQ(obj.text_sections().size(), 1u);
+  ASSERT_EQ(obj.allocated_executable_sections().size(), 1u);
+  EXPECT_EQ(obj.allocated_executable_sections().front(), obj.text_sections().front());
   EXPECT_TRUE(obj.rodata_sections().empty());
   EXPECT_TRUE(std::ranges::none_of(obj.all_sections(), [](const auto &section) {
     return section != nullptr && section->name() == ".rodata";

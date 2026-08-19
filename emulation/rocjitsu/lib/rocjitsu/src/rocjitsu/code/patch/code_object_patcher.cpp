@@ -1188,9 +1188,9 @@ CodeObjectPatcher::CodeObjectPatcher(const AmdGpuCodeObject &obj)
 }
 
 CodeObjectPatcher::CodeObjectPatcher(CodeObjectPatcher &&other) noexcept
-    : image_(std::move(other.image_)), text_offset_(other.text_offset_),
-      text_size_(other.text_size_), text_vaddr_(other.text_vaddr_),
-      text_tail_size_(other.text_tail_size_) {
+    : image_(std::move(other.image_)), text_section_index_(other.text_section_index_),
+      text_offset_(other.text_offset_), text_size_(other.text_size_),
+      text_vaddr_(other.text_vaddr_), text_tail_size_(other.text_tail_size_) {
   major_image_ownership::transfer_owner(&other, this, &image_);
 }
 
@@ -1488,7 +1488,8 @@ TextReplacementResult CodeObjectPatcher::replace_text_impl(std::span<const uint8
   const major_image_ownership::ScopedOwner transaction_owner(
       major_image_ownership::OwnerKind::TransactionImage, image);
 
-  const auto text_index = find_text_section(shdrs, text_offset_, text_size_);
+  const auto text_index =
+      validated_text_section(shdrs, text_section_index_, text_offset_, text_size_);
   if (!text_index) {
     assert(false && "text section header not found");
     return malformed();
@@ -1638,13 +1639,12 @@ TextReplacementResult CodeObjectPatcher::replace_text_impl(std::span<const uint8
   return TextReplacementResult::success(required_file_growth.value_or(0));
 }
 
-bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
-                                     std::span<const TextOffsetRelocation> text_relocations,
-                                     std::span<const PcRelativeDataRelocation> data_relocations,
-                                     std::span<const PcRelativeTextRelocation> code_relocations,
-                                     bool require_every_text_symbol_mapped,
-                                     const std::unordered_map<uint64_t, uint64_t>
-                                         *canonical_code_pointer_placement) {
+bool CodeObjectPatcher::replace_text(
+    std::span<const uint8_t> new_text, std::span<const TextOffsetRelocation> text_relocations,
+    std::span<const PcRelativeDataRelocation> data_relocations,
+    std::span<const PcRelativeTextRelocation> code_relocations,
+    bool require_every_text_symbol_mapped,
+    const std::unordered_map<uint64_t, uint64_t> *canonical_code_pointer_placement) {
   // Keep fail-closed behavior for callers that assume word-aligned executable
   // sections; accepting a non-word-aligned replacement can break downstream
   // PC-relative patching and branch-distance checks.

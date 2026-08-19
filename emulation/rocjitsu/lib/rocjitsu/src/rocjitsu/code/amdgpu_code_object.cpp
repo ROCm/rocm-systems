@@ -49,19 +49,25 @@ private:
 class HsaSection : public Section {
 public:
   HsaSection(std::string name, const char *data, const Elf64_Shdr &shdr, size_t section_index)
-      : Section(std::move(name)), data_(data), shdr_(shdr), section_index_(section_index) {}
+      : Section(std::move(name)), data_(data), size_(shdr.sh_size), flags_(shdr.sh_flags),
+        vaddr_(shdr.sh_addr), offset_(shdr.sh_offset), name_index_(shdr.sh_name),
+        section_index_(section_index) {}
 
-  std::size_t size() const override { return shdr_.sh_size; }
-  uint64_t flags() const override { return shdr_.sh_flags; }
-  uint64_t vaddr() const override { return shdr_.sh_addr; }
+  std::size_t size() const override { return size_; }
+  uint64_t flags() const override { return flags_; }
+  uint64_t vaddr() const override { return vaddr_; }
   const char *data() const override { return data_; }
-  uint32_t sectionHeaderNameIdx() const override { return shdr_.sh_name; }
+  uint32_t sectionHeaderNameIdx() const override { return name_index_; }
   std::optional<size_t> sectionHeaderIndex() const override { return section_index_; }
-  uint64_t sectionOffset() const override { return shdr_.sh_offset; }
+  uint64_t sectionOffset() const override { return offset_; }
 
 private:
   const char *data_ = nullptr;
-  Elf64_Shdr shdr_;
+  uint64_t size_ = 0;
+  uint64_t flags_ = 0;
+  uint64_t vaddr_ = 0;
+  uint64_t offset_ = 0;
+  uint32_t name_index_ = 0;
   size_t section_index_;
 };
 
@@ -524,14 +530,16 @@ void AmdGpuCodeObject::load_sections() {
     // metadata above so the translator's sole-PROGBITS-.text gate rejects the
     // layout, but keep all_sections() restricted to readable section data.
     if (shdr.sh_type == SHT_NOBITS) {
-      executable_nobits_sections_.emplace_back(
-          std::make_unique<HsaSection>(std::string(sec_name), nullptr, shdr, i));
-      allocated_executable_sections_.push_back(executable_nobits_sections_.back().get());
+      if (allocated_executable) {
+        executable_nobits_sections_.emplace_back(
+            std::make_unique<HsaSection>(std::string(sec_name), nullptr, shdr, i));
+        allocated_executable_sections_.push_back(executable_nobits_sections_.back().get());
+      }
       continue;
     }
 
-    sections_.emplace_back(
-        std::make_unique<HsaSection>(std::string(sec_name), image_.data() + shdr.sh_offset, shdr, i));
+    sections_.emplace_back(std::make_unique<HsaSection>(std::string(sec_name),
+                                                        image_.data() + shdr.sh_offset, shdr, i));
 
     if (allocated_executable)
       allocated_executable_sections_.push_back(sections_.back().get());
