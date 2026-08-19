@@ -306,6 +306,24 @@ hrr:
     <<: *level_2
     tags: [direct, stream]
     disabled: [amd_windows]
+  Unit_HRR_MemsetD2D_Direct:
+    <<: *level_2
+    tags: [direct, memset]
+  Unit_HRR_MemsetD2DPitchAlloc_Direct:
+    <<: *level_2
+    tags: [direct, memset]
+  Unit_HRR_MemsetD2DRoundtrip:
+    <<: *level_2
+    tags: [capture, memset, playback, roundtrip]
+  Unit_HRR_MemsetD2DPitchAllocRoundtrip:
+    <<: *level_2
+    tags: [capture, memset, playback, roundtrip]
+  Unit_HRR_MemsetSpt_Direct:
+    <<: *level_2
+    tags: [direct, memset]
+  Unit_HRR_MemsetSptRoundtrip:
+    <<: *level_2
+    tags: [capture, memset, playback, roundtrip]
   Unit_HRR_MemsetVariants_Direct:
     <<: *level_2
     tags: [direct, memset]

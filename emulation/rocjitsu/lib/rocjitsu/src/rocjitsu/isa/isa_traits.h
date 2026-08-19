@@ -36,8 +36,10 @@ template <rj_code_arch_t Arch> struct IsaTrait;
 /// templates depend on:
 ///   - `WF_SIZE`               — lanes per wavefront.
 ///   - `WF_SIZE_MAX`           — largest supported wavefront size.
+///   - `MAX_WF_SLOTS`          — maximum simulated wavefront slots per CU.
 ///   - `MAX_SGPRS_PER_WF`      — maximum scalar GPRs.
 ///   - `MAX_VGPRS_PER_WF`      — maximum vector GPRs.
+///   - `MAX_ADDRESSABLE_VGPRS_PER_WF` — maximum ordinary VGPR address span.
 ///   - `MAX_ACC_VGPRS_PER_WF`  — maximum accumulator VGPRs (0 if absent).
 ///   - `WAITCNT_LGKMCNT_MASK`  — lgkmcnt field mask in S_WAITCNT (0 if no
 ///                               monolithic S_WAITCNT — RDNA4 only).
@@ -49,8 +51,10 @@ template <typename Isa>
 concept GpuIsa = requires {
   { Isa::WF_SIZE } -> std::convertible_to<uint32_t>;
   { Isa::WF_SIZE_MAX } -> std::convertible_to<uint32_t>;
+  { Isa::MAX_WF_SLOTS } -> std::convertible_to<uint32_t>;
   { Isa::MAX_SGPRS_PER_WF } -> std::convertible_to<uint32_t>;
   { Isa::MAX_VGPRS_PER_WF } -> std::convertible_to<uint32_t>;
+  { Isa::MAX_ADDRESSABLE_VGPRS_PER_WF } -> std::convertible_to<uint32_t>;
   { Isa::MAX_ACC_VGPRS_PER_WF } -> std::convertible_to<uint32_t>;
   { Isa::WAITCNT_LGKMCNT_MASK } -> std::convertible_to<uint32_t>;
   { Isa::MODE_HAS_GPR_IDX_EN } -> std::convertible_to<bool>;
@@ -93,6 +97,29 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
   return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
          arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
          arch == ROCJITSU_CODE_ARCH_RDNA4;
+}
+
+/// @brief Return true when scalar selectors 102 and 103 name FLAT_SCRATCH.
+///
+/// @details GFX10+ makes those selectors ordinary SGPRs. Keep both the legacy
+/// and modern architecture sets explicit so an unclassified future target does
+/// not silently inherit the legacy register alias.
+[[nodiscard]] inline constexpr bool arch_uses_legacy_flat_scratch_sgprs(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return true;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
+  default:
+    return false;
+  }
 }
 
 /// @brief Maximum SGPR allocation encodable in an AMDHSA descriptor for @p arch.

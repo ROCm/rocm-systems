@@ -31,10 +31,22 @@ namespace {
 /// rules. Prefix-classified WMMA/SWMMAC and cluster-load instructions are
 /// handled separately by family-level translation rules.
 ///
-/// Separately, a 64-bit source reading FLAT_SCRATCH_BASE is classified via
-/// operand inspection (see gfx1250_reads_flat_scratch_base_64bit), and the
-/// barrier-state query and s_monitor_sleep are DEFERRED with a pass-through
-/// report rather than fail-closed (see gfx1250_b0_to_a0_is_deferred_family).
+/// A rule keyed on an exact (encoding id, opcode) that only inserts spacing and
+/// leaves the opcode alone needs no entry here at all: with no classification
+/// the instruction reaches the semantic rule table on its own and, when the rule
+/// declines, takes the verbatim copy path. The MODE-write separation rule is
+/// registered that way, and the diff report is what shows it, as "expand
+/// semantic" with no legalization action.
+///
+/// An entry here does more than label the report when it is a mnemonic prefix
+/// that covers more instructions than the semantic table implements: the
+/// unimplemented siblings then fail closed instead of passing through silently.
+/// That is why the integer WMMA prefixes below keep their entry.
+///
+/// Separately, non-opcode-keyed rewrites are classified by SemanticTranslator's
+/// profile registry, and the barrier-state and sleep/monitor families are
+/// DEFERRED with a pass-through report rather than fail-closed (see
+/// gfx1250_b0_to_a0_is_deferred_family).
 inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemonics = {
     "ds_load_2addr_b32",
     "ds_load_2addr_b64",
@@ -248,13 +260,7 @@ const InstructionLegalization *gfx1250_b0_to_a0_legalization(const Instruction &
   if (fp8_clamp_family && !requires_fp8_clamp_emulation(inst))
     return nullptr;
 
-  // Reading FLAT_SCRATCH_BASE through a 64-bit source position is a property of
-  // the operand rather than the mnemonic, so it is classified separately.
-  // Deferred families reach here and stay on the copy path. Reporting that
-  // omission is the translation loop's job: see
-  // gfx1250_b0_to_a0_is_deferred_family.
-  if (!requires_b0_to_a0_expansion(inst.mnemonic()) &&
-      !gfx1250_reads_flat_scratch_base_64bit(inst)) {
+  if (!requires_b0_to_a0_expansion(inst.mnemonic())) {
     return nullptr;
   }
 

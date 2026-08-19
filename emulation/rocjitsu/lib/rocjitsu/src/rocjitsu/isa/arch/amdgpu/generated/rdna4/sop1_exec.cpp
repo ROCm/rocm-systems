@@ -313,13 +313,9 @@ void SSendmsgRtnB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_sendmsg_rtn_b64_sop1(*this, wf);
 }
 
-void SBarrierSignalSop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_barrier_signal_sop1(*this, wf);
-}
+void SBarrierSignalSop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
-void SBarrierSignalIsfirstSop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_barrier_signal_isfirst_sop1(*this, wf);
-}
+void SBarrierSignalIsfirstSop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 void SAllocVgprSop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_alloc_vgpr_sop1(*this, wf);
