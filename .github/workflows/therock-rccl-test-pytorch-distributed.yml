@@ -110,7 +110,7 @@ jobs:
             psutil
 
       - name: Run PyTorch c10d NCCL tests
-        timeout-minutes: 60
+        timeout-minutes: ${{ inputs.test_scope == 'all' && 120 || 60 }}
         env:
           NCCL_DEBUG: INFO
           TORCH_NCCL_BLOCKING_WAIT: 1
