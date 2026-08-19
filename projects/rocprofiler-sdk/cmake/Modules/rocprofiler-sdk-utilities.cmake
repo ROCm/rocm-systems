@@ -124,7 +124,13 @@ function(rocprofiler_sdk_dxg_topology_supported _VAR)
         # find_package(hsakmt) may report its include directories as either ordinary or
         # system includes, and only one of the two targets exists in a standalone
         # configure, so collect whichever are present.
-        set(_DXG_PROBE_INCLUDES "${ROCM_PATH}/include")
+        #
+        # The target's own directories go first because they are what the real compile
+        # sees; ${ROCM_PATH}/include is a fallback for a standalone configure in which
+        # neither target exists. Probing ROCM_PATH first reads the system headers even
+        # when hsakmt resolved to a different prefix, and a staged install beside an older
+        # /opt/rocm then gets the opposite answer.
+        set(_DXG_PROBE_INCLUDES)
         foreach(_TARGET hsakmt::hsakmt rocprofiler-sdk-hsakmt-nolink)
             if(TARGET ${_TARGET})
                 foreach(_PROPERTY INTERFACE_INCLUDE_DIRECTORIES
@@ -136,6 +142,7 @@ function(rocprofiler_sdk_dxg_topology_supported _VAR)
                 endforeach()
             endif()
         endforeach()
+        list(APPEND _DXG_PROBE_INCLUDES "${ROCM_PATH}/include")
         list(REMOVE_DUPLICATES _DXG_PROBE_INCLUDES)
 
         set(CMAKE_REQUIRED_INCLUDES ${_DXG_PROBE_INCLUDES})
