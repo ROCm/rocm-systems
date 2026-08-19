@@ -22,25 +22,32 @@ elapsed_ns(timespec start, timespec stop)
 // Uses nanosleep directly rather than std::this_thread::sleep_for, which
 // retries on EINTR internally and would hide the interruptions being counted.
 int
-main(int argc, char** argv)
+main(int argc, const char* const* argv)
 {
-    int iterations = (argc > 1) ? atoi(argv[1]) : 60;
+    const int iterations =
+        (argc > 1) ? static_cast<int>(std::strtol(argv[1], nullptr, 10)) : 60;
 
     int interrupted = 0;
     int short_sleep = 0;
 
     for(int i = 0; i < iterations; ++i)
     {
-        timespec request = { 0, SLEEP_NS };
-        timespec start{};
-        timespec stop{};
-
+        const timespec request = { 0, SLEEP_NS };
+        timespec       start{};
+        timespec       stop{};
+        // NOLINTBEGIN(misc-include-cleaner)
         clock_gettime(CLOCK_MONOTONIC, &start);
-        int status = nanosleep(&request, nullptr);
+        const int status = nanosleep(&request, nullptr);
         clock_gettime(CLOCK_MONOTONIC, &stop);
-
-        if(status != 0 && errno == EINTR) ++interrupted;
-        if(elapsed_ns(start, stop) < SLEEP_NS - SHORT_BY_NS) ++short_sleep;
+        // NOLINTEND(misc-include-cleaner)
+        if(status != 0 && errno == EINTR)
+        {
+            ++interrupted;
+        }
+        if(elapsed_ns(start, stop) < SLEEP_NS - SHORT_BY_NS)
+        {
+            ++short_sleep;
+        }
     }
 
     printf("sleep_interrupts: iterations=%d interrupted=%d short_sleeps=%d\n", iterations,
