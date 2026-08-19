@@ -254,13 +254,29 @@ fn looks_like_a_program(arg: &str) -> bool {
     arg.contains(std::path::MAIN_SEPARATOR) || std::path::Path::new(arg).is_file()
 }
 
-/// The subcommands that end in a workload, and so have a `--` and a span
-/// of mirage's own flags in front of it.
+/// Whether the subcommand `name` names ends in a workload, and so has a
+/// `--` and a span of mirage's own flags in front of it.
 ///
 /// Every other subcommand is an ordinary clap parse: it has no
 /// `trailing_var_arg` positional, so an unknown flag is reported by clap
 /// as an unknown flag and never becomes anything else.
-const TAKE_A_WORKLOAD: [&str; 2] = [RUN, "exec"];
+///
+/// Asked of clap rather than listed, for the same reason
+/// [`is_subcommand`] is. This was a list of two names sitting next to
+/// that function, and it controls whether the guard runs at all — so a
+/// third subcommand declared with a trailing workload, or an alias of
+/// one of these two, would have gone unguarded and recreated exactly the
+/// bug the list beside it was written to fix. `trailing_var_arg` on a
+/// positional *is* the declaration of "everything from here is the
+/// workload's", so it is what the question is asked of; aliases come
+/// free, because `find_subcommand` resolves them.
+fn takes_a_workload(name: &str) -> bool {
+    use clap::CommandFactory as _;
+    Cli::command().find_subcommand(name).is_some_and(|sub| {
+        sub.get_positionals()
+            .any(clap::Arg::is_trailing_var_arg_set)
+    })
+}
 
 /// Check the span of `args` that belongs to mirage rather than to the
 /// workload, and turn the first mistyped flag in it into a usage error.
@@ -357,7 +373,7 @@ fn dropin_argv(args: Vec<String>) -> Result<Vec<String>, String> {
     // rules, after clap had already thrown away the position that makes
     // it decidable. Same rules, same message, one implementation.
     if let Some(name) = head.filter(|h| is_subcommand(h)) {
-        if TAKE_A_WORKLOAD.contains(&name) {
+        if takes_a_workload(name) {
             check_flags(&args, head_idx + 1, sep, name)?;
         }
         return Ok(args);
@@ -854,6 +870,73 @@ mod tests {
                  and must be left alone"
             );
         }
+    }
+
+    /// The guard has to run for *every* subcommand that ends in a
+    /// workload, not for the two that did when it was written.
+    ///
+    /// Whether `check_flags` runs at all was decided by a hardcoded pair
+    /// of names sitting next to `is_subcommand` — the function that
+    /// exists because its own hardcoded list was missing `cleanup`. A
+    /// third workload subcommand, or an alias of one of these, would have
+    /// been parsed with `trailing_var_arg` and no guard in front of it,
+    /// which is the original bug: `mirage <sub> --nodes 2 ./app` brings a
+    /// session up and tries to execute `--nodes`.
+    ///
+    /// So the population is taken from clap: a positional declared
+    /// `trailing_var_arg` is the declaration of "everything from here is
+    /// the workload's", and every subcommand that has one must refuse a
+    /// flag mirage does not take — in both spellings, since the one with
+    /// no `--` is the one that used to be undecidable.
+    #[test]
+    fn every_subcommand_that_ends_in_a_workload_is_guarded() {
+        use clap::CommandFactory as _;
+
+        let mut guarded = 0;
+        for sub in Cli::command().get_subcommands() {
+            let name = sub.get_name().to_string();
+            if !sub
+                .get_positionals()
+                .any(clap::Arg::is_trailing_var_arg_set)
+            {
+                // No trailing positional, so an unknown flag is clap's to
+                // report and the rewriter must leave the line alone.
+                let args = v_args(&["mirage", &name, "--not-a-mirage-flag"]);
+                assert_eq!(
+                    dropin_argv(args.clone()).unwrap(),
+                    args,
+                    "`mirage {name}` does not end in a workload, so its flags \
+                     are clap's business"
+                );
+                continue;
+            }
+            guarded += 1;
+            // Both spellings. The one with no `--` is the one the old
+            // post-parse check could not see at all.
+            for argv in [
+                v_args(&["mirage", &name, "--not-a-mirage-flag", "--", "./app"]),
+                v_args(&["mirage", &name, "--not-a-mirage-flag", "./app"]),
+            ] {
+                match dropin_argv(argv.clone()) {
+                    Err(usage) => assert!(
+                        usage.contains("unexpected argument '--not-a-mirage-flag'"),
+                        "`mirage {name}` refused {argv:?} for the wrong reason:\
+                         {usage}"
+                    ),
+                    Ok(out) => panic!(
+                        "`mirage {name}` ends in a workload but its flags are \
+                         unguarded: {argv:?} became {out:?}"
+                    ),
+                }
+            }
+        }
+        // Nothing above asserts anything if clap reports no such
+        // subcommand, which would be a silent pass.
+        assert!(
+            guarded >= 2,
+            "`run` and `exec` both end in a workload; only {guarded} \
+             subcommand(s) were found to guard"
+        );
     }
 
     /// The inverse: something that is *not* a subcommand still routes to
