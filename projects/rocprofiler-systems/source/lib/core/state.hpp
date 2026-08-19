@@ -230,6 +230,15 @@ public:
         return last_state;
     }
 
+    // push/pop maintain an explicit per-thread stack for the cases where the
+    // save and the restore live in different scopes (see pthread_create_gotcha
+    // and the rocprofiler-sdk thread_pre/postcreate callbacks).  Prefer scoped()
+    // wherever the region is lexically scoped: it is materially cheaper.
+    //
+    // A push/pop pair must never straddle the lifetime of a scoped_guard, and a
+    // scoped_guard must never straddle a lone push or pop.  scoped_guard restores
+    // through its own member rather than this stack, so improper nesting would
+    // let the two mechanisms disagree about the current state.
     [[gnu::hot]] static State push(State state_to_push)
     {
         if(get() >= Completed)
@@ -254,20 +263,45 @@ public:
         return get();
     }
 
+    // Saves the previous state in a member rather than on the history() stack.
+    // The C++ call stack already provides the nesting a scoped region needs, and
+    // going through history() costs a thread-index lookup plus a write into
+    // std::array<std::vector<State>, ROCPROFSYS_MAX_THREADS>, whose 24-byte stride
+    // puts consecutive thread indices on the same cache line.  That false sharing
+    // dominates: on a 12-core Rocky 10.2 box at -O2, an uncontended shared_lock
+    // acquisition guarded this way cost ~247 ns/op at 8 threads versus ~12 ns/op
+    // here, with the unguarded baseline at ~12 ns/op.
     class [[nodiscard]] scoped_guard
     {
     public:
         [[gnu::always_inline]] explicit scoped_guard(State state_to_push)
+        : m_prev{ current() }
+        , m_active{ m_prev < Completed }
         {
-            thread::push(state_to_push);
+            if(m_active)
+            {
+                current() = state_to_push;
+            }
         }
 
-        [[gnu::always_inline]] ~scoped_guard() { thread::pop(); }
+        // Mirrors pop(): never resurrect a thread that was marked Completed or
+        // Disabled while the guard was live.
+        [[gnu::always_inline]] ~scoped_guard()
+        {
+            if(m_active && current() < Completed)
+            {
+                current() = m_prev;
+            }
+        }
 
         scoped_guard(const scoped_guard&)            = delete;
         scoped_guard& operator=(const scoped_guard&) = delete;
         scoped_guard(scoped_guard&&)                 = delete;
         scoped_guard& operator=(scoped_guard&&)      = delete;
+
+    private:
+        State m_prev;
+        bool  m_active;
     };
 
     [[nodiscard]] [[gnu::hot]] static scoped_guard scoped(State state_to_set)
