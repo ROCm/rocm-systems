@@ -2131,26 +2131,36 @@ fn an_application_defined_signal_is_forwarded_and_does_not_end_the_run() {
     // repeated rather than one long one because a shell runs a trap
     // between commands: with `sleep 300` the handler would not run until
     // the sleep was over.
-    let mut run = env.spawn_run(
-        &["--profile", "p"],
-        &[
-            "/bin/sh",
-            "-c",
-            "trap 'echo CHECKPOINTED' USR1; \
-             trap 'echo ROTATED' USR2; \
-             i=0; while [ $i -lt 200 ]; do sleep 0.1; i=$((i+1)); done; \
-             echo FINISHED",
-        ],
+    //
+    // The `touch` comes *after* both traps and is what the test waits on,
+    // which is the whole synchronisation. A signal that arrives before
+    // `/bin/sh` has installed its handlers is not relayed-and-ignored, it
+    // is fatal by default disposition — so a barrier that lets one
+    // through does not report a flaky test, it reports a signal-relay
+    // regression that did not happen.
+    let started = env.root().join("trapping");
+    let script = format!(
+        "trap 'echo CHECKPOINTED' USR1; \
+         trap 'echo ROTATED' USR2; \
+         touch {}; \
+         i=0; while [ $i -lt 200 ]; do sleep 0.1; i=$((i+1)); done; \
+         echo FINISHED",
+        started.display()
     );
-    let watch = run.watch_stderr();
+    let mut run = env.spawn_run(&["--profile", "p"], &["/bin/sh", "-c", &script]);
     run.await_ready(Duration::from_secs(90));
 
-    // Wait for the workload to be in its loop, so the signal lands on a
-    // run that is past bring-up rather than on one still starting.
-    wait_for("the workload to start", Duration::from_secs(60), || {
-        watch.contains("session")
-    });
-    std::thread::sleep(Duration::from_millis(500));
+    // The barrier this used to have was `watch.contains("session")`, which
+    // matches a line `mirage run` prints before it has even bound its
+    // control socket — true on the first poll, every time — leaving a bare
+    // 500 ms sleep as the only thing standing between bring-up and the
+    // signals. The sentinel is the idiom the rest of this file uses, and
+    // it is the workload itself saying it is ready to be signalled.
+    wait_for(
+        "the workload to install its traps",
+        Duration::from_secs(60),
+        || started.exists(),
+    );
 
     run.signal(Signal::SIGUSR1);
     run.signal(Signal::SIGUSR2);
