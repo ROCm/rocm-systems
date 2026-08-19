@@ -36,6 +36,7 @@ THE SOFTWARE.
 #include <sys/stat.h>
 #include <unordered_map>
 #include <memory>
+#include <mutex>
 #include <functional>
 #include <libdrm/amdgpu.h>
 #include <libdrm/amdgpu_drm.h>
@@ -192,6 +193,7 @@ class RocJpegVaapiMemoryPool {
         VADisplay va_display_; // The VADisplay associated with the memory pool.
         uint32_t max_pool_size_; // The maximum pool size of the memory pool (mem_pool_) per entry.
         std::unordered_map<uint32_t, std::vector<RocJpegVaapiMemPoolEntry>> mem_pool_; // The memory pool.
+        std::mutex pool_mutex_; // Protects mem_pool_ for concurrent async/sync access.
         /**
          * @brief Retrieves the total size of the memory pool.
          *

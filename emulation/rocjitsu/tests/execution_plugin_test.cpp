@@ -10,21 +10,25 @@
 /// Machine-level preservation below RegisterAccess must not add callbacks.
 
 #include "aql_queue.h"
+#include "decode_test_util.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/config/config_loader.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/vop1.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/vop1.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/execution_backend.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/vop1.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
@@ -34,6 +38,7 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/soc.h"
 #include "scoped_temp.h"
@@ -46,6 +51,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/AMDHSAKernelDescriptor.h"
 RJ_DIAGNOSTIC_POP
 
+#include "halt_snapshot_plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
@@ -54,7 +60,11 @@ RJ_DIAGNOSTIC_POP
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <barrier>
 #include <bit>
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstring>
 #include <format>
@@ -65,13 +75,32 @@ RJ_DIAGNOSTIC_POP
 #include <set>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <type_traits>
 #include <vector>
+
+#if defined(__linux__)
+#include <unistd.h>
+#endif
+
+namespace rocjitsu::test {
+
+class ExecutionPluginGroupTestAccess {
+public:
+  static uint64_t callback_lock_acquisitions(const ExecutionPluginGroup &group) {
+    return group.callback_lock_acquisitions_;
+  }
+};
+
+} // namespace rocjitsu::test
 
 namespace {
 
 using namespace rocjitsu;
 using namespace rocjitsu::amdgpu;
+
+static_assert(std::is_final_v<ExecutionPluginGroup>);
+static_assert(!std::is_polymorphic_v<ExecutionPluginGroup>);
 using namespace rocjitsu::plugins::race_detector;
 
 static_assert(!std::is_default_constructible_v<ExecutionPluginGroup>);
@@ -337,6 +366,151 @@ public:
 private:
   std::vector<std::string> &events_;
 };
+
+class ParallelSafePlugin final : public ExecutionPlugin {
+public:
+  ParallelSafePlugin() : ExecutionPlugin("parallel_safe") {}
+  bool requires_serial_hot_hooks() const override { return false; }
+};
+
+class SerialHotHookPlugin final : public ExecutionPlugin {
+public:
+  SerialHotHookPlugin() : ExecutionPlugin("serial_hot_hook") {}
+  bool requires_serial_hot_hooks() const override { return true; }
+};
+
+class OverlapProbe {
+public:
+  void observe() {
+    const int current = active_.fetch_add(1, std::memory_order_relaxed) + 1;
+    int observed = max_active_.load(std::memory_order_relaxed);
+    while (current > observed &&
+           !max_active_.compare_exchange_weak(observed, current, std::memory_order_relaxed)) {
+    }
+
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (current == 1) {
+      first_entered_ = true;
+      cv_.notify_all();
+      cv_.wait(lock, [&]() { return release_first_; });
+    } else {
+      overlap_observed_ = true;
+      cv_.notify_all();
+    }
+    active_.fetch_sub(1, std::memory_order_relaxed);
+  }
+
+  bool wait_for_first(std::chrono::milliseconds timeout) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return cv_.wait_for(lock, timeout, [&]() { return first_entered_; });
+  }
+
+  bool wait_for_overlap(std::chrono::milliseconds timeout) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return cv_.wait_for(lock, timeout, [&]() { return overlap_observed_; });
+  }
+
+  void release_first() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    release_first_ = true;
+    cv_.notify_all();
+  }
+
+  int max_active() const { return max_active_.load(std::memory_order_relaxed); }
+
+private:
+  std::atomic<int> active_{0};
+  std::atomic<int> max_active_{0};
+  std::mutex mutex_;
+  std::condition_variable cv_;
+  bool first_entered_ = false;
+  bool overlap_observed_ = false;
+  bool release_first_ = false;
+};
+
+class ConcurrencyProbePlugin final : public ExecutionPlugin {
+public:
+  explicit ConcurrencyProbePlugin(bool serialize_hot_hooks)
+      : ExecutionPlugin("concurrency_probe"), serialize_hot_hooks_(serialize_hot_hooks) {}
+
+  bool requires_serial_hot_hooks() const override { return serialize_hot_hooks_; }
+
+  void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override { hot_probe_.observe(); }
+
+  void onAmdgpuWorkgroupCompleted(uint32_t, uint32_t) override { cold_probe_.observe(); }
+
+  OverlapProbe &hot_probe() { return hot_probe_; }
+  OverlapProbe &cold_probe() { return cold_probe_; }
+
+private:
+  bool serialize_hot_hooks_;
+  OverlapProbe hot_probe_;
+  OverlapProbe cold_probe_;
+};
+
+class CrossHookConcurrencyProbePlugin final : public ExecutionPlugin {
+public:
+  explicit CrossHookConcurrencyProbePlugin(bool serialize_hot_hooks)
+      : ExecutionPlugin("cross_hook_concurrency_probe"), serialize_hot_hooks_(serialize_hot_hooks) {
+  }
+
+  bool requires_serial_hot_hooks() const override { return serialize_hot_hooks_; }
+
+  void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override { probe_.observe(); }
+
+  void onAmdgpuWorkgroupCompleted(uint32_t, uint32_t) override { probe_.observe(); }
+
+  OverlapProbe &probe() { return probe_; }
+
+private:
+  bool serialize_hot_hooks_;
+  OverlapProbe probe_;
+};
+
+struct OverlapResult {
+  bool first_entered;
+  bool overlap_observed;
+};
+
+template <typename FirstCallback, typename SecondCallback>
+OverlapResult run_staged_callbacks(OverlapProbe &probe, std::chrono::milliseconds overlap_timeout,
+                                   FirstCallback first_callback, SecondCallback second_callback) {
+  std::thread first(first_callback);
+  const bool first_entered = probe.wait_for_first(std::chrono::seconds(5));
+  if (!first_entered) {
+    probe.release_first();
+    first.join();
+    return {false, false};
+  }
+
+  std::thread second(second_callback);
+  const bool overlap_observed = probe.wait_for_overlap(overlap_timeout);
+  probe.release_first();
+  first.join();
+  second.join();
+  return {true, overlap_observed};
+}
+
+template <typename Callback>
+OverlapResult run_staged_threads(OverlapProbe &probe, std::chrono::milliseconds overlap_timeout,
+                                 Callback callback) {
+  return run_staged_callbacks(probe, overlap_timeout, callback, callback);
+}
+
+template <typename Callback> void run_two_threads(Callback callback) {
+  std::barrier start(3);
+  std::thread first([&]() {
+    start.arrive_and_wait();
+    callback();
+  });
+  std::thread second([&]() {
+    start.arrive_and_wait();
+    callback();
+  });
+  start.arrive_and_wait();
+  first.join();
+  second.join();
+}
 
 class MfmaRacePlugin : public ExecutionPlugin {
 public:
@@ -680,7 +854,7 @@ struct Wave32PluginFixture {
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   std::shared_ptr<ExecutionPluginGroup> plugin_group;
 
-  explicit Wave32PluginFixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_GFX1250)
+  explicit Wave32PluginFixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA5)
       : gpu_mem(std::make_unique<amdgpu::GpuMemory>("wave32_plugin_mem")),
         l2(std::make_unique<amdgpu::L2Cache>("wave32_plugin_l2")) {
     amdgpu::ComputeUnitCore::Config cfg{};
@@ -712,6 +886,161 @@ TEST(ExecutionPluginTest, NoPluginNoCrash) {
   f.run_kernel(code, 2);
 }
 
+TEST(ExecutionPluginTest, HotHookPolicyComesFromContainedPlugins) {
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  EXPECT_FALSE(group.requires_serial_hot_hooks());
+
+  ASSERT_TRUE(group.add(std::make_unique<ParallelSafePlugin>()));
+  EXPECT_FALSE(group.requires_serial_hot_hooks());
+
+  ASSERT_TRUE(group.add(std::make_unique<OrderingPlugin>()));
+  EXPECT_FALSE(group.requires_serial_hot_hooks());
+
+  ASSERT_TRUE(group.add(std::make_unique<SerialHotHookPlugin>()));
+  EXPECT_TRUE(group.requires_serial_hot_hooks());
+}
+
+TEST(ExecutionPluginTest, InfrequentHooksSerializeAtGroupBoundary) {
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto probe = std::make_unique<ConcurrencyProbePlugin>(false);
+  auto *probe_ptr = probe.get();
+  ASSERT_TRUE(group.add(std::move(probe)));
+
+  const auto result = run_staged_threads(probe_ptr->cold_probe(), std::chrono::milliseconds(20),
+                                         [&]() { group.onAmdgpuWorkgroupCompleted(0, 0); });
+
+  EXPECT_TRUE(result.first_entered);
+  EXPECT_FALSE(result.overlap_observed);
+  EXPECT_EQ(probe_ptr->cold_probe().max_active(), 1);
+}
+
+TEST(ExecutionPluginTest, HighFrequencyHooksRunConcurrentlyByDefault) {
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto probe = std::make_unique<ConcurrencyProbePlugin>(false);
+  auto *probe_ptr = probe.get();
+  ASSERT_TRUE(group.add(std::move(probe)));
+  ASSERT_FALSE(group.requires_serial_hot_hooks());
+
+  const auto result = run_staged_threads(probe_ptr->hot_probe(), std::chrono::seconds(5),
+                                         [&]() { group.onAmdgpuReadSgpr(nullptr, 0); });
+
+  EXPECT_TRUE(result.first_entered);
+  EXPECT_TRUE(result.overlap_observed);
+  EXPECT_EQ(probe_ptr->hot_probe().max_active(), 2);
+}
+
+TEST(ExecutionPluginTest, HighFrequencyHooksHonorSerialOptIn) {
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto probe = std::make_unique<ConcurrencyProbePlugin>(true);
+  auto *probe_ptr = probe.get();
+  ASSERT_TRUE(group.add(std::move(probe)));
+  ASSERT_TRUE(group.requires_serial_hot_hooks());
+
+  const auto result = run_staged_threads(probe_ptr->hot_probe(), std::chrono::milliseconds(20),
+                                         [&]() { group.onAmdgpuReadSgpr(nullptr, 0); });
+
+  EXPECT_TRUE(result.first_entered);
+  EXPECT_FALSE(result.overlap_observed);
+  EXPECT_EQ(probe_ptr->hot_probe().max_active(), 1);
+}
+
+TEST(ExecutionPluginTest, InfrequentAndHighFrequencyHooksMayOverlapByDefault) {
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto probe = std::make_unique<CrossHookConcurrencyProbePlugin>(false);
+  auto *probe_ptr = probe.get();
+  ASSERT_TRUE(group.add(std::move(probe)));
+  ASSERT_FALSE(group.requires_serial_hot_hooks());
+
+  const auto result = run_staged_callbacks(
+      probe_ptr->probe(), std::chrono::seconds(5),
+      [&]() { group.onAmdgpuWorkgroupCompleted(0, 0); },
+      [&]() { group.onAmdgpuReadSgpr(nullptr, 0); });
+
+  EXPECT_TRUE(result.first_entered);
+  EXPECT_TRUE(result.overlap_observed);
+  EXPECT_EQ(probe_ptr->probe().max_active(), 2);
+}
+
+TEST(ExecutionPluginTest, SerialHotHookOptInPreventsInfrequentAndHighFrequencyOverlap) {
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto probe = std::make_unique<CrossHookConcurrencyProbePlugin>(true);
+  auto *probe_ptr = probe.get();
+  ASSERT_TRUE(group.add(std::move(probe)));
+  ASSERT_TRUE(group.requires_serial_hot_hooks());
+
+  const auto result = run_staged_callbacks(
+      probe_ptr->probe(), std::chrono::milliseconds(20),
+      [&]() { group.onAmdgpuWorkgroupCompleted(0, 0); },
+      [&]() { group.onAmdgpuReadSgpr(nullptr, 0); });
+
+  EXPECT_TRUE(result.first_entered);
+  EXPECT_FALSE(result.overlap_observed);
+  EXPECT_EQ(probe_ptr->probe().max_active(), 1);
+}
+
+TEST(ExecutionPluginTest, EmptyGroupDispatchBypassesCallbackLock) {
+  auto group = ExecutionPluginGroup::empty_group();
+  ASSERT_TRUE(group->empty());
+  const uint64_t before = test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(*group);
+
+  run_two_threads([&]() {
+    for (int i = 0; i < 10000; ++i) {
+      group->onInit();
+      group->onAmdgpuReadSgpr(nullptr, 0);
+      group->onAmdgpuWorkgroupCompleted(0, 0);
+    }
+  });
+
+  EXPECT_EQ(test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(*group), before);
+
+  ExecutionPluginGroup non_empty_group(PluginSinkConfig{});
+  ASSERT_TRUE(non_empty_group.add(std::make_unique<ExecutionPlugin>("no-op")));
+  const uint64_t non_empty_before =
+      test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(non_empty_group);
+  non_empty_group.onInit();
+  EXPECT_EQ(test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(non_empty_group),
+            non_empty_before + 1);
+}
+
+int run_serial_hot_hook_halt_snapshot() {
+  PluginFixture f;
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  if (!f.plugin_group_->add(std::make_unique<SerialHotHookPlugin>()))
+    return 1;
+
+  auto snapshot = std::make_unique<test::HaltSnapshotPlugin>();
+  auto *snapshot_ptr = snapshot.get();
+  if (!f.plugin_group_->add(std::move(snapshot)))
+    return 2;
+  f.soc->set_plugin_group(f.plugin_group_);
+
+  const uint32_t code[] = {S_ENDPGM};
+  f.run_kernel(code, 1);
+
+  if (snapshot_ptr->snapshots().size() != 1u)
+    return 3;
+  if (snapshot_ptr->snapshots().front().sgprs.empty())
+    return 4;
+  if (snapshot_ptr->snapshots().front().vgprs.empty())
+    return 5;
+  return 0;
+}
+
+#if GTEST_HAS_DEATH_TEST && defined(__linux__)
+TEST(ExecutionPluginDeathTest, SerialHotHooksAllowRegisterReadsFromHaltHook) {
+  ASSERT_EXIT(
+      {
+        alarm(5);
+        _exit(run_serial_hot_hook_halt_snapshot());
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+#else
+TEST(ExecutionPluginTest, SerialHotHooksAllowRegisterReadsFromHaltHook) {
+  EXPECT_EQ(run_serial_hot_hook_halt_snapshot(), 0);
+}
+#endif
+
 TEST(ExecutionPluginTest, ValuSimdReadObservationUsesActiveExecMask) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
@@ -735,7 +1064,7 @@ TEST(ExecutionPluginTest, ValuSimdReadObservationUsesActiveExecMask) {
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     uint32_t words[4] = {vop2_encode(/*opcode=*/52, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256), 0u, 0u,
                          0u};
-    Instruction *inst = decoder->decode(words);
+    Instruction *inst = decode_valid(*decoder, words);
     ASSERT_NE(inst, nullptr);
     cu->execute_instruction(inst, *wf);
     delete inst;
@@ -767,7 +1096,7 @@ TEST(ExecutionPluginTest, ValuSimdWriteObservationUsesActiveExecMask) {
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     uint32_t words[4] = {vop2_encode(/*opcode=*/52, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256), 0u, 0u,
                          0u};
-    Instruction *inst = decoder->decode(words);
+    Instruction *inst = decode_valid(*decoder, words);
     ASSERT_NE(inst, nullptr);
     cu->execute_instruction(inst, *wf);
     delete inst;
@@ -814,7 +1143,7 @@ TEST(ExecutionPluginTest, DppObservationReportsExactSourceAndDestinationLanes) {
         vop1_encode(/*opcode=*/1, kDst, amdgpu::SRC_DPP),
         vop1_dpp_word(kSrc, /*dpp_ctrl=*/0, /*row_mask=*/0x1, /*bank_mask=*/0x5),
     };
-    Instruction *inst = decoder->decode(words);
+    Instruction *inst = decode_valid(*decoder, words);
     ASSERT_NE(inst, nullptr);
     plugin->events.clear();
     cu->execute_instruction(inst, *wf);
@@ -863,7 +1192,7 @@ TEST(ExecutionPluginTest, DppOutOfBoundsObservationHonorsBoundCtrl) {
         vop1_dpp_word(kSrc, amdgpu::dpp::ROW_SHR1, /*row_mask=*/0xF,
                       /*bank_mask=*/0xF, bound_ctrl),
     };
-    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     plugin->events.clear();
     cu->execute_instruction(inst.get(), *wf);
@@ -910,7 +1239,7 @@ TEST(ExecutionPluginTest, DppSourceDestinationAliasStagesBeforeWriting) {
       vop1_dpp_word(kReg, /*quad_perm:[1,0,3,2]=*/0xB1, /*row_mask=*/0x1,
                     /*bank_mask=*/0x1, /*bound_ctrl=*/true),
   };
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   plugin->events.clear();
   cu->execute_instruction(inst.get(), *wf);
@@ -945,7 +1274,7 @@ TEST(ExecutionPluginTest, Dpp8FetchInactiveControlsSourceObservation) {
   const uint32_t vb = wf->vgpr_alloc().base;
   const uint32_t lane_sel = (0u << 0u) | (0u << 3u) | (2u << 6u) | (3u << 9u) | (4u << 12u) |
                             (5u << 15u) | (6u << 18u) | (7u << 21u);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto run = [&](uint32_t src_marker) {
@@ -955,7 +1284,7 @@ TEST(ExecutionPluginTest, Dpp8FetchInactiveControlsSourceObservation) {
         vop1_encode(/*v_mov_b32 opcode=*/1, kDst, src_marker),
         kSrc | (lane_sel << 8u),
     };
-    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     plugin->events.clear();
     f.cu->execute_instruction(inst.get(), *wf);
@@ -1006,7 +1335,7 @@ TEST(ExecutionPluginTest, True16InstructionsReportSelectedSourceAndDestinationHa
   };
 
   const uint32_t vb = wf->vgpr_alloc().base;
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   for (const Case &test_case : cases) {
     SCOPED_TRACE(std::format("instruction word 0x{:08x}", test_case.word));
@@ -1014,7 +1343,7 @@ TEST(ExecutionPluginTest, True16InstructionsReportSelectedSourceAndDestinationHa
     f.cu->write_vgpr(vb + 1, 0, 0xAAAA5555u);
     f.cu->write_vgpr(vb + 129, 0, 0xDEADBEEFu);
 
-    std::unique_ptr<Instruction> inst(decoder->decode(&test_case.word));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, &test_case.word));
     ASSERT_NE(inst, nullptr);
     plugin->events.clear();
     f.cu->execute_instruction(inst.get(), *wf);
@@ -1057,9 +1386,9 @@ TEST(ExecutionPluginTest, Gfx1250Simd64BitWriteReportsBothDestinationRegisters) 
 
     const uint32_t word =
         vop1_encode(/*v_mov_b64 opcode=*/29, kDst, /*generic VGPR source=*/256 + kSrc);
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
     ASSERT_NE(decoder, nullptr);
-    std::unique_ptr<Instruction> inst(decoder->decode(&word));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, &word));
     ASSERT_NE(inst, nullptr);
     plugin->events.clear();
     f.cu->execute_instruction(inst.get(), *wf);
@@ -1073,7 +1402,7 @@ TEST(ExecutionPluginTest, Gfx1250Simd64BitWriteReportsBothDestinationRegisters) 
 
 TEST(ExecutionPluginTest, DppTrue16SourceReportsSelectedHalf) {
   ForceScalarOverride force_scalar(true);
-  ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
+  ScopedIsaExecutionBackend execution_backend_scope{&cdna5::execution_backend()};
   Wave32PluginFixture f;
   auto *plugin = f.attach_ordering_plugin();
   auto *wf = f.cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -1086,7 +1415,7 @@ TEST(ExecutionPluginTest, DppTrue16SourceReportsSelectedHalf) {
   f.cu->write_vgpr(vb + kSrc, 0, 0xAABB00FFu);
   f.cu->write_vgpr(vb + kDst, 0, 0xAAAA5555u);
 
-  gfx1250::Vop1VopDpp16MachineInst raw{};
+  cdna5::Vop1VopDpp16MachineInst raw{};
   raw.src0 = amdgpu::SRC_DPP;
   raw.vsrc0 = kSrc;
   raw.vdst = kDst;
@@ -1095,7 +1424,7 @@ TEST(ExecutionPluginTest, DppTrue16SourceReportsSelectedHalf) {
   raw.bound_ctrl = 1;
   raw.bank_mask = 0xF;
   raw.row_mask = 0xF;
-  gfx1250::VNotB16Vop1 inst(reinterpret_cast<const gfx1250::MachineInst *>(&raw));
+  cdna5::VNotB16Vop1 inst(reinterpret_cast<const cdna5::MachineInst *>(&raw));
 
   plugin->events.clear();
   inst.execute_impl(*wf);
@@ -1110,6 +1439,7 @@ TEST(ExecutionPluginTest, DppTrue16SourceReportsSelectedHalf) {
 
 TEST(ExecutionPluginTest, Rdna4DppTrue16SourceReportsOpSelHalf) {
   ForceScalarOverride force_scalar(true);
+  ScopedIsaExecutionBackend execution_backend_scope{&rdna4::execution_backend()};
   Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA4);
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu.get();
@@ -1174,6 +1504,7 @@ TEST(ExecutionPluginTest, Dpp64BitSourceSimdStagesBothPhysicalDwords) {
     return;
   }
   ForceScalarOverride force_simd(false);
+  ScopedIsaExecutionBackend execution_backend_scope{&cdna4::execution_backend()};
   PluginFixture f(/*num_wf_slots=*/1);
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
@@ -1207,6 +1538,7 @@ TEST(ExecutionPluginTest, Dpp64BitSourceSimdStagesBothPhysicalDwords) {
 
 TEST(ExecutionPluginTest, DppInstructionReuseRestagesOriginalSource) {
   ForceScalarOverride force_scalar(true);
+  ScopedIsaExecutionBackend execution_backend_scope{&cdna4::execution_backend()};
   PluginFixture f(/*num_wf_slots=*/1);
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -1238,6 +1570,7 @@ TEST(ExecutionPluginTest, DppInstructionReuseRestagesOriginalSource) {
 
 TEST(ExecutionPluginTest, Sdwa64BitDestinationWritesLegalConversionResult) {
   ForceScalarOverride force_scalar(true);
+  ScopedIsaExecutionBackend execution_backend_scope{&cdna3::execution_backend()};
   PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"cdna3");
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
@@ -1281,6 +1614,7 @@ TEST(ExecutionPluginTest, Sdwa64BitDestinationWritesLegalConversionResult) {
 
 TEST(ExecutionPluginTest, SdwaInstructionReuseRestagesOriginalSource) {
   ForceScalarOverride force_scalar(true);
+  ScopedIsaExecutionBackend execution_backend_scope{&cdna4::execution_backend()};
   PluginFixture f(/*num_wf_slots=*/1);
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -1338,7 +1672,7 @@ TEST(ExecutionPluginTest, SdwaFloatingModifiersUseSemanticSourceWidth) {
 
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     std::unique_ptr<Instruction> f32_inst(
-        decoder->decode(reinterpret_cast<const uint32_t *>(&add_f32)));
+        decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&add_f32)));
     ASSERT_NE(f32_inst, nullptr);
     cu->write_vgpr(vb + kSrc0, 0, std::bit_cast<uint32_t>(-2.0f));
     cu->write_vgpr(vb + kSrc1, 0, std::bit_cast<uint32_t>(0.5f));
@@ -1357,9 +1691,9 @@ TEST(ExecutionPluginTest, SdwaFloatingModifiersUseSemanticSourceWidth) {
     cvt_bf16.dst_unused = amdgpu::sdwa::UNUSED_PAD;
 
     std::unique_ptr<Instruction> bf16_inst(
-        decoder->decode(reinterpret_cast<const uint32_t *>(&cvt_bf16)));
+        decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&cvt_bf16)));
     ASSERT_NE(bf16_inst, nullptr);
-    ASSERT_EQ(std::string_view(bf16_inst->mnemonic()), "v_cvt_f32_bf16_e32");
+    ASSERT_EQ(std::string_view(bf16_inst->mnemonic()), "v_cvt_f32_bf16_sdwa");
     cu->write_vgpr(vb + kSrc0, 0, 0xCAFE'C000u);
     cu->execute_instruction(bf16_inst.get(), *wf);
     EXPECT_EQ(cu->read_vgpr_storage(vb + kDst, 0), std::bit_cast<uint32_t>(2.0f));
@@ -1379,7 +1713,7 @@ TEST(ExecutionPluginTest, SdwaFloatingModifiersUseSemanticSourceWidth) {
       add_f16.dst_unused = amdgpu::sdwa::UNUSED_PAD;
 
       std::unique_ptr<Instruction> f16_inst(
-          decoder->decode(reinterpret_cast<const uint32_t *>(&add_f16)));
+          decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&add_f16)));
       ASSERT_NE(f16_inst, nullptr);
       const uint32_t shift = selection == amdgpu::sdwa::WORD_1 ? 16u : 0u;
       const uint32_t selected_word_mask = uint32_t{0xFFFF} << shift;
@@ -1422,7 +1756,8 @@ TEST(ExecutionPluginTest, SdwaVop2Src1SelectorReportsExactBytes) {
   raw.dst_unused = amdgpu::sdwa::UNUSED_PAD;
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
-  std::unique_ptr<Instruction> inst(decoder->decode(reinterpret_cast<const uint32_t *>(&raw)));
+  std::unique_ptr<Instruction> inst(
+      decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&raw)));
   ASSERT_NE(inst, nullptr);
   plugin->events.clear();
   cu->execute_instruction(inst.get(), *wf);
@@ -1476,7 +1811,8 @@ TEST(ExecutionPluginTest, SdwaVop2ScalarSelectorsUseSgprs) {
     raw.dst_unused = amdgpu::sdwa::UNUSED_PAD;
 
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
-    std::unique_ptr<Instruction> inst(decoder->decode(reinterpret_cast<const uint32_t *>(&raw)));
+    std::unique_ptr<Instruction> inst(
+        decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&raw)));
     ASSERT_NE(inst, nullptr);
     plugin->events.clear();
     cu->execute_instruction(inst.get(), *wf);
@@ -1558,7 +1894,7 @@ TEST(ExecutionPluginTest, SdwaObservationReportsExactSourceAndDestinationBytes) 
           vop1_encode(/*opcode=*/1, kDst, amdgpu::SRC_SDWA),
           vop1_sdwa_word(kSrc, test_case.dst_sel, test_case.dst_unused, test_case.src0_sel),
       };
-      Instruction *inst = decoder->decode(words);
+      Instruction *inst = decode_valid(*decoder, words);
       ASSERT_NE(inst, nullptr);
       plugin->events.clear();
       cu->execute_instruction(inst, *wf);
@@ -1614,7 +1950,7 @@ TEST(ExecutionPluginTest, SdwaClampIsAppliedInsideArchitecturalDestinationWrite)
       vop1_sdwa_word(kSrc, amdgpu::sdwa::DWORD, amdgpu::sdwa::UNUSED_PAD, amdgpu::sdwa::DWORD,
                      /*clamp=*/true),
   };
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   plugin->events.clear();
   cu->execute_instruction(inst.get(), *wf);
@@ -1651,7 +1987,7 @@ TEST(ExecutionPluginTest, SdwaClampHonorsDx10ClampMode) {
       vop1_sdwa_word(kSrc, amdgpu::sdwa::DWORD, amdgpu::sdwa::UNUSED_PAD, amdgpu::sdwa::DWORD,
                      /*clamp=*/true),
   };
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
 
   struct Case {
@@ -1695,7 +2031,7 @@ TEST(ExecutionPluginTest, SdwaPartialPreserveClampReportsFullDwordWrite) {
       vop1_sdwa_word(kSrc, amdgpu::sdwa::BYTE_1, amdgpu::sdwa::UNUSED_PRESERVE, amdgpu::sdwa::DWORD,
                      /*clamp=*/true),
   };
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   plugin->events.clear();
   cu->execute_instruction(inst.get(), *wf);
@@ -1744,7 +2080,7 @@ TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotObserveInstructionWrite
 }
 
 TEST(ExecutionPluginTest, D16MemoryCompletionPreservesHalfWithoutObservation) {
-  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"gfx1250", /*wavefront_size=*/32);
+  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"cdna5", /*wavefront_size=*/32);
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -1812,7 +2148,7 @@ TEST(ExecutionPluginTest, F64SimdSourceReadObservationReportsBothHalves) {
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     uint32_t words[4] = {vop2_encode(/*opcode=*/4, /*vdst=*/4, /*vsrc1=*/2, /*src0=*/256), 0u, 0u,
                          0u};
-    Instruction *inst = decoder->decode(words);
+    Instruction *inst = decode_valid(*decoder, words);
     ASSERT_NE(inst, nullptr);
     cu->execute_instruction(inst, *wf);
     delete inst;
@@ -1844,7 +2180,7 @@ TEST(ExecutionPluginTest, Vop3FmacSimdReadObservationReportsAccumulator) {
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_encode(/*opcode=*/315, /*vdst=*/4, /*src0=*/256, /*src1=*/257, words);
-    Instruction *inst = decoder->decode(words);
+    Instruction *inst = decode_valid(*decoder, words);
     ASSERT_NE(inst, nullptr);
     cu->execute_instruction(inst, *wf);
     delete inst;
@@ -2515,6 +2851,53 @@ TEST(RaceDetectorPluginOutputTest, DispatchLineUsesReadableNameAndExactSymbol) {
   EXPECT_NE(sink.str().find("[rocjitsu] Kernel dispatch: \"racy_kernel\" "
                             "symbol=\"_Z11racy_kernelPKfPf\"\n"),
             std::string::npos);
+}
+
+TEST(RaceDetectorPluginTest, DroppedAsyncLdsLaneDoesNotCreateLowAddressRace) {
+  PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"cdna5", /*wavefront_size=*/32);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *cu = f.cu();
+  auto *writer = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  auto *reader = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(writer, nullptr);
+  ASSERT_NE(reader, nullptr);
+  writer->set_exec(0x1u);
+  reader->set_exec(0x1u);
+  std::array<amdgpu::Wavefront *, 2> waves{writer, reader};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/0,
+                                               /*physical_vgpr_count=*/512, /*sgpr_count=*/208,
+                                               waves);
+
+  auto dropped = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  dropped->elem_size = 4;
+  dropped->num_elems = 1;
+  dropped->is_load = true;
+  dropped->lds_dst = true;
+  dropped->lds_per_lane_addr = true;
+  dropped->wf_size = writer->wf_size();
+  dropped->lane_mask = 0x1u;
+  dropped->per_lane_lds_addr[0] = amdgpu::kInvalidLdsAddress;
+  TestMemoryInstruction dropped_inst(std::move(dropped));
+  f.plugin_group_->onAmdgpuRouteMemoryInstruction(dropped_inst, *writer);
+
+  auto read = std::make_unique<VectorMemState>(LOCAL_MEM);
+  read->elem_size = 4;
+  read->num_elems = 1;
+  read->is_load = true;
+  read->wf_size = reader->wf_size();
+  read->lane_mask = 0x1u;
+  read->per_lane_addr[0] = 0;
+  read->dst_reg_base = reader->vgpr_alloc().base;
+  TestMemoryInstruction read_inst(std::move(read));
+  f.plugin_group_->onAmdgpuRouteMemoryInstruction(read_inst, *reader);
+
+  EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
 }
 
 TEST(ExecutionPluginGroupTest, OwnsConfiguredSinkForRetainedGroupLifetime) {

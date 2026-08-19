@@ -91,6 +91,10 @@ struct VectorMemState : DynamicInstState {
   }
   std::array<uint64_t, 64> per_lane_addr = {};
   uint64_t lane_mask = 0;
+  /// Optional per-element lane validity. Empty means every element uses
+  /// lane_mask; otherwise the vector contains exactly num_elems masks and
+  /// lane_mask is their union.
+  std::vector<uint64_t> element_lane_masks;
   uint64_t exec_mask = 0; ///< EXEC mask at issue time. Set by addr calc functions.
                           ///< Writeback zeroes OOB lanes (exec_mask & ~lane_mask).
   uint32_t wf_size = 64;  ///< Wavefront width (set from wavefront's wf_size()).

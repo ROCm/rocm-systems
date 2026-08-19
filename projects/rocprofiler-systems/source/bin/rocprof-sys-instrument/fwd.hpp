@@ -255,7 +255,7 @@ extern std::unique_ptr<std::ofstream> log_ofs;
             if(debug_print || verbose_level >= LEVEL)                                    \
                 fprintf(stderr, "[rocprof-sys][exe] Error! " __VA_ARGS__);               \
             char _buff[FUNCNAMELEN];                                                     \
-            sprintf(_buff, "[rocprof-sys][exe] Error! " __VA_ARGS__);                    \
+            snprintf(_buff, FUNCNAMELEN, "[rocprof-sys][exe] Error! " __VA_ARGS__);      \
             throw std::runtime_error(std::string{ _buff });                              \
         }                                                                                \
         else                                                                             \

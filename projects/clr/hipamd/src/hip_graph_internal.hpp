@@ -212,7 +212,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     amd::ScopedLock lock(nodeSetLock_);
     nodeSet_.insert(this);
     isEnabled_ = node.isEnabled_;
-    dev_id_ = ihipGetDevice();
+    dev_id_ = node.dev_id_;
   }
 
   // Delete copy-assignment operator to prevent accidental copies causing unexpected behaviors.

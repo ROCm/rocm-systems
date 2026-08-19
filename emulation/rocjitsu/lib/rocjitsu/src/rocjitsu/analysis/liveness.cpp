@@ -172,9 +172,10 @@ LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, std::unique_ptr<Exec
   deferred_restrict_live_before_to_instructions_ = options.restrict_live_before_to_instructions;
 
   const KernelBlockScope deferred_scope(deferred_blocks_);
-  if (options.arch == ROCJITSU_CODE_ARCH_GFX1250 && options.entry_block != nullptr) {
+  if (options.arch == ROCJITSU_CODE_ARCH_CDNA5 && options.entry_block != nullptr) {
     gfx1250_vgpr_msb_ = std::make_unique<Gfx1250VgprMsbAnalysis>(
-        deferred_scope, options.entry_block, deferred_extra_edges_, options.text);
+        deferred_scope, options.entry_block, deferred_extra_edges_, options.text,
+        options.additional_entry_blocks);
   }
   collect_global_register_usage(deferred_scope, options.text);
 }
@@ -391,6 +392,11 @@ std::optional<uint8_t> LivenessAnalysis::vgpr_msb_bank_before(const Instruction 
   if (gfx1250_vgpr_msb_ == nullptr)
     return std::nullopt;
   return gfx1250_vgpr_msb_->bank_before(inst, role);
+}
+
+bool LivenessAnalysis::global_vgpr_usage_is_complete() const {
+  require_available();
+  return global_vgpr_usage_is_complete_;
 }
 
 std::optional<uint16_t>

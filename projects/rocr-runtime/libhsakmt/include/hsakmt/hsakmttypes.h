@@ -617,6 +617,25 @@ typedef struct _HsaGraphicsResourceInfo {
     HSAuint64  SizeHintInBytes;     // Caller-provided size hint for foreign (non-ROCr) resources (IN, 0 if unknown)
 } HsaGraphicsResourceInfo;
 
+// Windows-only metadata populated in HsaGraphicsResourceInfo::Metadata when the imported
+// resource's VCAM_SURFACE_DESC is available. Provides swizzle mode as a fallback for when
+// the DXX extension (CLQueryResource11/CLQueryResource) or GL extension(wglResourceAttachAMD)
+// is not available.
+// The interop layer (clr) copies this blob opaquely into the ROCr image descriptor's data[] dwords
+// (starting at data[0]) when a full SRD is not available (Windows Vulkan image interop). clr does NOT
+// interpret any field — it stamps the descriptor's version with
+// HSA_AMD_IMAGE_DESC_VERSION_WDDM_SURFACE_METADATA (defined in hsa_ext_amd.h) and memcpy's the bytes.
+// The gfx image managers cast data[] back to HsaWddmSurfaceMetadata and interpret the surface fields
+// to reconstruct the SRD. The `version` field below is unused (retained for ABI stability).
+typedef struct _HsaWddmSurfaceMetadata {
+    HSAuint32 version;           // Unused. clr stamps the descriptor version directly.
+    HSAuint32 swizzle_mode;      // VCAM_SURFACE_DESC.swizzleMode (union value)
+    HSAuint32 tile_swizzle;      // VCAM_SURFACE_DESC.ulTileSwizzle (pipe-bank XOR)
+    HSAuint32 compression_mode;  // VCAM_SURFACE_DESC.ulCompressionMode (0 = uncompressed). gfx12+.
+    HSAuint32 max_comp_blk;      // VCAM_SURFACE_DESC.maxCompressedBlockSize. gfx12+.
+    HSAuint32 max_uncomp_blk;    // VCAM_SURFACE_DESC.maxUncompressedBlockSize. gfx12+.
+} HsaWddmSurfaceMetadata;
+
 typedef enum _HSA_CACHING_TYPE
 {
     HSA_CACHING_CACHED        = 0,

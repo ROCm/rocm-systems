@@ -209,6 +209,95 @@ controllers.
 indexed read/write access. **VectorReg** (`vector_reg.h`) models a
 SIMD-width vector register with per-element access.
 
+### Register-file storage
+
+The functional GPU model provisions vector-register storage for every fixed
+wavefront slot in each simulated compute unit. Slots are independent of
+hardware occupancy: a wave that uses many registers still occupies one
+simulator slot, and register pressure does not reduce the number of admitted
+waves. For the shipped gfx942 configuration, the vector backing has the
+following dimensions:
+
+| Quantity                  | Value                                      |
+|---------------------------|--------------------------------------------|
+| Simulated compute units   | 320                                        |
+| Wavefront slots per CU    | 32                                         |
+| Registers per slot        | 512 combined VGPR and AGPR entries         |
+| Register width            | 64 lanes × 4 bytes                         |
+| Complete vector backing   | 1,280 MiB                                  |
+
+`RegisterFile` divides the physical VGPR index space into fixed 4 KiB chunks.
+An untouched chunk is represented by a null entry and reads as zero; its
+storage is allocated and zero-initialized on the first mutable access. Retiring
+a wave releases wholly covered chunks and clears any shared boundary chunk.
+The implementation uses only portable C++ allocation and does not require
+virtual-memory APIs. Mutable handles and handles into materialized registers
+remain stable until their allocation retires, but the complete register file is
+deliberately not contiguous. Const access to an unmaterialized register observes
+its logical zero value through shared immutable backing without allocating a
+chunk. That read-only handle is an ephemeral value observation, not a persistent
+storage identity, and need not observe a later write through another handle.
+
+This is a functional storage model, not a model of a physical register file.
+In particular, filling all 32 simulator slots with high-pressure waves can
+represent an occupancy that hardware could not admit. That distinction is
+important when interpreting memory measurements or using register pressure to
+approximate hardware throughput.
+
+#### Representative workloads
+
+The fixed-topology and IREE measurements were collected on 2026-08-10 from
+rocjitsu revision `49e6ddafeb9fd8cadda1c78b891466fd498ec676`. Fixed topology
+reports the median of six processes; IREE reports the median of five processes,
+all of which matched the checked-in output exactly. The CTS rows report the
+median of three source-identical processes from rocjitsu revision
+`4d5779c15beb0d9495b319dce5d906e966275e23` and test-corpus revision
+`ce5da512188dd40de0bc7da298ec11b587d8fdd3`; all tests passed. Every build was
+Release, pinned to CPU 8, and used an AMD EPYC 9554 host running Linux 6.8.
+
+| Workload                             | Eager runtime | Software runtime | Eager peak RSS | Software peak RSS | Effect                              |
+|--------------------------------------|--------------:|-----------------:|---------------:|------------------:|-------------------------------------|
+| Fixed topology, no kernel            |        0.87 s |          0.125 s |  1,511,424 KiB |       201,728 KiB | 85.6% faster, 86.7% less RSS        |
+| IREE softmax, exact output            |        2.50 s |           0.99 s |  1,630,208 KiB |       326,656 KiB | 60.4% faster, 80.0% less RSS        |
+| CTS math                             |       28.37 s |          27.94 s |  2,235,924 KiB |       926,788 KiB | 1.5% faster, 58.5% less RSS         |
+| CTS MFMA                             |      151.40 s |         150.78 s |  2,235,392 KiB |       926,720 KiB | 0.4% faster, 58.5% less RSS         |
+
+Unlike fixed topology and the shorter IREE workload, the CTS suites are
+dominated by simulated instruction execution and therefore amortize the fixed
+initialization work that lazy storage eliminates. Across three runs, the
+startup proxy (whole-process wall time minus test-body time) fell from about
+1.29 seconds to 0.54 seconds. Test-body time increased by 1.2% for math and was
+unchanged to measurement precision for MFMA (+0.1%). The result is a smaller
+end-to-end runtime improvement even as peak RSS falls by 58.5%.
+
+#### Worst-case saturation validation
+
+The qualified gfx942 saturation workload was measured on 2026-08-10 from
+rocjitsu revision `49e6ddafeb9fd8cadda1c78b891466fd498ec676`. The
+representative case places eight waves on each of one XCD's 40 CUs and reports
+three-launch medians. The all-slot case deliberately fills all 32 functional
+simulator slots on all 320 CUs with 253-VGPR waves—an occupancy that hardware
+could not admit—and reports one checksum-validated launch.
+
+| Saturation runtime                          |       Eager | Software lazy | Change      |
+|---------------------------------------------|------------:|--------------:|-------------|
+| 253-VGPR initialization-only median launch  |  156.201 ms |    157.479 ms | 0.8% slower |
+| 253-VGPR eight-update median launch         | 1,332.955 ms |  1,335.671 ms | 0.2% slower |
+| All-slot 253-VGPR eight-update timed launch |    48.127 s |      48.780 s | 1.4% slower |
+
+Peak RSS is a process-wide high-water measurement. The representative sweep
+therefore has one result covering all 9--253-VGPR pressure points rather than
+separate values for its individual launch timings.
+
+| Saturation peak RSS                |          Eager | Software lazy | Change         |
+|------------------------------------|---------------:|--------------:|----------------|
+| Complete 9--253-VGPR sweep         | 1,609,728 KiB  |  318,280 KiB  | 80.2% less RSS |
+| All slots, 253 VGPR, eight updates | 1,622,016 KiB  |  967,064 KiB  | 40.4% less RSS |
+
+The qualified workload, complete methodology, and reproduction commands are
+pinned at rocjitsu test corpus revision
+[`b3f5fa8a263ee2cd83666a62bc18731b09b1166a`](https://github.com/ROCm/rocjitsu-test-corpus/tree/b3f5fa8a263ee2cd83666a62bc18731b09b1166a/corpus/kernels/benchmarks/vgpr_saturation).
+
 ---
 
 ## Messages and Events

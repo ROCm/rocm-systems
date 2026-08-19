@@ -52,16 +52,18 @@ test::ScopedTempFile write_temp_config(std::string_view json) {
 }
 
 TEST(ConfigLoaderTest, LoadCdna4Config) {
-  std::string json = CONFIG_DIR_PATH + "/gfx950_cdna4.json";
+  std::string json = CONFIG_DIR_PATH + "/gfx950_mi355x.json";
   auto loaded = config::load_config(json, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
 
-  // CDNA4 config: 8 XCDs, 4 SEs per XCD, 8 CUs per SE, 2 IODs.
+  // MI350X physical geometry: 8 XCDs, 4 SEs per XCD, 9 CUs per SE, 2 IODs.
+  // The part exposes 256 active CUs through simd_count but has capacity for 288.
   EXPECT_EQ(soc->num_xcds(), 8u);
   EXPECT_EQ(soc->num_iods(), 2u);
   auto *xcd = soc->xcd(0);
   EXPECT_EQ(xcd->num_shader_engines(), 4u);
-  EXPECT_EQ(xcd->shader_engine(0)->num_compute_units(), 8u);
+  EXPECT_EQ(xcd->shader_engine(0)->num_compute_units(), 9u);
+  EXPECT_EQ(kmd::drm_cu_active_number(loaded.device.simd_count, loaded.device.simd_per_cu), 256u);
 }
 
 TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
@@ -87,10 +89,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
                                              rdna4.device.num_shader_arrays_per_engine,
                                          rdna4.device.num_shader_arrays_per_engine),
             4u);
-  EXPECT_EQ(kmd::drm_cu_active_number(rdna4.device.num_shader_engines *
-                                          rdna4.device.num_shader_arrays_per_engine,
-                                      rdna4.device.num_cu_per_sh),
-            64u);
+  EXPECT_EQ(kmd::drm_cu_active_number(rdna4.device.simd_count, rdna4.device.simd_per_cu), 64u);
   EXPECT_EQ(kmd::external_rev_id_for_gfx_target_version(rdna4.device.gfx_target_version,
                                                         rdna4.device.revision_id),
             0x51u);
@@ -136,10 +135,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
                                              rdna3.device.num_shader_arrays_per_engine,
                                          rdna3.device.num_shader_arrays_per_engine),
             6u);
-  EXPECT_EQ(kmd::drm_cu_active_number(rdna3.device.num_shader_engines *
-                                          rdna3.device.num_shader_arrays_per_engine,
-                                      rdna3.device.num_cu_per_sh),
-            96u);
+  EXPECT_EQ(kmd::drm_cu_active_number(rdna3.device.simd_count, rdna3.device.simd_per_cu), 96u);
   EXPECT_EQ(kmd::external_rev_id_for_gfx_target_version(rdna3.device.gfx_target_version,
                                                         rdna3.device.revision_id),
             0x1u);
@@ -173,10 +169,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
                                              rdna35.device.num_shader_arrays_per_engine,
                                          rdna35.device.num_shader_arrays_per_engine),
             2u);
-  EXPECT_EQ(kmd::drm_cu_active_number(rdna35.device.num_shader_engines *
-                                          rdna35.device.num_shader_arrays_per_engine,
-                                      rdna35.device.num_cu_per_sh),
-            32u);
+  EXPECT_EQ(kmd::drm_cu_active_number(rdna35.device.simd_count, rdna35.device.simd_per_cu), 32u);
   EXPECT_EQ(kmd::external_rev_id_for_gfx_target_version(rdna35.device.gfx_target_version,
                                                         rdna35.device.revision_id),
             0xc1u);
@@ -862,7 +855,7 @@ TEST(ConfigLoaderTest, RejectsSimulatorConfigForHardwareDbtBackend) {
 
 TEST(ConfigLoaderTest, Gfx1250ComputeUnitDefaultsCoverTtmpAndHighVgprs) {
   const char *json = R"({"max_ticks":1000,"num_threads":1,
-    "vm":{"arch":"gfx1250"},
+    "vm":{"arch":"cdna5"},
     "topology":{"root":{"name":"soc","type":"soc","children":[
       {"name":"vram","type":"gpu_memory"},
       {"name":"xcd0","type":"xcd","children":[
@@ -1052,8 +1045,13 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
   lower_wf->halt();
   const uint32_t acc0 = wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET;
   const uint32_t acc_last = acc0 + cdna3::Isa::MAX_ACC_VGPRS_PER_WF - 1;
+  const uint32_t acc_quarter = acc0 + cdna3::Isa::MAX_ACC_VGPRS_PER_WF / 4;
+  const uint32_t acc_midpoint = acc0 + cdna3::Isa::MAX_ACC_VGPRS_PER_WF / 2;
   cu->write_vgpr(acc0, 0, 0xA55A0001u);
+  cu->write_vgpr(acc_quarter, 63, 0xA55A003Fu);
+  cu->write_vgpr(acc_midpoint, 63, 0xA55A103Fu);
   cu->write_vgpr(acc_last, 0, 0xDEADBEEFu);
+  cu->write_vgpr(acc_last, 63, 0xFEEDFACEu);
 
   test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
   config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config);
@@ -1074,9 +1072,21 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
   EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET, 0),
             0xA55A0001u);
   EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET +
+                                       cdna3::Isa::MAX_ACC_VGPRS_PER_WF / 4,
+                                   63),
+            0xA55A003Fu);
+  EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET +
+                                       cdna3::Isa::MAX_ACC_VGPRS_PER_WF / 2,
+                                   63),
+            0xA55A103Fu);
+  EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET +
                                        cdna3::Isa::MAX_ACC_VGPRS_PER_WF - 1,
                                    0),
             0xDEADBEEFu);
+  EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET +
+                                       cdna3::Isa::MAX_ACC_VGPRS_PER_WF - 1,
+                                   63),
+            0xFEEDFACEu);
 }
 
 TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
@@ -1116,6 +1126,11 @@ TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
   ASSERT_NE(wf, nullptr);
   ASSERT_EQ(wf->wf_size(), 32u);
   wf->set_exec_raw(0xDEADBEEF0000000FULL);
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  const uint32_t vgpr_last = vgpr_base + cu->vgpr_allocation_block_size() - 1;
+  cu->write_vgpr(vgpr_base + 1, 31, 0x1234001Fu);
+  cu->write_vgpr(vgpr_base + cu->vgpr_allocation_block_size() / 2, 31, 0x5678001Fu);
+  cu->write_vgpr(vgpr_last, 31, 0x9ABC001Fu);
 
   test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
   config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config);
@@ -1127,15 +1142,24 @@ TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
   auto *restored_cp = restored_soc->xcd(0)->command_processor();
   ASSERT_NE(restored_cp, nullptr);
   EXPECT_EQ(restored_cp->sdma_packet_dialect(), amdgpu::SdmaPacketDialect::Gfx11Plus);
-  auto *restored_wf = restored_soc->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
+  auto *restored_cu = restored_soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(restored_cu, nullptr);
+  auto *restored_wf = restored_cu->wf(0);
   ASSERT_NE(restored_wf, nullptr);
   EXPECT_EQ(restored_wf->exec(), 0xFULL);
   EXPECT_EQ(restored_wf->exec_raw(), 0xDEADBEEF0000000FULL);
+  EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + 1, 31), 0x1234001Fu);
+  EXPECT_EQ(restored_cu->read_vgpr(
+                restored_wf->vgpr_alloc().base + restored_cu->vgpr_allocation_block_size() / 2, 31),
+            0x5678001Fu);
+  EXPECT_EQ(restored_cu->read_vgpr(
+                restored_wf->vgpr_alloc().base + restored_cu->vgpr_allocation_block_size() - 1, 31),
+            0x9ABC001Fu);
 }
 
 TEST(CheckpointTest, SaveAndRestoreHwregState) {
   const char *json = R"({"max_ticks":10000,"num_threads":1,
-    "vm":{"arch":"gfx1250"},
+    "vm":{"arch":"cdna5"},
     "topology":{
       "root":{
         "name":"soc","type":"soc",
@@ -1287,27 +1311,6 @@ TEST(CApiTest, RejectsMalformedCheckpoints) {
   EXPECT_EQ(rj_vm_restore_checkpoint(truncated.path().c_str(), &restored),
             ROCJITSU_STATUS_INVALID_FILE);
   EXPECT_EQ(restored, nullptr);
-}
-
-TEST(CApiTest, PluginLifecycleDispatchesProfiledShutdownThroughBaseGroup) {
-  test::ScopedTempDirectory sink_dir("rocjitsu-plugin-lifecycle-");
-  const std::filesystem::path sink_path(sink_dir.path());
-
-  rj_vm_t *handle = nullptr;
-  ASSERT_EQ(
-      rj_vm_create((CONFIG_DIR_PATH + "/gfx950_cdna4.json").c_str(), RJ_VM_MODE_DEFAULT, &handle),
-      ROCJITSU_STATUS_SUCCESS);
-  ASSERT_NE(handle, nullptr);
-
-  const std::string plugin_config = std::format(
-      R"({{"profiled":true,"sinks":{{"types":["file"],"dir":"{}"}}}})", sink_path.string());
-  ASSERT_EQ(rj_vm_load_plugins(handle, plugin_config.c_str(), nullptr), ROCJITSU_STATUS_SUCCESS);
-  rj_vm_destroy(handle);
-
-  std::ifstream profile(sink_path / "profile.log");
-  const std::string output{std::istreambuf_iterator<char>(profile),
-                           std::istreambuf_iterator<char>()};
-  EXPECT_NE(output.find("total emulation time"), std::string::npos) << output;
 }
 
 TEST(CApiTest, InvalidArguments) {

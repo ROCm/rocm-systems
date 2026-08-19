@@ -35,10 +35,13 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <span>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -48,6 +51,17 @@ namespace rocjitsu {
 namespace amdgpu {
 
 class CommandProcessor;
+
+inline constexpr int32_t kWorkgroupBarrierId = -1;
+inline constexpr int32_t kWorkgroupTrapBarrierId = -2;
+inline constexpr int32_t kClusterBarrierId = -3;
+inline constexpr int32_t kClusterTrapBarrierId = -4;
+
+inline constexpr uint8_t kNamedBarrierBit = 0;
+inline constexpr uint8_t kWorkgroupBarrierBit = 1;
+inline constexpr uint8_t kWorkgroupTrapBarrierBit = 2;
+inline constexpr uint8_t kClusterBarrierBit = 3;
+inline constexpr uint8_t kClusterTrapBarrierBit = 4;
 
 /// @brief Base AMDGPU compute unit that owns wavefront slots and register files.
 ///
@@ -72,6 +86,7 @@ class CommandProcessor;
 class ComputeUnitCore : public simdojo::CompositeComponent {
 public:
   static constexpr uint32_t kFunctionalQuantum = 1024;
+  static constexpr uint32_t kMaxNamedBarriers = 16;
 
   /// @brief Configuration for a compute unit.
   struct Config {
@@ -195,9 +210,26 @@ public:
   /// @brief Register a new workgroup with its expected WF count.
   /// @details Called by the DispatchController when assigning a WG to this CU.
   /// Initializes the refcount so release_wf() can detect WG completion.
-  void begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint32_t wf_count) {
-    active_wgs_[wg_key(dispatch_id, wg_id)] = wf_count;
-  }
+  void begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint32_t wf_count,
+                       uint32_t num_named_barriers = 0);
+
+  /// @brief Initialize a named barrier's member count and clear its signals.
+  void named_barrier_init(Wavefront &wf, int32_t barrier_id, uint32_t member_count);
+
+  /// @brief Associate a wave with one named barrier.
+  void named_barrier_join(Wavefront &wf, int32_t barrier_id);
+
+  /// @brief Signal a split-barrier domain and return whether this was its first signal.
+  bool barrier_signal(Wavefront &wf, int32_t barrier_id, uint32_t member_count);
+
+  /// @brief Return the packed architectural state of a split-barrier domain.
+  uint32_t barrier_state(const Wavefront &wf, int32_t barrier_id) const;
+
+  /// @brief Wait on the completion bit selected by a split-barrier ID.
+  void barrier_wait(Wavefront &wf, int32_t barrier_id);
+
+  /// @brief Leave the wave's currently joined named barrier.
+  bool named_barrier_leave(Wavefront &wf);
 
   /// @brief Called by Wavefront::halt() to decrement the WG refcount.
   /// @details When the refcount reaches zero, all WFs in the WG have halted
@@ -484,24 +516,59 @@ public:
   /// @returns Pointer to the contiguous SGPR data.
   const uint32_t *sgpr_data(uint32_t base) const { return &sgpr_file_[base]; }
 
-  /// @brief Return a raw pointer to a wavefront's VGPR data in the physical file.
+  /// @brief Return a raw pointer to one VGPR in the physical file.
   /// @details This bypasses plugin read hooks and should not be used directly
   /// by instruction emulators. It is reserved for RegisterAccess, VM storage
   /// code, serialization/checkpointing, diagnostics, and tightly controlled
   /// internals that have a separate observation contract.
-  /// @param base Base register index in the VGPR file.
-  /// @returns Const pointer to the raw VGPR data.
+  /// The returned pointer spans exactly one register's lanes, not a contiguous
+  /// multi-register region. For software-lazy storage, an unmaterialized
+  /// register may return shared immutable zero backing. Treat the result as an
+  /// ephemeral value observation: it is not a persistent storage identity and
+  /// need not observe a later write through another handle.
+  /// @param base Register index in the VGPR file.
+  /// @returns Const pointer to one register's raw lane data.
   virtual const uint8_t *raw_vgpr_data(uint32_t base) const = 0;
 
-  /// @brief Return a mutable raw pointer to a wavefront's VGPR data.
+  /// @brief Return a mutable raw pointer to one VGPR.
   /// @details This bypasses the instruction-facing RegisterAccess boundary.
   /// It is intended for VM storage operations such as memory completion,
   /// checkpoint restore, RegisterAccess view implementation, and other
   /// tightly controlled internals. Instruction emulators should use Operand or
-  /// RegisterAccess write APIs instead.
-  /// @param base Base register index in the VGPR file.
-  /// @returns Mutable pointer to the raw VGPR data.
+  /// RegisterAccess write APIs instead. The returned pointer spans exactly one
+  /// register's lanes and remains stable until the owning wave retires.
+  /// @param base Register index in the VGPR file.
+  /// @returns Mutable pointer to one register's raw lane data.
   virtual uint8_t *raw_vgpr_data(uint32_t base) = 0;
+
+  /// @brief Visit a logical physical-VGPR range in register order.
+  /// @details Each callback span contains exactly one register's lanes. Backing
+  /// storage boundaries are not observable through this interface.
+  template <typename Function>
+  void for_each_raw_vgpr(uint32_t base, uint32_t count, Function &&function) const {
+    using FunctionType = std::remove_reference_t<Function>;
+    static_assert(std::is_object_v<FunctionType>, "VGPR visitors must be callable objects");
+    static_assert(std::is_invocable_v<FunctionType &, std::span<const uint32_t>>,
+                  "VGPR visitor must accept a const lane span");
+    for_each_raw_vgpr_impl(base, count, &function,
+                           [](const void *context, std::span<const uint32_t> lanes) {
+                             if constexpr (std::is_const_v<FunctionType>) {
+                               (*static_cast<const FunctionType *>(context))(lanes);
+                             } else {
+                               (*static_cast<FunctionType *>(const_cast<void *>(context)))(lanes);
+                             }
+                           });
+  }
+
+  /// @brief Copy raw bytes from a logical physical-VGPR range.
+  virtual void copy_raw_vgprs_to(uint32_t base, uint32_t count,
+                                 std::span<std::byte> destination) const = 0;
+
+  /// @brief Restore raw bytes into a logically zero physical-VGPR range.
+  /// @details Zero source runs remain unmaterialized, so this is a full restore
+  /// only when every destination byte is initially zero.
+  virtual void restore_raw_vgprs_into_zeroed_storage(uint32_t base, uint32_t count,
+                                                     std::span<const std::byte> source) = 0;
 
   /// @brief Read a VGPR lane directly from physical storage.
   /// @details This deliberately bypasses plugin observation and is reserved
@@ -574,6 +641,10 @@ protected:
   /// @brief Count the number of free VGPR allocation blocks.
   virtual uint32_t free_vgpr_blocks() const = 0;
 
+  using RawVgprVisitor = void (*)(const void *, std::span<const uint32_t>);
+  virtual void for_each_raw_vgpr_impl(uint32_t base, uint32_t count, const void *context,
+                                      RawVgprVisitor visitor) const = 0;
+
   /// @brief Update wavefront states (WAITCNT, BARRIER, ENDING transitions).
   void update_wf_states();
 
@@ -620,6 +691,20 @@ protected:
 
   std::unordered_map<uint64_t, uint32_t> active_wgs_;
 
+  struct BarrierCounter {
+    uint32_t member_count = 0;
+    uint32_t signal_count = 0;
+  };
+  struct WorkgroupBarriers {
+    uint32_t allocated_count = 0;
+    std::array<BarrierCounter, kMaxNamedBarriers + 1> named{};
+    std::array<BarrierCounter, 2> workgroup{};
+  };
+  std::vector<Wavefront *> complete_barrier(uint32_t dispatch_id, uint32_t wg_id,
+                                            uint8_t completion_bit, uint32_t named_barrier_id = 0);
+  void notify_barrier_complete(std::span<Wavefront *> members);
+  std::unordered_map<uint64_t, WorkgroupBarriers> barrier_wgs_;
+
   uint64_t shared_aperture_base_ = 0;
   uint64_t shared_aperture_limit_ = 0;
   uint64_t private_aperture_base_ = 0;
@@ -636,9 +721,10 @@ protected:
   simdojo::Port *req_ = nullptr; ///< Requester port: L2 cache request (structural).
   uint64_t step_count_ = 0;
   bool functional_yield_requested_ = false;
+
+  friend class CommandProcessor;
 };
 
-inline GpuMemory *InstructionComputeUnitView::memory() const { return raw_cu().memory(); }
 inline L1ScalarCache &InstructionComputeUnitView::l1_scalar() { return raw_cu().l1_scalar(); }
 inline L1VectorCache &InstructionComputeUnitView::l1_vector() { return raw_cu().l1_vector(); }
 inline L2Cache *InstructionComputeUnitView::l2() const { return raw_cu().l2(); }
@@ -755,6 +841,14 @@ template <simdojo::ExecMode Mode, GpuIsa Isa>
 class IsaExecComputeUnit : public ExecComputeUnit<Mode> {
 public:
   using Vgpr = simdojo::VectorReg<Isa::WF_SIZE, uint32_t>;
+  static constexpr uint32_t MAX_ACCVGPR_PHYSICAL_LIMIT =
+      Isa::MAX_ACC_VGPRS_PER_WF == 0 ? 0 : ACC_VGPR_OFFSET + Isa::MAX_ACC_VGPRS_PER_WF;
+  static constexpr uint32_t MAX_VGPRS_PER_BLOCK =
+      std::max(Isa::MAX_ADDRESSABLE_VGPRS_PER_WF, MAX_ACCVGPR_PHYSICAL_LIMIT);
+  static constexpr size_t MAX_VGPR_FILE_REGISTERS =
+      static_cast<size_t>(Isa::MAX_WF_SLOTS) * MAX_VGPRS_PER_BLOCK;
+  using VgprFile = simdojo::RegisterFile<Vgpr, simdojo::RegisterFileStorage::SOFTWARE_LAZY,
+                                         MAX_VGPR_FILE_REGISTERS>;
 
   /// @brief Construct an ISA-parameterized compute unit.
   /// @param name Human-readable name (e.g., "cu0").
@@ -808,23 +902,33 @@ public:
     vgpr_file_[reg_idx][lane] = val;
   }
 
-  /// @returns Const pointer to the raw VGPR data.
+  /// @returns Const pointer to one VGPR's raw lane data.
   const uint8_t *raw_vgpr_data(uint32_t base) const override {
     return reinterpret_cast<const uint8_t *>(&vgpr_file_[base]);
   }
 
-  /// @returns Mutable pointer to the raw VGPR data.
+  /// @returns Mutable pointer to one VGPR's raw lane data.
   uint8_t *raw_vgpr_data(uint32_t base) override {
     return reinterpret_cast<uint8_t *>(&vgpr_file_[base]);
   }
 
+  void copy_raw_vgprs_to(uint32_t base, uint32_t count,
+                         std::span<std::byte> destination) const override {
+    vgpr_file_.copy_to(base, count, destination);
+  }
+
+  void restore_raw_vgprs_into_zeroed_storage(uint32_t base, uint32_t count,
+                                             std::span<const std::byte> source) override {
+    vgpr_file_.copy_nonzero_from(base, count, source);
+  }
+
   /// @brief Return the VGPR register file (typed, only on concrete CU).
   /// @returns Const reference to the VGPR register file.
-  const simdojo::RegisterFile<Vgpr> &vgpr_file() const { return vgpr_file_; }
+  const VgprFile &vgpr_file() const { return vgpr_file_; }
 
   /// @brief Return a mutable reference to the VGPR register file.
   /// @returns Mutable reference to the VGPR register file.
-  simdojo::RegisterFile<Vgpr> &vgpr_file() { return vgpr_file_; }
+  VgprFile &vgpr_file() { return vgpr_file_; }
 
 protected:
   /// @returns Base index of the allocated VGPR block, or -1 on failure.
@@ -834,6 +938,16 @@ protected:
   void free_vgprs(uint32_t base) override { vgpr_file_.free(base); }
 
   uint32_t free_vgpr_blocks() const override { return vgpr_file_.free_block_count(); }
+
+  void for_each_raw_vgpr_impl(uint32_t base, uint32_t count, const void *context,
+                              ComputeUnitCore::RawVgprVisitor visitor) const override {
+    static_assert(sizeof(Vgpr) == Isa::WF_SIZE * sizeof(uint32_t),
+                  "VectorReg must be layout-compatible with raw lane storage");
+    vgpr_file_.for_each(base, count, [&](const Vgpr &reg) {
+      visitor(context,
+              {reinterpret_cast<const uint32_t *>(&reg), static_cast<size_t>(Isa::WF_SIZE)});
+    });
+  }
 
 public:
   uint32_t vgpr_allocation_block_size() const override { return vgprs_per_block_; }
@@ -848,7 +962,7 @@ protected:
   }
 
 private:
-  simdojo::RegisterFile<Vgpr> vgpr_file_{"vgpr"};
+  VgprFile vgpr_file_{"vgpr"};
   std::vector<Wavefront *> vgpr_to_wave_; ///< Physical VGPR → owning wavefront.
   uint32_t vgprs_per_block_ = 0;
 };

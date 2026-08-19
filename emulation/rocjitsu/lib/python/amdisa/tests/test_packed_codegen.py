@@ -38,7 +38,7 @@ def test_gfx1250_pk_f32_uses_literal_aware_pair_helper():
         ['src0', 'src1'],
         'add',
         opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
-        use_gfx1250_helpers=True,
+        use_cdna5_helpers=True,
     )
 
     assert 'const auto s0 = read_pk_f32_words(src0, wf, lane)' in cpp
@@ -88,7 +88,7 @@ def test_gfx1250_mad_mix_f32_uses_helper_and_fma():
         ['src0', 'src1', 'src2'],
         op_sel_hi_2_expr='inst_.pad_14',
         opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
-        use_gfx1250_helpers=True,
+        use_cdna5_helpers=True,
     )
 
     assert 'read_fma_mix_source_f32(src0, wf, lane' in cpp
@@ -119,7 +119,7 @@ def test_gfx1250_mad_mixlo_f16_uses_helper_and_fma():
         is_lo=True,
         op_sel_hi_2_expr='inst_.pad_14',
         opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
-        use_gfx1250_helpers=True,
+        use_cdna5_helpers=True,
     )
 
     assert 'read_fma_mix_source_f32(src0, wf, lane' in cpp
@@ -160,7 +160,7 @@ def test_gfx1250_bf16_mad_mix_variants_use_bf16_helper():
         result='f32',
         op_sel_hi_2_expr='inst_.pad_14',
         opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
-        use_gfx1250_helpers=True,
+        use_cdna5_helpers=True,
     )
     cpp_lo = gen_mad_mix_bf16(
         ['vdst'],
@@ -168,7 +168,7 @@ def test_gfx1250_bf16_mad_mix_variants_use_bf16_helper():
         result='lo',
         op_sel_hi_2_expr='inst_.pad_14',
         opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
-        use_gfx1250_helpers=True,
+        use_cdna5_helpers=True,
     )
 
     assert 'read_fma_mix_bf16_source_f32(src0, wf, lane' in cpp_f32

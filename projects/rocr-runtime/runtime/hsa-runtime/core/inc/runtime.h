@@ -907,6 +907,9 @@ class Runtime {
   /// @brief Get the highest used node id.
   uint32_t max_node_id() const { return agents_by_node_.rbegin()->first; }
 
+  // Returns the GPU agent from enabled and disabled gpu agents list
+  Agent* LowestDrmMinorGpu();
+
   // Mutex object to protect multithreaded access to ::allocation_map_.
   // Also ensures atomicity of pointer info queries by interlocking
   // KFD map/unmap, register/unregister, and access to hsaKmtQueryPointerInfo

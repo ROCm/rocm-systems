@@ -69,6 +69,8 @@ void write_lds_dst_load_direct(const VectorMemState &d, Lds &lds, uint32_t per_l
     }
     uint32_t lds_addr =
         d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * per_lane_bytes;
+    if (lds_addr == kInvalidLdsAddress)
+      continue;
     lds.write(lds_addr, &d.response_data[data_offset], per_lane_bytes);
   }
 }
@@ -100,6 +102,10 @@ MemoryAccessCompletion complete_lds_dst_load(VectorMemState &d, Wavefront &wf, C
         std::memcpy(&v, &d.response_data[ln * per_lane_bytes], 4);
       uint32_t lds_addr =
           d.lds_per_lane_addr ? d.per_lane_lds_addr[ln] : d.lds_base + ln * per_lane_bytes;
+      if (lds_addr == kInvalidLdsAddress) {
+        os << std::format(" L{}:@{:#x}->lds[dropped]", ln, d.per_lane_addr[ln]);
+        continue;
+      }
       os << std::format(" L{}:@{:#x}->lds[{:#x}]={:#x}", ln, d.per_lane_addr[ln], lds_addr, v);
     }
   });
@@ -487,12 +493,13 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   }
 
   if (d.is_load) {
-    d.response_data.resize(d.wf_size * d.num_elems * d.elem_size);
+    d.response_data.assign(d.wf_size * d.num_elems * d.elem_size, 0);
     l1_->load(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems, d.response_data.data(),
-              d.mtype, d.non_temporal, d.request_force_l1_bypass, d.wf_size, wf.process_id());
+              d.mtype, d.non_temporal, d.request_force_l1_bypass, d.wf_size, wf.process_id(),
+              d.element_lane_masks);
   } else {
     l1_->store(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems, d.store_data.data(),
-               d.mtype, d.non_temporal, d.wf_size, wf.process_id());
+               d.mtype, d.non_temporal, d.wf_size, wf.process_id(), d.element_lane_masks);
   }
 }
 
