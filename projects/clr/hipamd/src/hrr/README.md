@@ -95,7 +95,7 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 | `--replace-kernel N=P` | Launch recorded kernel `N` from external code object `P` instead |
 | `--sync-after-launch` | `hipDeviceSynchronize` after every kernel launch |
 | `--sync-after-event` | Sync after every event (slow; pinpoints faults/hangs) |
-| `--continue-on-error` | Report a failing event and keep replaying instead of stopping at the first one; for surveying which APIs fail, not for reproducing a fault |
+| `--continue-on-error` | Report each HIP API error and keep replaying instead of aborting; for surveying which APIs fail, not for reproducing a fault |
 | `--sync-watchdog-ms N` | Abort if any device sync exceeds `N` ms (`0` = disabled) |
 | `--trace-kernels` | One compact line before every kernel launch |
 | `--trace-sync` | Log sync begin/done around kernel syncs |

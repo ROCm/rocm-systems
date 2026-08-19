@@ -74,7 +74,9 @@
 #include <utility>
 #include <vector>
 
+#ifndef _WIN32
 #include <link.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -96,6 +98,7 @@ namespace fs = std::filesystem;
 // instance, corrupts the runtime while loading code objects: the first symptom
 // is an unrelated HIP call failing with "invalid argument", and the second is a
 // segfault with nothing in the log to connect either to the real cause.
+#ifndef _WIN32
 static const char* const kRocmLibs[] = {
     "libamdhip64.so", "libhsa-runtime64.so", "libamd_comgr.so"};
 
@@ -110,10 +113,15 @@ static int collect_rocm_lib(struct dl_phdr_info* info, size_t, void* out) {
   }
   return 0;
 }
+#endif
 
 // Report the ROCm libraries actually mapped, resolved through any symlink so
-// the version-suffixed real file is what gets named.
+// the version-suffixed real file is what gets named. Linux-only: Windows has
+// no dl_iterate_phdr.
 static void print_loaded_rocm_libs() {
+#ifdef _WIN32
+  return;
+#else
   std::vector<std::string> found;
   dl_iterate_phdr(collect_rocm_lib, &found);
   std::sort(found.begin(), found.end());
@@ -124,6 +132,7 @@ static void print_loaded_rocm_libs() {
     printf("[HRR] %s: %s\n", label, (ec ? fs::path(lib) : real).c_str());
     label = "        ";
   }
+#endif
 }
 
 static bool env_flag_enabled(const char* name) {
@@ -1115,10 +1124,15 @@ static bool repair_root(const std::string& archive_path, int& exit_code) {
     else repaired++;
   }
 
-  // Re-scan so the root index reflects the manifests just written.
-  if (!write_root_manifest(root, collect_process_dirs(root)))
+  // Re-scan so the root index reflects the manifests just written. Stay in
+  // this function (return true) so the caller does not fall through to
+  // single-archive repair; count the write as a failure so we do not exit 0
+  // with a missing or stale root index.
+  if (!write_root_manifest(root, collect_process_dirs(root))) {
     fprintf(stderr, "[HRR] repair: cannot write %s\n",
             (root / "manifest.json").string().c_str());
+    failed++;
+  }
 
   printf("\n[HRR] Repair summary: %zu repaired, %zu already complete, %zu failed\n",
          repaired, already_clean, failed);
@@ -1174,13 +1188,13 @@ static void print_usage(const char* argv0) {
     "                        the archive is not modified.\n"
     "  --sync-after-launch   hipDeviceSynchronize after every kernel launch\n"
     "  --sync-after-event    hipDeviceSynchronize after EVERY event (slowest, most precise)\n"
-    "  --continue-on-error   Do not stop at the first failing event: report it and\n"
-    "                        keep replaying. Use to survey which APIs in an\n"
-    "                        archive fail, not to reproduce a fault: later events\n"
-    "                        run in a state the capture never had, so their\n"
-    "                        results mean less the further past the first error\n"
-    "                        they are. Also downgrades an unloadable code object\n"
-    "                        at pre-load from fatal to a warning.\n"
+    "  --continue-on-error   Do not stop on HIP API errors: report each and keep\n"
+    "                        replaying. Use to survey which APIs in an archive\n"
+    "                        fail, not to reproduce a fault: later events run in\n"
+    "                        a state the capture never had, so their results mean\n"
+    "                        less the further past the first error they are.\n"
+    "                        Also downgrades an unloadable code object at pre-load\n"
+    "                        from fatal to a warning.\n"
     "  --sync-watchdog-ms N  Abort with a diagnostic if any device synchronize does\n"
     "                        not complete within N ms (catches hung/deadlocked\n"
     "                        kernels, e.g. StreamK flag spin-waits). 0 = disabled.\n"
