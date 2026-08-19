@@ -133,6 +133,8 @@ bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize);
 bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize);
 bool rcclUseHierarchicalReduceScatter(struct ncclComm* comm, size_t msgSize);
 size_t rcclHierarchicalTempBufferSize(int nNodes, bool allGather, bool reduceScatter);
+size_t rcclHierarchicalAllGatherThreshold(int nNodes, const char* archName, int localRanks,
+                                          int minLocalNetDeviceCount, int64_t configuredThreshold);
 // Fills in algo/protocol/channels for a hierarchical AllGather or ReduceScatter.
 ncclResult_t rcclHierarchicalAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
                                       int* algo, int* protocol, int* maxChannels);
@@ -164,6 +166,8 @@ bool validHsaScratchEnvSetting(const char* hsaScratchEnv, int hipRuntimeVersion,
 RCCL_PARAM_DECLARE(DirectReduceScatterThreshold);
 // Hierarchical AllGather enabled
 RCCL_PARAM_DECLARE(HierarchicalAllGather);
+// Hierarchical AllGather threshold override in bytes (-1 selects automatic tuning)
+RCCL_PARAM_DECLARE(HierarchicalAllGatherThreshold);
 // Hierarchical ReduceScatter enabled
 RCCL_PARAM_DECLARE(HierarchicalReduceScatter);
 #define HIERARCHICAL_TEMP_BUFFER_SIZE (128 * 1024 * 1024) // 128MB

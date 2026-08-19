@@ -614,6 +614,7 @@ struct ncclComm {
   struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next> legacyRegCleanupQueue;
   bool peerInfoValid;
   int minNetCount; // Minimum number of network devices local to a rank
+  int minLocalNetDeviceCount; // Minimum total number of Net devices visible to any rank
   float minNetBw; // Minimum bw of any network device local to a rank
 
   ncclNet_t* ncclNet;
@@ -697,6 +698,7 @@ struct ncclComm {
   struct ncclComm* hierarchicalIntraComm;
   struct ncclComm* hierarchicalInterComm;
   bool hierarchicalCommsInitialized;
+  size_t hierarchicalAllGatherThreshold;
 
   // Hierarchical temporary buffer
   // Both hierarchical AG and RS use the same temp buffer,

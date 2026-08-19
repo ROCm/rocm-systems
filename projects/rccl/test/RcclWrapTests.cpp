@@ -1523,6 +1523,8 @@ TEST(Rcclwrap, RcclUseHierarchicalAllGatherTests)
                                    /*nRanks=*/8 * tc.nNodes);
                     mockComm->nNodes                       = tc.nNodes;
                     mockComm->hierarchicalCommsInitialized = tc.hierCommsInit;
+                    mockComm->hierarchicalAllGatherThreshold =
+                        rcclHierarchicalTempBufferSize(tc.nNodes, /*allGather=*/true, /*reduceScatter=*/false);
 
                     EXPECT_EQ(rcclUseHierarchicalAllGather(mockComm, tc.msgSize),
                               tc.expected)
@@ -1556,6 +1558,33 @@ TEST(Rcclwrap, RcclUseHierarchicalAllGatherTests)
         << "One or more rcclUseHierarchicalAllGather tests failed";
 
     TEST_INFO("=== Process-Isolated rcclUseHierarchicalAllGather Tests Completed ===");
+}
+
+TEST(Rcclwrap, RcclHierarchicalAllGatherTopologyThresholdTests)
+{
+    const size_t QUARTER   = HIERARCHICAL_TEMP_BUFFER_SIZE / 4;
+    const size_t HALF      = HIERARCHICAL_TEMP_BUFFER_SIZE / 2;
+    const size_t FULL      = HIERARCHICAL_TEMP_BUFFER_SIZE;
+    const size_t EIGHTH    = HIERARCHICAL_TEMP_BUFFER_SIZE / 8;
+    const size_t SIXTEENTH = HIERARCHICAL_TEMP_BUFFER_SIZE / 16;
+    const int64_t AUTO     = -1;
+
+    EXPECT_EQ(rcclHierarchicalAllGatherThreshold(16, "gfx942", 8, 4, AUTO), QUARTER);
+    EXPECT_EQ(rcclHierarchicalAllGatherThreshold(32, "gfx942", 8, 4, AUTO), HALF);
+    EXPECT_EQ(rcclHierarchicalAllGatherThreshold(32, "gfx942", 8, 7, AUTO), HALF);
+    EXPECT_EQ(rcclHierarchicalAllGatherThreshold(32, "gfx942", 8, 1, AUTO), HALF);
+    EXPECT_EQ(rcclHierarchicalAllGatherThreshold(32, "gfx942", 8, 8, AUTO), FULL);
+    EXPECT_EQ(rcclHierarchicalAllGatherThreshold(32, "gfx950", 8, 4, AUTO), FULL);
+    EXPECT_EQ(rcclHierarchicalAllGatherThreshold(16, "gfx942", 4, 2, AUTO), QUARTER);
+    EXPECT_EQ(rcclHierarchicalAllGatherThreshold(15, "gfx942", 8, 4, AUTO), EIGHTH);
+    EXPECT_EQ(rcclHierarchicalAllGatherThreshold(10, "gfx942", 8, 4, AUTO), EIGHTH);
+    EXPECT_EQ(rcclHierarchicalAllGatherThreshold(9, "gfx942", 8, 4, AUTO), SIXTEENTH);
+    EXPECT_EQ(rcclHierarchicalAllGatherThreshold(8, "gfx942", 8, 4, AUTO), SIXTEENTH);
+
+    // An explicit threshold overrides both node-count tuning and the gfx942 reduced-NIC cap.
+    EXPECT_EQ(rcclHierarchicalAllGatherThreshold(32, "gfx942", 8, 4, QUARTER), QUARTER);
+    EXPECT_EQ(rcclHierarchicalAllGatherThreshold(32, "gfx950", 8, 8, 0), 0);
+    EXPECT_EQ(rcclHierarchicalAllGatherThreshold(32, "gfx942", 8, 4, 2 * FULL), 2 * FULL);
 }
 
 TEST(Rcclwrap, RcclUseHierarchicalReduceScatterTests)

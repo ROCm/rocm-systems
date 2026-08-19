@@ -601,15 +601,36 @@ size_t rcclHierarchicalTempBufferSize(int nNodes, bool allGather, bool reduceSca
   return std::max(agThreshold, rsThreshold);
 }
 
+size_t rcclHierarchicalAllGatherThreshold(int nNodes, const char* archName, int localRanks,
+                                          int minLocalNetDeviceCount, int64_t configuredThreshold) {
+  if (configuredThreshold >= 0) return static_cast<size_t>(configuredThreshold);
+
+  size_t threshold = rcclHierarchicalTempBufferSize(nNodes, /*allGather=*/true, /*reduceScatter=*/false);
+  if (IsArchMatch(archName, "gfx942") && minLocalNetDeviceCount > 0 && minLocalNetDeviceCount < localRanks) {
+    size_t reducedNicThreshold = 0;
+    if (nNodes >= 32) {
+      reducedNicThreshold = HIERARCHICAL_TEMP_BUFFER_SIZE / 2; // 64MB
+    } else if (nNodes >= 16) {
+      reducedNicThreshold = HIERARCHICAL_TEMP_BUFFER_SIZE / 4; // 32MB
+    } else if (nNodes >= 10) {
+      reducedNicThreshold = HIERARCHICAL_TEMP_BUFFER_SIZE / 8; // 16MB
+    } else if (nNodes >= 8) {
+      reducedNicThreshold = HIERARCHICAL_TEMP_BUFFER_SIZE / 16; // 8MB
+    }
+    threshold = std::min(threshold, reducedNicThreshold);
+  }
+  return threshold;
+}
+
 RCCL_PARAM(HierarchicalAllGather, "HIERARCHICAL_ALLGATHER", 1);
+RCCL_PARAM(HierarchicalAllGatherThreshold, "HIERARCHICAL_ALLGATHER_THRESHOLD", -1);
 
 bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
   if (comm->nNodes < 8) return false;
   if (rcclParamHierarchicalAllGather() != 1) return false;
   if (!comm->hierarchicalCommsInitialized) return false;
 
-  size_t threshold = rcclHierarchicalTempBufferSize(comm->nNodes, /*allGather=*/true, /*reduceScatter=*/false);
-  return threshold > 0 && msgSize <= threshold;
+  return comm->hierarchicalAllGatherThreshold > 0 && msgSize <= comm->hierarchicalAllGatherThreshold;
 }
 
 bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {

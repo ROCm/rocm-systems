@@ -706,6 +706,8 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->hierarchicalIntraComm = nullptr;
   comm->hierarchicalInterComm = nullptr;
   comm->hierarchicalCommsInitialized = false;
+  comm->hierarchicalAllGatherThreshold = 0;
+  comm->minLocalNetDeviceCount = 0;
   comm->hierarchicalTempBuffer = nullptr;
   // Enable PAT for interComm hierarchical collectives
   comm->forcePatEnable = (parent != nullptr) ? parent->forcePatEnable : false;
@@ -1955,6 +1957,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
     comm->minNetCount = std::min(comm->minNetCount, allGather3Data[r].localNetDeviceBw);
   }
+  comm->minLocalNetDeviceCount = minLocalNetCount;
   if (rank == 0) {
     INFO(NCCL_INIT, "Local Net device counts across ranks: min %d max %d", minLocalNetCount, maxLocalNetCount);
     INFO(NCCL_INIT, "Local CollNet device counts across ranks: min %d max %d", minLocalCollNetCount,
@@ -2800,9 +2803,34 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
         comm->forcePatEnable = false;
         // inherit PXN disable from parent comm
         comm->hierarchicalInterComm->pxnDisable = comm->pxnDisable;
-        size_t tempBufSize = rcclHierarchicalTempBufferSize(comm->nNodes, rcclParamHierarchicalAllGather() == 1,
-                                                            rcclParamHierarchicalReduceScatter() == 1);
-        NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalTempBuffer), tempBufSize, comm->memManager), res, fail);
+
+        const bool allGatherEnabled = rcclParamHierarchicalAllGather() == 1;
+        const bool reduceScatterEnabled = rcclParamHierarchicalReduceScatter() == 1;
+        if (allGatherEnabled) {
+          const int64_t configuredThreshold = rcclParamHierarchicalAllGatherThreshold();
+          const size_t defaultThreshold =
+            rcclHierarchicalTempBufferSize(comm->nNodes, /*allGather=*/true, /*reduceScatter=*/false);
+          comm->hierarchicalAllGatherThreshold = rcclHierarchicalAllGatherThreshold(
+            comm->nNodes, comm->archName, comm->maxLocalRanks, comm->minLocalNetDeviceCount, configuredThreshold);
+          if (comm->rank == 0) {
+            if (configuredThreshold >= 0) {
+              INFO(NCCL_INIT, "Hierarchical AllGather threshold set to %zu bytes by environment",
+                   comm->hierarchicalAllGatherThreshold);
+            } else if (comm->hierarchicalAllGatherThreshold < defaultThreshold) {
+              INFO(NCCL_INIT,
+                   "Hierarchical AllGather threshold capped at %zu bytes for %s with %d local GPUs and %d visible "
+                   "NICs",
+                   comm->hierarchicalAllGatherThreshold, comm->archName, comm->maxLocalRanks,
+                   comm->minLocalNetDeviceCount);
+            }
+          }
+        }
+        const size_t reduceScatterThreshold =
+          rcclHierarchicalTempBufferSize(comm->nNodes, /*allGather=*/false, reduceScatterEnabled);
+        const size_t tempBufSize = std::max(comm->hierarchicalAllGatherThreshold, reduceScatterThreshold);
+        if (tempBufSize > 0) {
+          NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalTempBuffer), tempBufSize, comm->memManager), res, fail);
+        }
         comm->hierarchicalCommsInitialized = true;
         INFO(NCCL_INIT, "Hierarchical collectives: intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",
              comm->hierarchicalIntraComm->nRanks, comm->hierarchicalInterComm->nRanks);
