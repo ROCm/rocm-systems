@@ -1,4 +1,5 @@
----
+HeaderFilterRegex: "/rocprofiler-systems/source/"
+
 Checks: >
   -*,
   bugprone-assignment-in-if-condition,

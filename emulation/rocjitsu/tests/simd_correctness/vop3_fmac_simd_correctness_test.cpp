@@ -19,6 +19,7 @@
 /// These ops are NOT benched: looping the same instruction creates a loop-
 /// carried RAW dep on the accumulator that serializes both modes to ~1x.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -225,7 +226,7 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_encode(c.opcode, /*vdst=*/kAccVgpr, /*src0=*/256, /*src1=*/256 + src1_v, abs, neg, omod,
                 clamp, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
     auto out = fx.run(inst, c.kind, rot, exec);
     delete inst;
@@ -292,7 +293,7 @@ TEST(Vop3FmacSimdCorrectness, VMacF16LowDstZeroesHighHalf) {
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_encode(/*op=*/291, /*vdst=*/kAccVgpr, /*src0=*/256, /*src1=*/257, /*abs=*/0, /*neg=*/0,
                 /*omod=*/0, /*clamp=*/0, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << "v_mac_f16_vop3 decode failed";
     auto out = fx.run(inst, Kind::F16, /*rot=*/0, /*exec=*/~0ULL);
     delete inst;

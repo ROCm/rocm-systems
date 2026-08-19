@@ -171,7 +171,7 @@ public:
   /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuReadSgpr(const amdgpu::Wavefront * /*wf*/, uint32_t /*physical_reg*/) {}
 
-  /// Called when all waves in a workgroup have reached s_barrier.
+  /// Called with the waves synchronized by a completed barrier domain.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> /*wavefronts*/) {}
 

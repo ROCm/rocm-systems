@@ -1030,15 +1030,20 @@ public:
 
 class RewriteDischargeBoundTestDecoder final : public Decoder {
 public:
-  RewriteDischargeBoundTestDecoder(size_t max_instruction_words, size_t decoded_words)
-      : max_instruction_words_(max_instruction_words), decoded_words_(decoded_words) {}
+  RewriteDischargeBoundTestDecoder(size_t max_instruction_words, size_t decoded_words,
+                                   bool reject = false)
+      : max_instruction_words_(max_instruction_words), decoded_words_(decoded_words),
+        reject_(reject) {}
 
   std::size_t max_instruction_words() const override { return max_instruction_words_; }
 
-  Instruction *decode(const rj_code_binary_inst_t *words) override {
+  DecodeResult decode(const rj_code_binary_inst_t *words,
+                      const DecodeErrorEmitter &emit_error) override {
     ++decode_calls;
     observed_words.assign(words, words + max_instruction_words_);
-    return new RewriteDischargeBoundTestInstruction(decoded_words_);
+    if (reject_)
+      return emit_error.emit() << "test decoder rejected encoding";
+    return std::make_unique<RewriteDischargeBoundTestInstruction>(decoded_words_);
   }
 
   size_t decode_calls = 0;
@@ -1047,6 +1052,7 @@ public:
 private:
   size_t max_instruction_words_;
   size_t decoded_words_;
+  bool reject_;
 };
 
 TEST(BinaryTranslatorInternal, RewriteDischargeDecodeRejectsWidthBeyondDecoderMaximum) {
@@ -1079,6 +1085,22 @@ TEST(BinaryTranslatorInternal, RewriteDischargeDecodeRejectsZeroBoundWithoutDeco
             internal::RewriteDischargeDecodeStatus::InvalidLookaheadBound);
   EXPECT_EQ(instruction, nullptr);
   EXPECT_EQ(decoder.decode_calls, 0u);
+}
+
+TEST(BinaryTranslatorInternal, RewriteDischargeDecodeReportsRejectedEncoding) {
+  RewriteDischargeBoundTestDecoder decoder(/*max_instruction_words=*/1, /*decoded_words=*/1,
+                                           /*reject=*/true);
+  internal::RewriteDischargeInstructionDecoder bounded_decoder(decoder);
+  constexpr std::array<uint32_t, 1> words = {0x11111111u};
+  const auto bytes =
+      std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(words.data()), sizeof(words));
+  std::unique_ptr<Instruction> instruction;
+  util::StringDiagnostic decode_error;
+
+  EXPECT_EQ(bounded_decoder.decode(bytes, /*source_offset=*/8, instruction, decode_error.emitter()),
+            internal::RewriteDischargeDecodeStatus::InvalidEncoding);
+  EXPECT_EQ(instruction, nullptr);
+  EXPECT_EQ(decode_error.message(), "test decoder rejected encoding");
 }
 
 TEST(BinaryTranslatorInternal, RewriteDischargeDecodeClearsUnusedWordsAcrossCalls) {
