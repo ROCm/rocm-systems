@@ -12,6 +12,9 @@
 #include <cstdlib>
 
 #include "comm.h"
+#include "bootstrap.h"
+#include "argcheck.h"
+#include "group.h"
 #include "sym_kernels.h"
 #include "allocator.h"
 #include "utils.h"
@@ -30,6 +33,37 @@
 struct ncclDevCommCompat ncclDevCommCompat_v22902 = {};
 struct ncclDevCommCompat ncclDevCommCompat_v22907 = {};
 struct ncclDevCommCompat ncclDevCommCompat_v23000 = {};
+
+// ---------------------------------------------------------------------------
+// Bootstrap / arg-check / comm-registration / group-state-machine floor.
+//
+// dev_runtime.cc (#included whole by DevRuntimeTests.cpp) references these but
+// this binary links no real bootstrap / group / argcheck TU. They live here
+// rather than in the shared nccl_fakes.cc because the other host-only binaries
+// supply their own: rccl-UnitTestsMicro gets the real group state machine from
+// group.cc, and rccl-UnitTestsMicroInit has its own stub floor plus the real
+// init.cc / argcheck.cc -- so sharing these would cause duplicate-symbol links.
+// ---------------------------------------------------------------------------
+ncclResult_t bootstrapAllGather(void*, void*, int) { return ncclSuccess; }
+ncclResult_t bootstrapBarrier(void*, int, int, int) { return ncclSuccess; }
+ncclResult_t bootstrapIntraNodeBarrier(void*, int*, int, int, int) { return ncclSuccess; }
+ncclResult_t bootstrapIntraNodeAllGather(void*, int*, int, int, void*, int) { return ncclSuccess; }
+
+ncclResult_t PtrCheck(const void*, const char*, const char*) { return ncclSuccess; }
+ncclResult_t CommCheck(struct ncclComm*, const char*, const char*) { return ncclSuccess; }
+ncclResult_t ncclCommEnsureReady(ncclComm_t) { return ncclSuccess; }
+
+ncclResult_t ncclCommRegister(const ncclComm_t, void*, size_t, void**) { return ncclSuccess; }
+ncclResult_t ncclCommDeregister(const ncclComm_t, void*) { return ncclSuccess; }
+ncclResult_t ncclCommWindowDeregister(ncclComm_t, ncclWindow_t) { return ncclSuccess; }
+
+ncclResult_t ncclGroupStartInternal() { return ncclSuccess; }
+ncclResult_t ncclGroupEndInternal(ncclSimInfo_t*) { return ncclSuccess; }
+
+thread_local int              ncclGroupDepth = 0;
+thread_local ncclResult_t     ncclGroupError = ncclSuccess;
+thread_local struct ncclComm* ncclGroupCommHead[ncclGroupTaskTypeNum] = {};
+thread_local int              ncclGroupBlocking = 0;
 
 // ---------------------------------------------------------------------------
 // Symmetric kernels.
