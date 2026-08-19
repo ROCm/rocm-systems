@@ -142,9 +142,10 @@ kfd_device_available();
 // Parse a "gfx<NNN>" target name into the KFD-style numeric encoding
 // (major*10000 + minor*100 + step, e.g. "gfx1150" -> 110500). The last digit is
 // the step, the second-to-last the minor, and the remaining leading digits the
-// major. Returns std::nullopt for anything that is not "gfx" followed by >= 3
-// decimal digits, so a malformed name can never feed garbage into
-// gfx_target_version. Used by the WSL enumerator to validate
+// major. The step digit is hexadecimal, so "gfx90a" -> 90010, the same value
+// KFD publishes for a stepping of 10. Returns std::nullopt for anything that is
+// not "gfx" followed by >= 3 such digits, so a malformed name can never feed
+// garbage into gfx_target_version. Used by the WSL enumerator to validate
 // ROCPROFILER_FORCE_GFX and to encode the target the DXG topology reports.
 std::optional<uint32_t>
 parse_gfx_target_version(std::string_view gfx_name);

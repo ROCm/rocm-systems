@@ -340,7 +340,7 @@ resolve_gfx_name(const HsaNodeProperties& props)
         if(::rocprofiler::agent::parse_gfx_target_version(forced)) return std::string{forced};
 
         ROCP_WARNING << "Ignoring malformed ROCPROFILER_FORCE_GFX='" << forced
-                     << "'; expected gfx<NNN> with >=3 decimal digits";
+                     << "'; expected gfx<NNN> with >=3 digits, the last of which may be hex";
     }
 
     // EngineId and OverrideEngineId are unions over the same bit-field layout,

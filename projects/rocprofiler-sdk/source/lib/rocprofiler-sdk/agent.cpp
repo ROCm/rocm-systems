@@ -970,9 +970,21 @@ parse_gfx_target_version(std::string_view gfx_name)
     if(gfx_name.substr(0, 3) != "gfx") return std::nullopt;
     auto digits = gfx_name.substr(3);
     if(digits.size() < 3) return std::nullopt;
-    for(char c : digits)
-        if(c < '0' || c > '9') return std::nullopt;
-    uint32_t stp = static_cast<uint32_t>(digits[digits.size() - 1] - '0');
+    // Only the step is hexadecimal: steps 10-15 are spelled a-f (gfx90a), since
+    // spelling them in decimal would be ambiguous - "gfx9010" already reads as
+    // major 90, minor 1, step 0.
+    for(size_t k = 0; k + 1 < digits.size(); ++k)
+        if(digits[k] < '0' || digits[k] > '9') return std::nullopt;
+
+    const char step_digit = digits[digits.size() - 1];
+    uint32_t   stp        = 0;
+    if(step_digit >= '0' && step_digit <= '9')
+        stp = static_cast<uint32_t>(step_digit - '0');
+    else if(step_digit >= 'a' && step_digit <= 'f')
+        stp = 10 + static_cast<uint32_t>(step_digit - 'a');
+    else
+        return std::nullopt;
+
     uint32_t min = static_cast<uint32_t>(digits[digits.size() - 2] - '0');
     uint32_t maj = 0;
     for(size_t k = 0; k + 2 < digits.size(); ++k)

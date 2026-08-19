@@ -405,9 +405,9 @@ Environment variables
    (``config.yaml`` is keyed by gfx target). The target normally comes from the
    KMT node's engine id, which already honors the HSA runtime's own
    ``HSA_OVERRIDE_GFX_VERSION``; set this variable to override both. The value
-   must be of the form ``gfx<NNN>`` with at least three decimal digits; a
-   malformed value is ignored with a warning and the node-reported target is
-   used.
+   must be of the form ``gfx<NNN>`` with at least three digits, the last of
+   which may be a lowercase hex digit (as in ``gfx90a``); a malformed value is
+   ignored with a warning and the node-reported target is used.
 
 ``ROCPROFILER_FORCE_PLATFORM``
    Overrides platform autodetection, which otherwise selects the KFD enumerator

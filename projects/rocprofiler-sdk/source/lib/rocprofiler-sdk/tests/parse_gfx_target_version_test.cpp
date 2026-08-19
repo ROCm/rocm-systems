@@ -23,8 +23,8 @@
 // Pure-logic unit test for rocprofiler::agent::parse_gfx_target_version(). This
 // helper turns a "gfx<NNN>" name into the KFD-style packed encoding
 // (major*10000 + minor*100 + step) and must reject anything that is not "gfx"
-// followed by >= 3 decimal digits. It has no GPU/HSA dependency, so these cases
-// exercise the parser directly.
+// followed by >= 3 digits, the last of which may be a hex step. It has no
+// GPU/HSA dependency, so these cases exercise the parser directly.
 
 #include "lib/rocprofiler-sdk/agent.hpp"
 
@@ -48,6 +48,19 @@ TEST(parse_gfx_target_version, valid_public_targets)
     EXPECT_EQ(agent::parse_gfx_target_version("gfx1102"), std::optional<uint32_t>{110002});
 }
 
+TEST(parse_gfx_target_version, hex_stepping)
+{
+    // A step of 10 or more is spelled as a hex digit, and KFD packs it by its
+    // numeric value: gfx90a is step 10, so gfx_target_version is 90010.
+    EXPECT_EQ(agent::parse_gfx_target_version("gfx90a"), std::optional<uint32_t>{90010});
+    EXPECT_EQ(agent::parse_gfx_target_version("gfx90c"), std::optional<uint32_t>{90012});
+
+    // The hex spelling is what keeps the encoding unambiguous. Spelling step 10
+    // in decimal would produce "gfx9010", which is a different target entirely
+    // (major 90, minor 1, step 0), so the two must not pack to the same value.
+    EXPECT_EQ(agent::parse_gfx_target_version("gfx9010"), std::optional<uint32_t>{900100});
+}
+
 TEST(parse_gfx_target_version, packing_decomposition)
 {
     // The packed value must decompose back into major/minor/step so a malformed
@@ -59,17 +72,25 @@ TEST(parse_gfx_target_version, packing_decomposition)
     EXPECT_EQ(value / 10000, 11u);       // major
     EXPECT_EQ((value / 100) % 100, 0u);  // minor
     EXPECT_EQ(value % 100, 0u);          // step
+
+    const auto hex_packed = agent::parse_gfx_target_version("gfx90a");
+    ASSERT_TRUE(hex_packed.has_value());
+
+    const uint32_t hex_value = *hex_packed;
+    EXPECT_EQ(hex_value / 10000, 9u);        // major
+    EXPECT_EQ((hex_value / 100) % 100, 0u);  // minor
+    EXPECT_EQ(hex_value % 100, 10u);         // step
 }
 
 TEST(parse_gfx_target_version, rejects_malformed)
 {
-    // Anything that is not "gfx" + >= 3 decimal digits must yield nullopt.
+    // Anything that is not "gfx" + >= 3 digits, hex allowed only in the final
+    // step position, must yield nullopt.
     EXPECT_EQ(agent::parse_gfx_target_version(""), std::nullopt);         // empty
     EXPECT_EQ(agent::parse_gfx_target_version("gfx"), std::nullopt);      // no digits
     EXPECT_EQ(agent::parse_gfx_target_version("gfx11"), std::nullopt);    // too few digits
     EXPECT_EQ(agent::parse_gfx_target_version("foo"), std::nullopt);      // wrong prefix
     EXPECT_EQ(agent::parse_gfx_target_version("gfx11xy"), std::nullopt);  // non-digit tail
-    // Hex-suffixed names (e.g. the public gfx90a) are intentionally not handled
-    // by this purely-numeric parser and must be rejected rather than misparsed.
-    EXPECT_EQ(agent::parse_gfx_target_version("gfx90a"), std::nullopt);
+    EXPECT_EQ(agent::parse_gfx_target_version("gfx90z"), std::nullopt);   // step out of hex range
+    EXPECT_EQ(agent::parse_gfx_target_version("gfx9a0"), std::nullopt);   // hex outside the step
 }
