@@ -67,7 +67,7 @@ constexpr int kDdaLLArTwoShotPeerBatch = 8;
 // packet another thread still has to read in phase 1.
 template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
-__launch_bounds__(512)
+__launch_bounds__(1024)
 #endif
   __global__ void ddaAllReduceTwoShotLL(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: nRanks scratch bases
                                         T* __restrict__ recvbuff,           // local user output

@@ -81,7 +81,7 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
   const size_t bytes = count * sizeof(T);
   const size_t nPk = bytes >> 3; // 8 payload bytes per packet (for logging)
 
-  const unsigned threads = 256;
+  const unsigned threads = 512;
   int nBlocksMax = comm->ddaFabricMaxBlocks;
   if (nBlocksMax < 1) {
     nBlocksMax = 1;
@@ -135,7 +135,7 @@ static ncclResult_t ncclAllReduceDdaFabricLLTwoShotTyped(const void* sendbuff, v
   const size_t bytes = count * sizeof(T);
   const size_t nPk = (bytes >> 3 ) / (size_t)nRanks; // 8 payload bytes per packet
 
-  const unsigned threads = 256;
+  const unsigned threads = 1024;
   int nBlocksMax = comm->ddaFabricMaxBlocks;
   if (nBlocksMax < 1) {
     nBlocksMax = 1;
