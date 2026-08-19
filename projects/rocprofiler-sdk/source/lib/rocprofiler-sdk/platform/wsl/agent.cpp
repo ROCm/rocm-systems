@@ -677,16 +677,29 @@ enumerate()
         auto       info        = common::init_public_api_struct(rocprofiler_agent_t{});
         const auto gfx_name    = resolve_gfx_name(node->props);
         const auto gfx_version = ::rocprofiler::agent::parse_gfx_target_version(gfx_name);
-        if(!gfx_version || !apply_node_topology(*node, info))
+        if(!gfx_version)
         {
             ROCP_WARNING << fmt::format(
                 "wsl::enumerate: discarding adapter {} (vendor=0x{:04x} device=0x{:04x}): DXG node "
-                "topology is incomplete (gfx='{}' simd_count={} simd_per_cu={} shader_banks={} "
+                "{} names gfx target '{}', which this build cannot parse; the node topology itself "
+                "is not at fault",
+                i,
+                devids.DeviceIds.VendorID,
+                devids.DeviceIds.DeviceID,
+                node->node_id,
+                gfx_name);
+            continue;
+        }
+
+        if(!apply_node_topology(*node, info))
+        {
+            ROCP_WARNING << fmt::format(
+                "wsl::enumerate: discarding adapter {} (vendor=0x{:04x} device=0x{:04x}): DXG node "
+                "topology is incomplete (simd_count={} simd_per_cu={} shader_banks={} "
                 "arrays_per_engine={} wave_front_size={})",
                 i,
                 devids.DeviceIds.VendorID,
                 devids.DeviceIds.DeviceID,
-                gfx_name,
                 node->props.NumFComputeCores,
                 node->props.NumSIMDPerCU,
                 node->props.NumShaderBanks,
