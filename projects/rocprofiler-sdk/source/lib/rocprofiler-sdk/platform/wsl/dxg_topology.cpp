@@ -244,8 +244,18 @@ read_dxg_gpu_topology(const DxgThunk& dxg)
         ~OpenGuard() { dxg.close_kfd(); }
     } _open_guard{dxg};
 
-    // Refcounted, like the open above: the HSA runtime's reference on this
-    // snapshot outlives the release below, which drops only ours.
+    // Not refcounted, unlike the open above. Acquire copies out the one global
+    // snapshot without recording a holder, and the release below drops it
+    // outright: topology_drop_snapshot() frees it and deletes the WDDM devices
+    // for every consumer, not just this one. (hsaKmtOpenKFD() likewise resets
+    // the suballocator on every call, including one that reports
+    // KERNEL_ALREADY_OPENED.)
+    //
+    // Safe here only because of ordering: rocprofv3 sets
+    // ROCPROFILER_LIBRARY_CTOR, so this open/acquire/release/close runs from a
+    // library constructor and completes before main(), and so before
+    // hsa_init(). rocprof-attach, which injects into a process that is already
+    // running, gets no such ordering.
     auto sys_props = HsaSystemProperties{};
     if(auto st = dxg.acquire_snapshot(&sys_props); st != HSAKMT_STATUS_SUCCESS)
     {

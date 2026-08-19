@@ -59,10 +59,12 @@ inline constexpr const char* kLibRocdxgSoname = "librocdxg.so";
 
 // Every entry point the topology read needs, all of them long-standing KMT
 // exports. Requiring all five before any of them is called is what keeps the
-// read from having to unwind a half-open thunk, and it is also what makes
-// sharing the snapshot pair safe: librocdxg refcounts those two, so the
-// snapshot this read holds is the same one the HSA runtime holds and neither
-// consumer can drop it out from under the other.
+// read from having to unwind a half-open thunk.
+//
+// The snapshot pair is not refcounted the way the open pair is: librocdxg
+// keeps one global snapshot and no count of who holds it, so a release drops
+// it for every consumer. What makes this read safe is ordering rather than
+// sharing - see read_dxg_gpu_topology() in dxg_topology.cpp.
 //
 // abi_check is the sixth and is deliberately outside complete(): it is the
 // structure-size handshake, and a thunk built before the handshake existed does
