@@ -8,6 +8,7 @@
 #define ROCJITSU_ISA_INSTRUCTION_H_
 
 #include "rocjitsu/isa/operand.h"
+#include "rocjitsu/result.h"
 #include "util/intrusive_list.h"
 
 #include <array>
@@ -418,6 +419,12 @@ public:
   /// @param[in] mnemonic Human-readable mnemonic string.
   IsaInstruction(std::string_view mnemonic, ExecuteFn exec_fn, uint64_t src_loc = 0)
       : Instruction(mnemonic, exec_fn, src_loc) {}
+
+  /// @brief Accept encodings for formats without additional validation.
+  template <typename... Args>
+  static constexpr Result validate_encoding([[maybe_unused]] Args &&...args) noexcept {
+    return Result::success();
+  }
 
   /// @brief Helper to create an execute dispatch trampoline for a concrete type.
   ///

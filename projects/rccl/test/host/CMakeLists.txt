@@ -284,6 +284,20 @@ if(NOT GTest_FOUND)
   endif()
 endif()
 
+# Both find_package(GTest) code paths above (system and RCCL-vendored) export
+# only the modern GTest::gtest target; GTest::GTest is a legacy alias CMake's
+# own FindGTest module stopped providing. Add it once here instead of after
+# every branch so target_link_libraries(... GTest::GTest) below works
+# regardless of which resolution path was taken.
+if(TARGET GTest::gtest AND NOT TARGET GTest::GTest)
+  # Promote before aliasing: GTest's package config creates GTest::gtest as a
+  # non-GLOBAL imported target, and ALIAS of one of those needs CMake 3.18,
+  # above this project's declared 3.16 minimum. Promotion works from 3.11 and
+  # only from the directory that created the target, which is this file.
+  set_target_properties(GTest::gtest PROPERTIES IMPORTED_GLOBAL TRUE)
+  add_library(GTest::GTest ALIAS GTest::gtest)
+endif()
+
 # --- Resolve fmt: system -> FetchContent fallback ---
 find_package(fmt QUIET)
 if(NOT fmt_FOUND)
@@ -339,6 +353,33 @@ else()
   message(STATUS "amdsmi fabric API not found (AMDSMI_FABRIC_DIRECT disabled)")
 endif()
 
+# --- Detect HIP fabric API support (mirrors top-level CMakeLists.txt) ---
+# mem_manager.h only defines its own hipMemFabricHandle_st fallback when
+# HIP_FABRIC_API is undefined; on HIP runtimes that already provide the type
+# (e.g. ROCm 7.14+), omitting this define causes a redefinition conflict
+# with hip_runtime_api.h.
+# Compile-only (STATIC_LIBRARY), like the amdsmi probe above: with the default
+# EXECUTABLE target type these checks link, which drags in the HIP runtime at
+# configure time even though the binary itself is linked with -no-hip-rt.
+include(CheckSymbolExists)
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+check_symbol_exists("hipMemImportFromShareableHandle" "hip/hip_runtime_api.h" HIP_FABRIC_API_FUNC)
+check_cxx_source_compiles("
+  #include <hip/hip_runtime_api.h>
+  int main() {
+    hipMemFabricHandle_t handle;
+    (void)handle;
+    return 0;
+  }
+" HIP_FABRIC_HANDLE_TYPE)
+set(CMAKE_TRY_COMPILE_TARGET_TYPE EXECUTABLE)
+if(HIP_FABRIC_API_FUNC AND HIP_FABRIC_HANDLE_TYPE)
+  set(HIP_FABRIC_API ON)
+  message(STATUS "HIP Fabric API enabled (hipMemImportFromShareableHandle and hipMemFabricHandle_t found)")
+else()
+  set(HIP_FABRIC_API OFF)
+endif()
+
 # --- Common include paths for hipified RCCL headers ---
 set(RCCL_INCLUDE_DIRS
   ${RCCL_HIPIFY_DIR}/src/include
@@ -365,6 +406,7 @@ target_compile_definitions(rccl-source-wrappers PRIVATE
   NCCL_OS_LINUX
   ROCM_VERSION=70000
   $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+  $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 target_link_libraries(rccl-source-wrappers PRIVATE
   GTest::GTest
@@ -379,6 +421,7 @@ add_executable(rccl-HostUnitTests
   ${RCCL_TEST_DIR}/VersionInfoTests.cpp
   ${RCCL_TEST_DIR}/DdaCollCommonTests.cpp
   ${RCCL_TEST_DIR}/RomeTopoConsensusTests.cpp
+  RomeTopoConsensusLogTests.cpp
   ${RCCL_TEST_DIR}/MiscTests.cpp
   ${RCCL_TEST_DIR}/VersionGateTests.cpp
   ${RCCL_TEST_DIR}/TimeoutTests.cpp
@@ -400,14 +443,41 @@ target_compile_definitions(rccl-HostUnitTests PRIVATE
   RCCL_EXPOSE_STATIC
   ARSMI_TEST_BUILD
   $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+  $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 
-target_link_options(rccl-HostUnitTests PRIVATE -no-hip-rt)
+# llvm source-based coverage (host-only build: no -Xarch_device split needed
+# because --offload-host-only never runs the amdgcn device pass; see the
+# CMAKE_CXX_FLAGS_INIT above). On by default so the binary always produces a
+# profile; disable with -DHOST_UT_COVERAGE=OFF.
+#
+# RCCL_TEST_CODE_COVERAGE is what makes process-isolated tests flush their
+# counters in the forked child (test/common/ProcessIsolatedTestRunner.cpp).
+# Without it those tests run but contribute nothing to the profile, so it is
+# tied to the same switch rather than exposed separately.
+# rccl-source-wrappers must be instrumented too: mem_manager.cc reaches the
+# binary through that static library, so instrumenting only the executable
+# silently drops it from the report -- the profile still looks healthy, it just
+# has no record of that file at all.
+option(HOST_UT_COVERAGE "Build rccl-HostUnitTests with llvm source-based coverage" ON)
+if(HOST_UT_COVERAGE)
+  target_compile_options(rccl-HostUnitTests PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+  target_link_options(rccl-HostUnitTests PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+  target_compile_definitions(rccl-HostUnitTests PRIVATE RCCL_TEST_CODE_COVERAGE=1)
+  target_compile_options(rccl-source-wrappers PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+endif()
+
+target_link_options(rccl-HostUnitTests PRIVATE -no-hip-rt -no-pie)
 
 target_link_libraries(rccl-HostUnitTests PRIVATE
   GTest::GTest
   Threads::Threads
   fmt::fmt-header-only
+  # RCCL_TEST_CODE_COVERAGE compiles a dlsym() call in
+  # ProcessIsolatedTestRunner.cpp; the in-tree test build links dl for the same
+  # runner. Empty on platforms where libdl is folded into libc (glibc >= 2.34),
+  # required on older ones.
+  ${CMAKE_DL_LIBS}
   -Wl,--whole-archive
   rccl-source-wrappers
   -Wl,--no-whole-archive
@@ -441,9 +511,17 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   NCCL_OS_LINUX
   ROCM_VERSION=70000
   P2P_CC_PATH="${RCCL_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
+  # Same fallback-vs-runtime conflicts the host target guards against: without
+  # these, p2p-test.cc redefines hipMemFabricHandle_st and the amdsmi fabric
+  # enumerators on ROCm 7.14+, and the standalone build fails.
+  $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+  $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 
-target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt)
+# -no-pie for the same reason as rccl-HostUnitTests: the RCCL-vendored
+# libgtest.a used by this standalone path is built without -fPIC, so a PIE
+# link fails with "relocation R_X86_64_32 cannot be used against local symbol".
+target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt -no-pie)
 target_link_libraries(rccl-UnitTestsMicro PRIVATE
   GTest::GTest
   Threads::Threads
