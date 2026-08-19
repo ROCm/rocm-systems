@@ -22,18 +22,35 @@
 # branch, and label-gated on PRs -- add the "crusoe-linux-slurm-scale-runner"
 # label to run the smoke subset. Not a required merge gate.
 #
-# Build strategy: the runner is a SLURM submit node with no local GPUs, so
-# everything runs inside one SLURM batch job on the GPU compute nodes. Phase 0
-# builds RCCL fresh with --enable-mpi-tests from this run's own checkout on the
-# compute node (install.sh defaults -j to $(nproc), using all of the node's
-# cores). The single test run then loads that fresh build: gtest suites use the
-# freshly built rccl-UnitTestsMPI binary, and rccl-tests perf suites use
-# prebuilt rccl-tests binaries that load the fresh librccl.so via
-# LD_LIBRARY_PATH.
+# Build strategy: the runner is a submit node with no local GPUs, so everything
+# runs inside one batch job on the GPU compute nodes. Phase 0 builds RCCL fresh
+# with --enable-mpi-tests from this run's own checkout on the compute node
+# (install.sh defaults -j to $(nproc)). The single test run then loads that
+# fresh build: gtest suites use the freshly built rccl-UnitTestsMPI binary, and
+# rccl-tests perf suites use prebuilt rccl-tests binaries that load the fresh
+# librccl.so via LD_LIBRARY_PATH. TMPDIR is /dev/shm: $HOME is NFS without
+# O_TMPFILE, and clang temporaries otherwise produce a library with no gfx950
+# device code.
 #
-# Crusoe SLURM note: this cluster's sbatch wrapper has no --wait, so the submit
-# step uses sbatch --parsable, streams the NFS log with tail -F, and takes the
-# job's ExitCode from scontrol once the job leaves the queue.
+# Crusoe scheduler notes (SPUR, not Slurm; sbatch/squeue/scontrol are aliases):
+#   - The client talks to localhost unless SPUR_CONTROLLER_ADDR is set.
+#   - sbatch has no --wait: submit --parsable, stream the NFS log, read ExitCode
+#     from scontrol once the job leaves the queue. Wrap every SPUR CLI call in
+#     `timeout -k 5 30` -- the controller can wedge, and SIGTERM alone is not
+#     enough.
+#   - Request GPUs with --gpus-per-node, not --gres=gpu:mi355x:N.
+#   - Do not pass --ntasks=1: SPUR then allocates 1 node regardless of -N.
+#     Request --ntasks=$nodes --ntasks-per-node=1 --gpus-per-node=8. SPUR still
+#     runs the batch script on every node; the payload parks extra copies and
+#     mpirun fans out ranks.
+#   - Unpinned multi-node GPU jobs often die as JobLaunchFailure / NODE_FAIL.
+#     Submit pins to nodes that just passed a 1-node GPU probe (rocminfo gfx950
+#     count >= 8), and retries. Idle hostlists from sinfo are compact
+#     (`crsuse2-m2m-[044,046]`); expand them -- do not split on comma.
+#   - SPUR scontrol has no `show hostnames`. test_runner expands
+#     SLURM_JOB_NODELIST. OpenMPI's plm slurm is pointed at
+#     scripts/spur_srun.sh (installed as `srun` first on PATH) because SPUR's
+#     srun rejects --ntasks-per-node and ignores --nodelist.
 name: RCCL AINIC Crusoe gfx950 Runner
 
 on:
@@ -182,16 +199,9 @@ jobs:
         run: |
           set -o pipefail
 
-          # Run inside a SLURM batch job (sbatch, not interactive salloc): it
-          # decouples compute from the runner's shell so a transient runner hiccup
-          # can't tear down the allocation. Inside the job
-          # SLURM_JOB_ID/SLURM_NODELIST are set, test_runner calls
-          # `scontrol show hostnames`, and mpirun lands ranks on real GPUs.
-          # Crusoe's scheduler is SPUR (sbatch is a spur alias, not Slurm). Request
-          # GPUs with --gpus-per-node, not --gres=gpu:mi355x:N: that GRES type
-          # does not pack the same way (cluster jobs that run use gpu:8/node).
-          # GITHUB_WORKSPACE and RUNNER_TEMP live under NFS /home (shared with the
-          # compute nodes), so the fresh build and the run log are visible here.
+          # SPUR CLI can wedge; SIGTERM is not enough, so -k is required.
+          spur_cmd() { timeout -k 5 30 "$@"; }
+
           RESV_ARG=""
           if [ -n "${SALLOC_RESERVATION}" ]; then
             RESV_ARG="--reservation=${SALLOC_RESERVATION}"
@@ -206,7 +216,8 @@ jobs:
           # inline on the test run so it never leaks into Phase 0's build.
           export RUN_RCCL_BUILD_DIR GTEST_BIN_DIR PERF_BIN_DIR SCOPE \
                  GITHUB_WORKSPACE TEST_RUNNER_DIR RUNNER_TEMP \
-                 WORKDIR MPI_PATH ROCM_PATH
+                 WORKDIR MPI_PATH ROCM_PATH SPUR_CONTROLLER_ADDR
+          export PYTHONPATH="${GITHUB_WORKSPACE}/${TEST_RUNNER_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
 
           BATCH_SCRIPT="${RUNNER_TEMP}/crusoe_job.sbatch"
           SLURM_OUT="${RUNNER_TEMP}/crusoe_slurm.out"
@@ -217,9 +228,49 @@ jobs:
           #!/bin/bash
           set -o pipefail
           ulimit -l unlimited 2>/dev/null || true
+          # SPUR runs the batch script on every allocated node. Elect one launcher;
+          # extra copies wait on an NFS sentinel so the job can leave COMPLETING.
+          _done="${RUNNER_TEMP}/ainic_launcher_done_${SLURM_JOB_ID:-$$}"
+          _first=$(PYTHONPATH="${GITHUB_WORKSPACE}/${TEST_RUNNER_DIR}${PYTHONPATH:+:${PYTHONPATH}}" python3 -c 'from lib.test_executor import expand_slurm_hostlist; import os; h=expand_slurm_hostlist(os.environ.get("SLURM_JOB_NODELIST") or os.environ.get("SLURM_NODELIST") or ""); print(h[0] if h else "")')
+          if [ -n "${_first}" ] && [ "$(hostname -s)" != "${_first}" ]; then
+            echo "Parking extra SPUR copy on $(hostname -s); launcher is ${_first}"
+            while [ ! -f "${_done}" ]; do sleep 5; done
+            exit 0
+          fi
+          trap 'rm -f "${PARK_SENTINEL:-}"; touch "${_done}"' EXIT
+          # $HOME is NFS without O_TMPFILE; clang needs a local tmpdir or the
+          # gfx950 probe fails and the library builds with no device code.
+          export TMPDIR="/dev/shm/rccl-ci-${SLURM_JOB_ID:-$$}"
+          mkdir -p "${TMPDIR}"
           export PATH="/opt/openmpi/bin:/opt/rocm/bin:${PATH}"
           export LD_LIBRARY_PATH="/opt/ucx/lib:/opt/openmpi/lib:/opt/rocm/lib:${LD_LIBRARY_PATH:-}"
+          unset HIP_VISIBLE_DEVICES ROCR_VISIBLE_DEVICES CUDA_VISIBLE_DEVICES
+          # Allocation is 1 task/node; RCCL tests need 8 ranks/node.
+          # OpenMPI's slurm RAS reads this; test_runner also passes --host n:8.
+          if [ -n "${SLURM_NNODES:-}" ]; then
+            export SLURM_TASKS_PER_NODE="8(x${SLURM_NNODES})"
+          fi
+          # SPUR srun is not Slurm srun. Point OpenMPI plm slurm at the in-tree shim.
+          SHIMDIR="/dev/shm/rccl-srun-${SLURM_JOB_ID:-$$}"
+          mkdir -p "${SHIMDIR}"
+          cp "${GITHUB_WORKSPACE}/${TEST_RUNNER_DIR}/scripts/spur_srun.sh" "${SHIMDIR}/srun"
+          chmod +x "${SHIMDIR}/srun"
+          export PATH="${SHIMDIR}:${PATH}"
+          export OMPI=/opt/openmpi
+          export PARK_SENTINEL="/dev/shm/crusoe-mpirun.active"
+          touch "${PARK_SENTINEL}"
           cd "${GITHUB_WORKSPACE}/${TEST_RUNNER_DIR}"
+          HOSTFILE="${RUNNER_TEMP}/mpi_hostfile"
+          python3 - "${HOSTFILE}" <<'PY'
+          import os, sys
+          from lib.test_executor import expand_slurm_hostlist
+          path = sys.argv[1]
+          nl = os.environ.get("SLURM_JOB_NODELIST") or os.environ.get("SLURM_NODELIST") or ""
+          hosts = expand_slurm_hostlist(nl)
+          open(path, "w", encoding="utf-8").write("\n".join(hosts) + ("\n" if hosts else ""))
+          print("MPI hosts:", ",".join(hosts))
+          PY
+          export RCCL_TEST_MPI_HOSTFILE="${HOSTFILE}"
 
           # Phase 0: build RCCL with --enable-mpi-tests on THIS compute node
           # rather than the submit node. RCCL_BUILD_DIR is intentionally not
@@ -276,29 +327,156 @@ jobs:
           chmod +x "${BATCH_SCRIPT}"
           : > "${SLURM_OUT}"
 
+          expand_idle() {
+            python3 -c 'import sys; from lib.test_executor import expand_slurm_hostlist; print("\n".join(expand_slurm_hostlist(sys.argv[1])))' "$1"
+          }
+
+          # Probe each idle node with a 1-node GPU job; pin the real allocation
+          # to nodes that just reported >=8 gfx950 agents. Pinning to merely-idle
+          # nodes is not enough (JobLaunchFailure). Cancel probes by id -- never
+          # timeout a blocking `spur run`, which leaks queued jobs.
+          # Status goes to stderr; the node list is the only stdout (captured).
+          probe_pin() {
+            local need="$1"
+            local spec hosts n j waited c ok list
+            spec=$(spur_cmd sinfo -p "${SALLOC_PARTITION}" -h -t idle -o '%N' 2>/dev/null | head -1 || true)
+            hosts=$(expand_idle "${spec}")
+            if [ "$(echo "${hosts}" | sed '/^$/d' | wc -l)" -lt "${need}" ]; then
+              echo "Not enough idle nodes for a ${need}-node probe" >&2
+              return 1
+            fi
+            local probe_ids=""
+            mkdir -p "${RUNNER_TEMP}/probes"
+            for n in ${hosts}; do
+              rm -f "${RUNNER_TEMP}/probes/${n}.out"
+              j=$(spur_cmd sbatch --parsable \
+                --job-name="ainic-probe-${n}" \
+                --output="${RUNNER_TEMP}/probes/${n}.out" \
+                --error="${RUNNER_TEMP}/probes/${n}.out" \
+                --partition="${SALLOC_PARTITION}" \
+                ${RESV_ARG} \
+                ${EXCLUDE_ARG} \
+                --nodes=1 \
+                --ntasks=1 \
+                --cpus-per-task=8 \
+                --gpus-per-node=8 \
+                --nodelist="${n}" \
+                --time=00:05:00 \
+                --wrap 'hostname; rocminfo 2>/dev/null | grep -c gfx950' 2>/dev/null \
+                | grep -oE '[0-9]+' | tail -1)
+              if [ -n "${j}" ]; then
+                probe_ids="${probe_ids} ${j}"
+              fi
+            done
+            echo "Launched probes:${probe_ids}" >&2
+            ok=""
+            waited=0
+            while [ "${waited}" -lt 90 ]; do
+              sleep 10
+              waited=$((waited + 10))
+              ok=""
+              for n in ${hosts}; do
+                [ -s "${RUNNER_TEMP}/probes/${n}.out" ] || continue
+                c=$(grep -oE '^[0-9]+$' "${RUNNER_TEMP}/probes/${n}.out" 2>/dev/null | tail -1)
+                if [ "${c:-0}" -ge 8 ] 2>/dev/null; then
+                  ok="${ok:+${ok} }${n}"
+                fi
+              done
+              if [ "$(echo "${ok}" | wc -w)" -ge "${need}" ]; then
+                break
+              fi
+            done
+            for j in ${probe_ids}; do
+              spur_cmd scancel "${j}" >/dev/null 2>&1 || true
+            done
+            if [ "$(echo "${ok}" | wc -w)" -lt "${need}" ]; then
+              echo "Probe passers: ${ok:-none} (need ${need})" >&2
+              return 1
+            fi
+            list=$(echo "${ok}" | tr ' ' '\n' | head -n "${need}" | paste -sd, -)
+            echo "${list}"
+          }
+
           echo "Submitting sbatch job (partition=${SALLOC_PARTITION} nodes=${SALLOC_NODES} time=${SALLOC_TIME})..."
-          # Crusoe's sbatch wrapper has no --wait. Submit, stream the NFS log,
-          # then take the job's ExitCode from scontrol once it leaves the queue.
-          JOBID=$(sbatch --parsable \
-            --job-name=ainic-crusoe \
-            --output="${SLURM_OUT}" \
-            --error="${SLURM_OUT}" \
-            --partition="${SALLOC_PARTITION}" \
-            ${RESV_ARG} \
-            ${EXCLUDE_ARG} \
-            --nodes="${SALLOC_NODES}" \
-            --ntasks="${SALLOC_NODES}" \
-            --cpus-per-task=8 \
-            --gpus-per-node=8 \
-            --time="${SALLOC_TIME}" \
-            "${BATCH_SCRIPT}")
-          echo "Submitted SLURM job ${JOBID}"
+          MAX_LAUNCH_TRIES="${MAX_LAUNCH_TRIES:-8}"
+          JOBID=""
+          PIN=""
+          for try in $(seq 1 "${MAX_LAUNCH_TRIES}"); do
+            echo "Submit attempt ${try}/${MAX_LAUNCH_TRIES}..."
+            PIN=$(probe_pin "${SALLOC_NODES}" || true)
+            PIN_ARG=""
+            if [ -n "${PIN}" ] && [ "$(echo "${PIN}" | tr ',' '\n' | sed '/^$/d' | wc -l)" -ge "${SALLOC_NODES}" ]; then
+              PIN_ARG="--nodelist=${PIN}"
+              echo "Pinning probed nodes: ${PIN}"
+            else
+              echo "Not enough probed nodes this round; waiting before retry"
+              sleep 30
+              continue
+            fi
+            : > "${SLURM_OUT}"
+            # Do not pass --ntasks=1: SPUR then allocates 1 node regardless of -N.
+            JOBID=$(spur_cmd sbatch --parsable \
+              --job-name=ainic-crusoe \
+              --output="${SLURM_OUT}" \
+              --error="${SLURM_OUT}" \
+              --partition="${SALLOC_PARTITION}" \
+              ${RESV_ARG} \
+              ${EXCLUDE_ARG} \
+              ${PIN_ARG} \
+              --nodes="${SALLOC_NODES}" \
+              --ntasks="${SALLOC_NODES}" \
+              --ntasks-per-node=1 \
+              --cpus-per-task=32 \
+              --gpus-per-node=8 \
+              --time="${SALLOC_TIME}" \
+              "${BATCH_SCRIPT}" 2>&1 | grep -oE '[0-9]+' | tail -1)
+            if [ -z "${JOBID}" ]; then
+              echo "sbatch produced no job id (controller wedged?); retrying"
+              sleep 15
+              continue
+            fi
+            echo "Submitted SLURM job ${JOBID}"
+            waited=0
+            state=""
+            while [ "${waited}" -lt 90 ]; do
+              sleep 5
+              waited=$((waited + 5))
+              state=$(spur_cmd squeue -j "${JOBID}" -h -o '%T' 2>/dev/null | tr -d ' ' || true)
+              reason=$(spur_cmd squeue -j "${JOBID}" -h -o '%R' 2>/dev/null || true)
+              case "${state}" in
+                RUNNING) break ;;
+                ""|COMPLETED|FAILED|NODE_FAIL|CANCELLED)
+                  echo "Job ${JOBID} ended as ${state:-gone} after ${waited}s"
+                  break
+                  ;;
+              esac
+              case "${reason}" in
+                *JobLaunchFailure*|*NODE_FAIL*)
+                  echo "Launch failed (${reason}); cancelling ${JOBID}"
+                  state="NODE_FAIL"
+                  break
+                  ;;
+              esac
+            done
+            if [ "${state}" = "RUNNING" ]; then
+              break
+            fi
+            echo "Attempt ${try} did not stay RUNNING (state=${state:-gone}); cancelling ${JOBID}"
+            spur_cmd scancel "${JOBID}" >/dev/null 2>&1 || true
+            JOBID=""
+            sleep 10
+          done
+
+          if [ -z "${JOBID}" ]; then
+            echo "ERROR: failed to start a ${SALLOC_NODES}-node GPU allocation after ${MAX_LAUNCH_TRIES} attempts"
+            exit 1
+          fi
 
           tail -n +1 -F "${SLURM_OUT}" 2>/dev/null &
           TAIL_PID=$!
 
           while true; do
-            st=$(squeue -j "${JOBID}" -h -o '%T' 2>/dev/null || true)
+            st=$(spur_cmd squeue -j "${JOBID}" -h -o '%T' 2>/dev/null || true)
             if [ -z "${st}" ]; then
               break
             fi
@@ -309,8 +487,8 @@ jobs:
           kill "${TAIL_PID}" 2>/dev/null || true
           wait "${TAIL_PID}" 2>/dev/null || true
 
-          job_state=$(scontrol show job "${JOBID}" | sed -n 's/.*JobState=\([^ ]*\).*/\1/p' | head -n1)
-          exitcode=$(scontrol show job "${JOBID}" | sed -n 's/.*[[:space:]]ExitCode=\([0-9-]*\):.*/\1/p' | head -n1)
+          job_state=$(spur_cmd scontrol show job "${JOBID}" | sed -n 's/.*JobState=\([^ ]*\).*/\1/p' | head -n1)
+          exitcode=$(spur_cmd scontrol show job "${JOBID}" | sed -n 's/.*[[:space:]]ExitCode=\([0-9-]*\):.*/\1/p' | head -n1)
           rc="${exitcode:-1}"
           if [ "${job_state}" != "COMPLETED" ]; then
             rc=1

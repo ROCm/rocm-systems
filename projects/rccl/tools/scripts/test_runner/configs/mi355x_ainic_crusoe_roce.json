@@ -10,7 +10,7 @@
   },
   "auto_detect_hosts": true,
   "mpi_args": {
-    "ainic": "--bind-to numa --mca pml ob1 --mca osc ^ucx --mca btl tcp,self --mca btl_tcp_if_include ens3 --prefix /opt/openmpi"
+    "ainic": "--bind-to none --oversubscribe --prefix /opt/openmpi --mca plm slurm --mca orte_tmpdir_base /dev/shm --mca pml ob1 --mca osc ^ucx --mca btl tcp,self --mca btl_tcp_if_include ens3 --mca oob_tcp_if_include ens3"
   },
   "env_variables": {
     "NCCL_DEBUG": "INFO",
@@ -24,7 +24,9 @@
       "NCCL_IB_HCA": "ionic_0,ionic_1,ionic_2,ionic_3,ionic_4,ionic_5,ionic_6,ionic_7",
       "NCCL_TOPO_FILE": "/etc/crusoe/rccl_topo/mi355x-288gb-ib.xml",
       "NCCL_DMABUF_ENABLE": "1",
-      "NCCL_IB_GID_INDEX": "1"
+      "NCCL_IB_GID_INDEX": "1",
+      "TMPDIR": "/dev/shm",
+      "HOME": "${HOME}"
     }
   },
   "build_configuration": {

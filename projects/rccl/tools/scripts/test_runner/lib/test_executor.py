@@ -194,6 +194,37 @@ def infer_pytest_result_from_junit(junit_path: str, returncode: int) -> str:
     return TestResult.RESULT_PASSED.value
 
 
+def expand_slurm_hostlist(spec: str) -> list:
+    """
+    Expand a SLURM/SPUR hostlist into individual hostnames.
+
+    Handles already-expanded lists (``n1,n2``) and compact forms used on Crusoe
+    (``crsuse2-m2m-[046,072]``, ``crsuse2-m2m-[001-003,006]``). SPUR's scontrol
+    has no ``show hostnames`` verb, so callers fall back to this on
+    ``SLURM_JOB_NODELIST`` / ``SLURM_NODELIST``.
+    """
+    spec = (spec or "").strip()
+    if not spec:
+        return []
+    hosts = []
+    for match in re.finditer(r"([^,\[]+)(?:\[([^\]]+)\])?", spec):
+        prefix, inner = match.group(1).strip(" ,"), match.group(2)
+        if not inner:
+            if prefix:
+                hosts.append(prefix)
+            continue
+        for token in inner.split(","):
+            token = token.strip()
+            if re.fullmatch(r"\d+-\d+", token):
+                start, end = token.split("-", 1)
+                width = len(start)
+                for index in range(int(start), int(end) + 1):
+                    hosts.append(f"{prefix}{index:0{width}d}")
+            elif token:
+                hosts.append(f"{prefix}{token}")
+    return hosts
+
+
 def _distinct_host_count(mpi_hosts: dict) -> int:
     """
     Count distinct hosts from SLURM host_list or Open MPI hostfile.
@@ -419,17 +450,28 @@ class TestExecutor:
         auto_detect = self.config_processor.config.get("auto_detect_hosts", False)
 
         if auto_detect and os.environ.get('SLURM_JOB_ID'):
+            hosts = []
             try:
                 result = subprocess.run(
                     ['scontrol', 'show', 'hostnames'],
                     capture_output=True, text=True, timeout=5
                 )
                 if result.returncode == 0 and result.stdout.strip():
-                    hosts = ','.join(result.stdout.strip().split('\n'))
-                    print(f"Using SLURM hosts: {hosts}")
-                    return {'host_list': hosts}
-            except (subprocess.TimeoutExpired, FileNotFoundError):
+                    hosts = [h.strip() for h in result.stdout.splitlines() if h.strip()]
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
                 pass
+            if not hosts:
+                # SPUR (Crusoe) has no `scontrol show hostnames`; the allocation
+                # already publishes a (possibly compact) hostlist in the env.
+                nodelist = (
+                    os.environ.get('SLURM_JOB_NODELIST')
+                    or os.environ.get('SLURM_NODELIST')
+                    or ''
+                )
+                hosts = expand_slurm_hostlist(nodelist)
+            if hosts:
+                print(f"Using SLURM hosts: {','.join(hosts)}")
+                return {'host_list': ','.join(hosts)}
 
         hostfile = self.mpi_hostfile
         if hostfile:
