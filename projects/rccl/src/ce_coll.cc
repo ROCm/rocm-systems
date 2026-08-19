@@ -409,6 +409,66 @@ fail:
   goto exit;
 }
 
+// Capture: issue peer writes as a separate stream batch so the captured graph
+// orders write → wait → reset (reset is a second batch in ncclMemOpSync). Fusing
+// write+wait+reset in one HIP batch can hang on replay.
+static ncclResult_t ncclPrepUCSyncCapture(struct ncclComm* comm, bool isComplete, uint32_t* readyPtrs,
+                                         uint32_t* completePtrs, uint32_t waitValue, cudaStream_t stream) {
+  ncclResult_t ret = ncclSuccess;
+  hipStreamBatchMemOpParams* writeParams = nullptr;
+  size_t writeIdx = 0;
+  void* dstPtr = isComplete ? (void*)&completePtrs[comm->rank] : (void*)&readyPtrs[comm->rank];
+  size_t offset = (uint8_t*)dstPtr - (uint8_t*)comm->ceColl.ceSyncWin->userPtr;
+
+  NCCLCHECKGOTO(ncclCalloc(&writeParams, comm->nRanks), ret, fail);
+  for (int r = 0; r < comm->nRanks; ++r) {
+    if (r == comm->rank) continue;
+    void* peerDstPtr;
+    NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, comm->ceColl.ceSyncWin, offset, r, &peerDstPtr), ret, fail);
+    writeParams[writeIdx] = {};
+    writeParams[writeIdx].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
+    writeParams[writeIdx].writeValue.address = (CUdeviceptr)peerDstPtr;
+    writeParams[writeIdx].writeValue.value = waitValue;
+    writeParams[writeIdx].writeValue.flags = 0;
+    writeIdx++;
+  }
+  if (writeIdx) {
+    CUCHECKGOTO(hipStreamBatchMemOp(stream, writeIdx, writeParams, 0), ret, fail);
+  }
+
+exit:
+  free(writeParams);
+  return ret;
+fail:
+  goto exit;
+}
+
+// Non-capture: fuse peer writes into batchParams with waits (one submit, lower latency).
+static ncclResult_t ncclPrepUCSyncNonCapture(struct ncclComm* comm, bool isComplete, uint32_t* readyPtrs,
+                                            uint32_t* completePtrs, uint32_t waitValue,
+                                            hipStreamBatchMemOpParams* batchParams, size_t* opIdx) {
+  ncclResult_t ret = ncclSuccess;
+  void* dstPtr = isComplete ? (void*)&completePtrs[comm->rank] : (void*)&readyPtrs[comm->rank];
+  size_t offset = (uint8_t*)dstPtr - (uint8_t*)comm->ceColl.ceSyncWin->userPtr;
+
+  for (int r = 0; r < comm->nRanks; ++r) {
+    if (r == comm->rank) continue;
+    void* peerDstPtr;
+    NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, comm->ceColl.ceSyncWin, offset, r, &peerDstPtr), ret, fail);
+    batchParams[*opIdx] = {};
+    batchParams[*opIdx].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
+    batchParams[*opIdx].writeValue.address = (CUdeviceptr)peerDstPtr;
+    batchParams[*opIdx].writeValue.value = waitValue;
+    batchParams[*opIdx].writeValue.flags = CU_STREAM_WRITE_VALUE_DEFAULT;
+    (*opIdx)++;
+  }
+
+exit:
+  return ret;
+fail:
+  goto exit;
+}
+
 ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete, hipStreamBatchMemOpParams* batchParams,
                             size_t* opIdx, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
@@ -416,52 +476,19 @@ ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete, hipStreamBat
   #ifdef ENABLE_FAULT_INJECTION
     NCCLCHECK(ceFaultCheck(comm, CE_FAULT_SYNC_PREP, "ncclPrepUCSync"));
   #endif
-  
+
   uint32_t* readyPtrs = (uint32_t*)comm->ceColl.baseUCSymReadyPtr;
   uint32_t* completePtrs = (uint32_t*)comm->ceColl.baseUCSymComplPtr;
-  
+
   bool capturing = ncclCudaGraphValid(comm->planner.capturingGraph);
   uint32_t currentSeq = ++comm->ceColl.ceSeqNum;
   uint32_t waitValue = capturing ? GRAPH_SYNC_VALUE : currentSeq;
-  hipStreamBatchMemOpParams* writeParams = nullptr;
-                              
-  // Non-capture: fuse peer writes into batchParams with waits (one submit, lower latency).
-  // Capture: issue peer writes as a separate stream batch first so the captured graph
-  // orders write → wait → reset (reset is a second batch in ncclMemOpSync). Fusing
-  // write+wait+reset in one HIP batch can hang on replay.
+
   if (capturing) {
-    size_t writeIdx = 0;
-    NCCLCHECKGOTO(ncclCalloc(&writeParams, comm->nRanks), ret, fail);
-    for (int r = 0; r < comm->nRanks; ++r) {
-      if (r == comm->rank) continue;
-      void* peerDstPtr;
-      void* dstPtr = isComplete ? (void*)&completePtrs[comm->rank] : (void*)&readyPtrs[comm->rank];
-      size_t offset = (uint8_t*)dstPtr - (uint8_t*)comm->ceColl.ceSyncWin->userPtr;
-      NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, comm->ceColl.ceSyncWin, offset, r, &peerDstPtr), ret, fail);
-      writeParams[writeIdx] = {};
-      writeParams[writeIdx].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
-      writeParams[writeIdx].writeValue.address = (CUdeviceptr)peerDstPtr;
-      writeParams[writeIdx].writeValue.value = waitValue;
-      writeParams[writeIdx].writeValue.flags = 0;
-      writeIdx++;
-    }
-    if (writeIdx) {
-      CUCHECKGOTO(hipStreamBatchMemOp(stream, writeIdx, writeParams, 0), ret, fail);
-    }
+    NCCLCHECKGOTO(ncclPrepUCSyncCapture(comm, isComplete, readyPtrs, completePtrs, waitValue, stream), ret, fail);
   } else {
-    for (int r = 0; r < comm->nRanks; ++r) {
-      if (r == comm->rank) continue;
-      void* peerDstPtr;
-      void* dstPtr = isComplete ? (void*)&completePtrs[comm->rank] : (void*)&readyPtrs[comm->rank];
-      size_t offset = (uint8_t*)dstPtr - (uint8_t*)comm->ceColl.ceSyncWin->userPtr;
-      NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, comm->ceColl.ceSyncWin, offset, r, &peerDstPtr), ret, fail);
-      batchParams[*opIdx] = {};
-      batchParams[*opIdx].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
-      batchParams[*opIdx].writeValue.address = (CUdeviceptr)peerDstPtr;
-      batchParams[*opIdx].writeValue.value = waitValue;
-      batchParams[*opIdx].writeValue.flags = CU_STREAM_WRITE_VALUE_DEFAULT;
-      (*opIdx)++;
-    }
+    NCCLCHECKGOTO(ncclPrepUCSyncNonCapture(comm, isComplete, readyPtrs, completePtrs, waitValue, batchParams, opIdx),
+                  ret, fail);
   }
 
   // Waits always go in batchParams (submitted by ncclMemOpSync; reset follows if capturing).
@@ -477,7 +504,6 @@ ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete, hipStreamBat
   }
 
 exit:
-  free(writeParams);
   return ret;
 fail:
   goto exit;
