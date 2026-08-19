@@ -6,7 +6,6 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/mimg.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/execution_backend.h"
-#include "util/except.h"
 #include <memory>
 
 namespace rocjitsu {
@@ -30,7 +29,11 @@ ImageLoadMimg::ImageLoadMimg(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageLoadMimg(const MachineInst *opcode) {
+DecodeResult decodeImageLoadMimg(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_load", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageLoadMimg>(opcode);
 }
 } // namespace detail
@@ -53,7 +56,12 @@ ImageLoadMipMimg::ImageLoadMipMimg(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageLoadMipMimg(const MachineInst *opcode) {
+DecodeResult decodeImageLoadMipMimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_load_mip", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageLoadMipMimg>(opcode);
 }
 } // namespace detail
@@ -76,7 +84,12 @@ ImageLoadPckMimg::ImageLoadPckMimg(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageLoadPckMimg(const MachineInst *opcode) {
+DecodeResult decodeImageLoadPckMimg(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_load_pck", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageLoadPckMimg>(opcode);
 }
 } // namespace detail
@@ -99,7 +112,12 @@ ImageLoadPckSgnMimg::ImageLoadPckSgnMimg(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageLoadPckSgnMimg(const MachineInst *opcode) {
+DecodeResult decodeImageLoadPckSgnMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_load_pck_sgn", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageLoadPckSgnMimg>(opcode);
 }
 } // namespace detail
@@ -122,7 +140,12 @@ ImageLoadMipPckMimg::ImageLoadMipPckMimg(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageLoadMipPckMimg(const MachineInst *opcode) {
+DecodeResult decodeImageLoadMipPckMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_load_mip_pck", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageLoadMipPckMimg>(opcode);
 }
 } // namespace detail
@@ -145,7 +168,12 @@ ImageLoadMipPckSgnMimg::ImageLoadMipPckSgnMimg(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageLoadMipPckSgnMimg(const MachineInst *opcode) {
+DecodeResult decodeImageLoadMipPckSgnMimg(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_load_mip_pck_sgn", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageLoadMipPckSgnMimg>(opcode);
 }
 } // namespace detail
@@ -168,7 +196,11 @@ ImageStoreMimg::ImageStoreMimg(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageStoreMimg(const MachineInst *opcode) {
+DecodeResult decodeImageStoreMimg(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_store", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageStoreMimg>(opcode);
 }
 } // namespace detail
@@ -191,7 +223,12 @@ ImageStoreMipMimg::ImageStoreMipMimg(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageStoreMipMimg(const MachineInst *opcode) {
+DecodeResult decodeImageStoreMipMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_store_mip", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageStoreMipMimg>(opcode);
 }
 } // namespace detail
@@ -214,7 +251,12 @@ ImageStorePckMimg::ImageStorePckMimg(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageStorePckMimg(const MachineInst *opcode) {
+DecodeResult decodeImageStorePckMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_store_pck", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageStorePckMimg>(opcode);
 }
 } // namespace detail
@@ -237,7 +279,12 @@ ImageStoreMipPckMimg::ImageStoreMipPckMimg(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageStoreMipPckMimg(const MachineInst *opcode) {
+DecodeResult decodeImageStoreMipPckMimg(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_store_mip_pck", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageStoreMipPckMimg>(opcode);
 }
 } // namespace detail
@@ -260,7 +307,12 @@ ImageGetResinfoMimg::ImageGetResinfoMimg(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageGetResinfoMimg(const MachineInst *opcode) {
+DecodeResult decodeImageGetResinfoMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_get_resinfo", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageGetResinfoMimg>(opcode);
 }
 } // namespace detail
@@ -284,7 +336,12 @@ ImageAtomicSwapMimg::ImageAtomicSwapMimg(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicSwapMimg(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicSwapMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_swap", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicSwapMimg>(opcode);
 }
 } // namespace detail
@@ -308,7 +365,12 @@ ImageAtomicCmpswapMimg::ImageAtomicCmpswapMimg(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicCmpswapMimg(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicCmpswapMimg(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_cmpswap", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicCmpswapMimg>(opcode);
 }
 } // namespace detail
@@ -332,7 +394,12 @@ ImageAtomicAddMimg::ImageAtomicAddMimg(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicAddMimg(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicAddMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_add", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicAddMimg>(opcode);
 }
 } // namespace detail
@@ -356,7 +423,12 @@ ImageAtomicSubMimg::ImageAtomicSubMimg(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicSubMimg(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicSubMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_sub", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicSubMimg>(opcode);
 }
 } // namespace detail
@@ -380,7 +452,12 @@ ImageAtomicSminMimg::ImageAtomicSminMimg(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicSminMimg(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicSminMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_smin", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicSminMimg>(opcode);
 }
 } // namespace detail
@@ -404,7 +481,12 @@ ImageAtomicUminMimg::ImageAtomicUminMimg(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicUminMimg(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicUminMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_umin", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicUminMimg>(opcode);
 }
 } // namespace detail
@@ -428,7 +510,12 @@ ImageAtomicSmaxMimg::ImageAtomicSmaxMimg(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicSmaxMimg(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicSmaxMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_smax", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicSmaxMimg>(opcode);
 }
 } // namespace detail
@@ -452,7 +539,12 @@ ImageAtomicUmaxMimg::ImageAtomicUmaxMimg(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicUmaxMimg(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicUmaxMimg(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_umax", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicUmaxMimg>(opcode);
 }
 } // namespace detail
@@ -476,7 +568,12 @@ ImageAtomicAndMimg::ImageAtomicAndMimg(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicAndMimg(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicAndMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_and", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicAndMimg>(opcode);
 }
 } // namespace detail
@@ -500,7 +597,12 @@ ImageAtomicOrMimg::ImageAtomicOrMimg(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicOrMimg(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicOrMimg(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_or", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicOrMimg>(opcode);
 }
 } // namespace detail
@@ -524,7 +626,12 @@ ImageAtomicXorMimg::ImageAtomicXorMimg(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicXorMimg(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicXorMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_xor", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicXorMimg>(opcode);
 }
 } // namespace detail
@@ -548,7 +655,12 @@ ImageAtomicIncMimg::ImageAtomicIncMimg(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicIncMimg(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicIncMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_inc", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicIncMimg>(opcode);
 }
 } // namespace detail
@@ -572,7 +684,12 @@ ImageAtomicDecMimg::ImageAtomicDecMimg(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageAtomicDecMimg(const MachineInst *opcode) {
+DecodeResult decodeImageAtomicDecMimg(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_atomic_dec", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageAtomicDecMimg>(opcode);
 }
 } // namespace detail
@@ -597,7 +714,12 @@ ImageSampleMimg::ImageSampleMimg(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeImageSampleMimg(const MachineInst *opcode) {
+DecodeResult decodeImageSampleMimg(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Mimg::validate_encoding(
+      "image_sample", reinterpret_cast<const Mimg::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<ImageSampleMimg>(opcode);
 }
 } // namespace detail

@@ -337,7 +337,7 @@ HwregTable table_for_arch(rj_code_arch_t arch) {
     return make_table(RDNA3_HWREGS);
   case ROCJITSU_CODE_ARCH_RDNA4:
     return make_table(RDNA4_HWREGS);
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return make_table(GFX1250_HWREGS);
   default:
     return {nullptr, 0};

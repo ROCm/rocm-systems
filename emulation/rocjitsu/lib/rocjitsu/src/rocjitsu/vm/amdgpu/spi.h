@@ -103,7 +103,8 @@ public:
 
       ComputeUnitCore *cu = placement->cu;
       uint32_t lds_base = placement->lds_base;
-      cu->begin_workgroup(wg.entry->dispatch_id, wg.global_wg_id, wg.entry->wfs_per_workgroup);
+      cu->begin_workgroup(wg.entry->dispatch_id, wg.global_wg_id, wg.entry->wfs_per_workgroup,
+                          wg.entry->num_named_barriers);
       std::vector<Wavefront *> wg_wfs;
       wg_wfs.reserve(wg.entry->wfs_per_workgroup);
       for (uint32_t w = 0; w < wg.entry->wfs_per_workgroup; ++w) {

@@ -13,9 +13,15 @@
 // Compiled as C++ (the RCCL project only enables CXX/HIP), so the plugin symbol
 // is exported with C linkage and default visibility for RCCL's dlsym() lookup.
 //
-// RCCL_NET_TEST_PLUGIN_MODE=assign_fail selects an incompatible UNPACK device
-// version (assignment rejected after init) and records init/finalize via
-// RCCL_NET_ASSIGN_FAIL_{INIT,FINALIZE}_FILE (NCCL 2.28.7 net.cc fix).
+// RCCL_NET_TEST_PLUGIN_MODE selects a failure to inject:
+//   assign_fail   - incompatible UNPACK device version, so assignment is rejected
+//                   after a successful init (NCCL 2.28.7 net.cc fix). Records
+//                   init/finalize via RCCL_NET_ASSIGN_FAIL_{INIT,FINALIZE}_FILE.
+//   init_fail     - init() reports an error (AICOMRCCL-1891 / NCCL 2.29.7 net.cc
+//                   fix: finalize() must not run for an init() that failed).
+//   devices_fail  - init() succeeds but devices() reports an error, which is the
+//                   companion case where finalize() must still run.
+// Both new modes record via RCCL_NET_TEST_{INIT,FINALIZE}_FILE.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,6 +34,13 @@
 
 static char kPluginName[] = "ReloadTest";
 
+enum PluginTestMode {
+  kModeDefault,
+  kModeAssignFail,
+  kModeInitFail,
+  kModeDevicesFail,
+};
+
 static void recordLine(const char* envVar) {
   const char* path = getenv(envVar);
   if (path == nullptr) return;
@@ -39,9 +52,13 @@ static void recordLine(const char* envVar) {
   fclose(f);
 }
 
-static int assignFailMode() {
+static PluginTestMode testMode() {
   const char* mode = getenv("RCCL_NET_TEST_PLUGIN_MODE");
-  return mode && strcmp(mode, "assign_fail") == 0;
+  if (mode == nullptr) return kModeDefault;
+  if (strcmp(mode, "assign_fail") == 0) return kModeAssignFail;
+  if (strcmp(mode, "init_fail") == 0) return kModeInitFail;
+  if (strcmp(mode, "devices_fail") == 0) return kModeDevicesFail;
+  return kModeDefault;
 }
 
 __hidden ncclResult_t pluginInit(void** ctx, uint64_t commId, ncclNetCommConfig_v12_t* config,
@@ -49,16 +66,25 @@ __hidden ncclResult_t pluginInit(void** ctx, uint64_t commId, ncclNetCommConfig_
   (void)ctx; (void)commId; (void)config; (void)logFunction; (void)profFunction;
   recordLine("RCCL_NET_RELOAD_COUNTER_FILE");
   recordLine("RCCL_NET_ASSIGN_FAIL_INIT_FILE");
+  recordLine("RCCL_NET_TEST_INIT_FILE");
+  // Recorded before failing, so a test can tell "init was never attempted" apart
+  // from "init was attempted and rejected".
+  if (testMode() == kModeInitFail) return ncclSystemError;
   return ncclSuccess;
 }
 
 __hidden ncclResult_t pluginFinalize(void* ctx) {
   (void)ctx;
   recordLine("RCCL_NET_ASSIGN_FAIL_FINALIZE_FILE");
+  recordLine("RCCL_NET_TEST_FINALIZE_FILE");
   return ncclSuccess;
 }
 
-__hidden ncclResult_t pluginDevices(int* ndev) { *ndev = 1; return ncclSuccess; }
+__hidden ncclResult_t pluginDevices(int* ndev) {
+  if (testMode() == kModeDevicesFail) return ncclSystemError;
+  *ndev = 1;
+  return ncclSuccess;
+}
 
 __hidden ncclResult_t pluginGetProperties(int dev, ncclNetProperties_v12_t* props) {
   props->name = kPluginName;
@@ -72,7 +98,7 @@ __hidden ncclResult_t pluginGetProperties(int dev, ncclNetProperties_v12_t* prop
   props->latency = 0;
   props->maxComms = 1024 * 1024;
   props->maxRecvs = NCCL_PLUGIN_MAX_RECVS;
-  if (assignFailMode()) {
+  if (testMode() == kModeAssignFail) {
     props->netDeviceType = NCCL_NET_DEVICE_UNPACK;
     props->netDeviceVersion = NCCL_NET_DEVICE_UNPACK_VERSION - 1;
   } else {

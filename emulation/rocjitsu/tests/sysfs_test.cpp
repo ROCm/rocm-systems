@@ -292,6 +292,57 @@ TEST(SysfsTopologyGeometryTest, ArrayCountIsScaledByNumXcc) {
   }
 }
 
+// MI350X is harvested too: its captured KFD topology has 32 shader arrays of
+// 9 CUs (288 physical CUs), while simd_count exposes 1024 SIMDs, or 256 active
+// CUs at four SIMDs per CU. Keep every full-device gfx950 config pinned to that
+// same capture so local, KMD, and multi-GPU launch paths cannot drift apart.
+TEST(SysfsTopologyGeometryTest, Mi350xMatchesCapturedPhysicalAndActiveCuCounts) {
+  const std::string config_dir = CONFIG_DIR;
+  constexpr const char *kMi350xConfigs[] = {"gfx950_mi355x.json", "gfx950_mi355x_kmd.json",
+                                            "gfx950_mi355x_kmd_2gpu.json"};
+
+  for (const char *cfg : kMi350xConfigs) {
+    SCOPED_TRACE(cfg);
+    auto loaded = config::load_config(config_dir + "/" + cfg, rocjitsu::kEmbeddedSchema);
+    ASSERT_TRUE(loaded.device.present);
+    ASSERT_NE(loaded.soc(), nullptr);
+    const uint32_t num_xcc = loaded.soc()->num_xcds();
+    ASSERT_EQ(num_xcc, 8u);
+
+    Sysfs sysfs;
+    std::string topology_dir = sysfs.generate(gpu_info_from_config(loaded.device, num_xcc));
+    ASSERT_FALSE(topology_dir.empty());
+    auto props = read_properties(topology_dir + "/nodes/1/properties");
+
+    ASSERT_TRUE(props.count("array_count"));
+    ASSERT_TRUE(props.count("simd_arrays_per_engine"));
+    ASSERT_TRUE(props.count("cu_per_simd_array"));
+    ASSERT_TRUE(props.count("simd_count"));
+    ASSERT_TRUE(props.count("simd_per_cu"));
+    EXPECT_EQ(props["array_count"], 32u);
+    EXPECT_EQ(props["simd_arrays_per_engine"], 1u);
+    EXPECT_EQ(props["cu_per_simd_array"], 9u);
+    EXPECT_EQ(props["simd_count"], 1024u);
+    EXPECT_EQ(props["simd_per_cu"], 4u);
+
+    const uint64_t physical_cus = props["array_count"] * props["cu_per_simd_array"];
+    const uint64_t active_cus = props["simd_count"] / props["simd_per_cu"];
+    EXPECT_EQ(physical_cus, 288u);
+    EXPECT_EQ(active_cus, 256u);
+
+    EXPECT_EQ(loaded.device.device_id, 30112u);
+    EXPECT_EQ(loaded.device.local_mem_size, 309220868096ULL);
+    EXPECT_EQ(loaded.device.mem_clk_max, 1900u);
+    EXPECT_EQ(loaded.device.num_sdma_engines, 2u);
+    EXPECT_EQ(loaded.device.num_sdma_xgmi_engines, 14u);
+    EXPECT_EQ(loaded.device.num_sdma_queues_per_engine, 8u);
+    ASSERT_TRUE(props.count("num_sdma_queues_per_engine"));
+    EXPECT_EQ(props["num_sdma_queues_per_engine"], 8u);
+    EXPECT_EQ(loaded.device.num_cp_queues, 24u);
+    EXPECT_EQ(loaded.device.max_engine_clk_fcompute, 2200u);
+  }
+}
+
 // Every shipped config must describe the machine it actually simulates.
 //
 // num_shader_engines is the per-XCC shader-engine count, so it has to equal the
@@ -419,7 +470,7 @@ TEST(SysfsTopologyDebugCapabilityTest, ConfigTopologyMatchesRealHardware) {
   // Configs whose device matches a captured real-hardware topology dump.
   constexpr const char *kConfigs[] = {
       "gfx942_cdna3.json",  // MI300X
-      "gfx950_cdna4.json",  // MI350X
+      "gfx950_mi355x.json", // MI350X
       "gfx1201_r9700.json", // R9700
   };
 

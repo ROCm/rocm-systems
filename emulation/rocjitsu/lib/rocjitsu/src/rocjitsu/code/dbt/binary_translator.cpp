@@ -35,7 +35,6 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
-#include "util/except.h"
 
 #include <algorithm>
 #include <cassert>
@@ -354,15 +353,13 @@ generated_branch_island_pool_offsets(std::span<const uint8_t> text, rj_code_arch
       // A malformed slot can select an extension-bearing format. Pad the
       // speculative decode so pool recognition never reads beyond its input.
       const std::array<uint32_t, 3> slot_words = {text_word_at(text, slot_offset), 0, 0};
-      try {
-        std::unique_ptr<Instruction> slot_inst(decoder->decode(slot_words.data()));
-        if (slot_inst && slot_inst->size() == static_cast<int>(sizeof(uint32_t)) &&
+      DecodeResult decoded = decoder->decode(slot_words.data());
+      if (decoded.succeeded()) {
+        const std::unique_ptr<Instruction> &slot_inst = decoded.value();
+        if (slot_inst->size() == static_cast<int>(sizeof(uint32_t)) &&
             slot_inst->mnemonic() == "s_branch" && slot_inst->branch_offset_bytes()) {
           continue;
         }
-      } catch (const util::InvalidInst &) {
-        // A marker-shaped region containing an invalid instruction is not a
-        // generated pool. Normal block decoding will report the instruction.
       }
       has_canonical_slots = false;
       break;
@@ -458,7 +455,7 @@ translation_refusal(const CodeObjectPatcher &patcher, rj_code_arch_t guest_arch,
 
   // A same-architecture gfx1250 translation is direction-specific: A0 and B0 share an ELF machine
   // ID, so both revisions must be given. Enforce this here as well as in the C API.
-  if (guest_arch == ROCJITSU_CODE_ARCH_GFX1250 && host_arch == ROCJITSU_CODE_ARCH_GFX1250) {
+  if (guest_arch == ROCJITSU_CODE_ARCH_CDNA5 && host_arch == ROCJITSU_CODE_ARCH_CDNA5) {
     if (options.input_revision == ProcessorRevision::Unspecified ||
         options.output_revision == ProcessorRevision::Unspecified) {
       return error(DiagnosticKind::Legalization,
@@ -1938,10 +1935,9 @@ namespace internal {
 RewriteDischargeInstructionDecoder::RewriteDischargeInstructionDecoder(Decoder &decoder)
     : decoder_(decoder), lookahead_words_(decoder.max_instruction_words()) {}
 
-RewriteDischargeDecodeStatus
-RewriteDischargeInstructionDecoder::decode(std::span<const uint8_t> remaining_bytes,
-                                           uint64_t source_offset,
-                                           std::unique_ptr<Instruction> &instruction) {
+RewriteDischargeDecodeStatus RewriteDischargeInstructionDecoder::decode(
+    std::span<const uint8_t> remaining_bytes, uint64_t source_offset,
+    std::unique_ptr<Instruction> &instruction, const DecodeErrorEmitter &emit_error) {
   instruction.reset();
   if (lookahead_words_.empty())
     return RewriteDischargeDecodeStatus::InvalidLookaheadBound;
@@ -1950,7 +1946,10 @@ RewriteDischargeInstructionDecoder::decode(std::span<const uint8_t> remaining_by
   const size_t remaining_words = remaining_bytes.size() / sizeof(uint32_t);
   const size_t copied_words = std::min(remaining_words, lookahead_words_.size());
   std::memcpy(lookahead_words_.data(), remaining_bytes.data(), copied_words * sizeof(uint32_t));
-  instruction.reset(decoder_.decode(lookahead_words_.data(), source_offset));
+  DecodeResult decoded = decoder_.decode(lookahead_words_.data(), source_offset, emit_error);
+  if (decoded.failed())
+    return RewriteDischargeDecodeStatus::InvalidEncoding;
+  instruction = std::move(decoded).value();
   if (instruction == nullptr || instruction->size() <= 0 ||
       instruction->size() % static_cast<int>(sizeof(uint32_t)) != 0) {
     return RewriteDischargeDecodeStatus::InvalidInstructionSize;
@@ -2052,7 +2051,7 @@ BinaryTranslator::BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t hos
           guest_arch, host_arch, options.input_revision, options.output_revision)) {}
 
 bool BinaryTranslator::is_gfx1250_b0_to_a0() const {
-  return guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_GFX1250 &&
+  return guest_arch_ == ROCJITSU_CODE_ARCH_CDNA5 && host_arch_ == ROCJITSU_CODE_ARCH_CDNA5 &&
          options_.input_revision == ProcessorRevision::Gfx1250B0 &&
          options_.output_revision == ProcessorRevision::Gfx1250A0;
 }
@@ -2179,7 +2178,7 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
 
       uint32_t first_word = 0;
       std::memcpy(&first_word, text_bytes.data() + instruction_offset, sizeof(first_word));
-      if (host_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && first_word == 0) {
+      if (host_arch_ == ROCJITSU_CODE_ARCH_CDNA5 && first_word == 0) {
         ++instruction_word_index;
         instruction_offset += sizeof(uint32_t);
         continue;
@@ -2191,12 +2190,21 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
       }
 
       std::unique_ptr<Instruction> inst;
-      const auto decode_status = instruction_decoder.decode(text_bytes.subspan(instruction_offset),
-                                                            instruction_offset, inst);
+      util::StringDiagnostic decode_error;
+      const auto decode_status = instruction_decoder.decode(
+          text_bytes.subspan(instruction_offset), instruction_offset, inst, decode_error.emitter());
       if (decode_status == internal::RewriteDischargeDecodeStatus::InvalidLookaheadBound) {
         append_rewrite_discharge_error(
             result.diagnostics,
             "rewrite-discharge verification decoder reported an invalid lookahead bound");
+        return;
+      }
+      if (decode_status == internal::RewriteDischargeDecodeStatus::InvalidEncoding) {
+        append_rewrite_discharge_error(
+            result.diagnostics,
+            "rewrite-discharge verification failed to decode final output: " +
+                decode_error.message(),
+            instruction_offset);
         return;
       }
       if (decode_status == internal::RewriteDischargeDecodeStatus::InvalidInstructionSize) {
@@ -2244,8 +2252,17 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
       return;
     }
 
-    const auto blocks = BasicBlock::build(output, *decoder, host_arch_, block_leaders,
-                                          ExternalEntryPolicy::ExplicitOnly);
+    util::StringDiagnostic decode_error;
+    FailureOr<std::vector<std::unique_ptr<BasicBlock>>> block_result =
+        BasicBlock::build(output, *decoder, host_arch_, decode_error.emitter(), block_leaders,
+                          ExternalEntryPolicy::ExplicitOnly);
+    if (block_result.failed()) {
+      append_rewrite_discharge_error(
+          result.diagnostics, "rewrite-discharge verification failed to decode final output: " +
+                                  decode_error.message());
+      return;
+    }
+    std::vector<std::unique_ptr<BasicBlock>> blocks = std::move(block_result).value();
     if (has_invalid_block_leader(blocks, block_leaders, text->size())) {
       append_rewrite_discharge_error(
           result.diagnostics,
@@ -2316,7 +2333,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   // A same-architecture gfx1250 translation is direction-specific: A0 and B0
   // share an ELF machine ID, so both revisions must be given. Enforce this here
   // as well as in the C API.
-  if (guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_GFX1250) {
+  if (guest_arch_ == ROCJITSU_CODE_ARCH_CDNA5 && host_arch_ == ROCJITSU_CODE_ARCH_CDNA5) {
     if (options_.input_revision == ProcessorRevision::Unspecified ||
         options_.output_revision == ProcessorRevision::Unspecified) {
       append_error(result.diagnostics, DiagnosticKind::Legalization,
@@ -2413,7 +2430,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
 
   if (descriptor_translations.empty()) {
     const bool descriptorless_gfx1250_b0_to_a0 =
-        guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_GFX1250 &&
+        guest_arch_ == ROCJITSU_CODE_ARCH_CDNA5 && host_arch_ == ROCJITSU_CODE_ARCH_CDNA5 &&
         options_.input_revision == ProcessorRevision::Gfx1250B0 &&
         options_.output_revision == ProcessorRevision::Gfx1250A0;
     if (!descriptorless_gfx1250_b0_to_a0) {
@@ -2496,13 +2513,15 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   // branch or call target can be resolved through the current kernel's placement
   // map without borrowing another kernel's return continuation.
   std::vector<std::unique_ptr<BasicBlock>> blocks;
-  try {
-    blocks = BasicBlock::build(obj, *decoder, guest_arch_, block_leaders,
-                               ExternalEntryPolicy::ExplicitOnly, block_split_points);
-  } catch (const util::InvalidInst &error) {
-    append_error(result.diagnostics, DiagnosticKind::Legalization, error.what());
+  util::StringDiagnostic decode_error;
+  auto block_result =
+      BasicBlock::build(obj, *decoder, guest_arch_, decode_error.emitter(), block_leaders,
+                        ExternalEntryPolicy::ExplicitOnly, block_split_points);
+  if (block_result.failed()) {
+    append_error(result.diagnostics, DiagnosticKind::Legalization, decode_error.message());
     return leave_unchanged();
   }
+  blocks = std::move(block_result).value();
   if (has_invalid_block_leader(blocks, block_leaders, text.size())) {
     append_error(result.diagnostics, DiagnosticKind::Legalization,
                  "translation found an invalid executable entry");

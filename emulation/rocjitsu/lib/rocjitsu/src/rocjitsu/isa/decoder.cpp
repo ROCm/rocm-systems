@@ -27,21 +27,11 @@ Decoder::~Decoder() {
 
 void Decoder::disable_pool() { Instruction::invalidate_allocator_pool(&pool_); }
 
-void Decoder::validate_instruction_operands(const Instruction &inst) {
-  for (int index = 0; index < inst.num_src_operands(); ++index) {
-    if (const Operand *operand = inst.src_operand(index))
-      operand->validate_encoding();
-  }
-  for (int index = 0; index < inst.num_dst_operands(); ++index) {
-    if (const Operand *operand = inst.dst_operand(index))
-      operand->validate_encoding();
-  }
-}
-
-Instruction *Decoder::decode(const rj_code_binary_inst_t *inst, uint64_t src_loc) {
-  Instruction *decoded = decode(inst);
-  if (decoded != nullptr)
-    decoded->src_loc_ = src_loc;
+DecodeResult Decoder::decode(const rj_code_binary_inst_t *inst, uint64_t src_loc,
+                             const DecodeErrorEmitter &emit_error) {
+  DecodeResult decoded = decode(inst, emit_error);
+  if (decoded.succeeded())
+    decoded.value()->src_loc_ = src_loc;
   return decoded;
 }
 
@@ -49,6 +39,21 @@ void Decoder::activate_pool(AllocFn alloc, DeallocFn dealloc, void *pool) {
   Instruction::alloc_fn_ = alloc;
   Instruction::dealloc_fn_ = dealloc;
   Instruction::alloc_pool_ = pool;
+}
+
+Result Decoder::validate_instruction_operands(const Instruction &inst,
+                                              const DecodeErrorEmitter &emit_error) {
+  for (int index = 0; index < inst.num_src_operands(); ++index) {
+    if (const Operand *operand = inst.src_operand(index))
+      if (operand->validate_encoding(emit_error).failed()) [[unlikely]]
+        return Result::failure();
+  }
+  for (int index = 0; index < inst.num_dst_operands(); ++index) {
+    if (const Operand *operand = inst.dst_operand(index))
+      if (operand->validate_encoding(emit_error).failed()) [[unlikely]]
+        return Result::failure();
+  }
+  return Result::success();
 }
 
 } // namespace rocjitsu
