@@ -14,6 +14,8 @@ RCCL_PARAM(IbCastQpDepthMultiplier, "IB_QP_DEPTH_MULTIPLIER", 1);
 // Pool and comm table globals
 struct IbCastSharedQp       g_IbCastSharedQpPool[IBCAST_MAX_SHARED_QPS];
 int                         g_IbCastSharedQpPoolCount = 0;
+int                         g_IbCastSharedQpFreeStack[IBCAST_MAX_SHARED_QPS];
+int                         g_IbCastSharedQpFreeTop = 0;
 struct IbCastCommTableEntry g_IbCastCommTable[IBCAST_MAX_COMMS];
 uint16_t                    g_IbCastNextCommId = 1;   // 0 reserved for "not shared"
 uint16_t                    g_IbCastCommIdFreeStack[IBCAST_MAX_COMMS];
@@ -62,11 +64,18 @@ struct IbCastSharedQp* IbCastRegisterSharedQp(const IbCastSharedQpKey* key,
     struct ibv_qp* qp, struct ibv_cq* primaryCq,
     int primaryIbDevN, int devIndex, int initialRefcount) {
 
-    if (g_IbCastSharedQpPoolCount >= IBCAST_MAX_SHARED_QPS) {
+    std::lock_guard<std::mutex> lock(g_IbCastSharedQpMutex);
+    int idx;
+    if (g_IbCastSharedQpFreeTop > 0) {
+        // Reuse a slot freed by IbCastCleanupGroupCqs -- O(1)
+        idx = g_IbCastSharedQpFreeStack[--g_IbCastSharedQpFreeTop];
+    } else if (g_IbCastSharedQpPoolCount < IBCAST_MAX_SHARED_QPS) {
+        idx = g_IbCastSharedQpPoolCount++;
+    } else {
         WARN("IB CAST QP Sharing: pool full (%d entries)", IBCAST_MAX_SHARED_QPS);
         return NULL;
     }
-    struct IbCastSharedQp* entry = &g_IbCastSharedQpPool[g_IbCastSharedQpPoolCount++];
+    struct IbCastSharedQp* entry = &g_IbCastSharedQpPool[idx];
     entry->key = *key;
     entry->qp = qp;
     entry->primaryCq = primaryCq;
@@ -77,6 +86,13 @@ struct IbCastSharedQp* IbCastRegisterSharedQp(const IbCastSharedQpKey* key,
     entry->used = true;
     entry->ctsQpSlot = IBCAST_CTS_QP_SLOT_INVALID;
     return entry;
+}
+
+void IbCastUnregisterSharedQpLocked(struct IbCastSharedQp* entry) {
+    if (entry == NULL) return;
+    int idx = (int)(entry - g_IbCastSharedQpPool);
+    entry->used = false;
+    g_IbCastSharedQpFreeStack[g_IbCastSharedQpFreeTop++] = idx;
 }
 
 int IbCastCountGroupQpSlots(const union ncclSocketAddress* peerAddr,
@@ -209,5 +225,6 @@ void IbCastCleanupGroupCqs(struct IbCastSharedQp* slot0Entry) {
             }
         }
         g_IbCastSharedQpPool[i].used = false;
+        g_IbCastSharedQpFreeStack[g_IbCastSharedQpFreeTop++] = i;
     }
 }

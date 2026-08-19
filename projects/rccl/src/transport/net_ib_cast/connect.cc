@@ -1312,12 +1312,16 @@ qp_sharing_skip_sender:
       struct IbCastSharedQp* entry = IbCastRegisterSharedQp(&key,
           comm->base.qps[q].qp, comm->devs[devIdx].base.cq,
           comm->devs[devIdx].base.ibDevN, comm->base.qps[q].devIndex, 1);
-      if (entry && q == 0) {
+      if (entry == NULL) {
+        WARN("NET/IB: %s: QP sharing PRIMARY sender commId=%u group=%d: shared-QP pool exhausted "
+             "registering qpIdx=%d/%d", __func__, comm->base.commId, comm->base.sharedGroupIdx, q, nqps);
+        ret = ncclInternalError;
+        goto fail;
+      }
+      if (q == 0) {
         entry->cqRefcount = 1;
       }
-      if (entry) {
-        entry->ctsQpSlot = comm->base.qps[q].ctsQpSlot;
-      }
+      entry->ctsQpSlot = comm->base.qps[q].ctsQpSlot;
     }
   }
 
@@ -2182,11 +2186,15 @@ qp_sharing_skip_recv:
       struct IbCastSharedQp* entry = IbCastRegisterSharedQp(&recvKey,
           rComm->base.qps[q].qp, rComm->devs[devIdx].base.cq,
           rComm->devs[devIdx].base.ibDevN, rComm->base.qps[q].devIndex, 1);
-      if (entry) {
-        entry->ctsQpSlot = rComm->base.qps[q].ctsQpSlot;
-        if (q == 0) {
-          entry->cqRefcount = 1;
-        }
+      if (entry == NULL) {
+        WARN("NET/IB: %s: QP sharing PRIMARY receiver commId=%u group=%d: shared-QP pool exhausted "
+             "registering qpIdx=%d/%d", __func__, rComm->base.commId, rComm->base.sharedGroupIdx, q, nqps);
+        ret = ncclInternalError;
+        goto fail;
+      }
+      entry->ctsQpSlot = rComm->base.qps[q].ctsQpSlot;
+      if (q == 0) {
+        entry->cqRefcount = 1;
       }
     }
 
@@ -2516,10 +2524,12 @@ ncclResult_t IbCastCloseRecv(void* recvComm) {
                      flushSlot->qp->qp_num, flushSlot->key.groupIdx);
                 wrap_ibv_destroy_qp(flushSlot->qp);
                 flushSlot->qp = NULL;
-                flushSlot->used = false;
+                IbCastUnregisterSharedQpLocked(flushSlot);  // caller holds g_IbCastSharedQpMutex
               }
             } else {
-              // Not in pool (shouldn't happen), destroy directly
+              // Not in pool -- e.g. registration hit the pool-exhaustion
+              // fallback (IbCastRegisterSharedQp returned NULL); this comm's
+              // flush QP was never pool-tracked, so just destroy it directly.
               NCCLCHECK(wrap_ibv_destroy_qp(commDev->gpuFlush.qp.qp));
             }
             commDev->gpuFlush.qp.qp = NULL;
