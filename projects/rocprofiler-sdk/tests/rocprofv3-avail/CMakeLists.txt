@@ -128,5 +128,4 @@ rocprofiler_add_integration_validate_test(
     ENVIRONMENT "ROCPROFILER_PC_SAMPLING_BETA_ENABLED=on"
     TARGET_DEPENDS "rocprofiler-sdk::rocprofv3;rocprofiler-sdk::rocprofv3-avail"
     LABELS "integration-tests"
-    DISABLED_MEMCHECKS ".+"
     DISABLED "${IS_DISABLED}")
