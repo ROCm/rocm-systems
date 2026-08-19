@@ -60,3 +60,11 @@ exclusion, which prevents partial runs from becoming a develop baseline.
 
 With `--warn-perf`, `run-corpus-tests.sh` warns about passing tests whose
 runtime approaches the pytest timeout.
+
+## Corpus skip tests
+Some corpus tests fail with the current ROCjitsu implementation. They are
+temporarily disabled in CI through the target-specific
+`gfx*_skip_tests.json` files. The skipped cases and their observed outcomes
+are documented in
+[`gfx-corpus-skip-tests.md`](gfx-corpus-skip-tests.md), grouped by target and
+observed outcome. The JSON files and documentation contain the same cases.

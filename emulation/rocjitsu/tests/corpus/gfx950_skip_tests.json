@@ -3,22 +3,46 @@
     "iree.gfx950.e2e.pack_i8.static_pack_vnni_lhs_large"
   ],
   "cts": [
-    "cts.gfx950.fpsan.fpsan_mfma_gfx950_test",
-    "cts.gfx950.fpsan.fpsan_cvt_gfx950_test",
+    "cts.gfx950.fpsan.fpsan_amdgcn_math_extra_test",
+    "cts.gfx950.fpsan.fpsan_atomic_test",
     "cts.gfx950.fpsan.fpsan_cvt_scalef32_fp4_gfx950_test",
     "cts.gfx950.fpsan.fpsan_cvt_scalef32_fp6_gfx950_test",
     "cts.gfx950.fpsan.fpsan_cvt_scalef32_sr_gfx950_test",
-    "cts.gfx950.fpsan.fpsan_atomic_test",
     "cts.gfx950.fpsan.fpsan_hip_device_test",
-    "cts.gfx950.fpsan.fpsan_wave_test",
-    "cts.gfx950.fpsan.fpsan_amdgcn_math_test",
-    "cts.gfx950.fpsan.fpsan_amdgcn_ldexp_test",
-    "cts.gfx950.fpsan.fpsan_amdgcn_math_extra_test",
     "cts.gfx950.fpsan.fpsan_mfma_gfx950_scaled_test",
-    "cts.gfx950.fpsan.fpsan_mfma_gfx950_smfmac_test"
+    "cts.gfx950.fpsan.fpsan_mfma_gfx950_smfmac_test",
+    "cts.gfx950.fpsan.fpsan_mfma_gfx950_test"
   ],
   "kernels": [
-    "rocblas_sgemm::large_2048x2048",
-    "rocblas_sgemm::square_64x64"
+    "kernels.gfx950.rocblas.rocblas_sgemm.large_2048x2048"
+  ],
+  "llama": [
+    "llama.gfx950.backend_ops.FLASH_ATTN_EXT.2b8c93acdf59",
+    "llama.gfx950.backend_ops.FLASH_ATTN_EXT.da5c646e799e",
+    "llama.gfx950.backend_ops.FLASH_ATTN_EXT.e024795e26c2",
+    "llama.gfx950.backend_ops.LIGHTNING_INDEXER.28d7def07117",
+    "llama.gfx950.backend_ops.MUL_MAT.462ccb738b08",
+    "llama.gfx950.backend_ops.MUL_MAT.5a436936375c",
+    "llama.gfx950.backend_ops.MUL_MAT.9f4865116d4b",
+    "llama.gfx950.backend_ops.MUL_MAT.b3d523cee895",
+    "llama.gfx950.backend_ops.MUL_MAT_ID.4c6f0c369254",
+    "llama.gfx950.backend_ops.MUL_MAT_ID.501e10751a9a",
+    "llama.gfx950.backend_ops.MUL_MAT_ID.dbedbadd142a",
+    "llama.gfx950.backend_ops.MUL_MAT_ID_FUSION.b3d0befaa714",
+    "llama.gfx950.backend_ops.MUL_MAT_ID_FUSION.dfb1ed5ca4e9",
+    "llama.gfx950.backend_ops.MUL_MAT_ID_FUSION.f6f7601c1c97",
+    "llama.gfx950.backend_ops.OPT_STEP_ADAMW.53563ed7ba67",
+    "llama.gfx950.backend_ops.OUT_PROD.7eb05239af23",
+    "llama.gfx950.backend_ops.ROPE.637c25a9ca18",
+    "llama.gfx950.backend_ops.ROPE_SET_ROWS.466fbec03e98",
+    "llama.gfx950.backend_ops.ROPE_SET_ROWS.9fab018c060b",
+    "llama.gfx950.backend_ops.SOLVE_TRI.4b2665c93c4f",
+    "llama.gfx950.backend_ops.SOLVE_TRI.efce0cf0e0d3",
+    "llama.gfx950.backend_ops.SSM_SCAN.83b46ddc1f72",
+    "llama.gfx950.backend_ops.SSM_SCAN.8ffce5cff50e",
+    "llama.gfx950.backend_ops.SSM_SCAN.b63c27fe2feb",
+    "llama.gfx950.backend_ops.UPSCALE.f4497e2354a8",
+    "llama.gfx950.backend_ops.XIELU.925694f8c916",
+    "llama.gfx950.backend_ops.XIELU.dc6e5386ba70"
   ]
 }
