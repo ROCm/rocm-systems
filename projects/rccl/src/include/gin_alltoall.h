@@ -13,14 +13,12 @@
 
 struct ncclComm;
 
-// Upper bound on CTAs, and therefore on both the LSA barrier count and the
-// number of GIN signals reserved for this path.
-constexpr int kGinA2AMaxCtas = 16;
+// Upper bound on CTAs, and so on the LSA barriers and GIN signals reserved here.
+constexpr int kGinA2AMaxCtas = 64;
 constexpr int kGinA2AThreadsPerCta = 256;
 
-// Lazily created on the first eligible alltoall and torn down with the comm. The
-// devComm is private so it does not disturb the symmetric kernels. Declared
-// unconditionally, or rcclras and librccl disagree on the layout of ncclComm.
+// Lazily created on the first eligible alltoall and torn down with the comm.
+// Declared unconditionally, or rcclras and librccl disagree on ncclComm layout.
 struct ncclGinA2AState {
   bool initialized;
   struct ncclDevComm devComm;

@@ -25,6 +25,9 @@
 NCCL_PARAM(GinA2AEnable, "GIN_A2A_ENABLE", 1)
 NCCL_PARAM(GinA2AMinBytes, "GIN_A2A_MIN_BYTES", 0)
 
+// Per-peer bytes at or above which SDMA beats direct LSA stores.
+NCCL_PARAM(GinA2ASdmaMinBytes, "GIN_A2A_SDMA_MIN_BYTES", 8 * 1024 * 1024)
+
 namespace {
 
 // True only when the SDMA device templates were compiled into this TU.
@@ -34,33 +37,96 @@ constexpr bool kSdmaDeviceBackendCompiled = (NCCL_GIN_ANVIL_SDMA_ENABLE != 0);
 // bit 64. The scaleup path uses one channel, so this bound keeps us in range.
 constexpr int kGinA2AMaxRanks = 16;
 
-// This kernel only queues one put per peer and the SDMA engines do the copying.
+// This path only queues one put per peer and the SDMA engines do the copying.
 // That is little enough work for a single CTA, and more would not copy faster.
-constexpr int kGinA2ACtas = 1;
+constexpr int kGinA2ASdmaCtas = 1;
 
-__global__ void ncclGinA2ASdmaKernel(ncclWindow_t sendWin, size_t sendOff, ncclWindow_t recvWin, size_t recvOff,
-                                     size_t bytesPerPeer, struct ncclDevComm devComm) {
+// Best measured LSA geometry per size range.
+struct GinA2ALsaBand {
+  size_t maxBytesPerPeer;
+  int chunksPerPeer;
+  int threadsPerCta;
+};
+
+// Totals are for 8 ranks, the lookup itself keys on the per-peer bound.
+constexpr GinA2ALsaBand kGinA2ALsaBands[] = {
+  {16 * 1024, 2, 256},    // up to 16 KB/peer, 64 KB total: 2 chunks, 256 threads
+  {64 * 1024, 4, 256},    // 16 to 64 KB/peer, 128 KB to 256 KB total: 4 chunks, 256 threads
+  {512 * 1024, 8, 256},   // 64 to 512 KB/peer, 512 KB to 2 MB total: 8 chunks, 256 threads
+  {SIZE_MAX, 8, 512},     // 512 KB/peer and up, 4 MB total and up: 8 chunks, 512 threads
+};
+
+inline size_t ginA2ADivUp(size_t a, size_t b) { return (a + b - 1) / b; }
+inline size_t ginA2AAlignUp(size_t a, size_t b) { return ginA2ADivUp(a, b) * b; }
+
+// Whole CTA cooperates on one chunk, 16B vectors with a scalar tail.
+__device__ __forceinline__ void ginA2ACopyCta(char* dst, const char* src, size_t bytes) {
+  size_t nVec = bytes / sizeof(uint4);
+  for (size_t i = threadIdx.x; i < nVec; i += blockDim.x) {
+    ((uint4*)dst)[i] = ((const uint4*)src)[i];
+  }
+  for (size_t i = nVec * sizeof(uint4) + threadIdx.x; i < bytes; i += blockDim.x) {
+    dst[i] = src[i];
+  }
+}
+
+// Keeps the maxChunks division below from rounding down to an empty grid.
+static_assert(kGinA2AMaxCtas >= kGinA2AMaxRanks, "LSA grid needs a chunk per peer");
+
+void ginA2ALsaLaunchConfig(int nRanks, size_t bytesPerPeer, int* chunksPerPeer, int* threads, size_t* chunkBytes) {
+  const GinA2ALsaBand* band = kGinA2ALsaBands;
+  while (bytesPerPeer >= band->maxBytesPerPeer) band++;
+
+  // The grid is nRanks * chunks and every CTA takes a barrier and a signal slot.
+  int maxChunks = kGinA2AMaxCtas / nRanks;
+  int chunks = band->chunksPerPeer > maxChunks ? maxChunks : band->chunksPerPeer;
+
+  *chunksPerPeer = chunks;
+  *threads = band->threadsPerCta;
+  *chunkBytes = ginA2AAlignUp(ginA2ADivUp(bytesPerPeer, chunks), sizeof(uint4));
+}
+
+// Acquire keeps a rank from writing before every peer is ready, release publishes those writes before any peer reads.
+template <bool UseSdma>
+__global__ void ncclGinA2AKernel(ncclWindow_t sendWin, size_t sendOff, ncclWindow_t recvWin, size_t recvOff,
+                                 size_t bytesPerPeer, size_t chunkBytes, struct ncclDevComm devComm) {
   constexpr int ginContext = 0;
-  unsigned int signalIndex = blockIdx.x;
+  // LSA runs a 2D (peer, chunk) grid, so flatten it for the per-CTA slots.
+  unsigned int ctaIndex = blockIdx.y * gridDim.x + blockIdx.x;
   ncclGin gin{devComm, ginContext};
-  uint64_t signalValue = gin.readSignal(signalIndex);
+  uint64_t signalValue = UseSdma ? gin.readSignal(ctaIndex) : 0;
 
-  ncclLsaBarrierSession<ncclCoopCta> bar{ncclCoopCta(), devComm, ncclTeamTagLsa(), blockIdx.x};
+  ncclLsaBarrierSession<ncclCoopCta> bar{ncclCoopCta(), devComm, ncclTeamTagLsa(), ctaIndex};
   bar.sync(ncclCoopCta(), cuda::memory_order_acquire);
 
-  int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  int nthreads = blockDim.x * gridDim.x;
+  if (UseSdma) {
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    int nthreads = blockDim.x * gridDim.x;
 
-  for (int r = tid; r < devComm.nRanks; r += nthreads) {
-    gin.put(ncclTeamWorld(devComm), r, recvWin, recvOff + devComm.rank * bytesPerPeer, sendWin,
-            sendOff + r * bytesPerPeer, bytesPerPeer, ncclGin_SignalInc{signalIndex});
-  }
+    for (int r = tid; r < devComm.nRanks; r += nthreads) {
+      gin.put(ncclTeamWorld(devComm), r, recvWin, recvOff + devComm.rank * bytesPerPeer, sendWin,
+              sendOff + r * bytesPerPeer, bytesPerPeer, ncclGin_SignalInc{ctaIndex});
+    }
 
-  int receivingCta = (devComm.rank % nthreads) / blockDim.x;
-  if (blockIdx.x == receivingCta) {
-    gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + devComm.nRanks);
+    int receivingCta = (devComm.rank % nthreads) / blockDim.x;
+    if (blockIdx.x == receivingCta) {
+      gin.waitSignal(ncclCoopCta(), ctaIndex, signalValue + devComm.nRanks);
+    }
+    gin.flush(ncclCoopCta());
+  } else {
+    // blockIdx.x picks the peer, blockIdx.y the chunk of that peer's slice.
+    int r = blockIdx.x;
+    size_t off = chunkBytes * blockIdx.y;
+
+    if (off < bytesPerPeer) {
+      size_t bytes = bytesPerPeer - off;
+      if (bytes > chunkBytes) bytes = chunkBytes;
+
+      char* dst = (char*)ncclGetLsaPointer(recvWin, recvOff + devComm.rank * bytesPerPeer + off, r);
+      const char* src = (const char*)ncclGetLocalPointer(sendWin, sendOff + r * bytesPerPeer + off);
+      ginA2ACopyCta(dst, src, bytes);
+    }
   }
-  gin.flush(ncclCoopCta());
 
   bar.sync(ncclCoopCta(), cuda::memory_order_release);
 }
@@ -128,8 +194,23 @@ ncclResult_t ncclAllToAllGinSdma(const void* sendbuff, void* recvbuff, size_t co
   size_t recvOff = (uint8_t*)recvbuff - (uint8_t*)recvWin->userPtr;
   size_t bytesPerPeer = count * ncclTypeSize(datatype);
 
-  ncclGinA2ASdmaKernel<<<kGinA2ACtas, kGinA2AThreadsPerCta, 0, stream>>>(
-    sendWin->vidmem, sendOff, recvWin->vidmem, recvOff, bytesPerPeer, comm->ginA2AState.devComm);
+  bool useSdma = bytesPerPeer >= (size_t)ncclParamGinA2ASdmaMinBytes();
+
+  if (useSdma) {
+    INFO(NCCL_COLL, "AllToAll GIN: transport=sdma bytesPerPeer=%zu", bytesPerPeer);
+    ncclGinA2AKernel<true><<<kGinA2ASdmaCtas, kGinA2AThreadsPerCta, 0, stream>>>(
+      sendWin->vidmem, sendOff, recvWin->vidmem, recvOff, bytesPerPeer, 0, comm->ginA2AState.devComm);
+  } else {
+    // Under LSA the CTAs do the copying, so the grid scales with the message.
+    int lsaChunks, lsaThreads;
+    size_t lsaChunkBytes;
+    ginA2ALsaLaunchConfig(comm->nRanks, bytesPerPeer, &lsaChunks, &lsaThreads, &lsaChunkBytes);
+
+    INFO(NCCL_COLL, "AllToAll GIN: transport=lsa bytesPerPeer=%zu chunks=%d ctas=%d threads=%d", bytesPerPeer,
+         lsaChunks, comm->nRanks * lsaChunks, lsaThreads);
+    ncclGinA2AKernel<false><<<dim3(comm->nRanks, lsaChunks), lsaThreads, 0, stream>>>(
+      sendWin->vidmem, sendOff, recvWin->vidmem, recvOff, bytesPerPeer, lsaChunkBytes, comm->ginA2AState.devComm);
+  }
   CUDACHECK(cudaGetLastError());
 
   return ncclSuccess;
