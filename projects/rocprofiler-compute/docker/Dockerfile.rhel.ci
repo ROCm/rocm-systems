@@ -2,6 +2,9 @@ ARG DISTRO=rockylinux
 ARG VERSION=8
 FROM ${DISTRO}:${VERSION}
 
+# Re-declare so VERSION is accessible in RUN commands (ARGs before FROM go out of scope after FROM)
+ARG VERSION
+
 ENV HOME=/root
 ENV SHELL=/bin/bash
 ENV BASH_ENV=/etc/bash.bashrc
