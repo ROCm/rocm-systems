@@ -183,9 +183,11 @@ typedef enum rocprofiler_callback_tracing_kind_t  // NOLINT(performance-enum-siz
     ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,  ///< @see ::rocprofiler_hip_stream_operation_t
     ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API,  ///< @see
                                                          ///< ::rocprofiler_marker_core_range_api_id_t
-    ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH,     ///< @see ::rocprofiler_hip_graph_operation_t
-    ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API,  ///< rocSHMEM API tracing
-    ROCPROFILER_CALLBACK_TRACING_HIPFILE_API,   ///< hipFILE API Tracing
+    ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH,      ///< @see ::rocprofiler_hip_graph_operation_t
+    ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API,   ///< rocSHMEM API tracing
+    ROCPROFILER_CALLBACK_TRACING_HIPFILE_API,    ///< hipFILE API Tracing
+    ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,  ///< EXPERIMENTAL: @see
+                                                 ///< ::rocprofiler_kernel_replay_operation_t
     ROCPROFILER_CALLBACK_TRACING_LAST,
 } rocprofiler_callback_tracing_kind_t;
 
@@ -382,6 +384,23 @@ typedef enum rocprofiler_kernel_dispatch_operation_t  // NOLINT(performance-enum
     /// resulting in rocprofiler-sdk invoking this operation callback for kernel B before invoking
     /// the callback for kernel A.
 } rocprofiler_kernel_dispatch_operation_t;
+
+/**
+ * @brief ROCProfiler Kernel Replay Tracing Operation Types.
+ *
+ * CONFIG is delivered once per replayed dispatch (enter before replay begins,
+ * exit after all passes complete). PASS is delivered once per replay iteration
+ * (enter before kernel submission, exit after kernel completion).
+ */
+typedef enum rocprofiler_kernel_replay_operation_t  // NOLINT(performance-enum-size)
+{
+    ROCPROFILER_KERNEL_REPLAY_NONE   = 0,  ///< Unknown kernel replay operation
+    ROCPROFILER_KERNEL_REPLAY_CONFIG = 1,  ///< Replay configuration (pass count, loop control)
+    ROCPROFILER_KERNEL_REPLAY_PASS,        ///< Per-pass begin/end notification
+    // TODO: ROCPROFILER_KERNEL_REPLAY_SNAPSHOT  -- memory snapshot enter/exit
+    // TODO: ROCPROFILER_KERNEL_REPLAY_RESTORE   -- memory restore enter/exit
+    ROCPROFILER_KERNEL_REPLAY_LAST,
+} rocprofiler_kernel_replay_operation_t;
 
 /**
  * @brief PC Sampling Method.
