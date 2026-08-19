@@ -36,7 +36,6 @@ import ctypes.util
 import errno
 import glob
 import gzip
-import json
 import os
 import subprocess
 import sys
@@ -81,9 +80,9 @@ KFD_CAPABILITY_AIS = 0x40
 # Per-GPU topology directory the kernel's KFD driver publishes.
 KFD_TOPOLOGY_NODES = "/sys/class/kfd/kfd/topology/nodes"
 
-# amd-smi reports a virtual function's market name with a "VF" suffix (e.g.
-# "AMD Instinct MI300X VF"); see docs/troubleshooting/known-issues.rst.
-AMD_SMI = "amd-smi"
+# amdsmi ships its Python bindings under this ROCm path, which is not on the
+# default sys.path.
+AMDSMI_PYTHON_PATH = "/opt/rocm/share/amd_smi"
 
 
 def amdgpu_dkms_version():
@@ -404,51 +403,75 @@ def amdgpu_supports_ais():
     return False
 
 
+def _amdsmi_gpu_bdf(amdsmi, handle, index):
+    """Best-effort BDF for a GPU handle, falling back to a gpu-index label."""
+    try:
+        return amdsmi.amdsmi_get_gpu_device_bdf(handle)
+    except amdsmi.AmdSmiException:
+        return f"gpu {index}"
+
+
+def _amdsmi_gpu_market_name(amdsmi, handle):
+    """Best-effort market name for a GPU handle; "" when unavailable."""
+    try:
+        return (amdsmi.amdsmi_get_gpu_asic_info(handle).get("market_name") or "").strip()
+    except amdsmi.AmdSmiException:
+        return ""
+
+
 def sriov_vf_gpus():
     """
-    Return a list of (bdf, market_name) for AMD GPUs that are SR-IOV virtual
-    functions (VFs), as reported by amd-smi.
+    Return a list of (bdf, market_name) for AMD GPUs running as SR-IOV virtual
+    functions (VFs), as reported by the amdsmi library.
 
     hipFile's fastpath is only supported on GPU physical functions; on a VF it
-    falls back to the slower compatibility path. amd-smi names a VF with a "VF"
-    suffix (e.g. "AMD Instinct MI300X VF"), which is the authoritative signal --
-    it works inside SR-IOV guests where the physical function isn't visible in
-    sysfs. See docs/troubleshooting/known-issues.rst.
+    falls back to the slower compatibility path. A VF used inside an SR-IOV guest
+    reports virtualization mode GUEST, which is authoritative even when the
+    physical function isn't visible in sysfs. See
+    docs/troubleshooting/known-issues.rst.
 
-    Returns [] when amd-smi is missing, exits non-zero, or emits output that
-    can't be parsed; VF status is treated as "not detected" rather than an error,
-    matching the tool's other best-effort probes.
+    Returns [] when the amdsmi Python bindings can't be imported or any query
+    fails; VF status is treated as "not detected" rather than an error, matching
+    the tool's other best-effort probes.
     """
-    try:
-        result = subprocess.run(
-            [AMD_SMI, "static", "--asic", "--bus", "--json"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError:
-        return []
+    if AMDSMI_PYTHON_PATH not in sys.path:
+        sys.path.insert(0, AMDSMI_PYTHON_PATH)
 
-    if result.returncode != 0:
+    try:
+        import amdsmi  # pylint: disable=import-outside-toplevel
+    except ImportError:
         return []
 
     try:
-        data = json.loads(result.stdout)
-    except (json.JSONDecodeError, ValueError):
+        amdsmi.amdsmi_init()
+    except amdsmi.AmdSmiException:
         return []
 
     vfs = []
-    for entry in data.get("gpu_data", []):
-        if not isinstance(entry, dict):
-            continue
-        asic = entry.get("asic") or {}
-        market = (asic.get("market_name") or "").strip()
-        normalized = market.upper()
-        if normalized != "VF" and not normalized.endswith(" VF"):
-            continue
-        bus = entry.get("bus") or {}
-        bdf = bus.get("bdf") or f"gpu {entry.get('gpu', '?')}"
-        vfs.append((bdf, market))
+    try:
+        try:
+            handles = amdsmi.amdsmi_get_processor_handles()
+        except amdsmi.AmdSmiException:
+            return []
+
+        for index, handle in enumerate(handles):
+            try:
+                mode = amdsmi.amdsmi_get_gpu_virtualization_mode(handle)["mode"]
+            except (amdsmi.AmdSmiException, KeyError, TypeError):
+                continue
+            if mode != amdsmi.AmdSmiVirtualizationMode.GUEST:
+                continue
+            vfs.append(
+                (
+                    _amdsmi_gpu_bdf(amdsmi, handle, index),
+                    _amdsmi_gpu_market_name(amdsmi, handle),
+                )
+            )
+    finally:
+        try:
+            amdsmi.amdsmi_shut_down()
+        except amdsmi.AmdSmiException:
+            pass
 
     return vfs
 
