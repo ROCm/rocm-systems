@@ -689,10 +689,17 @@ local:
     *;
 } hip_7.14;
 
-hip_10.1 {
+hip_7.16 {
 global:
     hipDeviceGetLuid;
     hipInitDevice;
 local:
     *;
 } hip_7.15;
+
+hip_7.17 {
+global:
+    hipModuleEnumerateFunctions;
+local:
+    *;
+} hip_7.16;

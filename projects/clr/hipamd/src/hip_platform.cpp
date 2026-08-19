@@ -1149,6 +1149,21 @@ hipError_t PlatformState::GetFuncCount(unsigned int* count, hipModule_t hmod) {
 }
 
 // ================================================================================================
+hipError_t PlatformState::EnumerateFunctions(hipFunction_t* functions, unsigned int numFunctions,
+                                             hipModule_t hmod) {
+  std::unordered_map<hipModule_t, hip::DynCO*>::iterator it;
+  {
+    std::scoped_lock lock(lock_);
+    it = dynCO_map_.find(hmod);
+    if (it == dynCO_map_.end()) {
+      LogPrintfError("Cannot find the module: %p", hmod);
+      return hipErrorNotFound;
+    }
+  }
+  return it->second->enumerateFunctions(functions, numFunctions);
+}
+
+// ================================================================================================
 bool PlatformState::IsValidDynFunc(const void* hfunc) {
   std::scoped_lock lock(lock_);
   return std::any_of(dynCO_map_.begin(), dynCO_map_.end(),
