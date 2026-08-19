@@ -123,7 +123,7 @@ replay. If a root contains exactly one `pid-<pid>/` sub-archive, the reader
 auto-resolves it for compatibility with simple single-process captures; a root
 with multiple process captures must be disambiguated.
 
-### Archive Format (v5)
+### Archive Format (v6)
 ```
 capture.hrr/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
@@ -237,7 +237,7 @@ hipamd/src/hrr/
                                     block layout, via _snapshot() polling
 
   playback/
-    hrr_reader.h/.cpp             — archive loader, v5 format; record framing
+    hrr_reader.h/.cpp             — archive loader, v6 format; record framing
                                     (read_raw_record / open_record_stream) shared
                                     with the region sidecars
     hrr_region_map.h/.cpp         — region timeline: merge, cursor, live block set,
@@ -300,20 +300,20 @@ The generator classifies each API:
 
 Generated capture shims for manual APIs are pass-throughs (no `write_event()`).
 
-## Archive Format (v5)
+## Archive Format (v6)
 
 Single-authority definition in `hrr_api_args.h` (auto-generated):
 
 ```
 HRR_MAGIC   = 0x52524845  ("HRRE")
-HRR_VERSION = 5
+HRR_VERSION = 6
 ```
 
 ```
 <output_dir>/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
                      (version here is the manifest schema = 1, distinct from the
-                      events.bin HRR_VERSION = 5)
+                      events.bin HRR_VERSION = 6)
   pid-<pid>/
     manifest.json      { pid, parent_pid, complete, event_count, blob_count }
     writer_state.json  checkpoint cursor (next_seq, event/blob counts, events file

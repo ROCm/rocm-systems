@@ -1797,7 +1797,7 @@ _HEADER_PREAMBLE = """\
  * One packed struct per HIP API covering both HipDispatchTable (runtime) and
  * HipCompilerDispatchTable (compiler stubs).
  *
- * Archive format (v5):
+ * Archive format (v6):
  *   events.bin:
  *     [0..7]   hrr_file_header  { magic, version, reserved }
  *     [8..]    hrr_event_header (32 bytes) + payload bytes, repeated per event
@@ -1851,8 +1851,12 @@ _HEADER_PREAMBLE = """\
  * table and needs an ID translation to be read back. From v5 on a new API
  * takes the next free ID in its table and no existing runtime ID moves, so
  * adding APIs no longer needs a version bump. A retired dispatch-table slot
- * (nulled void*) still occupies an ID. */
-#define HRR_VERSION ((uint16_t)5u)
+ * (nulled void*) still occupies an ID.
+ * v6: pointer arguments whose pointee used to be dropped now carry it inline
+ * (DEREF_FIELDS). Event payloads grew for ~50 APIs, so an archive written
+ * before v6 cannot be read by a v6 reader: re-capture rather than replay an
+ * old recording. */
+#define HRR_VERSION ((uint16_t)6u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
