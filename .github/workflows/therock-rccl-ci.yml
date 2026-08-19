@@ -79,6 +79,8 @@ jobs:
       matrix:
         amdgpu_family: [gfx94X-dcgpu, gfx950-dcgpu]
     uses: ./.github/workflows/therock-rccl-ci-linux.yml
+    secrets:
+      RCCL_CI_TEAMS_WEBHOOK: ${{ secrets.RCCL_CI_TEAMS_WEBHOOK }}
     with:
       amdgpu_families: ${{ matrix.amdgpu_family }}
       artifact_group: ${{ matrix.amdgpu_family }}
