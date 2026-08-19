@@ -961,21 +961,22 @@ fn resume(pid: u32) {
 ///   stopping a unit.
 /// * `SIGHUP` — the terminal window closed, which is the commonest way a
 ///   run is abandoned.
-/// * `SIGUSR1` and `SIGUSR2` — a batch scheduler warning a job that it is
-///   about to be preempted or has reached its time limit. Slurm sends
-///   `SIGUSR1` for this by default. They are "user-defined" in the sense
-///   that nothing else claims them, not in the sense that they are
-///   harmless: their default disposition kills the process just as
-///   surely as `SIGTERM`'s does.
 ///
 /// What is deliberately *not* here is as much of the rule as what is.
-/// `SIGTSTP`, `SIGTTIN` and `SIGTTOU` are job control rather than
-/// stopping — suspending a run must keep working, and `SIGTTOU` in
-/// particular is blocked around the terminal handoff rather than caught
-/// (see [`TerminalHandoff`]). `SIGPIPE` is already ignored process-wide
-/// by the Rust runtime and would be a lie about intent anyway. `SIGKILL`
-/// and `SIGSTOP` cannot be caught at all, which is precisely why
-/// `mirage cleanup` exists.
+/// `SIGUSR1` and `SIGUSR2` satisfy the first half of it — unhandled,
+/// they end mirage where it stands — and fail the second: nobody sends
+/// them to say "stop", they say whatever the workload decided they say.
+/// They were in this list once, and being in it meant a scheduler's
+/// checkpoint warning aborted the bring-up it was warning about and a
+/// job checkpointing on a timer terminated itself on its second one. So
+/// they are caught, forwarded, and counted for nothing; see
+/// [`RELAY_SIGNALS`]. `SIGTSTP`, `SIGTTIN` and `SIGTTOU` are job control
+/// rather than stopping — suspending a run must keep working, and
+/// `SIGTTOU` in particular is blocked around the terminal handoff rather
+/// than caught (see [`TerminalHandoff`]). `SIGPIPE` is already ignored
+/// process-wide by the Rust runtime and would be a lie about intent
+/// anyway. `SIGKILL` and `SIGSTOP` cannot be caught at all, which is
+/// precisely why `mirage cleanup` exists.
 ///
 /// # Why this is installed before anything else happens
 ///

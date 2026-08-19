@@ -2163,6 +2163,14 @@ fn an_application_defined_signal_is_forwarded_and_does_not_end_the_run() {
         stdout.contains("CHECKPOINTED"),
         "SIGUSR1 did not reach the workload:\nstdout: {stdout}\nstderr: {stderr}"
     );
+    // Both of them, separately. Asserting only the first would pass on a
+    // build that armed `SIGUSR1` and dropped `SIGUSR2` — and `SIGUSR2` is
+    // the one this test exists for, because it is the second signal that
+    // used to reach "not waiting any longer" and end the run.
+    assert!(
+        stdout.contains("ROTATED"),
+        "SIGUSR2 did not reach the workload:\nstdout: {stdout}\nstderr: {stderr}"
+    );
     // The run ran to the end of its own accord. On the old ladder the
     // second signal printed "not waiting any longer" and terminated the
     // workload, so this line never appeared.
