@@ -588,9 +588,13 @@ TestRMAPut() {
   ExecTest  "putnbi"           2       32           128       512
   unset LOCALBUFTYPE
 
-  export LOCALBUFTYPE=managed
-  ExecTest  "putnbi"           2       32           128       512
-  unset LOCALBUFTYPE
+  if [[ "$GPU_ARCH" != "gfx1100" ]]; then
+    export LOCALBUFTYPE=managed
+    ExecTest  "putnbi"           2       32           128       512
+    unset LOCALBUFTYPE
+  else
+    echo "Skip:   putnbi_localbuftype=managed (gfx1100: hipMallocManaged not supported)"
+  fi
 }
 
 TestRMAGet() {
@@ -666,9 +670,13 @@ TestRMAGet() {
     ExecTest  "getnbi"           2       32           128       512
     unset LOCALBUFTYPE
 
-    export LOCALBUFTYPE=managed
-    ExecTest  "getnbi"           2       32           128       512
-    unset LOCALBUFTYPE
+    if [[ "$GPU_ARCH" != "gfx1100" ]]; then
+      export LOCALBUFTYPE=managed
+      ExecTest  "getnbi"           2       32           128       512
+      unset LOCALBUFTYPE
+    else
+      echo "Skip:   getnbi_localbuftype=managed (gfx1100: hipMallocManaged not supported)"
+    fi
   fi
 }
 
