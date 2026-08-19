@@ -298,8 +298,8 @@ TEST(SysfsTopologyGeometryTest, ArrayCountIsScaledByNumXcc) {
 // same capture so local, KMD, and multi-GPU launch paths cannot drift apart.
 TEST(SysfsTopologyGeometryTest, Mi350xMatchesCapturedPhysicalAndActiveCuCounts) {
   const std::string config_dir = CONFIG_DIR;
-  constexpr const char *kMi350xConfigs[] = {"gfx950_cdna4.json", "gfx950_cdna4_kmd.json",
-                                            "gfx950_cdna4_kmd_2gpu.json"};
+  constexpr const char *kMi350xConfigs[] = {"gfx950_mi355x.json", "gfx950_mi355x_kmd.json",
+                                            "gfx950_mi355x_kmd_2gpu.json"};
 
   for (const char *cfg : kMi350xConfigs) {
     SCOPED_TRACE(cfg);
@@ -470,7 +470,7 @@ TEST(SysfsTopologyDebugCapabilityTest, ConfigTopologyMatchesRealHardware) {
   // Configs whose device matches a captured real-hardware topology dump.
   constexpr const char *kConfigs[] = {
       "gfx942_cdna3.json",  // MI300X
-      "gfx950_cdna4.json",  // MI350X
+      "gfx950_mi355x.json", // MI350X
       "gfx1201_r9700.json", // R9700
   };
 

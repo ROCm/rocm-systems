@@ -36,7 +36,7 @@ RJ_DIAGNOSTIC_POP
 
 using namespace rocjitsu;
 
-static const std::string CONFIG_PATH = test::config_path("gfx950_cdna4.json");
+static const std::string CONFIG_PATH = test::config_path("gfx950_mi355x.json");
 using test::kernel_path;
 
 static constexpr uint32_t TOTAL_XCDS = 8;

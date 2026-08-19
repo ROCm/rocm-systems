@@ -42,7 +42,7 @@ namespace {
 using namespace rocjitsu;
 using test::kernel_path;
 
-const std::string CONFIG_PATH = test::config_path("gfx950_cdna4.json");
+const std::string CONFIG_PATH = test::config_path("gfx950_mi355x.json");
 
 constexpr uint32_t TOTAL_XCDS = 8;
 constexpr uint32_t CUS_PER_XCD = 36; // 4 SEs × 9 physical CUs
