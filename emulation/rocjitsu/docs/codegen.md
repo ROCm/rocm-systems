@@ -48,8 +48,9 @@ rocm-systems/shared/machine-readable-isa/isa/
 | Cross-ISA legalization tables | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `legalization_codegen.py` |
 | Encoding decode/encode functions | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `encoding_translator_codegen.py` |
 
-CDNA5's MR ISA name, logical architecture key, runtime target, ELF identity,
-configuration, and public DBT target identity remain `gfx1250`. Its filesystem
+CDNA5's logical generator key and configuration architecture are `cdna5`. Its
+MR ISA name and filename, concrete GPU/runtime target, ELF identity, and public
+DBT target identity intentionally remain `gfx1250`. Its filesystem
 directories, generated and hand-written C++ namespace (`rocjitsu::cdna5`), and
 internal CMake provider targets use `cdna5`.
 
@@ -88,8 +89,9 @@ generated.
 ## Regenerating everything
 
 The repository helper derives the repository, shared MR ISA, and generated
-output directories from its own location. Its argument is the CDNA5 MR ISA XML,
-whose concrete GPU filename and logical architecture key remain `gfx1250`.
+output directories from its own location. Its argument is the CDNA5 MR ISA XML
+with the concrete filename `amdgpu_isa_gfx1250.xml`; the logical generator key
+used by the command is `cdna5`.
 Activate a Python virtual environment containing the generator dependencies and
 `pre-commit`, then run this command from the `rocm-systems` repository root:
 
@@ -122,7 +124,7 @@ python -m amdisa \
     rdna3:$MRISA/amdgpu_isa_rdna3.xml \
     rdna3_5:$MRISA/amdgpu_isa_rdna3_5.xml \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
-    gfx1250:$CDNA5_MRISA/amdgpu_isa_gfx1250.xml \
+    cdna5:$CDNA5_MRISA/amdgpu_isa_gfx1250.xml \
   --isa-output lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated \
   --dbt-output lib/rocjitsu/src/rocjitsu/code/dbt/generated
 
@@ -144,7 +146,7 @@ python -m amdisa \
     rdna3:$MRISA/amdgpu_isa_rdna3.xml \
     rdna3_5:$MRISA/amdgpu_isa_rdna3_5.xml \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
-    gfx1250:$CDNA5_MRISA/amdgpu_isa_gfx1250.xml \
+    cdna5:$CDNA5_MRISA/amdgpu_isa_gfx1250.xml \
   --gen-isas \
   --isa-output lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated
 
@@ -166,7 +168,7 @@ python -m amdisa \
     rdna3:$MRISA/amdgpu_isa_rdna3.xml \
     rdna3_5:$MRISA/amdgpu_isa_rdna3_5.xml \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
-    gfx1250:$CDNA5_MRISA/amdgpu_isa_gfx1250.xml \
+    cdna5:$CDNA5_MRISA/amdgpu_isa_gfx1250.xml \
   --gen-dbt \
   --dbt-output lib/rocjitsu/src/rocjitsu/code/dbt/generated
 

@@ -8,10 +8,13 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <charconv>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <system_error>
 
 namespace {
@@ -94,6 +97,62 @@ const ProcessResult &rocminfo_output() {
   return result;
 }
 
+// Removes surrounding horizontal whitespace from a rocminfo field or line.
+std::string_view trim(std::string_view value) {
+  const size_t first = value.find_first_not_of(" \t\r");
+  if (first == std::string_view::npos)
+    return {};
+  const size_t last = value.find_last_not_of(" \t\r");
+  return value.substr(first, last - first + 1);
+}
+
+// Returns the value of an exactly labeled field within one rocminfo agent block.
+std::optional<std::string_view> agent_field(std::string_view agent, std::string_view label) {
+  size_t line_start = 0;
+  while (line_start < agent.size()) {
+    const size_t line_end = agent.find('\n', line_start);
+    std::string_view line = trim(agent.substr(line_start, line_end - line_start));
+    if (line.size() > label.size() && line.compare(0, label.size(), label) == 0 &&
+        line[label.size()] == ':') {
+      return trim(line.substr(label.size() + 1));
+    }
+    if (line_end == std::string_view::npos)
+      break;
+    line_start = line_end + 1;
+  }
+  return std::nullopt;
+}
+
+// Finds the rocminfo agent block identified as a gfx950 GPU.
+std::optional<std::string_view> gfx950_gpu_agent(std::string_view output) {
+  constexpr std::string_view kAgentHeading = "\nAgent ";
+  size_t agent_start = output.find(kAgentHeading);
+  while (agent_start != std::string_view::npos) {
+    const size_t next_agent = output.find(kAgentHeading, agent_start + kAgentHeading.size());
+    std::string_view agent = output.substr(agent_start, next_agent - agent_start);
+    const auto name = agent_field(agent, "Name");
+    const auto device_type = agent_field(agent, "Device Type");
+    if (name && device_type && *name == "gfx950" && *device_type == "GPU") {
+      return agent;
+    }
+    agent_start = next_agent;
+  }
+  return std::nullopt;
+}
+
+// Parses an entire rocminfo agent field as an unsigned decimal integer.
+std::optional<uint64_t> decimal_agent_field(std::string_view agent, std::string_view label) {
+  const auto text = agent_field(agent, label);
+  if (!text)
+    return std::nullopt;
+
+  uint64_t value = 0;
+  const auto [end, error] = std::from_chars(text->data(), text->data() + text->size(), value);
+  if (error != std::errc{} || end != text->data() + text->size())
+    return std::nullopt;
+  return value;
+}
+
 TEST(RocminfoTest, ExitsSuccessfully) {
   EXPECT_EQ(rocminfo_output().exit_code, 0)
       << "rocminfo failed with exit code " << rocminfo_output().exit_code << "\nOutput:\n"
@@ -132,6 +191,29 @@ TEST(RocminfoTest, ReportsWavefrontSize) {
   EXPECT_NE(rocminfo_output().output.find("Wavefront Size:"), std::string::npos)
       << "rocminfo did not report Wavefront Size.\nOutput:\n"
       << rocminfo_output().output;
+}
+
+TEST(RocminfoTest, ReportsMi350xActiveComputeUnits) {
+  ASSERT_EQ(rocminfo_output().exit_code, 0) << rocminfo_output().output;
+  const auto agent = gfx950_gpu_agent(rocminfo_output().output);
+  ASSERT_TRUE(agent) << "rocminfo did not report a gfx950 GPU agent.\nOutput:\n"
+                     << rocminfo_output().output;
+  const auto compute_units = decimal_agent_field(*agent, "Compute Unit");
+  ASSERT_TRUE(compute_units)
+      << "rocminfo did not report a numeric GPU Compute Unit field.\nOutput:\n"
+      << rocminfo_output().output;
+  EXPECT_EQ(*compute_units, 256u);
+}
+
+TEST(RocminfoTest, ReportsMi350xMaxClockFrequency) {
+  ASSERT_EQ(rocminfo_output().exit_code, 0) << rocminfo_output().output;
+  const auto agent = gfx950_gpu_agent(rocminfo_output().output);
+  ASSERT_TRUE(agent) << "rocminfo did not report a gfx950 GPU agent.\nOutput:\n"
+                     << rocminfo_output().output;
+  const auto max_clock = decimal_agent_field(*agent, "Max Clock Freq. (MHz)");
+  ASSERT_TRUE(max_clock) << "rocminfo did not report a numeric GPU maximum clock field.\nOutput:\n"
+                         << rocminfo_output().output;
+  EXPECT_EQ(*max_clock, 2200u);
 }
 
 } // namespace

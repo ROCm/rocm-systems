@@ -373,6 +373,88 @@ TEST_F(Gfx950RaceTest, lds_cross_wave_race) {
   EXPECT_NE(t.mark1.find("ds_read_b32"), npos) << "mark1: " << t.mark1;
 }
 
+// --- LDS same-wave instruction ordering ---
+
+__attribute__((amdgpu_flat_work_group_size(64, 64)))
+__global__ void lds_same_wave_write_read_order_kernel(uint32_t *out) {
+  uint32_t lane = threadIdx.x;
+  uint32_t read_lane = (lane + 1) & 63;
+  uint32_t value = lane + 1;
+  uint32_t observed;
+  asm volatile(
+      "ds_write_b8 %1, %2\n"
+      "ds_read_u8 %0, %3\n"
+      "s_waitcnt lgkmcnt(0)\n"
+      : "=&v"(observed)
+      : "v"(lane), "v"(value), "v"(read_lane)
+      : "memory"
+  );
+  out[lane] = observed;
+}
+
+__attribute__((amdgpu_flat_work_group_size(64, 64)))
+__global__ void lds_same_wave_read_write_order_kernel(uint32_t *out) {
+  uint32_t lane = threadIdx.x;
+  uint32_t read_lane = (lane + 1) & 63;
+  uint32_t old_value = lane + 1;
+  uint32_t new_value = old_value ^ 0xff;
+  uint32_t observed_old;
+  uint32_t observed_new;
+
+  // Establish the old value, then test that the following same-wave DS read
+  // completes logically before the later DS write to the overlapping bytes.
+  asm volatile(
+      "ds_write_b8 %0, %1\n"
+      "s_waitcnt lgkmcnt(0)\n"
+      :
+      : "v"(lane), "v"(old_value)
+      : "memory"
+  );
+  asm volatile(
+      "ds_read_u8 %0, %2\n"
+      "ds_write_b8 %1, %3\n"
+      "s_waitcnt lgkmcnt(0)\n"
+      : "=&v"(observed_old)
+      : "v"(lane), "v"(read_lane), "v"(new_value)
+      : "memory"
+  );
+  asm volatile(
+      "ds_read_u8 %0, %1\n"
+      "s_waitcnt lgkmcnt(0)\n"
+      : "=v"(observed_new)
+      : "v"(lane)
+      : "memory"
+  );
+
+  out[2 * lane] = observed_old;
+  out[2 * lane + 1] = observed_new;
+}
+
+TEST_F(Gfx950RaceTest, lds_same_wave_order) {
+  auto *write_read_out = alloc<uint32_t>(64);
+  lds_same_wave_write_read_order_kernel<<<1, 64, 64>>>(write_read_out);
+  sync();
+
+  std::vector<uint32_t> write_read_host(64);
+  (void)hipMemcpy(write_read_host.data(), write_read_out,
+                  write_read_host.size() * sizeof(uint32_t), hipMemcpyDeviceToHost);
+  for (uint32_t lane = 0; lane < write_read_host.size(); ++lane)
+    EXPECT_EQ(write_read_host[lane], ((lane + 1) & 63) + 1);
+
+  auto *read_write_out = alloc<uint32_t>(128);
+  lds_same_wave_read_write_order_kernel<<<1, 64, 64>>>(read_write_out);
+  sync();
+
+  std::vector<uint32_t> read_write_host(128);
+  (void)hipMemcpy(read_write_host.data(), read_write_out,
+                  read_write_host.size() * sizeof(uint32_t), hipMemcpyDeviceToHost);
+  for (uint32_t lane = 0; lane < 64; ++lane) {
+    EXPECT_EQ(read_write_host[2 * lane], ((lane + 1) & 63) + 1);
+    EXPECT_EQ(read_write_host[2 * lane + 1], (lane + 1) ^ 0xff);
+  }
+  ExpectNoRace();
+}
+
 // --- Global-to-LDS buffer ---
 // These kernels use buffer_load_dword with the LDS flag to load data from
 // global memory directly into LDS (bypassing VGPRs). Designed for 128-thread

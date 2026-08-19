@@ -101,7 +101,7 @@ def _make_codegen(profile) -> CodeGenerator:
 
 # Regex tolerant to whitespace and identifier choice. We anchor on the
 # stable parts of the contract — the wave-mask helper calls
-# ``set_vcc``, ``set_exec``) and the dst identifier — not on the exact
+# ``set_vcc_mask``, ``set_exec``) and the dst identifier — not on the exact
 # variable name of the result-mask local.
 def _re_write_wave_mask(dst_ident: str) -> re.Pattern[str]:
     return re.compile(
@@ -110,7 +110,7 @@ def _re_write_wave_mask(dst_ident: str) -> re.Pattern[str]:
     )
 
 
-_RE_SET_VCC = re.compile(r'\bwf\s*\.\s*set_vcc\s*\(\s*\w+\s*\)\s*;')
+_RE_SET_VCC = re.compile(r'\bwf\s*\.\s*set_vcc_mask\s*\(\s*\w+\s*\)\s*;')
 _RE_SET_EXEC = re.compile(r'\bwf\s*\.\s*set_exec\s*\(\s*\w+\s*\)\s*;')
 _RE_ANY_WRITE_WAVE_MASK = re.compile(r'\bamdgpu::write_wave_mask_scalar\s*\(')
 
@@ -147,7 +147,7 @@ class TestGenVectorCmpxWriteBacks:
       * ``set_exec`` is emitted unconditionally.
       * a wave-size-width-aware write on the SDST is emitted iff
         ``profile.cmpx_writes_vcc and is_vop3 and dst``.
-      * ``set_vcc`` is emitted iff
+      * ``set_vcc_mask`` is emitted iff
         ``profile.cmpx_writes_vcc and not (is_vop3 and dst)``.
 
     The ``op='t'`` shortcut is intentional: it bypasses ``_cmp_condition``
@@ -200,11 +200,11 @@ class TestGenVectorCmpxWriteBacks:
         # VCC write: must appear iff expected.
         vcc_match = _RE_SET_VCC.search(body)
         if expect_vcc_write:
-            assert vcc_match, f'Expected wf.set_vcc(...) call; body was:\n{body}'
+            assert vcc_match, f'Expected wf.set_vcc_mask(...) call; body was:\n{body}'
         else:
             assert (
                 not vcc_match
-            ), f'Did not expect wf.set_vcc(...) call; body was:\n{body}'
+            ), f'Did not expect wf.set_vcc_mask(...) call; body was:\n{body}'
 
         # Mutual exclusion: a single V_CMPX never writes both VCC and SDST.
         assert not (
