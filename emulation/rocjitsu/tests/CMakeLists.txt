@@ -1114,7 +1114,7 @@ add_test(
     NAME "RocjitsuLauncher.PreservesHsaToolsList"
     COMMAND
         ${RJ_CLI} --config
-        ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
+        ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_simulated_gfx942.json --
         ${CMAKE_COMMAND} -P
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_launcher_hsa_tools.cmake
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
@@ -1132,7 +1132,7 @@ add_test(
     NAME "RocjitsuLauncher.AppendsHsaToolToEmptyList"
     COMMAND
         ${RJ_CLI} --config
-        ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
+        ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_simulated_gfx942.json --
         ${CMAKE_COMMAND} -P
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_launcher_hsa_tools.cmake
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}

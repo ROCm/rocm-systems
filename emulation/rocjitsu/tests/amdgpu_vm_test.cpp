@@ -1816,29 +1816,28 @@ TEST_P(IsaTest, DispatchWfReturnsNullWhenSlotsExhausted) {
   EXPECT_EQ(cu->dispatch_wf(0, 0x1040, 104, 256), nullptr);
 }
 
-TEST(Gfx1250AllocationTest, BitsetsCrossWordBoundaryAndReuseLowestSlot) {
-  for (uint32_t slots : {65u, 128u}) {
-    VmFixture f("gfx1250", 1, slots);
-    auto *cu = f.cu();
-    std::vector<amdgpu::Wavefront *> waves;
-    waves.reserve(slots);
-    for (uint32_t i = 0; i < slots; ++i) {
-      auto *wave = cu->dispatch_wf(/*wg_id=*/i, /*pc=*/0x1040, /*num_sgprs=*/8,
-                                   /*num_vgprs=*/8);
-      ASSERT_NE(wave, nullptr) << "slots=" << slots << " index=" << i;
-      EXPECT_EQ(wave->wf_id(), i);
-      waves.push_back(wave);
-    }
-    EXPECT_EQ(cu->num_wfs(), slots);
-    EXPECT_EQ(cu->dispatch_wf(0, 0x1040, 8, 8), nullptr);
-
-    cu->free_wavefront_resources(*waves[64]);
-    auto *reused = cu->dispatch_wf(/*wg_id=*/slots, /*pc=*/0x1040, /*num_sgprs=*/8,
-                                   /*num_vgprs=*/8);
-    ASSERT_NE(reused, nullptr);
-    EXPECT_EQ(reused->wf_id(), 64u);
-    EXPECT_EQ(cu->num_wfs(), slots);
+TEST(Gfx1250AllocationTest, SupportsArchitecturalMaximumAndReusesHighestSlot) {
+  constexpr uint32_t kSlots = 64;
+  VmFixture f("gfx1250", 1, kSlots);
+  auto *cu = f.cu();
+  std::vector<amdgpu::Wavefront *> waves;
+  waves.reserve(kSlots);
+  for (uint32_t i = 0; i < kSlots; ++i) {
+    auto *wave = cu->dispatch_wf(/*wg_id=*/i, /*pc=*/0x1040, /*num_sgprs=*/8,
+                                 /*num_vgprs=*/8);
+    ASSERT_NE(wave, nullptr) << "index=" << i;
+    EXPECT_EQ(wave->wf_id(), i);
+    waves.push_back(wave);
   }
+  EXPECT_EQ(cu->num_wfs(), kSlots);
+  EXPECT_EQ(cu->dispatch_wf(0, 0x1040, 8, 8), nullptr);
+
+  cu->free_wavefront_resources(*waves.back());
+  auto *reused = cu->dispatch_wf(/*wg_id=*/kSlots, /*pc=*/0x1040, /*num_sgprs=*/8,
+                                 /*num_vgprs=*/8);
+  ASSERT_NE(reused, nullptr);
+  EXPECT_EQ(reused->wf_id(), kSlots - 1u);
+  EXPECT_EQ(cu->num_wfs(), kSlots);
 }
 
 TEST_P(IsaTest, VendorSpecificExtKernelDispatch) {

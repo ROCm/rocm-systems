@@ -523,7 +523,7 @@ public:
   /// @brief Return a pointer to a wavefront's SGPR data in the physical file.
   /// @param base Base register index in the SGPR file.
   /// @returns Pointer to the contiguous SGPR data.
-  const uint32_t *sgpr_data(uint32_t base, uint32_t count) const {
+  const uint32_t *sgpr_data(uint32_t base, [[maybe_unused]] uint32_t count) const {
     assert(base <= sgpr_file_.total_regs() && count <= sgpr_file_.total_regs() - base);
     return sgpr_file_.data() + base;
   }
