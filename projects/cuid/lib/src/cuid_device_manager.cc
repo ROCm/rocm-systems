@@ -21,6 +21,14 @@
  */
 
 #include "src/cuid_device_manager.h"
+
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+
+#include <algorithm>
+#include <iostream>
+
 #include "include/amd_cuid.h"
 #include "src/cuid_cpu.h"
 #include "src/cuid_gpu.h"
@@ -29,17 +37,12 @@
 #include "src/cuid_platform.h"
 #include "src/cuid_util.h"
 #include "src/ipc_protocol.h"
-#include <algorithm>
-#include <iostream>
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <unistd.h>
 
 class CuidDaemonIpcClientUtils {
-public:
-  static amdcuid_status_t request_add_device(const char *dev_path,
+ public:
+  static amdcuid_status_t request_add_device(const char* dev_path,
                                              amdcuid_device_type_t device_type,
-                                             amdcuid_id_t *device_handle) {
+                                             amdcuid_id_t* device_handle) {
     int sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (sock_fd < 0) {
       return AMDCUID_STATUS_IPC_ERROR;
@@ -48,11 +51,9 @@ public:
     struct sockaddr_un server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sun_family = AF_UNIX;
-    strncpy(server_addr.sun_path, AMDCUID_SOCKET_PATH,
-            sizeof(server_addr.sun_path));
+    strncpy(server_addr.sun_path, AMDCUID_SOCKET_PATH, sizeof(server_addr.sun_path));
 
-    if (connect(sock_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) <
-        0) {
+    if (connect(sock_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
       close(sock_fd);
       return AMDCUID_STATUS_IPC_ERROR;
     }
@@ -89,11 +90,9 @@ public:
     struct sockaddr_un server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sun_family = AF_UNIX;
-    strncpy(server_addr.sun_path, AMDCUID_SOCKET_PATH,
-            sizeof(server_addr.sun_path));
+    strncpy(server_addr.sun_path, AMDCUID_SOCKET_PATH, sizeof(server_addr.sun_path));
 
-    if (connect(sock_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) <
-        0) {
+    if (connect(sock_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
       close(sock_fd);
       return AMDCUID_STATUS_IPC_ERROR;
     }
@@ -101,9 +100,8 @@ public:
     IpcRequest request;
     request.type = IpcMessageType::REFRESH_DEVICES;
     memset(request.device_path, 0,
-           sizeof(request.device_path)); // Not used for REFRESH_DEVICES
-    request.device_type =
-        AMDCUID_DEVICE_TYPE_NONE; // Not used for REFRESH_DEVICES
+           sizeof(request.device_path));             // Not used for REFRESH_DEVICES
+    request.device_type = AMDCUID_DEVICE_TYPE_NONE;  // Not used for REFRESH_DEVICES
 
     if (send(sock_fd, &request, sizeof(request), 0) != sizeof(request)) {
       close(sock_fd);
@@ -129,11 +127,9 @@ public:
     struct sockaddr_un server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sun_family = AF_UNIX;
-    strncpy(server_addr.sun_path, AMDCUID_SOCKET_PATH,
-            sizeof(server_addr.sun_path));
+    strncpy(server_addr.sun_path, AMDCUID_SOCKET_PATH, sizeof(server_addr.sun_path));
 
-    if (connect(sock_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) <
-        0) {
+    if (connect(sock_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
       close(sock_fd);
       return false;
     }
@@ -144,7 +140,6 @@ public:
 };
 
 amdcuid_status_t CuidDeviceManager::get_devices_on_system() {
-
   amdcuid_status_t status;
   std::vector<DevicePtr> discovered_devices;
 
@@ -153,7 +148,7 @@ amdcuid_status_t CuidDeviceManager::get_devices_on_system() {
   std::vector<DevicePtr> platform_devices;
   status = CuidPlatform::discover(platform_devices);
   if (status == AMDCUID_STATUS_SUCCESS) {
-    for (const auto &platform_device : platform_devices) {
+    for (const auto& platform_device : platform_devices) {
       discovered_devices.push_back(platform_device);
     }
   }
@@ -161,7 +156,7 @@ amdcuid_status_t CuidDeviceManager::get_devices_on_system() {
   std::vector<DevicePtr> cpu_devices;
   status = CuidCpu::discover(cpu_devices);
   if (status == AMDCUID_STATUS_SUCCESS) {
-    for (const auto &cpu : cpu_devices) {
+    for (const auto& cpu : cpu_devices) {
       discovered_devices.push_back(cpu);
     }
   }
@@ -169,7 +164,7 @@ amdcuid_status_t CuidDeviceManager::get_devices_on_system() {
   std::vector<DevicePtr> gpu_devices;
   status = CuidGpu::discover(gpu_devices);
   if (status == AMDCUID_STATUS_SUCCESS) {
-    for (const auto &gpu : gpu_devices) {
+    for (const auto& gpu : gpu_devices) {
       discovered_devices.push_back(gpu);
     }
   }
@@ -177,7 +172,7 @@ amdcuid_status_t CuidDeviceManager::get_devices_on_system() {
   std::vector<DevicePtr> nic_devices;
   status = CuidNic::discover(nic_devices);
   if (status == AMDCUID_STATUS_SUCCESS) {
-    for (const auto &nic : nic_devices) {
+    for (const auto& nic : nic_devices) {
       discovered_devices.push_back(nic);
     }
   }
@@ -185,7 +180,7 @@ amdcuid_status_t CuidDeviceManager::get_devices_on_system() {
   std::vector<DevicePtr> npu_devices;
   status = CuidNpu::discover(npu_devices);
   if (status == AMDCUID_STATUS_SUCCESS) {
-    for (const auto &npu : npu_devices) {
+    for (const auto& npu : npu_devices) {
       discovered_devices.push_back(npu);
     }
   }
@@ -200,78 +195,75 @@ amdcuid_status_t CuidDeviceManager::get_devices_on_system() {
     devices_ = discovered_devices;
   }
 
-  return discovered_devices.empty() ? AMDCUID_STATUS_DEVICE_NOT_FOUND
-                                    : AMDCUID_STATUS_SUCCESS;
+  return discovered_devices.empty() ? AMDCUID_STATUS_DEVICE_NOT_FOUND : AMDCUID_STATUS_SUCCESS;
 }
 
 // helper function to convert CuidFileEntry to appropriate CuidDevice
-void _convert_entry_to_device(CuidFileEntry &entry, DevicePtr &device) {
-
+void _convert_entry_to_device(CuidFileEntry& entry, DevicePtr& device) {
   switch (entry.device_type) {
-  case AMDCUID_DEVICE_TYPE_PLATFORM: {
-    amdcuid_platform_info platform_info = {};
-    platform_info.header.fields.platform.vendor_id = entry.vendor_id;
-    device = std::make_shared<CuidPlatform>(platform_info);
-    break;
-  }
-  case AMDCUID_DEVICE_TYPE_GPU: {
-    amdcuid_gpu_info gpu_info = {};
-    gpu_info.header.fields.gpu.vendor_id = entry.vendor_id;
-    gpu_info.header.fields.gpu.device_id = entry.device_id;
-    gpu_info.header.fields.gpu.pci_class = entry.pci_class;
-    gpu_info.header.fields.gpu.revision_id = entry.revision_id;
-    gpu_info.header.fields.gpu.unit_id = entry.unit_id;
-    gpu_info.render_node = entry.device_node;
-    gpu_info.bdf = entry.bdf;
-    device = std::make_shared<CuidGpu>(gpu_info);
-    break;
-  }
-  case AMDCUID_DEVICE_TYPE_CPU: {
-    amdcuid_cpu_info cpu_info = {};
-    cpu_info.header.fields.cpu.vendor_id = entry.vendor_id;
-    cpu_info.header.fields.cpu.family = entry.family;
-    cpu_info.header.fields.cpu.model = entry.model;
-    cpu_info.header.fields.cpu.device_id = entry.device_id;
-    cpu_info.header.fields.cpu.revision_id = entry.revision_id;
-    cpu_info.header.fields.cpu.unit_id = entry.unit_id;
-    cpu_info.header.fields.cpu.physical_id = entry.package_id;
-    cpu_info.header.fields.cpu.core = entry.core_id;
-    // Restore device_node for unique CPU identification (needed for SMT)
-    cpu_info.device_node = entry.device_node;
-    device = std::make_shared<CuidCpu>(cpu_info);
-    break;
-  }
-  case AMDCUID_DEVICE_TYPE_NIC: {
-    amdcuid_nic_info nic_info = {};
-    nic_info.header.fields.nic.vendor_id = entry.vendor_id;
-    nic_info.header.fields.nic.device_id = entry.device_id;
-    nic_info.header.fields.nic.pci_class = entry.pci_class;
-    nic_info.header.fields.nic.revision_id = entry.revision_id;
-    nic_info.network_interface = entry.device_node;
-    nic_info.bdf = entry.bdf;
-    device = std::make_shared<CuidNic>(nic_info);
-    break;
-  }
-  case AMDCUID_DEVICE_TYPE_NPU: {
-    amdcuid_npu_info npu_info = {};
-    npu_info.header.fields.npu.vendor_id = entry.vendor_id;
-    npu_info.header.fields.npu.device_id = entry.device_id;
-    npu_info.header.fields.npu.pci_class = entry.pci_class;
-    npu_info.header.fields.npu.revision_id = entry.revision_id;
-    npu_info.accel_node = entry.device_node;
-    npu_info.bdf = entry.bdf;
-    device = std::make_shared<CuidNpu>(npu_info);
-    break;
-  }
-  default: {
-    device = nullptr;
-    break;
-  }
+    case AMDCUID_DEVICE_TYPE_PLATFORM: {
+      amdcuid_platform_info platform_info = {};
+      platform_info.header.fields.platform.vendor_id = entry.vendor_id;
+      device = std::make_shared<CuidPlatform>(platform_info);
+      break;
+    }
+    case AMDCUID_DEVICE_TYPE_GPU: {
+      amdcuid_gpu_info gpu_info = {};
+      gpu_info.header.fields.gpu.vendor_id = entry.vendor_id;
+      gpu_info.header.fields.gpu.device_id = entry.device_id;
+      gpu_info.header.fields.gpu.pci_class = entry.pci_class;
+      gpu_info.header.fields.gpu.revision_id = entry.revision_id;
+      gpu_info.header.fields.gpu.unit_id = entry.unit_id;
+      gpu_info.render_node = entry.device_node;
+      gpu_info.bdf = entry.bdf;
+      device = std::make_shared<CuidGpu>(gpu_info);
+      break;
+    }
+    case AMDCUID_DEVICE_TYPE_CPU: {
+      amdcuid_cpu_info cpu_info = {};
+      cpu_info.header.fields.cpu.vendor_id = entry.vendor_id;
+      cpu_info.header.fields.cpu.family = entry.family;
+      cpu_info.header.fields.cpu.model = entry.model;
+      cpu_info.header.fields.cpu.device_id = entry.device_id;
+      cpu_info.header.fields.cpu.revision_id = entry.revision_id;
+      cpu_info.header.fields.cpu.unit_id = entry.unit_id;
+      cpu_info.header.fields.cpu.physical_id = entry.package_id;
+      cpu_info.header.fields.cpu.core = entry.core_id;
+      // Restore device_node for unique CPU identification (needed for SMT)
+      cpu_info.device_node = entry.device_node;
+      device = std::make_shared<CuidCpu>(cpu_info);
+      break;
+    }
+    case AMDCUID_DEVICE_TYPE_NIC: {
+      amdcuid_nic_info nic_info = {};
+      nic_info.header.fields.nic.vendor_id = entry.vendor_id;
+      nic_info.header.fields.nic.device_id = entry.device_id;
+      nic_info.header.fields.nic.pci_class = entry.pci_class;
+      nic_info.header.fields.nic.revision_id = entry.revision_id;
+      nic_info.network_interface = entry.device_node;
+      nic_info.bdf = entry.bdf;
+      device = std::make_shared<CuidNic>(nic_info);
+      break;
+    }
+    case AMDCUID_DEVICE_TYPE_NPU: {
+      amdcuid_npu_info npu_info = {};
+      npu_info.header.fields.npu.vendor_id = entry.vendor_id;
+      npu_info.header.fields.npu.device_id = entry.device_id;
+      npu_info.header.fields.npu.pci_class = entry.pci_class;
+      npu_info.header.fields.npu.revision_id = entry.revision_id;
+      npu_info.accel_node = entry.device_node;
+      npu_info.bdf = entry.bdf;
+      device = std::make_shared<CuidNpu>(npu_info);
+      break;
+    }
+    default: {
+      device = nullptr;
+      break;
+    }
   }
 }
 
-amdcuid_status_t
-CuidDeviceManager::get_devices_from_file_entries(CuidFile &cuid_file) {
+amdcuid_status_t CuidDeviceManager::get_devices_from_file_entries(CuidFile& cuid_file) {
   std::lock_guard<std::mutex> lock(manager_mutex_);
 
   amdcuid_status_t status = cuid_file.load();
@@ -280,9 +272,9 @@ CuidDeviceManager::get_devices_from_file_entries(CuidFile &cuid_file) {
   }
 
   devices_.clear();
-  for (const auto &entry : cuid_file.get_entries()) {
+  for (const auto& entry : cuid_file.get_entries()) {
     DevicePtr device = nullptr;
-    _convert_entry_to_device(const_cast<CuidFileEntry &>(entry), device);
+    _convert_entry_to_device(const_cast<CuidFileEntry&>(entry), device);
     if (device) {
       devices_.push_back(device);
     }
@@ -309,9 +301,8 @@ amdcuid_status_t CuidDeviceManager::add_device(DevicePtr device) {
   return AMDCUID_STATUS_SUCCESS;
 }
 
-amdcuid_status_t
-CuidDeviceManager::get_device_from_file_by_id(amdcuid_id_t &derived_cuid,
-                                              DevicePtr &device) {
+amdcuid_status_t CuidDeviceManager::get_device_from_file_by_id(amdcuid_id_t& derived_cuid,
+                                                               DevicePtr& device) {
   amdcuid_status_t status = AMDCUID_STATUS_DEVICE_NOT_FOUND;
 
   // Search in privileged CUID file first
@@ -344,8 +335,8 @@ CuidDeviceManager::get_device_from_file_by_id(amdcuid_id_t &derived_cuid,
   return status;
 }
 
-amdcuid_status_t CuidDeviceManager::get_device_from_file_by_dev_path(
-    const std::string &device_path, DevicePtr &device) {
+amdcuid_status_t CuidDeviceManager::get_device_from_file_by_dev_path(const std::string& device_path,
+                                                                     DevicePtr& device) {
   amdcuid_status_t status = AMDCUID_STATUS_DEVICE_NOT_FOUND;
 
   // Search in privileged CUID file first
@@ -357,7 +348,7 @@ amdcuid_status_t CuidDeviceManager::get_device_from_file_by_dev_path(
     }
     status = priv_cuid_file_.find_by_device_node(device_path, entry);
     if (status != AMDCUID_STATUS_SUCCESS) {
-      return status; // Not found in either file
+      return status;  // Not found in either file
     }
   } else {
     status = unpriv_cuid_file_.load();
@@ -366,7 +357,7 @@ amdcuid_status_t CuidDeviceManager::get_device_from_file_by_dev_path(
     }
     status = unpriv_cuid_file_.find_by_device_node(device_path, entry);
     if (status != AMDCUID_STATUS_SUCCESS) {
-      return status; // Not found in unprivileged file
+      return status;  // Not found in unprivileged file
     }
   }
 
@@ -378,9 +369,8 @@ amdcuid_status_t CuidDeviceManager::get_device_from_file_by_dev_path(
   return status;
 }
 
-amdcuid_status_t
-CuidDeviceManager::get_device_from_file_by_bdf(const std::string &bdf,
-                                               DevicePtr &device) {
+amdcuid_status_t CuidDeviceManager::get_device_from_file_by_bdf(const std::string& bdf,
+                                                                DevicePtr& device) {
   amdcuid_status_t status = AMDCUID_STATUS_DEVICE_NOT_FOUND;
 
   // Search in privileged CUID file first
@@ -392,7 +382,7 @@ CuidDeviceManager::get_device_from_file_by_bdf(const std::string &bdf,
     }
     status = priv_cuid_file_.find_by_bdf(bdf, entry);
     if (status != AMDCUID_STATUS_SUCCESS) {
-      return status; // Not found in privileged file
+      return status;  // Not found in privileged file
     }
   } else {
     status = unpriv_cuid_file_.load();
@@ -401,7 +391,7 @@ CuidDeviceManager::get_device_from_file_by_bdf(const std::string &bdf,
     }
     status = unpriv_cuid_file_.find_by_bdf(bdf, entry);
     if (status != AMDCUID_STATUS_SUCCESS) {
-      return status; // Not found in unprivileged file
+      return status;  // Not found in unprivileged file
     }
   }
 
@@ -413,15 +403,14 @@ CuidDeviceManager::get_device_from_file_by_bdf(const std::string &bdf,
   return status;
 }
 
-amdcuid_status_t
-CuidDeviceManager::request_device(const std::string &device_path,
-                                  amdcuid_device_type_t device_type,
-                                  DevicePtr &device) {
+amdcuid_status_t CuidDeviceManager::request_device(const std::string& device_path,
+                                                   amdcuid_device_type_t device_type,
+                                                   DevicePtr& device) {
   amdcuid_status_t status;
   if (CuidDaemonIpcClientUtils::is_daemon_running()) {
     amdcuid_id_t device_handle;
-    status = CuidDaemonIpcClientUtils::request_add_device(
-        device_path.c_str(), device_type, &device_handle);
+    status = CuidDaemonIpcClientUtils::request_add_device(device_path.c_str(), device_type,
+                                                          &device_handle);
     if (status == AMDCUID_STATUS_SUCCESS) {
       // Lookup device by handle and return it
       status = get_device_from_file_by_id(device_handle, device);
@@ -500,15 +489,15 @@ amdcuid_status_t CuidDeviceManager::shutdown() {
   return AMDCUID_STATUS_SUCCESS;
 }
 
-CuidDeviceManager &CuidDeviceManager::instance() {
+CuidDeviceManager& CuidDeviceManager::instance() {
   static CuidDeviceManager instance;
   return instance;
 }
 
 void CuidDeviceManager::get_grouped_devices(
-    std::map<amdcuid_device_type_t, std::vector<DevicePtr>> &grouped) {
+    std::map<amdcuid_device_type_t, std::vector<DevicePtr>>& grouped) {
   grouped.clear();
-  for (const auto &entry : devices_) {
+  for (const auto& entry : devices_) {
     grouped[entry->type()].push_back(entry);
   }
 }
@@ -517,11 +506,10 @@ void CuidDeviceManager::build_cuid_index() {
   std::lock_guard<std::mutex> lock(manager_mutex_);
 
   cuid_index_.clear();
-  for (const auto &device : devices_) {
+  for (const auto& device : devices_) {
     amdcuid_derived_id derived;
     if (geteuid() == 0) {
-      if (device->get_derived_cuid(derived, &manager_hmac) ==
-          AMDCUID_STATUS_SUCCESS) {
+      if (device->get_derived_cuid(derived, &manager_hmac) == AMDCUID_STATUS_SUCCESS) {
         cuid_index_[derived.UUIDv8_representation] = device;
       }
     } else {
@@ -532,8 +520,7 @@ void CuidDeviceManager::build_cuid_index() {
   }
 }
 
-DevicePtr
-CuidDeviceManager::lookup_by_handle(const amdcuid_id_t &handle) const {
+DevicePtr CuidDeviceManager::lookup_by_handle(const amdcuid_id_t& handle) const {
   // Since amdcuid_id_t is our handle, we can use it directly as key
   auto it = cuid_index_.find(handle);
   return (it != cuid_index_.end()) ? it->second : nullptr;
@@ -543,7 +530,7 @@ std::vector<amdcuid_id_t> CuidDeviceManager::get_all_handles() const {
   std::vector<amdcuid_id_t> handles;
   handles.reserve(cuid_index_.size());
 
-  for (const auto &pair : cuid_index_) {
+  for (const auto& pair : cuid_index_) {
     // amdcuid_id_t is the handle, so just copy directly
     handles.push_back(pair.first);
   }
@@ -556,8 +543,8 @@ amdcuid_status_t CuidDeviceManager::save_registry_to_files() {
   amdcuid_status_t status = AMDCUID_STATUS_SUCCESS;
   if (geteuid() == 0) {
     // Generate new priv CUID file from current device list
-    status = CuidFileGenerator::generate_priv_from_devices(
-        devices_, priv_cuid_file_.get_file_path());
+    status =
+        CuidFileGenerator::generate_priv_from_devices(devices_, priv_cuid_file_.get_file_path());
     if (status != AMDCUID_STATUS_SUCCESS) {
       return status;
     }
@@ -567,8 +554,8 @@ amdcuid_status_t CuidDeviceManager::save_registry_to_files() {
   }
 
   // Generate new unpriv CUID file from current device list
-  status = CuidFileGenerator::generate_unpriv_from_devices(
-      devices_, unpriv_cuid_file_.get_file_path());
+  status =
+      CuidFileGenerator::generate_unpriv_from_devices(devices_, unpriv_cuid_file_.get_file_path());
   if (status != AMDCUID_STATUS_SUCCESS) {
     return status;
   }

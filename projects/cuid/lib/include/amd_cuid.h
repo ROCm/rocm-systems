@@ -45,7 +45,7 @@ extern "C" {
 //! headers
 #define AMDCUID_LIB_VERSION_MINOR 0
 
-//! Patch version should be updated for each bug fix or non-API change
+//! Patch version should be updated for each fix or non-API change
 #define AMDCUID_LIB_VERSION_PATCH 0
 
 /**
@@ -54,7 +54,7 @@ extern "C" {
  * Major version should be changed for every header change that breaks ABI such
  * as adding/deleting APIs, changing names, fields of structures, etc. Minor
  * version should be updated for each API change, but without changing headers.
- * Patch version should be updated for each bug fix or non-API change.
+ * Patch version should be updated for each fix or non-API change.
  *
  * @param[out] major Pointer to store the major version number.
  * @param[out] minor Pointer to store the minor version number.
