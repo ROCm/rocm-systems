@@ -1957,16 +1957,67 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
   // that bounded set avoids repeatedly scanning every fact
   // to recover information that changes only when the corresponding vector does.
   std::vector<std::bitset<REGISTER_SET_MAX_SGPRS>> entry_pairs(blocks.size());
-  std::deque<size_t> worklist;
+
+  // Visit blocks in reverse postorder. The least fixed point of this monotone
+  // join does not depend on the visit order, but the order decides how many
+  // times it is recomputed. A recovered indirect call gives its shared callee
+  // block one predecessor per call site -- thousands of them on a large device
+  // library -- and popping in block-index order then re-evaluates that
+  // O(predecessors x pairs) join once for every predecessor that happens to be
+  // processed after it. Reverse postorder evaluates a predecessor before its
+  // successors wherever the graph is acyclic, so a block is normally recomputed
+  // only for its back edges. On the largest hipTensor object this is the
+  // difference between 84.8M block visits and 558k, and between 264 s and 0.7 s
+  // per round.
+  //
+  // The order is a pure function of the block graph: roots are tried in
+  // ascending block index, successors in their stored order, and the root loop
+  // covers every block, so blocks unreachable from any earlier root still
+  // receive a position and are still seeded onto the worklist below.
+  std::vector<size_t> rpo_order;
+  rpo_order.reserve(blocks.size());
+  {
+    std::vector<uint8_t> visited(blocks.size(), 0);
+    std::vector<std::pair<size_t, size_t>> stack;
+    for (size_t root = 0; root < blocks.size(); ++root) {
+      if (visited[root])
+        continue;
+      visited[root] = 1;
+      stack.emplace_back(root, 0);
+      while (!stack.empty()) {
+        const size_t node = stack.back().first;
+        size_t &next_successor = stack.back().second;
+        if (next_successor < blocks[node].successors.size()) {
+          const size_t successor = blocks[node].successors[next_successor++];
+          if (successor < blocks.size() && !visited[successor]) {
+            visited[successor] = 1;
+            stack.emplace_back(successor, 0);
+          }
+          continue;
+        }
+        rpo_order.push_back(node);
+        stack.pop_back();
+      }
+    }
+  }
+  std::ranges::reverse(rpo_order);
+  std::vector<size_t> rpo_position(blocks.size(), 0);
+  for (size_t position = 0; position < rpo_order.size(); ++position)
+    rpo_position[rpo_order[position]] = position;
+
+  // Keyed by reverse-postorder position so the lowest position is always popped
+  // next. Positions are unique, so this is a total order and the pop sequence is
+  // fully determined by the block graph.
+  std::set<size_t> worklist;
   std::vector<bool> on_worklist(blocks.size(), false);
   for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
-    worklist.push_back(block_index);
+    worklist.insert(rpo_position[block_index]);
     on_worklist[block_index] = true;
   }
 
   while (!worklist.empty()) {
-    const size_t block_index = worklist.front();
-    worklist.pop_front();
+    const size_t block_index = rpo_order[*worklist.begin()];
+    worklist.erase(worklist.begin());
     on_worklist[block_index] = false;
 
     LatticeFacts new_entry;
@@ -2052,7 +2103,7 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
     for (size_t successor : blocks[block_index].successors) {
       if (on_worklist[successor])
         continue;
-      worklist.push_back(successor);
+      worklist.insert(rpo_position[successor]);
       on_worklist[successor] = true;
     }
   }
@@ -2244,11 +2295,17 @@ constexpr size_t kRetainedAnalysisUnitBytes = 64;
 // budget. Exhaustion remains fail-closed, so a still larger object loses recovery rather than
 // memory.
 //
-// 1<<24 is a ceiling, not a headroom guess. At 1<<26 the largest hipTensor object in the corpus
-// (8.3 MB) does finish -- but in 552 s and 2.6 GB, against a 30 s per-object budget, and this runs
-// at code-object load time. Refusing that object costs one unrecovered transfer; admitting it would
-// stall the loader for nine minutes. The bound is set where recovery still pays for itself.
-constexpr size_t kMaxRetainedAnalysisUnits = size_t{1} << 24;
+// Sized to admit the objects real workloads dispatch rather than to leave headroom. hipTensor's
+// scale_contraction and trinary_scale_contraction tests dispatch 4.65 MB and 4.70 MB objects that
+// 1<<24 still refused; at this bound they translate in 7.6 s and 1.06 GB, against a 30 s and
+// 4096 MiB per-object budget.
+//
+// Raising it does NOT expose the loader to the multi-minute translations some very large objects
+// take. Those are pre-existing and not governed by this constant: the 8.3 MB hipTensor object costs
+// 510 s / 2.4 GB on unmodified develop at 1<<20, 541 s at 1<<24 and 552 s at 1<<26 -- about 6%
+// across a 64x change in the bound, because the time is spent outside lane recovery almost
+// entirely. Exhaustion stays fail-closed: an object that outgrows this loses recovery, not memory.
+constexpr size_t kMaxRetainedAnalysisUnits = size_t{1} << 26;
 constexpr size_t kMaxCalleeSummaryVariantsPerTarget = 8;
 constexpr size_t kCalleeSummaryCacheEntryUnits =
     1 + (sizeof(CalleeSummaryCacheKey) + sizeof(std::optional<CalleeSummary>) + 3 * sizeof(void *) -
