@@ -3786,8 +3786,13 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       if (info->coll == ncclFuncAllReduce) {
         const bool ceAllReduceOpSupported =
           (info->op == ncclSum || info->op == ncclProd || info->op == ncclMin || info->op == ncclMax);
-        if (!ceArGraphAllowed || !ceAllReduceOpSupported || (info->count % (size_t)comm->nRanks != 0) ||
-            !rcclParamCeAllReduce()) {
+        // The CE kernels never read the bias buffer, so every CE AllReduce sub-path below
+        // (registered-window ceAvailable path and the unregistered force-mode ceAllReduceFits
+        // path) must be closed off when a bias buffer is present, or ncclAllReduceWithBias would
+        // silently drop it. Checked once here rather than inside rcclUseCeAllReduce(), since this
+        // function no longer calls it for the AllReduce case.
+        if (info->acc != nullptr || !ceArGraphAllowed || !ceAllReduceOpSupported ||
+            (info->count % (size_t)comm->nRanks != 0) || !rcclParamCeAllReduce()) {
           ceAvailable = false;
         } else if (ceAllReduceOpSupported) {
           // check if we want to force CE AllReduce without symmetric window registration
