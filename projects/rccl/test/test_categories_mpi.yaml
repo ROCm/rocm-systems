@@ -75,6 +75,26 @@ test_categories:
       - "NCCL_CUMEM_ENABLE=1"
       - "NCCL_LOCAL_REGISTER=0"
       - "RCCL_CE_ALLREDUCE=1"
+  quick_env_ce_alltoall:
+    description: "CE AlltoAll MPI smoke under CE dispatch env. DDA is disabled because
+      ncclAlltoAll_impl takes the DDA IPC path before CE is considered, so CE never
+      dispatches for messages under the DDA AlltoAll threshold."
+    test_patterns:
+      - "CeMPI_AlltoAll.*"
+    exclude_windows: *mpi_exclude_windows
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+      - "mpi"
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "NCCL_DEBUG_SUBSYS=ALL"
+      - "NCCL_CTA_POLICY=2"
+      - "NCCL_CUMEM_ENABLE=1"
+      - "NCCL_LOCAL_REGISTER=0"
+      - "RCCL_DDA_ENABLE=0"
   quick_env_shm_ce_memcpy_send:
     description: "Shared-memory CE memcpy on send side (mode 1, locality 1)."
     test_patterns:
