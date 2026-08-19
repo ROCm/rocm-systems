@@ -1078,7 +1078,7 @@ hipError_t GraphExecBase::CreateStreams(uint32_t num_streams, int devId) {
   }
 
   // num_streams is already capped by Init() but guard here defensively. On the
-  // instantiation device the launch stream fills one slot, so create one fewer there.
+  // capture device the launch stream fills one slot, so create one fewer there.
   uint32_t capped = std::min(num_streams, DEBUG_HIP_FORCE_GRAPH_QUEUES);
   uint32_t max_streams = (devId == captureDeviceId_ && capped > 0) ? capped - 1 : capped;
   if (max_streams == 0) {
@@ -1265,9 +1265,9 @@ hipError_t GraphExecSegmented::FindStreamsReqPerDevForSegments() {
 
 // ================================================================================================
 void GraphExecSegmented::RoundRobinStreamAssignment() {
-  // max_streams_dev_ holds the raw parallelism count per device as computed by
-  // FindStreamsReqPerDevForSegments() and capped in Init(). CreateStreams() applies
-  // the -1 for the instantiation device, so this is the total pool size everywhere.
+  // max_streams_dev_ represents the total stream-slot count uniformly per device;
+  // CreateStreams() does not adjust it. The capture device's slot 0 instead comes
+  // from the launch stream (same-device) or EnsureCrossDeviceStream() (cross-device).
   auto getPoolSize = [&](int dev_id) -> size_t {
     auto it = max_streams_dev_.find(dev_id);
     return (it != max_streams_dev_.end() && it->second > 0)
