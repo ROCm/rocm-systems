@@ -116,6 +116,11 @@ session::apply_locked_transition(const std::function<void()>& mutate,
     // a separate mutex from m_actions_mutex (released below, before
     // notify_pause()/notify_resume() run) so a subscriber callback that
     // re-enters is_active()/is_active_without() cannot deadlock.
+    //
+    // WARNING: on_pause/on_resume run with this mutex still held (see
+    // notify_pause/notify_resume below). A callback must never call
+    // set_action() itself, directly or transitively - that re-enters
+    // m_notify_mutex and deadlocks.
     const std::scoped_lock notify_lk{ m_notify_mutex };
 
     const auto scope_idx  = static_cast<std::size_t>(event_scope);
