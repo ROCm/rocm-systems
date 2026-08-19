@@ -5,6 +5,7 @@
 /// @brief Shared fixture implementations for CPU-only DBT translation tests.
 
 #include "translate_test_support.h"
+#include "decode_test_util.h"
 
 #include "elf_test_support.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -321,7 +322,7 @@ std::unique_ptr<Instruction> decode_one(uint32_t word, rj_code_arch_t arch) {
   auto decoder = Decoder::create(arch);
   if (!decoder)
     return nullptr;
-  return std::unique_ptr<Instruction>(decoder->decode(&word));
+  return std::unique_ptr<Instruction>(decode_valid(*decoder, &word));
 }
 
 bool has_error_containing(const TranslatedCodeObject &result, DiagnosticKind kind,
