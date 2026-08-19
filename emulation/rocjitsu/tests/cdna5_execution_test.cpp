@@ -3,6 +3,7 @@
 
 #include "cdna5_sim_test_common.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vbuffer.h"
 
 namespace {
 
@@ -137,6 +138,208 @@ TEST(Gfx1250ExecutionTest, Wave32VectorComparePreservesVccHiScratch) {
     decoded->execute(*decoded, wf);
     EXPECT_EQ(wf->vcc(), 0x000001c000000001ull);
   }
+}
+
+TEST(Gfx1250ExecutionTest, VbufferB128LoadsZeroAndStoresDropPartialOobDwords) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  constexpr uint64_t kAddr = 0xC000;
+  constexpr uint32_t kResourceSgpr = 4;
+  constexpr uint32_t kLoadVgpr = 8;
+  constexpr uint32_t kStoreVgpr = 12;
+  constexpr std::array<uint32_t, 4> kInitial = {0x101u, 0x102u, 0x103u, 0x104u};
+  constexpr std::array<uint32_t, 4> kStored = {0x201u, 0x202u, 0x203u, 0x204u};
+  for (uint32_t i = 0; i < kInitial.size(); ++i)
+    sim.memory->write32(kAddr + i * sizeof(uint32_t), kInitial[i]);
+
+  // gfx1250 NUM_RECORDS is a 45-bit byte count split across SRD words 1-3.
+  constexpr uint64_t kNumRecords = 10;
+  const std::array<uint32_t, 4> resource = {
+      static_cast<uint32_t>(kAddr),
+      static_cast<uint32_t>((kAddr >> 32) & 0x01FF'FFFFu) |
+          static_cast<uint32_t>((kNumRecords & 0x7Fu) << 25),
+      static_cast<uint32_t>(kNumRecords >> 7),
+      static_cast<uint32_t>((kNumRecords >> 39) & 0x3Fu),
+  };
+  for (uint32_t i = 0; i < resource.size(); ++i)
+    cu->write_sgpr(wf->sgpr_alloc().base + kResourceSgpr + i, resource[i]);
+
+  cdna5::VbufferMachineInst machine{};
+  machine.vdata = kLoadVgpr;
+  machine.rsrc = kResourceSgpr;
+  machine.soffset = cdna5::OPR_SREG_NULL;
+  machine.scope = 3; // System scope selects uncached accesses for direct memory checks.
+
+  amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), cu->l2());
+  auto *load =
+      new cdna5::BufferLoadB128Vbuffer(reinterpret_cast<const cdna5::MachineInst *>(&machine));
+  load->execute_impl(*wf);
+  pipeline.issue(load, *wf);
+
+  EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + kLoadVgpr + 0, 0), kInitial[0]);
+  EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + kLoadVgpr + 1, 0), kInitial[1]);
+  EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + kLoadVgpr + 2, 0), 0u);
+  EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + kLoadVgpr + 3, 0), 0u);
+
+  for (uint32_t i = 0; i < kStored.size(); ++i)
+    cu->write_vgpr(wf->vgpr_alloc().base + kStoreVgpr + i, 0, kStored[i]);
+  machine.vdata = kStoreVgpr;
+  auto *store =
+      new cdna5::BufferStoreB128Vbuffer(reinterpret_cast<const cdna5::MachineInst *>(&machine));
+  store->execute_impl(*wf);
+  pipeline.issue(store, *wf);
+
+  EXPECT_EQ(sim.memory->read32(kAddr), kStored[0]);
+  EXPECT_EQ(sim.memory->read32(kAddr + 4), kStored[1]);
+  EXPECT_EQ(sim.memory->read32(kAddr + 8), kInitial[2]);
+  EXPECT_EQ(sim.memory->read32(kAddr + 12), kInitial[3]);
+}
+
+TEST(Gfx1250ExecutionTest, VbufferB64B96MixedLanesHonorStructuredPartialOob) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x3u);
+
+  constexpr uint64_t kAddr = 0xC080;
+  constexpr uint32_t kResourceSgpr = 4;
+  constexpr uint32_t kSoffsetSgpr = 12;
+  constexpr uint32_t kAddressVgpr = 4;
+  constexpr uint32_t kB96LoadVgpr = 8;
+  constexpr uint32_t kB64LoadVgpr = 12;
+  constexpr uint32_t kStoreVgpr = 16;
+  constexpr uint64_t kNumRecords = 32;
+  constexpr uint32_t kRawStride = 4;
+  constexpr uint32_t kStrideScale = 1;
+  constexpr uint32_t kStride = kRawStride * 4;
+  const std::array<uint32_t, 4> resource = {
+      static_cast<uint32_t>(kAddr),
+      static_cast<uint32_t>((kAddr >> 32) & 0x01FF'FFFFu) |
+          static_cast<uint32_t>((kNumRecords & 0x7Fu) << 25),
+      static_cast<uint32_t>(kNumRecords >> 7),
+      static_cast<uint32_t>((kNumRecords >> 39) & 0x3Fu) | (kRawStride << 12) |
+          (kStrideScale << 26) | (1u << 29),
+  };
+  for (uint32_t i = 0; i < resource.size(); ++i)
+    cu->write_sgpr(wf->sgpr_alloc().base + kResourceSgpr + i, resource[i]);
+  cu->write_sgpr(wf->sgpr_alloc().base + kSoffsetSgpr, 4);
+
+  const uint32_t vbase = wf->vgpr_alloc().base;
+  cu->write_vgpr(vbase + kAddressVgpr, 0, 0);
+  cu->write_vgpr(vbase + kAddressVgpr + 1, 0, 0);
+  cu->write_vgpr(vbase + kAddressVgpr, 1, 1);
+  cu->write_vgpr(vbase + kAddressVgpr + 1, 1, 8);
+
+  constexpr std::array<uint32_t, 3> kLane0Initial = {0x101u, 0x102u, 0x103u};
+  constexpr std::array<uint32_t, 3> kLane1Initial = {0x201u, 0x202u, 0x203u};
+  for (uint32_t i = 0; i < kLane0Initial.size(); ++i)
+    sim.memory->write32(kAddr + 4 + i * sizeof(uint32_t), kLane0Initial[i]);
+  for (uint32_t i = 0; i < kLane1Initial.size(); ++i)
+    sim.memory->write32(kAddr + 28 + i * sizeof(uint32_t), kLane1Initial[i]);
+
+  cdna5::VbufferMachineInst machine{};
+  machine.rsrc = kResourceSgpr;
+  machine.soffset = kSoffsetSgpr;
+  machine.vaddr = kAddressVgpr;
+  machine.idxen = 1;
+  machine.offen = 1;
+  machine.scope = 3;
+  amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), cu->l2());
+
+  machine.vdata = kB64LoadVgpr;
+  auto *b64_load =
+      new cdna5::BufferLoadB64Vbuffer(reinterpret_cast<const cdna5::MachineInst *>(&machine));
+  b64_load->execute_impl(*wf);
+  pipeline.issue(b64_load, *wf);
+  EXPECT_EQ(cu->read_vgpr(vbase + kB64LoadVgpr, 0), kLane0Initial[0]);
+  EXPECT_EQ(cu->read_vgpr(vbase + kB64LoadVgpr + 1, 0), kLane0Initial[1]);
+  EXPECT_EQ(cu->read_vgpr(vbase + kB64LoadVgpr, 1), kLane1Initial[0]);
+  EXPECT_EQ(cu->read_vgpr(vbase + kB64LoadVgpr + 1, 1), 0u);
+
+  machine.vdata = kB96LoadVgpr;
+  auto *b96_load =
+      new cdna5::BufferLoadB96Vbuffer(reinterpret_cast<const cdna5::MachineInst *>(&machine));
+  b96_load->execute_impl(*wf);
+  pipeline.issue(b96_load, *wf);
+  for (uint32_t i = 0; i < kLane0Initial.size(); ++i)
+    EXPECT_EQ(cu->read_vgpr(vbase + kB96LoadVgpr + i, 0), kLane0Initial[i]);
+  EXPECT_EQ(cu->read_vgpr(vbase + kB96LoadVgpr, 1), kLane1Initial[0]);
+  EXPECT_EQ(cu->read_vgpr(vbase + kB96LoadVgpr + 1, 1), 0u);
+  EXPECT_EQ(cu->read_vgpr(vbase + kB96LoadVgpr + 2, 1), 0u);
+
+  constexpr std::array<uint32_t, 3> kLane0Stored = {0x301u, 0x302u, 0x303u};
+  constexpr std::array<uint32_t, 3> kLane1Stored = {0x401u, 0x402u, 0x403u};
+  for (uint32_t i = 0; i < kLane0Stored.size(); ++i) {
+    cu->write_vgpr(vbase + kStoreVgpr + i, 0, kLane0Stored[i]);
+    cu->write_vgpr(vbase + kStoreVgpr + i, 1, kLane1Stored[i]);
+  }
+  machine.vdata = kStoreVgpr;
+  auto *b96_store =
+      new cdna5::BufferStoreB96Vbuffer(reinterpret_cast<const cdna5::MachineInst *>(&machine));
+  b96_store->execute_impl(*wf);
+  pipeline.issue(b96_store, *wf);
+
+  for (uint32_t i = 0; i < kLane0Stored.size(); ++i)
+    EXPECT_EQ(sim.memory->read32(kAddr + 4 + i * sizeof(uint32_t)), kLane0Stored[i]);
+  EXPECT_EQ(sim.memory->read32(kAddr + kStride + 12), kLane1Stored[0]);
+  EXPECT_EQ(sim.memory->read32(kAddr + kStride + 16), kLane1Initial[1]);
+  EXPECT_EQ(sim.memory->read32(kAddr + kStride + 20), kLane1Initial[2]);
+}
+
+TEST(Gfx1250ExecutionTest, NonReturningVbufferB64AtomicHonorsWholePayloadBounds) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  constexpr uint64_t kAddr = 0xC100;
+  constexpr uint32_t kResourceSgpr = 4;
+  constexpr uint32_t kDataVgpr = 8;
+  constexpr uint64_t kInitial = 0x0102'0304'0506'0708ULL;
+  constexpr uint64_t kAddend = 0x1011'1213'1415'1617ULL;
+  auto write_resource = [&](uint64_t num_records) {
+    const std::array<uint32_t, 4> resource = {
+        static_cast<uint32_t>(kAddr),
+        static_cast<uint32_t>((kAddr >> 32) & 0x01FF'FFFFu) |
+            static_cast<uint32_t>((num_records & 0x7Fu) << 25),
+        static_cast<uint32_t>(num_records >> 7),
+        static_cast<uint32_t>((num_records >> 39) & 0x3Fu),
+    };
+    for (uint32_t i = 0; i < resource.size(); ++i)
+      cu->write_sgpr(wf->sgpr_alloc().base + kResourceSgpr + i, resource[i]);
+  };
+
+  cu->write_vgpr(wf->vgpr_alloc().base + kDataVgpr, 0, static_cast<uint32_t>(kAddend));
+  cu->write_vgpr(wf->vgpr_alloc().base + kDataVgpr + 1, 0, static_cast<uint32_t>(kAddend >> 32));
+  cdna5::VbufferMachineInst machine{};
+  machine.vdata = kDataVgpr;
+  machine.rsrc = kResourceSgpr;
+  machine.soffset = cdna5::OPR_SREG_NULL;
+  machine.scope = 3;
+  machine.th = 0;
+  amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), cu->l2());
+
+  sim.memory->write64(kAddr, kInitial);
+  write_resource(/*num_records=*/8);
+  auto *exact_end =
+      new cdna5::BufferAtomicAddU64Vbuffer(reinterpret_cast<const cdna5::MachineInst *>(&machine));
+  exact_end->execute_impl(*wf);
+  pipeline.issue(exact_end, *wf);
+  EXPECT_EQ(sim.memory->read64(kAddr), kInitial + kAddend);
+
+  sim.memory->write64(kAddr, kInitial);
+  write_resource(/*num_records=*/6);
+  auto *partial_oob =
+      new cdna5::BufferAtomicAddU64Vbuffer(reinterpret_cast<const cdna5::MachineInst *>(&machine));
+  partial_oob->execute_impl(*wf);
+  pipeline.issue(partial_oob, *wf);
+  EXPECT_EQ(sim.memory->read64(kAddr), kInitial);
 }
 
 TEST(Gfx1250ExecutionTest, DivScaleWritesExplicitSdstMask) {
