@@ -53,3 +53,6 @@ f4bf55d0033915b030380a8e1733b390235dbae6
 
 # [Manual] One time post formatting fix
 a3ce94021e982212cc9c5af7fe74979ac77eddf5
+
+# [AICOMRCCL-ZZZZ] [rccl] Fix trailing whitespace and missing final newlines
+cd9e5ba39962f5aab0eb368b08c56265728c89b4
