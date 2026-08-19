@@ -1031,6 +1031,8 @@ class Database:
                 PCSampleState.total_count.label("count"),
                 PCSampleState.issue_count.label("count_issue"),
                 PCSampleState.stall_count.label("count_stall"),
+                PCSampleState.wave_occupancy_percent,
+                PCSampleState.active_thread_percent,
                 stall_reason_json_subquery.c.stall_reason,
             )
             .select_from(PCSampleState)

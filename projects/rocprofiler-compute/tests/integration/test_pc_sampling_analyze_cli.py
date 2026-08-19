@@ -156,13 +156,14 @@ def test_pc_sampling_analyze_database_output(
             ).fetchone()[0]
             db_pc_sampling = pd.read_sql_query(
                 "SELECT kernel_name, offset, instruction, source, count, "
-                "count_issue, count_stall, stall_reason "
+                "count_issue, count_stall, wave_occupancy_percent, "
+                "active_thread_percent, stall_reason "
                 "FROM compute_pc_sampling_summary_view "
                 "ORDER BY kernel_name, offset",
                 conn,
             )
-            # Derived wave metrics live on the state table; the summary view
-            # does not carry them.
+            # Derived wave metrics live on the state table; read them straight
+            # from it so the summary view's copy is checked independently.
             db_wave_metrics = pd.read_sql_query(
                 "SELECT active_thread_percent, wave_occupancy_percent "
                 "FROM compute_pc_sample_state",
@@ -221,6 +222,17 @@ def test_pc_sampling_analyze_database_output(
             .between(0, 100, inclusive="right")
             .all()
         )
+        percent_columns = [
+            "wave_occupancy_percent",
+            "active_thread_percent",
+        ]
+        assert db_pc_sampling[percent_columns].notna().all().all()
+        assert db_pc_sampling[percent_columns].ge(0).all().all()
+        assert db_pc_sampling[percent_columns].le(100).all().all()
+        # vcopy is fully converged: every wave64 lane is active.
+        assert db_pc_sampling["active_thread_percent"].eq(100.0).all()
+        assert db_pc_sampling["wave_occupancy_percent"].gt(0).all()
+        assert db_pc_sampling["wave_occupancy_percent"].le(100).all()
         assert pc_sampling_views == [("compute_pc_sampling_summary_view",)]
         assert db_dispatch_count == 3
         assert db_code_object_process_ids == [(698961,)]
@@ -303,6 +315,12 @@ def test_pc_sampling_analyze_csv_output(
         assert len(csv_pc_sampling) == 19
         assert csv_pc_sampling["count"].sum() == 857
         assert set(csv_pc_sampling["pid"]) == {698961}
+        percent_columns = [
+            "wave_occupancy_percent",
+            "active_thread_percent",
+        ]
+        assert set(percent_columns) <= set(csv_pc_sampling.columns)
+        assert csv_pc_sampling[percent_columns].notna().all().all()
         assert csv_kernel.iloc[0]["dispatch_count"] == 3
         csv_source_lines = pd.read_csv(csv_dir / "source_lines.csv")
         assert set(csv_source_lines["file_path"]) == {
@@ -311,6 +329,26 @@ def test_pc_sampling_analyze_csv_output(
         }
         # Every sampling row must resolve to a kernel the kernel view exposes.
         assert set(csv_pc_sampling["kernel_uuid"]) <= set(csv_kernel["kernel_uuid"])
+
+        isa_percent_columns = [
+            "Wave occupancy percent",
+            "Active thread percent",
+        ]
+        isa_csv_paths = sorted((csv_dir / "per_kernel_pc_sampling").rglob("*.csv"))
+        assert isa_csv_paths
+        has_populated_sample_metrics = False
+        for isa_csv_path in isa_csv_paths:
+            isa_rows = pd.read_csv(isa_csv_path)
+            if not set(isa_percent_columns) <= set(isa_rows.columns):
+                continue
+            sampled_isa_rows = isa_rows.loc[isa_rows["Total count"].notna()]
+            if (
+                not sampled_isa_rows.empty
+                and sampled_isa_rows[isa_percent_columns].notna().all().all()
+            ):
+                has_populated_sample_metrics = True
+                break
+        assert has_populated_sample_metrics
     finally:
         common.clean_output_dir(True, str(workload_dir))
 
