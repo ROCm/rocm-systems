@@ -315,11 +315,12 @@ WriteInterceptor(const void* packets,
 
     auto*      gls                 = ::rocprofiler::hip::graph::current_launch_state();
     const bool graph_launch_active = (gls != nullptr);
+    const bool counters_active     = counters::is_any_active();
     // Counter collection no longer registers a queue-controller callback, so it does not count
     // toward get_notifiers(); detect it explicitly so a counters-only run still enters the
     // interceptor.
     const bool no_real_consumers =
-        (queue.get_notifiers() == 0 && !counters::is_any_active() &&
+        (queue.get_notifiers() == 0 && !counters_active &&
          context::get_active_contexts(full_packet_instrumentation_context_filter).empty());
 
     if(pkt_count == 0 || (no_real_consumers && !graph_launch_active))
@@ -778,7 +779,7 @@ WriteInterceptor(const void* packets,
     });
 
     // Counter collection requires per-packet mode; it no longer participates in the registry.
-    if(counters::is_any_active()) should_batch_packets = false;
+    if(counters_active) should_batch_packets = false;
 
     if(should_batch_packets)
     {
