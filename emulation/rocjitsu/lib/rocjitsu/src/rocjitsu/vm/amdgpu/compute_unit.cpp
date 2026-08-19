@@ -604,23 +604,16 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
 
   active->trace_inst_count_++;
 
-  Instruction *inst = nullptr;
-  try {
-    inst = decoder_->decode(words);
-  } catch (const util::InvalidInst &e) {
-    util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(InvalidInst) pc=0x",
+  util::StringDiagnostic decode_error;
+  DecodeResult decoded = decoder_->decode(words, decode_error.emitter());
+  if (decoded.failed()) {
+    util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(decode rejection) pc=0x",
                      std::hex, active->pc, " words=[0x", words[0], ",0x", words[1], ",0x", words[2],
-                     ",0x", words[3], "]", std::dec, " what=", e.what());
+                     ",0x", words[3], "]", std::dec, " what=", decode_error.message());
     active->halt();
     return;
   }
-  if (!inst) {
-    util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(null decode) pc=0x",
-                     std::hex, active->pc, " words=[0x", words[0], ",0x", words[1], ",0x", words[2],
-                     ",0x", words[3], "]", std::dec);
-    active->halt();
-    return;
-  }
+  Instruction *inst = decoded.value().release();
 
   int inst_size_signed = inst->size();
   assert(inst_size_signed > 0 && "instruction size must be positive");

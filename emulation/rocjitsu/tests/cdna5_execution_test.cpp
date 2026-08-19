@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "cdna5_sim_test_common.h"
+#include "decode_test_util.h"
 
 namespace {
 
@@ -46,7 +47,7 @@ TEST(Gfx1250ExecutionTest, ScalarMovesTreatS102AndS103AsOrdinarySgprs) {
       0,
       0,
   };
-  std::unique_ptr<Instruction> move64(decoder->decode(kMove64.data()));
+  std::unique_ptr<Instruction> move64(decode_valid(*decoder, kMove64.data()));
   ASSERT_NE(move64, nullptr);
   EXPECT_EQ(move64->mnemonic(), "s_mov_b64");
   EXPECT_EQ(move64->size(), 4);
@@ -66,7 +67,7 @@ TEST(Gfx1250ExecutionTest, ScalarMovesTreatS102AndS103AsOrdinarySgprs) {
       0,
   };
   for (const auto *words : {kWriteS102.data(), kWriteS103.data()}) {
-    std::unique_ptr<Instruction> move32(decoder->decode(words));
+    std::unique_ptr<Instruction> move32(decode_valid(*decoder, words));
     ASSERT_NE(move32, nullptr);
     EXPECT_EQ(move32->mnemonic(), "s_mov_b32");
     EXPECT_EQ(move32->size(), 4);
@@ -86,7 +87,7 @@ TEST(Gfx1250ExecutionTest, ScalarMovesTreatS102AndS103AsOrdinarySgprs) {
       0,
   };
   for (const auto *words : {kReadS102.data(), kReadS103.data()}) {
-    std::unique_ptr<Instruction> move32(decoder->decode(words));
+    std::unique_ptr<Instruction> move32(decode_valid(*decoder, words));
     ASSERT_NE(move32, nullptr);
     EXPECT_EQ(move32->mnemonic(), "s_mov_b32");
     EXPECT_EQ(move32->size(), 4);
@@ -100,7 +101,7 @@ TEST(Gfx1250ExecutionTest, ScalarMovesTreatS102AndS103AsOrdinarySgprs) {
       0,
       0,
   };
-  std::unique_ptr<Instruction> read64(decoder->decode(kReadS102S103.data()));
+  std::unique_ptr<Instruction> read64(decode_valid(*decoder, kReadS102S103.data()));
   ASSERT_NE(read64, nullptr);
   EXPECT_EQ(read64->mnemonic(), "s_mov_b64");
   EXPECT_EQ(read64->size(), 4);
@@ -130,7 +131,7 @@ TEST(Gfx1250ExecutionTest, Wave32VectorComparePreservesVccHiScratch) {
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
     ASSERT_NE(decoder, nullptr);
     constexpr auto kCompare = cdna5::build_vopc(cdna5::kVCmpGtI32Vopc, {.src0 = 28, .vsrc1 = 18});
-    std::unique_ptr<Instruction> decoded(decoder->decode(kCompare.data()));
+    std::unique_ptr<Instruction> decoded(decode_valid(*decoder, kCompare.data()));
     ASSERT_NE(decoded, nullptr);
     EXPECT_EQ(decoded->mnemonic(), "v_cmp_gt_i32_e32");
     decoded->execute(*decoded, wf);
@@ -312,7 +313,7 @@ TEST(Gfx1250ExecutionTest, IreeF16ReductionTailKeepsLane31Sum) {
   }};
 
   for (const auto &inst_words : words) {
-    std::unique_ptr<Instruction> inst(decoder->decode(inst_words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, inst_words.data()));
     ASSERT_NE(inst, nullptr);
     cu->execute_instruction(inst.get(), *wf);
   }
@@ -416,7 +417,8 @@ TEST(Gfx1250LiteralOperandTest, SplitBackendPreservesSignedAndEncodingSemantics)
     const auto signed_mad_base = cdna5::build_vop3(
         cdna5::kVMadNcI64I32Vop3, {.vdst = 4, .src0 = 129, .src1 = 129, .src2 = 255});
     const std::array signed_mad_words{signed_mad_base[0], signed_mad_base[1], literal};
-    std::unique_ptr<Instruction> signed_mad_decoded(decoder->decode(signed_mad_words.data()));
+    std::unique_ptr<Instruction> signed_mad_decoded(
+        decode_valid(*decoder, signed_mad_words.data()));
     ASSERT_NE(signed_mad_decoded, nullptr);
     EXPECT_EQ(signed_mad_decoded->mnemonic(), "v_mad_nc_i64_i32");
     EXPECT_EQ(signed_mad_decoded->size(), 12);
@@ -435,7 +437,8 @@ TEST(Gfx1250LiteralOperandTest, SplitBackendPreservesSignedAndEncodingSemantics)
     const auto unsigned_mad_base = cdna5::build_vop3(
         cdna5::kVMadNcU64U32Vop3, {.vdst = 6, .src0 = 129, .src1 = 129, .src2 = 255});
     const std::array unsigned_mad_words{unsigned_mad_base[0], unsigned_mad_base[1], literal};
-    std::unique_ptr<Instruction> unsigned_mad_decoded(decoder->decode(unsigned_mad_words.data()));
+    std::unique_ptr<Instruction> unsigned_mad_decoded(
+        decode_valid(*decoder, unsigned_mad_words.data()));
     ASSERT_NE(unsigned_mad_decoded, nullptr);
     auto *unsigned_mad = dynamic_cast<cdna5::VMadNcU64U32Vop3 *>(unsigned_mad_decoded.get());
     ASSERT_NE(unsigned_mad, nullptr);
@@ -451,7 +454,7 @@ TEST(Gfx1250LiteralOperandTest, SplitBackendPreservesSignedAndEncodingSemantics)
     const auto scalar_base =
         cdna5::build_sop2(cdna5::kSAshrI64Sop2, {.ssrc0 = 255, .ssrc1 = 128, .sdst = 0});
     const std::array scalar_words{scalar_base[0], literal};
-    std::unique_ptr<Instruction> scalar_decoded(decoder->decode(scalar_words.data()));
+    std::unique_ptr<Instruction> scalar_decoded(decode_valid(*decoder, scalar_words.data()));
     ASSERT_NE(scalar_decoded, nullptr);
     EXPECT_EQ(scalar_decoded->mnemonic(), "s_ashr_i64");
     EXPECT_EQ(scalar_decoded->size(), 8);
@@ -468,7 +471,7 @@ TEST(Gfx1250LiteralOperandTest, SplitBackendPreservesSignedAndEncodingSemantics)
     const auto b64_base =
         cdna5::build_sop2(cdna5::kSAndB64Sop2, {.ssrc0 = 255, .ssrc1 = 193, .sdst = 2});
     const std::array b64_words{b64_base[0], literal};
-    std::unique_ptr<Instruction> b64_decoded(decoder->decode(b64_words.data()));
+    std::unique_ptr<Instruction> b64_decoded(decode_valid(*decoder, b64_words.data()));
     ASSERT_NE(b64_decoded, nullptr);
     auto *b64 = dynamic_cast<cdna5::SAndB64Sop2 *>(b64_decoded.get());
     ASSERT_NE(b64, nullptr);
@@ -505,7 +508,7 @@ TEST(Gfx1250LiteralOperandTest, NegativeI64CompareCoversScalarAndAvailableSimdPa
     const auto compare_base =
         cdna5::build_vop3(cdna5::kVCmpLtI64Vop3, {.vdst = 0, .src0 = 255, .src1 = 256});
     const std::array compare_words{compare_base[0], compare_base[1], 0xffffffffu};
-    std::unique_ptr<Instruction> compare(decoder->decode(compare_words.data()));
+    std::unique_ptr<Instruction> compare(decode_valid(*decoder, compare_words.data()));
     ASSERT_NE(compare, nullptr);
     EXPECT_EQ(compare->mnemonic(), "v_cmp_lt_i64");
     EXPECT_EQ(compare->size(), 12);
@@ -556,7 +559,7 @@ TEST(Gfx1250LiteralOperandTest, ScalarMaskOperandsRejectLiteralMarkers) {
       SCOPED_TRACE(test_case.name);
       SCOPED_TRACE(marker);
       const std::array words{test_case.encoding[0], test_case.encoding[1], 0xffffffffu, 0u};
-      EXPECT_THROW(std::unique_ptr<Instruction>(decoder->decode(words.data())), util::InvalidInst);
+      EXPECT_TRUE(decode_fails(*decoder, words.data()));
     }
   }
 }
@@ -576,7 +579,7 @@ TEST(Gfx1250LiteralOperandTest, PkF32LiteralReplicatesAndUsesAvailableSimdPath) 
 
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
     ASSERT_NE(decoder, nullptr);
-    std::unique_ptr<Instruction> add(decoder->decode(add_words.data()));
+    std::unique_ptr<Instruction> add(decode_valid(*decoder, add_words.data()));
     ASSERT_NE(add, nullptr);
     auto *typed_add = dynamic_cast<cdna5::VPkAddF32Vop3p *>(add.get());
     ASSERT_NE(typed_add, nullptr);
@@ -665,7 +668,7 @@ TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralVgprSourcesUseAvailableSimdPath
     const std::array words{base[0], base[1], kLiteral};
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
     ASSERT_NE(decoder, nullptr);
-    std::unique_ptr<Instruction> instruction(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
     ASSERT_NE(instruction, nullptr);
 
     const Operand *literal_operand = instruction->src_operand(test_case.literal_source);
@@ -723,7 +726,7 @@ TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralSourceSpecificSelectorFallsBack
   const std::array words{base[0], base[1], kLiteral};
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> instruction(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
   ASSERT_NE(instruction, nullptr);
   auto *typed = dynamic_cast<cdna5::VPkAddF32Vop3p *>(instruction.get());
   ASSERT_NE(typed, nullptr);
@@ -771,7 +774,7 @@ TEST(Gfx1250ExecutionTest, PkF32AddMulSimdMatchesScalarWithPartialExec) {
           {.vdst = 4, .neg_hi = 2, .src0 = 256, .src1 = 258, .opsel_hi = 3, .neg = 1});
       auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
       ASSERT_NE(decoder, nullptr);
-      std::unique_ptr<Instruction> instruction(decoder->decode(words.data()));
+      std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
       ASSERT_NE(instruction, nullptr);
 
       Gfx1250Sim sim;
@@ -880,7 +883,7 @@ TEST(Gfx1250ExecutionTest, PkF32EveryNondefaultSelectorGateFallsBackToScalar) {
         words[0] |= uint32_t{1} << 14;
       auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
       ASSERT_NE(decoder, nullptr);
-      std::unique_ptr<Instruction> instruction(decoder->decode(words.data()));
+      std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
       ASSERT_NE(instruction, nullptr);
 
       Gfx1250Sim sim;
@@ -951,7 +954,7 @@ TEST(Gfx1250ExecutionTest, PkFmaF32SimdMatchesScalarWithPartialExec) {
     words[0] |= uint32_t{1} << 14; // pad_14 is the src2 high-half selector.
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
     ASSERT_NE(decoder, nullptr);
-    std::unique_ptr<Instruction> instruction(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
     ASSERT_NE(instruction, nullptr);
     auto *typed = dynamic_cast<cdna5::VPkFmaF32Vop3p *>(instruction.get());
     ASSERT_NE(typed, nullptr);
@@ -1018,7 +1021,7 @@ TEST(Gfx1250DecodeTest, Vop3pRejectsLiteral64SelectorInEverySourcePosition) {
            cdna5::Vop3pBuilderFields{.src2 = 254},
        }) {
     const auto words = cdna5::build_vop3p(cdna5::kVPkFmaF32Vop3p, fields);
-    EXPECT_THROW(static_cast<void>(decoder->decode(words.data())), util::InvalidInst);
+    EXPECT_TRUE(decode_fails(*decoder, words.data()));
   }
 }
 
@@ -1028,7 +1031,7 @@ TEST(Gfx1250DecodeTest, BinaryVop3pIgnoresLiteral64SelectorInUnusedSrc2) {
 
   for (const uint32_t opcode : {cdna5::kVPkAddF32Vop3p, cdna5::kVPkMulF32Vop3p}) {
     const auto words = cdna5::build_vop3p(opcode, {.src0 = 128, .src1 = 129, .src2 = 254});
-    std::unique_ptr<Instruction> instruction(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
     ASSERT_NE(instruction, nullptr);
     EXPECT_EQ(instruction->size(), 8);
     EXPECT_EQ(instruction->num_src_operands(), 2);
@@ -1074,7 +1077,7 @@ TEST(Gfx1250ExecutionTest, Wave32ScalarVccHiWritePreservesUpperHalf) {
   ASSERT_NE(decoder, nullptr);
 
   const uint32_t words[] = {0x8c6b7e6bu, 0}; // s_or_b32 vcc_hi, vcc_hi, exec_lo
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "s_or_b32");
   cu->execute_instruction(inst.get(), *wf);
