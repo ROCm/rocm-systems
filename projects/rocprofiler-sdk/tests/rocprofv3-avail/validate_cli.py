@@ -571,6 +571,23 @@ def test_rocprofv3_list_avail_inherited_output_variables(cli, inventory, tmp_pat
     assert sorted(tmp_path.rglob("*_list_avail.txt")) == []
 
 
+def test_rocprofv3_list_avail_explicit_file_with_inherited_path(cli, inventory, tmp_path):
+    inherited = tmp_path / "inherited"
+    result = cli(
+        "rocprofv3",
+        "-o",
+        "metrics",
+        "--list-avail",
+        cwd=tmp_path,
+        extra_environment={"ROCPROF_OUTPUT_PATH": str(inherited)},
+    )
+
+    # an explicit -o diverts the listing, and the inherited path still decides
+    # where it lands, so it stays with the other artifacts of the same run
+    assert result.stdout == ""
+    _assert_combined_availability(_list_avail_file(inherited), inventory)
+
+
 def test_rocprofv3_list_avail_with_trace(cli, inventory, request, tmp_path):
     transpose = "{}/bin/transpose".format(request.config.getoption("--rocm-path"))
     if not os.path.isfile(transpose):
