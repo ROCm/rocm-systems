@@ -224,7 +224,7 @@ uint32_t run_modern_dot4(rj_code_arch_t arch, uint32_t opcode, uint32_t src0_val
       0xCC000000u | ((opcode & 0xFFu) << 16) | (1u << 15) | kDstVgpr,
       256u | (257u << 9) | (258u << 18) | (3u << 27) | ((neg & 7u) << 29),
   };
-  Instruction *inst = decoder->decode(words);
+  Instruction *inst = decode_valid(*decoder, words);
   EXPECT_NE(inst, nullptr);
 
   const uint32_t vb = wf->vgpr_alloc().base;
@@ -253,7 +253,7 @@ TEST(Vop3pDotIntSimdCorrectness, Dot4ClampPolicyMatchesArchitecture) {
     EXPECT_EQ(run_modern_dot4(ROCJITSU_CODE_ARCH_RDNA4, 23, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFF00u,
                               0, force_scalar),
               kUnsignedWrapped);
-    EXPECT_EQ(run_modern_dot4(ROCJITSU_CODE_ARCH_GFX1250, 23, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFF00u,
+    EXPECT_EQ(run_modern_dot4(ROCJITSU_CODE_ARCH_CDNA5, 23, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFF00u,
                               0, force_scalar),
               kUnsignedWrapped);
 
@@ -264,7 +264,7 @@ TEST(Vop3pDotIntSimdCorrectness, Dot4ClampPolicyMatchesArchitecture) {
     EXPECT_EQ(run_modern_dot4(ROCJITSU_CODE_ARCH_RDNA4, 22, 0x7F7F7F7Fu, 0x7F7F7F7Fu, 0x7FFFFFF5u,
                               3, force_scalar),
               kMixedSignedWrapped);
-    EXPECT_EQ(run_modern_dot4(ROCJITSU_CODE_ARCH_GFX1250, 22, 0x7F7F7F7Fu, 0x7F7F7F7Fu, 0x7FFFFFF5u,
+    EXPECT_EQ(run_modern_dot4(ROCJITSU_CODE_ARCH_CDNA5, 22, 0x7F7F7F7Fu, 0x7F7F7F7Fu, 0x7FFFFFF5u,
                               3, force_scalar),
               kMixedSignedWrapped);
   }

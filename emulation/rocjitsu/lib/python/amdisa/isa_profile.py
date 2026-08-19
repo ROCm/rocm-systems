@@ -319,6 +319,11 @@ class IsaProfile(ABC):
         return False
 
     @property
+    def supports_gpr_idx(self) -> bool:
+        """True when MODE.GPR_IDX_EN applies M0 indexing to VALU operands."""
+        return False
+
+    @property
     def uses_packed_16bit_e32_source_selectors(self) -> bool:
         """True when E32 16-bit source selectors can address packed high halves."""
         return False
@@ -388,6 +393,11 @@ class IsaProfile(ABC):
     @property
     def ds_addtid_uses_m0_byte_base(self) -> bool:
         """True when DS ADDTID addresses use M0 as a byte-address base."""
+        return False
+
+    @property
+    def ds_transpose_ignores_exec(self) -> bool:
+        """True when DS transpose loads form addresses for every lane."""
         return False
 
     @property
@@ -1086,6 +1096,10 @@ class CdnaProfile(_AmdgpuProfileBase):
       encodings with ``bit_cnt >= 64``, since their ``OpEncoding``
       struct already spans the full instruction width.
     """
+
+    @property
+    def supports_gpr_idx(self) -> bool:
+        return True
 
     _FLAT_SEGMENTS = frozenset({'GLBL', 'SCRATCH'})
 
@@ -1819,6 +1833,10 @@ class Cdna5Profile(Rdna4Profile):
 
     @property
     def ds_addtid_uses_m0_byte_base(self) -> bool:
+        return True
+
+    @property
+    def ds_transpose_ignores_exec(self) -> bool:
         return True
 
     _SKIP = frozenset(

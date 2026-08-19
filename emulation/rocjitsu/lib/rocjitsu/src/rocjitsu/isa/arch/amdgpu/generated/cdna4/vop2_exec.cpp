@@ -635,7 +635,8 @@ void VMacF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t omod = 0u;
     uint16_t result = amdgpu::fp_mode::fma_f16(
         src0_bits, src1_bits, accumulator, false, false, false, false, false, false,
-        wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, false, wf.fp16_ovfl());
+        wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, false, wf.fp16_ovfl(),
+        amdgpu::floating_clamp_nan_to_zero(wf));
     amdgpu::sdwa::write_lane<true>(*this, wf, vdst, lane, result);
   }
 }

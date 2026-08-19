@@ -8,7 +8,6 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/vgpr_range.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -238,13 +237,13 @@ void VClrexcpVop3::execute_impl(amdgpu::Wavefront &wf) {
 void VMovreldB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   std::optional<uint32_t> rel_dst_base =
       Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
-  int64_t rel_dst_index =
-      rel_dst_base ? static_cast<int64_t>(*rel_dst_base) + static_cast<int64_t>(wf.m0()) : -1;
-  std::optional<uint32_t> safe_dst_offset =
-      amdgpu::destination_vgpr_offset(wf, rel_dst_index, vdst.vgpr_count());
-  if (!safe_dst_offset)
+  uint64_t rel_dst_index =
+      rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + wf.m0() : UINT64_MAX;
+  bool rel_dst_valid = rel_dst_base && wf.m0() <= 1023u &&
+                       rel_dst_index + vdst.vgpr_count() <= wf.vgpr_alloc().count;
+  if (!rel_dst_valid)
     return;
-  amdgpu::PhysicalVgprOperand rel_dst(vdst.size_bits(), *safe_dst_offset);
+  Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -257,13 +256,12 @@ void VMovreldB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 void VMovrelsB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   std::optional<uint32_t> rel_src_base =
       Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  int64_t rel_src_index =
-      rel_src_base ? static_cast<int64_t>(*rel_src_base) + static_cast<int64_t>(wf.m0()) : -1;
-  std::optional<uint32_t> rel_src_offset =
-      amdgpu::source_vgpr_offset(wf, rel_src_index, src0.vgpr_count());
-  if (!rel_src_offset)
-    return;
-  amdgpu::PhysicalVgprOperand rel_src(src0.size_bits(), *rel_src_offset);
+  uint64_t rel_src_index =
+      rel_src_base ? static_cast<uint64_t>(*rel_src_base) + wf.m0() : UINT64_MAX;
+  bool rel_src_valid = rel_src_base && wf.m0() <= 1023u &&
+                       rel_src_index + src0.vgpr_count() <= wf.vgpr_alloc().count;
+  Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR,
+                  static_cast<int>(rel_src_valid ? rel_src_index : 0u));
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -280,16 +278,19 @@ void VMovrelsdB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
   uint32_t rel_src_offset = wf.m0();
   uint32_t rel_dst_offset = wf.m0();
-  int64_t rel_src_index = rel_src_base ? static_cast<int64_t>(*rel_src_base) + rel_src_offset : -1;
-  int64_t rel_dst_index = rel_dst_base ? static_cast<int64_t>(*rel_dst_base) + rel_dst_offset : -1;
-  std::optional<uint32_t> safe_src_offset =
-      amdgpu::source_vgpr_offset(wf, rel_src_index, src0.vgpr_count());
-  std::optional<uint32_t> safe_dst_offset =
-      amdgpu::destination_vgpr_offset(wf, rel_dst_index, vdst.vgpr_count());
-  if (!safe_src_offset || !safe_dst_offset)
+  uint64_t rel_src_index =
+      rel_src_base ? static_cast<uint64_t>(*rel_src_base) + rel_src_offset : UINT64_MAX;
+  uint64_t rel_dst_index =
+      rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;
+  bool rel_src_valid = rel_src_base && rel_src_offset <= 1023u &&
+                       rel_src_index + src0.vgpr_count() <= wf.vgpr_alloc().count;
+  bool rel_dst_valid = rel_dst_base && rel_dst_offset <= 1023u &&
+                       rel_dst_index + vdst.vgpr_count() <= wf.vgpr_alloc().count;
+  if (!rel_dst_valid)
     return;
-  amdgpu::PhysicalVgprOperand rel_src(src0.size_bits(), *safe_src_offset);
-  amdgpu::PhysicalVgprOperand rel_dst(vdst.size_bits(), *safe_dst_offset);
+  Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR,
+                  static_cast<int>(rel_src_valid ? rel_src_index : 0u));
+  Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -306,16 +307,19 @@ void VMovrelsd2B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
   uint32_t rel_src_offset = wf.m0() & 0x3ffu;
   uint32_t rel_dst_offset = (wf.m0() >> 16) & 0x3ffu;
-  int64_t rel_src_index = rel_src_base ? static_cast<int64_t>(*rel_src_base) + rel_src_offset : -1;
-  int64_t rel_dst_index = rel_dst_base ? static_cast<int64_t>(*rel_dst_base) + rel_dst_offset : -1;
-  std::optional<uint32_t> safe_src_offset =
-      amdgpu::source_vgpr_offset(wf, rel_src_index, src0.vgpr_count());
-  std::optional<uint32_t> safe_dst_offset =
-      amdgpu::destination_vgpr_offset(wf, rel_dst_index, vdst.vgpr_count());
-  if (!safe_src_offset || !safe_dst_offset)
+  uint64_t rel_src_index =
+      rel_src_base ? static_cast<uint64_t>(*rel_src_base) + rel_src_offset : UINT64_MAX;
+  uint64_t rel_dst_index =
+      rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;
+  bool rel_src_valid = rel_src_base && rel_src_offset <= 1023u &&
+                       rel_src_index + src0.vgpr_count() <= wf.vgpr_alloc().count;
+  bool rel_dst_valid = rel_dst_base && rel_dst_offset <= 1023u &&
+                       rel_dst_index + vdst.vgpr_count() <= wf.vgpr_alloc().count;
+  if (!rel_dst_valid)
     return;
-  amdgpu::PhysicalVgprOperand rel_src(src0.size_bits(), *safe_src_offset);
-  amdgpu::PhysicalVgprOperand rel_dst(vdst.size_bits(), *safe_dst_offset);
+  Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR,
+                  static_cast<int>(rel_src_valid ? rel_src_index : 0u));
+  Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -443,7 +447,7 @@ void VFmacLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
         return v;
       }();
       if (inst_.clamp)
-        v = std::clamp(v, 0.0f, 1.0f);
+        v = amdgpu::clamp_floating_result(v, wf);
       return v;
     }()));
   }
@@ -588,7 +592,7 @@ void VFmaLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
         return v;
       }();
       if (inst_.clamp)
-        v = std::clamp(v, 0.0f, 1.0f);
+        v = amdgpu::clamp_floating_result(v, wf);
       return v;
     }()));
   }
@@ -735,43 +739,6 @@ void VDivFmasF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
 void VMsadU8Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_msad_u8_vop3(*this, wf); }
 
 void VQsadPkU16U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  std::optional<uint32_t> dst_offset =
-      Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
-  amdgpu::ResolvedVgprSpan dst_span =
-      amdgpu::resolve_vgpr_span(wf, dst_offset, vdst.vgpr_count(), true);
-  if (!dst_span.is_valid())
-    return;
-  uint32_t dst_base = wf.vgpr_alloc().base + dst_span.offset();
-  std::optional<uint32_t> src0_offset =
-      Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  amdgpu::ResolvedVgprSpan src0_span =
-      amdgpu::resolve_vgpr_span(wf, src0_offset, src0.vgpr_count(), false);
-  if (src0_span.is_invalid())
-    return;
-  std::optional<amdgpu::PhysicalVgprOperand> src0_physical;
-  if (src0_span.is_valid())
-    src0_physical.emplace(src0.size_bits(), src0_span.offset());
-  ScopedOperandDelegate src0_binding(src0, src0_physical ? &*src0_physical : nullptr);
-  std::optional<uint32_t> src1_offset =
-      Isa::resolved_vgpr_offset(src1.opr_type_, src1.encoding_value_);
-  amdgpu::ResolvedVgprSpan src1_span =
-      amdgpu::resolve_vgpr_span(wf, src1_offset, src1.vgpr_count(), false);
-  if (src1_span.is_invalid())
-    return;
-  std::optional<amdgpu::PhysicalVgprOperand> src1_physical;
-  if (src1_span.is_valid())
-    src1_physical.emplace(src1.size_bits(), src1_span.offset());
-  ScopedOperandDelegate src1_binding(src1, src1_physical ? &*src1_physical : nullptr);
-  std::optional<uint32_t> src2_offset =
-      Isa::resolved_vgpr_offset(src2.opr_type_, src2.encoding_value_);
-  amdgpu::ResolvedVgprSpan src2_span =
-      amdgpu::resolve_vgpr_span(wf, src2_offset, src2.vgpr_count(), false);
-  if (src2_span.is_invalid())
-    return;
-  std::optional<amdgpu::PhysicalVgprOperand> src2_physical;
-  if (src2_span.is_valid())
-    src2_physical.emplace(src2.size_bits(), src2_span.offset());
-  ScopedOperandDelegate src2_binding(src2, src2_physical ? &*src2_physical : nullptr);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -779,6 +746,7 @@ void VQsadPkU16U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t source = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     uint32_t reference = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint64_t accum = amdgpu::RegisterAccess(wf).read_lane64(src2, lane);
+    uint64_t packed_result = 0;
     for (uint32_t window = 0; window < 4; ++window) {
       uint32_t sum = 0;
       for (uint32_t byte = 0; byte < 4; ++byte) {
@@ -787,54 +755,13 @@ void VQsadPkU16U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
         sum += a > b ? a - b : b - a;
       }
       uint32_t value = sum + ((accum >> (window * 16)) & 0xffffu);
-      uint32_t reg = window / 2;
-      uint32_t shift = (window % 2) * 16;
-      uint32_t old = amdgpu::RegisterAccess(wf.cu()).read_vgpr(dst_base + reg, lane);
-      uint32_t mask = 0xffffu << shift;
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + reg, lane,
-                                                 (old & ~mask) | ((value & 0xffffu) << shift));
+      packed_result |= static_cast<uint64_t>(value & 0xffffu) << (window * 16);
     }
+    amdgpu::sdwa::write_lane64<false>(*this, wf, vdst, lane, packed_result);
   }
 }
 
 void VMqsadPkU16U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  std::optional<uint32_t> dst_offset =
-      Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
-  amdgpu::ResolvedVgprSpan dst_span =
-      amdgpu::resolve_vgpr_span(wf, dst_offset, vdst.vgpr_count(), true);
-  if (!dst_span.is_valid())
-    return;
-  uint32_t dst_base = wf.vgpr_alloc().base + dst_span.offset();
-  std::optional<uint32_t> src0_offset =
-      Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  amdgpu::ResolvedVgprSpan src0_span =
-      amdgpu::resolve_vgpr_span(wf, src0_offset, src0.vgpr_count(), false);
-  if (src0_span.is_invalid())
-    return;
-  std::optional<amdgpu::PhysicalVgprOperand> src0_physical;
-  if (src0_span.is_valid())
-    src0_physical.emplace(src0.size_bits(), src0_span.offset());
-  ScopedOperandDelegate src0_binding(src0, src0_physical ? &*src0_physical : nullptr);
-  std::optional<uint32_t> src1_offset =
-      Isa::resolved_vgpr_offset(src1.opr_type_, src1.encoding_value_);
-  amdgpu::ResolvedVgprSpan src1_span =
-      amdgpu::resolve_vgpr_span(wf, src1_offset, src1.vgpr_count(), false);
-  if (src1_span.is_invalid())
-    return;
-  std::optional<amdgpu::PhysicalVgprOperand> src1_physical;
-  if (src1_span.is_valid())
-    src1_physical.emplace(src1.size_bits(), src1_span.offset());
-  ScopedOperandDelegate src1_binding(src1, src1_physical ? &*src1_physical : nullptr);
-  std::optional<uint32_t> src2_offset =
-      Isa::resolved_vgpr_offset(src2.opr_type_, src2.encoding_value_);
-  amdgpu::ResolvedVgprSpan src2_span =
-      amdgpu::resolve_vgpr_span(wf, src2_offset, src2.vgpr_count(), false);
-  if (src2_span.is_invalid())
-    return;
-  std::optional<amdgpu::PhysicalVgprOperand> src2_physical;
-  if (src2_span.is_valid())
-    src2_physical.emplace(src2.size_bits(), src2_span.offset());
-  ScopedOperandDelegate src2_binding(src2, src2_physical ? &*src2_physical : nullptr);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -842,6 +769,7 @@ void VMqsadPkU16U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t source = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     uint32_t reference = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint64_t accum = amdgpu::RegisterAccess(wf).read_lane64(src2, lane);
+    uint64_t packed_result = 0;
     for (uint32_t window = 0; window < 4; ++window) {
       uint32_t sum = 0;
       for (uint32_t byte = 0; byte < 4; ++byte) {
@@ -851,13 +779,9 @@ void VMqsadPkU16U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
           sum += a > b ? a - b : b - a;
       }
       uint32_t value = sum + ((accum >> (window * 16)) & 0xffffu);
-      uint32_t reg = window / 2;
-      uint32_t shift = (window % 2) * 16;
-      uint32_t old = amdgpu::RegisterAccess(wf.cu()).read_vgpr(dst_base + reg, lane);
-      uint32_t mask = 0xffffu << shift;
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + reg, lane,
-                                                 (old & ~mask) | ((value & 0xffffu) << shift));
+      packed_result |= static_cast<uint64_t>(value & 0xffffu) << (window * 16);
     }
+    amdgpu::sdwa::write_lane64<false>(*this, wf, vdst, lane, packed_result);
   }
 }
 
@@ -866,43 +790,6 @@ void VTrigPreopF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VMqsadU32U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  std::optional<uint32_t> dst_offset =
-      Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
-  amdgpu::ResolvedVgprSpan dst_span =
-      amdgpu::resolve_vgpr_span(wf, dst_offset, vdst.vgpr_count(), true);
-  if (!dst_span.is_valid())
-    return;
-  uint32_t dst_base = wf.vgpr_alloc().base + dst_span.offset();
-  std::optional<uint32_t> src0_offset =
-      Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  amdgpu::ResolvedVgprSpan src0_span =
-      amdgpu::resolve_vgpr_span(wf, src0_offset, src0.vgpr_count(), false);
-  if (src0_span.is_invalid())
-    return;
-  std::optional<amdgpu::PhysicalVgprOperand> src0_physical;
-  if (src0_span.is_valid())
-    src0_physical.emplace(src0.size_bits(), src0_span.offset());
-  ScopedOperandDelegate src0_binding(src0, src0_physical ? &*src0_physical : nullptr);
-  std::optional<uint32_t> src1_offset =
-      Isa::resolved_vgpr_offset(src1.opr_type_, src1.encoding_value_);
-  amdgpu::ResolvedVgprSpan src1_span =
-      amdgpu::resolve_vgpr_span(wf, src1_offset, src1.vgpr_count(), false);
-  if (src1_span.is_invalid())
-    return;
-  std::optional<amdgpu::PhysicalVgprOperand> src1_physical;
-  if (src1_span.is_valid())
-    src1_physical.emplace(src1.size_bits(), src1_span.offset());
-  ScopedOperandDelegate src1_binding(src1, src1_physical ? &*src1_physical : nullptr);
-  std::optional<uint32_t> src2_offset =
-      Isa::resolved_vgpr_offset(src2.opr_type_, src2.encoding_value_);
-  amdgpu::ResolvedVgprSpan src2_span =
-      amdgpu::resolve_vgpr_span(wf, src2_offset, src2.vgpr_count(), false);
-  if (src2_span.is_invalid())
-    return;
-  std::optional<amdgpu::PhysicalVgprOperand> src2_physical;
-  if (src2_span.is_valid())
-    src2_physical.emplace(src2.size_bits(), src2_span.offset());
-  ScopedOperandDelegate src2_binding(src2, src2_physical ? &*src2_physical : nullptr);
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -910,23 +797,21 @@ void VMqsadU32U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint64_t source = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
     uint32_t reference = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t accum[4];
-    if (src2_span.is_valid()) {
-      for (uint32_t window = 0; window < 4; ++window)
-        accum[window] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(
-            wf.vgpr_alloc().base + src2_span.offset() + window, lane);
-    } else if (std::optional<uint64_t> constant = src2.const_value()) {
+    if (std::optional<uint64_t> constant = src2.const_value()) {
       accum[0] = static_cast<uint32_t>(*constant);
       accum[1] = static_cast<uint32_t>(*constant >> 32);
       accum[2] = 0;
       accum[3] = 0;
     } else {
-      auto accum_word = src2;
+      Operand accum_word = src2;
       accum_word.size_bits_ = 32;
       for (uint32_t window = 0; window < 4; ++window) {
         accum_word.encoding_value_ = src2.encoding_value_ + static_cast<int>(window);
         accum[window] = amdgpu::RegisterAccess(wf).read_lane(accum_word, lane);
       }
     }
+    Operand dst_word = vdst;
+    dst_word.size_bits_ = 32;
     for (uint32_t window = 0; window < 4; ++window) {
       uint32_t sum = 0;
       for (uint32_t byte = 0; byte < 4; ++byte) {
@@ -935,7 +820,8 @@ void VMqsadU32U8Vop3::execute_impl(amdgpu::Wavefront &wf) {
         if (b != 0)
           sum += a > b ? a - b : b - a;
       }
-      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + window, lane, accum[window] + sum);
+      dst_word.encoding_value_ = vdst.encoding_value_ + static_cast<int>(window);
+      amdgpu::sdwa::write_lane<false>(*this, wf, dst_word, lane, accum[window] + sum);
     }
   }
 }

@@ -1820,18 +1820,18 @@ _FLAT_DATA_MAP: dict[str, tuple[int, int, bool]] = {
 _TRANSPOSE_LOAD_MAP: dict[str, tuple[str, int, int, int]] = {
     # suffix -> (semantic suffix, elem_size, num_elems, transpose kind)
     # elem_size/num_elems describe the raw VGPR result size in dwords.
-    # transpose kind is amdgpu::TransposeKind: TR_B4=1, TR_B6=2, TR_B8=3,
-    # TR16_B128=4 (grouped 16-bit B128 layout), B64_TR_B16=5 (CDNA4 4x16-lane
-    # ds_read_b64_tr_b16 layout).
+    # transpose kind is amdgpu::TransposeKind: TR_B4=1, TR_B6=2,
+    # B64_TR_B8=3 (CDNA4 MFMA layout), TR16_B128=4, B64_TR_B16=5,
+    # WMMA_TR_B8=6 (CDNA5/RDNA4 16x16 matrix layout).
     'B64_TR_B4': ('b4', 4, 2, 1),
     'B96_TR_B6': ('b6', 4, 3, 2),
     'B64_TR_B8': ('b8', 4, 2, 3),
     'B64_TR_B16': ('b16', 4, 2, 5),
     'TR4_B64': ('b4', 4, 2, 1),
     'TR6_B96': ('b6', 4, 3, 2),
-    'TR8_B64': ('b8', 4, 2, 3),
+    'TR8_B64': ('b8', 4, 2, 6),
     'TR16_B128': ('b16', 4, 4, 4),
-    'TR_B64': ('b8', 4, 2, 3),
+    'TR_B64': ('b8', 4, 2, 6),
     'TR_B128': ('b16', 4, 4, 4),
 }
 

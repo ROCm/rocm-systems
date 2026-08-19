@@ -1587,7 +1587,7 @@ void GlobalLoadTr8B64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 2;
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->transpose = 3;
+  d->transpose = 6;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);

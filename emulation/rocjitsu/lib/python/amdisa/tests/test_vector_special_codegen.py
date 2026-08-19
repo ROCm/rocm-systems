@@ -69,9 +69,13 @@ def test_relative_vgpr_ops_use_unsigned_packed_m0_fields():
     assert 'rel_staged_src_binding(rel_src' in move
     assert 'write_lane(rel_src, lane, dst_value)' in swap
     assert 'std::optional<uint32_t>' in move
-    assert 'destination_vgpr_offset' in move
-    assert 'if (!safe_src_offset || !safe_dst_offset) return;' in swap
-    assert 'static_cast<int64_t>(wf.m0())' in full_width
+    assert 'Operand rel_src' in move
+    assert 'Operand rel_dst' in move
+    assert 'rel_src_offset > 255u' not in swap
+    assert 'rel_dst_offset > 255u' not in swap
+    assert 'rel_src_valid ? rel_src_index : 0u' in move
+    assert 'if (!rel_dst_valid) return;' in move
+    assert 'wf.m0() <= 1023u' in full_width
     assert 'static_cast<int32_t>(wf.m0())' not in full_width
 
 
@@ -95,15 +99,15 @@ def test_perm_and_qsad_codegen_cover_multiword_results():
 
     assert 'uint32_t packed[3]' in perm
     assert 'source_bit = index * 6u' in perm
-    assert 'ResolvedVgprSpan dst_span' in perm
-    assert 'if (src0_span.is_invalid()) return;' in perm
+    assert 'Operand dst_word = vdst;' in perm
+    assert 'dst_word.encoding_value_' in perm
     assert 'read_lane64(src1, lane)' in perm
-    assert 'PhysicalVgprOperand safe_src0' not in perm
     assert '(window + byte) * 8' in qsad
+    assert 'write_lane64(vdst, lane, packed_result)' in qsad
     assert 'value & 0xffffu' in qsad
     assert 'if (b != 0)' in mqsad
-    assert 'accum[window] = amdgpu::RegisterAccess(wf.cu()).read_vgpr' in mqsad
-    assert 'else if (std::optional<uint64_t> constant = src2.const_value())' in mqsad
+    assert 'accum[window] = amdgpu::RegisterAccess(wf).read_lane' in mqsad
+    assert 'if (std::optional<uint64_t> constant = src2.const_value())' in mqsad
     assert 'accum[window] + sum' in mqsad
 
 
@@ -130,6 +134,7 @@ def test_mullit_and_trig_preop_preserve_special_fp_rules():
     assert 's1 == -std::numeric_limits<float>::infinity()' in mullit
     assert 's2 <= 0.0f || std::isnan(s2)' in mullit
     assert '(s0 == 0.0f || s1 == 0.0f) ? 0.0f' in mullit
+    assert 'amdgpu::clamp_floating_result(result, wf)' in mullit
     assert '0xA2F983u' in trig
     assert 'kTwoOverPiChunks' in trig
     assert 'kChunkBits = 24u' in trig
@@ -138,7 +143,8 @@ def test_mullit_and_trig_preop_preserve_special_fp_rules():
     assert 'if (bit >= kValidBits) return 0' in trig
     assert 'exponent > 1077u' in trig
     assert 'exponent >= 1968u' in trig
-    assert 'std::ldexp' in trig
+    assert 'scale_u53_f64_rtz(segment, scale)' in trig
+    assert 'amdgpu::fp_mode::finish_f64' in trig
 
 
 def test_trig_preop_two_over_pi_table_integrity():
@@ -220,8 +226,8 @@ def test_vop3_f16_simd_probes_split_true16_from_generic():
     assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16' in rcp_true16
     fma_generic = simd_probe_line('v_fma_f16_vop3')
     fma_true16 = simd_probe_line('v_fma_f16_vop3', true16_vop3=True)
-    assert fma_generic is None
-    assert fma_true16 is None
+    assert fma_generic == '  ROCJITSU_TRY_SIMD_FMA_VOP3_FP16();'
+    assert fma_true16 == '  ROCJITSU_TRY_SIMD_FMA_VOP3_TRUE16_FP16();'
     div_fixup = simd_probe_line('v_div_fixup_f16_vop3')
     assert 'if (!wf.fp16_ovfl())' not in div_fixup
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16' in div_fixup
@@ -230,11 +236,23 @@ def test_vop3_f16_simd_probes_split_true16_from_generic():
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' in div_fixup_true16
     fmac_generic = simd_probe_line('v_fmac_f16_vop3')
     fmac_true16 = simd_probe_line('v_fmac_f16_vop3', true16_vop3=True)
-    assert fmac_generic is None
-    assert fmac_true16 is None
-    assert simd_probe_line('v_fmac_f16_vop2') is None
-    assert simd_probe_line('v_fmamk_f16_vop2') is None
-    assert simd_probe_line('v_fmaak_f16_vop2') is None
+    assert fmac_generic == '  ROCJITSU_TRY_SIMD_FMAC_VOP3_MODE_FP16();'
+    assert fmac_true16 == '  ROCJITSU_TRY_SIMD_FMAC_VOP3_MODE_TRUE16_FP16();'
+    assert simd_probe_line('v_fmac_f16_vop2') == '  ROCJITSU_TRY_SIMD_VOP2_FMAC_F16();'
+    assert simd_probe_line('v_fmamk_f16_vop2') == (
+        '  ROCJITSU_TRY_SIMD_VOP2_FMA_F16_MULTIPLY_LITERAL('
+        'amdgpu::RegisterAccess(wf).read_scalar(inst.simm32));'
+    )
+    assert simd_probe_line('v_fmaak_f16_vop2') == (
+        '  ROCJITSU_TRY_SIMD_VOP2_FMA_F16_ADD_LITERAL('
+        'amdgpu::RegisterAccess(wf).read_scalar(inst.simm32));'
+    )
+    assert simd_probe_line('v_fmac_f64_vop2') == '  ROCJITSU_TRY_SIMD_VOP2_FMA_F64();'
+    assert simd_probe_line('v_fma_f64_vop3') == '  ROCJITSU_TRY_SIMD_FMA_VOP3_FP64();'
+    assert (
+        simd_probe_line('v_fmac_f64_vop3')
+        == '  ROCJITSU_TRY_SIMD_FMAC_VOP3_MODE_FP64();'
+    )
     assert simd_probe_line('v_cmp_class_f16_vop3').startswith(
         '  ROCJITSU_TRY_SIMD_VOP3_CLASS_B32'
     )

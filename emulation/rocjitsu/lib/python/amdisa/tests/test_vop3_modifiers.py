@@ -90,11 +90,9 @@ class TestVop3DstMod:
         lines = vop3_dst_mod('result')
         assert any('omod == 3' in line and '*= 0.5f' in line for line in lines)
 
-    def test_clamp_uses_float_literals(self):
+    def test_clamp_uses_shared_architecture_policy(self):
         lines = vop3_dst_mod('result')
-        assert any(
-            'clamp' in line and '0.0f' in line and '1.0f' in line for line in lines
-        )
+        assert any('clamp_floating_result(result, wf)' in line for line in lines)
 
     def test_varname_appears_in_all_lines(self):
         lines = vop3_dst_mod('myresult')
@@ -128,11 +126,9 @@ class TestVop3DstModF64:
         lines = vop3_dst_mod_f64('result')
         assert any('omod == 3' in line and '*= 0.5;' in line for line in lines)
 
-    def test_clamp_uses_double_literals(self):
+    def test_clamp_uses_shared_architecture_policy(self):
         lines = vop3_dst_mod_f64('result')
-        assert any(
-            'clamp' in line and '0.0,' in line and '1.0)' in line for line in lines
-        )
+        assert any('clamp_floating_result(result, wf)' in line for line in lines)
 
     def test_does_not_use_float_suffix(self):
         lines = vop3_dst_mod_f64('result')

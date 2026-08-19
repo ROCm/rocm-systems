@@ -726,6 +726,280 @@ TEST(Gfx1250MemoryExecutionHarness, NonBufferResourceTypeSuppressesLoadAndStore)
     wf->halt();
 }
 
+TEST(Rdna2MovrelModifierTest, RelativeSourceIsSelectedBeforeDppAndSdwaStaging) {
+  amdgpu::GpuMemory gpu_mem("rdna2_movrel_modifier_mem");
+  amdgpu::L2Cache l2("rdna2_movrel_modifier_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA2;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("rdna2_movrel_modifier", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA2);
+  ASSERT_NE(decoder, nullptr);
+
+  const uint32_t base = wf->vgpr_alloc().base;
+  wf->set_m0(1u); // Every encoded v7 source below resolves to v8.
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    cu->write_vgpr(base + 8, lane, 0x100u + lane);
+
+  auto execute = [&](const std::array<uint32_t, 2> &words) {
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(std::string_view(inst->mnemonic()).starts_with("v_movrels_b32"));
+    cu->execute_instruction(inst.get(), *wf);
+  };
+
+  // LLVM 23 gfx1030 encodings. DPP16 row_shr:1 reads the M0-adjusted source
+  // from the preceding lane and supplies zero at the row boundary.
+  wf->set_exec(~0ULL);
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    cu->write_vgpr(base + 5, lane, 0xDEADBEEFu);
+  execute({0x7E0A86FAu, 0xFF091107u});
+  EXPECT_EQ(cu->read_vgpr(base + 5, 0), 0u);
+  EXPECT_EQ(cu->read_vgpr(base + 5, 1), 0x100u);
+  EXPECT_EQ(cu->read_vgpr(base + 5, 15), 0x10Eu);
+  EXPECT_EQ(cu->read_vgpr(base + 5, 16), 0u);
+
+  // With only even lanes active, DPP8 FI controls whether an active lane may
+  // fetch its odd, inactive partner. Inactive destinations remain untouched.
+  constexpr uint64_t kEvenLanes = 0x5555555555555555ULL;
+  wf->set_exec(kEvenLanes);
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    cu->write_vgpr(base + 5, lane, 0xDEADBEEFu);
+  execute({0x7E0A86E9u, 0xDE54C107u}); // dpp8 [1,0,3,2,5,4,7,6], FI=0
+  EXPECT_EQ(cu->read_vgpr(base + 5, 0), 0u);
+  EXPECT_EQ(cu->read_vgpr(base + 5, 1), 0xDEADBEEFu);
+
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    cu->write_vgpr(base + 5, lane, 0xDEADBEEFu);
+  execute({0x7E0A86EAu, 0xDE54C107u}); // same permutation, FI=1
+  EXPECT_EQ(cu->read_vgpr(base + 5, 0), 0x101u);
+  EXPECT_EQ(cu->read_vgpr(base + 5, 1), 0xDEADBEEFu);
+
+  // SDWA observes byte 2 of the relative source and merges it into destination
+  // word 1 while preserving destination word 0.
+  wf->set_exec(1u);
+  cu->write_vgpr(base + 8, 0, 0xA1B2C3D4u);
+  cu->write_vgpr(base + 5, 0, 0x11223344u);
+  execute({0x7E0A86F9u, 0x00021507u});
+  EXPECT_EQ(cu->read_vgpr(base + 5, 0), 0x00B23344u);
+}
+
+TEST(Cdna4GprIdxTest, SelectorMaskMapsIndependentlyToEachOperandRole) {
+  constexpr std::array<amdgpu::VgprMsbRole, 4> kRoles = {
+      amdgpu::VgprMsbRole::Src0, amdgpu::VgprMsbRole::Src1, amdgpu::VgprMsbRole::Src2,
+      amdgpu::VgprMsbRole::Dst};
+
+  for (uint32_t mask = 0; mask < 16; ++mask) {
+    for (size_t role = 0; role < kRoles.size(); ++role)
+      EXPECT_EQ(amdgpu::gpr_idx_role_enabled(mask, kRoles[role]), (mask & (1u << role)) != 0)
+          << "mask=" << mask << " role=" << role;
+    EXPECT_FALSE(amdgpu::gpr_idx_role_enabled(mask, amdgpu::VgprMsbRole::None));
+  }
+}
+
+TEST(Cdna4GprIdxTest, MadmkVsrc1UsesSrc2SelectorBit) {
+  amdgpu::GpuMemory gpu_mem("cdna4_madmk_gpr_idx_mem");
+  amdgpu::L2Cache l2("cdna4_madmk_gpr_idx_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("cdna4_madmk_gpr_idx", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  constexpr uint32_t kIndex = 4;
+  constexpr uint32_t kSrc0 = 0;
+  constexpr uint32_t kAddend = 8;
+  constexpr uint32_t kDst = 16;
+  const auto encoded = cdna4::build_vop2(
+      cdna4::kVMadmkF16Vop2,
+      {.src0 = static_cast<uint16_t>(256u + kSrc0), .vsrc1 = kAddend, .vdst = kDst});
+  const uint32_t words[] = {encoded[0], util::f32_to_f16(3.0f)};
+  std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words));
+  ASSERT_NE(instruction, nullptr);
+  ASSERT_EQ(std::string_view(instruction->mnemonic()), "v_madmk_f16_e32");
+
+  wf->set_exec(1u);
+  wf->set_mode_raw(amdgpu::Wavefront::GPR_IDX_EN_BIT);
+  const uint32_t base = wf->vgpr_alloc().base;
+  cu->write_vgpr(base + kSrc0, 0, util::f32_to_f16(2.0f));
+  cu->write_vgpr(base + kAddend, 0, util::f32_to_f16(1.0f));
+  cu->write_vgpr(base + kAddend + kIndex, 0, util::f32_to_f16(5.0f));
+
+  struct SelectorCase {
+    uint32_t mask;
+    float expected;
+  };
+  constexpr std::array<SelectorCase, 2> kCases = {
+      SelectorCase{.mask = 0x2, .expected = 7.0f},
+      SelectorCase{.mask = 0x4, .expected = 11.0f},
+  };
+  for (const SelectorCase &selector_case : kCases) {
+    SCOPED_TRACE(selector_case.mask);
+    wf->set_m0(kIndex | (selector_case.mask << 12));
+    cu->write_vgpr(base + kDst, 0, 0xCAFE0000u);
+    cu->execute_instruction(instruction.get(), *wf);
+    EXPECT_EQ(cu->read_vgpr(base + kDst, 0), util::f32_to_f16(selector_case.expected));
+  }
+}
+
+TEST(Cdna4GprIdxTest, SwapWritesEachDestinationWithItsAssignedRole) {
+  amdgpu::GpuMemory gpu_mem("cdna4_swap_gpr_idx_mem");
+  amdgpu::L2Cache l2("cdna4_swap_gpr_idx_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("cdna4_swap_gpr_idx", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  constexpr uint32_t kIndex = 16;
+  constexpr uint32_t kSrc = 4;
+  constexpr uint32_t kDst = 8;
+  const auto words =
+      cdna4::build_vop1(cdna4::kVSwapB32Vop1, {.src0 = static_cast<uint16_t>(vgpr_src(kSrc)),
+                                               .vdst = static_cast<uint8_t>(kDst)});
+  std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+  ASSERT_NE(instruction, nullptr);
+  ASSERT_EQ(std::string_view(instruction->mnemonic()), "v_swap_b32_e32");
+
+  wf->set_exec(1u);
+  wf->set_mode_raw(amdgpu::Wavefront::GPR_IDX_EN_BIT);
+  const uint32_t base = wf->vgpr_alloc().base;
+
+  wf->set_m0(kIndex | (0x1u << 12));
+  cu->write_vgpr(base + kSrc, 0, 0x11111111u);
+  cu->write_vgpr(base + kSrc + kIndex, 0, 0x22222222u);
+  cu->write_vgpr(base + kDst, 0, 0x33333333u);
+  cu->execute_instruction(instruction.get(), *wf);
+  EXPECT_EQ(cu->read_vgpr(base + kSrc, 0), 0x11111111u);
+  EXPECT_EQ(cu->read_vgpr(base + kSrc + kIndex, 0), 0x33333333u);
+  EXPECT_EQ(cu->read_vgpr(base + kDst, 0), 0x22222222u);
+
+  wf->set_m0(kIndex | (0x8u << 12));
+  cu->write_vgpr(base + kSrc, 0, 0x44444444u);
+  cu->write_vgpr(base + kDst, 0, 0x55555555u);
+  cu->write_vgpr(base + kDst + kIndex, 0, 0x66666666u);
+  cu->execute_instruction(instruction.get(), *wf);
+  EXPECT_EQ(cu->read_vgpr(base + kSrc, 0), 0x66666666u);
+  EXPECT_EQ(cu->read_vgpr(base + kDst, 0), 0x55555555u);
+  EXPECT_EQ(cu->read_vgpr(base + kDst + kIndex, 0), 0x44444444u);
+}
+
+TEST(Cdna4GprIdxTest, MfmaIndexesArchitecturalVgprsButNotAccvgprs) {
+  amdgpu::GpuMemory gpu_mem("cdna4_mfma_gpr_idx_mem");
+  amdgpu::L2Cache l2("cdna4_mfma_gpr_idx_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("cdna4_mfma_gpr_idx", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  constexpr uint32_t kIndex = 16;
+  constexpr uint32_t kSrc0 = 0;
+  constexpr uint32_t kSrc1 = 4;
+  constexpr uint32_t kSrc2 = 8;
+  constexpr uint32_t kDst = 64;
+  constexpr uint32_t kDstDwords = 4;
+  const uint32_t base = wf->vgpr_alloc().base;
+  wf->set_exec(~0ULL);
+  wf->set_mode_raw(amdgpu::Wavefront::GPR_IDX_EN_BIT);
+
+  auto make_instruction = [&](uint8_t acc_cd) {
+    const auto words = cdna4::build_vop3p_mfma(cdna4::kVMfmaF3216x16x4F32Vop3pMfma,
+                                               {.vdst = kDst,
+                                                .acc_cd = acc_cd,
+                                                .src0 = static_cast<uint16_t>(vgpr_src(kSrc0)),
+                                                .src1 = static_cast<uint16_t>(vgpr_src(kSrc1)),
+                                                .src2 = static_cast<uint16_t>(vgpr_src(kSrc2))});
+    return std::unique_ptr<Instruction>(decode_valid(*decoder, words.data()));
+  };
+  std::unique_ptr<Instruction> vgpr_instruction = make_instruction(0);
+  std::unique_ptr<Instruction> acc_instruction = make_instruction(1);
+  ASSERT_NE(vgpr_instruction, nullptr);
+  ASSERT_NE(acc_instruction, nullptr);
+
+  auto initialize_sources = [&](float src0, float indexed_src0) {
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      cu->write_vgpr(base + kSrc0, lane, std::bit_cast<uint32_t>(src0));
+      cu->write_vgpr(base + kSrc0 + kIndex, lane, std::bit_cast<uint32_t>(indexed_src0));
+      cu->write_vgpr(base + kSrc1, lane, std::bit_cast<uint32_t>(3.0f));
+      for (uint32_t dword = 0; dword < kDstDwords; ++dword)
+        cu->write_vgpr(base + kSrc2 + dword, lane, std::bit_cast<uint32_t>(5.0f));
+    }
+  };
+
+  initialize_sources(7.0f, 2.0f);
+  wf->set_m0(kIndex | (0x1u << 12));
+  cu->execute_instruction(vgpr_instruction.get(), *wf);
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    for (uint32_t dword = 0; dword < kDstDwords; ++dword)
+      EXPECT_EQ(cu->read_vgpr(base + kDst + dword, lane), std::bit_cast<uint32_t>(29.0f));
+
+  initialize_sources(2.0f, 7.0f);
+  wf->set_m0(kIndex | (0x8u << 12));
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    for (uint32_t dword = 0; dword < kDstDwords; ++dword) {
+      cu->write_vgpr(base + kDst + dword, lane, 0x11111111u);
+      cu->write_vgpr(base + kDst + kIndex + dword, lane, 0x22222222u);
+    }
+  cu->execute_instruction(vgpr_instruction.get(), *wf);
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    for (uint32_t dword = 0; dword < kDstDwords; ++dword) {
+      EXPECT_EQ(cu->read_vgpr(base + kDst + dword, lane), 0x11111111u);
+      EXPECT_EQ(cu->read_vgpr(base + kDst + kIndex + dword, lane), std::bit_cast<uint32_t>(29.0f));
+    }
+
+  initialize_sources(2.0f, 7.0f);
+  wf->set_m0(kIndex | (0xCu << 12));
+  const uint32_t acc_base = base + amdgpu::ACC_VGPR_OFFSET + kDst;
+  const uint32_t acc_src2_base = base + amdgpu::ACC_VGPR_OFFSET + kSrc2;
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    for (uint32_t dword = 0; dword < kDstDwords; ++dword) {
+      cu->write_vgpr(acc_src2_base + dword, lane, std::bit_cast<uint32_t>(5.0f));
+      cu->write_vgpr(acc_src2_base + kIndex + dword, lane, 0x44444444u);
+      cu->write_vgpr(acc_base + dword, lane, 0x22222222u);
+      cu->write_vgpr(acc_base + kIndex + dword, lane, 0x33333333u);
+    }
+  cu->execute_instruction(acc_instruction.get(), *wf);
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    for (uint32_t dword = 0; dword < kDstDwords; ++dword) {
+      EXPECT_EQ(cu->read_vgpr(acc_base + dword, lane), std::bit_cast<uint32_t>(29.0f));
+      EXPECT_EQ(cu->read_vgpr(acc_base + kIndex + dword, lane), 0x33333333u);
+      EXPECT_EQ(cu->read_vgpr(acc_src2_base + kIndex + dword, lane), 0x44444444u);
+    }
+}
+
 TEST(Rdna4ScalarSccTest, AddSubCoI32UseSignedOverflow) {
   amdgpu::GpuMemory gpu_mem("rdna4_scc_i32_overflow_mem");
   amdgpu::L2Cache l2("rdna4_scc_i32_overflow_l2");
@@ -1966,13 +2240,36 @@ TEST(Cdna4Permlane16SwapExecutionTest, Wave64SwapsAllFourGroups) {
 }
 
 uint32_t wmma64_ab_lane(uint32_t row_or_col, uint32_t k) {
-  return row_or_col + 16u * ((k >> 2) & 1u);
+  return row_or_col + 16u * ((k >> 3) & 1u);
 }
 
-uint32_t wmma64_ab_index(uint32_t k) {
-  const uint32_t reg =
-      ((k >> 1) & 1u) + 2u * ((k >> 3) & 1u) + 4u * ((k >> 4) & 1u) + 8u * ((k >> 5) & 1u);
-  return 2u * reg + (k & 1u);
+uint32_t wmma64_ab_index(uint32_t k) { return (k & 7u) + 8u * (k >> 4); }
+
+TEST(Gfx1250WmmaTest, Fp8K128PhysicalLayoutMatchesCdna5Anchors) {
+  struct LayoutAnchor {
+    uint32_t k;
+    uint32_t lane_half;
+    uint32_t slot;
+  };
+  constexpr LayoutAnchor anchors[] = {
+      {0, 0, 0},   {7, 0, 7},   {8, 1, 0},   {15, 1, 7},   {16, 0, 8},
+      {63, 1, 31}, {64, 0, 32}, {72, 1, 32}, {127, 1, 63},
+  };
+  constexpr uint32_t row_or_col = 3;
+
+  for (const LayoutAnchor &anchor : anchors) {
+    SCOPED_TRACE(anchor.k);
+    const amdgpu::InputLoc a = amdgpu::wmma_a_input_loc(16, 128, row_or_col, anchor.k, 8, 8);
+    const amdgpu::InputLoc b = amdgpu::wmma_b_input_loc(16, 128, row_or_col, anchor.k, 8, 8);
+    for (const amdgpu::InputLoc &loc : {a, b}) {
+      EXPECT_EQ(loc.lane, row_or_col + 16u * anchor.lane_half);
+      EXPECT_EQ(loc.vgpr_offset, anchor.slot / 4u);
+      EXPECT_EQ(loc.sub_element, anchor.slot % 4u);
+      EXPECT_EQ(loc.data_bits, 8u);
+    }
+    EXPECT_EQ(wmma64_ab_lane(row_or_col, anchor.k), row_or_col + 16u * anchor.lane_half);
+    EXPECT_EQ(wmma64_ab_index(anchor.k), anchor.slot);
+  }
 }
 
 void write_packed_byte(amdgpu::ComputeUnitCore &cu, uint32_t reg, uint32_t lane, uint32_t byte,
@@ -2786,12 +3083,12 @@ TEST(Gfx1250True16Vop3Test, SpecialVop3OpsUseSelectedHalves) {
     execute(encode_vop3(/*op=*/786, /*vdst=*/9, /*src0=*/256, /*src1=*/257,
                         /*src2=*/0, /*abs=*/0, /*opsel=*/0x3),
             "v_cvt_pk_norm_i16_f16");
-    EXPECT_EQ(cu->read_vgpr(vb + 9, 0), 0x7FFF3FFFu);
+    EXPECT_EQ(cu->read_vgpr(vb + 9, 0), 0x7FFF4000u);
 
     execute(encode_vop3(/*op=*/787, /*vdst=*/10, /*src0=*/256, /*src1=*/257,
                         /*src2=*/0, /*abs=*/0, /*opsel=*/0x3),
             "v_cvt_pk_norm_u16_f16");
-    EXPECT_EQ(cu->read_vgpr(vb + 10, 0), 0xFFFF7FFFu);
+    EXPECT_EQ(cu->read_vgpr(vb + 10, 0), 0xFFFF8000u);
 
     cu->write_vgpr(vb + 0, 0, pack16(util::f32_to_f16(0.25f), util::f32_to_f16(2.0f)));
     cu->write_vgpr(vb + 1, 0, pack16(util::f32_to_f16(1.0f), util::f32_to_f16(3.0f)));
@@ -3769,12 +4066,12 @@ TEST(Rdna4True16Vop3Test, SpecialVop3OpsUseSelectedHalves) {
     execute(encode_vop3(/*op=*/786, /*vdst=*/9, /*src0=*/256, /*src1=*/257,
                         /*src2=*/0, /*abs=*/0, /*opsel=*/0x3),
             "v_cvt_pk_norm_i16_f16");
-    EXPECT_EQ(cu->read_vgpr(vb + 9, 0), 0x7FFF3FFFu);
+    EXPECT_EQ(cu->read_vgpr(vb + 9, 0), 0x7FFF4000u);
 
     execute(encode_vop3(/*op=*/787, /*vdst=*/10, /*src0=*/256, /*src1=*/257,
                         /*src2=*/0, /*abs=*/0, /*opsel=*/0x3),
             "v_cvt_pk_norm_u16_f16");
-    EXPECT_EQ(cu->read_vgpr(vb + 10, 0), 0xFFFF7FFFu);
+    EXPECT_EQ(cu->read_vgpr(vb + 10, 0), 0xFFFF8000u);
 
     cu->write_vgpr(vb + 0, 0, pack16(util::f32_to_f16(0.25f), util::f32_to_f16(2.0f)));
     cu->write_vgpr(vb + 1, 0, pack16(util::f32_to_f16(1.0f), util::f32_to_f16(3.0f)));
@@ -5864,6 +6161,69 @@ TEST(Cdna4CvtScaleTest, WideFp6ToF16ConsumesFp16OvflMode) {
     wf->halt();
 }
 
+TEST(Cdna4GprIdxTest, WideConversionIndexesResolvedBaseBeforeDwordOffsets) {
+  amdgpu::GpuMemory gpu_mem("cdna4_cvt_scale_wide_gpr_idx_mem");
+  amdgpu::L2Cache l2("cdna4_cvt_scale_wide_gpr_idx_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("cdna4_cvt_scale_wide_gpr_idx", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  constexpr uint32_t kDst = 2;
+  constexpr uint32_t kSrc = 20;
+  constexpr uint32_t kScale = 80;
+  constexpr uint32_t kIndex = 32;
+  const auto words = encode_cdna_vop3(cdna4::kVCvtScalef32Pk32F16Fp6Vop3, kDst, vgpr_src(kSrc),
+                                      vgpr_src(kScale), 0);
+  std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+  ASSERT_NE(instruction, nullptr);
+
+  wf->set_exec(1u);
+  wf->set_mode_raw(amdgpu::Wavefront::GPR_IDX_EN_BIT);
+  const uint32_t base = wf->vgpr_alloc().base;
+  cu->write_vgpr(base + kScale, 0, std::bit_cast<uint32_t>(1.0f));
+
+  uint8_t fp6_values[32];
+  std::fill(std::begin(fp6_values), std::end(fp6_values), 0x10u);
+  uint32_t packed_fp6[6]{};
+  util::pack_6bit(fp6_values, packed_fp6);
+  const uint16_t expected_half = util::f32_to_f16(util::fp6_e2m3_to_f32(0x10u));
+  const uint32_t expected = pack16(expected_half, expected_half);
+
+  wf->set_m0(kIndex | (0x1u << 12));
+  for (uint32_t dword = 0; dword < 6; ++dword) {
+    cu->write_vgpr(base + kSrc + dword, 0, 0u);
+    cu->write_vgpr(base + kSrc + kIndex + dword, 0, packed_fp6[dword]);
+  }
+  for (uint32_t dword = 0; dword < 16; ++dword)
+    cu->write_vgpr(base + kDst + dword, 0, 0xDEADBEEFu);
+  cu->execute_instruction(instruction.get(), *wf);
+  for (uint32_t dword = 0; dword < 16; ++dword)
+    EXPECT_EQ(cu->read_vgpr(base + kDst + dword, 0), expected) << dword;
+
+  wf->set_m0(kIndex | (0x8u << 12));
+  for (uint32_t dword = 0; dword < 6; ++dword)
+    cu->write_vgpr(base + kSrc + dword, 0, packed_fp6[dword]);
+  for (uint32_t dword = 0; dword < 16; ++dword) {
+    cu->write_vgpr(base + kDst + dword, 0, 0x11111111u);
+    cu->write_vgpr(base + kDst + kIndex + dword, 0, 0x22222222u);
+  }
+  cu->execute_instruction(instruction.get(), *wf);
+  for (uint32_t dword = 0; dword < 16; ++dword) {
+    EXPECT_EQ(cu->read_vgpr(base + kDst + dword, 0), 0x11111111u) << dword;
+    EXPECT_EQ(cu->read_vgpr(base + kDst + kIndex + dword, 0), expected) << dword;
+  }
+}
+
 TEST(Gfx1250CvtFp8Test, E5M3ClampSelectsUnsignedFp8Format) {
   amdgpu::GpuMemory gpu_mem("gfx1250_cvt_fp8_e5m3_mem");
   amdgpu::L2Cache l2("gfx1250_cvt_fp8_e5m3_l2");
@@ -6507,7 +6867,7 @@ TEST(HwregHelperTest, ModeBit27OnlyEnablesGprIndexingWhereArchitected) {
       {ROCJITSU_CODE_ARCH_CDNA3, "cdna3", true},  {ROCJITSU_CODE_ARCH_CDNA4, "cdna4", true},
       {ROCJITSU_CODE_ARCH_RDNA1, "rdna1", false}, {ROCJITSU_CODE_ARCH_RDNA2, "rdna2", false},
       {ROCJITSU_CODE_ARCH_RDNA3, "rdna3", false}, {ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", false},
-      {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", false}, {ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", true},
+      {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", false}, {ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", false},
   };
 
   for (const GprIdxModeCase &arch_case : cases) {

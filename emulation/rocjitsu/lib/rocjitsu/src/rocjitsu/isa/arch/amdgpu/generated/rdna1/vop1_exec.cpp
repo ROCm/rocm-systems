@@ -9,7 +9,6 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/vgpr_range.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -628,13 +627,13 @@ void VMovreldB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
   std::optional<uint32_t> rel_dst_base =
       Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
-  int64_t rel_dst_index =
-      rel_dst_base ? static_cast<int64_t>(*rel_dst_base) + static_cast<int64_t>(wf.m0()) : -1;
-  std::optional<uint32_t> safe_dst_offset =
-      amdgpu::destination_vgpr_offset(wf, rel_dst_index, vdst.vgpr_count());
-  if (!safe_dst_offset)
+  uint64_t rel_dst_index =
+      rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + wf.m0() : UINT64_MAX;
+  bool rel_dst_valid = rel_dst_base && wf.m0() <= 1023u &&
+                       rel_dst_index + vdst.vgpr_count() <= wf.vgpr_alloc().count;
+  if (!rel_dst_valid)
     return;
-  amdgpu::PhysicalVgprOperand rel_dst(vdst.size_bits(), *safe_dst_offset);
+  Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
   uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -647,13 +646,12 @@ void VMovreldB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
 void VMovrelsB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   std::optional<uint32_t> rel_src_base =
       Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  int64_t rel_src_index =
-      rel_src_base ? static_cast<int64_t>(*rel_src_base) + static_cast<int64_t>(wf.m0()) : -1;
-  std::optional<uint32_t> rel_src_offset =
-      amdgpu::source_vgpr_offset(wf, rel_src_index, src0.vgpr_count());
-  if (!rel_src_offset)
-    return;
-  amdgpu::PhysicalVgprOperand rel_src(src0.size_bits(), *rel_src_offset);
+  uint64_t rel_src_index =
+      rel_src_base ? static_cast<uint64_t>(*rel_src_base) + wf.m0() : UINT64_MAX;
+  bool rel_src_valid = rel_src_base && wf.m0() <= 1023u &&
+                       rel_src_index + src0.vgpr_count() <= wf.vgpr_alloc().count;
+  Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR,
+                  static_cast<int>(rel_src_valid ? rel_src_index : 0u));
   std::unique_ptr<StagedOperand> rel_staged_src;
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(&rel_src, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_, dpp_bound_ctrl_,
@@ -681,16 +679,19 @@ void VMovrelsdB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
       Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
   uint32_t rel_src_offset = wf.m0();
   uint32_t rel_dst_offset = wf.m0();
-  int64_t rel_src_index = rel_src_base ? static_cast<int64_t>(*rel_src_base) + rel_src_offset : -1;
-  int64_t rel_dst_index = rel_dst_base ? static_cast<int64_t>(*rel_dst_base) + rel_dst_offset : -1;
-  std::optional<uint32_t> safe_src_offset =
-      amdgpu::source_vgpr_offset(wf, rel_src_index, src0.vgpr_count());
-  std::optional<uint32_t> safe_dst_offset =
-      amdgpu::destination_vgpr_offset(wf, rel_dst_index, vdst.vgpr_count());
-  if (!safe_src_offset || !safe_dst_offset)
+  uint64_t rel_src_index =
+      rel_src_base ? static_cast<uint64_t>(*rel_src_base) + rel_src_offset : UINT64_MAX;
+  uint64_t rel_dst_index =
+      rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;
+  bool rel_src_valid = rel_src_base && rel_src_offset <= 1023u &&
+                       rel_src_index + src0.vgpr_count() <= wf.vgpr_alloc().count;
+  bool rel_dst_valid = rel_dst_base && rel_dst_offset <= 1023u &&
+                       rel_dst_index + vdst.vgpr_count() <= wf.vgpr_alloc().count;
+  if (!rel_dst_valid)
     return;
-  amdgpu::PhysicalVgprOperand rel_src(src0.size_bits(), *safe_src_offset);
-  amdgpu::PhysicalVgprOperand rel_dst(vdst.size_bits(), *safe_dst_offset);
+  Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR,
+                  static_cast<int>(rel_src_valid ? rel_src_index : 0u));
+  Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
   std::unique_ptr<StagedOperand> rel_staged_src;
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(&rel_src, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_, dpp_bound_ctrl_,
@@ -718,16 +719,19 @@ void VMovrelsd2B32Vop1::execute_impl(amdgpu::Wavefront &wf) {
       Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
   uint32_t rel_src_offset = wf.m0() & 0x3ffu;
   uint32_t rel_dst_offset = (wf.m0() >> 16) & 0x3ffu;
-  int64_t rel_src_index = rel_src_base ? static_cast<int64_t>(*rel_src_base) + rel_src_offset : -1;
-  int64_t rel_dst_index = rel_dst_base ? static_cast<int64_t>(*rel_dst_base) + rel_dst_offset : -1;
-  std::optional<uint32_t> safe_src_offset =
-      amdgpu::source_vgpr_offset(wf, rel_src_index, src0.vgpr_count());
-  std::optional<uint32_t> safe_dst_offset =
-      amdgpu::destination_vgpr_offset(wf, rel_dst_index, vdst.vgpr_count());
-  if (!safe_src_offset || !safe_dst_offset)
+  uint64_t rel_src_index =
+      rel_src_base ? static_cast<uint64_t>(*rel_src_base) + rel_src_offset : UINT64_MAX;
+  uint64_t rel_dst_index =
+      rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;
+  bool rel_src_valid = rel_src_base && rel_src_offset <= 1023u &&
+                       rel_src_index + src0.vgpr_count() <= wf.vgpr_alloc().count;
+  bool rel_dst_valid = rel_dst_base && rel_dst_offset <= 1023u &&
+                       rel_dst_index + vdst.vgpr_count() <= wf.vgpr_alloc().count;
+  if (!rel_dst_valid)
     return;
-  amdgpu::PhysicalVgprOperand rel_src(src0.size_bits(), *safe_src_offset);
-  amdgpu::PhysicalVgprOperand rel_dst(vdst.size_bits(), *safe_dst_offset);
+  Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR,
+                  static_cast<int>(rel_src_valid ? rel_src_index : 0u));
+  Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
   std::unique_ptr<StagedOperand> rel_staged_src;
   if (inst_.src0 == amdgpu::SRC_DPP)
     amdgpu::dpp::apply_dpp(&rel_src, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_, dpp_bound_ctrl_,
@@ -1080,18 +1084,18 @@ void VSwaprelB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
       Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
   std::optional<uint32_t> rel_src_base =
       Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
-  int64_t rel_src_index =
-      rel_src_base ? static_cast<int64_t>(*rel_src_base) + (wf.m0() & 0x3ffu) : -1;
-  int64_t rel_dst_index =
-      rel_dst_base ? static_cast<int64_t>(*rel_dst_base) + ((wf.m0() >> 16) & 0x3ffu) : -1;
-  std::optional<uint32_t> safe_src_offset =
-      amdgpu::destination_vgpr_offset(wf, rel_src_index, src0.vgpr_count());
-  std::optional<uint32_t> safe_dst_offset =
-      amdgpu::destination_vgpr_offset(wf, rel_dst_index, vdst.vgpr_count());
-  if (!safe_src_offset || !safe_dst_offset)
+  uint32_t rel_src_offset = wf.m0() & 0x3ffu;
+  uint32_t rel_dst_offset = (wf.m0() >> 16) & 0x3ffu;
+  uint64_t rel_src_index =
+      rel_src_base ? static_cast<uint64_t>(*rel_src_base) + rel_src_offset : UINT64_MAX;
+  uint64_t rel_dst_index =
+      rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;
+  if (!rel_src_base || rel_src_index + src0.vgpr_count() > wf.vgpr_alloc().count)
     return;
-  amdgpu::PhysicalVgprOperand rel_src(src0.size_bits(), *safe_src_offset);
-  amdgpu::PhysicalVgprOperand rel_dst(vdst.size_bits(), *safe_dst_offset);
+  if (!rel_dst_base || rel_dst_index + vdst.vgpr_count() > wf.vgpr_alloc().count)
+    return;
+  Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_src_index));
+  Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))

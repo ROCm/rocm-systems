@@ -18,6 +18,7 @@ from amdisa.codegen import CodeGenerator
 from amdisa.codegen.config import CodegenConfig
 from amdisa.codegen.execute.vector_special import (
     gen_cvt_fp8,
+    gen_cvt_scalef32,
     gen_vector_mad_64_32,
     gen_vector_div_scale,
     gen_vector_movrel,
@@ -320,26 +321,18 @@ def test_generated_execution_helper_includes_are_scoped(
     execute_shared_path: Path,
 ):
     fp_include = '#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"'
-    vgpr_include = '#include "rocjitsu/isa/arch/amdgpu/shared/vgpr_range.h"'
 
     for path in (
         gfx1250_generated_root / 'smem_exec.cpp',
         amdgpu_generated_root / 'cdna4' / 'smem_exec.cpp',
-        amdgpu_generated_root / 'rdna4' / 'vds_exec.cpp',
     ):
         source = path.read_text()
         assert fp_include not in source, path
-        assert vgpr_include not in source, path
 
     assert fp_include in (gfx1250_generated_root / 'vop2_exec.cpp').read_text()
-    assert vgpr_include in (gfx1250_generated_root / 'vop1_exec.cpp').read_text()
-    assert (
-        vgpr_include in (amdgpu_generated_root / 'cdna4' / 'vop3_exec.cpp').read_text()
-    )
 
     shared = execute_shared_path.read_text()
     assert fp_include in shared
-    assert vgpr_include not in shared
 
 
 def test_gfx1250_model_include_graph_does_not_reach_vm(
@@ -863,13 +856,13 @@ def test_gfx1250_parser_injects_permlane64_compat_once():
     vop1.primary_dt_ptrs[104] = 0
     dte = SimpleNamespace(sub_decode_funcs=[None] * 128, decode_func=None)
     parser.isa_spec = SimpleNamespace(
-        arch_name='gfx1250',
+        arch_name='cdna5',
         encoding_map={'ENC_VOP1': vop1},
         primary_decode_table=[dte],
     )
 
-    parser._inject_gfx1250_permlane64_compat()
-    parser._inject_gfx1250_permlane64_compat()
+    parser._inject_cdna5_permlane64_compat()
+    parser._inject_cdna5_permlane64_compat()
 
     assert [(inst.name, inst.opcode) for inst in vop1.insts] == [
         ('V_SWAP_B16', 102),
@@ -897,7 +890,7 @@ def test_gfx1250_parser_permlane64_requires_an_unambiguous_adjacent_route():
     vop1.primary_dt_ptrs[102] = 1
     vop1.primary_dt_ptrs[104] = 2
     parser.isa_spec = SimpleNamespace(
-        arch_name='gfx1250',
+        arch_name='cdna5',
         encoding_map={'ENC_VOP1': vop1},
         primary_decode_table=[
             SimpleNamespace(sub_decode_funcs=[None] * 128, decode_func=None)
@@ -905,7 +898,7 @@ def test_gfx1250_parser_permlane64_requires_an_unambiguous_adjacent_route():
         ],
     )
 
-    parser._inject_gfx1250_permlane64_compat()
+    parser._inject_cdna5_permlane64_compat()
 
     assert not any(inst.name == 'V_PERMLANE64_B32' for inst in vop1.insts)
     assert vop1.primary_dt_ptrs[103] == -1
@@ -1354,6 +1347,40 @@ def test_cdna4_fp8_mfma_keeps_ocp_helper_variant():
     assert 'amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, true, true, true>(' not in body
 
 
+def test_cdna4_matrix_bases_apply_gpr_idx_by_operand_role():
+    dense = Instruction('V_MFMA_F32_16X16X4_F32', 'ENC_VOP3P_MFMA', 0, [])
+    sparse = Instruction('V_SMFMAC_F32_16X16X64_BF16', 'ENC_VOP3P_MFMA', 0, [])
+
+    dense_body = gen_mfma(dense, ['vdst'], ['src0', 'src1', 'src2'], 'cdna4')
+    sparse_body = gen_mfma(sparse, ['vdst'], ['src0', 'src1', 'src2'], 'cdna4')
+
+    for role in ('Dst', 'Src0', 'Src1', 'Src2'):
+        assert f'amdgpu::VgprMsbRole::{role}' in dense_body
+        assert f'amdgpu::VgprMsbRole::{role}' in sparse_body
+    assert 'if (const_acc == amdgpu::ACC_FROM_VGPR)' in dense_body
+    assert 'apply_gpr_idx_to_mma_base' in dense_body
+    assert 'apply_gpr_idx_to_mma_base' in sparse_body
+
+
+def test_cdna4_wide_conversion_indexes_each_base_once():
+    body = gen_cvt_scalef32(
+        SimpleNamespace(
+            op='2xpk16_fp6_f32',
+            dst_ops=['vdst'],
+            src_ops=['src0', 'src1', 'src2'],
+            arch_name='cdna4',
+        )
+    )
+
+    for operand in ('vdst', 'src0', 'src1'):
+        assert body.count(f'auto {operand}_off = Isa::resolved_vgpr_offset') == 1
+        assert f'uint32_t {operand}_base = vb + amdgpu::apply_gpr_idx' in body
+    assert 'unified_vgpr_index()' not in body
+    assert 'rd(src0_base' in body
+    assert 'rd(src1_base' in body
+    assert 'wr(vdst_base' in body
+
+
 def test_cdna3_fp8_cvt_uses_fnuz_helper_variant():
     ctx = SimpleNamespace(
         dst_ops=['vdst'],
@@ -1485,6 +1512,7 @@ def test_gfx1250_profile_enables_generator_backed_quirks():
     assert profile.buffer_payload_reads_use_effective_exec_mask
     assert profile.generate_scaled_wmma_vop3px2
     assert profile.smem_address_uses_access_size
+    assert profile.ds_transpose_ignores_exec
     assert profile.vop3_cmp_sdst_size_bits == 32
     assert profile.vop3_cndmask_selector_size_bits == 32
     assert profile.vop3_carry_mask_size_bits == 32
@@ -1496,6 +1524,8 @@ def test_gfx1250_profile_enables_generator_backed_quirks():
         ('ENC_VOP2', 'V_FMAMK_F16', 'vsrc1', 'Src2'),
         ('ENC_VOP2', 'V_FMAMK_F32', 'vsrc1', 'Src2'),
         ('ENC_VOP2', 'V_FMAMK_F64', 'vsrc1', 'Src2'),
+        ('ENC_VOP2', 'V_MADMK_F16', 'vsrc1', 'Src2'),
+        ('ENC_VOP2', 'V_MADMK_F32', 'vsrc1', 'Src2'),
         ('ENC_VOP2', 'V_ADD_F32', 'vsrc1', 'Src1'),
         ('ENC_VOP1', 'V_SWAP_B32', 'src0', 'Src0'),
         ('ENC_VDS', 'DS_STORE_ADDTID_B32', 'data0', 'Src1'),
@@ -1533,6 +1563,7 @@ def test_rdna4_profile_enables_gfx12_true16_and_mode_hwregs_only():
     assert not profile.buffer_payload_reads_use_effective_exec_mask
     assert not profile.generate_scaled_wmma_vop3px2
     assert not profile.smem_address_uses_access_size
+    assert not profile.ds_transpose_ignores_exec
     assert profile.vop3_cmp_sdst_size_bits is None
     assert profile.vop3_cndmask_selector_size_bits is None
     assert profile.vop3_carry_mask_size_bits is None
@@ -1780,7 +1811,9 @@ def test_gfx1250_generated_vop2_fmac_f16_reads_packed_vdst(
 
 
 def test_gfx1250_generated_high_vgpr_paths_use_logical_operands(
-    gfx1250_generated_root: Path, execute_shared_path: Path
+    amdgpu_generated_root: Path,
+    gfx1250_generated_root: Path,
+    execute_shared_path: Path,
 ):
     vop1 = (gfx1250_generated_root / 'vop1.cpp').read_text()
     vop1_exec = (gfx1250_generated_root / 'vop1_exec.cpp').read_text()
@@ -1790,6 +1823,7 @@ def test_gfx1250_generated_high_vgpr_paths_use_logical_operands(
     vds_exec = (gfx1250_generated_root / 'vds_exec.cpp').read_text()
     vglobal = (gfx1250_generated_root / 'vglobal.cpp').read_text()
     vopd = (gfx1250_generated_root / 'vopd.cpp').read_text()
+    cdna4_vop2_exec = (amdgpu_generated_root / 'cdna4' / 'vop2_exec.cpp').read_text()
     shared = execute_shared_path.read_text()
 
     mov_b16 = _generated_method_body(vop1_exec, 'VMovB16Vop1', 'VMovB64Vop1')
@@ -1799,6 +1833,9 @@ def test_gfx1250_generated_high_vgpr_paths_use_logical_operands(
     fmac_f16 = _generated_method_body(vop2_exec, 'VFmacF16Vop2', 'VFmamkF16Vop2')
     assert 'read_lane(vdst, lane)' in fmac_f16
     assert 'base + (inst_.vdst & 0x7fu), lane)' not in fmac_f16
+
+    add_co = _generated_method_body(cdna4_vop2_exec, 'VAddCoU32Vop2', 'VSubCoU32Vop2')
+    assert 'execute_v_add_co_u32_vop2' in add_co
 
     for name, next_name in (
         ('ds_bpermute_b32_vds', 'ds_bpermute_fi_b32_vds'),
@@ -1812,9 +1849,9 @@ def test_gfx1250_generated_high_vgpr_paths_use_logical_operands(
 
     assert 'src_data[i] = regs.read_lane(inst.data0, i);' in shared
     assert (
-        'd->dst_reg_base =\n      wf.vgpr_alloc().base +\n'
-        '      *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, '
-        'vdst.vgpr_msb_role());' in vds_exec
+        'd->dst_reg_base =\n'
+        '      wf.vgpr_alloc().base +\n'
+        '      *Isa::resolved_vgpr_offset(' in vds_exec
     )
     assert 'data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);' in vds
     assert 'vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);' in vglobal
@@ -3339,6 +3376,29 @@ def test_generated_rdna3_dot2acc_uses_dot2c_simd_probe(
     assert 'throw util::UnimplementedInst' not in body
 
 
+def test_gfx1250_swmmac_reuse_hint_does_not_select_sparse_index_set():
+    inst = Instruction(
+        'V_SWMMAC_I32_16X16X128_IU8',
+        'ENC_VOP3P',
+        0,
+        [
+            Operand('vdst', 256, 'OPR_VGPR', True, True, False, False, 0),
+            Operand('src0', 256, 'OPR_SRC_VGPR', True, False, False, False, 1),
+            Operand('src1', 256, 'OPR_SRC_VGPR', True, False, False, False, 2),
+            Operand('src2', 256, 'OPR_SRC_VGPR', True, False, False, False, 3),
+        ],
+    )
+
+    body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'cdna5')
+
+    assert 'uint32_t index_key = 0u;' in body
+    assert 'index_key = inst_.opsel' not in body
+    assert (
+        'index_base, 32, index_key, extract_a, extract_b, inst_.clamp, const_acc);'
+        in body
+    )
+
+
 def test_rdna4_swmmac_uses_src2_as_sparse_index_vgpr():
     inst = Instruction(
         'V_SWMMAC_F32_16X16X32_FP8_FP8',
@@ -3360,9 +3420,8 @@ def test_rdna4_swmmac_uses_src2_as_sparse_index_vgpr():
     assert 'uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);' in body
     assert 'uint32_t index_key = inst_.opsel & 0x1u;' in body
     assert (
-        'amdgpu::exec_swmmac_f32(cu, 16, 16, 32, 8, dst, '
-        'amdgpu::src_base(vb, src0.encoding_value_), '
-        'amdgpu::src_base(vb, src1.encoding_value_), s2, index_base, 16, '
+        'amdgpu::exec_swmmac_f32(cu, 16, 16, 32, 8, dst, src0_base, '
+        'src1_base, s2, index_base, 16, '
         'index_key, amdgpu::extract_fp8, amdgpu::extract_fp8, const_acc, wf.wf_size());'
     ) in body
     assert 'resolve_acc' not in body
@@ -3398,9 +3457,8 @@ def test_rdna4_f16_bf16_swmmac_dispatch_wiring_is_generated():
         )
         assert 'uint32_t index_key = inst_.opsel & 0x1u;' in body
         assert (
-            f'amdgpu::{exec_fn}(cu, 16, 16, 32, 8, dst, '
-            'amdgpu::src_base(vb, src0.encoding_value_), '
-            'amdgpu::src_base(vb, src1.encoding_value_), s2, index_base, 16, '
+            f'amdgpu::{exec_fn}(cu, 16, 16, 32, 8, dst, src0_base, '
+            'src1_base, s2, index_base, 16, '
             f'index_key, amdgpu::{extract_a}, amdgpu::{extract_b}, const_acc, wf.wf_size());'
         ) in body
 

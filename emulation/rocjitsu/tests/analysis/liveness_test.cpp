@@ -21,6 +21,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vbuffer.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/mubuf.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
@@ -2540,7 +2542,7 @@ TEST(CfgAnalysis, Gfx1250RelativeVgprDestinationDisablesExactCalleeSummary) {
   }
 }
 
-TEST(CfgAnalysis, Gfx1250GprIndexedVgprDestinationDisablesExactCalleeSummary) {
+TEST(CfgAnalysis, Gfx1250ModeBit27DoesNotInvalidateExactCalleeSummary) {
   constexpr uint16_t kReturnSreg = 30;
   constexpr uint16_t kModeGprIdxEnable = 1u | (27u << 6);
   constexpr auto enable_with_literal =
@@ -2578,11 +2580,15 @@ TEST(CfgAnalysis, Gfx1250GprIndexedVgprDestinationDisablesExactCalleeSummary) {
     ASSERT_NE(decoder, nullptr);
     auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
 
+    const IndirectCallFixup *continuation_fixup = nullptr;
     for (const auto &block : blocks) {
-      EXPECT_TRUE(std::ranges::none_of(
-          block->static_indirect_call_fixups(),
-          [](const IndirectCallFixup &fixup) { return fixup.source_call_offset == 52; }));
+      for (const auto &fixup : block->static_indirect_call_fixups()) {
+        if (fixup.source_call_offset == 52)
+          continuation_fixup = &fixup;
+      }
     }
+    ASSERT_NE(continuation_fixup, nullptr);
+    EXPECT_EQ(continuation_fixup->source_target_offset, 60u);
   }
 }
 
@@ -4250,9 +4256,7 @@ TEST(LivenessAnalysis, Gfx1250SwaprelDisablesGlobalUnusedQuery) {
   EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
 }
 
-TEST(LivenessAnalysis, Gfx1250GprIndexModeWriteDisablesGlobalUnusedQuery) {
-  // A runtime MODE[27] write can enable GPR indexing, after which ordinary
-  // encoded operands may access M0-offset VGPRs.
+TEST(LivenessAnalysis, Gfx1250DynamicModeBit27WriteDoesNotEnableGprIndexing) {
   constexpr uint16_t kModeGprIdxEnableHwreg = 1u | (27u << 6);
   constexpr auto setreg =
       cdna5::build_sopk(cdna5::kSSetregB32Sopk, {.simm16 = kModeGprIdxEnableHwreg, .sdst = 0});
@@ -4276,11 +4280,39 @@ TEST(LivenessAnalysis, Gfx1250GprIndexModeWriteDisablesGlobalUnusedQuery) {
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
   ASSERT_NE(instruction, blocks.front()->instructions().end());
-  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2), std::nullopt);
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2), 1);
   EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
 }
 
-TEST(LivenessAnalysis, Gfx1250ImmediateGprIndexModeWriteUsesLiteralValue) {
+TEST(LivenessAnalysis, Rdna4DynamicModeBit27WriteDoesNotEnableGprIndexing) {
+  constexpr uint16_t kModeDisablePerfHwreg = 1u | (27u << 6);
+  constexpr auto setreg =
+      rdna4::build_sopk(rdna4::kSSetregB32Sopk, {.simm16 = kModeDisablePerfHwreg, .sdst = 0});
+  constexpr auto move = rdna4::build_vop1(rdna4::kVMovB32Vop1, {.src0 = 256, .vdst = 0});
+  constexpr auto end = rdna4::build_sopp(rdna4::kSEndpgmSopp);
+  TestCodeObject co({setreg[0], move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/32);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  ++instruction;
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2), 1);
+  EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
+}
+
+TEST(LivenessAnalysis, Gfx1250ImmediateModeBit27WriteDoesNotEnableGprIndexing) {
   constexpr uint16_t kModeGprIdxEnableHwreg = 1u | (27u << 6);
   constexpr auto setreg =
       cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kModeGprIdxEnableHwreg});
@@ -4308,10 +4340,7 @@ TEST(LivenessAnalysis, Gfx1250ImmediateGprIndexModeWriteUsesLiteralValue) {
     ++instruction;
     ASSERT_NE(instruction, blocks.front()->instructions().end());
     const auto unused = liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2);
-    if (literal == 0)
-      EXPECT_EQ(unused, 1);
-    else
-      EXPECT_EQ(unused, std::nullopt);
+    EXPECT_EQ(unused, 1);
     EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
   }
 }

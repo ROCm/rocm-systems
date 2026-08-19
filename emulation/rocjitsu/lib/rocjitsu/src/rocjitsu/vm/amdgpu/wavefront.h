@@ -341,7 +341,7 @@ public:
   uint32_t fp_denorm_mode_f32() const { return (mode_raw_ >> 4) & 0x3u; }
   uint32_t fp_denorm_mode_f16_f64() const { return (mode_raw_ >> 6) & 0x3u; }
   uint32_t gpr_idx_offset() const { return m0_ & 0xFF; }
-  uint32_t gpr_idx_mode() const { return (m0_ >> 8) & 0xF; }
+  uint32_t gpr_idx_mode() const { return (m0_ >> 12) & 0xF; }
 
   /// @brief Return the per-wavefront scratch (private segment) base address.
   /// @returns Byte address in GPU memory where this wavefront's scratch starts.
@@ -943,9 +943,15 @@ private:
   friend class ScalarMemPipeline;
 };
 
-inline uint32_t apply_gpr_idx(const Wavefront &wf, uint32_t vgpr_off, bool is_dst) {
-  uint32_t mode = wf.gpr_idx_mode();
-  if ((!is_dst && (mode & 0x7)) || (is_dst && (mode & 0x8)))
+/// @brief Return whether an M0 GPR_IDX selector enables one operand role.
+[[nodiscard]] constexpr bool gpr_idx_role_enabled(uint32_t mode, VgprMsbRole role) {
+  const std::optional<size_t> index = vgpr_msb_role_index(role);
+  return index && (mode & (1u << *index));
+}
+
+/// @brief Apply the wave's GPR_IDX offset to one logical VALU operand role.
+inline uint32_t apply_gpr_idx(const Wavefront &wf, uint32_t vgpr_off, VgprMsbRole role) {
+  if (wf.gpr_idx_en() && gpr_idx_role_enabled(wf.gpr_idx_mode(), role))
     return vgpr_off + wf.gpr_idx_offset();
   return vgpr_off;
 }

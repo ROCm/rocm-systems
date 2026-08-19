@@ -346,20 +346,34 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   }
 }
 
-void ds_calculate_addresses(const VdsMachineInst &inst, amdgpu::Wavefront &wf,
-                            amdgpu::VectorMemState &d) {
+void ds_calculate_addresses_masked(const VdsMachineInst &inst, amdgpu::Wavefront &wf,
+                                   amdgpu::VectorMemState &d, uint64_t lane_mask) {
   auto &cu = wf.cu();
   init_vector_mem_state(wf, d);
-  uint64_t exec = d.exec_mask;
+  d.lane_mask = lane_mask;
+  d.exec_mask = lane_mask;
   uint32_t addr_base = resolved_vgpr_base(wf, inst.addr, amdgpu::VgprMsbRole::Src0);
   uint32_t offset = (static_cast<uint32_t>(inst.offset1) << 8) | inst.offset0;
   amdgpu::RegisterAccess regs(cu);
-  auto addr_region = regs.read_vgpr_region(addr_base, 1, exec);
+  amdgpu::RegisterAccess::VgprReadRegion addr_region =
+      regs.read_vgpr_region(addr_base, 1, lane_mask);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(lane_mask & (1ULL << lane)))
       continue;
     d.per_lane_addr[lane] = addr_region.lane(0, lane) + offset + wf.lds_base();
   }
+}
+
+void ds_calculate_addresses(const VdsMachineInst &inst, amdgpu::Wavefront &wf,
+                            amdgpu::VectorMemState &d) {
+  ds_calculate_addresses_masked(inst, wf, d, wf.exec());
+}
+
+void ds_calculate_addresses_all_lanes(const VdsMachineInst &inst, amdgpu::Wavefront &wf,
+                                      amdgpu::VectorMemState &d) {
+  const uint64_t full_mask =
+      wf.wf_size() == 64 ? ~uint64_t{0} : (uint64_t{1} << wf.wf_size()) - uint64_t{1};
+  ds_calculate_addresses_masked(inst, wf, d, full_mask);
 }
 
 } // namespace rocjitsu::cdna5

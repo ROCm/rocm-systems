@@ -3,7 +3,8 @@
 
 /// @file vop3_fmac_simd_correctness_test.cpp
 /// @brief Bit-identity check (SIMD fast path vs scalar body) for the
-/// dst-accumulate FMA VOP3 forms on CDNA4 (v_fmac_f32). Per-isa codegen
+/// dst-accumulate FMA VOP3 forms on CDNA4 (V_FMAC_F32 and MODE-aware
+/// V_FMAC_F64). Per-isa codegen
 /// classes for these ops only initialize
 /// src0+src1+vdst — the third FMA operand IS vdst. The new accumulate-form
 /// glue (try_execute_fmac_vop3_fp*_simd) reads inst.vdst as the third operand
@@ -74,8 +75,9 @@ struct Case {
   Kind kind;
 };
 
-const std::array<Case, 1> kCases = {{
+const std::array<Case, 2> kCases = {{
     {"v_fmac_f32_vop3", 315, Kind::F32},
+    {"v_fmac_f64_vop3", 260, Kind::F64},
 }};
 
 // Finite-normal sanitized inputs (NaN lanes skipped; payload divergence is

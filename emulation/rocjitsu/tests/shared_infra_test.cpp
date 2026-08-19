@@ -29,6 +29,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
@@ -77,6 +78,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -138,6 +140,16 @@ static_assert(!HasMonolithicWaitcnt<rdna4::Isa>);
 static_assert(!isa_properties(ROCJITSU_CODE_ARCH_CDNA3).supports_wgp_mode);
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).supports_wgp_mode);
 static_assert(!isa_properties(ROCJITSU_CODE_ARCH_CDNA5).supports_wgp_mode);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA1).mode_has_gpr_idx_en);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA2).mode_has_gpr_idx_en);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA3).mode_has_gpr_idx_en);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA4).mode_has_gpr_idx_en);
+static_assert(!isa_properties(ROCJITSU_CODE_ARCH_RDNA1).mode_has_gpr_idx_en);
+static_assert(!isa_properties(ROCJITSU_CODE_ARCH_RDNA2).mode_has_gpr_idx_en);
+static_assert(!isa_properties(ROCJITSU_CODE_ARCH_RDNA3).mode_has_gpr_idx_en);
+static_assert(!isa_properties(ROCJITSU_CODE_ARCH_RDNA3_5).mode_has_gpr_idx_en);
+static_assert(!isa_properties(ROCJITSU_CODE_ARCH_RDNA4).mode_has_gpr_idx_en);
+static_assert(!isa_properties(ROCJITSU_CODE_ARCH_CDNA5).mode_has_gpr_idx_en);
 static_assert(!isa_properties(ROCJITSU_CODE_ARCH_CDNA3).uses_ttmp_workgroup_ids);
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).uses_ttmp_workgroup_ids);
 static_assert(!isa_properties(ROCJITSU_CODE_ARCH_RDNA4).uses_cluster_ttmp_workgroup_ids);
@@ -370,6 +382,25 @@ TEST(MfmaExecTest, Gfx11WmmaIu8InputLocReplicatesKAcrossHalfwaves) {
   EXPECT_EQ(g1k15.sub_element, 3u);
 }
 
+TEST(MfmaExecTest, Gfx1250WmmaIu8InputLocMatchesEightElementKBlocks) {
+  struct Anchor {
+    uint32_t k;
+    uint32_t lane;
+    uint32_t slot;
+  };
+  constexpr std::array anchors{
+      Anchor{0, 3, 0},   Anchor{7, 3, 7},    Anchor{8, 19, 0},   Anchor{15, 19, 7},
+      Anchor{16, 3, 8},  Anchor{24, 19, 8},  Anchor{32, 3, 16},  Anchor{40, 19, 16},
+      Anchor{48, 3, 24}, Anchor{56, 19, 24}, Anchor{63, 19, 31},
+  };
+  for (const auto &anchor : anchors) {
+    const auto loc = amdgpu::wmma_input_loc(16, 64, /*i=*/3, anchor.k, 8);
+    EXPECT_EQ(loc.lane, anchor.lane) << anchor.k;
+    EXPECT_EQ(loc.vgpr_offset, anchor.slot / 4) << anchor.k;
+    EXPECT_EQ(loc.sub_element, anchor.slot % 4) << anchor.k;
+  }
+}
+
 TEST(MfmaExecTest, Gfx11WmmaOutputLoc32PairsRowsAcrossHalfwaves) {
   auto r0 = amdgpu::gfx11_wmma_output_loc_32(amdgpu::WMMA_WAVE32, 16, 16, /*row=*/0, /*col=*/5);
   EXPECT_EQ(r0.reg, 0u);
@@ -445,6 +476,108 @@ TEST(MfmaExecTest, SwmmacK32InputLocUsesSparseHardwareLayout) {
   auto fp8_idx_g4s0 = amdgpu::swmmac_index_loc(16, 32, 8, /*row=*/3, /*compressed_k=*/8, 16);
   EXPECT_EQ(fp8_idx_g4s0.lane, 19u);
   EXPECT_EQ(fp8_idx_g4s0.local_compressed_k, 0u);
+}
+
+TEST(MfmaExecTest, Gfx1250SwmmacK128Iu8LocationsMatchSparseManual) {
+  for (uint32_t ck = 0; ck < 64; ++ck) {
+    const uint32_t expected_lane = 5u + 16u * ((ck >> 3) & 1u);
+    const uint32_t expected_slot = (ck & 7u) + 8u * (ck >> 4);
+    const auto a = amdgpu::swmmac_a_input_loc(16, 128, /*row=*/5, ck, 8);
+    EXPECT_EQ(a.lane, expected_lane) << ck;
+    EXPECT_EQ(a.vgpr_offset, expected_slot / 4) << ck;
+    EXPECT_EQ(a.sub_element, expected_slot % 4) << ck;
+
+    const auto index = amdgpu::swmmac_index_loc(16, 128, 8, /*row=*/5, ck, /*index_entries=*/32);
+    EXPECT_EQ(index.lane, expected_lane) << ck;
+    EXPECT_EQ(index.local_compressed_k, expected_slot) << ck;
+  }
+
+  for (uint32_t k = 0; k < 128; ++k) {
+    const uint32_t expected_lane = 7u + 16u * ((k >> 4) & 1u);
+    const uint32_t expected_slot = (k & 15u) + 16u * (k >> 5);
+    const auto b = amdgpu::swmmac_b_input_loc(16, 128, /*col=*/7, k, 8);
+    EXPECT_EQ(b.lane, expected_lane) << k;
+    EXPECT_EQ(b.vgpr_offset, expected_slot / 4) << k;
+    EXPECT_EQ(b.sub_element, expected_slot % 4) << k;
+  }
+}
+
+TEST(TransposeLoadTest, WmmaTrB8Wave32MatchesMatrixLayout) {
+  amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
+  state.wf_size = 32;
+  state.num_elems = 2;
+  state.transpose = static_cast<uint8_t>(amdgpu::TransposeKind::WMMA_TR_B8);
+  state.response_data.resize(32 * 8);
+  for (uint32_t source_lane = 0; source_lane < 32; ++source_lane)
+    for (uint32_t byte = 0; byte < 8; ++byte)
+      state.response_data[source_lane * 8 + byte] = static_cast<uint8_t>(source_lane * 8 + byte);
+
+  amdgpu::transpose_response(state);
+
+  ASSERT_EQ(state.num_elems, 2u);
+  ASSERT_EQ(state.response_data.size(), 32u * 8u);
+  for (uint32_t source_lane = 0; source_lane < 32; ++source_lane) {
+    const uint32_t k = (source_lane & 7u) + 8u * (source_lane >> 4);
+    for (uint32_t byte = 0; byte < 8; ++byte) {
+      const uint32_t row = byte + 8u * ((source_lane >> 3) & 1u);
+      const uint32_t lane = row + 16u * ((k >> 3) & 1u);
+      const uint32_t slot = (k & 3u) + 4u * ((k >> 2) & 1u);
+      EXPECT_EQ(state.response_data[lane * 8 + slot], static_cast<uint8_t>(source_lane * 8 + byte));
+    }
+  }
+}
+
+TEST(TransposeLoadTest, WmmaTrB8Wave64UsesFirst32AddressesAndOneVgpr) {
+  amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
+  state.wf_size = 64;
+  state.num_elems = 2;
+  state.lane_mask = ~0ULL;
+  state.transpose = static_cast<uint8_t>(amdgpu::TransposeKind::WMMA_TR_B8);
+  state.response_data.assign(64 * 8, 0xEE);
+  for (uint32_t source_lane = 0; source_lane < 32; ++source_lane)
+    for (uint32_t byte = 0; byte < 8; ++byte)
+      state.response_data[source_lane * 8 + byte] = static_cast<uint8_t>(source_lane * 8 + byte);
+
+  EXPECT_EQ(amdgpu::transpose_request_lane_mask(state), 0xFFFF'FFFFULL);
+  amdgpu::transpose_response(state);
+
+  ASSERT_EQ(state.num_elems, 1u);
+  ASSERT_EQ(state.response_data.size(), 64u * 4u);
+  for (uint32_t source_lane = 0; source_lane < 32; ++source_lane) {
+    const uint32_t k = (source_lane & 7u) + 8u * (source_lane >> 4);
+    for (uint32_t byte = 0; byte < 8; ++byte) {
+      const uint32_t row = byte + 8u * ((source_lane >> 3) & 1u);
+      const uint32_t lane = row + 16u * ((k >> 3) & 1u) + 32u * ((k >> 2) & 1u);
+      EXPECT_EQ(state.response_data[lane * 4 + (k & 3u)],
+                static_cast<uint8_t>(source_lane * 8 + byte));
+    }
+  }
+}
+
+TEST(TransposeLoadTest, Cdna4B64TrB8KeepsMfmaPermutation) {
+  amdgpu::VectorMemState state(amdgpu::LOCAL_MEM);
+  state.wf_size = 64;
+  state.num_elems = 2;
+  state.lane_mask = ~0ULL;
+  state.transpose = static_cast<uint8_t>(amdgpu::TransposeKind::B64_TR_B8);
+  state.response_data.resize(64 * 8);
+  for (uint32_t source_lane = 0; source_lane < 64; ++source_lane)
+    for (uint32_t byte = 0; byte < 8; ++byte)
+      state.response_data[source_lane * 8 + byte] = static_cast<uint8_t>(source_lane * 8 + byte);
+
+  const auto input = state.response_data;
+  amdgpu::transpose_response(state);
+
+  ASSERT_EQ(state.num_elems, 2u);
+  for (uint32_t half = 0; half < 2; ++half)
+    for (uint32_t group = 0; group < 32; group += 4)
+      for (uint32_t byte = 0; byte < 8; ++byte) {
+        const uint32_t dest_reg = (group % 16) / 8;
+        const uint32_t dest_lane = half * 32 + (group / 16) * 16 + ((group / 4) % 2) * 8 + byte;
+        for (uint32_t source = 0; source < 4; ++source)
+          EXPECT_EQ(state.response_data[dest_lane * 8 + dest_reg * 4 + source],
+                    input[(half * 32 + group + source) * 8 + byte]);
+      }
 }
 
 TEST(MfmaExecTest, Gfx12Wave64WmmaLocSplitsKAcrossFourLaneGroups) {
@@ -701,8 +834,8 @@ TEST(MfmaExecTest, WmmaF8f6f4K128InputLocUsesPairAwareSubbyteLayouts) {
 
   auto ab8 = amdgpu::wmma_f8f6f4_input_loc(16, 128, /*i=*/3, /*k=*/4, 8,
                                            /*mixed_subbyte=*/false);
-  EXPECT_EQ(ab8.lane, 19u);
-  EXPECT_EQ(ab8.vgpr_offset, 0u);
+  EXPECT_EQ(ab8.lane, 3u);
+  EXPECT_EQ(ab8.vgpr_offset, 1u);
   EXPECT_EQ(ab8.sub_element, 0u);
 
   EXPECT_EQ(amdgpu::wmma_f8f6f4_scale_byte(/*k=*/4, /*data_bits=*/6,

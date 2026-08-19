@@ -60,7 +60,7 @@ def test_pk_fmac_vop2_reads_old_destination_and_fuses_both_halves():
     assert cpp.count('amdgpu::fp_mode::fma_f16') == 2
     assert 'wf.fp_round_mode_f16_f64()' in cpp
     assert 'wf.fp_denorm_mode_f16_f64()' in cpp
-    assert ', 0, false, wf.fp16_ovfl())' in cpp
+    assert ', 0, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf))' in cpp
 
 
 def test_promoted_pk_fmac_applies_vop3_modifiers_to_multiplicands_only():
@@ -89,7 +89,9 @@ def test_pk_fma_f16_uses_mode_helper_and_clamp_for_both_halves():
     assert cpp.count('amdgpu::fp_mode::fma_f16') == 2
     assert 'wf.fp_round_mode_f16_f64()' in cpp
     assert 'wf.fp_denorm_mode_f16_f64()' in cpp
-    assert ', 0, inst_.clamp, wf.fp16_ovfl())' in cpp
+    assert (
+        ', 0, inst_.clamp, wf.fp16_ovfl(), ' 'amdgpu::floating_clamp_nan_to_zero(wf))'
+    ) in cpp
 
 
 def test_pk_add_minmax_saturates_add_before_selecting_third_operand():

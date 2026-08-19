@@ -17,6 +17,7 @@ from amdisa.sema_ast import (
 from amdisa.codegen.execute.sema_lower import (
     _INLINE_BINARY_OPS,
     _INLINE_TERNARY_OPS,
+    _lower_apply_clamp,
     InlineBinaryOp,
     LoweringContext,
     OperandBinding,
@@ -158,6 +159,22 @@ class TestLowerScalarAdd:
 
 
 class TestLowerVectorAdd:
+    def test_apply_clamp_uses_architecture_mode_policy(self):
+        node = SemaNode(
+            SemaNodeKind.CALL,
+            call_name='apply_clamp',
+            ty=SemaType.F32,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name='apply_clamp'),
+                SemaNode(SemaNodeKind.LIT, lit_value='0.5', ty=SemaType.F32),
+            ),
+        )
+
+        result = _lower_apply_clamp(node, LoweringContext(exec_model=ExecModel.VECTOR))
+
+        assert 'amdgpu::clamp_floating_result(v, wf)' in result
+        assert 'std::clamp' not in result
+
     def test_vector_add_f32(self):
         body = SemaNode(
             SemaNodeKind.ASSIGN,

@@ -320,7 +320,7 @@ VMovrelsdB32Vop3::VMovrelsdB32Vop3(const MachineInst *inst)
                ? "v_movrelsd_b32_e64_dpp"
                : "v_movrelsd_b32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMovrelsdB32Vop3), LiteralSupport::None, 1),
+           selected_exec_fn(InstructionExecutionId::VMovrelsdB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       m0(32, OperandType::OPR_SDST_M0, 125) {
@@ -352,7 +352,16 @@ VMovrelsdB32Vop3::VMovrelsdB32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMovrelsdB32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMovrelsdB32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_movrelsd_b32_e64_dpp"
+          : "v_movrelsd_b32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::None, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMovrelsdB32Vop3>(opcode);
 }
 } // namespace detail
@@ -362,7 +371,7 @@ VMovrelsd2B32Vop3::VMovrelsd2B32Vop3(const MachineInst *inst)
                ? "v_movrelsd_2_b32_e64_dpp"
                : "v_movrelsd_2_b32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VMovrelsd2B32Vop3), LiteralSupport::None, 1),
+           selected_exec_fn(InstructionExecutionId::VMovrelsd2B32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       m0(32, OperandType::OPR_SDST_M0, 125) {
@@ -394,7 +403,16 @@ VMovrelsd2B32Vop3::VMovrelsd2B32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMovrelsd2B32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVMovrelsd2B32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_movrelsd_2_b32_e64_dpp"
+          : "v_movrelsd_2_b32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::None, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMovrelsd2B32Vop3>(opcode);
 }
 } // namespace detail

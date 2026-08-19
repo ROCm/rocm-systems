@@ -416,7 +416,7 @@ void VFrexpMantF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
               return v;
             }();
             if (inst_.clamp)
-              v = std::clamp(v, 0.0f, 1.0f);
+              v = amdgpu::clamp_floating_result(v, wf);
             return v;
           }(),
           wf.fp16_ovfl())));
@@ -472,7 +472,7 @@ void VFrexpExpI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
               return v;
             }();
             if (inst_.clamp)
-              v = std::clamp(v, 0.0f, 1.0f);
+              v = amdgpu::clamp_floating_result(v, wf);
             return v;
           }(),
           wf.fp16_ovfl())));

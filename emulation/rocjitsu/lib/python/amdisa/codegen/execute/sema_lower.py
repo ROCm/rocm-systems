@@ -1878,9 +1878,8 @@ def _lower_apply_clamp(node: SemaNode, ctx: LoweringContext) -> str:
     rhs = _lower_expr(node.children[1], ctx)
     is_f64 = node.ty and node.ty.size == 64
     fp_type = 'double' if is_f64 else 'float'
-    suffix = '' if is_f64 else 'f'
     return (
         f'[&]() {{ {fp_type} v = {rhs};'
-        f' if (inst_.clamp) v = std::clamp(v, 0.0{suffix}, 1.0{suffix});'
+        ' if (inst_.clamp) v = amdgpu::clamp_floating_result(v, wf);'
         f' return v; }}()'
     )

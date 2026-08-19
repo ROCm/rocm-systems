@@ -10,7 +10,6 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"
 #include "util/data_types.h"
 
-#include <algorithm>
 #include <bit>
 #include <cfenv>
 #include <cmath>
@@ -75,18 +74,18 @@ private:
 
 } // namespace detail
 
-/// Return the OMOD value supported by an ordinary floating-point result.
+/// @brief Return the OMOD value supported by an ordinary floating-point result.
 inline uint32_t effective_omod(rj_code_arch_t arch, uint32_t denorm_mode, bool ieee_mode,
                                uint32_t omod) {
   if (omod == 0)
     return 0;
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250)
+  if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5)
     return omod;
   return (denorm_mode & 2u) == 0 && !ieee_mode ? omod : 0;
 }
 
-/// Return the OMOD value that applies to an F16 result on the selected ISA.
-/// GFX11+ packed-F16 results explicitly ignore OMOD. Older profiles expose
+/// @brief Return the OMOD value that applies to an F16 result on the selected ISA.
+/// @details GFX11+ packed-F16 results explicitly ignore OMOD. Older profiles expose
 /// OMOD on the promoted VOP3 form of V_PK_FMAC_F16, subject to their ordinary
 /// output-denormal and MODE.IEEE restrictions. GFX12 and gfx1250 allow OMOD on
 /// non-packed F16 results regardless of output-denormal mode.
@@ -95,15 +94,16 @@ inline uint32_t effective_f16_omod(rj_code_arch_t arch, uint32_t denorm_mode, bo
   if (omod == 0)
     return 0;
   if (packed_result && (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-                        arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250))
+                        arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5))
     return 0;
   return effective_omod(arch, denorm_mode, ieee_mode, omod);
 }
 
-/// Execute an F16 fused multiply-add and return its raw F16 encoding.
+/// @brief Execute an F16 fused multiply-add and return its raw F16 encoding.
 inline uint16_t fma_f16(uint16_t src0, uint16_t src1, uint16_t src2, bool abs0, bool abs1,
                         bool abs2, bool neg0, bool neg1, bool neg2, uint32_t round_mode,
-                        uint32_t denorm_mode, uint32_t omod, bool clamp, bool fp16_ovfl) {
+                        uint32_t denorm_mode, uint32_t omod, bool clamp, bool fp16_ovfl,
+                        bool clamp_nan_to_zero) {
   src0 = detail::flush_input_f16(detail::modify_f16(src0, abs0, neg0), denorm_mode);
   src1 = detail::flush_input_f16(detail::modify_f16(src1, abs1, neg1), denorm_mode);
   src2 = detail::flush_input_f16(detail::modify_f16(src2, abs2, neg2), denorm_mode);
@@ -111,14 +111,15 @@ inline uint16_t fma_f16(uint16_t src0, uint16_t src1, uint16_t src2, bool abs0, 
   const double multiplicand = static_cast<double>(util::f16_to_f32(src0));
   const double multiplier = static_cast<double>(util::f16_to_f32(src1));
   const double addend = static_cast<double>(util::f16_to_f32(src2));
-  uint16_t result = pseudo_scalar::round_f16_result(std::fma(multiplicand, multiplier, addend),
-                                                    round_mode, omod, clamp, fp16_ovfl);
+  uint16_t result =
+      pseudo_scalar::round_f16_result(std::fma(multiplicand, multiplier, addend), round_mode, omod,
+                                      clamp, fp16_ovfl, clamp_nan_to_zero);
   if ((denorm_mode & 2u) == 0 && (result & 0x7c00u) == 0 && (result & 0x03ffu) != 0)
     result &= 0x8000u;
   return result;
 }
 
-/// Execute an F64 fused multiply-add under MODE.FP_ROUND and MODE.FP_DENORM.
+/// @brief Execute an F64 fused multiply-add under MODE.FP_ROUND and MODE.FP_DENORM.
 inline uint64_t fma_f64(uint64_t src0, uint64_t src1, uint64_t src2, uint32_t round_mode,
                         uint32_t denorm_mode) {
   if ((denorm_mode & 1u) == 0) {
@@ -139,9 +140,10 @@ inline uint64_t fma_f64(uint64_t src0, uint64_t src1, uint64_t src2, uint32_t ro
   return result;
 }
 
-/// Apply F64 OMOD/CLAMP under the architectural rounding mode. A nonzero OMOD
-/// flushes a denormal result and converts either signed zero to +0.
-inline uint64_t finish_f64(uint64_t value, uint32_t round_mode, uint32_t omod, bool clamp) {
+/// @brief Apply F64 OMOD/CLAMP under the architectural rounding mode.
+/// @details A nonzero OMOD flushes a denormal result and converts either signed zero to +0.
+inline uint64_t finish_f64(uint64_t value, uint32_t round_mode, uint32_t omod, bool clamp,
+                           bool clamp_nan_to_zero) {
   double result;
   {
     detail::ScopedFenv environment(round_mode);
@@ -152,8 +154,12 @@ inline uint64_t finish_f64(uint64_t value, uint32_t round_mode, uint32_t omod, b
       result *= 4.0;
     else if (omod == 3)
       result *= 0.5;
-    if (clamp)
-      result = std::clamp(result, 0.0, 1.0);
+    if (clamp) {
+      if ((clamp_nan_to_zero && std::isnan(result)) || result <= 0.0)
+        result = 0.0;
+      else if (result > 1.0)
+        result = 1.0;
+    }
   }
   uint64_t bits = std::bit_cast<uint64_t>(result);
   if (omod != 0) {
@@ -162,6 +168,13 @@ inline uint64_t finish_f64(uint64_t value, uint32_t round_mode, uint32_t omod, b
       bits = 0;
   }
   return bits;
+}
+
+/// @brief Scale an exact unsigned 53-bit significand using round-toward-zero.
+/// @details The host floating-point environment is restored before returning.
+inline uint64_t scale_u53_f64_rtz(uint64_t significand, int exponent) {
+  detail::ScopedFenv environment(3);
+  return std::bit_cast<uint64_t>(std::ldexp(static_cast<double>(significand), exponent));
 }
 
 } // namespace rocjitsu::amdgpu::fp_mode

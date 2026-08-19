@@ -667,7 +667,8 @@ void VFmacF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t omod = 0u;
     uint16_t result = amdgpu::fp_mode::fma_f16(
         src0_bits, src1_bits, accumulator, false, false, false, false, false, false,
-        wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, false, wf.fp16_ovfl());
+        wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, false, wf.fp16_ovfl(),
+        amdgpu::floating_clamp_nan_to_zero(wf));
     amdgpu::sdwa::write_lane<true>(*this, wf, vdst, lane, result);
   }
 }
@@ -680,9 +681,10 @@ void VFmamkF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
     uint16_t s0 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
     uint16_t k = static_cast<uint16_t>(literal.encoding_value_);
     uint16_t s2 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    uint16_t result = amdgpu::fp_mode::fma_f16(
-        s0, k, s2, false, false, false, false, false, false, wf.fp_round_mode_f16_f64(),
-        wf.fp_denorm_mode_f16_f64(), 0, false, wf.fp16_ovfl());
+    uint16_t result =
+        amdgpu::fp_mode::fma_f16(s0, k, s2, false, false, false, false, false, false,
+                                 wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, false,
+                                 wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));
     amdgpu::sdwa::write_lane<true>(*this, wf, vdst, lane, result);
   }
 }
@@ -695,9 +697,10 @@ void VFmaakF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
     uint16_t s0 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
     uint16_t s1 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
     uint16_t k = static_cast<uint16_t>(literal.encoding_value_);
-    uint16_t result = amdgpu::fp_mode::fma_f16(
-        s0, s1, k, false, false, false, false, false, false, wf.fp_round_mode_f16_f64(),
-        wf.fp_denorm_mode_f16_f64(), 0, false, wf.fp16_ovfl());
+    uint16_t result =
+        amdgpu::fp_mode::fma_f16(s0, s1, k, false, false, false, false, false, false,
+                                 wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, false,
+                                 wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));
     amdgpu::sdwa::write_lane<true>(*this, wf, vdst, lane, result);
   }
 }

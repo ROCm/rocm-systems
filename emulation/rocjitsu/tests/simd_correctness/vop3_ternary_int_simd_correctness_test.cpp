@@ -247,7 +247,7 @@ TEST(Vop3TernaryIntSimdCorrectness, IsaGoldenByteOperations) {
       ASSERT_NE(fx.wf, nullptr);
       uint32_t words[2]{};
       vop3_tern_encode(golden.opcode, kDstVgpr, 256, 257, 258, words);
-      std::unique_ptr<Instruction> inst(fx.decoder->decode(words));
+      std::unique_ptr<Instruction> inst(decode_valid(*fx.decoder, words));
       ASSERT_NE(inst, nullptr);
       ASSERT_EQ(std::string_view(inst->mnemonic()), golden.name);
 

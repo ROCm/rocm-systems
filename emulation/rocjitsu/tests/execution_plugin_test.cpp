@@ -2489,18 +2489,7 @@ TEST(ExecutionPluginTest, F64SourceReadObservationReportsBothHalves) {
     cu->execute_instruction(inst, *wf);
     delete inst;
 
-    const auto events = vgpr_read_events(*plugin);
-    ASSERT_EQ(events.size(), 6u * std::popcount(kPartialExecMask));
-    std::array<uint64_t, 6> observed_lane_masks{};
-    for (const HookEvent &event : events) {
-      ASSERT_GE(event.physical_reg, vb);
-      const uint32_t logical_reg = event.physical_reg - vb;
-      ASSERT_LT(logical_reg, observed_lane_masks.size());
-      EXPECT_EQ(event.byte_mask, ExecutionPlugin::kFullByteMask);
-      observed_lane_masks[logical_reg] |= event.lane_mask;
-    }
-    for (uint64_t observed_lane_mask : observed_lane_masks)
-      EXPECT_EQ(observed_lane_mask, kPartialExecMask);
+    expect_vgpr_read_set(vgpr_read_events(*plugin), vb, {0, 1, 2, 3, 4, 5}, kPartialExecMask);
   }
 }
 

@@ -376,7 +376,7 @@ void VMin3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
               return v;
             }();
             if (inst_.clamp)
-              v = std::clamp(v, 0.0f, 1.0f);
+              v = amdgpu::clamp_floating_result(v, wf);
             return v;
           }(),
           wf.fp16_ovfl())));
@@ -445,7 +445,7 @@ void VMax3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
               return v;
             }();
             if (inst_.clamp)
-              v = std::clamp(v, 0.0f, 1.0f);
+              v = amdgpu::clamp_floating_result(v, wf);
             return v;
           }(),
           wf.fp16_ovfl())));
@@ -541,7 +541,7 @@ void VMinimum3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
               return v;
             }();
             if (inst_.clamp)
-              v = std::clamp(v, 0.0f, 1.0f);
+              v = amdgpu::clamp_floating_result(v, wf);
             return v;
           }(),
           wf.fp16_ovfl())));
@@ -615,7 +615,7 @@ void VMaximum3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
               return v;
             }();
             if (inst_.clamp)
-              v = std::clamp(v, 0.0f, 1.0f);
+              v = amdgpu::clamp_floating_result(v, wf);
             return v;
           }(),
           wf.fp16_ovfl())));
@@ -693,7 +693,7 @@ void VMed3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
               return v;
             }();
             if (inst_.clamp)
-              v = std::clamp(v, 0.0f, 1.0f);
+              v = amdgpu::clamp_floating_result(v, wf);
             return v;
           }(),
           wf.fp16_ovfl())));
@@ -807,6 +807,8 @@ void VFmaF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                             amdgpu::dpp::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0));
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_.get());
   ScopedOperandDelegate dpp_src1_binding_(src1, dpp_src1_.get());
+  auto &inst = *this;
+  ROCJITSU_TRY_SIMD_FMA_VOP3_TRUE16_FP16();
   uint64_t exec = amdgpu::dpp::execution_lane_mask(*this, wf);
   uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -823,7 +825,8 @@ void VFmaF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint16_t result = amdgpu::fp_mode::fma_f16(
         src0_bits, src1_bits, src2_bits, inst_.abs & 1u, inst_.abs & 2u, inst_.abs & 4u,
         inst_.neg & 1u, inst_.neg & 2u, inst_.neg & 4u, wf.fp_round_mode_f16_f64(),
-        wf.fp_denorm_mode_f16_f64(), omod, inst_.clamp, wf.fp16_ovfl());
+        wf.fp_denorm_mode_f16_f64(), omod, inst_.clamp, wf.fp16_ovfl(),
+        amdgpu::floating_clamp_nan_to_zero(wf));
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result, true);
   }
 }
@@ -1412,7 +1415,7 @@ void VMinmaxNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
               return v;
             }();
             if (inst_.clamp)
-              v = std::clamp(v, 0.0f, 1.0f);
+              v = amdgpu::clamp_floating_result(v, wf);
             return v;
           }(),
           wf.fp16_ovfl())));
@@ -1481,7 +1484,7 @@ void VMaxminNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
               return v;
             }();
             if (inst_.clamp)
-              v = std::clamp(v, 0.0f, 1.0f);
+              v = amdgpu::clamp_floating_result(v, wf);
             return v;
           }(),
           wf.fp16_ovfl())));
@@ -1577,7 +1580,7 @@ void VMinimummaximumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
               return v;
             }();
             if (inst_.clamp)
-              v = std::clamp(v, 0.0f, 1.0f);
+              v = amdgpu::clamp_floating_result(v, wf);
             return v;
           }(),
           wf.fp16_ovfl())));
@@ -1651,7 +1654,7 @@ void VMaximumminimumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
               return v;
             }();
             if (inst_.clamp)
-              v = std::clamp(v, 0.0f, 1.0f);
+              v = amdgpu::clamp_floating_result(v, wf);
             return v;
           }(),
           wf.fp16_ovfl())));

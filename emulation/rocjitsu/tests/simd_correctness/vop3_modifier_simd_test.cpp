@@ -7,8 +7,8 @@
 /// carry per-source abs/neg and per-instruction omod/clamp; the SIMD fast path
 /// must apply them identically to the scalar lambda nest
 /// (execute_shared.h: abs(std::fabs) -> neg(-x) per source, then omod(*2/*4/*0.5)
-/// -> clamp(std::clamp(v,0,1)) on the result). These tests pin every modifier
-/// combination over normal/NaN/Inf/denormal/signed-zero inputs.
+/// -> architecture/MODE-aware clamp on the result). These tests pin every
+/// modifier combination over normal/NaN/Inf/denormal/signed-zero inputs.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 
@@ -66,7 +66,7 @@ constexpr std::array<uint64_t, 12> kF64SrcPatterns = {
     0x3FB999999999999Aull, // 0.1 (in [0,1])
 };
 
-constexpr std::array<uint64_t, 11> kF64DstPatterns = {
+constexpr std::array<uint64_t, 12> kF64DstPatterns = {
     0x3FE0000000000000ull, // 0.5
     0x400921FB54442D18ull, // pi (> 1)
     0xC00921FB54442D18ull, // -pi
@@ -75,6 +75,7 @@ constexpr std::array<uint64_t, 11> kF64DstPatterns = {
     0x7FF0000000000000ull, // +Inf
     0xFFF0000000000000ull, // -Inf
     0x7FF8000000000000ull, // qNaN
+    0x7FF0000000000001ull, // sNaN
     0x0000000000000001ull, // +denormal
     0x8000000000000001ull, // -denormal
     0x3FB999999999999Aull, // 0.1 (in [0,1])
@@ -96,28 +97,65 @@ double ref_src(double x, bool abs, bool neg) {
   return x;
 }
 
-float ref_dst(float v, uint32_t omod, bool clamp) {
+float ref_dst(float v, uint32_t omod, bool clamp, bool clamp_nan_to_zero) {
   if (omod == 1)
     v *= 2.0f;
   else if (omod == 2)
     v *= 4.0f;
   else if (omod == 3)
     v *= 0.5f;
-  if (clamp)
-    v = std::clamp(v, 0.0f, 1.0f);
+  if (clamp) {
+    if (std::isnan(v))
+      return clamp_nan_to_zero ? 0.0f : v;
+    if (v <= 0.0f)
+      return 0.0f;
+    if (v > 1.0f)
+      return 1.0f;
+  }
   return v;
 }
 
-double ref_dst(double v, uint32_t omod, bool clamp) {
+double ref_dst(double v, uint32_t omod, bool clamp, bool clamp_nan_to_zero) {
   if (omod == 1)
     v *= 2.0;
   else if (omod == 2)
     v *= 4.0;
   else if (omod == 3)
     v *= 0.5;
-  if (clamp)
-    v = std::clamp(v, 0.0, 1.0);
+  if (clamp) {
+    if (std::isnan(v))
+      return clamp_nan_to_zero ? 0.0 : v;
+    if (v <= 0.0)
+      return 0.0;
+    if (v > 1.0)
+      return 1.0;
+  }
   return v;
+}
+
+TEST(Vop3ModifierPolicy, NanClampFollowsArchitectureAndDx10Mode) {
+  using rocjitsu::amdgpu::floating_clamp_nan_to_zero;
+
+  EXPECT_FALSE(floating_clamp_nan_to_zero(ROCJITSU_CODE_ARCH_CDNA4, false));
+  EXPECT_TRUE(floating_clamp_nan_to_zero(ROCJITSU_CODE_ARCH_CDNA4, true));
+  EXPECT_TRUE(floating_clamp_nan_to_zero(ROCJITSU_CODE_ARCH_RDNA4, false));
+  EXPECT_TRUE(floating_clamp_nan_to_zero(ROCJITSU_CODE_ARCH_CDNA5, false));
+}
+
+TEST(Vop3ModifierPolicy, ScalarClampHandlesQuietSignalingNanAndSignedZero) {
+  using rocjitsu::amdgpu::clamp_floating_result;
+
+  constexpr uint32_t kQuietNan = 0x7FC12345u;
+  constexpr uint32_t kSignalingNan = 0x7F812345u;
+  constexpr uint32_t kNegativeZero = 0x80000000u;
+  for (uint32_t bits : {kQuietNan, kSignalingNan}) {
+    const float value = std::bit_cast<float>(bits);
+    EXPECT_EQ(std::bit_cast<uint32_t>(clamp_floating_result(value, false)), bits);
+    EXPECT_EQ(std::bit_cast<uint32_t>(clamp_floating_result(value, true)), 0u);
+  }
+  EXPECT_EQ(
+      std::bit_cast<uint32_t>(clamp_floating_result(std::bit_cast<float>(kNegativeZero), false)),
+      0u);
 }
 
 TEST(Vop3ModifierSimd, SrcMod_AllAbsNegCombos_BitExact) {
@@ -186,13 +224,16 @@ TEST(Vop3ModifierSimd, DstMod_AllOmodClampCombos_BitExact) {
 
   for (uint32_t omod = 0; omod < 4; ++omod) {
     for (uint32_t clamp = 0; clamp < 2; ++clamp) {
-      auto out = apply_vop3_dst_mod_f32(v, omod, clamp);
-      alignas(util::native<float>) float o[W];
-      out.copy_to(o, util::stdx::element_aligned);
-      for (std::size_t i = 0; i < W; ++i) {
-        const float r = ref_dst(in[i], omod, clamp != 0);
-        EXPECT_EQ(std::bit_cast<uint32_t>(o[i]), std::bit_cast<uint32_t>(r))
-            << "omod=" << omod << " clamp=" << clamp << " lane " << i;
+      for (uint32_t clamp_nan = 0; clamp_nan < 2; ++clamp_nan) {
+        auto out = apply_vop3_dst_mod_f32(v, omod, clamp, clamp_nan != 0);
+        alignas(util::native<float>) float o[W];
+        out.copy_to(o, util::stdx::element_aligned);
+        for (std::size_t i = 0; i < W; ++i) {
+          const float r = ref_dst(in[i], omod, clamp != 0, clamp_nan != 0);
+          EXPECT_EQ(std::bit_cast<uint32_t>(o[i]), std::bit_cast<uint32_t>(r))
+              << "omod=" << omod << " clamp=" << clamp << " clamp_nan=" << clamp_nan << " lane "
+              << i;
+        }
       }
     }
   }
@@ -208,13 +249,16 @@ TEST(Vop3ModifierSimd, DstModF64_AllOmodClampCombos_BitExact) {
 
   for (uint32_t omod = 0; omod < 4; ++omod) {
     for (uint32_t clamp = 0; clamp < 2; ++clamp) {
-      auto out = apply_vop3_dst_mod_f64(v, omod, clamp);
-      alignas(util::native<double>) double o[W];
-      out.copy_to(o, util::stdx::element_aligned);
-      for (std::size_t i = 0; i < W; ++i) {
-        const double r = ref_dst(in[i], omod, clamp != 0);
-        EXPECT_EQ(std::bit_cast<uint64_t>(o[i]), std::bit_cast<uint64_t>(r))
-            << "omod=" << omod << " clamp=" << clamp << " lane " << i;
+      for (uint32_t clamp_nan = 0; clamp_nan < 2; ++clamp_nan) {
+        auto out = apply_vop3_dst_mod_f64(v, omod, clamp, clamp_nan != 0);
+        alignas(util::native<double>) double o[W];
+        out.copy_to(o, util::stdx::element_aligned);
+        for (std::size_t i = 0; i < W; ++i) {
+          const double r = ref_dst(in[i], omod, clamp != 0, clamp_nan != 0);
+          EXPECT_EQ(std::bit_cast<uint64_t>(o[i]), std::bit_cast<uint64_t>(r))
+              << "omod=" << omod << " clamp=" << clamp << " clamp_nan=" << clamp_nan << " lane "
+              << i;
+        }
       }
     }
   }
