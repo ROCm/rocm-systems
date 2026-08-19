@@ -1,173 +1,48 @@
 # Contributing to ROCm Compute Profiler
 
-## Getting Started
+## Cloning and setup instructions
+ROCm Compute Profiler lives under `projects/rocprofiler-compute` in the [ROCm Systems super-repo](https://github.com/ROCm/rocm-systems).
+The latest sources are in the `develop` branch. You can find particular releases in the `release/rocm-rel-X.Y` branch for the particular release you're looking for.
 
-ROCm Compute Profiler lives under `projects/rocprofiler-compute` in the [ROCm Systems super-repo](https://github.com/ROCm/rocm-systems). To set up your local environment, follow the [clone and setup instructions](https://github.com/ROCm/rocm-systems/blob/develop/CONTRIBUTING.md#getting-started) in the rocm-systems CONTRIBUTING.md. Sparse checkout is recommended for most contributors.
-
-## Reporting Issues and Bugs
-
-- Search [existing issues](https://github.com/ROCm/rocm-systems/issues) before filing a new one — your bug may already be tracked.
-- If you don't find an existing issue, [open a new one](https://github.com/ROCm/rocm-systems/issues/new) with a clear description of the problem and steps to reproduce it.
-
-## Submitting a Pull Request
-
-Follow the [pull request guidelines](https://github.com/ROCm/rocm-systems/blob/develop/CONTRIBUTING.md#pull-request-guidelines) in the rocm-systems CONTRIBUTING.md.
-
-> **Note for external contributors:** Please refer to the [ROCm contribution guide](https://rocm.docs.amd.com/en/develop/contribute/contributing.html) for instructions on contributing from a fork.
-
-### Review and Labeling
-
-Labels and reviewer assignments are handled automatically based on the files you've changed. Reviewers for `projects/rocprofiler-compute` are defined in the top-level [CODEOWNERS](https://github.com/ROCm/rocm-systems/blob/develop/CODEOWNERS) file.
-
-### CI Requirements
-
-All pull requests must pass CI checks before merging. For `rocprofiler-compute`, these currently include compilation checks, with correctness and performance tests being added over time. See the [CI documentation](https://github.com/ROCm/rocm-systems/blob/develop/docs/continuous-integration.md) for a full breakdown of what runs on each PR.
-
-> [!TIP]
-> Run our pre-commit hooks locally before pushing to catch formatting issues early. See [Using Pre-Commit Hooks](#using-pre-commit-hooks) below for setup instructions.
-
-## Adding Experimental Features
-
-New features that aren't yet stable can be introduced behind the `--experimental` flag. This lets users opt in to preview functionality while keeping the default experience stable.
-
-### How It Works
-
-The `--experimental` flag acts as a master toggle:
-
-- Experimental options are **hidden** from help output unless `--experimental` is passed.
-- Attempting to use an experimental flag without `--experimental` raises a clear error.
-- A warning is displayed when an experimental feature is active.
-
-To see available experimental features:
+Sparse checkout is recommended for most contributors.
 
 ```bash
-rocprof-compute profile --experimental --help
+git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
+cd rocm-systems
+git sparse-checkout init --cone
+git sparse-checkout set projects/rocprofiler-compute
+git checkout develop
+
+cd projects/rocprofiler-compute
+
+# Initialize submodule dependencies (vendored Python deps and src/lib/external C++ libs)
+git submodule update --init --recursive -- src/
+
+python3 -m pip install -r requirements.txt
 ```
 
-### Adding a New Experimental Feature
+**Note**: When working from source, submodules live under `src/` (vendored Python dependencies like PyYAML in `src/vendored/`, and C++ libraries like googletest, fmt, and json in `src/lib/external/`). If you see import errors about missing vendored modules or missing C++ externals during a build, run `git submodule update --init --recursive -- src/`.
 
-Follow these three steps to add a new experimental flag.
 
-**Step 1 — Register it in the `--experimental` help text**
-
-In `src/argparser.py`, update the `add_general_group()` function:
-
-```python
-general_group.add_argument(
-    "--experimental",
-    action="store_true",
-    default=False,
-    help=(
-        "Enable experimental feature(s):\n"
-        "   Your feature name (--your-flag)\n"  # Add this line
-    ),
-)
-```
-
-**Step 2 — Add the argument using `ExperimentalAction`**
-
-Add your flag to the relevant parser group (profile, analyze, etc.):
-
-```python
-# For a flag that accepts a value
-profile_group.add_argument(
-    "--your-flag",
-    dest="your_flag",
-    required=False,
-    default=None,
-    action=ExperimentalAction,
-    experimental_enabled=experimental_enabled,
-    feature_label="Your feature name",
-    base_action="store",  # Required — see supported actions below
-    type=str,
-    nargs="*",
-    metavar="",
-    help="\t\t\tDescription of your feature",
-)
-
-# For a boolean toggle flag
-analyze_group.add_argument(
-    "--your-flag",
-    dest="your_flag",
-    required=False,
-    default=False,
-    action=ExperimentalAction,
-    experimental_enabled=experimental_enabled,
-    feature_label="Your feature description",
-    base_action="store_const",  # Required — see supported actions below
-    nargs=0,
-    const=True,
-    help="\t\tDescription of your feature",
-)
-```
-
-The `base_action` parameter is required and must be one of:
-
-| Value | Behavior |
-|---|---|
-| `store` | Store a value (standard argparse default) |
-| `store_const` | Store a fixed constant; consumes no arguments |
-| `store_true` | Store `True` when the flag is present |
-| `store_false` | Store `False` when the flag is present |
-| `append` | Append each value to a list |
-| `append_const` | Append a constant to a list |
-| `count` | Count occurrences (e.g. `-vvv`) |
-| `extend` | Extend a list with multiple values |
-
-**Step 3 — Verify behavior**
-
-Confirm the flag is hidden without `--experimental` and visible with it:
-
+## Development instructions
+### Install development tools (linter, pre-commit hooks, YAML utilities)
 ```bash
-# Should not appear
-rocprof-compute profile --help
-
-# Should appear with EXPERIMENTAL: prefix
-rocprof-compute profile --experimental --help
+python3 -m pip install -r requirements-development.txt
 ```
 
-### Promoting a Feature to Stable
-
-When a feature is ready for general availability:
-
-1. Remove it from the `--experimental` help text in `src/argparser.py`.
-2. Replace `action=ExperimentalAction` with a standard argparse action (e.g. `action="store"`).
-3. Remove the `experimental_enabled`, `feature_label`, and `base_action` parameters.
-4. Update documentation and tests accordingly.
-
-## Using Pre-Commit Hooks
-
-Pre-commit hooks automatically check your code for formatting issues before each commit, helping you catch problems before they reach CI.
-
-**Setup:**
-
-First, install [development dependencies](README.md#development-dependencies), then enable the hooks:
-
+### Install pre-commit hooks
+This automatically checks your code for formatting issues before each commit, helping you catch problems before they reach CI.
 ```bash
 cd rocprofiler-compute
 pre-commit install
 ```
 
 Once installed, every commit will run the configured checks automatically:
-
 ![A screen capture showing terminal output from a pre-commit hook](docs/data/contributing/pre-commit-hook.png)
-
 See the [pre-commit documentation](https://pre-commit.com/#quick-start) for more details.
 
-## Code Style and Formatting
-
-ROCm Compute Profiler uses [Ruff](https://docs.astral.sh/ruff/) for linting and formatting. All contributions to `src/` must pass Ruff checks before merging. Pre-commit hooks handle this automatically.
-
-**Style references:**
-
-| Topic | Source of Truth |
-|-------|-----------------|
-| Function design, naming, code organization | [Python Coding Style Guidelines](docs/dev-guidelines/python-coding-style.md) |
-| Ruff configuration (enforced rules, ignores, formatting) | [`pyproject.toml`](pyproject.toml) |
-| YAML metric equation formatting | [YAML Metric Equation Formatting](#yaml-metric-equation-formatting) |
-
-### Running Ruff Manually
-
+This will automatically use [Ruff](https://docs.astral.sh/ruff/) for linting and formatting. All contributions to `src/` must pass Ruff checks before merging.
+If you want to run Ruff manually:
 ```bash
 # Check for issues
 ruff check .
@@ -178,56 +53,18 @@ ruff check --fix .
 ruff format .
 ```
 
-### YAML Metric Equation Formatting
+## Check coding style and development guidelines:
+- [Python Coding Style Guidelines](docs-internal/dev-guidelines/coding-style-python.md).
+- [YAML Metric Equation Guidelines](docs-internal/dev-guidelines/yaml-metric-equation-guidelines.md)
+- [Command Line Interface Guidelines](docs-internal/dev-guidelines/cli-guidleines.md)
 
-Metric equations in YAML config files follow a canonical format. The canonical
-implementation is [`tools/format_yaml.py`](tools/format_yaml.py).
 
-**Scope.** Equation formatting applies to YAML files under:
+## Submitting a Pull Request
+Labels and reviewer assignments are handled automatically based on the files you've changed. Reviewers for `projects/rocprofiler-compute` are defined in the top-level [CODEOWNERS](https://github.com/ROCm/rocm-systems/blob/develop/CODEOWNERS) file.
 
-- `src/rocprof_compute_soc/analysis_configs/gfx*/*.yaml`
-- `src/rocprof_compute_tui/utils/gfx*/*.yaml`
+All pull requests must pass CI checks before merging. For `rocprofiler-compute`, these currently include compilation checks, with correctness and performance tests being added over time. See the [CI documentation](https://github.com/ROCm/rocm-systems/blob/develop/docs/continuous-integration.md) for a full breakdown of what runs on each PR.
 
-Template files (`*_template.yaml`) and build artifacts are excluded. Only values
-under these keys are treated as equations: `value`, `avg`, `min`, `max`, `peak`.
-
-**Rules.**
-
-- **Operator spacing** — all binary operators (`+`, `-`, `*`, `/`) have exactly
-  one space on each side: `SUM(x) / SUM(y)`.
-- **Constant factoring** — when an aggregation (`SUM`, `AVG`, `MIN`, `MAX`)
-  multiplies by a numeric constant, factor it out:
-  `128 * SUM(x)`, not `SUM(x * 128)`. Addition inside aggregations is left as-is.
-- **Minimal parentheses** — remove parentheses made redundant by operator
-  precedence (`a + b + c`, not `(a + b) + c`), but preserve those required for
-  correct evaluation (`a - (b - c)`, `(a + b) * c`).
-- **Unary negation** — negation of a compound expression keeps its parentheses:
-  `-(a + b)`, not `-a + b`.
-- **Literal values** — `N/A`, `None`, `null`, `true`, `false`, and
-  `Peak (Empirical)` are never parsed as equations and must be written exactly
-  as shown (the space before `(` in `Peak (Empirical)` is required).
-
-Equations with unsupported syntax (unknown characters, unmatched parentheses) are
-left unchanged; the formatter never corrupts an equation it cannot fully parse.
-
-**Enforcement.** The `yaml-format-fix` pre-commit hook runs
-`tools/format_yaml.py --fix` on staged config files and auto-corrects equations
-in place. Re-stage the modified files and commit again.
-
-```bash
-# Show proposed changes
-python tools/format_yaml.py --diff src/rocprof_compute_soc/analysis_configs/gfx950/*.yaml
-
-# Auto-fix in place
-python tools/format_yaml.py --fix src/rocprof_compute_soc/analysis_configs/gfx950/*.yaml
-```
-
-## Documentation Changes
-
-For instructions on building and testing changes to files under the `docs/` folder, see the [ROCm documentation contributing guide](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
-
-## Metrics Management
-
+### Updating metric YAML files
 If your PR modifies **metric configurations** — panel YAMLs under `src/rocprof_compute_soc/analysis_configs/gfx<arch>/*.yaml` or metric descriptions in `docs/data/metrics_description.yaml` — follow the metric management workflow:
 
 1. Edit the relevant panel YAMLs.
@@ -236,8 +73,7 @@ If your PR modifies **metric configurations** — panel YAMLs under `src/rocprof
 
 For full details, see the [metric config management README](./tools/config_management/README.md).
 
-## Analysis Database Schema Diagrams
-
+### Updating analysis database
 The two diagrams in the [analysis data dump docs](docs/how-to/analyze/cli.rst) are
 generated from [`src/utils/analysis_orm.py`](src/utils/analysis_orm.py), not drawn
 by hand. If your PR changes a table, column, foreign key, or a view definition in
@@ -251,6 +87,14 @@ This requires the Graphviz `dot` binary (`apt install graphviz`). The tool reads
 the ORM metadata for the schema diagram, and materializes the views in a
 throwaway database to read back their real columns for the views diagram, so
 neither diagram can drift from the code. Do not edit the PNGs by hand.
+
+### Updating documentation
+For instructions on building and testing changes to files under the `docs/` folder, see the [ROCm documentation contributing guide](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
+
+
+## Reporting Issues and Bugs
+- Search [existing issues](https://github.com/ROCm/rocm-systems/issues) before filing a new one — your bug may already be tracked.
+- If you don't find an existing issue, [open a new one](https://github.com/ROCm/rocm-systems/issues/new) with a clear description of the problem and steps to reproduce it.
 
 ## Vendoring External Dependencies
 
