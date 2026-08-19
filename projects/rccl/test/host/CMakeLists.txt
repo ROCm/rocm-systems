@@ -109,6 +109,46 @@ function(register_test_categories tgt yaml_name)
   endif()
 endfunction()
 
+# add_host_micro_test(<name> SOURCES ... [INCLUDES ...] [DEFINES ...])
+#
+# Create a standalone host-only micro-test binary. All of these binaries share
+# the same model as rccl-HostUnitTests (hipcc --offload-host-only, -no-hip-rt),
+# are built from the hipified snapshot, and satisfy every HIP/nccl symbol from
+# fakes/ rather than librccl.so or the HIP runtime. SOURCES are the
+# unit-specific files; the common gtest main, process-isolation runner and
+# shared fakes are added automatically. INCLUDES / DEFINES are appended to the
+# shared include dirs / RCCL_HOST_TEST_DEFS for that binary.
+#
+# -no-pie: the RCCL-vendored libgtest.a used by this standalone path is built
+# without -fPIC, so a PIE link fails with "relocation R_X86_64_32 cannot be
+# used against local symbol". Called only from the standalone project below, so
+# RCCL_INCLUDE_DIRS / RCCL_HOST_TEST_DEFS / RCCL_TEST_DIR are set by call time.
+function(add_host_micro_test name)
+  cmake_parse_arguments(ARG "" "" "SOURCES;INCLUDES;DEFINES" ${ARGN})
+  add_executable(${name}
+    ${ARG_SOURCES}
+    fakes/nccl_fakes.cc
+    fakes/hip_fakes.cc
+    ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
+    ${RCCL_TEST_DIR}/common/ProcessIsolatedTestRunner.cpp
+  )
+  target_include_directories(${name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${RCCL_INCLUDE_DIRS}
+    ${ARG_INCLUDES}
+  )
+  target_compile_definitions(${name} PRIVATE
+    ${RCCL_HOST_TEST_DEFS}
+    ${ARG_DEFINES}
+  )
+  target_link_options(${name} PRIVATE -no-hip-rt -no-pie)
+  target_link_libraries(${name} PRIVATE
+    GTest::GTest
+    Threads::Threads
+    fmt::fmt-header-only
+  )
+endfunction()
+
 if(BUILD_TESTS)
   # rccl-UnitTestsMicro: standalone unit-test binary compiled directly into
   # the test binary. This lets us use preprocessor and link-time substitution
@@ -592,81 +632,49 @@ target_link_libraries(rccl-HostUnitTests PRIVATE
   -Wl,--no-whole-archive
 )
 
-# --- Standalone micro-test binary ---------------------------------------
-# rccl-UnitTestsMicro: same host-only model as rccl-HostUnitTests (hipcc
-# --offload-host-only, -no-hip-rt), built from the hipified snapshot. It
-# #includes each unit-under-test production .cc directly (via P2P_CC_PATH,
-# RMA_PROXY_PROGRESS_CC_PATH, GROUP_CC_PATH, DEVCOMM_V22902_CC_PATH,
-# DEVCOMM_V22907_CC_PATH) and
-# satisfies every HIP/nccl symbol from fakes/ rather than librccl.so or the
-# HIP runtime.
-add_executable(rccl-UnitTestsMicro ${RCCL_MICRO_TEST_SOURCES})
-
-target_include_directories(rccl-UnitTestsMicro PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}
-  ${RCCL_HIPIFY_DIR}/src/devcomm      # devcomm_v22902.h, included unqualified
-  ${RCCL_INCLUDE_DIRS}
+# --- Standalone micro-test binaries -------------------------------------
+# rccl-UnitTestsMicro #includes the unit-under-test production .cc directly
+# (via P2P_CC_PATH). rccl-UnitTestsDevRuntime is a sibling that #includes the
+# hipified src/dev_runtime.cc (via DEV_RUNTIME_CC_PATH). They are kept as
+# separate binaries rather than folded together: both would #include a whole
+# production .cc into one link (p2p_tmp.cc vs dev_runtime.cc), risking
+# duplicate-symbol/ODR clashes, and this keeps devr_fakes.cc off the p2p link.
+add_host_micro_test(rccl-UnitTestsMicro
+  SOURCES
+    p2p-test.cc
+    rma-proxy-progress-test.cc
+    group-test.cc
+    devcomm-test.cc
+    fakes/p2p_fakes.cc
+    fakes/rma_fakes.cc
+    fakes/comm_fakes.cc
+    fakes/collective_stubs.cc
+    fakes/devcomm_fakes.cc
+  INCLUDES
+    ${RCCL_HIPIFY_DIR}/src/devcomm         # devcomm_v22902.h, included unqualified
+  DEFINES
+    P2P_CC_PATH="${RCCL_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
+    RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
+    GROUP_CC_PATH="${RCCL_HIPIFY_DIR}/src/group.cc"
+    DEVCOMM_V22902_CC_PATH="${RCCL_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc"
+    DEVCOMM_V22907_CC_PATH="${RCCL_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc"
+    # Same fallback-vs-runtime conflicts the host target guards against: without
+    # these, p2p-test.cc redefines hipMemFabricHandle_st and the amdsmi fabric
+    # enumerators on ROCm 7.14+, and the standalone build fails.
+    $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+    $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
 )
 
-target_compile_definitions(rccl-UnitTestsMicro PRIVATE
-  ${RCCL_HOST_TEST_DEFS}
-  P2P_CC_PATH="${RCCL_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
-  RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
-  GROUP_CC_PATH="${RCCL_HIPIFY_DIR}/src/group.cc"
-  DEVCOMM_V22902_CC_PATH="${RCCL_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc"
-  DEVCOMM_V22907_CC_PATH="${RCCL_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc"
-  # Same fallback-vs-runtime conflicts the host target guards against: without
-  # these, p2p-test.cc redefines hipMemFabricHandle_st and the amdsmi fabric
-  # enumerators on ROCm 7.14+, and the standalone build fails.
-  $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
-  $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
-)
-
-# -no-pie for the same reason as rccl-HostUnitTests: the RCCL-vendored
-# libgtest.a used by this standalone path is built without -fPIC, so a PIE
-# link fails with "relocation R_X86_64_32 cannot be used against local symbol".
-target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt -no-pie)
-target_link_libraries(rccl-UnitTestsMicro PRIVATE
-  GTest::GTest
-  Threads::Threads
-  fmt::fmt-header-only
-)
-
-# --- Standalone dev_runtime test binary ---------------------------
-# rccl-UnitTestsDevRuntime: sibling of rccl-UnitTestsMicro that #includes
-# the hipified src/dev_runtime.cc directly (via DEV_RUNTIME_CC_PATH). Kept a
-# separate binary rather than folded in: both would #include a whole production
-# .cc into one link (p2p_tmp.cc vs dev_runtime.cc), risking duplicate-symbol/ODR
-# clashes, and this keeps devr_fakes.cc off the p2p link.
-add_executable(rccl-UnitTestsDevRuntime
-  DevRuntimeTests.cpp
-  fakes/nccl_fakes.cc
-  fakes/devr_fakes.cc
-  fakes/hip_fakes.cc
-  ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
-  ${RCCL_TEST_DIR}/common/ProcessIsolatedTestRunner.cpp
-)
-
-target_include_directories(rccl-UnitTestsDevRuntime PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}
-  ${CMAKE_CURRENT_SOURCE_DIR}/fakes
-  ${RCCL_INCLUDE_DIRS}
-  ${RCCL_HIPIFY_DIR}/src/include/nccl_device
-  ${RCCL_HIPIFY_DIR}/src/device
-)
-
-target_compile_definitions(rccl-UnitTestsDevRuntime PRIVATE
-  ${RCCL_HOST_TEST_DEFS}
-  DEV_RUNTIME_CC_PATH="${RCCL_HIPIFY_DIR}/src/dev_runtime.cc"
-)
-
-# -no-pie: the RCCL-vendored libgtest.a used by this standalone path is built
-# without -fPIC (see rccl-UnitTestsMicro above).
-target_link_options(rccl-UnitTestsDevRuntime PRIVATE -no-hip-rt -no-pie)
-target_link_libraries(rccl-UnitTestsDevRuntime PRIVATE
-  GTest::GTest
-  Threads::Threads
-  fmt::fmt-header-only
+add_host_micro_test(rccl-UnitTestsDevRuntime
+  SOURCES
+    DevRuntimeTests.cpp
+    fakes/devr_fakes.cc
+  INCLUDES
+    ${CMAKE_CURRENT_SOURCE_DIR}/fakes
+    ${RCCL_HIPIFY_DIR}/src/include/nccl_device
+    ${RCCL_HIPIFY_DIR}/src/device
+  DEFINES
+    DEV_RUNTIME_CC_PATH="${RCCL_HIPIFY_DIR}/src/dev_runtime.cc"
 )
 
 # llvm source-based coverage (host-only build: no -Xarch_device split needed
