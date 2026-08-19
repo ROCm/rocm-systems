@@ -230,26 +230,25 @@ struct metadata_registry
     find_gpu_perf_counter_by_id(std::uint32_t device_id, std::uint64_t counter_id) const;
 
 private:
-    common::synchronized<info::process, false, state::thread> m_process{};
+    common::synchronized<info::process, state::thread> m_process{};
     common::synchronized<
-        std::unordered_set<info::pmc, info::pmc_info_hash, info::pmc_info_equal>, false,
+        std::unordered_set<info::pmc, info::pmc_info_hash, info::pmc_info_equal>,
         state::thread>
-                                                                       m_pmc_infos{};
-    common::synchronized<std::set<info::thread>, false, state::thread> m_threads{};
-    common::synchronized<std::set<info::track>, false, state::thread>  m_tracks{};
+                                                                m_pmc_infos{};
+    common::synchronized<std::set<info::thread>, state::thread> m_threads{};
+    common::synchronized<std::set<info::track>, state::thread>  m_tracks{};
 
-    common::synchronized<std::set<std::uint64_t>, false, state::thread> m_streams{};
-    common::synchronized<std::set<std::uint64_t>, false, state::thread> m_queues{};
-    common::synchronized<std::unordered_set<std::string>, false, state::thread>
-        m_strings{};
+    common::synchronized<std::set<std::uint64_t>, state::thread>         m_streams{};
+    common::synchronized<std::set<std::uint64_t>, state::thread>         m_queues{};
+    common::synchronized<std::unordered_set<std::string>, state::thread> m_strings{};
     common::synchronized<std::set<rocprofiler_callback_tracing_code_object_load_data_t,
                                   info::code_object_less>,
-                         false, state::thread>
+                         state::thread>
         m_code_objects{};
     common::synchronized<
         std::set<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t,
                  info::kernel_symbol_less>,
-        false, state::thread>
+        state::thread>
                                                       m_kernel_symbols{};
     rocprofiler::sdk::buffer_name_info_t<const char*> m_buffered_tracing_info{
         rocprofiler::sdk::get_buffer_tracing_names<const char*>()

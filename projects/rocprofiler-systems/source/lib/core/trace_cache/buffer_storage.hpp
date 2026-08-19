@@ -12,7 +12,6 @@
 
 #include <atomic>
 #include <cassert>
-#include <concepts>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>

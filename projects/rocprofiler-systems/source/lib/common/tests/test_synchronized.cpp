@@ -37,7 +37,7 @@ struct mock_thread_state_policy_t
 };
 
 template <typename T, bool IsMappedTypeV = false>
-using traced_synchronized = synchronized<T, IsMappedTypeV, mock_thread_state_policy_t>;
+using traced_synchronized = synchronized<T, mock_thread_state_policy_t, IsMappedTypeV>;
 }  // namespace
 
 class synchronized_test : public ::testing::Test
