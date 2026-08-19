@@ -3983,13 +3983,6 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
     sess.debugger_pid = caller.client_pid();
     sess.debugger_pidfd = std::move(new_debugger_pidfd);
     sess.dbg_fd = dbg_fd;
-    // In daemon mode the session owns the transferred fd and releases it via
-    // RAII (on DISABLE or process teardown). In local mode dbg_fd is the
-    // debugger's own descriptor, left for the debugger to close. Take ownership
-    // here, before the liveness checks below can return early: once the fd has
-    // been substituted into our fd space it is ours to close on every path.
-    if (daemon_mode_)
-      sess.owned_dbg_fd = util::UniqueHandle(dbg_fd);
     sess.exception_enable_mask = args->enable.exception_mask;
 
     // Snapshot the runtime-enable state under a single lock so the marshaled
@@ -4026,10 +4019,18 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
     if (debugger_commit_live != 0)
       return debugger_commit_live == 1 ? -ESRCH : debugger_commit_live;
 
-    // owned_dbg_fd was taken above, before the liveness checks. The authorized
-    // memory fd is adopted here because it only has to survive a successful
-    // ENABLE: on any earlier return the caller still owns it and reclaims it.
+    // Both transferred fds are adopted here, past every failure check, because
+    // each only has to survive a successful ENABLE: on any earlier return the
+    // caller still owns it and reclaims it. Adopting the notifier sooner would
+    // double-close it, because the transport clears cmd->in_handle only when
+    // the ioctl succeeds -- a late liveness failure would destroy sess (closing
+    // the fd) and then let the transport close the same number again. With
+    // daemon requests running concurrently another thread can be handed that
+    // number in between, so the second close would land on an unrelated
+    // descriptor. In local mode dbg_fd is the debugger's own descriptor and
+    // nothing is owned here.
     if (daemon_mode_) {
+      sess.owned_dbg_fd = util::UniqueHandle(dbg_fd);
       sess.target_mem_fd = util::UniqueHandle(*target_mem_fd);
       *target_mem_fd = -1;
     }
