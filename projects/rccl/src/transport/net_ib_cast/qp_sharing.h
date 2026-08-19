@@ -42,7 +42,10 @@ struct IbCastSharedQp {
     IbCastSharedQpKey key;
     struct ibv_qp*    qp;                  // the physical QP
     struct ibv_cq*    primaryCq;           // CQ for this device in this group
-    struct ncclIbNetCommDevBase* primaryDevBase;  // device base of primary comm's CQ
+    int      primaryIbDevN;                // local IB device index of the primary comm's device,
+                                            // captured by value: the primary comm (and its inline
+                                            // devs[]) may be freed while secondaries or this pool
+                                            // entry still reference the group
     int      devIndex;                     // local device index within comm->devs[]
     int      refcount;                     // number of comms using this QP
     int      cqRefcount;                   // comms using this group's CQs (tracked on qpIdx==0 only)
@@ -81,7 +84,7 @@ struct IbCastSharedQp* IbCastFindSharedQpByQpn(uint32_t qpn, bool isSend);
 // Register a new shared QP in the pool
 struct IbCastSharedQp* IbCastRegisterSharedQp(const IbCastSharedQpKey* key,
     struct ibv_qp* qp, struct ibv_cq* primaryCq,
-    struct ncclIbNetCommDevBase* primaryDevBase, int devIndex, int initialRefcount);
+    int primaryIbDevN, int devIndex, int initialRefcount);
 
 // Count QP slots registered by the primary for a given group
 int IbCastCountGroupQpSlots(const union ncclSocketAddress* peerAddr,
