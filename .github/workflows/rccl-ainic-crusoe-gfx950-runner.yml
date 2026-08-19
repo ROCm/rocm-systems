@@ -4,8 +4,11 @@
 # test_runner framework lives at projects/rccl/tools/scripts/test_runner/ and its
 # entry point is test_runner.py (run from that directory so its `from lib...`
 # imports resolve, matching the README). The test plan is
-# configs/mi355x_ainic_crusoe_roce.json. Runs on the self-hosted org runner
-# labeled "crusoe-linux-slurm-scale-runner" (agent crusoe-linux-slurm-01).
+# configs/mi355x_ainic_crusoe_roce.json. Runs on the org runner
+# crusoe-linux-slurm-01. That agent was registered with --no-default-labels,
+# so its only GitHub label is crusoe-linux-slurm-scale-runner -- do not also
+# require self-hosted, or the job waits forever for a runner that will never
+# match.
 #
 # Test scope and categories live entirely in the JSON config (not here), so the
 # set of suites and the smoke subset can be changed without editing this
@@ -156,7 +159,7 @@ jobs:
     concurrency:
       group: crusoe-ainic-test-runner-pinned-nodes
       cancel-in-progress: false
-    runs-on: [self-hosted, crusoe-linux-slurm-scale-runner]
+    runs-on: crusoe-linux-slurm-scale-runner
     timeout-minutes: 540
 
     steps:
