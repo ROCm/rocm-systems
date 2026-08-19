@@ -5,7 +5,7 @@
 # entry point is test_runner.py (run from that directory so its `from lib...`
 # imports resolve, matching the README). The test plan is
 # configs/mi355x_ainic_crusoe_roce.json. Runs on the self-hosted org runner
-# "crusoe-linux-slurm-scale-runner".
+# labeled "crusoe-linux-slurm-scale-runner" (agent crusoe-linux-slurm-01).
 #
 # Test scope and categories live entirely in the JSON config (not here), so the
 # set of suites and the smoke subset can be changed without editing this
@@ -19,8 +19,8 @@
 #     "smoke": true); schedule/manual run the full plan (all enabled suites).
 #
 # Triggers: manual (workflow_dispatch), nightly (schedule) against the default
-# branch, and label-gated on PRs -- add the "crusoe-linux-slurm-scale-runner"
-# label to run the smoke subset. Not a required merge gate.
+# branch, and label-gated on PRs -- add the "crusoe-test" label to run the
+# smoke subset. Not a required merge gate.
 #
 # Build strategy: the runner is a submit node with no local GPUs, so everything
 # runs inside one batch job on the GPU compute nodes. Phase 0 builds RCCL fresh
@@ -107,7 +107,7 @@ on:
     # Nightly at 02:00 UTC: runs the full plan against HEAD of the default branch.
     - cron: '0 2 * * *'
   pull_request:
-    # Label-gated smoke: runs only when the "crusoe-linux-slurm-scale-runner"
+    # Label-gated smoke: runs only when the "crusoe-test"
     # label is present (see the job `if`); the subset that runs is every suite
     # marked "smoke": true in the config (selected via --scope smoke below).
     types: [labeled, synchronize]
@@ -140,14 +140,14 @@ env:
 jobs:
   crusoe-ainic-test-runner:
     # On PRs, run only for same-repo branches (never forks) that carry the
-    # "crusoe-linux-slurm-scale-runner" label -- the same-repo guard stops a
+    # "crusoe-test" label -- the same-repo guard stops a
     # labeled fork PR from running updated fork code on the self-hosted runner
     # via later synchronize events. All other events (workflow_dispatch,
     # schedule) always run.
     if: >-
       github.event_name != 'pull_request' ||
       (github.event.pull_request.head.repo.full_name == github.repository &&
-       contains(github.event.pull_request.labels.*.name, 'crusoe-linux-slurm-scale-runner'))
+       contains(github.event.pull_request.labels.*.name, 'crusoe-test'))
     # Serialise on the shared Crusoe nodes: only one run at a time, and never
     # cancel an in-progress allocation (it must finish cleanly to release the
     # nodes). Job-level (not workflow-level) so skipped PR runs -- every PR
