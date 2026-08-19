@@ -65,6 +65,7 @@ NUMERIC_COLS = [
 REPORT_COLS = [
     "VGPRs",
     "TotalSGPRs",
+    "AGPRs",
     "VGPRsSpill",
     "SGPRsSpill",
     "ScratchBytesPerLane",
@@ -74,6 +75,7 @@ REPORT_COLS = [
 RESOURCE_LABELS = {
     "VGPRs": "VGPRs",
     "TotalSGPRs": "SGPRs",
+    "AGPRs": "AGPRs",
     "VGPRsSpill": "VGPR Spill",
     "SGPRsSpill": "SGPR Spill",
     "ScratchBytesPerLane": "Scratch [B/lane]",
@@ -166,7 +168,14 @@ def build_diff_rows(baseline, branch):
     branch, that is surfaced explicitly via count_mismatch/occurrence_count_*
     rather than silently comparing an arbitrary pair.
     """
-    all_keys = set(baseline) | set(branch)
+    # Sorted, not a bare set iteration: str hashing is randomized per-process
+    # (PYTHONHASHSEED), so iterating a set of string-keyed tuples gives a
+    # different order every run. write_csv()'s final sort is stable, so ties
+    # in |delta| (extremely common -- e.g. many zero-delta rows, or distinct
+    # template instantiations with identical resource shapes) would otherwise
+    # silently reorder -- and change which rows land in the top --top N --
+    # from one invocation to the next on the exact same input CSVs.
+    all_keys = sorted(set(baseline) | set(branch))
     diff_rows = []
     for key in all_keys:
         b_rows = sorted(baseline.get(key, []), key=metric_tuple)
@@ -384,7 +393,13 @@ def make_chart(
                 return True
         return False
 
-    active_cols = [c for c in REPORT_COLS if col_active(c)]
+    # sort_by is always shown even if col_active(sort_by) is False -- that
+    # happens when every displayed row was pulled in solely via the
+    # DynamicStack_changed clause above (sort_by's own delta is 0 for all of
+    # them), and hiding the very column the chart's title claims to rank by
+    # is far more misleading than a panel full of "0->0" bars confirming
+    # there's genuinely no change in that metric.
+    active_cols = [c for c in REPORT_COLS if col_active(c) or c == sort_by]
     if sort_by in active_cols:
         active_cols.remove(sort_by)
         active_cols.insert(0, sort_by)
