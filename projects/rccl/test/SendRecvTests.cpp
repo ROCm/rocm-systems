@@ -208,8 +208,9 @@ namespace RcclUnitTesting
   //
   // The caller pins the transport + NCCL_ALLOC_P2P_NET_LL_BUFFERS to make one latency protocol the
   // deterministic choice for below-threshold sizes, and passes the matching `expect`:
-  //   - ExpectProto::LL128 (gfx942/gfx950, flag=1, NET path): below-threshold -> LL128, above ->
-  //       SIMPLE; legacy LL must NOT appear. Skipped on archs without the LL128 send/recv kernel.
+  //   - ExpectProto::LL128 (gfx942/gfx950, ll128Enabled=1, flag=1, NET path): below-threshold ->
+  //       LL128, above -> SIMPLE; legacy LL must NOT appear. Skipped on archs without the LL128
+  //       send/recv kernel.
   //   - ExpectProto::LegacyLL (intranode path, flag=0, any arch): below-threshold -> legacy LL,
   //       above -> SIMPLE; LL128 must NOT appear. Pins the default latency path (and its restored
   //       LL wire<->data / proxy byte conversions), which correctness alone can't distinguish from a
@@ -370,6 +371,39 @@ namespace RcclUnitTesting
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // P2P send/recv protocol-selection matrix (host gate in enqueue.cc). LL128 is selected only when
+  // ALL of the following hold; otherwise the legacy LL kernel is used (SIMPLE above threshold):
+  //
+  //     useLL128SendRecv = defined(ENABLE_LL128)          // compile-time (HIP >= 6.1.33591)
+  //                        && comm->topo->ll128Enabled    // comm LL128 gate (RCCL_LL128_FORCE_ENABLE)
+  //                        && comm->allocP2pNetLLBuffers  // NCCL_ALLOC_P2P_NET_LL_BUFFERS=1
+  //                        && (cudaArch == 940 || 950);   // gfx942 / gfx950 only
+  //
+  // ll128Enabled is required so P2P stays consistent with the comm's collective protocol choice: if
+  // LL128 is not enabled for the comm, send/recv must not use it even with the opt-in flag set. For
+  // an op whose staging buffer is present, below-threshold picks the latency protocol and
+  // above-threshold picks SIMPLE:
+  //     below: useLL128SendRecv ? LL128 (reg=1) : legacy LL (reg=0)
+  //     above: SIMPLE (under whichever kernel variant was selected)
+  //
+  //  ENABLE_LL128 | ll128Enabled | ALLOC_FLAG | size  | protocol  | kernel | covered by
+  //  ------------ | ------------ | ---------- | ----- | --------- | ------ | ----------------------------
+  //   on          | on           | 1          | below | LL128     | reg=1  | LL128NetBuffersEnabled
+  //   on          | on           | 1          | above | SIMPLE    | reg=1  | LL128NetBuffersEnabled
+  //   on          | on           | 0          | below | legacy LL | reg=0  | Ll128EnabledDoesNotEnableP2pLL128
+  //   on          | on           | 0          | above | SIMPLE    | reg=0  | Ll128EnabledDoesNotEnableP2pLL128
+  //   on          | off          | 1          | below | legacy LL | reg=0  | Ll128DisabledDoesNotEnableP2pLL128
+  //   on          | off          | 1          | above | SIMPLE    | reg=0  | Ll128DisabledDoesNotEnableP2pLL128
+  //   on          | off          | 0          | below | legacy LL | reg=0  | LegacyLLIntranode, LL128NetBuffersDisabled
+  //   on          | off          | 0          | above | SIMPLE    | reg=0  | LegacyLLIntranode, LL128NetBuffersDisabled
+  //   off         | any          | any        | below | legacy LL | reg=0  | LL128NetBuffersEnabled (#ifdef-guarded)
+  //   off         | any          | any        | above | SIMPLE    | reg=0  | LL128NetBuffersEnabled (#ifdef-guarded)
+  //
+  // Non-gfx942/950 archs behave like the ENABLE_LL128=off rows (useLL128SendRecv is always false);
+  // the LL128 cases are skipped there via DeviceSupportsLL128SendRecv().
+  // ---------------------------------------------------------------------------
+
   // Default intranode path (P2P/SHM left enabled), NCCL_ALLOC_P2P_NET_LL_BUFFERS=0: latency-bound
   // send/recv selects the legacy LL protocol (useLL128SendRecv is false on every arch when the flag
   // is off), above-threshold selects SIMPLE. This pins the default P2P latency path and its restored
@@ -429,14 +463,17 @@ namespace RcclUnitTesting
     unsetenv("NCCL_P2P_DISABLE");
   }
 
-  // NCCL_ALLOC_P2P_NET_LL_BUFFERS=1: exercises the branch that allocates a dedicated LL/LL128 staging
-  // buffer for shared p2p NET connections (device memory + GDR), enabling LL128 for latency-bound
-  // send/recv over the network. Verifies correctness of the changed net allocation + LL128 dispatch,
-  // and that LL128 is selected for latency-bound send/recv. See RunLL128BoundarySweep.
+  // NCCL_ALLOC_P2P_NET_LL_BUFFERS=1 with LL128 enabled for the comm: exercises the branch that
+  // allocates a dedicated LL/LL128 staging buffer for shared p2p NET connections (device memory +
+  // GDR), enabling LL128 for latency-bound send/recv over the network. Verifies correctness of the
+  // changed net allocation + LL128 dispatch, and that LL128 is selected for latency-bound send/recv.
+  // RCCL_LL128_FORCE_ENABLE=1 is required because ll128Enabled defaults off on gfx942/gfx950 and the
+  // gate now requires it (see the matrix above). See RunLL128BoundarySweep.
   TEST(SendRecv, LL128NetBuffersEnabled)
   {
     setenv("NCCL_P2P_DISABLE", "1", 1);              // disable P2P/IPC so send/recv does not use it
     setenv("NCCL_SHM_DISABLE", "1", 1);              // disable SHM so send/recv falls through to NET
+    setenv("RCCL_LL128_FORCE_ENABLE", "1", 1);       // ll128Enabled=true (required by the P2P LL128 gate)
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "1", 1); // enabled case
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
     // Capture the per-op protocol selection so we can assert LL128 was actually chosen (see helper).
@@ -447,7 +484,14 @@ namespace RcclUnitTesting
     setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_ll128_enabled_" + std::to_string(getpid()) + ".%p").c_str(), 1);
     {
       TestBed testBed;
+#if defined(ENABLE_LL128)
       RunLL128BoundarySweep(testBed, debugGlob, ExpectProto::LL128);
+#else
+      // Built without LL128 support (HIP < 6.1.33591): the reg=1 kernel is not generated, so the
+      // host gate forces useLL128SendRecv=false even with the flag on and the arch match -- LL128
+      // must never be selected (it would resolve to a null/trap device slot). See enqueue.cc gate.
+      RunLL128BoundarySweep(testBed, debugGlob, ExpectProto::NoLL128);
+#endif
     }
     RemoveGlobbedFiles(debugGlob);
     unsetenv("NCCL_DEBUG_FILE");
@@ -455,8 +499,69 @@ namespace RcclUnitTesting
     unsetenv("NCCL_DEBUG");
     unsetenv("NCCL_MAX_P2P_NCHANNELS");
     unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
+    unsetenv("RCCL_LL128_FORCE_ENABLE");
     unsetenv("NCCL_SHM_DISABLE");
     unsetenv("NCCL_P2P_DISABLE");
+  }
+
+  // Both the P2P opt-in flag AND the comm's ll128Enabled gate are required for P2P LL128. This pins
+  // the "ALLOC_FLAG=1 but ll128Enabled=0" rows: with the flag on but ll128Enabled off (its default
+  // on gfx942/gfx950), latency-bound send/recv must fall back to legacy LL (reg=0), above-threshold
+  // SIMPLE, and LL128 must never appear. Uses the intranode path (P2P/SHM enabled) so the LL staging
+  // buffer is always present and legacy LL is the deterministic below-threshold choice. See
+  // RunLL128BoundarySweep.
+  TEST(SendRecv, Ll128DisabledDoesNotEnableP2pLL128)
+  {
+    // ll128Enabled left at its gfx942/gfx950 default (off): RCCL_LL128_FORCE_ENABLE is NOT set.
+    setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "1", 1); // P2P opt-in ON, but ll128Enabled off -> no LL128
+    setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
+    std::string const debugGlob = "/tmp/rccl_ll128_disabled_gate_" + std::to_string(getpid()) + ".*";
+    RemoveGlobbedFiles(debugGlob);
+    setenv("NCCL_DEBUG", "INFO", 1);
+    setenv("NCCL_DEBUG_SUBSYS", "INIT", 1);
+    setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_ll128_disabled_gate_" + std::to_string(getpid()) + ".%p").c_str(), 1);
+    {
+      TestBed testBed;
+      RunLL128BoundarySweep(testBed, debugGlob, ExpectProto::LegacyLL);
+    }
+    RemoveGlobbedFiles(debugGlob);
+    unsetenv("NCCL_DEBUG_FILE");
+    unsetenv("NCCL_DEBUG_SUBSYS");
+    unsetenv("NCCL_DEBUG");
+    unsetenv("NCCL_MAX_P2P_NCHANNELS");
+    unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
+  }
+
+  // Both conditions required (mirror of the above): forcing ll128Enabled on with
+  // RCCL_LL128_FORCE_ENABLE=1 must NOT by itself make send/recv use LL128 while
+  // NCCL_ALLOC_P2P_NET_LL_BUFFERS=0. Same intranode setup as LegacyLLIntranode but with ll128Enabled
+  // forced on: below-threshold must still be legacy LL (reg=0), above-threshold SIMPLE, and LL128
+  // must never appear -- proving the P2P opt-in flag is also required. Covers the "ll128Enabled=on,
+  // ALLOC_FLAG=0" rows of the matrix above. Runs on any arch. See RunLL128BoundarySweep.
+  TEST(SendRecv, Ll128EnabledDoesNotEnableP2pLL128)
+  {
+    // P2P and SHM left ENABLED so cross-GPU pairs use intranode connections (deterministic legacy LL
+    // below-threshold). RCCL_LL128_FORCE_ENABLE flips comm->topo->ll128Enabled, but with the flag
+    // below off useLL128SendRecv stays false.
+    setenv("RCCL_LL128_FORCE_ENABLE", "1", 1);       // force comm->topo->ll128Enabled = true
+    setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "0", 1); // P2P LL128 opt-in OFF -> useLL128SendRecv=false
+    setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
+    std::string const debugGlob = "/tmp/rccl_ll128_indep_" + std::to_string(getpid()) + ".*";
+    RemoveGlobbedFiles(debugGlob);
+    setenv("NCCL_DEBUG", "INFO", 1);
+    setenv("NCCL_DEBUG_SUBSYS", "INIT", 1);
+    setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_ll128_indep_" + std::to_string(getpid()) + ".%p").c_str(), 1);
+    {
+      TestBed testBed;
+      RunLL128BoundarySweep(testBed, debugGlob, ExpectProto::LegacyLL);
+    }
+    RemoveGlobbedFiles(debugGlob);
+    unsetenv("NCCL_DEBUG_FILE");
+    unsetenv("NCCL_DEBUG_SUBSYS");
+    unsetenv("NCCL_DEBUG");
+    unsetenv("NCCL_MAX_P2P_NCHANNELS");
+    unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
+    unsetenv("RCCL_LL128_FORCE_ENABLE");
   }
 
   TEST(SendRecv, UserBufferRegister)

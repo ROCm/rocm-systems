@@ -1192,15 +1192,30 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   struct ncclProxyOp proxyOps[2] = {};
   int nProxyOps = selfSend ? 0 : 2;
   // Latency-bound send/recv uses one of two separately-generated kernel variants:
-  //   - LL128 kernel: only generated for gfx942/gfx950 (see reg_values_of() in the device
-  //     codegen), and only activated when NCCL_ALLOC_P2P_NET_LL_BUFFERS=1 (which is also what
-  //     makes the LL128 staging buffer available on network connections).
-  //   - legacy LL kernel: every other arch, or when NCCL_ALLOC_P2P_NET_LL_BUFFERS=0.
+  //   - LL128 kernel: only generated for gfx942/gfx950 (see reg_values_of() in the device codegen),
+  //     and only activated when this comm has LL128 enabled and NCCL_ALLOC_P2P_NET_LL_BUFFERS=1
+  //     (which is also what makes the LL128 staging buffer available on network connections).
+  //   - legacy LL kernel: every other arch/comm, or when NCCL_ALLOC_P2P_NET_LL_BUFFERS=0.
   // The choice is per-communicator, so all P2P ops in a plan agree on the kernel variant.
   // cudaArch is 100*major + 10*minor: 940 = gfx942, 950 = gfx950 -- the only archs whose LL128
   // send/recv kernel is generated (see reg_values_of("SendRecv") in the device codegen).
+  // LL128 send/recv requires ALL of:
+  //   - ENABLE_LL128 compiled in: otherwise the reg=1 LL128 kernel is not built (see the arch guard
+  //     in generate.py and DeviceLinker.cmake), yet the host func-id table still maps it, so
+  //     selecting it would dispatch to a null/trap device slot.
+  //   - comm->topo->ll128Enabled: the comm's LL128 gate (topology tuning / RCCL_LL128_FORCE_ENABLE).
+  //     If LL128 is not enabled for this comm, P2P must not use it even with the opt-in flag set, so
+  //     send/recv stays consistent with the collective protocol choice.
+  //   - NCCL_ALLOC_P2P_NET_LL_BUFFERS=1: the P2P opt-in that also makes the LL128 staging buffer
+  //     available on network connections.
+  //   - gfx942/gfx950: the only archs whose LL128 send/recv kernel is generated.
+#if defined(ENABLE_LL128)
   bool useLL128SendRecv = comm->allocP2pNetLLBuffers &&
+                          comm->topo->ll128Enabled &&
                           (comm->cudaArch == 940 || comm->cudaArch == 950);
+#else
+  bool useLL128SendRecv = false; // LL128 kernels not built (e.g. HIP < 6.1.33591)
+#endif
   if (comm->p2pNet) {
     for (int dir = 0; dir <= 1; dir++) {
       if (bytes[dir] > rcclParamP2pNetThreshold()) connIndex[dir] = NCCL_CONN_IDX_P2P_NET;
@@ -1217,7 +1232,10 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
         struct ncclConnector* conn =
           dir ? &channelPeers[peerRank]->send[connIndex[dir]] : &channelPeers[peerRank]->recv[connIndex[dir]];
         // The latency path needs the staging buffer for the protocol its kernel variant uses:
-        // the LL128 buffer when the LL128 kernel is active, otherwise the legacy LL buffer.
+        // the LL128 buffer when the LL128 kernel is active, otherwise the legacy LL buffer. If the
+        // chosen buffer is absent on any connection the op drops straight to SIMPLE (not to the
+        // other LL-family protocol) -- once LL128 is opted in, the fallback is SIMPLE, never legacy
+        // LL. Intranode always allocates the LL128 buffer, so this only affects mixed setups.
         int latencyProto = useLL128SendRecv ? NCCL_PROTO_LL128 : NCCL_PROTO_LL;
         protoLatency[dir] &= conn->conn.buffs[latencyProto] != nullptr;
         network[dir] |= conn->transportComm == (dir ? &netTransport.send : &netTransport.recv);
