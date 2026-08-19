@@ -19,8 +19,8 @@ if(ROCPROFILER_SDK_DXG_TOPOLOGY_SUPPORTED)
     set(ROCPROFILER_PLATFORM_WSL_SOURCES agent.cpp dxg_topology.cpp)
 else()
     message(
-        STATUS
-            "WSL/DXG agent enumeration disabled: the hsakmt headers in ${ROCM_PATH} do not declare everything the DXG topology read needs (adapter LUID, HsaStructureSizes, OverrideEngineId), and this ROCm ships no librocdxg to read through either."
+        WARNING
+            "WSL/DXG agent enumeration is NOT built into this rocprofiler-sdk: the hsakmt headers in ${ROCM_PATH} do not declare what the DXG topology read needs (the adapter LUID pair and HsaStructureSizes). Every released ROCm package ships headers in this state, 7.x included, so this is the expected outcome of a stock build and not a sign of a broken one. To get WSL support compiled in, install hsakmt headers built from this repository (projects/rocr-runtime/libhsakmt/include) into ${ROCM_PATH} and reconfigure."
         )
     set(ROCPROFILER_PLATFORM_WSL_HEADERS agent.hpp)
     set(ROCPROFILER_PLATFORM_WSL_SOURCES agent_unsupported.cpp)

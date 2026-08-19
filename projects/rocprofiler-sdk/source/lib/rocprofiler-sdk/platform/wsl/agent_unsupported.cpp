@@ -41,6 +41,8 @@
 
 #include "lib/common/logging.hpp"
 
+#include <unistd.h>
+
 #include <vector>
 
 namespace rocprofiler
@@ -52,15 +54,40 @@ namespace wsl
 bool
 is_available()
 {
-    ROCP_INFO << "agent topology: " << name
-              << " is not built into this binary; profiling on WSL requires rocprofiler-sdk "
-                 "to be built against hsakmt headers that describe a DXG KMT node";
-    return false;
+    // Split by /dev/dxg on the same rule agent.cpp states for the real
+    // enumerator: without it this is not a WSL GPU environment and the answer
+    // is uninteresting, but with it the caller is on WSL and about to get an
+    // empty agent list, which needs an explanation visible without -v. Latched
+    // because select_platform() asks twice per process.
+    static const bool _v = []() {
+        if(::access("/dev/dxg", F_OK) == 0)
+            ROCP_WARNING << "agent topology: " << name
+                         << " is not built into this binary; profiling on WSL requires "
+                            "rocprofiler-sdk to be built against hsakmt headers that describe a "
+                            "DXG KMT node";
+        else
+            ROCP_INFO << "agent topology: " << name << " is not built into this binary";
+        return false;
+    }();
+    return _v;
 }
 
 std::vector<unique_agent_t>
 enumerate()
 {
+    // Ungated, unlike is_available(): reaching this means the platform was
+    // already chosen, which here only happens through
+    // ROCPROFILER_FORCE_PLATFORM=wsl - autodetect cannot choose an enumerator
+    // whose is_available() is hard-coded false - so the caller asked for this
+    // whatever /dev/dxg says, and the two messages never both fire. Latched
+    // like that one: refreshing the topology enumerates twice, and what is
+    // absent here is a property of the binary that cannot change while it runs.
+    [[maybe_unused]] static const bool _warned = []() {
+        ROCP_WARNING << "agent topology: " << name
+                     << " is not built into this binary; returning no agents. Rebuild against "
+                        "hsakmt headers that describe a DXG KMT node to enable it.";
+        return true;
+    }();
     return {};
 }
 }  // namespace wsl
