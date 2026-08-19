@@ -95,17 +95,19 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
         continue;
       }
       try {
-        std::unique_ptr<Instruction> inst(decoder->decode(&words[pc]));
-        if (!inst) {
-          record_decode_failure(section_report, pc * sizeof(uint32_t), "decode returned null");
+        util::StringDiagnostic decode_error;
+        DecodeResult decoded = decoder->decode(&words[pc], decode_error.emitter());
+        if (decoded.failed()) {
+          record_decode_failure(section_report, pc * sizeof(uint32_t), decode_error.message());
           if (include_disassembly) {
             os << "  0x" << std::hex << std::setw(4) << std::setfill('0') << pc * 4
-               << ": <decode returned null>\n"
+               << ": <decode error: " << decode_error.message() << ">\n"
                << std::dec << std::setfill(' ');
           }
           ++pc;
           continue;
         }
+        std::unique_ptr<Instruction> inst = std::move(decoded).value();
 
         const uint32_t inst_words = inst->size() / sizeof(uint32_t);
         ++section_report.instruction_count;
@@ -317,14 +319,11 @@ collect_executable_sections(const AmdGpuCodeObject &object) {
     return "<source offset out of range>";
 
   const auto *words = reinterpret_cast<const uint32_t *>(text->data());
-  try {
-    std::unique_ptr<Instruction> inst(decoder->decode(&words[offset / sizeof(uint32_t)]));
-    if (!inst)
-      return "<decode returned null>";
-    return inst->disassemble();
-  } catch (const std::exception &e) {
-    return std::string("<decode error: ") + e.what() + ">";
-  }
+  util::StringDiagnostic decode_error;
+  DecodeResult decoded = decoder->decode(&words[offset / sizeof(uint32_t)], decode_error.emitter());
+  if (decoded.failed())
+    return std::string("<decode error: ") + decode_error.message() + ">";
+  return decoded.value()->disassemble();
 }
 
 [[nodiscard]] std::vector<std::string> disassemble_words(std::span<const uint32_t> words,
@@ -338,21 +337,18 @@ collect_executable_sections(const AmdGpuCodeObject &object) {
 
   size_t pc = 0;
   while (pc < words.size()) {
-    try {
-      std::unique_ptr<Instruction> inst(decoder->decode(&words[pc]));
-      if (!inst) {
-        lines.push_back("<decode returned null>");
-        ++pc;
-        continue;
-      }
-
-      lines.push_back(inst->disassemble());
-      const uint32_t inst_words = inst->size() / sizeof(uint32_t);
-      pc += inst_words == 0 ? 1 : inst_words;
-    } catch (const std::exception &e) {
-      lines.push_back(std::string("<decode error: ") + e.what() + ">");
+    util::StringDiagnostic decode_error;
+    DecodeResult decoded = decoder->decode(&words[pc], decode_error.emitter());
+    if (decoded.failed()) {
+      lines.push_back(std::string("<decode error: ") + decode_error.message() + ">");
       ++pc;
+      continue;
     }
+
+    const std::unique_ptr<Instruction> &inst = decoded.value();
+    lines.push_back(inst->disassemble());
+    const uint32_t inst_words = inst->size() / sizeof(uint32_t);
+    pc += inst_words == 0 ? 1 : inst_words;
   }
 
   return lines;

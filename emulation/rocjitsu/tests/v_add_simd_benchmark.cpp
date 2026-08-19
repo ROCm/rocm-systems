@@ -9,6 +9,7 @@
 /// then unset (SIMD). Scalar-vs-SIMD bit-equivalence is verified separately by
 /// the *SimdCorrectness* suites (in-process double-run + EXPECT_EQ), not here.
 
+#include "decode_test_util.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
@@ -189,7 +190,7 @@ void run_words(const char *label, uint32_t w0, uint32_t w1, bool sanitize_finite
   ASSERT_NE(fx.wf, nullptr);
 
   uint32_t words[4] = {w0, w1, 0u, 0u};
-  Instruction *inst = fx.decoder->decode(words);
+  Instruction *inst = decode_valid(*fx.decoder, words);
   ASSERT_NE(inst, nullptr) << label << ": decode failed";
 
   constexpr uint64_t SEED = 0xC0FFEE'1234'5678ULL;
