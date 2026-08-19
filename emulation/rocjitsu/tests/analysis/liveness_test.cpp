@@ -2313,7 +2313,13 @@ TEST(CfgAnalysis, Gfx1250CarriesLaneStashAcrossProvenBlockBoundary) {
   auto *consumer = block_starting_at(blocks, 52);
   ASSERT_NE(consumer, nullptr);
   ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
-  EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, 60u);
+  const IndirectCallFixup &restored = consumer->static_indirect_call_fixups()[0];
+  EXPECT_EQ(restored.source_target_offset, 60u);
+  // This stash restores into the pair the getpc wrote, so the producer and consumer registers
+  // coincide. Pinning that is the counterpart to the split case below: the rewrite must name the
+  // producer, and when the two are equal that has to stay indistinguishable from naming either.
+  EXPECT_EQ(restored.source_builder_sreg, 0u);
+  EXPECT_EQ(restored.source_call_sreg, 0u);
 }
 
 TEST(CfgAnalysis, Gfx1250UnreachablePostRocrAbortBlockDoesNotPoisonLaneStash) {
@@ -3078,7 +3084,14 @@ TEST(CfgAnalysis, Gfx1250LaneRestoreReachesConsumerAcrossBranch) {
   auto *consumer = block_starting_at(blocks, 52);
   ASSERT_NE(consumer, nullptr);
   ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
-  EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, 60u);
+  const IndirectCallFixup &restored = consumer->static_indirect_call_fixups()[0];
+  EXPECT_EQ(restored.source_target_offset, 60u);
+  // Here the stash restores into a different pair than the getpc wrote, and the rewrite regenerates
+  // the add against the producer. Asserting both is what makes this a discovery-path check: the
+  // layout-level test builds its fixup by hand, so it would still pass if PcValue propagation or
+  // fixup_for_value dropped the producer pair on the way through.
+  EXPECT_EQ(restored.source_builder_sreg, 0u);
+  EXPECT_EQ(restored.source_call_sreg, 20u);
 }
 
 TEST(CfgAnalysis, Gfx1250PcPairCopyReachesConsumer) {
@@ -3115,6 +3128,9 @@ TEST(CfgAnalysis, Gfx1250PcPairCopyReachesConsumer) {
   }
   ASSERT_NE(copied_call, nullptr);
   EXPECT_EQ(copied_call->source_target_offset, 28u);
+  // Same producer/consumer split, reached by a register-pair copy rather than a lane stash.
+  EXPECT_EQ(copied_call->source_builder_sreg, kSourceSreg);
+  EXPECT_EQ(copied_call->source_call_sreg, kCopiedSreg);
 }
 
 TEST(CfgAnalysis, Gfx1250DirectCallOverwritesPcBuilderInReturnPair) {
