@@ -99,6 +99,9 @@ struct tool_counter_record_t
     rocprofiler_dispatch_counting_service_data_t dispatch_data = {};
     serialized_counter_record_t                  record        = {};
     rocprofiler_stream_id_t                      stream_id     = {.handle = 0};
+    // Kernel-replay pass index (0-based). All passes of a replayed dispatch share the same
+    // dispatch_id, so this is the only field that distinguishes them. 0 for non-replay runs.
+    uint64_t replay_pass = 0;
 
     template <typename ArchiveT>
     void save(ArchiveT& ar) const
@@ -110,6 +113,7 @@ struct tool_counter_record_t
         ar(cereal::make_nvp("dispatch_data", dispatch_data));
         ar(cereal::make_nvp("records", tmp));
         ar(cereal::make_nvp("stream_id", stream_id));
+        ar(cereal::make_nvp("replay_pass", replay_pass));
     }
 
     container_type read() const;
