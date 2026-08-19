@@ -132,7 +132,7 @@ def parse_log(log_path: Path):
         column = KEY_TO_COLUMN.get(key)
         if column is None:
             continue
-        loc = (source_file.strip(), lineno)
+        loc = (source_file.strip(), lineno.strip(), _col.strip())
         if column == "mangled_name":
             # A fresh "Function Name" at a location that already has an open row
             # means that row's block is complete (another instantiation sharing
