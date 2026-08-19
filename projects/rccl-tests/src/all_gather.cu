@@ -79,11 +79,10 @@ testResult_t AllGatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirem
         return testInternalError;
       }
       // Cover both the -V/deviceCtaCount launch and the size-adaptive CTA count the
-      // kernel self-selects (allGatherCtas, up to allGatherMaxCtas()), decoupled
+      // kernel self-selects (allGatherCtas, clamped to allGatherPoolCtas()), decoupled
       // from -V -- the kernel indexes barrier/lsaBarrier/signal by blockIdx.x.
       {
-        const int agBarCtas = (deviceCtaCount > gin_sdma_allgather::allGatherMaxCtas())
-                                ? deviceCtaCount : gin_sdma_allgather::allGatherMaxCtas();
+        const int agBarCtas = gin_sdma_allgather::allGatherPoolCtas(deviceCtaCount);
         reqs->barrierCount = agBarCtas;
         reqs->lsaBarrierCount = agBarCtas;
         reqs->ginSignalCount = agBarCtas;
@@ -108,8 +107,7 @@ bool AllGatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* re
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
     case 3: { // GinHybridAllGatherKernel: LSA direct (small) + direct GIN puts (large)
       // Size to cover the size-adaptive CTA count (allGatherCtas) as well as -V.
-      const int agBarCtas = (deviceCtaCount > gin_sdma_allgather::allGatherMaxCtas())
-                              ? deviceCtaCount : gin_sdma_allgather::allGatherMaxCtas();
+      const int agBarCtas = gin_sdma_allgather::allGatherPoolCtas(deviceCtaCount);
       reqs->barrierCount = agBarCtas;
       reqs->lsaBarrierCount = agBarCtas;
       reqs->ginSignalCount = agBarCtas;
@@ -165,7 +163,7 @@ static size_t AllGatherResolveSdmaThreshold() {
 template <typename T>
 __device__ void AllGatherLsaDirect(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int rank, int nRanks, int tid, int nthreads) {
   T* src = (T*)ncclGetLocalPointer(sendwin, sendoffset);
-  const size_t dstOff = (size_t)rank * count;
+  const size_t dstOff = gin_sdma_allgather::allGatherRecvSliceOffset(rank, count);
   for (size_t i = tid; i < count; i += nthreads) {
     T value = src[i];
     for (int lp = 0; lp < nRanks; lp++) {
@@ -281,7 +279,11 @@ testResult_t AllGatherRunColl(void* sendbuff, size_t sendoffset, void* recvbuff,
         const size_t agSdmaThreshold = AllGatherResolveSdmaThreshold();
         const size_t agChunkBytes = count * (size_t)wordSize(type);
         static const size_t agCtasEnv = AllGatherParseCtasEnv();
-        const int agGridCtas = gin_sdma_allgather::allGatherCtas(agChunkBytes, agSdmaThreshold, agCtasEnv);
+        // Clamp to the launched barrier/signal pool (max(-V, ladder peak)) so a
+        // diagnostic NCCL_GIN_ANVIL_AG_CTAS pin can never index past the pools.
+        const int agGridCtas = gin_sdma_allgather::allGatherCtas(
+            agChunkBytes, agSdmaThreshold, agCtasEnv,
+            gin_sdma_allgather::allGatherPoolCtas(deviceCtaCount));
         TESTCHECK(AllGatherLaunchDeviceKernel(SPECIALIZE_KERNEL(GinHybridAllGatherKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, root, comm, stream, agSdmaThreshold, agGridCtas));
         return testSuccess;
       }
@@ -317,7 +319,9 @@ testResult_t AllGatherDeviceTime(struct threadArgs* args, ncclDataType_t type, n
   // so the device-timed number reflects the launched configuration.
   const size_t agChunkBytes = count * (size_t)wordSize(type);
   static const size_t agCtasEnv = AllGatherParseCtasEnv();
-  const int gridCtas = gin_sdma_allgather::allGatherCtas(agChunkBytes, sdmaThreshold, agCtasEnv);
+  const int gridCtas = gin_sdma_allgather::allGatherCtas(
+      agChunkBytes, sdmaThreshold, agCtasEnv,
+      gin_sdma_allgather::allGatherPoolCtas(deviceCtaCount));
   double devUs = 0.0;
   TESTCHECK(gin_devtime::measure(args, gridCtas, loop,
       [&](int i, long long* d_start, long long* d_end) {
