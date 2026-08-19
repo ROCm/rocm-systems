@@ -46,7 +46,7 @@ target_include_directories(hrr-playback PRIVATE
 )
 target_compile_definitions(hrr-playback PRIVATE
   __HIP_PLATFORM_AMD__
-  HRR_BUILD_TYPE="$<CONFIG>"
+  "HRR_BUILD_TYPE=\"$<IF:$<BOOL:$<CONFIG>>,$<CONFIG>,unknown>\""
   $<$<BOOL:${WIN32}>:NOMINMAX WIN32_LEAN_AND_MEAN>
 )
 find_package(Threads REQUIRED)
