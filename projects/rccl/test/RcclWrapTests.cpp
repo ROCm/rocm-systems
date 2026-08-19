@@ -15,10 +15,15 @@
 #include "common/ErrCode.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "debug.h"
+#include "enqueue.h"
+#include "graph.h"
 #include "graph/topo.h"
 #include "net.h"
+#include "plugin/nccl_tuner.h"
 #include "rccl_common.h"
 #include "rocmwrap.h"
+
+#include <algorithm>
 
 namespace RcclUnitTesting
 {
@@ -1758,6 +1763,174 @@ TEST(Rcclwrap, RcclHierarchicalAlgoInfoTests)
         << "rcclHierarchicalAlgoInfo test failed";
 
     TEST_INFO("=== Process-Isolated rcclHierarchicalAlgoInfo Tests Completed ===");
+}
+
+// ===========================================================================
+// Direct ReduceScatter getAlgoInfo host-side guard (AICOMRCCL-1819).
+// When enableDirectReduceScatter is set, getAlgoInfo must force Ring/Simple
+// even if the tuner or RCCL_OVERRIDE_* env picks LL.
+// ===========================================================================
+
+namespace
+{
+
+constexpr uint64_t kDirectRsTestCount = 65536;
+
+ncclResult_t mockRingLlTunerGetCollInfo(void* /*context*/, ncclFunc_t /*collType*/, size_t /*nBytes*/,
+                                        int /*numPipeOps*/, float** collCostTable, int numAlgo, int numProto,
+                                        int /*regBuff*/, int* nChannels)
+{
+    float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
+    for(int a = 0; a < numAlgo; ++a)
+    {
+        for(int p = 0; p < numProto; ++p)
+        {
+            table[a][p] = NCCL_ALGO_PROTO_IGNORE;
+        }
+    }
+    table[NCCL_ALGO_RING][NCCL_PROTO_LL] = 0.0;
+    if(nChannels)
+    {
+        *nChannels = 0;
+    }
+    return ncclSuccess;
+}
+
+ncclTuner_t g_mockRingLlTuner = {
+  .name         = "MockRingLlTuner",
+  .init         = nullptr,
+  .getCollInfo  = mockRingLlTunerGetCollInfo,
+  .finalize     = nullptr,
+  .getChunkSize = nullptr,
+};
+
+void InitGetAlgoInfoMockComm(ncclComm_t&           comm,
+                             struct ncclTopoSystem& topo,
+                             const char*            arch,
+                             int                    nRanks,
+                             int                    nNodes)
+{
+    struct ncclTopoNode gpuNode{};
+    CreateMockComm(comm, topo, gpuNode, arch, nRanks);
+    comm->nNodes        = nNodes;
+    comm->nChannels     = 4;
+    comm->collChannels  = 4;
+    comm->nvlsChannels  = 4;
+    comm->WarpSize      = 64;
+    comm->maxLocalRanks = std::max(1, nRanks / std::max(1, nNodes));
+    comm->topo->tuning  = rcclGetTuningIndexForArch(arch);
+    comm->topo->type |= RCCL_TOPO_XGMI_ALL;
+
+    for(int a = 0; a < NCCL_NUM_ALGORITHMS; ++a)
+    {
+        for(int p = 0; p < NCCL_NUM_PROTOCOLS; ++p)
+        {
+            comm->maxThreads[a][p]                      = 256;
+            comm->threadThresholds[a][p]                 = 8192;
+            comm->bandwidths[ncclFuncReduceScatter][a][p] = 100.0f;
+            comm->latencies[ncclFuncReduceScatter][a][p]  = 1.0f;
+        }
+    }
+}
+
+ncclTaskColl MakeReduceScatterTask(uint64_t count = kDirectRsTestCount, ncclDataType_t dt = ncclFloat32)
+{
+    ncclTaskColl task{};
+    task.func     = ncclFuncReduceScatter;
+    task.count    = count;
+    task.datatype = dt;
+    return task;
+}
+
+void ExpectGetAlgoInfoSelection(ncclComm_t comm, ncclTaskColl& task, int algo, int proto)
+{
+    ASSERT_EQ(ncclGetAlgoInfo(comm, &task, 0, 0, 1, nullptr), ncclSuccess);
+    EXPECT_EQ(task.algorithm, algo);
+    EXPECT_EQ(task.protocol, proto);
+}
+
+} // namespace
+
+// Tuner picks Ring+LL; Direct RS host guard must override to Ring/Simple.
+TEST(Rcclwrap, GetAlgoInfo_DirectRsOverridesMockTunerRingLl)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "GetAlgoInfo_DirectRsOverridesMockTunerRingLl",
+        []()
+        {
+            ncclComm_t          comm = nullptr;
+            auto                topo = std::make_unique<ncclTopoSystem>();
+            InitGetAlgoInfoMockComm(comm, *topo, "gfx950", 8, 2);
+            comm->enableDirectReduceScatter = true;
+            comm->tuner                     = &g_mockRingLlTuner;
+
+            ncclTaskColl task = MakeReduceScatterTask();
+            ExpectGetAlgoInfoSelection(comm, task, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+            CleanupMockComm(comm);
+        },
+        {}
+    );
+}
+
+// Same tuner pick without Direct RS: selection must stay Ring+LL.
+TEST(Rcclwrap, GetAlgoInfo_MockTunerRingLlPreservedWithoutDirectRs)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "GetAlgoInfo_MockTunerRingLlPreservedWithoutDirectRs",
+        []()
+        {
+            ncclComm_t          comm = nullptr;
+            auto                topo = std::make_unique<ncclTopoSystem>();
+            InitGetAlgoInfoMockComm(comm, *topo, "gfx950", 8, 2);
+            comm->enableDirectReduceScatter = false;
+            comm->tuner                     = &g_mockRingLlTuner;
+
+            ncclTaskColl task = MakeReduceScatterTask();
+            ExpectGetAlgoInfoSelection(comm, task, NCCL_ALGO_RING, NCCL_PROTO_LL);
+            CleanupMockComm(comm);
+        },
+        {}
+    );
+}
+
+// RCCL_OVERRIDE_PROTO=LL forces LL; Direct RS host guard must still pick Ring/Simple.
+TEST(Rcclwrap, GetAlgoInfo_DirectRsForcesSimpleDespiteLlOverride)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "GetAlgoInfo_DirectRsForcesSimpleDespiteLlOverride",
+        []()
+        {
+            ncclComm_t          comm = nullptr;
+            auto                topo = std::make_unique<ncclTopoSystem>();
+            InitGetAlgoInfoMockComm(comm, *topo, "gfx950", 8, 2);
+            comm->enableDirectReduceScatter = true;
+
+            ncclTaskColl task = MakeReduceScatterTask();
+            ExpectGetAlgoInfoSelection(comm, task, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+            CleanupMockComm(comm);
+        },
+        {{"RCCL_OVERRIDE_PROTO", "LL"}, {"RCCL_OVERRIDE_ALGO", "Ring"}}
+    );
+}
+
+// Same env override without Direct RS: selection must stay Ring+LL.
+TEST(Rcclwrap, GetAlgoInfo_LlOverridePreservedWithoutDirectRs)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "GetAlgoInfo_LlOverridePreservedWithoutDirectRs",
+        []()
+        {
+            ncclComm_t          comm = nullptr;
+            auto                topo = std::make_unique<ncclTopoSystem>();
+            InitGetAlgoInfoMockComm(comm, *topo, "gfx950", 8, 2);
+            comm->enableDirectReduceScatter = false;
+
+            ncclTaskColl task = MakeReduceScatterTask();
+            ExpectGetAlgoInfoSelection(comm, task, NCCL_ALGO_RING, NCCL_PROTO_LL);
+            CleanupMockComm(comm);
+        },
+        {{"RCCL_OVERRIDE_PROTO", "LL"}, {"RCCL_OVERRIDE_ALGO", "Ring"}}
+    );
 }
 
 // ===========================================================================
