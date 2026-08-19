@@ -12,6 +12,7 @@ import pandas as pd
 import pytest
 
 from pc_sampling.pc_sampling_analysis import (
+    InstructionLineRecord,
     aggregate_pc_sample_records,
     detect_pc_sampling_method,
     enrich_with_metadata,
@@ -80,6 +81,8 @@ def make_record(
     wave_issued: bool = True,
     stall_reason: str | None = None,
     inst_type: str | None = None,
+    exec_mask: int | None = None,
+    wave_cnt: int | None = None,
 ) -> dict:
     snapshot = {}
     if stall_reason is not None:
@@ -95,6 +98,10 @@ def make_record(
     }
     if inst_type is not None:
         record["inst_type"] = inst_type
+    if exec_mask is not None:
+        record["exec_mask"] = exec_mask
+    if wave_cnt is not None:
+        record["wave_cnt"] = wave_cnt
     return {"inst_index": inst_index, "record": record}
 
 
@@ -103,17 +110,24 @@ def make_host_trap_record(
     offset: int,
     inst_index: int,
     dispatch_id: int,
+    exec_mask: int | None = None,
+    wave_cnt: int | None = None,
 ) -> dict:
     """A host_trap sample: no wave_issued / snapshot (no issue/stall info)."""
+    record = {
+        "pc": {
+            "code_object_id": code_object_id,
+            "code_object_offset": offset,
+        },
+        "dispatch_id": dispatch_id,
+    }
+    if exec_mask is not None:
+        record["exec_mask"] = exec_mask
+    if wave_cnt is not None:
+        record["wave_cnt"] = wave_cnt
     return {
         "inst_index": inst_index,
-        "record": {
-            "pc": {
-                "code_object_id": code_object_id,
-                "code_object_offset": offset,
-            },
-            "dispatch_id": dispatch_id,
-        },
+        "record": record,
     }
 
 
@@ -417,6 +431,39 @@ def test_load_pc_sample_records_unmapped_dispatch_kernel_id_none() -> None:
     assert df.iloc[0]["kernel_id"] is None
 
 
+def test_load_pc_sample_records_carries_top_level_wave_measurements() -> None:
+    """Wave measurements are normalized from the record, not its snapshot."""
+    sample = make_record(
+        1,
+        0x10,
+        0,
+        dispatch_id=0,
+        exec_mask=0b1011,
+        wave_cnt=7,
+    )
+    assert "exec_mask" not in sample["record"]["snapshot"]
+    assert "wave_cnt" not in sample["record"]["snapshot"]
+
+    records = load_pc_sample_records(make_tool_data(stochastic=[sample]))
+
+    assert {"exec_mask", "wave_cnt"}.issubset(records.columns)
+    assert records.iloc[0]["exec_mask"] == 0b1011
+    assert records.iloc[0]["wave_cnt"] == 7
+
+
+def test_load_pc_sample_records_missing_wave_measurements_are_none() -> None:
+    """A record may omit either wave measurement without failing to normalize."""
+    sample = make_record(1, 0x10, 0, dispatch_id=0)
+    assert "exec_mask" not in sample["record"]
+    assert "wave_cnt" not in sample["record"]
+
+    records = load_pc_sample_records(make_tool_data(stochastic=[sample]))
+
+    assert {"exec_mask", "wave_cnt"}.issubset(records.columns)
+    assert records.iloc[0]["exec_mask"] is None
+    assert records.iloc[0]["wave_cnt"] is None
+
+
 # ═══════════════════════════════════════════════════════════════
 # aggregate_pc_sample_records
 # ═══════════════════════════════════════════════════════════════
@@ -518,6 +565,304 @@ def test_aggregate_group_by_kernel_id_separates_shared_code_object() -> None:
     assert set(result["kernel_id"]) == {100, 101}
 
 
+def test_aggregate_active_threads_counts_every_bit_in_oversized_mask() -> None:
+    """Population count includes every set bit even above the machine wave size."""
+    oversized_mask = 2**64 + 2**8 + 2**7
+    records = load_pc_sample_records(
+        make_tool_data(
+            stochastic=[
+                make_record(
+                    1,
+                    0x10,
+                    0,
+                    dispatch_id=0,
+                    exec_mask=oversized_mask,
+                    wave_cnt=8,
+                )
+            ]
+        )
+    )
+
+    result = aggregate_pc_sample_records(
+        records,
+        group_by=["code_object_id", "code_object_offset"],
+        sys_info={"wave_size": "64", "max_waves_per_cu": "32"},
+    )
+
+    assert oversized_mask.bit_count() == 3
+    assert result.iloc[0]["active_thread_percent"] == 4.6875
+
+
+def test_aggregate_wave_means_include_every_sample_regardless_of_issue_state() -> None:
+    """Wave measurements are independent of issue, stall, and instruction state."""
+    records = load_pc_sample_records(
+        make_tool_data(
+            stochastic=[
+                make_record(
+                    1,
+                    0x10,
+                    0,
+                    dispatch_id=0,
+                    wave_issued=True,
+                    inst_type=f"{INST_PREFIX}VALU",
+                    exec_mask=0b1,
+                    wave_cnt=2,
+                ),
+                make_record(
+                    1,
+                    0x10,
+                    0,
+                    dispatch_id=0,
+                    wave_issued=False,
+                    stall_reason=f"{PREFIX}WAITCNT",
+                    inst_type=f"{INST_PREFIX}VALU",
+                    exec_mask=0b11,
+                    wave_cnt=7,
+                ),
+                make_record(
+                    1,
+                    0x10,
+                    0,
+                    dispatch_id=0,
+                    wave_issued=True,
+                    inst_type=f"{INST_PREFIX}NO_INST",
+                    exec_mask=0b11111111,
+                    wave_cnt=20,
+                ),
+            ]
+        )
+    )
+
+    row = aggregate_pc_sample_records(
+        records,
+        group_by=["code_object_id", "code_object_offset"],
+        sys_info={"wave_size": "64", "max_waves_per_cu": "32"},
+    ).iloc[0]
+
+    assert row["active_thread_percent"] == pytest.approx((11 / 3) / 64 * 100), (
+        "active_thread_percent must include all samples; filtering by "
+        "wave_issued, stall_reason, or inst_type is wrong"
+    )
+    assert row["wave_occupancy_percent"] == pytest.approx((29 / 3) / 32 * 100), (
+        "wave_occupancy_percent must include all samples; filtering by "
+        "wave_issued, stall_reason, or inst_type is wrong"
+    )
+
+
+@pytest.mark.parametrize(
+    (
+        "method",
+        "exec_mask",
+        "wave_cnt",
+        "expected_active_thread_percent",
+        "expected_wave_occupancy_percent",
+    ),
+    [
+        pytest.param("host_trap", 0b1111, None, 6.25, None, id="host-mask-only"),
+        pytest.param("stochastic", 0b11, 8, 3.125, 25.0, id="stochastic-both"),
+        pytest.param("stochastic", None, None, None, None, id="stochastic-neither"),
+    ],
+)
+def test_aggregate_wave_measurements_follow_field_presence_not_method(
+    method: str,
+    exec_mask: int | None,
+    wave_cnt: int | None,
+    expected_active_thread_percent: float | None,
+    expected_wave_occupancy_percent: float | None,
+) -> None:
+    """Each sample contributes the measurements it carries, for either method."""
+    if method == "host_trap":
+        sample = make_host_trap_record(
+            1,
+            0x10,
+            0,
+            dispatch_id=0,
+            exec_mask=exec_mask,
+            wave_cnt=wave_cnt,
+        )
+    else:
+        sample = make_record(
+            1,
+            0x10,
+            0,
+            dispatch_id=0,
+            exec_mask=exec_mask,
+            wave_cnt=wave_cnt,
+        )
+    tool_data = make_tool_data(**{method: [sample]})
+    records = load_pc_sample_records(tool_data)
+
+    row = aggregate_pc_sample_records(
+        records,
+        group_by=["code_object_id", "code_object_offset"],
+        sys_info={"wave_size": "64", "max_waves_per_cu": "32"},
+    ).iloc[0]
+
+    if expected_active_thread_percent is None:
+        assert row["active_thread_percent"] is None
+    else:
+        assert row["active_thread_percent"] == expected_active_thread_percent
+    if expected_wave_occupancy_percent is None:
+        assert row["wave_occupancy_percent"] is None
+    else:
+        assert row["wave_occupancy_percent"] == expected_wave_occupancy_percent
+
+
+def test_aggregate_wave_measurements_exclude_missing_fields_independently() -> None:
+    """Missing one field never prevents the other field from contributing."""
+    records = load_pc_sample_records(
+        make_tool_data(
+            stochastic=[
+                make_record(1, 0x10, 0, dispatch_id=0, exec_mask=0b1),
+                make_record(1, 0x10, 0, dispatch_id=0, wave_cnt=16),
+                make_record(
+                    1,
+                    0x10,
+                    0,
+                    dispatch_id=0,
+                    exec_mask=0b111,
+                    wave_cnt=8,
+                ),
+            ]
+        )
+    )
+
+    row = aggregate_pc_sample_records(
+        records,
+        group_by=["code_object_id", "code_object_offset"],
+        sys_info={"wave_size": "64", "max_waves_per_cu": "32"},
+    ).iloc[0]
+
+    assert row["active_thread_percent"] == 3.125, (
+        "exec_mask mean must use exactly the samples carrying exec_mask"
+    )
+    assert row["wave_occupancy_percent"] == 37.5, (
+        "wave_cnt mean must use exactly the samples carrying wave_cnt"
+    )
+
+
+def test_aggregate_wave_measurements_are_none_without_sys_info() -> None:
+    """Omitted and explicit-None system information leave both values unknown."""
+    records = load_pc_sample_records(
+        make_tool_data(
+            stochastic=[
+                make_record(
+                    1,
+                    0x10,
+                    0,
+                    dispatch_id=0,
+                    exec_mask=0b1111,
+                    wave_cnt=8,
+                )
+            ]
+        )
+    )
+    group_by = ["code_object_id", "code_object_offset"]
+
+    results = [
+        aggregate_pc_sample_records(records, group_by=group_by),
+        aggregate_pc_sample_records(records, group_by=group_by, sys_info=None),
+    ]
+
+    for result in results:
+        assert {
+            "active_thread_percent",
+            "wave_occupancy_percent",
+        }.issubset(result.columns)
+        assert result.iloc[0]["active_thread_percent"] is None
+        assert result.iloc[0]["wave_occupancy_percent"] is None
+
+
+@pytest.mark.parametrize(
+    ("sys_info", "expected_active_thread_percent", "expected_wave_occupancy_percent"),
+    [
+        pytest.param(
+            {"max_waves_per_cu": "32"},
+            None,
+            25.0,
+            id="missing-wave-size",
+        ),
+        pytest.param(
+            {"wave_size": "64"},
+            6.25,
+            None,
+            id="missing-max-waves",
+        ),
+        pytest.param(
+            {"wave_size": "", "max_waves_per_cu": "32"},
+            None,
+            25.0,
+            id="blank-wave-size",
+        ),
+        pytest.param(
+            {"wave_size": "many", "max_waves_per_cu": "32"},
+            None,
+            25.0,
+            id="nonnumeric-wave-size",
+        ),
+        pytest.param(
+            {"wave_size": "0", "max_waves_per_cu": "32"},
+            None,
+            25.0,
+            id="zero-wave-size",
+        ),
+        pytest.param(
+            {"wave_size": "64", "max_waves_per_cu": ""},
+            6.25,
+            None,
+            id="blank-max-waves",
+        ),
+        pytest.param(
+            {"wave_size": "64", "max_waves_per_cu": "many"},
+            6.25,
+            None,
+            id="nonnumeric-max-waves",
+        ),
+        pytest.param(
+            {"wave_size": "64", "max_waves_per_cu": "0"},
+            6.25,
+            None,
+            id="zero-max-waves",
+        ),
+    ],
+)
+def test_aggregate_wave_measurements_require_usable_denominators(
+    sys_info: dict[str, str],
+    expected_active_thread_percent: float | None,
+    expected_wave_occupancy_percent: float | None,
+) -> None:
+    """Each percentage is None unless its own denominator is usable."""
+    records = load_pc_sample_records(
+        make_tool_data(
+            stochastic=[
+                make_record(
+                    1,
+                    0x10,
+                    0,
+                    dispatch_id=0,
+                    exec_mask=0b1111,
+                    wave_cnt=8,
+                )
+            ]
+        )
+    )
+
+    row = aggregate_pc_sample_records(
+        records,
+        group_by=["code_object_id", "code_object_offset"],
+        sys_info=sys_info,
+    ).iloc[0]
+
+    if expected_active_thread_percent is None:
+        assert row["active_thread_percent"] is None
+    else:
+        assert row["active_thread_percent"] == expected_active_thread_percent
+    if expected_wave_occupancy_percent is None:
+        assert row["wave_occupancy_percent"] is None
+    else:
+        assert row["wave_occupancy_percent"] == expected_wave_occupancy_percent
+
+
 # ═══════════════════════════════════════════════════════════════
 # enrich_with_metadata
 # ═══════════════════════════════════════════════════════════════
@@ -590,6 +935,70 @@ def test_load_aggregated_pc_sampling_happy_path() -> None:
     assert line.instruction == "v_mov"
     assert line.source == "/s/a.cpp:1"
     assert line.kernel_name == "vecCopy"
+
+
+def test_instruction_line_record_wave_measurements_default_to_none() -> None:
+    """Callers that omit wave measurements retain a compatible null default."""
+    line = InstructionLineRecord(
+        code_object_offset=0x10,
+        kernel_name="vecCopy",
+        instruction="v_mov",
+        source="/s/a.cpp:1",
+        total_count=1,
+        issue_count=1,
+        stall_count=0,
+        stall_reasons={},
+        inst_types={"VALU": 1},
+    )
+
+    assert line.active_thread_percent is None
+    assert line.wave_occupancy_percent is None
+
+
+@pytest.mark.parametrize("method", ["host_trap", "stochastic"])
+def test_wave_measurements_are_carried_but_not_added_to_terminal_frame(
+    method: str,
+) -> None:
+    """Database records carry wave metrics without changing terminal columns."""
+    if method == "host_trap":
+        sample = make_host_trap_record(
+            5,
+            0x10,
+            0,
+            dispatch_id=0,
+            exec_mask=0b1111,
+            wave_cnt=8,
+        )
+    else:
+        sample = make_record(
+            5,
+            0x10,
+            0,
+            dispatch_id=0,
+            exec_mask=0b1111,
+            wave_cnt=8,
+        )
+    tool_data = make_tool_data(
+        **{method: [sample]},
+        instructions=["v_mov"],
+        comments=["/s/a.cpp:1"],
+        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
+        kernel_dispatch=[make_dispatch(0, 100)],
+        code_objects=[make_code_object(5)],
+    )
+
+    display_frame = load_pc_sampling_data(schema.Workload(), "count", [tool_data])
+    assert {
+        "active_thread_percent",
+        "wave_occupancy_percent",
+    }.isdisjoint(display_frame.columns)
+
+    line = load_aggregated_pc_sampling(
+        tool_data,
+        sys_info={"wave_size": "64", "max_waves_per_cu": "32"},
+    )[0].instruction_lines[0]
+    assert line.active_thread_percent == 6.25
+    assert line.wave_occupancy_percent == 25.0
 
 
 # ═══════════════════════════════════════════════════════════════

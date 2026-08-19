@@ -315,10 +315,11 @@ class db_analysis(OmniAnalyze_Base):
         workload_objs: list[orm.Workload] = []
         for workload_path in self._runs.keys():
             # Add workload
+            sys_info = self._runs[workload_path].sys_info.iloc[0].to_dict()
             workload_obj = orm.Workload(
                 name=workload_path.split("/")[-2],
                 sub_name=workload_path.split("/")[-1],
-                sys_info_extdata=self._runs[workload_path].sys_info.iloc[0].to_dict(),
+                sys_info_extdata=sys_info,
                 roofline_bench_extdata=self._roofline_ceilings_per_workload.get(
                     workload_path
                 ),
@@ -401,6 +402,7 @@ class db_analysis(OmniAnalyze_Base):
                 kernel_objs,
                 kernel_symbols,
                 source_frames,
+                sys_info=sys_info,
             )
             self.add_code_object_isa(
                 workload_path,
@@ -627,6 +629,8 @@ class db_analysis(OmniAnalyze_Base):
         kernel_objs: dict[KernelKey, orm.Kernel],
         kernel_symbols: dict[KernelSymbolKey, orm.KernelSymbol],
         source_frames: SourceFrameCollector,
+        *,
+        sys_info: Optional[dict[str, Any]] = None,
     ) -> dict[CodeObjectKey, orm.CodeObjectStore]:
         """Insert the normalized PC-sampling rows for one workload.
 
@@ -638,11 +642,15 @@ class db_analysis(OmniAnalyze_Base):
         tool_data_records = self._pc_sampling_tool_data_per_workload.get(
             workload_path, []
         )
+        if sys_info is None and workload_path in self._runs:
+            sys_info = self._runs[workload_path].sys_info.iloc[0].to_dict()
 
         for tool_data in tool_data_records:
             pid: int = tool_data["metadata"]["pid"]
 
-            for code_object in load_aggregated_pc_sampling(tool_data):
+            for code_object in load_aggregated_pc_sampling(
+                tool_data, sys_info=sys_info
+            ):
                 for line in code_object.instruction_lines:
                     kernel = kernel_objs.get(line.kernel_name)
                     if kernel is None:
@@ -726,6 +734,8 @@ class db_analysis(OmniAnalyze_Base):
             total_count=line.total_count,
             issue_count=line.issue_count,
             stall_count=line.stall_count,
+            active_thread_percent=line.active_thread_percent,
+            wave_occupancy_percent=line.wave_occupancy_percent,
             instruction_line=instruction_line,
         )
         Database.get_session().add(sample_state)
