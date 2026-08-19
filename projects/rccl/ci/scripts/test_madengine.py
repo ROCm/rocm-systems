@@ -527,6 +527,7 @@ def generate_manifest(
     work_dir: Path,
     nodelist: str = "",
     registry: str = "",
+    rccl_lib: Path | None = None,
 ) -> Path:
     """Generate a madengine manifest.json for the workload.
 
@@ -585,6 +586,30 @@ def generate_manifest(
             " -v /usr/lib64/libibumad.so.3"
             ":/usr/lib/x86_64-linux-gnu/libibumad.so.3:ro"
         )
+
+    # When --skip-overlay-build is used the base image still has its
+    # bundled RCCL.  Bind-mount the CI-built librccl.so (and kpack
+    # files if present) over the container's copies so we actually
+    # test the artifact, not the image default.
+    if rccl_lib is not None:
+        host_so = str(rccl_lib.resolve())
+        sdk_lib = "/opt/venv/lib/python3.12/site-packages/_rocm_sdk_libraries/lib"
+        sdk_dev = "/opt/venv/lib/python3.12/site-packages/_rocm_sdk_devel/lib"
+        docker_run_opts += (
+            f" -v {host_so}:{sdk_lib}/librccl.so.1:ro"
+            f" -v {host_so}:{sdk_lib}/librccl.so.1.0:ro"
+            f" -v {host_so}:{sdk_dev}/librccl.so.1:ro"
+            f" -v {host_so}:{sdk_dev}/librccl.so.1.0:ro"
+        )
+        kpack_dir = rccl_lib.resolve().parent.parent / ".kpack"
+        if not kpack_dir.is_dir():
+            kpack_dir = rccl_lib.resolve().parent / ".kpack"
+        if kpack_dir.is_dir():
+            sdk_kpack = "/opt/venv/lib/python3.12/site-packages/_rocm_sdk_libraries/.kpack"
+            for kp in kpack_dir.glob("rccl*.kpack"):
+                docker_run_opts += f" -v {kp}:{sdk_kpack}/{kp.name}:ro"
+            log.info("Bind-mounting RCCL kpack from %s", kpack_dir)
+        log.info("Bind-mounting CI-built RCCL: %s", host_so)
 
     slurm_config = {
         "partition": cluster_config.get("slurm_partition", workload_config["slurm_partition"]),
@@ -1125,6 +1150,7 @@ def main() -> None:
         work_dir,
         nodelist=nodelist,
         registry=args.registry,
+        rccl_lib=rccl_lib if args.skip_overlay_build else None,
     )
 
     # Step 5: Run the workload
