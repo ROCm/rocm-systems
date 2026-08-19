@@ -128,6 +128,13 @@ option(ENABLE_ASAN_PACKAGING "" OFF)
 # ON, the WSL intercept hooks and mock backend are compiled
 option(ENABLE_WSL_BACKEND "Build the experimental WSL (WDDM/dxg) GPU backend" OFF)
 
+# Opt-in check that the vendored librocdxg ABI still matches rocr-runtime's.
+# Needs a libhsakmt include tree, which the normal build deliberately does not.
+option(VERIFY_ROCDXG_ABI "Verify the vendored librocdxg ABI against upstream libhsakmt headers" OFF)
+if(VERIFY_ROCDXG_ABI AND NOT BUILD_TESTS)
+    message(WARNING "VERIFY_ROCDXG_ABI needs BUILD_TESTS=ON; the check will not be built.")
+endif()
+
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
     option(ENABLE_ESMI_LIB "Build ESMI Library" ON)
 else()
@@ -404,6 +411,9 @@ if(BUILD_TESTS)
     set(TESTS_COMPONENT "tests")
     add_subdirectory("tests/amd_smi_test")
     add_subdirectory("tests/python")
+    if(VERIFY_ROCDXG_ABI)
+        add_subdirectory("tests/rocdxg_abi_check")
+    endif()
 endif()
 
 # python interface, CLI, and py-test depend on shared libraries

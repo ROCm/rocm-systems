@@ -33,9 +33,7 @@
 #include "amd_smi/impl/amd_smi_gpu_backend.h"
 #include "amd_smi/impl/amd_smi_processor.h"
 #include "amd_smi/impl/amd_smi_socket.h"
-#include "hsakmt/rocdxg_smi.h"
-
-typedef struct _HsaNodeProperties HsaNodeProperties;
+#include "amd_smi/impl/wsl/rocdxg_abi.h"
 
 namespace amd::smi {
 
@@ -85,31 +83,21 @@ class WSLGPUBackend : public IGPUBackend {
   amdsmi_status_t get_fan_speed(uint32_t sensor_ind, int64_t* speed) override;
   amdsmi_status_t get_fan_speed_max(uint32_t sensor_ind, uint64_t* max_speed) override;
 
-  // Device identity (populated from HsaNodeProperties at construction).
+  // Device identity, cached from rocdxg_smi_get_device_info() at construction.
   uint32_t node_id() const { return node_id_; }
   amdsmi_bdf_t bdf() const { return bdf_; }
 
  private:
-  explicit WSLGPUBackend(uint32_t gpu_id, uint32_t node_id, const HsaNodeProperties& props);
+  WSLGPUBackend(uint32_t gpu_id, uint32_t node_id, const rocdxg_smi_device_info_t& info);
 
   uint32_t gpu_id_;
   uint32_t node_id_;
-  uint16_t vendor_id_;
-  uint16_t device_id_;
-  uint32_t family_id_;
-  uint32_t num_compute_units_;
-  uint32_t num_xcc_;
+  uint64_t device_id_;
   uint64_t unique_id_;
-  uint64_t local_mem_size_;
   amdsmi_bdf_t bdf_;
-  std::string marketing_name_;
 
-  // Lazily-loaded aggregate static device info from rocdxg_smi_get_device_info().
-  mutable rocdxg_smi_device_info_t device_info_ = {};
-  mutable std::once_flag device_info_once_;
-  mutable amdsmi_status_t device_info_status_ = AMDSMI_STATUS_NOT_INIT;
-
-  amdsmi_status_t load_device_info() const;
+  // Aggregate static device info, fetched once during enumeration.
+  rocdxg_smi_device_info_t device_info_ = {};
 };
 
 }  // namespace amd::smi

@@ -372,6 +372,7 @@ amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {
   // Native Linux path: use rsmi + libdrm.
   AMDSmiSystem::cleanup();
   rsmi_driver_state_t state;
+  // Forward the test flag so rsmi's mutex becomes non-blocking.
   uint64_t rsmi_flags = (init_flag_ & AMD_SMI_INIT_FLAG_RESRV_TEST1)
                             ? static_cast<uint64_t>(RSMI_INIT_FLAG_RESRV_TEST1)
                             : 0ULL;
@@ -395,6 +396,7 @@ amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {
   }
 
   for (uint32_t i = 0; i < device_count; i++) {
+    // GPU devices are keyed by bdf, since several may share one socket.
     std::string socket_id;
     amd_smi_status = get_gpu_socket_id(i, socket_id);
     if (amd_smi_status != AMDSMI_STATUS_SUCCESS) {

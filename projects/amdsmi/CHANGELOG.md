@@ -15,6 +15,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
+- **Removed the libhsakmt build-time dependency from the WSL backend**.
+  - amd-smi now carries its own copy of the librocdxg ABI in `include/amd_smi/impl/wsl/rocdxg_abi.h`, so building with `-DENABLE_WSL_BACKEND=ON` no longer requires a `rocr-runtime/libhsakmt` source tree alongside the checkout.
+  - GPU enumeration goes through `rocdxg_smi_get_device_count()` and `rocdxg_smi_get_device_info()` instead of `hsaKmtGetNodeProperties()`, dropping the large `HsaNodeProperties` structure from the ABI surface.
+  - `amdsmitst` no longer links `librocdxg`; the WSL functional tests resolve it with `dlopen`, matching the library. The tests package no longer carries an undeclared runtime dependency.
+  - Added an opt-in `-DVERIFY_ROCDXG_ABI=ON` target that `static_assert`s the vendored copy against upstream headers.
+
 - **Bumped the library major version to 27.0.0** (breaking).  
   - The shared library SONAME is now `libamd_smi.so.27`. Consumers linked against `libamd_smi.so.26` must relink; no source changes are required beyond the API changes listed elsewhere in this release.
 
