@@ -309,8 +309,7 @@ private:
   /// @param aql_packet_id AQL ring packet id (queue read index) for debugger correlation.
   void process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt, const HwQueue &queue,
                           uint64_t pkt_addr, uint32_t queue_packet_id, HwQueueState &qs,
-                          uint64_t aql_packet_id = 0,
-                          ClusterDispatchShape cluster_shape = {});
+                          uint64_t aql_packet_id = 0, ClusterDispatchShape cluster_shape = {});
 
   rocr::llvm::amdhsa::kernel_descriptor_t
   read_kernel_descriptor(uint64_t kernel_object, uint32_t vmid, bool host_accessible = false);
