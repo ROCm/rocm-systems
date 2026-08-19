@@ -92,7 +92,7 @@ still runs (and CTest still passes) without the full data set.
 
 ## `perf_regression.py` — performance regression check
 
-Measures decode FPS (via `run_rocDecodeSamples.py` / `videoDecodePerf`) and compares it
+Measures decode FPS (running the `videoDecodePerf` sample on each stream) and compares it
 against the GPU-specific baseline, flagging streams whose Avg FPS has dropped beyond the
 tolerance. Prints a summary box, writes a per-stream comparison CSV to
 `$HOME/rocDecode_perf_results/<timestamp>/` (outside the repo; override the base with

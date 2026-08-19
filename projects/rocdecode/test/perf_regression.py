@@ -25,9 +25,9 @@
 # Baseline: an HTML report (rocDecode_perf_baseline.html) with one column per GPU
 # (MI250X, MI300X, MI300A, MI350, MI355, Navi31, Navi48) and one row per perf
 # stream. The local GPU is detected and mapped to the matching column. Measured
-# FPS comes from run_rocDecodeSamples.py (--sample_mode 1). Streams that appear to
-# regress on a single run are re-measured (3-run average) to rule out noise before
-# being reported as regressions.
+# FPS comes from running the videoDecodePerf sample directly on each stream.
+# Streams that appear to regress on a single run are re-measured (3-run average)
+# to rule out noise before being reported as regressions.
 #
 # Inputs are located via ROCDECODE_PERF_DIR (default: $HOME/rocDecodePerformance),
 # which must contain the per-codec stream subdirectories AvcPerformance,
@@ -47,9 +47,6 @@ import pandas as pd
 # --- paths ---
 SCRIPT_DIR = Path(__file__).resolve().parent          # .../test
 PROJECT_ROOT = SCRIPT_DIR.parent                      # .../rocdecode
-TESTSCRIPTS = SCRIPT_DIR / "testScripts"
-RUNNER = TESTSCRIPTS / "run_rocDecodeSamples.py"
-PERF_RESULTS = TESTSCRIPTS / "rocDecode_videoDecodePerf_results" / "rocDecode_test_results.csv"
 PERF_EXE = PROJECT_ROOT / "samples" / "videoDecodePerf" / "build" / "videodecodeperf"
 
 # (display name, stream subdirectory) in report order
@@ -192,29 +189,6 @@ def load_baseline(baseline_path, label):
     return baseline, str(col)
 
 
-def measure_codec(codec_dir, device):
-    """Run run_rocDecodeSamples.py over a codec dir; return {basename: avg_fps}."""
-    if PERF_RESULTS.exists():
-        PERF_RESULTS.unlink()
-    cmd = [sys.executable, str(RUNNER),
-           "--rocDecode_directory", str(PROJECT_ROOT),
-           "--sample_mode", "1",
-           "--gpu_device_id", str(device),
-           "--files_directory", str(codec_dir)]
-    _run(cmd, cwd=str(TESTSCRIPTS))
-    if not PERF_RESULTS.exists():
-        return {}
-    df = pd.read_csv(PERF_RESULTS, skipinitialspace=True)
-    df.columns = [c.strip() for c in df.columns]
-    result = {}
-    for _, row in df.iterrows():
-        name = os.path.basename(str(row["File Name"]).strip())
-        fps = pd.to_numeric(row.get("Avg FPS"), errors="coerce")
-        if name and pd.notna(fps):
-            result[name] = float(fps)
-    return result
-
-
 def measure_stream(stream_path, runs, device):
     """Run videodecodeperf directly N times on one stream; return averaged FPS or None."""
     vals = []
@@ -327,18 +301,25 @@ def main():
             summary_rows.append((disp, "WARNING"))
             continue
         print(f"=== Measuring {disp} ({codec_dir}) ===")
-        measured = measure_codec(codec_dir, args.device)
+        index = build_stream_index(codec_dir)
+        # Measure each baseline stream present in this codec dir once (flagged
+        # streams are re-measured below to rule out run-to-run noise). Measuring
+        # videoDecodePerf directly avoids writing any results into the repo tree.
+        measured = {}
+        for name, path in index.items():
+            if name not in baseline:
+                continue  # not in baseline for this GPU (e.g. n/a) -- skip
+            fps = measure_stream(path, 1, args.device)
+            if fps is not None:
+                measured[name] = fps
         if not measured:
             print(f"    no results produced for {disp}")
             summary_rows.append((disp, "WARNING"))
             continue
-        index = build_stream_index(codec_dir)
 
         regressions = 0
         compared = 0
         for name, m_fps in measured.items():
-            if name not in baseline:
-                continue  # no baseline entry (e.g. n/a for this GPU)
             compared += 1
             b_fps = baseline[name]
             delta = (m_fps - b_fps) / b_fps * 100.0
