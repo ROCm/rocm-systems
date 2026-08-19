@@ -46,10 +46,9 @@
 #     Request --ntasks=$nodes --ntasks-per-node=1 --gpus-per-node=8. SPUR still
 #     runs the batch script on every node; the payload parks extra copies and
 #     mpirun fans out ranks.
-#   - Unpinned multi-node GPU jobs often die as JobLaunchFailure / NODE_FAIL.
-#     Submit pins to nodes that just passed a 1-node GPU probe (rocminfo gfx950
-#     count >= 8), and retries. Idle hostlists from sinfo are compact
-#     (`crsuse2-m2m-[044,046]`); expand them -- do not split on comma.
+#   - Submit the 2-node GPU job and leave it PENDING until SPUR allocates.
+#     Do not fail just because nodes are busy, and do not scancel a healthy
+#     queued job. Retry only on JobLaunchFailure / NODE_FAIL.
 #   - SPUR scontrol has no `show hostnames`. test_runner expands
 #     SLURM_JOB_NODELIST. OpenMPI's plm slurm is pointed at
 #     scripts/spur_srun.sh (installed as `srun` first on PATH) because SPUR's
@@ -106,6 +105,10 @@ on:
         description: 'SLURM nodes to exclude from allocation (empty = env default, known-broken hardware)'
         required: false
         default: ''
+      salloc_account:
+        description: 'SPUR account for the runner user z1_coco (empty = env default)'
+        required: false
+        default: ''
   schedule:
     # Nightly at 02:00 UTC: runs the full plan against HEAD of the default branch.
     - cron: '0 2 * * *'
@@ -137,6 +140,8 @@ env:
   DEFAULT_SALLOC_RESERVATION: ''
   DEFAULT_SALLOC_NODES: '2'
   DEFAULT_SALLOC_TIME: '04:00:00'
+  # Runner process is z1_coco; that user is associated with amd-frameworks-ci.
+  DEFAULT_SALLOC_ACCOUNT: amd-frameworks-ci
   # No nodes excluded by default; override via the salloc_exclude input if needed.
   DEFAULT_SALLOC_EXCLUDE: ''
 
@@ -199,8 +204,10 @@ jobs:
           SALLOC_NODES: ${{ github.event.inputs.salloc_nodes || env.DEFAULT_SALLOC_NODES }}
           SALLOC_TIME: ${{ github.event.inputs.salloc_time || env.DEFAULT_SALLOC_TIME }}
           SALLOC_EXCLUDE: ${{ github.event.inputs.salloc_exclude || env.DEFAULT_SALLOC_EXCLUDE }}
+          SALLOC_ACCOUNT: ${{ github.event.inputs.salloc_account || env.DEFAULT_SALLOC_ACCOUNT }}
         run: |
           set -o pipefail
+          export PATH="/usr/local/bin:${PATH}"
 
           # SPUR CLI can wedge; SIGTERM is not enough, so -k is required.
           spur_cmd() { timeout -k 5 30 "$@"; }
@@ -212,6 +219,10 @@ jobs:
           EXCLUDE_ARG=""
           if [ -n "${SALLOC_EXCLUDE}" ]; then
             EXCLUDE_ARG="--exclude=${SALLOC_EXCLUDE}"
+          fi
+          ACCOUNT_ARG=""
+          if [ -n "${SALLOC_ACCOUNT}" ]; then
+            ACCOUNT_ARG="--account=${SALLOC_ACCOUNT}"
           fi
 
           # sbatch --export=ALL (default) forwards these to the batch job. Note
@@ -330,148 +341,121 @@ jobs:
           chmod +x "${BATCH_SCRIPT}"
           : > "${SLURM_OUT}"
 
-          expand_idle() {
-            python3 -c 'import sys; from lib.test_executor import expand_slurm_hostlist; print("\n".join(expand_slurm_hostlist(sys.argv[1])))' "$1"
+          job_state_of() {
+            spur_cmd squeue -j "$1" -h -o '%T' 2>/dev/null | tr -d ' ' || true
+          }
+          job_reason_of() {
+            spur_cmd squeue -j "$1" -h -o '%R' 2>/dev/null || true
+          }
+          job_scontrol_state() {
+            spur_cmd scontrol show job "$1" 2>/dev/null | sed -n 's/.*JobState=\([^ ]*\).*/\1/p' | head -n1
           }
 
-          # Probe each idle node with a 1-node GPU job; pin the real allocation
-          # to nodes that just reported >=8 gfx950 agents. Pinning to merely-idle
-          # nodes is not enough (JobLaunchFailure). Cancel probes by id -- never
-          # timeout a blocking `spur run`, which leaks queued jobs.
-          # Status goes to stderr; the node list is the only stdout (captured).
-          probe_pin() {
-            local need="$1"
-            local spec hosts n j waited c ok list
-            spec=$(spur_cmd sinfo -p "${SALLOC_PARTITION}" -h -t idle -o '%N' 2>/dev/null | head -1 || true)
-            hosts=$(expand_idle "${spec}")
-            if [ "$(echo "${hosts}" | sed '/^$/d' | wc -l)" -lt "${need}" ]; then
-              echo "Not enough idle nodes for a ${need}-node probe" >&2
-              return 1
-            fi
-            local probe_ids=""
-            mkdir -p "${RUNNER_TEMP}/probes"
-            for n in ${hosts}; do
-              rm -f "${RUNNER_TEMP}/probes/${n}.out"
-              j=$(spur_cmd sbatch --parsable \
-                --job-name="ainic-probe-${n}" \
-                --output="${RUNNER_TEMP}/probes/${n}.out" \
-                --error="${RUNNER_TEMP}/probes/${n}.out" \
-                --partition="${SALLOC_PARTITION}" \
-                ${RESV_ARG} \
-                ${EXCLUDE_ARG} \
-                --nodes=1 \
-                --ntasks=1 \
-                --cpus-per-task=8 \
-                --gpus-per-node=8 \
-                --nodelist="${n}" \
-                --time=00:05:00 \
-                --wrap 'hostname; rocminfo 2>/dev/null | grep -c gfx950' 2>/dev/null \
-                | grep -oE '[0-9]+' | tail -1)
-              if [ -n "${j}" ]; then
-                probe_ids="${probe_ids} ${j}"
+          # Wait until the job is RUNNING. PENDING is the expected busy-cluster
+          # path -- do not scancel it. Heartbeats go to stderr so the caller can
+          # capture only the terminal state on stdout.
+          wait_until_running() {
+            local jobid="$1"
+            local state="" reason="" js="" last_log=0 now
+            while true; do
+              state=$(job_state_of "${jobid}")
+              reason=$(job_reason_of "${jobid}")
+              now=$(date +%s)
+              if [ "$((now - last_log))" -ge 60 ]; then
+                echo "$(date -u +%H:%M:%SZ) job ${jobid} state=${state:-?} reason=${reason:-?}" >&2
+                last_log="${now}"
               fi
+              case "${reason}" in
+                *JobLaunchFailure*|*NODE_FAIL*)
+                  echo "Launch failed (${reason}); cancelling ${jobid}" >&2
+                  echo "NODE_FAIL"
+                  return 1
+                  ;;
+              esac
+              case "${state}" in
+                RUNNING)
+                  echo "RUNNING"
+                  return 0
+                  ;;
+                PENDING|CONFIGURING)
+                  sleep 15
+                  continue
+                  ;;
+                COMPLETED|FAILED|NODE_FAIL|CANCELLED|TIMEOUT)
+                  echo "${state}"
+                  return 1
+                  ;;
+                "")
+                  js=$(job_scontrol_state "${jobid}")
+                  case "${js}" in
+                    RUNNING)
+                      echo "RUNNING"
+                      return 0
+                      ;;
+                    PENDING|CONFIGURING)
+                      sleep 15
+                      continue
+                      ;;
+                    COMPLETED|FAILED|NODE_FAIL|CANCELLED|TIMEOUT)
+                      echo "${js}"
+                      return 1
+                      ;;
+                    "")
+                      echo "gone"
+                      return 1
+                      ;;
+                  esac
+                  sleep 15
+                  ;;
+                *)
+                  sleep 15
+                  ;;
+              esac
             done
-            echo "Launched probes:${probe_ids}" >&2
-            ok=""
-            waited=0
-            while [ "${waited}" -lt 90 ]; do
-              sleep 10
-              waited=$((waited + 10))
-              ok=""
-              for n in ${hosts}; do
-                [ -s "${RUNNER_TEMP}/probes/${n}.out" ] || continue
-                c=$(grep -oE '^[0-9]+$' "${RUNNER_TEMP}/probes/${n}.out" 2>/dev/null | tail -1)
-                if [ "${c:-0}" -ge 8 ] 2>/dev/null; then
-                  ok="${ok:+${ok} }${n}"
-                fi
-              done
-              if [ "$(echo "${ok}" | wc -w)" -ge "${need}" ]; then
-                break
-              fi
-            done
-            for j in ${probe_ids}; do
-              spur_cmd scancel "${j}" >/dev/null 2>&1 || true
-            done
-            if [ "$(echo "${ok}" | wc -w)" -lt "${need}" ]; then
-              echo "Probe passers: ${ok:-none} (need ${need})" >&2
-              return 1
-            fi
-            list=$(echo "${ok}" | tr ' ' '\n' | head -n "${need}" | paste -sd, -)
-            echo "${list}"
           }
 
-          echo "Submitting sbatch job (partition=${SALLOC_PARTITION} nodes=${SALLOC_NODES} time=${SALLOC_TIME})..."
+          echo "Submitting sbatch job (account=${SALLOC_ACCOUNT} partition=${SALLOC_PARTITION} nodes=${SALLOC_NODES} time=${SALLOC_TIME})..."
           MAX_LAUNCH_TRIES="${MAX_LAUNCH_TRIES:-8}"
           JOBID=""
-          PIN=""
           for try in $(seq 1 "${MAX_LAUNCH_TRIES}"); do
             echo "Submit attempt ${try}/${MAX_LAUNCH_TRIES}..."
-            PIN=$(probe_pin "${SALLOC_NODES}" || true)
-            PIN_ARG=""
-            if [ -n "${PIN}" ] && [ "$(echo "${PIN}" | tr ',' '\n' | sed '/^$/d' | wc -l)" -ge "${SALLOC_NODES}" ]; then
-              PIN_ARG="--nodelist=${PIN}"
-              echo "Pinning probed nodes: ${PIN}"
-            else
-              echo "Not enough probed nodes this round; waiting before retry"
-              sleep 30
-              continue
-            fi
             : > "${SLURM_OUT}"
             # Do not pass --ntasks=1: SPUR then allocates 1 node regardless of -N.
-            JOBID=$(spur_cmd sbatch --parsable \
+            sbatch_out=$(spur_cmd sbatch --parsable \
               --job-name=ainic-crusoe \
               --output="${SLURM_OUT}" \
               --error="${SLURM_OUT}" \
               --partition="${SALLOC_PARTITION}" \
+              ${ACCOUNT_ARG} \
               ${RESV_ARG} \
               ${EXCLUDE_ARG} \
-              ${PIN_ARG} \
               --nodes="${SALLOC_NODES}" \
               --ntasks="${SALLOC_NODES}" \
               --ntasks-per-node=1 \
               --cpus-per-task=32 \
               --gpus-per-node=8 \
               --time="${SALLOC_TIME}" \
-              "${BATCH_SCRIPT}" 2>&1 | grep -oE '[0-9]+' | tail -1)
+              "${BATCH_SCRIPT}" 2>&1) || true
+            echo "${sbatch_out}"
+            JOBID=$(printf '%s\n' "${sbatch_out}" | grep -oE '^[0-9]+$' | tail -1)
             if [ -z "${JOBID}" ]; then
-              echo "sbatch produced no job id (controller wedged?); retrying"
+              echo "sbatch produced no job id; retrying"
               sleep 15
               continue
             fi
-            echo "Submitted SLURM job ${JOBID}"
-            waited=0
-            state=""
-            while [ "${waited}" -lt 90 ]; do
-              sleep 5
-              waited=$((waited + 5))
-              state=$(spur_cmd squeue -j "${JOBID}" -h -o '%T' 2>/dev/null | tr -d ' ' || true)
-              reason=$(spur_cmd squeue -j "${JOBID}" -h -o '%R' 2>/dev/null || true)
-              case "${state}" in
-                RUNNING) break ;;
-                ""|COMPLETED|FAILED|NODE_FAIL|CANCELLED)
-                  echo "Job ${JOBID} ended as ${state:-gone} after ${waited}s"
-                  break
-                  ;;
-              esac
-              case "${reason}" in
-                *JobLaunchFailure*|*NODE_FAIL*)
-                  echo "Launch failed (${reason}); cancelling ${JOBID}"
-                  state="NODE_FAIL"
-                  break
-                  ;;
-              esac
-            done
+            echo "Submitted SPUR job ${JOBID}; waiting for ${SALLOC_NODES} nodes (PENDING is OK)"
+            state=$(wait_until_running "${JOBID}") || true
             if [ "${state}" = "RUNNING" ]; then
               break
             fi
-            echo "Attempt ${try} did not stay RUNNING (state=${state:-gone}); cancelling ${JOBID}"
+            echo "Attempt ${try} did not reach RUNNING (state=${state:-gone}); cancelling ${JOBID}"
             spur_cmd scancel "${JOBID}" >/dev/null 2>&1 || true
             JOBID=""
             sleep 10
           done
 
           if [ -z "${JOBID}" ]; then
-            echo "ERROR: failed to start a ${SALLOC_NODES}-node GPU allocation after ${MAX_LAUNCH_TRIES} attempts"
+            echo "ERROR: failed to start a ${SALLOC_NODES}-node GPU allocation after ${MAX_LAUNCH_TRIES} launch failures"
             exit 1
           fi
 
