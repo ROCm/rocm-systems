@@ -22,11 +22,15 @@ visibility. CI uploads those two files as job artifacts.
 
 **Detection rules** (each mutant vs the baseline run for that shader):
 
-- **Baseline FP:** unmodified shader must report ``baseline_hazard_count == 0``.
-- **FN:** if a mutant *killed* the program (``m.correct`` is false) and it *ran*, the plugin
-  must report *more* hazards than baseline: ``m.hazard_count > baseline_hazard_count``.
-- **FP:** if a mutant *survived* (``m.correct`` is true) and ran, the plugin must not report
-  *more* hazards than baseline: ``m.hazard_count <= baseline_hazard_count``.
+- **Baseline FP:** unmodified shader must report ``baseline_hazard_count == 0``. Being the
+  known-good program, it is where a false positive shows up.
+- **Missed hazard (FN):** a mutant that ran to completion (``m.exit_code == 0``) is missing a
+  wait the compiler emitted, so the plugin must report *more* hazards than baseline:
+  ``m.hazard_count > baseline_hazard_count``. Its output is not the oracle. The simulators
+  issue instructions in a fixed order and return the expected result with the wait removed,
+  so ``m.correct`` stays true there; real hardware is where the result can change.
+- **Crash:** a mutant that exited non-zero is judged separately — its hazard count says how
+  far it got, not how well hazards are detected.
 
 ROCm tool discovery uses ``ROCM_PATH`` / ``ROCM_HOME`` when set; architecture uses
 ``TARGET_ARCH`` when set.
@@ -57,7 +61,6 @@ from mutate_and_test import (  # noqa: E402
     build_rocjitsu_runner,
     discover_shaders,
     find_tool,
-    is_false_negative,
     process_shader,
     write_csv_report,
     write_json_report,
@@ -156,18 +159,33 @@ def _assert_mutation_ground_truth(report: ShaderReport, artifact_dir: Path) -> N
         f"for {report.shader!r}, got baseline_hazard_count={baseline_hazard_count}. "
         f"See {artifact_dir / 'mutation_report.json'}"
     )
-    mismatches: list[str] = []
+    crashed: list[str] = []
+    missed: list[str] = []
     for i, mutant in enumerate(report.mutants):
         assert mutant.ran, f"mutant {i} ({mutant.wait_instruction!r}) did not run"
-        if is_false_negative(mutant, baseline_hazard_count):
-            mismatches.append(
-                f"  [{i}] {mutant.wait_instruction!r}: "
-                f"hazard_count={mutant.hazard_count}, baseline={baseline_hazard_count}"
-            )
-    assert not mismatches, (
-        "hazard_count must be strictly above baseline for the cases below.\n"
-        + "\n".join(mismatches)
-        + f"\nReport: {artifact_dir / 'mutation_report.json'}"
+        detail = (
+            f"  [{i}] {mutant.wait_instruction!r}: "
+            f"hazard_count={mutant.hazard_count}, baseline={baseline_hazard_count}"
+        )
+        if mutant.exit_code != 0:
+            crashed.append(f"{detail}, exit_code={mutant.exit_code!r}")
+        elif mutant.hazard_count <= baseline_hazard_count:
+            outcome = "output matched" if mutant.stdout_match else "output diverged"
+            missed.append(f"{detail} ({outcome})")
+
+    report_path = artifact_dir / "mutation_report.json"
+    assert not crashed, (
+        "these mutants crashed instead of finishing, so their hazard counts say how "
+        "far they got, not what was detected. Diagnose the crash first.\n"
+        + "\n".join(crashed)
+        + f"\nReport: {report_path}"
+    )
+    assert not missed, (
+        "these mutants ran to completion with a required wait removed, so the plugin "
+        "must report more hazards than the baseline and did not. Matching output does "
+        "not clear the mutation: the simulators return the same result either way.\n"
+        + "\n".join(missed)
+        + f"\nReport: {report_path}"
     )
 
 
