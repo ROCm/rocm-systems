@@ -3,8 +3,14 @@
 # DEPLOYMENT: RCCL now lives in the ROCm/rocm-systems monorepo at projects/rccl.
 # This file belongs in that repo at
 #   .github/workflows/rccl_perf_regression.yml
-# It runs on the self-hosted org runner "tw-gfx950-ainic-ROCm-scale-runner"
-# (org: ROCm). Adjust `runs-on` labels to match how that runner was registered.
+# It runs on self-hosted org runners (org: ROCm) registered on a GPU-less Slurm
+# submit host, one per role:
+#   rccl-build    tw-gfx950-ainic-ROCm-scale-rccl-build-1
+#   rccl-detect   tw-gfx950-ainic-ROCm-scale-rccl-detect-1
+# (the names retain a gfx950 prefix for consistency with the older GPU runner;
+# these hosts have no GPUs). They must NOT carry the
+# tw-gfx950-ainic-ROCm-scale-runner label, or they will be handed GPU jobs they
+# cannot run. The `report` job needs no Slurm access and runs on ubuntu-latest.
 # The `paths` filter keeps the gate scoped to RCCL-only changes in the monorepo;
 # build_rccl.sh auto-detects the projects/rccl cmake subdir in the checkout.
 #
@@ -116,12 +122,14 @@ jobs:
     concurrency:
       group: rccl-perf-gate-build-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: false
-    # Capacity note: build and detect share one runner label today, so they are
-    # serialised by runner availability regardless of the locks above. Once a
-    # second runner is registered, give the build a distinct label (it needs no
-    # GPUs and no RDMA -- just a Slurm submit host) so a build can proceed while
-    # another PR's detect holds the 4-node allocation.
-    runs-on: [self-hosted, tw-gfx950-ainic-ROCm-scale-runner]
+    # Own runner label. This job needs no GPUs and no RDMA -- it is a Slurm
+    # submit-and-poll client -- and it targets SLURM_BUILD_RESERVATION, a
+    # different node pool from detect's. Sharing one label with detect meant a
+    # ~9min build queued behind a ~37min detect, or behind a GIN run that can
+    # hold a runner for 5h, for no reason at all. One runner per role today;
+    # changing that count is a registration change on the runner host, not an
+    # edit here.
+    runs-on: [self-hosted, rccl-build]
     # Was 60, the same as rccl_build.sbatch's own --time=01:00:00, which left no
     # room for queue time: a build that waited 20min for a node and then
     # compiled for 13 was killed here at 60 even though Slurm was happy. Sit
@@ -300,7 +308,14 @@ jobs:
     concurrency:
       group: rccl-perf-gate-detect-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: false
-    runs-on: [self-hosted, tw-gfx950-ainic-ROCm-scale-runner]
+    # Own runner label; see the note on the build job. Exactly one detect runner
+    # exists, which matches the hardware -- the pinned 4-node set admits one
+    # detect at a time regardless. A second runner would not add throughput; it
+    # would only move a waiting PR out of GitHub's runner queue (unbounded, and
+    # invisible to the timeout nest below, since timeout-minutes does not start
+    # until a runner is assigned) and into Slurm's, which is logged and bounded
+    # by MAX_QUEUE_SEC. Worth doing once there is queue data to justify it.
+    runs-on: [self-hosted, rccl-detect]
     # Outermost layer of the timeout nest. Must stay above MAX_QUEUE_SEC (4h)
     # plus MAX_WAIT_SEC (5h10m) in submit_and_poll.sh, so that script gets to
     # cancel the Slurm job and report *why* rather than being killed here with
