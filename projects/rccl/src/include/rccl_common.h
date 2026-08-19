@@ -166,12 +166,27 @@ RCCL_PARAM_DECLARE(DirectReduceScatterThreshold);
 RCCL_PARAM_DECLARE(HierarchicalAllGather);
 // Hierarchical ReduceScatter enabled
 RCCL_PARAM_DECLARE(HierarchicalReduceScatter);
+#define HIERARCHICAL_TEMP_BUFFER_SIZE (128 * 1024 * 1024) // 128MB
 
-// DDA threashold
+// DDA threshold
 RCCL_PARAM_DECLARE(DdaThreshold);
+RCCL_PARAM_DECLARE(DdaLL);
+RCCL_PARAM_DECLARE(DdaLLThreshold);
+RCCL_PARAM_DECLARE(DdaLL128);
+RCCL_PARAM_DECLARE(DdaLL128Threshold);
 RCCL_PARAM_DECLARE(DdaEnable);
 
-#define HIERARCHICAL_TEMP_BUFFER_SIZE (128 * 1024 * 1024) // 128MB
+// Per-collective DDA AlltoAll thresholds (4 MiB for all supported archs).
+constexpr size_t kDdaAlltoAllGfx942ThresholdBytes = 4194304;
+constexpr size_t kDdaAlltoAllGfx950ThresholdBytes = 4194304;
+constexpr size_t kDdaAlltoAllGfx1250ThresholdBytes = 4194304;
+
+// Returns true when the DDA fast path should be attempted for a collective.
+// Per-arch defaults cap the threshold; when 0, gfx950/gfx1250 fall back to
+// the user-configurable RCCL_DDA_THRESHOLD env var.
+bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default,
+                    size_t gfx950Default = 0, size_t gfx1250Default = 0);
+
 int getFirmwareVersion();
 bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, char const* archName);
 #ifdef ENABLE_WARP_SPEED

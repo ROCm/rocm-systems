@@ -130,6 +130,10 @@ MANUAL_CAPTURE_APIS: Set[str] = {
     "hipMemGetAllocationGranularity",
     "hipMemPoolSetAccess",
     "hipMemSetAccess",
+    # hipDrv driver 3D/2D memcpy (HIP_MEMCPY3D / hip_Memcpy2D struct ptr; inline + blobs)
+    "hipDrvMemcpy3D",
+    "hipDrvMemcpy3DAsync",
+    "hipDrvMemcpy2DUnaligned",
 }
 
 # Alias for backward compat within the file (some helpers used MANUAL_APIS)
@@ -256,6 +260,10 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     # Device allocation — must allocate a real buffer and record it in alloc_map
     # (with padding + zero-init parity with hipMalloc).
     "hipExtMallocWithFlags",
+    # hipDrv driver 3D/2D memcpy (reconstruct struct, translate device ptrs, blob/validate)
+    "hipDrvMemcpy3D",
+    "hipDrvMemcpy3DAsync",
+    "hipDrvMemcpy2DUnaligned",
 }
 
 # ---------------------------------------------------------------------------
@@ -448,18 +456,6 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipMemset3DAsync",
     "hipMemset3D_spt",
     "hipMemset3DAsync_spt",
-    # hipMemset_spt / 2D_spt variants — host ptr for dst (stale) or pitched ptr — noop
-    "hipMemset_spt",
-    "hipMemset2D_spt",
-    "hipMemsetAsync_spt",
-    "hipMemset2DAsync_spt",
-    # hipMemsetD2D8/16/32 and Async — hipDeviceptr_t output correctly typed; but not in alloc_map — noop
-    "hipMemsetD2D8",
-    "hipMemsetD2D8Async",
-    "hipMemsetD2D16",
-    "hipMemsetD2D16Async",
-    "hipMemsetD2D32",
-    "hipMemsetD2D32Async",
     # hipMallocPitch — already in MANUAL_PLAYBACK_APIS for the DrvMemcpy test; these are the _spt wrappers
     # hipLaunchCooperativeKernel — variable args (void**); handled via regular kernel launch fallback — noop
     "hipLaunchCooperativeKernel",
@@ -501,11 +497,16 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipExtStreamGetCUMask",
     # hipExtGetLinkTypeAndHopCount — output uint32_t* ptrs stale
     "hipExtGetLinkTypeAndHopCount",
-    # StreamWait/Write Value — void* ptr is stale device address (no alloc_map translation in generated shim)
+    # hipStreamWaitValue32/64 stay no-op because a wait can hang on replay: the
+    # condition is satisfied by whatever wrote the value at capture time, and if
+    # that writer is not itself replayed the wait never completes and blocks the
+    # replay. The void* ptr is not the problem here: it is named `ptr`, so the
+    # generated shim would translate it via ctx.translate_ptr like any other.
+    # hipStreamWriteValue32/64 are replayed instead: the void* ptr is translated
+    # via alloc_map (ctx.translate_ptr) and the stream via ctx.translate_stream.
+    # See SKIP_IF_UNMAPPED_PLAYBACK_APIS for the untranslatable-destination case.
     "hipStreamWaitValue32",
     "hipStreamWaitValue64",
-    "hipStreamWriteValue32",
-    "hipStreamWriteValue64",
     # hipStreamAttachMemAsync — void* dev_ptr stale
     "hipStreamAttachMemAsync",
     # hipGetStreamDeviceId — returns int not hipError_t (wrong return type cast)
@@ -575,9 +576,6 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     # hipDrvMemDiscardAndPrefetchBatchAsync — hipDeviceptr_t* dptrs output param; generator emits wrong cast
     "hipDrvMemDiscardAndPrefetchBatchAsync",
     # Category 13: Driver 3D/2D memcpy — HIP_MEMCPY3D* / hipMemcpy3DPeerParms* / hip_Memcpy2D* stale struct ptrs
-    "hipDrvMemcpy3D",
-    "hipDrvMemcpy3DAsync",
-    "hipDrvMemcpy2DUnaligned",
     "hipMemcpy3DPeer",
     "hipMemcpy3DPeerAsync",
     "hipMemcpy2DArrayToArray",
@@ -654,6 +652,26 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipDrvGraphExecMemsetNodeSetParams",
     "hipDrvGraphMemcpyNodeGetParams",
     "hipDrvGraphMemcpyNodeSetParams",
+}
+
+# ---------------------------------------------------------------------------
+# Playback APIs whose recorded destination must resolve to a live allocation
+# before the real API is called: API name -> destination parameter name.
+# ---------------------------------------------------------------------------
+#
+# ctx.translate_ptr() returns nullptr when the recorded address is in neither
+# the alloc map nor the VMM reserved-VA map, for instance a write into memory
+# HRR does not track such as a framework sub-allocation carved out of a larger
+# hipMalloc. The stream-operation APIs reject a null ptr with
+# hipErrorInvalidValue (ihipStreamOperation checks it first), and
+# dispatch_event() treats any non-success handler return as fatal, so a single
+# untranslatable destination would abort the entire replay. Warn once and skip
+# the call instead, which is the unmapped-pointer contract the hand-written
+# playback_hipFree / playback_hipFreeAsync / playback_hipHostFree already use.
+# Slightly-wrong data beats no replay at all.
+SKIP_IF_UNMAPPED_PLAYBACK_APIS: Dict[str, str] = {
+    "hipStreamWriteValue32": "ptr",
+    "hipStreamWriteValue64": "ptr",
 }
 
 # ---------------------------------------------------------------------------
@@ -745,6 +763,21 @@ EXTRA_FIELDS: Dict[str, List[Tuple[str, str, str]]] = {
                          ("uint64_t", "d2h_hash_lo",  "D2H expected-output blob hash lo (0 if not D2H)"),
                          ("uint64_t", "d2h_hash_hi",  "D2H expected-output blob hash hi")],
     # hipArrayCreate — HIP_ARRAY_DESCRIPTOR is 24 bytes; store inline.
+    "hipDrvMemcpy3D":      [("uint8_t", "drv3d_bytes[192]", "HIP_MEMCPY3D inline copy"),
+                            ("uint64_t", "blob_hash_lo",    "H2D blob hash lo (0 if not H2D)"),
+                            ("uint64_t", "blob_hash_hi",    "H2D blob hash hi"),
+                            ("uint64_t", "d2h_hash_lo",     "D2H expected-output blob hash lo (0 if not D2H)"),
+                            ("uint64_t", "d2h_hash_hi",     "D2H expected-output blob hash hi")],
+    "hipDrvMemcpy3DAsync": [("uint8_t", "drv3d_bytes[192]", "HIP_MEMCPY3D inline copy"),
+                            ("uint64_t", "blob_hash_lo",    "H2D blob hash lo (0 if not H2D)"),
+                            ("uint64_t", "blob_hash_hi",    "H2D blob hash hi"),
+                            ("uint64_t", "d2h_hash_lo",     "D2H expected-output blob hash lo (0 if not D2H)"),
+                            ("uint64_t", "d2h_hash_hi",     "D2H expected-output blob hash hi")],
+    "hipDrvMemcpy2DUnaligned": [("uint8_t", "drv2d_bytes[136]", "hip_Memcpy2D inline copy"),
+                            ("uint64_t", "blob_hash_lo",    "H2D blob hash lo (0 if not H2D)"),
+                            ("uint64_t", "blob_hash_hi",    "H2D blob hash hi"),
+                            ("uint64_t", "d2h_hash_lo",     "D2H expected-output blob hash lo (0 if not D2H)"),
+                            ("uint64_t", "d2h_hash_hi",     "D2H expected-output blob hash hi")],
     "hipArrayCreate":   [("uint8_t", "array_desc_bytes[24]", "HIP_ARRAY_DESCRIPTOR inline copy")],
     # hipArray3DCreate — HIP_ARRAY3D_DESCRIPTOR is 40 bytes; store inline.
     "hipArray3DCreate": [("uint8_t", "array3d_desc_bytes[40]", "HIP_ARRAY3D_DESCRIPTOR inline copy")],
@@ -764,6 +797,8 @@ EXTRA_FIELDS: Dict[str, List[Tuple[str, str, str]]] = {
 _INLINE_STRUCT_ASSERTS: Dict[str, str] = {
     "pool_props_bytes":   "hipMemPoolProps",
     "parms_bytes":        "hipMemcpy3DParms",
+    "drv3d_bytes":        "HIP_MEMCPY3D",
+    "drv2d_bytes":        "hip_Memcpy2D",
     "array_desc_bytes":   "HIP_ARRAY_DESCRIPTOR",
     "array3d_desc_bytes": "HIP_ARRAY3D_DESCRIPTOR",
     "stream_attr_bytes":  "hipStreamAttrValue",
@@ -1580,6 +1615,33 @@ CUSTOM_CAPTURE_SHIMS: Dict[str, str] = {
     ),
 }
 
+# ---------------------------------------------------------------------------
+# Playback: APIs that must warn-and-skip when their destination pointer cannot
+# be translated.
+#
+# dispatch_event() treats ANY non-hipSuccess handler return as fatal and aborts
+# the whole replay.  So an API whose only device-pointer argument is a
+# destination it writes must not hand a null pointer to the real API: the call
+# returns hipErrorInvalidValue and one untranslatable buffer kills the entire
+# replay of a customer archive.  A recorded destination legitimately has no
+# alloc_map entry whenever the API that produced it is itself a playback no-op,
+# e.g. hipMemAllocPitch (in NOOP_PLAYBACK_APIS), the idiomatic driver-API partner
+# of hipMemsetD2D*.
+#
+# Maps API name -> destination parameter name.  Emits the codebase's standard
+# untranslatable-pointer idiom (playback_hipFree, playback_hipMemRelease, ... all
+# do `if (!live) return hipSuccess;`), plus a once-per-process warning naming the
+# API so the lost fidelity is attributable.  Skipping loses one buffer's
+# contents; aborting loses the whole replay.
+SKIP_IF_UNMAPPED_DST_PLAYBACK_APIS: Dict[str, str] = {
+    "hipMemsetD2D8":       "dst",
+    "hipMemsetD2D8Async":  "dst",
+    "hipMemsetD2D16":      "dst",
+    "hipMemsetD2D16Async": "dst",
+    "hipMemsetD2D32":      "dst",
+    "hipMemsetD2D32Async": "dst",
+}
+
 CUSTOM_PLAYBACK_BODIES: Dict[str, str] = {
     # Restore the recorded desired thread capture mode (stored as enum VALUE) so
     # allocations bracketed by these calls during a graph capture are permitted.
@@ -2036,6 +2098,42 @@ def generate_playback_shim(entry: ApiEntry) -> str:
     is_alloc_free    = entry.name in _ALLOC_FREE_APIS
     is_hdl_create    = entry.name in _HANDLE_CREATE_APIS
     is_hdl_destroy   = entry.name in _HANDLE_DESTROY_APIS
+    skip_param       = SKIP_IF_UNMAPPED_PLAYBACK_APIS.get(entry.name)
+
+    # Translate the destination once up front and skip the call when the
+    # recorded address is in no map: returning an error here would abort the
+    # whole replay (see SKIP_IF_UNMAPPED_PLAYBACK_APIS). The live pointer is
+    # reused for the real call below, so there is no second lookup.
+    if skip_param:
+        lines.append(f"  void* _live_dst = ctx.translate_ptr(a->{skip_param});")
+        lines.append(f"  if (_live_dst == nullptr) {{")
+        lines.append(f"    static bool warned = false;")
+        lines.append(f"    if (!warned) {{")
+        lines.append(f"      warned = true;")
+        lines.append(f"      fprintf(stderr, \"[HRR] {entry.name}: recorded destination 0x%llx \"")
+        lines.append(f"              \"is not in the alloc map (memory HRR does not track); \"")
+        lines.append(f"              \"skipping this write. Results may differ from capture.\\n\",")
+        lines.append(f"              (unsigned long long)a->{skip_param});")
+        lines.append(f"    }}")
+        lines.append(f"    return hipSuccess;")
+        lines.append(f"  }}")
+
+    # Untranslatable destination -> warn once and skip (never abort the replay).
+    # See SKIP_IF_UNMAPPED_DST_PLAYBACK_APIS.
+    skip_dst = SKIP_IF_UNMAPPED_DST_PLAYBACK_APIS.get(entry.name)
+    if skip_dst:
+        lines.append(f"  void* _live_{skip_dst} = ctx.translate_ptr(a->{skip_dst});")
+        lines.append(f"  if (!_live_{skip_dst}) {{")
+        lines.append(f"    static bool warned = false;")
+        lines.append(f"    if (!warned) {{")
+        lines.append(f"      warned = true;")
+        lines.append(f"      fprintf(stderr, \"[HRR] {entry.name}: {skip_dst} 0x%llx has no alloc_map entry \"")
+        lines.append(f"              \"(its allocation was not replayed), so this call is skipped; the \"")
+        lines.append(f"              \"destination buffer will differ from capture.\\n\",")
+        lines.append(f"              (unsigned long long)a->{skip_dst});")
+        lines.append(f"    }}")
+        lines.append(f"    return hipSuccess;")
+        lines.append(f"  }}")
 
     # For alloc-free and handle-destroy APIs: grab the recorded key before the call
     if is_alloc_free:
@@ -2056,9 +2154,17 @@ def generate_playback_shim(entry: ApiEntry) -> str:
         name = p.name or f"p{unnamed}"
         if not p.name: unnamed += 1
 
+        # Destination already translated (and null-checked) above
+        if skip_dst and name == skip_dst:
+            call_args.append(f"({p.raw_type.strip()})_live_{skip_dst}")
+            continue
         # For alloc-free: replace the pointer arg with the translated live ptr
         if is_alloc_free and name == _ALLOC_FREE_APIS[entry.name]:
             call_args.append("_live_ptr")
+            continue
+        # For skip-if-unmapped: reuse the destination translated above
+        if skip_param and name == skip_param:
+            call_args.append("_live_dst")
             continue
         # For handle-destroy: replace the handle arg with the live handle
         if is_hdl_destroy and name == _HANDLE_DESTROY_APIS[entry.name][0]:
@@ -2226,7 +2332,10 @@ def main() -> None:
         ("MANUAL_CAPTURE_APIS",  MANUAL_CAPTURE_APIS),
         ("MANUAL_PLAYBACK_APIS", MANUAL_PLAYBACK_APIS),
         ("NOOP_PLAYBACK_APIS",   NOOP_PLAYBACK_APIS),
+        ("SKIP_IF_UNMAPPED_PLAYBACK_APIS", set(SKIP_IF_UNMAPPED_PLAYBACK_APIS)),
         ("ERROR_STUB_PLAYBACK_APIS", ERROR_STUB_PLAYBACK_APIS),
+        ("SKIP_IF_UNMAPPED_DST_PLAYBACK_APIS",
+         set(SKIP_IF_UNMAPPED_DST_PLAYBACK_APIS.keys())),
         ("EXTRA_FIELDS",         set(EXTRA_FIELDS.keys())),
     ]:
         bad = sorted(n for n in api_set if n not in parsed_names)
@@ -2237,6 +2346,20 @@ def main() -> None:
         for set_name, names in unknown.items():
             for n in names:
                 print(f"  {set_name}: '{n}'")
+        sys.exit(1)
+
+    # generate_playback_shim() returns early for no-op / error-stub / custom /
+    # manual APIs, so a skip-if-unmapped entry that is also in one of those sets
+    # would have no effect at all. Fail loudly rather than silently.
+    shadowed = sorted(
+        set(SKIP_IF_UNMAPPED_DST_PLAYBACK_APIS)
+        & (NOOP_PLAYBACK_APIS | ERROR_STUB_PLAYBACK_APIS
+           | set(CUSTOM_PLAYBACK_BODIES) | MANUAL_PLAYBACK_APIS))
+    if shadowed:
+        print("\nERROR: SKIP_IF_UNMAPPED_DST_PLAYBACK_APIS entries have no effect "
+              "because the API is handled earlier:")
+        for n in shadowed:
+            print(f"  '{n}'")
         sys.exit(1)
     print(f"  Manual capture (hand-written in hip_capture.cpp):  {n_manual_cap}")
     print(f"  Manual playback (hand-written in hip_playback.cpp): {n_manual_play}")

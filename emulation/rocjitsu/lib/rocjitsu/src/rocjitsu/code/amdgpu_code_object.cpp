@@ -40,17 +40,20 @@ private:
 
 class HsaSection : public Section {
 public:
-  HsaSection(std::string name, std::unique_ptr<char[]> data, const Elf64_Shdr &shdr)
-      : Section(std::move(name), std::move(data)), shdr_(shdr) {}
+  HsaSection(std::string name, std::unique_ptr<char[]> data, const Elf64_Shdr &shdr,
+             size_t section_index)
+      : Section(std::move(name), std::move(data)), shdr_(shdr), section_index_(section_index) {}
 
   std::size_t size() const override { return shdr_.sh_size; }
   uint64_t flags() const override { return shdr_.sh_flags; }
   uint64_t vaddr() const override { return shdr_.sh_addr; }
   uint32_t sectionHeaderNameIdx() const override { return shdr_.sh_name; }
+  std::optional<size_t> sectionHeaderIndex() const override { return section_index_; }
   uint64_t sectionOffset() const override { return shdr_.sh_offset; }
 
 private:
   Elf64_Shdr shdr_;
+  size_t section_index_;
 };
 
 bool is_elf(const Elf64_Ehdr &ehdr) { return !std::memcmp(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE); }
@@ -79,6 +82,8 @@ AmdGpuCodeObject::AmdGpuCodeObject(AmdGpuCodeObject &&other) noexcept
   header_ = std::move(other.header_);
   sections_ = std::move(other.sections_);
   text_sections_ = std::move(other.text_sections_);
+  executable_nobits_sections_ = std::move(other.executable_nobits_sections_);
+  allocated_executable_sections_ = std::move(other.allocated_executable_sections_);
   rodata_sections_ = std::move(other.rodata_sections_);
 }
 
@@ -190,12 +195,23 @@ void AmdGpuCodeObject::load_sections() {
   }
   const char *shstrtab_data = image_.data() + shstrtab.sh_offset;
 
-  for (const auto &shdr : section_hdrs) {
-    if (shdr.sh_type == SHT_NULL || shdr.sh_type == SHT_NOBITS)
+  for (size_t section_index = 0; section_index < section_hdrs.size(); ++section_index) {
+    const Elf64_Shdr &shdr = section_hdrs[section_index];
+    if (shdr.sh_type == SHT_NULL)
       continue;
-    if (shdr.sh_name >= shstrtab.sh_size)
+    const bool allocated_executable =
+        (shdr.sh_flags & (SHF_ALLOC | SHF_EXECINSTR)) == (SHF_ALLOC | SHF_EXECINSTR);
+    if (shdr.sh_type == SHT_NOBITS && !allocated_executable)
       continue;
-    if (!fits_in_bounds(shdr.sh_offset, shdr.sh_size, image_.size())) {
+    if (shdr.sh_name >= shstrtab.sh_size) {
+      if (allocated_executable) {
+        is_valid_ = false;
+        return;
+      }
+      continue;
+    }
+    if (shdr.sh_type != SHT_NOBITS &&
+        !fits_in_bounds(shdr.sh_offset, shdr.sh_size, image_.size())) {
       is_valid_ = false;
       return;
     }
@@ -204,10 +220,26 @@ void AmdGpuCodeObject::load_sections() {
     std::string sec_name(shstrtab_data + shdr.sh_name,
                          strnlen(shstrtab_data + shdr.sh_name, max_len));
 
-    auto sec_data = std::make_unique<char[]>(shdr.sh_size);
-    std::memcpy(sec_data.get(), image_.data() + shdr.sh_offset, shdr.sh_size);
-    sections_.emplace_back(std::make_unique<HsaSection>(sec_name, std::move(sec_data), shdr));
+    std::unique_ptr<char[]> sec_data;
+    if (shdr.sh_type != SHT_NOBITS) {
+      sec_data = std::make_unique<char[]>(shdr.sh_size);
+      std::memcpy(sec_data.get(), image_.data() + shdr.sh_offset, shdr.sh_size);
+    }
+    // SHT_NOBITS has no executable bytes to decode. Retain allocated executable
+    // metadata above so the translator's sole-PROGBITS-.text gate rejects the
+    // layout, but keep all_sections() restricted to readable section data.
+    if (shdr.sh_type == SHT_NOBITS) {
+      executable_nobits_sections_.emplace_back(
+          std::make_unique<HsaSection>(sec_name, nullptr, shdr, section_index));
+      allocated_executable_sections_.push_back(executable_nobits_sections_.back().get());
+      continue;
+    }
 
+    sections_.emplace_back(
+        std::make_unique<HsaSection>(sec_name, std::move(sec_data), shdr, section_index));
+
+    if (allocated_executable)
+      allocated_executable_sections_.push_back(sections_.back().get());
     if (sec_name == ".text")
       text_sections_.push_back(sections_.back().get());
     else if (sec_name == ".rodata")

@@ -7,6 +7,7 @@ from contextlib import ExitStack, closing
 from typing import Optional
 
 import utils.utils_profile_csv as csv_ops
+from utils import csv_compression
 from utils.logger import console_error
 
 # From schema definition in source/share/rocprofiler-sdk-rocpd/data_views.sql
@@ -76,9 +77,7 @@ def convert_dbs_to_csv(
 
     with ExitStack() as stack:
         writers = {
-            path: csv.writer(
-                stack.enter_context(open(path, "w", newline="", encoding="utf-8"))
-            )
+            path: csv.writer(stack.enter_context(csv_compression.open_csv_write(path)))
             for path in queries
         }
         for db_path in db_paths:

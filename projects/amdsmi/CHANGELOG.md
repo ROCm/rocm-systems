@@ -4,7 +4,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ***All information listed below is for reference and subject to change.***
 
-## amd_smi_lib for ROCm 7.15.0
+## amd_smi_lib for ROCm 10.0.0
 
 ### Added
 
@@ -119,6 +119,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ## amd_smi_lib for ROCm 7.14.0
 
 ### Added
+
+- **Added an experimental, opt-in WSL (WDDM/dxg) GPU backend**.
+  - Built only with `-DENABLE_WSL_BACKEND=ON` (off by default); native builds and packages are unchanged.
+  - Reads real GPU telemetry through `librocdxg` (`rocdxg_smi_*` APIs); queries with no WDDM equivalent return `AMDSMI_STATUS_NOT_SUPPORTED`. See [Using AMD SMI under WSL](https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/amdsmi-wsl-mode.html).
 
 - **Added NIC processor discovery and information API surface**.  
   - New C APIs: `amdsmi_get_nic_processor_handles()`, `amdsmi_get_nic_device_bdf()`, `amdsmi_get_nic_fw_info()`, `amdsmi_get_nic_port_statistics()`, and `amdsmi_get_nic_vendor_statistics()`.
