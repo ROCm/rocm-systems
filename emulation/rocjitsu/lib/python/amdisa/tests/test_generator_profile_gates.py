@@ -3681,7 +3681,8 @@ def test_gfx1250_scaled_wmma_skips_vop3p_extension_decode(
         'selected_exec_fn(InstructionExecutionId::VWmmaScaleF32Vop3px2), '
         'Vop3p::ExtensionDecodePolicy::Skip)'
     ) in vop3p_cpp
-    assert 'scale->src2 != 0x100u' in decoder_cpp
+    assert 'scale->src2 == 0x080u || scale->src2 == 0x100u' in decoder_cpp
+    assert '!fixed_src2_valid' in decoder_cpp
     assert '(scale->opsel & 0x2u) != 0u' in decoder_cpp
     assert '(scale->opsel_hi & 0x2u) != 0u' in decoder_cpp
     assert '(matrix->neg_hi & 0x3u) != 0u' in decoder_cpp

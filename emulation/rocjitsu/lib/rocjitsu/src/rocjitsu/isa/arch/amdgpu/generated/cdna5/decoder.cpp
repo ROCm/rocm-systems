@@ -2325,8 +2325,10 @@ bool isGfx1250WmmaScalePairValid(const MachineInst *opcode) {
   const auto *scale = reinterpret_cast<const Vop3pMachineInst *>(opcode);
   const auto *matrix = reinterpret_cast<const Vop3pMachineInst *>(opcode + 2);
   const bool scale16 = scale->op == 0x3au;
+  // Accept LLVM's encoding as an alias for the ISA-canonical constant.
+  const bool fixed_src2_valid = scale->src2 == 0x080u || scale->src2 == 0x100u;
   if (scale->vdst != 0u || (scale->neg_hi & 0x4u) != 0u || (scale->opsel & 0x2u) != 0u ||
-      scale->clamp != 0u || scale->src2 != 0x100u || (scale->opsel_hi & 0x2u) != 0u ||
+      scale->clamp != 0u || !fixed_src2_valid || (scale->opsel_hi & 0x2u) != 0u ||
       (scale->neg & 0x4u) != 0u || (matrix->neg_hi & 0x3u) != 0u || matrix->clamp != 0u ||
       (matrix->neg & 0x3u) != 0u)
     return false;

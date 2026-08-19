@@ -550,6 +550,25 @@ TEST(Gfx1250DecodeTest, WmmaScaleF8f6f4ConsumesVop3px2Pair) {
             "v_wmma_scale_f32_16x16x128_f8f6f4 v[6:13], v[18:33], v[52:67], 0, v0, v4");
 }
 
+TEST(Gfx1250DecodeTest, WmmaScaleAcceptsLlvmAndIsaFixedSrc2Encodings) {
+  auto isa_words = build_scaled_wmma_words(0x35, 0, 0, 0, 0, 128, 128);
+  auto llvm_words = isa_words;
+  constexpr uint32_t kSrc2Mask = 0x1ffu << 18;
+  llvm_words[1] = (llvm_words[1] & ~kSrc2Mask) | (0x080u << 18);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> isa_inst(decode_valid(*decoder, isa_words.data()));
+  std::unique_ptr<Instruction> llvm_inst(decode_valid(*decoder, llvm_words.data()));
+  ASSERT_NE(isa_inst, nullptr);
+  ASSERT_NE(llvm_inst, nullptr);
+  EXPECT_EQ(llvm_inst->mnemonic(), isa_inst->mnemonic());
+  EXPECT_EQ(llvm_inst->size(), isa_inst->size());
+  EXPECT_EQ(llvm_inst->num_src_operands(), isa_inst->num_src_operands());
+  EXPECT_EQ(llvm_inst->num_dst_operands(), isa_inst->num_dst_operands());
+  EXPECT_EQ(llvm_inst->disassemble(), isa_inst->disassemble());
+}
+
 TEST(Gfx1250DecodeTest, WmmaScalePairRejectsInvalidEmbeddedSourceSelectors) {
   constexpr uint32_t invalid_src0_selectors[] = {255u, 250u, 233u, 234u};
   for (const uint32_t embedded_src0 : invalid_src0_selectors) {
@@ -596,7 +615,7 @@ TEST(Gfx1250DecodeTest, WmmaScalePairRejectsInvalidFixedAndReservedFields) {
     EXPECT_TRUE(decode_fails(*decoder, words.data()));
   }
 
-  for (uint32_t fixed_src2 : {0u, 128u, 255u, 511u}) {
+  for (uint32_t fixed_src2 : {0u, 255u, 511u}) {
     SCOPED_TRACE(::testing::Message() << "prefix_src2=" << fixed_src2);
     auto words = build_scaled_wmma_words(0x35, 0, 0, 0, 0, 128, 128);
     constexpr uint32_t kSrc2Mask = 0x1ffu << 18;
@@ -767,10 +786,17 @@ TEST(Gfx1250ExecutionTest, WmmaRegularScaleInlineZeroMatchesNeutralScalarSources
   constexpr auto inline_matrix = cdna5::build_vop3p(
       cdna5::kVWmmaF3216x16x128F8f6f4Vop3p,
       {.vdst = 40, .src0 = kVgprEncoding, .src1 = kVgprEncoding + 16, .src2 = kVgprEncoding + 40});
+  constexpr auto llvm_matrix = cdna5::build_vop3p(
+      cdna5::kVWmmaF3216x16x128F8f6f4Vop3p,
+      {.vdst = 48, .src0 = kVgprEncoding, .src1 = kVgprEncoding + 16, .src2 = kVgprEncoding + 48});
   const std::array<uint32_t, 4> scalar_words = {scalar_prefix[0], scalar_prefix[1],
                                                 scalar_matrix[0], scalar_matrix[1]};
   const std::array<uint32_t, 4> inline_words = {inline_prefix[0], inline_prefix[1],
                                                 inline_matrix[0], inline_matrix[1]};
+  std::array<uint32_t, 4> llvm_words = {inline_prefix[0], inline_prefix[1], llvm_matrix[0],
+                                        llvm_matrix[1]};
+  constexpr uint32_t kSrc2Mask = 0x1ffu << 18;
+  llvm_words[1] = (llvm_words[1] & ~kSrc2Mask) | (0x080u << 18);
 
   write_wave_sgpr(*cu, *wf, 0, 0x807e007fu);
   write_wave_sgpr(*cu, *wf, 1, 0x0102037fu);
@@ -783,10 +809,13 @@ TEST(Gfx1250ExecutionTest, WmmaRegularScaleInlineZeroMatchesNeutralScalarSources
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> scalar_inst(decode_valid(*decoder, scalar_words.data()));
   std::unique_ptr<Instruction> inline_inst(decode_valid(*decoder, inline_words.data()));
+  std::unique_ptr<Instruction> llvm_inst(decode_valid(*decoder, llvm_words.data()));
   ASSERT_NE(scalar_inst, nullptr);
   ASSERT_NE(inline_inst, nullptr);
+  ASSERT_NE(llvm_inst, nullptr);
   cu->execute_instruction(scalar_inst.get(), *wf);
   cu->execute_instruction(inline_inst.get(), *wf);
+  cu->execute_instruction(llvm_inst.get(), *wf);
 
   for (uint32_t reg = 0; reg < 8; ++reg)
     for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
@@ -794,6 +823,8 @@ TEST(Gfx1250ExecutionTest, WmmaRegularScaleInlineZeroMatchesNeutralScalarSources
       EXPECT_EQ(scalar_result, std::bit_cast<uint32_t>(128.0f))
           << "reg " << reg << ", lane " << lane;
       EXPECT_EQ(cu->read_vgpr(vgpr_base + 40 + reg, lane), scalar_result)
+          << "reg " << reg << ", lane " << lane;
+      EXPECT_EQ(cu->read_vgpr(vgpr_base + 48 + reg, lane), scalar_result)
           << "reg " << reg << ", lane " << lane;
     }
 }

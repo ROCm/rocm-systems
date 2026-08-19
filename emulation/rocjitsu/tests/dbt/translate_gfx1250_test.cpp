@@ -3611,6 +3611,33 @@ TEST(BinaryTranslatorE2E, Gfx1250InvalidPoolCandidateFallsBackToNormalDecodeDiag
       result, rocjitsu::DiagnosticKind::Legalization, "does not support 32-bit literals"));
 }
 
+TEST(BinaryTranslatorE2E, Gfx1250FourWordMalformedPoolCandidateFailsSafely) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  std::vector<uint32_t> words = {
+      rocjitsu::build_s_nop(rocjitsu::kBranchIslandPoolMarkerNopImmediate,
+                            ROCJITSU_CODE_ARCH_CDNA5),
+      rocjitsu::build_s_branch(static_cast<int16_t>(rocjitsu::kDirectBranchIslandPoolSlots),
+                               ROCJITSU_CODE_ARCH_CDNA5),
+  };
+  words.insert(words.end(), rocjitsu::kDirectBranchIslandPoolSlots,
+               rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA5));
+  // Force speculative pool recognition down the four-word VOP3PX2 decode path.
+  words[rocjitsu::kGeneratedIslandPoolHeaderWords] = 0xCC350000u;
+  words.push_back(kGfx1250SEndpgm);
+
+  auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+
+  EXPECT_FALSE(result.ok());
+  EXPECT_EQ(result.elf_bytes, image);
+}
+
 TEST(BinaryTranslatorE2E, Gfx1250RejectsNearMissGeneratedIslandPool) {
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   std::vector<uint32_t> words = {
@@ -11815,35 +11842,40 @@ TEST(BinaryTranslatorE2E, Gfx1250RegularWmmaScaleEncodesSrc2AndWaitsForCompletio
   // the inline-zero selector in the B0 object even though SQ decodes that unused
   // field as a scalar dependency. The A0 output must encode VGPR0 without changing
   // other bits.
-  constexpr std::array<uint32_t, 4> source_scale = {0xCC350000u, 0x0202954Eu, 0xCC332042u,
-                                                    0x050A01CAu};
+  constexpr std::array<uint32_t, 4> base_scale = {0xCC350000u, 0x0202954Eu, 0xCC332042u,
+                                                  0x050A01CAu};
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
-  auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
-      {source_scale[0], source_scale[1], source_scale[2], source_scale[3], kGfx1250SEndpgm});
-  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
-
-  rocjitsu::BinaryTranslator translator(
-      ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
-      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
-                               rocjitsu::ProcessorRevision::Gfx1250A0));
-  auto result = translator.translate(source);
-  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
-                                                          : result.diagnostics.front().message);
-
-  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
-  ASSERT_FALSE(translated.text_sections().empty());
-  const auto *target_words =
-      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
-  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
-  ASSERT_EQ(target_word_count, 6u);
   constexpr uint32_t kScaleSrc2Mask = 0x1ffu << 18;
   constexpr auto completion_wait = kGfx1250WmmaCompletionWait;
-  EXPECT_EQ(target_words[0], source_scale[0]);
-  EXPECT_EQ(target_words[1], (source_scale[1] & ~kScaleSrc2Mask) | (0x100u << 18));
-  EXPECT_EQ(target_words[2], source_scale[2]);
-  EXPECT_EQ(target_words[3], source_scale[3]);
-  EXPECT_EQ(target_words[4], completion_wait[0]);
-  EXPECT_EQ(target_words[5], kGfx1250SEndpgm);
+  for (const uint32_t source_src2 : {0x080u, 0x100u}) {
+    SCOPED_TRACE(::testing::Message() << "source_src2=" << source_src2);
+    auto source_scale = base_scale;
+    source_scale[1] = (source_scale[1] & ~kScaleSrc2Mask) | (source_src2 << 18);
+    auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
+        {source_scale[0], source_scale[1], source_scale[2], source_scale[3], kGfx1250SEndpgm});
+    rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+
+    rocjitsu::BinaryTranslator translator(
+        ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
+        gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                                 rocjitsu::ProcessorRevision::Gfx1250A0));
+    auto result = translator.translate(source);
+    ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                            : result.diagnostics.front().message);
+
+    rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_FALSE(translated.text_sections().empty());
+    const auto *target_words =
+        reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+    const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+    ASSERT_EQ(target_word_count, 6u);
+    EXPECT_EQ(target_words[0], source_scale[0]);
+    EXPECT_EQ(target_words[1], (source_scale[1] & ~kScaleSrc2Mask) | (0x100u << 18));
+    EXPECT_EQ(target_words[2], source_scale[2]);
+    EXPECT_EQ(target_words[3], source_scale[3]);
+    EXPECT_EQ(target_words[4], completion_wait[0]);
+    EXPECT_EQ(target_words[5], kGfx1250SEndpgm);
+  }
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250FloatingScaledWmmaRejectsNonzeroCmFields) {

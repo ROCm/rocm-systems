@@ -60,13 +60,14 @@ namespace rocjitsu {
 
 namespace {
 
-/// @brief Adapt B0 scaled-WMMA prefixes for the common A0-oriented decoder.
+/// @brief Normalize legacy scaled-WMMA prefixes for the common decoder.
 ///
-/// @details Legacy B0 source objects may populate the architecturally unused prefix SRC2 field
-/// with a noncanonical selector (the offline oracle uses inline zero, 0x080), while A0 requires
-/// that field to encode VGPR0 (0x100). Keep this normalization inside the revision-specific
-/// translation path so the architecture decoder can enforce the A0 fixed-field contract
-/// everywhere else.
+/// @details Legacy source objects may populate the architecturally unused prefix SRC2 field
+/// with a noncanonical selector (the offline oracle uses inline zero, 0x080), while the ISA
+/// requires that field to encode VGPR0 (0x100). Normalize it inside the revision-specific
+/// translation path so translated objects remain ISA-canonical; the architecture decoder
+/// separately accepts LLVM's exact compatibility encoding without weakening other fixed-field
+/// checks.
 class Gfx1250B0ToA0CanonicalizingDecoder final : public Decoder {
 public:
   explicit Gfx1250B0ToA0CanonicalizingDecoder(std::unique_ptr<Decoder> decoder)
@@ -367,6 +368,10 @@ generated_branch_island_pool_offsets(std::span<const uint8_t> text, rj_code_arch
   auto decoder = Decoder::create(arch);
   if (!decoder)
     return offsets;
+  const std::size_t lookahead_words = decoder->max_instruction_words();
+  if (lookahead_words == 0)
+    return offsets;
+  std::vector<uint32_t> slot_words(lookahead_words, 0);
 
   const uint32_t marker = build_s_nop(kBranchIslandPoolMarkerNopImmediate, arch);
   const uint32_t skip_pool =
@@ -388,7 +393,7 @@ generated_branch_island_pool_offsets(std::span<const uint8_t> text, rj_code_arch
           offset + (kGeneratedIslandPoolHeaderWords + slot) * sizeof(uint32_t);
       // A malformed slot can select an extension-bearing format. Pad the
       // speculative decode so pool recognition never reads beyond its input.
-      const std::array<uint32_t, 3> slot_words = {text_word_at(text, slot_offset), 0, 0};
+      slot_words[0] = text_word_at(text, slot_offset);
       DecodeResult decoded = decoder->decode(slot_words.data());
       if (decoded.succeeded()) {
         const std::unique_ptr<Instruction> &slot_inst = decoded.value();
