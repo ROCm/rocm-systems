@@ -154,6 +154,31 @@ _LITERAL_ENCODING_OPERANDS = {
     ),
 }
 
+# Immediate operands carry their value directly in the instruction encoding.
+_IMMEDIATE_OPERAND_TYPES = (
+    'OPR_SIMM4',
+    'OPR_SIMM8',
+    'OPR_SIMM16',
+    'OPR_SIMM32',
+    'OPR_SIMM64',
+    'OPR_LABEL',
+    'OPR_WAITCNT',
+)
+
+# Only operand selector families that define SRC_LITERAL may consume a literal
+# extension word. Keeping this as an allowlist makes new selector types fail
+# closed until their literal capability is explicitly established.
+_LITERAL_CAPABLE_OPERAND_TYPES = frozenset(
+    {
+        'OPR_SRC',
+        'OPR_SRC_NOINLINE',
+        'OPR_SRC_NOLDS',
+        'OPR_SREG_LITERAL',
+        'OPR_SSRC',
+        'OPR_SSRC_NOLDS',
+    }
+)
+
 
 def _exec_mask_flag_stmts(sem) -> list[str]:
     """Return ``flags_ |= ...;`` statements for EXEC instruction metadata.
@@ -897,6 +922,81 @@ class CodeGenerator:
         return _LITERAL_ENCODING_OPERANDS.get(lit_enc.enc_name.upper())
 
     @staticmethod
+    def _encoded_literal_field_masks(
+        inst_enc: InstEncoding, literal_fields: tuple[str, ...]
+    ) -> dict[int, tuple[str, ...]]:
+        """Return the active literal-selector fields for each opcode.
+
+        Encoding formats describe every possible source field, but individual
+        opcodes may use only a subset of them or reinterpret one as inline
+        immediate data. Extension sizing must follow the selected opcode's
+        operands rather than every field present in the format.
+        """
+        fields_by_opcode: dict[int, set[str]] = {}
+        for inst in inst_enc.insts:
+            active = fields_by_opcode.setdefault(inst.opcode, set())
+            active.update(
+                opnd.name
+                for opnd in inst.operands
+                if opnd.name in literal_fields
+                and opnd.operand_type in _LITERAL_CAPABLE_OPERAND_TYPES
+            )
+        return {
+            opcode: tuple(field for field in literal_fields if field in active)
+            for opcode, active in fields_by_opcode.items()
+        }
+
+    @classmethod
+    def _encoded_literal_helper_impl(
+        cls,
+        inst_enc: InstEncoding,
+        literal_fields: tuple[str, ...],
+        selector: int,
+    ) -> str:
+        """Render an opcode-aware encoded-literal predicate."""
+        grouped_opcodes: dict[tuple[str, ...], list[int]] = {}
+        for opcode, fields in cls._encoded_literal_field_masks(
+            inst_enc, literal_fields
+        ).items():
+            grouped_opcodes.setdefault(fields, []).append(opcode)
+
+        name = f'has_encoded_literal{64 if selector == 254 else 32}'
+        lines = [
+            f'bool {inst_enc.fmt_enc_name}::{name}() const {{',
+            '  switch (inst_.op) {',
+        ]
+        for fields, opcodes in sorted(
+            grouped_opcodes.items(), key=lambda item: (item[0], item[1])
+        ):
+            if not fields:
+                continue
+            lines.extend(f'  case {opcode}:' for opcode in sorted(opcodes))
+            condition = ' || '.join(f'inst_.{field} == {selector}' for field in fields)
+            lines.append(f'    return {condition};')
+        lines.extend(('  default:', '    return false;', '  }', '}'))
+        return '\n'.join(lines)
+
+    @staticmethod
+    def _opcode_predicate_helper_impl(
+        inst_enc: InstEncoding,
+        name: str,
+        opcodes: list[int],
+        selector_condition: str | None = None,
+    ) -> str:
+        """Render an opcode membership predicate for an encoding feature."""
+        lines = [
+            f'bool {inst_enc.fmt_enc_name}::{name}() const {{',
+        ]
+        if selector_condition:
+            lines.extend((f'  if (!({selector_condition}))', '    return false;'))
+        lines.append('  switch (inst_.op) {')
+        lines.extend(f'  case {opcode}:' for opcode in sorted(opcodes))
+        lines.extend(
+            ('    return true;', '  default:', '    return false;', '  }', '}')
+        )
+        return '\n'.join(lines)
+
+    @staticmethod
     def _literal_operand_from_expr_stmt(
         opnd: Operand,
         literal_expr: str,
@@ -1125,6 +1225,18 @@ class CodeGenerator:
         return (
             dpp_struct is not None and self._supports_dpp_for_encoding(enc_name)
         ) or dpp8_struct is not None
+
+    def _supports_sdwa_for_encoding(self, enc_name: str) -> bool:
+        """Whether any instruction in an encoding has an SDWA alternate."""
+        enc_upper = enc_name.upper()
+        if enc_upper not in ('ENC_VOP1', 'ENC_VOP2', 'ENC_VOPC'):
+            return False
+        return any(
+            self._instruction_supports_sdwa(inst, enc_name)
+            for inst_enc in self.isa_spec.inst_encodings
+            if inst_enc.enc_name.upper() == enc_upper
+            for inst in inst_enc.insts
+        )
 
     def _supports_dpp_for_encoding(self, enc_name: str) -> bool:
         enc_upper = enc_name.upper()
@@ -2511,6 +2623,58 @@ class CodeGenerator:
         )
         cpp_file.gen_code()
 
+    def _encoding_extension_word_capacity(self, inst_enc: InstEncoding) -> int:
+        """Return the largest extension storage owned by an encoding."""
+        dpp_struct, dpp8_struct = self._vop_dpp_struct_names(inst_enc.enc_name)
+        owns_dpp_extension = (
+            dpp_struct is not None
+            and self._supports_dpp_for_encoding(inst_enc.enc_name)
+        ) or dpp8_struct is not None
+        default_cond = dict(inst_enc.enc_conds).get('default_encoding', 'true')
+        has_real_default_check = inst_enc.bit_cnt < 64 and default_cond != 'false'
+        literal32_condition = any(
+            name.startswith('has_lit') and not name.startswith('has_lit64')
+            for name, _ in inst_enc.enc_conds
+        )
+
+        capacity = int(owns_dpp_extension)
+        if has_real_default_check and default_cond != 'true':
+            capacity = max(capacity, 1)
+        if literal32_condition:
+            capacity = max(capacity, 1)
+        if self._literal64_condition_names(inst_enc):
+            capacity = max(capacity, 2)
+        if inst_enc.has_implied_literal_ops:
+            capacity = max(capacity, 1, *inst_enc.implied_literal_ops.values())
+        return capacity
+
+    def _max_instruction_word_count(self) -> int:
+        """Return the maximum encoded width and lookahead for this generated decoder."""
+        maximum = 1
+        for inst_enc in self.isa_spec.inst_encodings:
+            if not inst_enc.insts:
+                continue
+            base_words = (inst_enc.bit_cnt + 31) // 32
+            maximum = max(
+                maximum,
+                base_words + self._encoding_extension_word_capacity(inst_enc),
+            )
+
+        for size_bytes in self.isa_spec.profile.inst_size_overrides.values():
+            maximum = max(maximum, (size_bytes + 3) // 4)
+
+        # Bespoke generated decoders do not necessarily have a matching XML
+        # encoding object. VOPD can own one literal DWORD, while VOP3PX2 forms
+        # are a two-DWORD prefix followed by a two-DWORD instruction.
+        if self._supports_generated_vopd():
+            maximum = max(maximum, 3)
+        if (
+            self._supports_gfx1250_scaled_wmma_vop3px2()
+            or self._supports_cdna_mfma_f8f6f4_vop3px2()
+        ):
+            maximum = max(maximum, 4)
+        return maximum
+
     def gen_encodings(self) -> None:
         """Generate encoding classes wrapping raw encoding types."""
         enc_classes = []
@@ -2520,6 +2684,7 @@ class CodeGenerator:
         for inst_enc in self.isa_spec.inst_encodings:
             if not inst_enc.insts:
                 continue
+            enc_upper = inst_enc.enc_name.upper()
             enc_field_names = {f.name for f in inst_enc.ucode_fields}
             literal_fields = _LITERAL_ENCODING_OPERANDS.get(
                 inst_enc.enc_name.upper(), ('', ())
@@ -2535,6 +2700,9 @@ class CodeGenerator:
                 needs_invalid_inst_include = True
             unsupported_literal64_fields = self._unsupported_literal64_selector_fields(
                 inst_enc
+            )
+            supports_sdwa_extension = self._supports_sdwa_for_encoding(
+                inst_enc.enc_name
             )
             supports_fixed_size_embedding = (
                 self._supports_gfx1250_scaled_wmma_vop3px2()
@@ -2671,6 +2839,24 @@ class CodeGenerator:
             if has_op:
                 size_line += '\n  opcode_ = inst_.op;'
             literal64_conds = self._literal64_condition_names(inst_enc)
+            explicit_literal64_conds = [
+                name for name, _ in inst_enc.enc_conds if name.startswith('has_lit64')
+            ]
+            if explicit_literal64_conds and encoded_literal_fields:
+                public_members.append(cgen.Line('bool has_encoded_literal64() const;'))
+                class_func_impls.append(
+                    cgen.Line(
+                        self._encoded_literal_helper_impl(
+                            inst_enc, encoded_literal_fields, 254
+                        )
+                    )
+                )
+                literal64_conds = [
+                    name
+                    for name in literal64_conds
+                    if name not in explicit_literal64_conds
+                ]
+                literal64_conds.append('has_encoded_literal64')
             implied_literal64_ops = [
                 str(inst.opcode)
                 for inst in inst_enc.insts
@@ -2683,6 +2869,16 @@ class CodeGenerator:
                 for name, _ in inst_enc.enc_conds
                 if name.startswith('has_lit') and not name.startswith('has_lit64')
             ]
+            if literal32_conds and encoded_literal_fields:
+                public_members.append(cgen.Line('bool has_encoded_literal32() const;'))
+                class_func_impls.append(
+                    cgen.Line(
+                        self._encoded_literal_helper_impl(
+                            inst_enc, encoded_literal_fields, 255
+                        )
+                    )
+                )
+                literal32_conds = ['has_encoded_literal32']
             literal32_condition = ' || '.join(f'{name}()' for name in literal32_conds)
             if supports_fixed_size_embedding:
                 size_line += ' if (extension_policy == ExtensionDecodePolicy::Decode) {'
@@ -2717,22 +2913,9 @@ class CodeGenerator:
                         ' throw util::InvalidInst('
                         f'std::string(mnemonic) + " does not support {width}-bit literals", "");'
                     )
-            non_literal_selector_ops = sorted(
-                {
-                    inst.opcode
-                    for inst in inst_enc.insts
-                    if any(
-                        opnd.name in literal_fields
-                        and opnd.operand_type in ('OPR_SENDMSG', 'OPR_SENDMSG_RTN')
-                        for opnd in inst.operands
-                    )
-                }
-            )
             if needs_explicit_dpp_size and encoded_literal_fields:
                 dpp_extension_condition = ' || '.join(dpp_extension_conditions)
-                literal_selector_condition = ' || '.join(
-                    f'inst_.{field} == 255' for field in encoded_literal_fields
-                )
+                literal_selector_condition = literal32_condition or 'false'
                 size_line += (
                     f' if (({dpp_extension_condition}) && '
                     f'({literal_selector_condition}))'
@@ -2744,27 +2927,63 @@ class CodeGenerator:
             # not the architecture-wide operand selector table. For example,
             # gfx1250 defines selector 254 for 64-bit literals, but the 64-bit
             # VOP3 and VOP3P encodings only support a 32-bit literal extension.
-            extension_word_capacity = 0
-            if owns_dpp_extension:
-                extension_word_capacity = 1
-            if has_real_default_check and default_cond != 'true':
-                extension_word_capacity = max(extension_word_capacity, 1)
-            if literal32_condition:
-                extension_word_capacity = max(extension_word_capacity, 1)
-            if literal64_condition:
-                extension_word_capacity = max(extension_word_capacity, 2)
-            if inst_enc.has_implied_literal_ops:
-                extension_word_capacity = max(
-                    extension_word_capacity,
-                    1,
-                    *inst_enc.implied_literal_ops.values(),
+            encoded_sdwa_opcodes = (
+                [
+                    inst.opcode
+                    for inst in inst_enc.insts
+                    if self._instruction_supports_sdwa(inst, inst_enc.enc_name)
+                ]
+                if supports_sdwa_extension
+                else []
+            )
+            encoded_sdwa_condition = ''
+            if encoded_sdwa_opcodes:
+                encoded_sdwa_condition = 'has_encoded_sdwa()'
+                public_members.append(cgen.Line('bool has_encoded_sdwa() const;'))
+                class_func_impls.append(
+                    cgen.Line(
+                        self._opcode_predicate_helper_impl(
+                            inst_enc,
+                            'has_encoded_sdwa',
+                            encoded_sdwa_opcodes,
+                            'inst_.src0 == amdgpu::SRC_SDWA',
+                        )
+                    )
                 )
+            extension_word_capacity = self._encoding_extension_word_capacity(inst_enc)
             owns_extension_words = extension_word_capacity > 0
+            literal32_size_condition = size_condition
+            compact_modifier_encoding = has_real_default_check and (
+                owns_dpp_extension or supports_sdwa_extension
+            )
+            if compact_modifier_encoding:
+                compact_extension_conditions = [
+                    *dpp_extension_conditions,
+                    *([encoded_sdwa_condition] if encoded_sdwa_condition else []),
+                    *([literal32_condition] if literal32_condition else []),
+                ]
+                if (
+                    inst_enc.has_implied_literal_ops
+                    and not inst_enc.has_variable_implied_literal_size
+                ):
+                    compact_extension_conditions.append('hasImpliedLiteral()')
+                literal32_size_condition = (
+                    ' || '.join(compact_extension_conditions) or None
+                )
+            elif not owns_dpp_extension and literal32_condition:
+                literal32_size_condition = literal32_condition
+                if (
+                    inst_enc.has_implied_literal_ops
+                    and not inst_enc.has_variable_implied_literal_size
+                ):
+                    literal32_size_condition += ' || hasImpliedLiteral()'
+            elif literal32_size_condition is None:
+                literal32_size_condition = literal32_condition or None
             extension_size_line = ''
-            if literal64_condition and size_condition is not None:
+            if literal64_condition and literal32_size_condition is not None:
                 extension_size_line = (
                     f' if ({literal64_condition}) size_ += 2 * sizeof(MachineInst);'
-                    f' else if ({size_condition}) size_ += sizeof(MachineInst);'
+                    f' else if ({literal32_size_condition}) size_ += sizeof(MachineInst);'
                 )
             elif literal64_condition and literal32_condition:
                 extension_size_line = (
@@ -2775,20 +2994,13 @@ class CodeGenerator:
                 extension_size_line = (
                     f' if ({literal64_condition}) size_ += 2 * sizeof(MachineInst);'
                 )
-            elif size_condition is not None:
+            elif literal32_size_condition is not None:
                 extension_size_line = (
-                    f' if ({size_condition}) size_ += sizeof(MachineInst);'
+                    f' if ({literal32_size_condition}) size_ += sizeof(MachineInst);'
                 )
             elif literal32_condition:
                 extension_size_line = (
                     f' if ({literal32_condition}) size_ += sizeof(MachineInst);'
-                )
-            if extension_size_line and non_literal_selector_ops:
-                extension_guard = ' && '.join(
-                    f'inst_.op != {opcode}' for opcode in non_literal_selector_ops
-                )
-                extension_size_line = (
-                    f' if ({extension_guard}) {{' + extension_size_line + ' }'
                 )
             if inst_enc.has_variable_implied_literal_size:
                 size_line += (
@@ -2849,25 +3061,30 @@ class CodeGenerator:
             # that have modifier flags (memory instructions). This is
             # called lazily by disassemble() instead of eagerly in the
             # constructor, avoiding string allocation on the hot path.
-            if modifier_lines or dpp8_modifier_line:
+            # The modifier_lines were written for the constructor where
+            # they appended to modifiers_ and accessed inst->field.
+            # Rewrite to append to 'out' and access via local pointer.
+            modifier_impl = (
+                modifier_lines.replace('modifiers_', 'out') + dpp8_modifier_line
+            )
+            modifier_prologue = (
+                '  auto *inst = &inst_;\n  (void)inst;\n'
+                if 'inst->' in modifier_impl
+                else ''
+            )
+            modifier_tail = (
+                f'{modifier_prologue}  {modifier_impl}\n' if modifier_impl else ''
+            )
+            if modifier_impl and not supports_sdwa_extension:
                 public_members.append(
                     cgen.Line('void build_modifiers(std::string &out) const override;'),
-                )
-                # The modifier_lines were written for the constructor where
-                # they appended to modifiers_ and accessed inst->field.
-                # Rewrite to append to 'out' and access via local pointer.
-                mod_impl = (
-                    modifier_lines.replace('modifiers_', 'out') + dpp8_modifier_line
-                )
-                mod_prologue = (
-                    ' auto *inst = &inst_;(void)inst;' if modifier_lines else ''
                 )
                 class_func_impls.append(
                     cgen.Line(
                         f'void {inst_enc.fmt_enc_name}::build_modifiers'
                         f'(std::string &out) const '
-                        f'{{{mod_prologue}'
-                        f'{mod_impl}}}'
+                        f'{{{modifier_prologue}'
+                        f'{modifier_impl}}}'
                     )
                 )
             fmt_enc_name = inst_enc.fmt_enc_name
@@ -2909,6 +3126,59 @@ class CodeGenerator:
                         f'{{ {implicit_use_operands_impl} }}'
                     )
                 )
+
+            if supports_sdwa_extension:
+                public_members.append(
+                    cgen.Line(
+                        'void append_src_operand(std::string &out, '
+                        'uint8_t operand_index) const override;'
+                    )
+                )
+                public_members.append(
+                    cgen.Line('void build_modifiers(std::string &out) const override;')
+                )
+                class_func_impls.append(
+                    cgen.Line(
+                        f'void {fmt_enc_name}::append_src_operand('
+                        'std::string &out, uint8_t operand_index) const {\n'
+                        '  const Operand *operand = src_operands_[operand_index];\n'
+                        '  if (inst_.src0 == amdgpu::SRC_SDWA && operand == sdwa_src0_operand_) {\n'
+                        '    amdgpu::sdwa::append_source(out, *operand, sdwa_src0_format_,\n'
+                        '                                sdwa_src0_sext_, sdwa_src0_neg_, sdwa_src0_abs_);\n'
+                        '    return;\n'
+                        '  }\n'
+                        '  if (inst_.src0 == amdgpu::SRC_SDWA && operand == sdwa_src1_operand_) {\n'
+                        '    amdgpu::sdwa::append_source(out, *operand, sdwa_src1_format_,\n'
+                        '                                sdwa_src1_sext_, sdwa_src1_neg_, sdwa_src1_abs_);\n'
+                        '    return;\n'
+                        '  }\n'
+                        '  Instruction::append_src_operand(out, operand_index);\n'
+                        '}'
+                    )
+                )
+                if enc_upper == 'ENC_VOPC':
+                    class_func_impls.append(
+                        cgen.Line(
+                            f'void {fmt_enc_name}::build_modifiers(std::string &out) const {{\n'
+                            '  if (inst_.src0 == amdgpu::SRC_SDWA)\n'
+                            '    amdgpu::sdwa::append_source_attributes(\n'
+                            '        out, sdwa_src0_sel_, sdwa_src1_operand_, sdwa_src1_sel_);\n'
+                            f'{modifier_tail}'
+                            '}'
+                        )
+                    )
+                else:
+                    class_func_impls.append(
+                        cgen.Line(
+                            f'void {fmt_enc_name}::build_modifiers(std::string &out) const {{\n'
+                            '  if (inst_.src0 == amdgpu::SRC_SDWA)\n'
+                            '    amdgpu::sdwa::append_destination_attributes(\n'
+                            '        out, sdwa_clamp_, sdwa_omod_, sdwa_dst_sel_, sdwa_dst_unused_,\n'
+                            '        sdwa_src0_sel_, sdwa_src1_operand_, sdwa_src1_sel_);\n'
+                            f'{modifier_tail}'
+                            '}'
+                        )
+                    )
 
             if fmt_enc_name not in cond_emitted:
                 cond_emitted.add(fmt_enc_name)
@@ -3051,6 +3321,25 @@ class CodeGenerator:
                 class_members.append(cgen.Statement('bool sdwa_src1_sext_ = false'))
                 class_members.append(cgen.Statement('bool sdwa_src1_neg_ = false'))
                 class_members.append(cgen.Statement('bool sdwa_src1_abs_ = false'))
+                if supports_sdwa_extension:
+                    class_members.append(
+                        cgen.Statement('const Operand *sdwa_src0_operand_ = nullptr')
+                    )
+                    class_members.append(
+                        cgen.Statement('const Operand *sdwa_src1_operand_ = nullptr')
+                    )
+                    class_members.append(
+                        cgen.Statement(
+                            'amdgpu::sdwa::SourceModifierFormat sdwa_src0_format_ = '
+                            'amdgpu::sdwa::SourceModifierFormat::NONE'
+                        )
+                    )
+                    class_members.append(
+                        cgen.Statement(
+                            'amdgpu::sdwa::SourceModifierFormat sdwa_src1_format_ = '
+                            'amdgpu::sdwa::SourceModifierFormat::NONE'
+                        )
+                    )
                 if inst_enc.enc_name.upper() != 'ENC_VOPC':
                     class_members.append(
                         cgen.Statement('uint32_t sdwa_dst_sel_ = amdgpu::sdwa::DWORD')
@@ -3059,6 +3348,8 @@ class CodeGenerator:
                         cgen.Statement('uint32_t sdwa_dst_unused_ = 0')
                     )
                     class_members.append(cgen.Statement('bool sdwa_clamp_ = false'))
+                    if supports_sdwa_extension:
+                        class_members.append(cgen.Statement('uint32_t sdwa_omod_ = 0'))
                 else:
                     class_members.append(cgen.Statement('uint32_t sdwa_sdst_ = 106'))
                     class_members.append(cgen.Statement('bool sdwa_sd_ = false'))
@@ -3150,6 +3441,13 @@ class CodeGenerator:
             ('cstring', True),
             ('string', True),
         ]
+        if any(
+            self._supports_sdwa_for_encoding(enc.enc_name)
+            for enc in self.isa_spec.inst_encodings
+        ):
+            _enc_cpp_includes.insert(
+                1, ('rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h', False)
+            )
         if needs_invalid_inst_include or (
             self._supports_simm64_literal_operands()
             and any(
@@ -3609,26 +3907,6 @@ class CodeGenerator:
             self._supports_cdna_mfma_f8f6f4_vop3px2()
             and inst.name in self.isa_spec.profile.inst_size_overrides
         )
-
-    @staticmethod
-    def _emit_cdna_mfma_f8f6f4_vop3px2_decoder_helpers() -> str:
-        return textwrap.dedent('''\
-            namespace {
-
-            bool isMfmaScaleF8f6f4Vop3px2(const MachineInst *opcode) {
-              constexpr uint32_t VOP3P_MFMA_ENC = 423;
-              constexpr uint32_t PREFIX_OP = 44;
-              auto enc0 = (opcode[0] >> 23) & 0x1FFu;
-              auto op0 = (opcode[0] >> 16) & 0x7Fu;
-              if (enc0 != VOP3P_MFMA_ENC || op0 != PREFIX_OP)
-                return false;
-              auto enc2 = (opcode[2] >> 23) & 0x1FFu;
-              auto op2 = (opcode[2] >> 16) & 0x7Fu;
-              return enc2 == VOP3P_MFMA_ENC && (op2 == 45 || op2 == 46);
-            }
-
-            } // namespace
-            ''')
 
     def _gfx1250_f8f6f4_wmma_shape(
         self, inst: Instruction
@@ -5847,6 +6125,7 @@ class CodeGenerator:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
         _, _, nt = self._coherency_exprs()
+        stride = esz * ne
         L.append(
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
@@ -5869,7 +6148,7 @@ class CodeGenerator:
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
         L.append(
-            '  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.'
+            '  // CDNA5 ISA 10.8.1 and expressions 95-102 and 106-109 add IOFFSET to global and LDS addresses.'
         )
         L.append(f"  uint32_t lds_addr_base = {self._vgpr_base_expr('vdst')};")
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
@@ -5877,7 +6156,9 @@ class CodeGenerator:
         L.append(
             '    uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);'
         )
-        L.append('    d->per_lane_lds_addr[lane] = wf.lds_base() + lane_lds_addr;')
+        L.append(
+            f'    d->per_lane_lds_addr[lane] = async_lds_lane_address(inst_, wf, lane_lds_addr, {stride});'
+        )
         L.append('  }')
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
@@ -5903,14 +6184,20 @@ class CodeGenerator:
         L.append('  const auto &lds = cu.lds();')
         L.append('  uint64_t exec = wf.exec();')
         L.append(
-            '  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.'
+            '  // CDNA5 ISA 10.8.1 and expressions 95-102 and 106-109 add IOFFSET to global and LDS addresses.'
         )
         L.append(f"  uint32_t lds_addr_base = {self._vgpr_base_expr('vsrc')};")
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         L.append(
-            '    uint32_t lds_addr = wf.lds_base() + amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);'
+            '    uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);'
+        )
+        L.append(
+            f'    uint32_t lds_addr = async_lds_lane_address(inst_, wf, lane_lds_addr, {stride});'
+        )
+        L.append(
+            '    // Out-of-range LDS reads return zero; the global store still issues.'
         )
         L.append(f'    lds.read(lds_addr, &d->store_data[lane * {stride}], {stride});')
         L.append('  }')
@@ -5925,9 +6212,12 @@ class CodeGenerator:
         L.append('    d->wg_id = wf.wg_id(); d->wf_id = wf.wf_id();')
         L.append('    d->cu_path = wf.cu().full_path();')
         L.append('    uint64_t base = amdgpu::RegisterAccess(wf).read_scalar64(saddr);')
-        L.append(
-            '    int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);'
+        offset_expr = (
+            'signed_ioffset(inst_.ioffset)'
+            if self.isa_spec.arch_name == 'gfx1250'
+            else 'static_cast<int32_t>(inst_.ioffset << 8) >> 8'
         )
+        L.append(f'    int64_t offset = static_cast<int64_t>({offset_expr});')
         L.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('      if (!(exec & (1ULL << lane))) continue;')
         L.append(
@@ -6390,7 +6680,7 @@ class CodeGenerator:
             if counter is not None:
                 L.append(f'    d->wait_counter_type = {counter};')
             L.append('    d->lds_dst = true;')
-            L.append('    d->lds_base = wf.m0() + wf.lds_base();')
+            L.append('    d->lds_base = wf.m0() + inst_.offset + wf.lds_base();')
             L.append(f'    d->mtype = {self._mtype_expr()};')
             L.append(f'    d->non_temporal = {nt};')
             L.append(f'    {addr_fn}(inst_, wf, *d);')
@@ -6589,15 +6879,16 @@ class CodeGenerator:
         signal the memory pipeline to apply the cross-lane shuffle after the
         raw read.
         """
-        # TR_B4=1, TR_B6=2, TR_B8=3, TR_B16=4
+        # amdgpu::TransposeKind: TR_B4=1, TR_B6=2, TR_B8=3, TR16_B128=4,
+        # B64_TR_B16=5. Defaults describe the B64 (num_elems=2) forms.
         tr_map = {
             'ds_read_tr_b4': (4, 2, 1),  # elem_size=4, num_elems=2, transpose=1
             'ds_read_tr_b6': (4, 3, 2),  # elem_size=4, num_elems=3, transpose=2
             'ds_read_tr_b8': (4, 2, 3),  # elem_size=4, num_elems=2, transpose=3
-            'ds_read_tr_b16': (4, 2, 4),  # elem_size=4, num_elems=2, transpose=4
+            'ds_read_tr_b16': (4, 2, 5),  # elem_size=4, num_elems=2, transpose=5
         }
         default_esz, default_ne, default_tr_kind = tr_map.get(
-            sem.semantic_class, (4, 2, 4)
+            sem.semantic_class, (4, 2, 5)
         )
         esz = sem.elem_size if sem.elem_size is not None else default_esz
         ne = sem.num_elems if sem.num_elems is not None else default_ne
@@ -7355,6 +7646,7 @@ class CodeGenerator:
             if all_insts and not profile.is_alt_encoding(enc.enc_name):
                 enc_field_names = {f.name for f in enc.ucode_fields}
                 is_smem = enc.enc_name.upper() == 'ENC_SMEM'
+                supports_sdwa_extension = self._supports_sdwa_for_encoding(enc.enc_name)
                 has_sem = self._enc_has_semantics(enc)
                 # Check child encodings for semantics too.
                 for child in child_encs.get(enc.enc_name, []):
@@ -7850,6 +8142,19 @@ class CodeGenerator:
                             'reinterpret_cast<const OpEncoding*>(inst)->src0) ? '
                             f'"{dpp8_mnemonic}" : "{full_mnemonic}"'
                         )
+                    if supports_sdwa_extension and self._instruction_supports_sdwa(
+                        inst, enc.enc_name
+                    ):
+                        assert full_mnemonic.endswith('_e32'), (
+                            f'{inst.name}: compact SDWA mnemonic does not end in _e32: '
+                            f'{full_mnemonic}'
+                        )
+                        sdwa_mnemonic = full_mnemonic[:-4] + '_sdwa'
+                        mnemonic_expr = (
+                            'reinterpret_cast<const OpEncoding*>(inst)->src0 '
+                            '== amdgpu::SRC_SDWA ? '
+                            f'"{sdwa_mnemonic}" : {mnemonic_expr}'
+                        )
                     exec_fn_expr = f'make_exec_fn<{inst.fmt_name}>()'
                     if profile.split_execution_sources:
                         exec_fn_expr = self._split_execute_expr(inst.fmt_name)
@@ -7930,6 +8235,7 @@ class CodeGenerator:
                         }
                     )
                     ctor_body_parts = list(opnd_body)
+                    fieldless_caps_guards: dict[str, str] = {}
                     # Guard fieldless def/use operands (pushed positionally) from
                     # silently writing past the fixed-size operand arrays. The
                     # capacities mirror instruction.h (see the class constants).
@@ -8051,8 +8357,7 @@ class CodeGenerator:
                             for opnd in inst.operands
                             if opnd.name in _lit_fields
                             and opnd.name in enc_field_names
-                            and opnd.operand_type
-                            not in ('OPR_SENDMSG', 'OPR_SENDMSG_RTN')
+                            and opnd.operand_type in _LITERAL_CAPABLE_OPERAND_TYPES
                         ]
                         if (
                             _supports_simm32_literals
@@ -8088,9 +8393,9 @@ class CodeGenerator:
                                 opnd.name in _lit_fields
                                 and opnd.name in enc_field_names
                             ):
-                                if opnd.operand_type in (
-                                    'OPR_SENDMSG',
-                                    'OPR_SENDMSG_RTN',
+                                if (
+                                    opnd.operand_type
+                                    not in _LITERAL_CAPABLE_OPERAND_TYPES
                                 ):
                                     continue
                                 literal_operand_type = self._constructor_operand_type(
@@ -8326,6 +8631,34 @@ class CodeGenerator:
                                         _sdwa_struct = 'VopcVopSdwaSdstEncMachineInst'
                                     else:
                                         _sdwa_struct = f'{_enc_base}VopSdwaMachineInst'
+                                    _sdwa_src0_format = (
+                                        self._sdwa_source_modifier_format(
+                                            inst_sem, 0, opnd
+                                        )
+                                        if inst_sem
+                                        else 'amdgpu::sdwa::SourceModifierFormat::NONE'
+                                    )
+                                    _sdwa_src1_opnd = next(
+                                        (
+                                            candidate
+                                            for candidate in inst.operands
+                                            if candidate.name == 'vsrc1'
+                                        ),
+                                        None,
+                                    )
+                                    _sdwa_src1_binding = ''
+                                    if _sdwa_src1_opnd is not None:
+                                        _sdwa_src1_format = (
+                                            self._sdwa_source_modifier_format(
+                                                inst_sem, 1, _sdwa_src1_opnd
+                                            )
+                                            if inst_sem
+                                            else 'amdgpu::sdwa::SourceModifierFormat::NONE'
+                                        )
+                                        _sdwa_src1_binding = (
+                                            f' sdwa_src1_operand_ = &{_sdwa_src1_opnd.name};'
+                                            f' sdwa_src1_format_ = {_sdwa_src1_format};'
+                                        )
                                     _sdwa_s1_code = ''
                                     if enc.enc_name.upper() in (
                                         'ENC_VOP2',
@@ -8335,6 +8668,31 @@ class CodeGenerator:
                                             f' if (sw->s1)'
                                             f'   vsrc1 = Operand({opnd.size}, OperandType::OPR_SRC,'
                                             f'     reinterpret_cast<const OpEncoding*>(inst)->vsrc1);'
+                                        )
+                                    _sdwa_dst_binding = ''
+                                    if enc.enc_name.upper() == 'ENC_VOPC':
+                                        _sdwa_dst_opnd = next(
+                                            (
+                                                candidate
+                                                for candidate in inst.operands
+                                                if candidate.is_output
+                                                and candidate.fieldless
+                                            ),
+                                            None,
+                                        )
+                                        if _sdwa_dst_opnd is None:
+                                            raise ValueError(
+                                                f'{inst.name}: SDWA VOPC lacks a '
+                                                'fieldless destination'
+                                            )
+                                        _sdwa_dst_binding = (
+                                            f' if (sw->sd) {_sdwa_dst_opnd.name} = '
+                                            f'Operand({_sdwa_dst_opnd.size}, '
+                                            'OperandType::OPR_SREG, sw->sdst);'
+                                        )
+                                        fieldless_caps_guards[_sdwa_dst_opnd.name] = (
+                                            'reinterpret_cast<const OpEncoding*>'
+                                            '(inst)->src0 == amdgpu::SRC_SDWA'
                                         )
                                     ctor_body_parts.append(
                                         f'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_SDWA) {{'
@@ -8348,13 +8706,18 @@ class CodeGenerator:
                                         f' sdwa_src1_sext_ = sw->src1_sext;'
                                         f' sdwa_src1_neg_ = sw->src1_neg;'
                                         f' sdwa_src1_abs_ = sw->src1_abs;'
+                                        f' sdwa_src0_operand_ = &{opnd.name};'
+                                        f' sdwa_src0_format_ = {_sdwa_src0_format};'
+                                        f'{_sdwa_src1_binding}'
                                         + (
                                             f' sdwa_sdst_ = sw->sdst;'
                                             f' sdwa_sd_ = sw->sd;'
+                                            f'{_sdwa_dst_binding}'
                                             if enc.enc_name.upper() == 'ENC_VOPC'
                                             else f' sdwa_dst_sel_ = sw->dst_sel;'
                                             f' sdwa_dst_unused_ = sw->dst_unused;'
                                             f' sdwa_clamp_ = sw->clamp;'
+                                            f' sdwa_omod_ = sw->omod;'
                                         )
                                         + f'{_sdwa_s1_code}}}'
                                     )
@@ -8379,9 +8742,13 @@ class CodeGenerator:
                     # call per fieldless operand regardless of any reassignment.
                     for opnd in inst.operands:
                         if opnd.fieldless:
-                            ctor_body_parts.append(
-                                self._fieldless_caps_stmt(opnd.name, opnd.operand_type)
+                            caps_stmt = self._fieldless_caps_stmt(
+                                opnd.name, opnd.operand_type
                             )
+                            guard = fieldless_caps_guards.get(opnd.name)
+                            if guard:
+                                caps_stmt = f'if (!({guard})) {caps_stmt}'
+                            ctor_body_parts.append(caps_stmt)
 
                     ctor_body_parts.extend(vgpr_msb_role_body)
 
@@ -10523,17 +10890,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         # in a generated .cpp anonymous namespace) so both the model operand.cpp
         # (Operand::const_value) and the execution operand.cpp can use it.
         imm_types = [
-            t
-            for t in (
-                'OPR_SIMM4',
-                'OPR_SIMM8',
-                'OPR_SIMM16',
-                'OPR_SIMM32',
-                'OPR_SIMM64',
-                'OPR_LABEL',
-                'OPR_WAITCNT',
-            )
-            if t in self.isa_spec.operand_types
+            operand_type
+            for operand_type in _IMMEDIATE_OPERAND_TYPES
+            if operand_type in self.isa_spec.operand_types
         ]
         if imm_types:
             fn = '[[nodiscard]] constexpr bool is_immediate_type(OperandType t) {'
@@ -12140,6 +12499,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 'Decoder',
                 [
                     cgen.Line('public:'),
+                    cgen.Statement(
+                        f'static constexpr std::size_t kMaxInstructionWords = {self._max_instruction_word_count()}'
+                    ),
                     cgen.FunctionDeclaration(
                         cgen.Value('static std::unique_ptr<Instruction>', 'decode'),
                         [cgen.Value('const MachineInst *', 'opcode')],
@@ -12167,20 +12529,6 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         if self._supports_gfx1250_scaled_wmma_vop3px2():
             class_impl.append(
                 cgen.Line(self._emit_gfx1250_scaled_wmma_vop3px2_decoder_helpers())
-            )
-        if self._supports_cdna_mfma_f8f6f4_vop3px2():
-            class_impl.append(
-                cgen.Line(self._emit_cdna_mfma_f8f6f4_vop3px2_decoder_helpers())
-            )
-            decode_body.append(
-                cgen.Line(
-                    '  if (isMfmaScaleF8f6f4Vop3px2(opcode)) {\n'
-                    '    auto op2 = (opcode[2] >> 16) & 0x7Fu;\n'
-                    '    if (op2 == 45)\n'
-                    '      return std::make_unique<VMfmaF3216x16x128F8f6f4Vop3pMfma>(opcode + 2, true);\n'
-                    '    return std::make_unique<VMfmaF3232x32x64F8f6f4Vop3pMfma>(opcode + 2, true);\n'
-                    '  }\n'
-                )
             )
         decode_body.extend(
             [
@@ -12321,16 +12669,38 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                     )
                                 ):
                                     _dte.sub_decode_funcs[inst.opcode] = 'decodeInvalid'
-                        _custom_decode_bodies[_pfx] = cgen.Block(
-                            [
-                                cgen.Statement(
-                                    f'auto op = *reinterpret_cast<const {_dte.enc.fmt_enc_name}::OpEncoding *>(opcode + 2)'
-                                ),
-                                cgen.Statement(
-                                    f'return {_dte.sub_decode_table}[op.op](opcode + 2)'
-                                ),
-                            ]
-                        )
+                        if self._supports_cdna_mfma_f8f6f4_vop3px2():
+                            _custom_decode_bodies[_pfx] = cgen.Block(
+                                [
+                                    cgen.Line(
+                                        '  const uint32_t suffix_encoding = '
+                                        '(opcode[2] >> 23) & 0x1FFu;\n'
+                                        '  const uint32_t suffix_opcode = '
+                                        '(opcode[2] >> 16) & 0x7Fu;\n'
+                                        '  if (suffix_encoding != encoding::kVop3pMfma ||\n'
+                                        '      (suffix_opcode != '
+                                        'kVMfmaF3216x16x128F8f6f4Vop3pMfma &&\n'
+                                        '       suffix_opcode != '
+                                        'kVMfmaF3232x32x64F8f6f4Vop3pMfma))\n'
+                                        '    return decodeInvalid(opcode);\n'
+                                        '  if (suffix_opcode == '
+                                        'kVMfmaF3216x16x128F8f6f4Vop3pMfma)\n'
+                                        '    return std::make_unique<VMfmaF3216x16x128F8f6f4Vop3pMfma>(opcode + 2, true);\n'
+                                        '  return std::make_unique<VMfmaF3232x32x64F8f6f4Vop3pMfma>(opcode + 2, true);\n'
+                                    )
+                                ]
+                            )
+                        else:
+                            _custom_decode_bodies[_pfx] = cgen.Block(
+                                [
+                                    cgen.Statement(
+                                        f'auto op = *reinterpret_cast<const {_dte.enc.fmt_enc_name}::OpEncoding *>(opcode + 2)'
+                                    ),
+                                    cgen.Statement(
+                                        f'return {_dte.sub_decode_table}[op.op](opcode + 2)'
+                                    ),
+                                ]
+                            )
                         break
         for _fn, _body in _custom_primary_decode_bodies.items():
             _decl = cgen.FunctionDeclaration(
@@ -12538,6 +12908,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     ),
                     False,
                 ),
+                ('array', True),
+                ('cstddef', True),
                 ('memory', True),
             ],
             ['Instruction'],
@@ -12560,6 +12932,16 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 False,
             ),
         ]
+        if self._supports_cdna_mfma_f8f6f4_vop3px2():
+            decoder_impl_includes.append(
+                (
+                    self.config.generated_include(
+                        self.generated_dir_name,
+                        'opcodes.h',
+                    ),
+                    False,
+                )
+            )
         if self._supports_generated_vopd():
             decoder_impl_includes.append(
                 (

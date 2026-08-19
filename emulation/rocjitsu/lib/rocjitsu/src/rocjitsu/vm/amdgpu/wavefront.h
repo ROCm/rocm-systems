@@ -18,6 +18,7 @@
 #include <cassert>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -170,6 +171,12 @@ public:
   /// @brief Set the per-WG LDS base offset.
   void set_lds_base(uint32_t base) { lds_base_ = base; }
 
+  /// @brief Return the aligned LDS allocation size for this workgroup.
+  uint32_t lds_size() const { return lds_size_; }
+
+  /// @brief Set the aligned LDS allocation size for this workgroup.
+  void set_lds_size(uint32_t size) { lds_size_ = size; }
+
   /// @brief Return the LDS backing selected for this workgroup placement.
   ///
   /// CU-mode workgroups use their owning CU's LDS. WGP-mode workgroups can
@@ -180,6 +187,15 @@ public:
   /// @brief Override the LDS backing for this workgroup placement.
   /// Passing nullptr restores the owning CU's LDS.
   void set_lds(Lds *lds) { lds_ = lds; }
+
+  /// @brief Return whether this wave's compute unit has GPU memory backing.
+  bool has_gpu_memory() const;
+
+  /// @brief Read GPU memory in this wave's process address space.
+  void read_gpu_memory(uint64_t addr, std::span<uint8_t> dst) const;
+
+  /// @brief Write GPU memory in this wave's process address space.
+  void write_gpu_memory(uint64_t addr, std::span<const uint8_t> src);
 
   /// @brief Return this workgroup's rank within its cluster.
   uint32_t cluster_rank() const { return cluster_rank_; }
@@ -229,13 +245,27 @@ public:
   /// @brief Set the raw architectural EXEC register pair.
   void set_exec_raw(uint64_t val) { exec_ = val; }
 
-  /// @brief Return the VCC scalar register pair.
-  /// @returns Raw VCC register value.
+  /// @brief Return the raw architectural VCC register pair.
+  /// @returns Raw VCC register value, including non-lane bits in wave32 mode.
   uint64_t vcc() const { return vcc_; }
 
-  /// @brief Set the VCC scalar register pair.
-  /// @param val New VCC value.
+  /// @brief Return the active-lane portion of the VCC register pair.
+  /// @returns VCC mask with non-lane bits cleared.
+  uint64_t vcc_mask() const { return vcc_ & lane_mask(); }
+
+  /// @brief Set the raw architectural VCC register pair.
+  /// @param val New raw VCC value.
+  ///
+  /// Scalar operand writes may update either half directly. Vector predicate
+  /// and carry producers must use set_vcc_mask() to preserve wave32 VCC_HI.
   void set_vcc(uint64_t val) { vcc_ = val; }
+
+  /// @brief Set the active-lane portion of the VCC register pair.
+  /// @param val New lane-mask value.
+  ///
+  /// Wave32 leaves VCC_HI available as scalar scratch. Vector instructions
+  /// that produce a predicate or carry mask must preserve those non-lane bits.
+  void set_vcc_mask(uint64_t val) { vcc_ = (vcc_ & ~lane_mask()) | (val & lane_mask()); }
 
   /// @brief Return the M0 special register.
   /// @returns M0 register value.
@@ -476,6 +506,7 @@ public:
     dispatch_id_ = 0;
     process_id_ = 0;
     lds_base_ = 0;
+    lds_size_ = 0;
     lds_ = nullptr;
     cluster_rank_ = 0;
     cluster_size_ = 1;
@@ -520,6 +551,7 @@ protected:
   uint32_t dispatch_id_ = 0;  ///< Dispatch ID (set per dispatch, unique per dispatch).
   uint32_t process_id_ = 0;   ///< Owning process ID (PASID analog, set per dispatch).
   uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
+  uint32_t lds_size_ = 0;     ///< Aligned per-WG LDS allocation size.
   Lds *lds_ = nullptr;        ///< Placement-selected LDS backing; nullptr means CU-local LDS.
   uint32_t cluster_rank_ = 0; ///< Workgroup rank inside the dispatch cluster.
   uint32_t cluster_size_ = 1; ///< Number of workgroups in the dispatch cluster.

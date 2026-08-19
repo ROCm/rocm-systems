@@ -84,6 +84,7 @@ option(BUILD_BFD                               "Enable custom backtrace (if bfd.
 option(BUILD_LOCAL_GPU_TARGET_ONLY             "Build only for GPUs detected on this machine"  OFF)
 option(BUILD_SHARED_LIBS                       "Build as shared library"                       ON)
 option(BUILD_TESTS                             "Build unit test programs"                      OFF)
+option(BUILD_PROFILER_INSPECTOR                "Build the NCCL Inspector profiler plugin"      ${BUILD_TESTS})
 option(BUILD_PLUGIN_EXAMPLES                      "Build plugin example libraries (net, tuner, profiler, env)" OFF)
 option(DUMP_ASM                                "Disassemble and dump"                          OFF)
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
@@ -166,10 +167,23 @@ set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGE
 
 # Modify GPU architectures for Address Sanitizer builds by appending "xnack+"
 if (BUILD_ADDRESS_SANITIZER)
-  execute_process(
-    COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libclang_rt.asan-x86_64.so
-    OUTPUT_VARIABLE ASAN_RUNTIME_PATH OUTPUT_STRIP_TRAILING_WHITESPACE)
-  get_filename_component(ASAN_RUNTIME_DIR "${ASAN_RUNTIME_PATH}" DIRECTORY)
+  set(_suffix "asan")
+  set(_clang_rt_names "libclang_rt.${_suffix}.so" "libclang_rt.${_suffix}-x86_64.so")
+  foreach(_clang_rt_name ${_clang_rt_names})
+    execute_process(
+      COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=${_clang_rt_name}
+      OUTPUT_VARIABLE _clang_rt_path OUTPUT_STRIP_TRAILING_WHITESPACE)
+    # If _clang_rt_path is libclang_rt.asan-x86_64.so
+    # rather than /path/to/libclang_rt.asan-x86_64.so then
+    # we failed to locate it.
+    if(IS_ABSOLUTE "${_clang_rt_path}" AND EXISTS "${_clang_rt_path}")
+      get_filename_component(ASAN_RUNTIME_DIR "${_clang_rt_path}" DIRECTORY)
+      break()
+    endif()
+  endforeach()
+  if(NOT ASAN_RUNTIME_DIR)
+    message(FATAL_ERROR "Failed to locate libclang_rt.asan-x86_64.so or libclang_rt.asan.so")
+  endif()
   message(STATUS "ASAN runtime directory: ${ASAN_RUNTIME_DIR}")
 
   SET(amdgpu_targets "")
@@ -651,6 +665,12 @@ configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used b
 #==================================================================================================
 # Source directory contains library creation
 add_subdirectory(src)
+
+# NCCL Inspector profiler plugin. Built as its own .so and loaded at runtime via
+# NCCL_PROFILER_PLUGIN; the MPI tests pick up the in-tree build automatically.
+if(BUILD_PROFILER_INSPECTOR)
+  add_subdirectory(plugins/profiler/inspector)
+endif()
 
 # LLVM IR / bitcode for nccl_device APIs (HIP / AMDGPU)
 #==================================================================================================

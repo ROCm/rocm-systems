@@ -14,7 +14,10 @@ namespace rocjitsu {
 namespace cdna1 {
 
 VCmpClassF32Vopc::VCmpClassF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_class_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_class_f32_sdwa"
+               : "v_cmp_class_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpClassF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -41,12 +44,19 @@ VCmpClassF32Vopc::VCmpClassF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -56,7 +66,10 @@ std::unique_ptr<Instruction> decodeVCmpClassF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxClassF32Vopc::VCmpxClassF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_class_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_class_f32_sdwa"
+               : "v_cmpx_class_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxClassF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -85,12 +98,19 @@ VCmpxClassF32Vopc::VCmpxClassF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -164,7 +184,10 @@ std::unique_ptr<Instruction> decodeVCmpxClassF64Vopc(const MachineInst *opcode) 
 } // namespace detail
 
 VCmpClassF16Vopc::VCmpClassF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_class_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_class_f16_sdwa"
+               : "v_cmp_class_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpClassF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -192,12 +215,19 @@ VCmpClassF16Vopc::VCmpClassF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -207,7 +237,10 @@ std::unique_ptr<Instruction> decodeVCmpClassF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxClassF16Vopc::VCmpxClassF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_class_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_class_f16_sdwa"
+               : "v_cmpx_class_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxClassF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -237,12 +270,19 @@ VCmpxClassF16Vopc::VCmpxClassF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -254,7 +294,9 @@ std::unique_ptr<Instruction> decodeVCmpxClassF16Vopc(const MachineInst *opcode) 
 } // namespace detail
 
 VCmpFF16Vopc::VCmpFF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_f_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_cmp_f_f16_sdwa"
+                                                                                : "v_cmp_f_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpFF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -282,12 +324,19 @@ VCmpFF16Vopc::VCmpFF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -297,7 +346,10 @@ std::unique_ptr<Instruction> decodeVCmpFF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpLtF16Vopc::VCmpLtF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_lt_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_lt_f16_sdwa"
+               : "v_cmp_lt_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLtF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -325,12 +377,19 @@ VCmpLtF16Vopc::VCmpLtF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -340,7 +399,10 @@ std::unique_ptr<Instruction> decodeVCmpLtF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpEqF16Vopc::VCmpEqF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_eq_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_eq_f16_sdwa"
+               : "v_cmp_eq_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -368,12 +430,19 @@ VCmpEqF16Vopc::VCmpEqF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -383,7 +452,10 @@ std::unique_ptr<Instruction> decodeVCmpEqF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpLeF16Vopc::VCmpLeF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_le_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_le_f16_sdwa"
+               : "v_cmp_le_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLeF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -411,12 +483,19 @@ VCmpLeF16Vopc::VCmpLeF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -426,7 +505,10 @@ std::unique_ptr<Instruction> decodeVCmpLeF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpGtF16Vopc::VCmpGtF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_gt_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_gt_f16_sdwa"
+               : "v_cmp_gt_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -454,12 +536,19 @@ VCmpGtF16Vopc::VCmpGtF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -469,7 +558,10 @@ std::unique_ptr<Instruction> decodeVCmpGtF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpLgF16Vopc::VCmpLgF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_lg_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_lg_f16_sdwa"
+               : "v_cmp_lg_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLgF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -497,12 +589,19 @@ VCmpLgF16Vopc::VCmpLgF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -512,7 +611,10 @@ std::unique_ptr<Instruction> decodeVCmpLgF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpGeF16Vopc::VCmpGeF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_ge_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_ge_f16_sdwa"
+               : "v_cmp_ge_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -540,12 +642,19 @@ VCmpGeF16Vopc::VCmpGeF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -555,7 +664,9 @@ std::unique_ptr<Instruction> decodeVCmpGeF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpOF16Vopc::VCmpOF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_o_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_cmp_o_f16_sdwa"
+                                                                                : "v_cmp_o_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpOF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -583,12 +694,19 @@ VCmpOF16Vopc::VCmpOF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -598,7 +716,9 @@ std::unique_ptr<Instruction> decodeVCmpOF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpUF16Vopc::VCmpUF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_u_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_cmp_u_f16_sdwa"
+                                                                                : "v_cmp_u_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpUF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -626,12 +746,19 @@ VCmpUF16Vopc::VCmpUF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -641,7 +768,10 @@ std::unique_ptr<Instruction> decodeVCmpUF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpNgeF16Vopc::VCmpNgeF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_nge_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_nge_f16_sdwa"
+               : "v_cmp_nge_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNgeF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -669,12 +799,19 @@ VCmpNgeF16Vopc::VCmpNgeF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -684,7 +821,10 @@ std::unique_ptr<Instruction> decodeVCmpNgeF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpNlgF16Vopc::VCmpNlgF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_nlg_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_nlg_f16_sdwa"
+               : "v_cmp_nlg_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNlgF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -712,12 +852,19 @@ VCmpNlgF16Vopc::VCmpNlgF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -727,7 +874,10 @@ std::unique_ptr<Instruction> decodeVCmpNlgF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpNgtF16Vopc::VCmpNgtF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_ngt_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_ngt_f16_sdwa"
+               : "v_cmp_ngt_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNgtF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -755,12 +905,19 @@ VCmpNgtF16Vopc::VCmpNgtF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -770,7 +927,10 @@ std::unique_ptr<Instruction> decodeVCmpNgtF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpNleF16Vopc::VCmpNleF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_nle_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_nle_f16_sdwa"
+               : "v_cmp_nle_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNleF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -798,12 +958,19 @@ VCmpNleF16Vopc::VCmpNleF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -813,7 +980,10 @@ std::unique_ptr<Instruction> decodeVCmpNleF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpNeqF16Vopc::VCmpNeqF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_neq_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_neq_f16_sdwa"
+               : "v_cmp_neq_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNeqF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -841,12 +1011,19 @@ VCmpNeqF16Vopc::VCmpNeqF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -856,7 +1033,10 @@ std::unique_ptr<Instruction> decodeVCmpNeqF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpNltF16Vopc::VCmpNltF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_nlt_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_nlt_f16_sdwa"
+               : "v_cmp_nlt_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNltF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -884,12 +1064,19 @@ VCmpNltF16Vopc::VCmpNltF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -899,7 +1086,10 @@ std::unique_ptr<Instruction> decodeVCmpNltF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpTruF16Vopc::VCmpTruF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_tru_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_tru_f16_sdwa"
+               : "v_cmp_tru_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpTruF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -927,12 +1117,19 @@ VCmpTruF16Vopc::VCmpTruF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -942,7 +1139,10 @@ std::unique_ptr<Instruction> decodeVCmpTruF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxFF16Vopc::VCmpxFF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_f_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_f_f16_sdwa"
+               : "v_cmpx_f_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxFF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -972,12 +1172,19 @@ VCmpxFF16Vopc::VCmpxFF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -989,7 +1196,10 @@ std::unique_ptr<Instruction> decodeVCmpxFF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxLtF16Vopc::VCmpxLtF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_lt_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_lt_f16_sdwa"
+               : "v_cmpx_lt_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1019,12 +1229,19 @@ VCmpxLtF16Vopc::VCmpxLtF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -1036,7 +1253,10 @@ std::unique_ptr<Instruction> decodeVCmpxLtF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxEqF16Vopc::VCmpxEqF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_eq_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_eq_f16_sdwa"
+               : "v_cmpx_eq_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1066,12 +1286,19 @@ VCmpxEqF16Vopc::VCmpxEqF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -1083,7 +1310,10 @@ std::unique_ptr<Instruction> decodeVCmpxEqF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxLeF16Vopc::VCmpxLeF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_le_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_le_f16_sdwa"
+               : "v_cmpx_le_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1113,12 +1343,19 @@ VCmpxLeF16Vopc::VCmpxLeF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -1130,7 +1367,10 @@ std::unique_ptr<Instruction> decodeVCmpxLeF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxGtF16Vopc::VCmpxGtF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_gt_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_gt_f16_sdwa"
+               : "v_cmpx_gt_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1160,12 +1400,19 @@ VCmpxGtF16Vopc::VCmpxGtF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -1177,7 +1424,10 @@ std::unique_ptr<Instruction> decodeVCmpxGtF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxLgF16Vopc::VCmpxLgF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_lg_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_lg_f16_sdwa"
+               : "v_cmpx_lg_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLgF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1207,12 +1457,19 @@ VCmpxLgF16Vopc::VCmpxLgF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -1224,7 +1481,10 @@ std::unique_ptr<Instruction> decodeVCmpxLgF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxGeF16Vopc::VCmpxGeF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_ge_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_ge_f16_sdwa"
+               : "v_cmpx_ge_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1254,12 +1514,19 @@ VCmpxGeF16Vopc::VCmpxGeF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -1271,7 +1538,10 @@ std::unique_ptr<Instruction> decodeVCmpxGeF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxOF16Vopc::VCmpxOF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_o_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_o_f16_sdwa"
+               : "v_cmpx_o_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxOF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1301,12 +1571,19 @@ VCmpxOF16Vopc::VCmpxOF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -1318,7 +1595,10 @@ std::unique_ptr<Instruction> decodeVCmpxOF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxUF16Vopc::VCmpxUF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_u_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_u_f16_sdwa"
+               : "v_cmpx_u_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxUF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1348,12 +1628,19 @@ VCmpxUF16Vopc::VCmpxUF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -1365,7 +1652,10 @@ std::unique_ptr<Instruction> decodeVCmpxUF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxNgeF16Vopc::VCmpxNgeF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_nge_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_nge_f16_sdwa"
+               : "v_cmpx_nge_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNgeF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1395,12 +1685,19 @@ VCmpxNgeF16Vopc::VCmpxNgeF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -1412,7 +1709,10 @@ std::unique_ptr<Instruction> decodeVCmpxNgeF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxNlgF16Vopc::VCmpxNlgF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_nlg_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_nlg_f16_sdwa"
+               : "v_cmpx_nlg_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNlgF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1442,12 +1742,19 @@ VCmpxNlgF16Vopc::VCmpxNlgF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -1459,7 +1766,10 @@ std::unique_ptr<Instruction> decodeVCmpxNlgF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxNgtF16Vopc::VCmpxNgtF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_ngt_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_ngt_f16_sdwa"
+               : "v_cmpx_ngt_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNgtF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1489,12 +1799,19 @@ VCmpxNgtF16Vopc::VCmpxNgtF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -1506,7 +1823,10 @@ std::unique_ptr<Instruction> decodeVCmpxNgtF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxNleF16Vopc::VCmpxNleF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_nle_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_nle_f16_sdwa"
+               : "v_cmpx_nle_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNleF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1536,12 +1856,19 @@ VCmpxNleF16Vopc::VCmpxNleF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -1553,7 +1880,10 @@ std::unique_ptr<Instruction> decodeVCmpxNleF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxNeqF16Vopc::VCmpxNeqF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_neq_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_neq_f16_sdwa"
+               : "v_cmpx_neq_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeqF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1583,12 +1913,19 @@ VCmpxNeqF16Vopc::VCmpxNeqF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -1600,7 +1937,10 @@ std::unique_ptr<Instruction> decodeVCmpxNeqF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxNltF16Vopc::VCmpxNltF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_nlt_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_nlt_f16_sdwa"
+               : "v_cmpx_nlt_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNltF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1630,12 +1970,19 @@ VCmpxNltF16Vopc::VCmpxNltF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -1647,7 +1994,10 @@ std::unique_ptr<Instruction> decodeVCmpxNltF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxTruF16Vopc::VCmpxTruF16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_tru_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_tru_f16_sdwa"
+               : "v_cmpx_tru_f16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxTruF16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1677,12 +2027,19 @@ VCmpxTruF16Vopc::VCmpxTruF16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F16;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -1694,7 +2051,9 @@ std::unique_ptr<Instruction> decodeVCmpxTruF16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpFF32Vopc::VCmpFF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_f_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_cmp_f_f32_sdwa"
+                                                                                : "v_cmp_f_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpFF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1721,12 +2080,19 @@ VCmpFF32Vopc::VCmpFF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -1736,7 +2102,10 @@ std::unique_ptr<Instruction> decodeVCmpFF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpLtF32Vopc::VCmpLtF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_lt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_lt_f32_sdwa"
+               : "v_cmp_lt_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLtF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1763,12 +2132,19 @@ VCmpLtF32Vopc::VCmpLtF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -1778,7 +2154,10 @@ std::unique_ptr<Instruction> decodeVCmpLtF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpEqF32Vopc::VCmpEqF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_eq_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_eq_f32_sdwa"
+               : "v_cmp_eq_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1805,12 +2184,19 @@ VCmpEqF32Vopc::VCmpEqF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -1820,7 +2206,10 @@ std::unique_ptr<Instruction> decodeVCmpEqF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpLeF32Vopc::VCmpLeF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_le_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_le_f32_sdwa"
+               : "v_cmp_le_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLeF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1847,12 +2236,19 @@ VCmpLeF32Vopc::VCmpLeF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -1862,7 +2258,10 @@ std::unique_ptr<Instruction> decodeVCmpLeF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpGtF32Vopc::VCmpGtF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_gt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_gt_f32_sdwa"
+               : "v_cmp_gt_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1889,12 +2288,19 @@ VCmpGtF32Vopc::VCmpGtF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -1904,7 +2310,10 @@ std::unique_ptr<Instruction> decodeVCmpGtF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpLgF32Vopc::VCmpLgF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_lg_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_lg_f32_sdwa"
+               : "v_cmp_lg_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLgF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1931,12 +2340,19 @@ VCmpLgF32Vopc::VCmpLgF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -1946,7 +2362,10 @@ std::unique_ptr<Instruction> decodeVCmpLgF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpGeF32Vopc::VCmpGeF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_ge_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_ge_f32_sdwa"
+               : "v_cmp_ge_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -1973,12 +2392,19 @@ VCmpGeF32Vopc::VCmpGeF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -1988,7 +2414,9 @@ std::unique_ptr<Instruction> decodeVCmpGeF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpOF32Vopc::VCmpOF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_o_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_cmp_o_f32_sdwa"
+                                                                                : "v_cmp_o_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpOF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2015,12 +2443,19 @@ VCmpOF32Vopc::VCmpOF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -2030,7 +2465,9 @@ std::unique_ptr<Instruction> decodeVCmpOF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpUF32Vopc::VCmpUF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_u_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_cmp_u_f32_sdwa"
+                                                                                : "v_cmp_u_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpUF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2057,12 +2494,19 @@ VCmpUF32Vopc::VCmpUF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -2072,7 +2516,10 @@ std::unique_ptr<Instruction> decodeVCmpUF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpNgeF32Vopc::VCmpNgeF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_nge_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_nge_f32_sdwa"
+               : "v_cmp_nge_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNgeF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2099,12 +2546,19 @@ VCmpNgeF32Vopc::VCmpNgeF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -2114,7 +2568,10 @@ std::unique_ptr<Instruction> decodeVCmpNgeF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpNlgF32Vopc::VCmpNlgF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_nlg_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_nlg_f32_sdwa"
+               : "v_cmp_nlg_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNlgF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2141,12 +2598,19 @@ VCmpNlgF32Vopc::VCmpNlgF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -2156,7 +2620,10 @@ std::unique_ptr<Instruction> decodeVCmpNlgF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpNgtF32Vopc::VCmpNgtF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_ngt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_ngt_f32_sdwa"
+               : "v_cmp_ngt_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNgtF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2183,12 +2650,19 @@ VCmpNgtF32Vopc::VCmpNgtF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -2198,7 +2672,10 @@ std::unique_ptr<Instruction> decodeVCmpNgtF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpNleF32Vopc::VCmpNleF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_nle_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_nle_f32_sdwa"
+               : "v_cmp_nle_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNleF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2225,12 +2702,19 @@ VCmpNleF32Vopc::VCmpNleF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -2240,7 +2724,10 @@ std::unique_ptr<Instruction> decodeVCmpNleF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpNeqF32Vopc::VCmpNeqF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_neq_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_neq_f32_sdwa"
+               : "v_cmp_neq_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNeqF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2267,12 +2754,19 @@ VCmpNeqF32Vopc::VCmpNeqF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -2282,7 +2776,10 @@ std::unique_ptr<Instruction> decodeVCmpNeqF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpNltF32Vopc::VCmpNltF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_nlt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_nlt_f32_sdwa"
+               : "v_cmp_nlt_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNltF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2309,12 +2806,19 @@ VCmpNltF32Vopc::VCmpNltF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -2324,7 +2828,10 @@ std::unique_ptr<Instruction> decodeVCmpNltF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpTruF32Vopc::VCmpTruF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_tru_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_tru_f32_sdwa"
+               : "v_cmp_tru_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpTruF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2351,12 +2858,19 @@ VCmpTruF32Vopc::VCmpTruF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -2366,7 +2880,10 @@ std::unique_ptr<Instruction> decodeVCmpTruF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxFF32Vopc::VCmpxFF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_f_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_f_f32_sdwa"
+               : "v_cmpx_f_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxFF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2395,12 +2912,19 @@ VCmpxFF32Vopc::VCmpxFF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -2412,7 +2936,10 @@ std::unique_ptr<Instruction> decodeVCmpxFF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxLtF32Vopc::VCmpxLtF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_lt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_lt_f32_sdwa"
+               : "v_cmpx_lt_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2441,12 +2968,19 @@ VCmpxLtF32Vopc::VCmpxLtF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -2458,7 +2992,10 @@ std::unique_ptr<Instruction> decodeVCmpxLtF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxEqF32Vopc::VCmpxEqF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_eq_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_eq_f32_sdwa"
+               : "v_cmpx_eq_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2487,12 +3024,19 @@ VCmpxEqF32Vopc::VCmpxEqF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -2504,7 +3048,10 @@ std::unique_ptr<Instruction> decodeVCmpxEqF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxLeF32Vopc::VCmpxLeF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_le_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_le_f32_sdwa"
+               : "v_cmpx_le_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2533,12 +3080,19 @@ VCmpxLeF32Vopc::VCmpxLeF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -2550,7 +3104,10 @@ std::unique_ptr<Instruction> decodeVCmpxLeF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxGtF32Vopc::VCmpxGtF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_gt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_gt_f32_sdwa"
+               : "v_cmpx_gt_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2579,12 +3136,19 @@ VCmpxGtF32Vopc::VCmpxGtF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -2596,7 +3160,10 @@ std::unique_ptr<Instruction> decodeVCmpxGtF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxLgF32Vopc::VCmpxLgF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_lg_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_lg_f32_sdwa"
+               : "v_cmpx_lg_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLgF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2625,12 +3192,19 @@ VCmpxLgF32Vopc::VCmpxLgF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -2642,7 +3216,10 @@ std::unique_ptr<Instruction> decodeVCmpxLgF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxGeF32Vopc::VCmpxGeF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_ge_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_ge_f32_sdwa"
+               : "v_cmpx_ge_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2671,12 +3248,19 @@ VCmpxGeF32Vopc::VCmpxGeF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -2688,7 +3272,10 @@ std::unique_ptr<Instruction> decodeVCmpxGeF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxOF32Vopc::VCmpxOF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_o_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_o_f32_sdwa"
+               : "v_cmpx_o_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxOF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2717,12 +3304,19 @@ VCmpxOF32Vopc::VCmpxOF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -2734,7 +3328,10 @@ std::unique_ptr<Instruction> decodeVCmpxOF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxUF32Vopc::VCmpxUF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_u_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_u_f32_sdwa"
+               : "v_cmpx_u_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxUF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2763,12 +3360,19 @@ VCmpxUF32Vopc::VCmpxUF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -2780,7 +3384,10 @@ std::unique_ptr<Instruction> decodeVCmpxUF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxNgeF32Vopc::VCmpxNgeF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_nge_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_nge_f32_sdwa"
+               : "v_cmpx_nge_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNgeF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2809,12 +3416,19 @@ VCmpxNgeF32Vopc::VCmpxNgeF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -2826,7 +3440,10 @@ std::unique_ptr<Instruction> decodeVCmpxNgeF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxNlgF32Vopc::VCmpxNlgF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_nlg_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_nlg_f32_sdwa"
+               : "v_cmpx_nlg_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNlgF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2855,12 +3472,19 @@ VCmpxNlgF32Vopc::VCmpxNlgF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -2872,7 +3496,10 @@ std::unique_ptr<Instruction> decodeVCmpxNlgF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxNgtF32Vopc::VCmpxNgtF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_ngt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_ngt_f32_sdwa"
+               : "v_cmpx_ngt_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNgtF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2901,12 +3528,19 @@ VCmpxNgtF32Vopc::VCmpxNgtF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -2918,7 +3552,10 @@ std::unique_ptr<Instruction> decodeVCmpxNgtF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxNleF32Vopc::VCmpxNleF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_nle_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_nle_f32_sdwa"
+               : "v_cmpx_nle_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNleF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2947,12 +3584,19 @@ VCmpxNleF32Vopc::VCmpxNleF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -2964,7 +3608,10 @@ std::unique_ptr<Instruction> decodeVCmpxNleF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxNeqF32Vopc::VCmpxNeqF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_neq_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_neq_f32_sdwa"
+               : "v_cmpx_neq_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeqF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2993,12 +3640,19 @@ VCmpxNeqF32Vopc::VCmpxNeqF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -3010,7 +3664,10 @@ std::unique_ptr<Instruction> decodeVCmpxNeqF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxNltF32Vopc::VCmpxNltF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_nlt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_nlt_f32_sdwa"
+               : "v_cmpx_nlt_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNltF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -3039,12 +3696,19 @@ VCmpxNltF32Vopc::VCmpxNltF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -3056,7 +3720,10 @@ std::unique_ptr<Instruction> decodeVCmpxNltF32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxTruF32Vopc::VCmpxTruF32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_tru_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_tru_f32_sdwa"
+               : "v_cmpx_tru_f32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxTruF32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -3085,12 +3752,19 @@ VCmpxTruF32Vopc::VCmpxTruF32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -4094,7 +4768,9 @@ std::unique_ptr<Instruction> decodeVCmpxTruF64Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpFI16Vopc::VCmpFI16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_f_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_cmp_f_i16_sdwa"
+                                                                                : "v_cmp_f_i16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpFI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4122,12 +4798,19 @@ VCmpFI16Vopc::VCmpFI16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -4137,7 +4820,10 @@ std::unique_ptr<Instruction> decodeVCmpFI16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpLtI16Vopc::VCmpLtI16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_lt_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_lt_i16_sdwa"
+               : "v_cmp_lt_i16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLtI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4165,12 +4851,19 @@ VCmpLtI16Vopc::VCmpLtI16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -4180,7 +4873,10 @@ std::unique_ptr<Instruction> decodeVCmpLtI16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpEqI16Vopc::VCmpEqI16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_eq_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_eq_i16_sdwa"
+               : "v_cmp_eq_i16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4208,12 +4904,19 @@ VCmpEqI16Vopc::VCmpEqI16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -4223,7 +4926,10 @@ std::unique_ptr<Instruction> decodeVCmpEqI16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpLeI16Vopc::VCmpLeI16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_le_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_le_i16_sdwa"
+               : "v_cmp_le_i16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLeI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4251,12 +4957,19 @@ VCmpLeI16Vopc::VCmpLeI16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -4266,7 +4979,10 @@ std::unique_ptr<Instruction> decodeVCmpLeI16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpGtI16Vopc::VCmpGtI16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_gt_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_gt_i16_sdwa"
+               : "v_cmp_gt_i16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4294,12 +5010,19 @@ VCmpGtI16Vopc::VCmpGtI16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -4309,7 +5032,10 @@ std::unique_ptr<Instruction> decodeVCmpGtI16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpNeI16Vopc::VCmpNeI16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_ne_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_ne_i16_sdwa"
+               : "v_cmp_ne_i16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNeI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4337,12 +5063,19 @@ VCmpNeI16Vopc::VCmpNeI16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -4352,7 +5085,10 @@ std::unique_ptr<Instruction> decodeVCmpNeI16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpGeI16Vopc::VCmpGeI16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_ge_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_ge_i16_sdwa"
+               : "v_cmp_ge_i16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4380,12 +5116,19 @@ VCmpGeI16Vopc::VCmpGeI16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -4395,7 +5138,9 @@ std::unique_ptr<Instruction> decodeVCmpGeI16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpTI16Vopc::VCmpTI16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_t_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_cmp_t_i16_sdwa"
+                                                                                : "v_cmp_t_i16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpTI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4423,12 +5168,19 @@ VCmpTI16Vopc::VCmpTI16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -4438,7 +5190,9 @@ std::unique_ptr<Instruction> decodeVCmpTI16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpFU16Vopc::VCmpFU16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_f_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_cmp_f_u16_sdwa"
+                                                                                : "v_cmp_f_u16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpFU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4466,12 +5220,19 @@ VCmpFU16Vopc::VCmpFU16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -4481,7 +5242,10 @@ std::unique_ptr<Instruction> decodeVCmpFU16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpLtU16Vopc::VCmpLtU16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_lt_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_lt_u16_sdwa"
+               : "v_cmp_lt_u16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLtU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4509,12 +5273,19 @@ VCmpLtU16Vopc::VCmpLtU16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -4524,7 +5295,10 @@ std::unique_ptr<Instruction> decodeVCmpLtU16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpEqU16Vopc::VCmpEqU16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_eq_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_eq_u16_sdwa"
+               : "v_cmp_eq_u16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4552,12 +5326,19 @@ VCmpEqU16Vopc::VCmpEqU16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -4567,7 +5348,10 @@ std::unique_ptr<Instruction> decodeVCmpEqU16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpLeU16Vopc::VCmpLeU16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_le_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_le_u16_sdwa"
+               : "v_cmp_le_u16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLeU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4595,12 +5379,19 @@ VCmpLeU16Vopc::VCmpLeU16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -4610,7 +5401,10 @@ std::unique_ptr<Instruction> decodeVCmpLeU16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpGtU16Vopc::VCmpGtU16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_gt_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_gt_u16_sdwa"
+               : "v_cmp_gt_u16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4638,12 +5432,19 @@ VCmpGtU16Vopc::VCmpGtU16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -4653,7 +5454,10 @@ std::unique_ptr<Instruction> decodeVCmpGtU16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpNeU16Vopc::VCmpNeU16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_ne_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_ne_u16_sdwa"
+               : "v_cmp_ne_u16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNeU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4681,12 +5485,19 @@ VCmpNeU16Vopc::VCmpNeU16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -4696,7 +5507,10 @@ std::unique_ptr<Instruction> decodeVCmpNeU16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpGeU16Vopc::VCmpGeU16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_ge_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_ge_u16_sdwa"
+               : "v_cmp_ge_u16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4724,12 +5538,19 @@ VCmpGeU16Vopc::VCmpGeU16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -4739,7 +5560,9 @@ std::unique_ptr<Instruction> decodeVCmpGeU16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpTU16Vopc::VCmpTU16Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_t_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_cmp_t_u16_sdwa"
+                                                                                : "v_cmp_t_u16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpTU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4767,12 +5590,19 @@ VCmpTU16Vopc::VCmpTU16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -4782,7 +5612,10 @@ std::unique_ptr<Instruction> decodeVCmpTU16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxFI16Vopc::VCmpxFI16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_f_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_f_i16_sdwa"
+               : "v_cmpx_f_i16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxFI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4812,12 +5645,19 @@ VCmpxFI16Vopc::VCmpxFI16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -4829,7 +5669,10 @@ std::unique_ptr<Instruction> decodeVCmpxFI16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxLtI16Vopc::VCmpxLtI16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_lt_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_lt_i16_sdwa"
+               : "v_cmpx_lt_i16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4859,12 +5702,19 @@ VCmpxLtI16Vopc::VCmpxLtI16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -4876,7 +5726,10 @@ std::unique_ptr<Instruction> decodeVCmpxLtI16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxEqI16Vopc::VCmpxEqI16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_eq_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_eq_i16_sdwa"
+               : "v_cmpx_eq_i16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4906,12 +5759,19 @@ VCmpxEqI16Vopc::VCmpxEqI16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -4923,7 +5783,10 @@ std::unique_ptr<Instruction> decodeVCmpxEqI16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxLeI16Vopc::VCmpxLeI16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_le_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_le_i16_sdwa"
+               : "v_cmpx_le_i16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4953,12 +5816,19 @@ VCmpxLeI16Vopc::VCmpxLeI16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -4970,7 +5840,10 @@ std::unique_ptr<Instruction> decodeVCmpxLeI16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxGtI16Vopc::VCmpxGtI16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_gt_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_gt_i16_sdwa"
+               : "v_cmpx_gt_i16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5000,12 +5873,19 @@ VCmpxGtI16Vopc::VCmpxGtI16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -5017,7 +5897,10 @@ std::unique_ptr<Instruction> decodeVCmpxGtI16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxNeI16Vopc::VCmpxNeI16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_ne_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_ne_i16_sdwa"
+               : "v_cmpx_ne_i16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5047,12 +5930,19 @@ VCmpxNeI16Vopc::VCmpxNeI16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -5064,7 +5954,10 @@ std::unique_ptr<Instruction> decodeVCmpxNeI16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxGeI16Vopc::VCmpxGeI16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_ge_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_ge_i16_sdwa"
+               : "v_cmpx_ge_i16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5094,12 +5987,19 @@ VCmpxGeI16Vopc::VCmpxGeI16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -5111,7 +6011,10 @@ std::unique_ptr<Instruction> decodeVCmpxGeI16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxTI16Vopc::VCmpxTI16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_t_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_t_i16_sdwa"
+               : "v_cmpx_t_i16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxTI16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5141,12 +6044,19 @@ VCmpxTI16Vopc::VCmpxTI16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -5158,7 +6068,10 @@ std::unique_ptr<Instruction> decodeVCmpxTI16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxFU16Vopc::VCmpxFU16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_f_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_f_u16_sdwa"
+               : "v_cmpx_f_u16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxFU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5188,12 +6101,19 @@ VCmpxFU16Vopc::VCmpxFU16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -5205,7 +6125,10 @@ std::unique_ptr<Instruction> decodeVCmpxFU16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxLtU16Vopc::VCmpxLtU16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_lt_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_lt_u16_sdwa"
+               : "v_cmpx_lt_u16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5235,12 +6158,19 @@ VCmpxLtU16Vopc::VCmpxLtU16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -5252,7 +6182,10 @@ std::unique_ptr<Instruction> decodeVCmpxLtU16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxEqU16Vopc::VCmpxEqU16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_eq_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_eq_u16_sdwa"
+               : "v_cmpx_eq_u16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5282,12 +6215,19 @@ VCmpxEqU16Vopc::VCmpxEqU16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -5299,7 +6239,10 @@ std::unique_ptr<Instruction> decodeVCmpxEqU16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxLeU16Vopc::VCmpxLeU16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_le_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_le_u16_sdwa"
+               : "v_cmpx_le_u16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5329,12 +6272,19 @@ VCmpxLeU16Vopc::VCmpxLeU16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -5346,7 +6296,10 @@ std::unique_ptr<Instruction> decodeVCmpxLeU16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxGtU16Vopc::VCmpxGtU16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_gt_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_gt_u16_sdwa"
+               : "v_cmpx_gt_u16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5376,12 +6329,19 @@ VCmpxGtU16Vopc::VCmpxGtU16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -5393,7 +6353,10 @@ std::unique_ptr<Instruction> decodeVCmpxGtU16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxNeU16Vopc::VCmpxNeU16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_ne_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_ne_u16_sdwa"
+               : "v_cmpx_ne_u16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5423,12 +6386,19 @@ VCmpxNeU16Vopc::VCmpxNeU16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -5440,7 +6410,10 @@ std::unique_ptr<Instruction> decodeVCmpxNeU16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxGeU16Vopc::VCmpxGeU16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_ge_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_ge_u16_sdwa"
+               : "v_cmpx_ge_u16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5470,12 +6443,19 @@ VCmpxGeU16Vopc::VCmpxGeU16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -5487,7 +6467,10 @@ std::unique_ptr<Instruction> decodeVCmpxGeU16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxTU16Vopc::VCmpxTU16Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_t_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_t_u16_sdwa"
+               : "v_cmpx_t_u16_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxTU16Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5517,12 +6500,19 @@ VCmpxTU16Vopc::VCmpxTU16Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -5534,7 +6524,9 @@ std::unique_ptr<Instruction> decodeVCmpxTU16Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpFI32Vopc::VCmpFI32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_f_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_cmp_f_i32_sdwa"
+                                                                                : "v_cmp_f_i32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpFI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5561,12 +6553,19 @@ VCmpFI32Vopc::VCmpFI32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -5576,7 +6575,10 @@ std::unique_ptr<Instruction> decodeVCmpFI32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpLtI32Vopc::VCmpLtI32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_lt_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_lt_i32_sdwa"
+               : "v_cmp_lt_i32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLtI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5603,12 +6605,19 @@ VCmpLtI32Vopc::VCmpLtI32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -5618,7 +6627,10 @@ std::unique_ptr<Instruction> decodeVCmpLtI32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpEqI32Vopc::VCmpEqI32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_eq_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_eq_i32_sdwa"
+               : "v_cmp_eq_i32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5645,12 +6657,19 @@ VCmpEqI32Vopc::VCmpEqI32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -5660,7 +6679,10 @@ std::unique_ptr<Instruction> decodeVCmpEqI32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpLeI32Vopc::VCmpLeI32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_le_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_le_i32_sdwa"
+               : "v_cmp_le_i32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLeI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5687,12 +6709,19 @@ VCmpLeI32Vopc::VCmpLeI32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -5702,7 +6731,10 @@ std::unique_ptr<Instruction> decodeVCmpLeI32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpGtI32Vopc::VCmpGtI32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_gt_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_gt_i32_sdwa"
+               : "v_cmp_gt_i32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5729,12 +6761,19 @@ VCmpGtI32Vopc::VCmpGtI32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -5744,7 +6783,10 @@ std::unique_ptr<Instruction> decodeVCmpGtI32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpNeI32Vopc::VCmpNeI32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_ne_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_ne_i32_sdwa"
+               : "v_cmp_ne_i32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNeI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5771,12 +6813,19 @@ VCmpNeI32Vopc::VCmpNeI32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -5786,7 +6835,10 @@ std::unique_ptr<Instruction> decodeVCmpNeI32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpGeI32Vopc::VCmpGeI32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_ge_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_ge_i32_sdwa"
+               : "v_cmp_ge_i32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5813,12 +6865,19 @@ VCmpGeI32Vopc::VCmpGeI32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -5828,7 +6887,9 @@ std::unique_ptr<Instruction> decodeVCmpGeI32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpTI32Vopc::VCmpTI32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_t_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_cmp_t_i32_sdwa"
+                                                                                : "v_cmp_t_i32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpTI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5855,12 +6916,19 @@ VCmpTI32Vopc::VCmpTI32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -5870,7 +6938,9 @@ std::unique_ptr<Instruction> decodeVCmpTI32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpFU32Vopc::VCmpFU32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_f_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_cmp_f_u32_sdwa"
+                                                                                : "v_cmp_f_u32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpFU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5897,12 +6967,19 @@ VCmpFU32Vopc::VCmpFU32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -5912,7 +6989,10 @@ std::unique_ptr<Instruction> decodeVCmpFU32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpLtU32Vopc::VCmpLtU32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_lt_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_lt_u32_sdwa"
+               : "v_cmp_lt_u32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLtU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5939,12 +7019,19 @@ VCmpLtU32Vopc::VCmpLtU32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -5954,7 +7041,10 @@ std::unique_ptr<Instruction> decodeVCmpLtU32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpEqU32Vopc::VCmpEqU32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_eq_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_eq_u32_sdwa"
+               : "v_cmp_eq_u32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5981,12 +7071,19 @@ VCmpEqU32Vopc::VCmpEqU32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -5996,7 +7093,10 @@ std::unique_ptr<Instruction> decodeVCmpEqU32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpLeU32Vopc::VCmpLeU32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_le_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_le_u32_sdwa"
+               : "v_cmp_le_u32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLeU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6023,12 +7123,19 @@ VCmpLeU32Vopc::VCmpLeU32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -6038,7 +7145,10 @@ std::unique_ptr<Instruction> decodeVCmpLeU32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpGtU32Vopc::VCmpGtU32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_gt_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_gt_u32_sdwa"
+               : "v_cmp_gt_u32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6065,12 +7175,19 @@ VCmpGtU32Vopc::VCmpGtU32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -6080,7 +7197,10 @@ std::unique_ptr<Instruction> decodeVCmpGtU32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpNeU32Vopc::VCmpNeU32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_ne_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_ne_u32_sdwa"
+               : "v_cmp_ne_u32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNeU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6107,12 +7227,19 @@ VCmpNeU32Vopc::VCmpNeU32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -6122,7 +7249,10 @@ std::unique_ptr<Instruction> decodeVCmpNeU32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpGeU32Vopc::VCmpGeU32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_ge_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmp_ge_u32_sdwa"
+               : "v_cmp_ge_u32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6149,12 +7279,19 @@ VCmpGeU32Vopc::VCmpGeU32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -6164,7 +7301,9 @@ std::unique_ptr<Instruction> decodeVCmpGeU32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpTU32Vopc::VCmpTU32Vopc(const MachineInst *inst)
-    : Vopc("v_cmp_t_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_cmp_t_u32_sdwa"
+                                                                                : "v_cmp_t_u32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpTU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6191,12 +7330,19 @@ VCmpTU32Vopc::VCmpTU32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
 }
 
 namespace detail {
@@ -6206,7 +7352,10 @@ std::unique_ptr<Instruction> decodeVCmpTU32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxFI32Vopc::VCmpxFI32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_f_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_f_i32_sdwa"
+               : "v_cmpx_f_i32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxFI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6235,12 +7384,19 @@ VCmpxFI32Vopc::VCmpxFI32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -6252,7 +7408,10 @@ std::unique_ptr<Instruction> decodeVCmpxFI32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxLtI32Vopc::VCmpxLtI32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_lt_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_lt_i32_sdwa"
+               : "v_cmpx_lt_i32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6281,12 +7440,19 @@ VCmpxLtI32Vopc::VCmpxLtI32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -6298,7 +7464,10 @@ std::unique_ptr<Instruction> decodeVCmpxLtI32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxEqI32Vopc::VCmpxEqI32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_eq_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_eq_i32_sdwa"
+               : "v_cmpx_eq_i32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6327,12 +7496,19 @@ VCmpxEqI32Vopc::VCmpxEqI32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -6344,7 +7520,10 @@ std::unique_ptr<Instruction> decodeVCmpxEqI32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxLeI32Vopc::VCmpxLeI32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_le_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_le_i32_sdwa"
+               : "v_cmpx_le_i32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6373,12 +7552,19 @@ VCmpxLeI32Vopc::VCmpxLeI32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -6390,7 +7576,10 @@ std::unique_ptr<Instruction> decodeVCmpxLeI32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxGtI32Vopc::VCmpxGtI32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_gt_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_gt_i32_sdwa"
+               : "v_cmpx_gt_i32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6419,12 +7608,19 @@ VCmpxGtI32Vopc::VCmpxGtI32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -6436,7 +7632,10 @@ std::unique_ptr<Instruction> decodeVCmpxGtI32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxNeI32Vopc::VCmpxNeI32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_ne_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_ne_i32_sdwa"
+               : "v_cmpx_ne_i32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6465,12 +7664,19 @@ VCmpxNeI32Vopc::VCmpxNeI32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -6482,7 +7688,10 @@ std::unique_ptr<Instruction> decodeVCmpxNeI32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxGeI32Vopc::VCmpxGeI32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_ge_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_ge_i32_sdwa"
+               : "v_cmpx_ge_i32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6511,12 +7720,19 @@ VCmpxGeI32Vopc::VCmpxGeI32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -6528,7 +7744,10 @@ std::unique_ptr<Instruction> decodeVCmpxGeI32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxTI32Vopc::VCmpxTI32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_t_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_t_i32_sdwa"
+               : "v_cmpx_t_i32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxTI32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6557,12 +7776,19 @@ VCmpxTI32Vopc::VCmpxTI32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -6574,7 +7800,10 @@ std::unique_ptr<Instruction> decodeVCmpxTI32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxFU32Vopc::VCmpxFU32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_f_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_f_u32_sdwa"
+               : "v_cmpx_f_u32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxFU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6603,12 +7832,19 @@ VCmpxFU32Vopc::VCmpxFU32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -6620,7 +7856,10 @@ std::unique_ptr<Instruction> decodeVCmpxFU32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxLtU32Vopc::VCmpxLtU32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_lt_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_lt_u32_sdwa"
+               : "v_cmpx_lt_u32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6649,12 +7888,19 @@ VCmpxLtU32Vopc::VCmpxLtU32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -6666,7 +7912,10 @@ std::unique_ptr<Instruction> decodeVCmpxLtU32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxEqU32Vopc::VCmpxEqU32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_eq_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_eq_u32_sdwa"
+               : "v_cmpx_eq_u32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6695,12 +7944,19 @@ VCmpxEqU32Vopc::VCmpxEqU32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -6712,7 +7968,10 @@ std::unique_ptr<Instruction> decodeVCmpxEqU32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxLeU32Vopc::VCmpxLeU32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_le_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_le_u32_sdwa"
+               : "v_cmpx_le_u32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6741,12 +8000,19 @@ VCmpxLeU32Vopc::VCmpxLeU32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -6758,7 +8024,10 @@ std::unique_ptr<Instruction> decodeVCmpxLeU32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxGtU32Vopc::VCmpxGtU32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_gt_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_gt_u32_sdwa"
+               : "v_cmpx_gt_u32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6787,12 +8056,19 @@ VCmpxGtU32Vopc::VCmpxGtU32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -6804,7 +8080,10 @@ std::unique_ptr<Instruction> decodeVCmpxGtU32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxNeU32Vopc::VCmpxNeU32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_ne_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_ne_u32_sdwa"
+               : "v_cmpx_ne_u32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6833,12 +8112,19 @@ VCmpxNeU32Vopc::VCmpxNeU32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -6850,7 +8136,10 @@ std::unique_ptr<Instruction> decodeVCmpxNeU32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxGeU32Vopc::VCmpxGeU32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_ge_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_ge_u32_sdwa"
+               : "v_cmpx_ge_u32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6879,12 +8168,19 @@ VCmpxGeU32Vopc::VCmpxGeU32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
@@ -6896,7 +8192,10 @@ std::unique_ptr<Instruction> decodeVCmpxGeU32Vopc(const MachineInst *opcode) {
 } // namespace detail
 
 VCmpxTU32Vopc::VCmpxTU32Vopc(const MachineInst *inst)
-    : Vopc("v_cmpx_t_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
+    : Vopc(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+               ? "v_cmpx_t_u32_sdwa"
+               : "v_cmpx_t_u32_e32",
+           reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxTU32Vopc)),
       vcc(64, OperandType::OPR_VCC, 0),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6925,12 +8224,19 @@ VCmpxTU32Vopc::VCmpxTU32Vopc(const MachineInst *inst)
     sdwa_src1_sext_ = sw->src1_sext;
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
+    sdwa_src0_operand_ = &src0;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_operand_ = &vsrc1;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
     sdwa_sdst_ = sw->sdst;
     sdwa_sd_ = sw->sd;
+    if (sw->sd)
+      vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
-  vcc.apply_fieldless_caps(false, false, false);
+  if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
+    vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= WRITES_EXEC;
 }
