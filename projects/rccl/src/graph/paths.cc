@@ -1292,13 +1292,18 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     // but the gfx1250 single-node doubling above asks for 4 parts per peer).
     //
     // gfx1250 defaults to the full pool so P2P follows the collective channel count.
-    // When the user explicitly raises NCCL_MAX_P2P_NCHANNELS past 4*CHANNEL_LIMIT
-    // (=64), treat it as an opt-in to the extended upper bound (up to MAXCHANNELS).
-    // Otherwise keep the historical 64 cap and per-arch multi-node caps below.
+    // Setting NCCL_MAX_P2P_NCHANNELS is an opt-in to a different upper bound (up to
+    // MAXCHANNELS). Otherwise keep the historical 64 cap and the per-arch caps below.
+    //
+    // Detect the opt-in from the environment, not from the value: the param default is
+    // MAXCHANNELS (kept in sync with NCCL), which is already above 4*CHANNEL_LIMIT, so a
+    // value test treats every unset run as an opt-in. That left non-gfx1250 P2P bounded
+    // only by the collective pool and made the `upper == defaultMax` caps below dead.
     {
+      const bool userSetMaxP2p = ncclGetEnv("NCCL_MAX_P2P_NCHANNELS") != NULL;
       int userMaxP2p = (int)ncclParamMaxP2pNChannels();
       int defaultMax = isGfx1250 ? (int)MAXCHANNELS : 4 * CHANNEL_LIMIT;
-      int upper = (userMaxP2p > defaultMax) ? std::min(userMaxP2p, (int)MAXCHANNELS) : defaultMax;
+      int upper = userSetMaxP2p ? std::min(userMaxP2p, (int)MAXCHANNELS) : defaultMax;
       comm->p2pnChannels = std::min(std::max(pow2Up(comm->p2pnChannels), pow2Up(comm->p2pnChannelsPerPeer)), upper);
       if (upper == defaultMax) {
         // p2pnChannelsPerPeer cannot be greater than MAXCHANNELS
@@ -1318,8 +1323,9 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
       // Trace which bound decided the P2P pool. Note p2pnChannels is rounded up to a
       // power of two, so a non-pow2 NCCL_MAX_P2P_NCHANNELS lands on the next pow2.
       INFO(NCCL_INIT | NCCL_TUNING,
-           "P2P channel defaults %s: defaultMax %d, NCCL_MAX_P2P_NCHANNELS %d -> upper %d, p2pnChannels %d",
-           comm->topo->nodes[GPU].nodes[0].gpu.gcn, defaultMax, userMaxP2p, upper, comm->p2pnChannels);
+           "P2P channel defaults %s: defaultMax %d, NCCL_MAX_P2P_NCHANNELS %s (%d) -> upper %d, p2pnChannels %d",
+           comm->topo->nodes[GPU].nodes[0].gpu.gcn, defaultMax, userSetMaxP2p ? "set" : "unset", userMaxP2p, upper,
+           comm->p2pnChannels);
     }
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, MAXCHANNELS);
   }
