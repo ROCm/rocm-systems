@@ -534,6 +534,31 @@ class TensileValidationTest(unittest.TestCase):
             / "gfx950_cdna4.json",
         )
 
+    def test_default_config_resolves_therock_workspace_layout(self) -> None:
+        with temporary_root() as root:
+            config = (
+                root
+                / "TheRock"
+                / "rocm-systems"
+                / "emulation"
+                / "rocjitsu"
+                / "configs"
+                / "gfx1250.json"
+            )
+            config.parent.mkdir(parents=True)
+            config.write_text("{}\n", encoding="utf-8")
+            overrides = {
+                tensile_support.TENSILELITE_ROOT_ENV: str(root / "tensile"),
+                tensile_support.ROCM_ROOT_ENV: str(root / "rocm"),
+                tensile_support.TENSILE_CLIENT_ENV: str(root / "client"),
+                tensile_support.TENSILE_WRAPPER_ENV: str(root / "wrapper"),
+                tensile_support.ROCJITSU_EXE_ENV: str(root / "rocjitsu"),
+                tensile_support.LLVM_READELF_ENV: str(root / "llvm-readelf"),
+            }
+            with mock.patch.dict(os.environ, overrides, clear=True):
+                paths = tensile_support.resolve_tensile_validation_paths(root)
+        self.assertEqual(paths.rocjitsu_config, config)
+
     def test_unknown_target_requires_an_explicit_rocjitsu_config(self) -> None:
         with temporary_root() as root:
             overrides = {

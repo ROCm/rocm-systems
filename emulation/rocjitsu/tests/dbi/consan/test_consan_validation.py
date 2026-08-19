@@ -217,8 +217,19 @@ class ConSanValidationTest(unittest.TestCase):
             with self.assertRaises(validation.ValidationError):
                 validation._launcher_from_json(malformed)
 
-    def test_inventory_and_fault_parsers_accept_a_target_launcher(self) -> None:
+    def test_runtime_command_parsers_accept_a_target_launcher(self) -> None:
         launcher_json = '["rocjitsu", "--config", "gfx1250.json", "--"]'
+        doctor = validation._parse_args(
+            [
+                "--target",
+                "gfx1250",
+                "doctor",
+                "--workload",
+                "pytorch-torch-mode",
+                "--launcher-json",
+                launcher_json,
+            ]
+        )
         inventory = validation._parse_args(
             [
                 "--target",
@@ -250,6 +261,7 @@ class ConSanValidationTest(unittest.TestCase):
             ]
         )
         launcher = ["rocjitsu", "--config", "gfx1250.json", "--"]
+        self.assertEqual(doctor.launcher, launcher)
         self.assertEqual(inventory.launcher, launcher)
         self.assertEqual(fault.launcher, launcher)
 
@@ -2182,7 +2194,42 @@ class ConSanValidationTest(unittest.TestCase):
             mock.patch.object(validation, "_doctor", return_value=result) as doctor,
         ):
             self.assertEqual(validation.main(["--target", "gfx1201", "doctor"]), 0)
-        doctor.assert_called_once_with(Path("/workspace"), "gfx1201", None)
+        doctor.assert_called_once_with(Path("/workspace"), "gfx1201", None, [])
+
+    def test_main_doctor_forwards_target_launcher(self) -> None:
+        result = {
+            "ok": True,
+            "workspace": "/workspace",
+            "target": "gfx1250",
+            "paths": {},
+            "tools": {},
+        }
+        launcher = ["rocjitsu", "--config", "gfx1250.json", "--"]
+        with (
+            mock.patch.object(
+                validation,
+                "_workspace_from_environment",
+                return_value=Path("/workspace"),
+            ),
+            mock.patch.object(validation, "_doctor", return_value=result) as doctor,
+        ):
+            self.assertEqual(
+                validation.main(
+                    [
+                        "--target",
+                        "gfx1250",
+                        "doctor",
+                        "--workload",
+                        "pytorch-torch-mode",
+                        "--launcher-json",
+                        json.dumps(launcher),
+                    ]
+                ),
+                0,
+            )
+        doctor.assert_called_once_with(
+            Path("/workspace"), "gfx1250", ("pytorch-torch-mode",), launcher
+        )
 
     def test_workload_doctor_requires_only_selected_inputs_and_tools(self) -> None:
         with temporary_root() as workspace:
@@ -3547,9 +3594,7 @@ class ConSanValidationTest(unittest.TestCase):
             2,
         )
 
-    def test_native_cdna_scrubs_software_model_environment_without_changing_gfx1250(
-        self,
-    ) -> None:
+    def test_all_targets_scrub_software_model_environment(self) -> None:
         model_environment = {
             name: f"configured-{name}" for name in validation.SOFTWARE_MODEL_ENVIRONMENT
         }
@@ -3567,22 +3612,21 @@ class ConSanValidationTest(unittest.TestCase):
                     ("gfx950", "pytorch-torch-mode"),
                 )
             }
-            gfx1250 = validation._clean_environment(
-                None,
-                validation.WORKLOAD_BY_ID["pytorch-torch-mode"],
-                Path("/workspace/hook.so"),
-                "gfx1250",
-                Path("/workspace"),
-            )
-        for target, environment in native_cdna.items():
+            environments = {
+                **native_cdna,
+                "gfx1250": validation._clean_environment(
+                    None,
+                    validation.WORKLOAD_BY_ID["pytorch-torch-mode"],
+                    Path("/workspace/hook.so"),
+                    "gfx1250",
+                    Path("/workspace"),
+                ),
+            }
+        for target, environment in environments.items():
             with self.subTest(target=target):
                 self.assertTrue(
                     validation.SOFTWARE_MODEL_ENVIRONMENT.isdisjoint(environment)
                 )
-        self.assertEqual(
-            {name: gfx1250[name] for name in validation.SOFTWARE_MODEL_ENVIRONMENT},
-            model_environment,
-        )
 
     def test_cdna_atomics_only_admit_order_faults(self) -> None:
         for target in ("gfx942", "gfx950"):
@@ -3744,8 +3788,13 @@ class ConSanValidationTest(unittest.TestCase):
                     "gfx1201",
                     workload,
                     workspace,
+                    ["rocjitsu", "--config", "gfx1201.json", "--"],
                 )
         self.assertTrue(runtime["ok"])
+        self.assertEqual(
+            run.call_args.args[0][:4],
+            ["rocjitsu", "--config", "gfx1201.json", "--"],
+        )
         self.assertEqual(run.call_args.args[0][-1], str(hook.resolve()))
 
     def test_pytorch_only_doctor_uses_runtime_target_probe_without_rocminfo(
@@ -3772,15 +3821,19 @@ class ConSanValidationTest(unittest.TestCase):
                 },
                 "reasons": [],
             }
+            launcher = ["rocjitsu", "--config", "gfx1201.json", "--"]
             with (
                 mock.patch.object(validation.shutil, "which", return_value=None),
                 mock.patch.object(
                     validation, "_pytorch_runtime_probe", return_value=runtime
-                ),
+                ) as probe,
             ):
-                doctor = validation._doctor(workspace, "gfx1201", (workload.id,))
+                doctor = validation._doctor(
+                    workspace, "gfx1201", (workload.id,), launcher
+                )
         self.assertTrue(doctor["ok"])
         self.assertEqual(doctor["tools"], {})
+        self.assertEqual(probe.call_args.args[-1], launcher)
 
     def test_pytorch_cluster_workload_runs_once(self) -> None:
         workload = validation.WORKLOAD_BY_ID["pytorch-cluster-load-sync"]
@@ -4197,6 +4250,24 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(command[command.index("--expect-numeric-rows") + 1], "1")
         self.assertEqual(command[command.index("--streamk-fixed-grid") + 1], "4")
         self.assertEqual(command[command.index("--require-streamk-mode") + 1], "3")
+
+    def test_bounded_tensile_smoke_resolves_therock_workspace_layout(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["tensile-sk-sgemm-runtime-smoke"]
+        with temporary_root() as workspace:
+            source_root = workspace / "TheRock" / "rocm-systems"
+            config = source_root / workload.relative_path
+            config.parent.mkdir(parents=True)
+            config.touch()
+            command = validation._workload_command(
+                workspace,
+                "gfx1250",
+                workload,
+                "clean",
+                workspace / "unused.json",
+            )
+            inputs = validation._input_files(workspace, "gfx1250", workload)
+        self.assertEqual(command[command.index("--config") + 1], str(config))
+        self.assertEqual(inputs["config"], config)
 
     def test_tensile_required_paths_follow_selected_corpus(self) -> None:
         smoke = validation.WORKLOAD_BY_ID["tensile-sk-sgemm-runtime-smoke"]

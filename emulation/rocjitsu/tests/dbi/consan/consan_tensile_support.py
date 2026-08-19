@@ -125,13 +125,13 @@ def resolve_tensile_validation_paths(
             raise ValueError(
                 f"target {target!r} has no default RocJITsu config; supported targets: {supported}"
             ) from error
-        rocjitsu_config = (
-            workspace
-            / "rocm-systems"
-            / "emulation"
-            / "rocjitsu"
-            / "configs"
-            / config_name
+        relative = Path("emulation/rocjitsu/configs") / config_name
+        rocjitsu_config = _first_existing(
+            (
+                workspace / "rocm-systems" / relative,
+                workspace / "TheRock" / "rocm-systems" / relative,
+            ),
+            directory=False,
         )
     llvm_readelf = _configured_path(LLVM_READELF_ENV)
     if llvm_readelf is None:

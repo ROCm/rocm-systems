@@ -166,6 +166,11 @@ rocjitsu-test-corpus-build/
 rocjitsu-build/
 ```
 
+The `rocm-systems` source corpus may be either
+`$CONSAN_VALIDATION_WORKSPACE_DIR/rocm-systems` in a standalone checkout or
+`$CONSAN_VALIDATION_WORKSPACE_DIR/TheRock/rocm-systems` in a TheRock
+workspace. The runner resolves both layouts without a compatibility symlink.
+
 For hip-moi rows, the runner requires the exact target-resolved executable
 reported by `manifest` and `doctor`; it does not require a generic
 `hip-moi-build/` alias. Current manifests use `hip-moi-build/` for gfx1201,
@@ -176,7 +181,7 @@ reported by `manifest` and `doctor`; it does not require a generic
 ### CDNA hip-moi simulator smoke
 
 The gfx942 and gfx950 target-native hip-moi executables share a compact
-simulator gate. Each target has 13 binaries totaling 33 tests: one reference
+simulator gate. Each target has 13 binaries totaling 35 tests: one reference
 binary plus all 12 shared CDNA instrumented sources. The offline suite registry
 owns their exact target-specific executable names and cross-checks the six
 campaign workload roles against the validation manifest. The runner rejects
@@ -301,6 +306,10 @@ The doctor reports every missing checkout, artifact, workload executable,
 hook, and tool.  When a PyTorch workload is selected, it also performs one
 small numeric GPU dispatch and verifies that the process loaded the exact
 ConSan hook.  Other workload kinds remain filesystem/tooling-only preflight.
+For a software target, pass the same exact `--launcher-json` used by `run`; the
+doctor applies it to the PyTorch dispatch so that the architecture and hook
+checks observe the emulated target. The runner removes legacy FFM/software-model
+environment variables for every target, including `gfx1250`.
 
 ### Native llama.cpp corpus clients
 

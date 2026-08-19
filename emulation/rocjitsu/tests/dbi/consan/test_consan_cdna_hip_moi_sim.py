@@ -21,7 +21,7 @@ class CdnaHipMoiSimulatorTest(unittest.TestCase):
             sum(suite.expected_tests for suite in simulator.SUITES),
             simulator.EXPECTED_TESTS,
         )
-        self.assertEqual(simulator.EXPECTED_TESTS, 33)
+        self.assertEqual(simulator.EXPECTED_TESTS, 35)
         self.assertEqual(len(simulator.SUITES), 13)
         self.assertEqual(
             {
@@ -200,7 +200,7 @@ class CdnaHipMoiSimulatorTest(unittest.TestCase):
                 "SUITE_BY_ID",
                 {suite.id: suite for suite in wrong_test_count},
             ),
-            self.assertRaisesRegex(registry.RegistryError, "33 tests"),
+            self.assertRaisesRegex(registry.RegistryError, "35 tests"),
         ):
             registry.validate()
 
@@ -375,7 +375,7 @@ class CdnaHipMoiSimulatorTest(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(run.call_count, 13)
         self.assertIn("== gfx950 hip-moi simulator summary ==", output.getvalue())
-        self.assertIn("total: 33/33 tests", output.getvalue())
+        self.assertIn("total: 35/35 tests", output.getvalue())
 
     def test_single_suite_count_mismatch_fails_the_ctest_entry(self) -> None:
         target = simulator.TARGETS["gfx942"]
@@ -442,7 +442,7 @@ class CdnaHipMoiSimulatorTest(unittest.TestCase):
                     completed = subprocess.CompletedProcess(
                         args=[],
                         returncode=0,
-                        stdout="[  PASSED  ] 2 tests.\n",
+                        stdout=f"[  PASSED  ] {suite.expected_tests} tests.\n",
                         stderr="",
                     )
                     with (

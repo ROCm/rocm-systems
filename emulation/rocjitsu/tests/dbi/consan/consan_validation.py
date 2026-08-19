@@ -1497,6 +1497,15 @@ def _workspace_from_environment() -> Path:
     return workspace
 
 
+def _corpus_root(workspace: Path, corpus: str) -> Path:
+    """Resolve a validation corpus in both standalone and TheRock layouts."""
+    canonical = workspace / corpus
+    if canonical.exists() or corpus != "rocm-systems":
+        return canonical
+    therock = workspace / "TheRock" / "rocm-systems"
+    return therock if therock.is_dir() else canonical
+
+
 def _target(args: argparse.Namespace) -> str:
     value = args.target or os.environ.get(TARGET_ENV)
     if not value or re.fullmatch(r"gfx[0-9a-z]+", value) is None:
@@ -1595,6 +1604,8 @@ def _required_paths(
         paths["hip-moi"] = workspace / "hip-moi"
     if any(workload.corpus == "rocjitsu-test-corpus" for workload in workloads):
         paths["rocjitsu-test-corpus"] = workspace / "rocjitsu-test-corpus"
+    if any(workload.corpus == "rocm-systems" for workload in workloads):
+        paths["rocm-systems"] = _corpus_root(workspace, "rocm-systems")
     if any(workload.corpus == "rdna4-matmul" for workload in workloads):
         paths["rdna4-matmul"] = _rdna4_matmul_root(workspace)
     if any(workload.kind == "tensile" for workload in workloads):
@@ -1631,6 +1642,7 @@ def _pytorch_runtime_probe(
     target: str,
     workload: Workload,
     workspace: Path,
+    launcher: list[str] | None = None,
 ) -> dict:
     """Proves that PyTorch can dispatch and that its HSA runtime loads ConSan."""
     probe_source = """
@@ -1675,8 +1687,9 @@ os._exit(0)
         }
     )
     try:
+        command = [str(python), "-c", probe_source, str(hook.resolve())]
         probe = subprocess.run(
-            [str(python), "-c", probe_source, str(hook.resolve())],
+            _with_launcher(launcher or [], command),
             check=False,
             capture_output=True,
             text=True,
@@ -1809,7 +1822,8 @@ def _input_files(workspace: Path, target: str, workload: Workload) -> dict[str, 
             "python": _tensile_python(),
             "workload-source": Path(__file__).with_name("consan_tensile_validation.py"),
             "support-source": Path(__file__).with_name("consan_tensile_support.py"),
-            "config": workspace / workload.corpus / workload.relative_path,
+            "config": _corpus_root(workspace, workload.corpus)
+            / workload.relative_path,
             "client": paths.client,
             "wrapper": paths.wrapper,
             "rocjitsu": paths.rocjitsu,
@@ -1884,7 +1898,10 @@ def _input_files(workspace: Path, target: str, workload: Workload) -> dict[str, 
 
 
 def _doctor(
-    workspace: Path, target: str, workload_ids: tuple[str, ...] | None = None
+    workspace: Path,
+    target: str,
+    workload_ids: tuple[str, ...] | None = None,
+    launcher: list[str] | None = None,
 ) -> dict:
     selected_ids = (
         tuple(workload.id for workload in _workloads_for_target(target))
@@ -1941,6 +1958,7 @@ def _doctor(
                 target,
                 pytorch_workloads[0],
                 workspace,
+                launcher,
             )
         else:
             runtimes["pytorch"] = {
@@ -2009,7 +2027,7 @@ def _clean_environment(
         for key, value in os.environ.items()
         if not key.startswith(CONTROLLED_ENV_PREFIX)
         and key not in ignored_environment
-        and not (target in NATIVE_CDNA_TARGETS and key in SOFTWARE_MODEL_ENVIRONMENT)
+        and key not in SOFTWARE_MODEL_ENVIRONMENT
     }
     if target is not None:
         environment["HIP_TARGET"] = target
@@ -2314,7 +2332,7 @@ def _workload_command(
             "--workspace",
             str(workspace),
             "--config",
-            str(workspace / workload.corpus / workload.relative_path),
+            str(_corpus_root(workspace, workload.corpus) / workload.relative_path),
             "--gpu-target",
             target,
             "--output-dir",
@@ -6050,7 +6068,7 @@ def _inventory(args: argparse.Namespace) -> int:
     target = selection.target
     workload = selection.require_workload()
     workspace = _workspace_from_environment()
-    if not _doctor(workspace, target, (workload.id,))["ok"]:
+    if not _doctor(workspace, target, (workload.id,), args.launcher)["ok"]:
         raise ValidationError("workspace doctor failed; run the doctor subcommand")
     root = args.artifact_root.resolve() / workload.id / "inventory"
     root.mkdir(parents=True, exist_ok=False)
@@ -6967,7 +6985,7 @@ def _fault(args: argparse.Namespace) -> int:
     target = selection.target
     workload = selection.require_workload()
     workspace = _workspace_from_environment()
-    if not _doctor(workspace, target, (workload.id,))["ok"]:
+    if not _doctor(workspace, target, (workload.id,), args.launcher)["ok"]:
         raise ValidationError("workspace doctor failed; run the doctor subcommand")
     if not args.allow_destructive:
         raise ValidationError("fault execution requires --allow-destructive")
@@ -7102,7 +7120,7 @@ def _fault(args: argparse.Namespace) -> int:
                 "--smoke-command-json",
                 json.dumps(smoke),
                 "--revision-root",
-                str(workspace / workload.corpus),
+                str(_corpus_root(workspace, workload.corpus)),
                 "--hash-file",
                 f"hook={hook}",
             ]
@@ -7606,7 +7624,7 @@ def _empirical_campaign(args: argparse.Namespace) -> int:
     workload = selection.require_workload()
     workspace = _workspace_from_environment()
     timeout = args.timeout if args.timeout is not None else workload.run_timeout_seconds
-    doctor = _doctor(workspace, target, (workload.id,))
+    doctor = _doctor(workspace, target, (workload.id,), args.launcher)
     if not doctor["ok"]:
         raise ValidationError("workspace doctor failed; run the doctor subcommand")
     profiles = PROFILE_IDS if args.profile == "all" else (args.profile,)
@@ -7936,7 +7954,7 @@ def _run(args: argparse.Namespace) -> int:
     workload = selection.require_workload()
     workspace = _workspace_from_environment()
     timeout = args.timeout if args.timeout is not None else workload.run_timeout_seconds
-    doctor = _doctor(workspace, target, (workload.id,))
+    doctor = _doctor(workspace, target, (workload.id,), args.launcher)
     if not doctor["ok"]:
         raise ValidationError("workspace doctor failed; run the doctor subcommand")
     artifact_root = args.artifact_root.resolve()
@@ -8007,6 +8025,13 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     doctor = subparsers.add_parser("doctor", help="validate tools and workspace layout")
     doctor.add_argument(
         "--workload", choices=(*tuple(WORKLOAD_BY_ID), "all"), default="all"
+    )
+    doctor.add_argument(
+        "--launcher-json",
+        dest="launcher",
+        type=_launcher_argument,
+        default=[],
+        help="JSON argv prefix used for target runtime probes",
     )
     doctor.add_argument("--json", action="store_true")
 
@@ -8227,7 +8252,9 @@ def main(argv: list[str] | None = None) -> int:
                 _print_explain(result)
             return 0
         if args.command == "doctor":
-            result = _doctor(workspace, target, selection.selected_ids())
+            result = _doctor(
+                workspace, target, selection.selected_ids(), args.launcher
+            )
             if args.json:
                 print(json.dumps(result, indent=2, sort_keys=True))
             else:
