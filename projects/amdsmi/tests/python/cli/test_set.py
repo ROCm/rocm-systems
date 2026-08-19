@@ -77,8 +77,12 @@ class TestSet(TestCliBase):
                 num = len(clock_sys["frequency_levels"])
                 level = f"Level {num - 1}"
                 clock_freq = int(clock_sys["frequency_levels"][level]["value"])
+                # Readable clock levels do not imply the determinism feature exists.
                 cmds.append(
-                    (f"amd-smi set --perf-determinism {clock_freq} --gpu {index}", self.PASS)
+                    (
+                        f"amd-smi set --perf-determinism {clock_freq} --gpu {index}",
+                        self.PASS_OR_UNSUPPORTED,
+                    )
                 )
 
             # set --compute-partition defaults
@@ -184,10 +188,12 @@ class TestSet(TestCliBase):
                     clk_type_limit_name = clock[clk_type_name][clk_limit_name]
                     if type(clk_type_limit_name) is dict:
                         value = clk_type_limit_name["value"]
+                        # A readable min/max clock does not imply the device
+                        # supports setting a limit on it.
                         cmds.append(
                             (
                                 f"amd-smi set --clk-limit {clk_type} {limit_type} {value} --gpu {index}",
-                                self.PASS,
+                                self.PASS_OR_UNSUPPORTED,
                             )
                         )
 
@@ -222,18 +228,18 @@ class TestSet(TestCliBase):
                     )
             # set --process-isolation defaults
             process_isolation = self.static_data["gpu_data"][index]["process_isolation"]
-            if process_isolation == "Disabled":
-                process_isolation_value = 0
-            else:
-                process_isolation_value = 1
-            cmds.append(
-                (
-                    f"amd-smi set --process-isolation {process_isolation_value} --gpu {index}",
-                    self.PASS,
+            # Put back whatever value the sweep left; "N/A" means unreadable, so
+            # there is nothing to restore.
+            if process_isolation != "N/A":
+                original = 0 if process_isolation == "Disabled" else 1
+                cmds.append(
+                    (
+                        f"amd-smi set --process-isolation {original} --gpu {index}",
+                        self.PASS_OR_UNSUPPORTED,
+                    )
                 )
-            )
 
-        print("Restore Starting Values")
+        self.common.print("Restore Starting Values")
         self.RunCmds(cmds)
 
         return
