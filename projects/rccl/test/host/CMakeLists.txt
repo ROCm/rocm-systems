@@ -1,21 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
 
-set(RCCL_MICRO_TEST_SOURCES
-  p2p-test.cc
-  rma-proxy-progress-test.cc          # RMA proxy inflight-request coverage
-  group-test.cc
-  devcomm-test.cc
-  fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
-  fakes/p2p_fakes.cc                   # p2p-specific stubs (arch/topo + alloc emulators)
-  fakes/rma_fakes.cc                   # rma_proxy_progress externals (circular-buf / destroy)
-  fakes/comm_fakes.cc                  # comm-lifecycle seams (real in init.cc; faked here)
-  fakes/collective_stubs.cc            # fail-loud collective launch + transport floor
-  fakes/devcomm_fakes.cc
-  fakes/hip_fakes.cc                   # HIP runtime seams + link-satisfying stubs
-  ../common/main_altrsmi.cpp           # minimal gtest main, no RCCL deps
-  ../common/ProcessIsolatedTestRunner.cpp
-)
-
 # =====================================================================
 # In-RCCL-build integration.
 #
@@ -31,6 +15,35 @@ set(RCCL_MICRO_TEST_SOURCES
 # not defined, so we fall through to the standalone project that builds
 # rccl-HostUnitTests + rccl-UnitTestsMicro from a hipified snapshot.
 # =====================================================================
+
+# --- Source lists shared by both modes --------------------------------
+# The in-RCCL-build path and the standalone project build the same two
+# host-only micro binaries; only the toolchain/link plumbing differs. Keep the
+# file lists in one place so a source added/removed here applies to both. Paths
+# are relative to this directory (CMAKE_CURRENT_SOURCE_DIR), valid in either
+# mode. RCCL_MICRO_COMMON_SOURCES is the shared fakes + gtest main + isolation
+# runner; the *_UNIT_SOURCES vars are the per-binary unit-specific files.
+set(RCCL_MICRO_COMMON_SOURCES
+  fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
+  fakes/hip_fakes.cc                   # HIP runtime seams + link-satisfying stubs
+  ../common/main_altrsmi.cpp           # minimal gtest main, no RCCL deps
+  ../common/ProcessIsolatedTestRunner.cpp
+)
+set(RCCL_MICRO_UNIT_SOURCES
+  p2p-test.cc
+  rma-proxy-progress-test.cc          # RMA proxy inflight-request coverage
+  group-test.cc
+  devcomm-test.cc                      # devcomm version-compat shim microtests
+  fakes/p2p_fakes.cc                   # p2p-specific stubs (arch/topo + alloc emulators)
+  fakes/rma_fakes.cc                   # rma_proxy_progress externals (circular-buf / destroy)
+  fakes/comm_fakes.cc                  # comm-lifecycle seams (real in init.cc; faked here)
+  fakes/collective_stubs.cc            # fail-loud collective launch + transport floor
+  fakes/devcomm_fakes.cc               # devcomm test doubles
+)
+set(RCCL_DEVR_UNIT_SOURCES
+  DevRuntimeTests.cpp
+  fakes/devr_fakes.cc                  # devr / gin / rma / team / shadow-pool stubs
+)
 
 # apply_hip_compile_only(<target>)
 #
@@ -127,10 +140,7 @@ function(add_host_micro_test name)
   cmake_parse_arguments(ARG "" "" "SOURCES;INCLUDES;DEFINES" ${ARGN})
   add_executable(${name}
     ${ARG_SOURCES}
-    fakes/nccl_fakes.cc
-    fakes/hip_fakes.cc
-    ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
-    ${RCCL_TEST_DIR}/common/ProcessIsolatedTestRunner.cpp
+    ${RCCL_MICRO_COMMON_SOURCES}
   )
   target_include_directories(${name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -156,7 +166,9 @@ if(BUILD_TESTS)
   # special hardware. Deliberately NOT linking librccl.so or the HIP runtime,
   # so any un-shimmed HIP call surfaces as a link error rather than binding
   # libamdhip64.so (HIP compile requirements are applied below without linking).
-  add_executable(rccl-UnitTestsMicro ${RCCL_MICRO_TEST_SOURCES})
+  add_executable(rccl-UnitTestsMicro
+    ${RCCL_MICRO_UNIT_SOURCES}
+    ${RCCL_MICRO_COMMON_SOURCES})
 
   target_include_directories(rccl-UnitTestsMicro PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -201,7 +213,8 @@ if(BUILD_TESTS)
 
   # Deliberately NOT linking librccl.so: this binary is for tests that compile
   # their unit-under-test source file(s) directly. Add files to
-  # RCCL_MICRO_TEST_SOURCES at the top of this file as new units come under test.
+  # RCCL_MICRO_UNIT_SOURCES (or RCCL_MICRO_COMMON_SOURCES) at the top of this
+  # file as new units come under test -- both build modes pick them up.
   rocm_install(TARGETS rccl-UnitTestsMicro COMPONENT tests)
 
   register_test_categories(rccl-UnitTestsMicro test_categories_micro.yaml)
@@ -316,13 +329,8 @@ if(BUILD_TESTS)
   # dev_runtime.cc (symmetric memory) only exists on ROCm >= 6.4.
   if(ROCM_VERSION VERSION_GREATER_EQUAL "60400")
   add_executable(rccl-UnitTestsDevRuntime
-    DevRuntimeTests.cpp
-    fakes/nccl_fakes.cc                 # reusable stubs for nccl*/bootstrap*/group symbols
-    fakes/devr_fakes.cc                 # devr / gin / rma / team / shadow-pool stubs
-    fakes/hip_fakes.cc                  # HIP runtime seams + host-backed VMM/stream profile
-    ../common/main_altrsmi.cpp          # minimal gtest main, no RCCL deps
-    ../common/ProcessIsolatedTestRunner.cpp
-  )
+    ${RCCL_DEVR_UNIT_SOURCES}
+    ${RCCL_MICRO_COMMON_SOURCES})
 
   target_include_directories(rccl-UnitTestsDevRuntime PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -641,15 +649,7 @@ target_link_libraries(rccl-HostUnitTests PRIVATE
 # duplicate-symbol/ODR clashes, and this keeps devr_fakes.cc off the p2p link.
 add_host_micro_test(rccl-UnitTestsMicro
   SOURCES
-    p2p-test.cc
-    rma-proxy-progress-test.cc
-    group-test.cc
-    devcomm-test.cc
-    fakes/p2p_fakes.cc
-    fakes/rma_fakes.cc
-    fakes/comm_fakes.cc
-    fakes/collective_stubs.cc
-    fakes/devcomm_fakes.cc
+    ${RCCL_MICRO_UNIT_SOURCES}
   INCLUDES
     ${RCCL_HIPIFY_DIR}/src/devcomm         # devcomm_v22902.h, included unqualified
   DEFINES
@@ -667,8 +667,7 @@ add_host_micro_test(rccl-UnitTestsMicro
 
 add_host_micro_test(rccl-UnitTestsDevRuntime
   SOURCES
-    DevRuntimeTests.cpp
-    fakes/devr_fakes.cc
+    ${RCCL_DEVR_UNIT_SOURCES}
   INCLUDES
     ${CMAKE_CURRENT_SOURCE_DIR}/fakes
     ${RCCL_HIPIFY_DIR}/src/include/nccl_device
