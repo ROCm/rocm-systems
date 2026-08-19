@@ -133,6 +133,7 @@ class TestTranspose(RocprofsysTest):
     ]
     LOOPS_RUN_ARGS = ["2", "100", "50"]
     SAMPLING_RUN_ARGS = ["4", "500", "100"]
+    LOCKS_RUN_ARGS = ["2", "50", "10"]
     SAMPLING_ENV = {
         "ROCPROFSYS_SAMPLING_REALTIME": "ON",
         "ROCPROFSYS_SAMPLING_REALTIME_FREQ": "300",
@@ -204,40 +205,25 @@ class TestTranspose(RocprofsysTest):
 
     @pytest.mark.locks
     @pytest.mark.timeout(60)
-    def test_mutex_locks(self, transpose_env):
+    @pytest.mark.parametrize("lock_mode", ["mutex-locks", "rw-locks"])
+    def test_locks(self, lock_mode, transpose_env):
         """
         Regression test for a self-deadlock: pthread_mutex_gotcha used to
-        intercept the trace cache's own internal lock (buffer_storage's
-        m_mutex), recursively re-entering it on the same thread while
-        recording the trace event for the lock acquisition itself. This
-        hung rocprof-sys-run indefinitely with -I mutex-locks enabled.
-        """
-        result = self.run_test(
-            "sys_run",
-            "transpose",
-            env=transpose_env,
-            sys_run_args=["-I", "mutex-locks"],
-            run_args=["2", "50", "10"],
-            check_target_arch=True,
-        )
-        self.assert_regex(result)
+        intercept rocprof-sys's own internal locks, recursively re-entering
+        them on the same thread while recording the trace event for the lock
+        acquisition itself.
 
-    @pytest.mark.locks
-    @pytest.mark.timeout(60)
-    def test_rw_locks(self, transpose_env):
-        """
-        Regression test for a self-deadlock: pthread_mutex_gotcha used to
-        intercept common::synchronized<>'s internal rwlock (metadata_registry's
-        m_threads), recursively re-entering it on the same thread while
-        recording the trace event for the lock acquisition itself. This
-        aborted rocprof-sys-run with SIGABRT with -I rw-locks enabled.
+        With -I mutex-locks this hung rocprof-sys-run indefinitely on the
+        trace cache's own lock (buffer_storage's m_mutex). With -I rw-locks it
+        aborted with SIGABRT on common::synchronized<>'s rwlock
+        (metadata_registry's m_threads).
         """
         result = self.run_test(
             "sys_run",
             "transpose",
             env=transpose_env,
-            sys_run_args=["-I", "rw-locks"],
-            run_args=["2", "50", "10"],
+            sys_run_args=["-I", lock_mode],
+            run_args=self.LOCKS_RUN_ARGS,
             check_target_arch=True,
         )
         self.assert_regex(result)
