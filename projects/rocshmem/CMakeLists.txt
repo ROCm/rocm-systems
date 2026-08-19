@@ -127,7 +127,7 @@ if(TARGET amd_smi)
 
   find_path(_hip_include_dir
     hip/hip_runtime_api.h
-    HINTS "${ROCM_PATH}" ${CMAKE_PREFIX_PATH} /opt/rocm
+    HINTS "${ROCM_PATH}"
     PATH_SUFFIXES include
     NO_DEFAULT_PATH
   )
