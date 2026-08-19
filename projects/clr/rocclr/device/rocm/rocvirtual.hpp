@@ -858,19 +858,11 @@ class VirtualGPU : public device::VirtualDevice {
   };
 
   void SetStateFlag(StateFlags flag) {
-    uint8_t old_state = state_.load(std::memory_order_relaxed);
-    while (!state_.compare_exchange_weak(old_state, old_state | flag,
-                                         std::memory_order_release,
-                                         std::memory_order_relaxed)) {
-    }
+    state_.fetch_or(flag, std::memory_order_release);
   }
 
   void ClearStateFlag(StateFlags flag) {
-    uint8_t old_state = state_.load(std::memory_order_relaxed);
-    while (!state_.compare_exchange_weak(old_state, old_state & ~flag,
-                                         std::memory_order_release,
-                                         std::memory_order_relaxed)) {
-    }
+    state_.fetch_and(~flag, std::memory_order_release);
   }
 
   bool GetStateFlag(StateFlags flag) const {
