@@ -81,6 +81,7 @@ groups:
     - rocrtstFunc.Signal_Destroy_Concurrently
     - rocrtstFunc.Signal_Max_Consumer
     - rocrtstFunc.Signal_Create_Concurrently
+    - rocrtstFunc.Signal_Wait_Multiple_With_Null_Entry
     - rocrtstFunc.Memory_Available
     - rocrtstPerf.Memory_Async_Copy
 
