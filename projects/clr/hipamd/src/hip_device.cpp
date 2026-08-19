@@ -186,7 +186,8 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
       waitForStream(null_stream_);
     }
   } else {
-    activeQueues = blocking_stream->device().getActiveQueues();
+    // Wait on this device's active streams.
+    activeQueues = devices()[0]->getActiveQueues();
     for (const auto& queue : activeQueues) {
       auto* active_stream = static_cast<hip::Stream*>(queue);
       // Only wait on blocking (non-nonblocking) streams other than the current one

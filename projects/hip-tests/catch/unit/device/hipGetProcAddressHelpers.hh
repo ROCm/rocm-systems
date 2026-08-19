@@ -128,7 +128,7 @@ bool validateCharDeviceArray(char *arr, int size, int refValue) {
  */
 __global__ void fillArray(int *arr, int size, int value) {
   for ( int i = 0; i < size; i++ ) {
-    arr[i] = value;
+    __hip_atomic_store(&arr[i], value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
   }
 }
 
