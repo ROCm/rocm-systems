@@ -18,8 +18,7 @@ This module is ONLY used in profile mode. Analyze mode can use pandas freely.
 
 import csv
 from collections.abc import Iterator, Sequence
-from contextlib import ExitStack
-from typing import Callable, Optional
+from typing import Optional
 
 from utils import csv_compression
 
@@ -98,51 +97,3 @@ class GroupIdAssigner:
         key = tuple(row.get(col) for col in self._columns)
         row[self._target] = self._ids.setdefault(key, len(self._ids))
         return row
-
-
-def stream_csv_to_file(
-    src: str,
-    dest: str,
-    transform: Optional[Callable[[dict], dict]] = None,
-    drop_columns: Sequence[str] = (),
-) -> int:
-    """Copy src to dest one row at a time, and return the row count.
-
-    Each row passes through transform before being written, so callers can
-    relabel columns without materializing the file. Columns in drop_columns are
-    removed from the output header and from every row.
-
-    Raises ValueError if src has no header row.
-    """
-    dropped = set(drop_columns)
-    with ExitStack() as stack:
-        infile = stack.enter_context(csv_compression.open_gzip_csv_read(src))
-        reader = csv.DictReader(infile)
-        if reader.fieldnames is None:
-            raise ValueError(f"CSV file {src} has no header row")
-
-        first_row = next(reader, None)
-        if first_row is not None and transform is not None:
-            first_row = transform(first_row)
-        # Take the header from the transformed row so that columns a transform
-        # adds are written too.
-        header_source = reader.fieldnames if first_row is None else first_row
-        fieldnames = [f for f in header_source if f not in dropped]
-
-        outfile = stack.enter_context(csv_compression.open_gzip_csv_write(dest))
-        writer = csv.DictWriter(outfile, fieldnames=fieldnames, extrasaction="ignore")
-        writer.writeheader()
-
-        if first_row is None:
-            return 0
-
-        rows_written = 0
-        row: Optional[dict] = first_row
-        while row is not None:
-            writer.writerow(row)
-            rows_written += 1
-            row = next(reader, None)
-            if row is not None and transform is not None:
-                row = transform(row)
-
-    return rows_written

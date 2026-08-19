@@ -5,6 +5,7 @@ import argparse
 import copy
 import csv
 import re
+import sqlite3
 import sys
 from abc import abstractmethod
 from collections import OrderedDict
@@ -15,7 +16,7 @@ import pandas as pd
 
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils import csv_compression, file_io, parser, schema
+from utils import csv_compression, file_io, parser, rocpd_data, schema
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
@@ -436,18 +437,44 @@ class OmniAnalyze_Base:
 
         console_debug(f"Created file: {output_file} ({rows_written} counter rows)")
 
-    def join_workload_csvs(self, workload_dir: Path) -> None:
-        """Concatenate results_*.csv.gz source files into pmc_perf.csv if needed.
+    @demarcate
+    def merge_profile_artifacts(self, workload_dir: Path, output_file: Path) -> None:
+        """Merge per-process profile artifacts into one plain CSV."""
+        try:
+            with open(output_file, "w", newline="", encoding="utf-8") as outfile:
+                rows_written = rocpd_data.write_pmc_rows(
+                    rocpd_data.iter_workload_rows(workload_dir), outfile
+                )
+        except (sqlite3.Error, ValueError, *csv_compression.CORRUPT_CSV_ERRORS) as e:
+            output_file.unlink(missing_ok=True)
+            console_error(
+                f"Could not read profile artifacts under "
+                f"{workload_dir / rocpd_data.OUT_DIR}: {e}\n"
+                "Re-run 'rocprof-compute profile' to regenerate the workload."
+            )
 
-        Args:
-            workload_dir: Path to the workload directory
-        """
+        if rows_written == 0:
+            output_file.unlink(missing_ok=True)
+            console_error(
+                f"No counter data in profile artifacts under "
+                f"{workload_dir / rocpd_data.OUT_DIR}.\n"
+                f"Please re-run 'rocprof-compute profile'."
+            )
+
+        console_debug(f"Created file: {output_file} ({rows_written} counter rows)")
+
+    def join_workload_csvs(self, workload_dir: Path) -> None:
+        """Build pmc_perf.csv from profile artifacts or legacy results CSVs."""
         pmc_perf = workload_dir / "pmc_perf.csv"
         results_glob = f"results_*.csv{csv_compression.GZIP_SUFFIX}"
         result_files = sorted(workload_dir.glob(results_glob))
 
         if pmc_perf.exists() and pmc_perf.stat().st_size > 0:
             console_debug(f"Using existing {pmc_perf}")
+        elif rocpd_data.pass_dirs(workload_dir):
+            console_log(f"Merging profile artifacts for {workload_dir}...")
+            self.merge_profile_artifacts(workload_dir, pmc_perf)
+            console_log(f"Created {pmc_perf}")
         elif result_files:
             console_log(f"Joining {results_glob} for {workload_dir}...")
             self.concat_result_csvs(result_files, pmc_perf)
@@ -455,7 +482,8 @@ class OmniAnalyze_Base:
         else:
             console_error(
                 f"No profiling data found in {workload_dir}.\n"
-                f"Expected: pmc_perf.csv or {results_glob}\n"
+                f"Expected: pmc_perf.csv, {rocpd_data.OUT_DIR}/ artifacts, "
+                f"or {results_glob}\n"
                 f"Please run 'rocprof-compute profile' first."
             )
 

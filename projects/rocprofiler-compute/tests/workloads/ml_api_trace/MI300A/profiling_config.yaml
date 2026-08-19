@@ -34,7 +34,6 @@ pc_sampling_method: stochastic
 quiet: false
 remaining: python3 /app/projects/rocprofiler-compute/src/utils/inject_roctx/launch.py
   --frameworks torch,triton -- ./tests/torch_compile_triton.py
-retain_rocpd_output: false
 rocprofiler_sdk_tool_path: /rocm-venv/lib/python3.12/site-packages/_rocm_sdk_core/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so
 roof_only: false
 set_selected: compute_thruput_util

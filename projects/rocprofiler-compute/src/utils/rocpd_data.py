@@ -3,11 +3,14 @@
 
 import csv
 import sqlite3
-from contextlib import ExitStack, closing
-from typing import Optional
+from collections.abc import Iterable, Iterator
+from contextlib import closing
+from pathlib import Path
+from typing import IO
 
 import utils.utils_profile_csv as csv_ops
 from utils import csv_compression
+from utils.csv_compression import PathLike, compressed_name
 from utils.logger import console_error
 
 # From schema definition in source/share/rocprofiler-sdk-rocpd/data_views.sql
@@ -47,160 +50,198 @@ SELECT
 FROM regions
 ORDER BY start
 """
-KERNEL_DISPATCH_QUERY = """
-SELECT dispatch_id, event_id, guid
-FROM rocpd_kernel_dispatch
-WHERE guid = ?
-"""
-ROCPD_PMC_EVENT_TABLE_NAME_PREFIX = "rocpd_pmc_event_"
-TABLE_NAME_PREFIX_QUERY = (
-    "SELECT name FROM sqlite_master WHERE type='table' "
-    "AND name LIKE '{table_name_prefix}%'"
+MARKER_COLUMNS = (
+    "Domain",
+    "Function",
+    "Process_Id",
+    "Thread_Id",
+    "Correlation_Id",
+    "GUID",
+    "Start_Timestamp",
+    "End_Timestamp",
 )
-INSERT_QUERY = "INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
+# Non-counter columns from counters_collection, read straight from the tables
+# the view builds on. Native counter CSVs live in a separate lane, so a db
+# the native tool collected has dispatches but no counters_collection rows.
+KERNEL_INFO_QUERY = """
+SELECT
+    K.agent_id as GPU_ID,
+    K.guid as GUID,
+    E.stack_id as Correlation_Id,
+    K.dispatch_id as Dispatch_ID,
+    P.pid as PID,
+    (K.grid_size_x * K.grid_size_y * K.grid_size_z) as Grid_Size,
+    (K.workgroup_size_x * K.workgroup_size_y * K.workgroup_size_z) as Workgroup_Size,
+    K.group_segment_size as LDS_Per_Workgroup,
+    K.private_segment_size as Scratch_Per_Workitem,
+    S.arch_vgpr_count as Arch_VGPR,
+    S.accum_vgpr_count as Accum_VGPR,
+    S.sgpr_count as SGPR,
+    S.display_name as Kernel_Name,
+    K.start as Start_Timestamp,
+    K.end as End_Timestamp,
+    K.kernel_id as Kernel_ID
+FROM rocpd_kernel_dispatch K
+    INNER JOIN rocpd_event E ON E.id = K.event_id AND E.guid = K.guid
+    INNER JOIN rocpd_info_kernel_symbol S ON S.id = K.kernel_id AND S.guid = K.guid
+    INNER JOIN rocpd_info_process P ON P.id = K.pid AND P.guid = K.guid
+ORDER BY K.dispatch_id
+"""
+KERNEL_DISPATCH_EXISTS_QUERY = "SELECT EXISTS(SELECT 1 FROM rocpd_kernel_dispatch)"
 
-# Rows per executemany call. Must be >1 to avoid row-by-row overhead
-# and less than the full file to preserve the streaming memory benefit.
-PMC_EVENT_INSERT_BATCH_SIZE = 50_000
+OUT_DIR = "out"
+NATIVE_COUNTERS_SUFFIX = "_native_counter_collection.csv"
+PMC_COLUMNS = (
+    "GPU_ID",
+    "GUID",
+    "Correlation_Id",
+    "Dispatch_ID",
+    "Grid_Size",
+    "Workgroup_Size",
+    "LDS_Per_Workgroup",
+    "Scratch_Per_Workitem",
+    "Arch_VGPR",
+    "Accum_VGPR",
+    "SGPR",
+    "Kernel_Name",
+    "Start_Timestamp",
+    "End_Timestamp",
+    "Kernel_ID",
+    "Counter_Name",
+    "Counter_Value",
+)
 
 
-def convert_dbs_to_csv(
-    db_paths: list[str],
-    counter_collection_csv_path: str,
-    marker_trace_csv_path: str,
-) -> None:
-    queries = {
-        counter_collection_csv_path: COUNTERS_COLLECTION_QUERY,
-        marker_trace_csv_path: MARKER_API_TRACE_QUERY,
+def pass_dir(workload_dir: PathLike, fbase: str) -> Path:
+    """Return the directory holding one collection pass' per-process artifacts."""
+    return Path(workload_dir) / OUT_DIR / fbase
+
+
+def pass_dirs(workload_dir: PathLike) -> list[Path]:
+    """Return a workload's collection pass directories, in pass order."""
+    out_dir = Path(workload_dir) / OUT_DIR
+    return sorted(path for path in out_dir.glob("*") if db_paths(path))
+
+
+def db_paths(path: PathLike) -> list[Path]:
+    """Return the per-process rocpd databases of one pass, in process order."""
+    return sorted(Path(path).glob("*/*.db"))
+
+
+def iter_counter_rows(db_path: str) -> Iterator[dict]:
+    """Yield the long-form counter rows of a database, in dispatch order."""
+    return _iter_query_rows(db_path, COUNTERS_COLLECTION_QUERY)
+
+
+def read_kernel_info(db_path: str) -> dict[str, dict]:
+    """Return kernel metadata for every dispatch, keyed by dispatch id as text."""
+    return {
+        str(row["Dispatch_ID"]): row
+        for row in _iter_query_rows(db_path, KERNEL_INFO_QUERY)
     }
-    header_written = {path: False for path in queries}
-
-    with ExitStack() as stack:
-        writers = {
-            path: csv.writer(
-                stack.enter_context(csv_compression.open_gzip_csv_write(path))
-            )
-            for path in queries
-        }
-        for db_path in db_paths:
-            with closing(sqlite3.connect(db_path)) as conn:
-                for file_path, query in queries.items():
-                    try:
-                        with closing(conn.execute(query)) as cursor:
-                            if cursor.description is None:
-                                continue
-                            if not header_written[file_path]:
-                                writers[file_path].writerow([
-                                    desc[0] for desc in cursor.description
-                                ])
-                                header_written[file_path] = True
-                            writers[file_path].writerows(cursor)
-                    except OSError as e:
-                        console_error(
-                            f"Database error while extracting {file_path} "
-                            f"from {db_path}: {e}"
-                        )
-                    except Exception as e:
-                        console_error(
-                            f"Unexpected error while extracting {file_path} "
-                            f"from {db_path}: {e}"
-                        )
 
 
-def update_rocpd_pmc_events(
-    counter_csv_path: str,
-    rocpd_db_path: str,
-    batch_size: int = PMC_EVENT_INSERT_BATCH_SIZE,
+def has_kernel_dispatches(db_path: str) -> bool:
+    """Whether a database recorded a kernel dispatch at all."""
+    with closing(sqlite3.connect(db_path)) as conn:
+        with closing(conn.execute(KERNEL_DISPATCH_EXISTS_QUERY)) as cursor:
+            return bool(cursor.fetchone()[0])
+
+
+def convert_dbs_to_marker_csv(
+    db_paths_list: list[str], marker_trace_csv_path: str
 ) -> None:
-    """Stream counter CSV in batches into the rocpd pmc_event table."""
-    try:
-        with closing(sqlite3.connect(rocpd_db_path)) as conn:
-            metadata = _resolve_pmc_event_metadata(conn)
-            if metadata is None:
-                return
-            table_name, guid, dispatch_to_event = metadata
-
-            _stream_csv_to_pmc_event_table(
-                conn,
-                counter_csv_path,
-                table_name,
-                guid,
-                dispatch_to_event,
-                batch_size,
-            )
-    except OSError as e:
-        console_error(f"Error while updating pmc_event table: {e}")
-    except Exception as e:
-        console_error(f"Unexpected error updating pmc_event table: {e}")
-
-
-def _resolve_pmc_event_metadata(
-    conn: sqlite3.Connection,
-) -> Optional[tuple[str, str, dict[str, str]]]:
-    """Look up the pmc_event table and build dispatch-to-event mapping.
-
-    Returns (table_name, guid, dispatch_to_event) or None on failure.
-    """
-    with closing(
-        conn.execute(
-            TABLE_NAME_PREFIX_QUERY.format(
-                table_name_prefix=ROCPD_PMC_EVENT_TABLE_NAME_PREFIX
-            )
+    """Write the marker regions of every database into one compressed CSV."""
+    with csv_compression.open_gzip_csv_write(marker_trace_csv_path) as output:
+        writer = csv.DictWriter(
+            output, fieldnames=MARKER_COLUMNS, extrasaction="ignore"
         )
-    ) as cursor:
-        table_name = cursor.fetchone()
-
-    if table_name is None:
-        console_error("No pmc_event table found in the rocpd database", exit=False)
-        return None
-    table_name = table_name[0]
-
-    guid = table_name[len(ROCPD_PMC_EVENT_TABLE_NAME_PREFIX) :].replace("_", "-")
-
-    # event_id may differ from dispatch_id when marker API tracing is enabled
-    with closing(conn.execute(KERNEL_DISPATCH_QUERY, (guid,))) as cursor:
-        db_rows = cursor.fetchall()
-
-    if not db_rows:
-        console_error("No kernel dispatch data found.", exit=False)
-        return None
-
-    dispatch_to_event = {
-        str(dispatch_id): str(event_id) for dispatch_id, event_id, _ in db_rows
-    }
-    return table_name, guid, dispatch_to_event
+        writer.writeheader()
+        for db_path in db_paths_list:
+            try:
+                writer.writerows(_iter_query_rows(db_path, MARKER_API_TRACE_QUERY))
+            except sqlite3.Error as e:
+                console_error(
+                    f"Database error while extracting the marker trace "
+                    f"from {db_path}: {e}"
+                )
 
 
-def _stream_csv_to_pmc_event_table(
-    conn: sqlite3.Connection,
-    counter_csv_path: str,
-    table_name: str,
-    guid: str,
-    dispatch_to_event: dict[str, str],
-    batch_size: int,
-) -> None:
-    """Read counter CSV in batches and insert into the pmc_event table."""
-    columns = ("guid", "event_id", "pmc_id", "value")
-    placeholders = ", ".join(["?"] * len(columns))
-    insert_sql = INSERT_QUERY.format(
-        table_name=table_name,
-        columns=", ".join(columns),
-        placeholders=placeholders,
+def iter_workload_rows(workload_dir: PathLike) -> Iterator[dict]:
+    """Yield the counter rows of every collection pass of a workload."""
+    for path in pass_dirs(workload_dir):
+        yield from iter_pass_rows(path)
+
+
+def iter_pass_rows(path: PathLike) -> Iterator[dict]:
+    """Yield counter rows for one pass, renumbering dispatch and kernel ids."""
+    dispatch_ids = csv_ops.GroupIdAssigner(
+        [
+            "PID",
+            "Kernel_Name",
+            "Grid_Size",
+            "Workgroup_Size",
+            "LDS_Per_Workgroup",
+            "Start_Timestamp",
+            "End_Timestamp",
+        ],
+        "Dispatch_ID",
     )
+    kernel_ids = csv_ops.GroupIdAssigner(
+        ["Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"],
+        "Kernel_ID",
+    )
+    pass_path = Path(path)
+    for db_path in db_paths(pass_path):
+        for row in _iter_process_rows(pass_path, db_path):
+            yield kernel_ids.apply(dispatch_ids.apply(row))
 
-    batch: list[tuple[Optional[str], ...]] = []
-    with conn:
-        for row in csv_ops.iter_csv_dicts(counter_csv_path):
-            event_id = dispatch_to_event.get(row.get("dispatch_id", ""))
-            batch.append((
-                guid,
-                event_id,
-                row.get("counter_id"),
-                row.get("counter_value"),
-            ))
-            if len(batch) >= batch_size:
-                conn.executemany(insert_sql, batch)
-                batch.clear()
 
-        if batch:
-            conn.executemany(insert_sql, batch)
+def write_pmc_rows(rows: Iterable[dict], output: IO[str]) -> int:
+    """Write long-form counter rows to an open file; return the row count."""
+    writer = csv.DictWriter(output, fieldnames=PMC_COLUMNS, extrasaction="ignore")
+    writer.writeheader()
+    written = 0
+    for row in rows:
+        writer.writerow(row)
+        written += 1
+    return written
+
+
+def _iter_process_rows(pass_path: Path, db_path: Path) -> Iterator[dict]:
+    """Yield counter rows for one process from whichever tool collected them."""
+    pid = db_path.stem.split("_")[0]
+    counters_csv = compressed_name(pass_path / f"{pid}{NATIVE_COUNTERS_SUFFIX}")
+    if not counters_csv.is_file():
+        yield from iter_counter_rows(str(db_path))
+        return
+
+    counters = _total_counters_per_dispatch(counters_csv)
+    kernel_info = read_kernel_info(str(db_path))
+    for dispatch_id in sorted(counters, key=int):
+        dispatch = kernel_info.get(dispatch_id)
+        if dispatch is None:
+            continue
+        for counter_name, value in counters[dispatch_id].items():
+            yield {**dispatch, "Counter_Name": counter_name, "Counter_Value": value}
+
+
+def _total_counters_per_dispatch(counters_csv: Path) -> dict[str, dict[str, float]]:
+    """Sum native counter rows per dispatch, matching counters_collection."""
+    totals: dict[str, dict[str, float]] = {}
+    for row in csv_ops.iter_csv_dicts(str(counters_csv)):
+        per_counter = totals.setdefault(row["dispatch_id"], {})
+        counter_name = row["counter_name"]
+        per_counter[counter_name] = per_counter.get(counter_name, 0.0) + float(
+            row["counter_value"]
+        )
+    return totals
+
+
+def _iter_query_rows(db_path: str, query: str) -> Iterator[dict]:
+    """Yield query rows as dicts keyed by the column names the query selects."""
+    with closing(sqlite3.connect(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        with closing(conn.execute(query)) as cursor:
+            for row in cursor:
+                yield dict(row)

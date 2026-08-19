@@ -86,9 +86,9 @@ for hardware counters, not a gfx arch, so the native writer sets `target_arch = 
 
 ## Analyze layer changes
 
-Replace the profile-mode CSV read + row-by-row insert (`update_rocpd_pmc_events` in
-`src/utils/rocpd_data.py`) with a set-based merge that runs in analyze mode. For each
-application-replay pass, given the consolidated SDK and native rocpds:
+Replace the profile-mode native counter injection removed in Phase C with a
+set-based merge that runs in analyze mode. For each application-replay pass,
+given the consolidated SDK and native rocpds:
 
 ```sql
 ATTACH DATABASE :native_db AS native;

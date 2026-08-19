@@ -133,7 +133,6 @@ def run_prof(
     profiler_options: ProfilerOptions,
     workload_dir: str,
     ml_api_trace_enabled: bool = False,
-    retain_rocpd_output: bool = False,
     extra_env: Optional[dict[str, str]] = None,
 ) -> None:
     multiple_files = isinstance(fnames, list)
@@ -273,105 +272,20 @@ def run_prof(
                 _classify_output_line(stripped)
         console_error("Profiling execution failed.")
 
-    out_dir = Path(workload_dir) / "out"
-    out_pmc_1 = out_dir / "pmc_1"
-    db_paths = sorted(out_pmc_1.glob("*/*.db"))
+    pass_path = rocpd_data.pass_dir(workload_dir, fbase)
+    shutil.rmtree(pass_path, ignore_errors=True)
+    (Path(workload_dir) / "out" / "pmc_1").rename(pass_path)
 
-    # If using native tool for counter collection
-    if (
-        get_rocprof_cmd() == "rocprofiler-sdk"
-        and options["ROCPROF_COUNTER_COLLECTION"] == "0"
-    ):
-        for db_name in db_paths:
-            pid = db_name.stem.split("_")[0]
-            native_counter_csv = csv_compression.compressed_name(
-                out_pmc_1 / f"{pid}_native_counter_collection.csv"
-            )
-            if not native_counter_csv.is_file():
-                console_debug(
-                    f"No native counter CSV for pid {pid}; "
-                    f"skipping rocpd update for {db_name}."
-                )
-                continue
-            rocpd_data.update_rocpd_pmc_events(
-                str(native_counter_csv),
-                str(db_name),
-            )
-            console_debug(f"Updated rocpd db {db_name} with native tool counters.")
-    # Write results_fbase.csv
-    counter_csv = csv_compression.compressed_name(
-        out_pmc_1 / f"{fbase}_counter_collection.csv"
-    )
-    marker_csv = csv_compression.compressed_name(
-        out_pmc_1 / f"{fbase}_marker_api_trace.csv"
-    )
-    rocpd_data.convert_dbs_to_csv(
-        [str(p) for p in db_paths],
-        str(counter_csv),
-        str(marker_csv),
-    )
-
-    # Reset Dispatch_ID based on PID, Kernel_Name, Grid_Size, Workgroup_Size,
-    # LDS_Per_Workgroup, Start_Timestamp, End_Timestamp, and Kernel_ID based on
-    # Kernel_Name, Grid_Size, Workgroup_Size, LDS_Per_Workgroup.
-    dispatch_ids = csv_ops.GroupIdAssigner(
-        [
-            "PID",
-            "Kernel_Name",
-            "Grid_Size",
-            "Workgroup_Size",
-            "LDS_Per_Workgroup",
-            "Start_Timestamp",
-            "End_Timestamp",
-        ],
-        "Dispatch_ID",
-    )
-    kernel_ids = csv_ops.GroupIdAssigner(
-        ["Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"],
-        "Kernel_ID",
-    )
-
-    # The counter CSV has one row per dispatch per counter, so it is streamed
-    # rather than held in memory. PID only groups dispatches; drop it from output.
-    results_csv = csv_compression.compressed_name(
-        Path(workload_dir) / f"results_{fbase}.csv"
-    )
-
-    # Subprocess succeeded but may have dispatched zero GPU kernels,
-    # in which case the CSV is missing or has no data rows.
-    try:
-        rows_written = csv_ops.stream_csv_to_file(
-            str(counter_csv),
-            str(results_csv),
-            transform=lambda row: kernel_ids.apply(dispatch_ids.apply(row)),
-            drop_columns=["PID"],
-        )
-    except (FileNotFoundError, ValueError):
-        rows_written = 0
-    if not rows_written:
-        results_csv.unlink(missing_ok=True)
+    pass_dbs = rocpd_data.db_paths(pass_path)
+    if not any(rocpd_data.has_kernel_dispatches(str(db)) for db in pass_dbs):
         console_warning(
             "No GPU kernel data collected. "
             "The workload may not have dispatched any GPU kernels."
         )
-        shutil.rmtree(str(out_dir), ignore_errors=True)
+        shutil.rmtree(pass_path, ignore_errors=True)
         return
     if ml_api_trace_enabled:
-        # results_*.csv already holds the relabeled counters the ML API trace
-        # path needs; copy it and the marker trace to the workload dir.
-        save_ml_api_trace_inputs(workload_dir, fbase, results_csv)
-    if retain_rocpd_output:
-        console_warning(
-            "--retain-rocpd-output is deprecated and will be removed in "
-            "a future release. .db files will be retained automatically."
-        )
-        for db_path in db_paths:
-            pid = db_path.stem.split("_")[0]
-            dest = Path(workload_dir) / f"{fbase}_{pid}.db"
-            shutil.copyfile(db_path, dest)
-            console_warning(f"Retaining large raw rocpd database: {dest}")
-    # Remove temp directory
-    shutil.rmtree(str(out_dir), ignore_errors=True)
+        save_ml_api_trace_inputs(workload_dir, fbase, pass_path)
 
 
 @demarcate
@@ -490,20 +404,21 @@ def _augment_marker_csv(src_marker: str, dst_marker: str) -> None:
 def save_ml_api_trace_inputs(
     workload_dir: str,
     fbase: str,
-    src_counter: Path,
+    pass_path: Path,
 ) -> None:
     """
-    Move counter_collection and marker_api_trace data to workload_dir,
+    Write counter_collection and marker_api_trace data to workload_dir,
     for creation of ML API trace in Analyze mode.
 
     Marker CSVs are augmented on copy: the trailing ``|<backend>`` suffix
     written by inject_roctx is split off Function and surfaced as a
     dedicated Backend column (torch, triton, ...).
     """
-    src_dir = Path(workload_dir) / "out" / "pmc_1"
-    # Only one pair expected
     src_marker = csv_compression.compressed_name(
-        src_dir / f"{fbase}_marker_api_trace.csv"
+        pass_path / f"{fbase}_marker_api_trace.csv"
+    )
+    rocpd_data.convert_dbs_to_marker_csv(
+        [str(db) for db in rocpd_data.db_paths(pass_path)], str(src_marker)
     )
     dst_counter = csv_compression.compressed_name(
         Path(workload_dir) / f"ml_api_trace_{fbase}_counter_collection.csv"
@@ -511,8 +426,8 @@ def save_ml_api_trace_inputs(
     dst_marker = csv_compression.compressed_name(
         Path(workload_dir) / f"ml_api_trace_{fbase}_marker_api_trace.csv"
     )
-    # These files are expected to exist.
-    shutil.copyfile(src_counter, dst_counter)
+    with csv_compression.open_gzip_csv_write(dst_counter) as output:
+        rocpd_data.write_pmc_rows(rocpd_data.iter_pass_rows(pass_path), output)
     _augment_marker_csv(str(src_marker), str(dst_marker))
     console_log(
         "ml api trace",

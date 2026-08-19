@@ -10,7 +10,7 @@ from typing import Any, Optional, Union
 import numpy as np
 import pandas as pd
 
-from utils import csv_compression
+from utils import csv_compression, rocpd_data
 from utils.logger import (
     console_debug,
     console_error,
@@ -593,6 +593,8 @@ def validate_workload(path: str) -> None:
     # Find PMC data files (merged or separate)
     if pmc_perf_path.is_file():
         files_to_check = [pmc_perf_path]
+    elif rocpd_data.pass_dirs(workload_dir):
+        return
     else:
         # read_csv infers gzip from the .gz suffix.
         files_to_check = sorted(
