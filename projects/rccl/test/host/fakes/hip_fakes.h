@@ -92,8 +92,69 @@ extern hipError_t g_hipStreamCreateResult;
 extern hipError_t g_hipAsyncOpsResult;
 extern int g_hipWarpSize;
 
+// --- HIP VMM driver API + stream lifecycle seams ------------------------
+// dev_runtime.cc drives the CUDA/HIP driver VMM API (hipMemAddressReserve /
+// hipMemMap / ...) plus a handful of stream-lifecycle calls that on real
+// hardware need a GPU. These seams let a host-only test swap in
+// host-memory-backed behaviour (see InstallHostBackedVmm()).
+//
+// Defaults return hipErrorInvalidValue (and zero out-params) so any call site
+// a test doesn't explicitly opt into surfaces the unexpected call loudly,
+// matching the plain fail-loud stubs these seams replaced. The p2p micro-test
+// is therefore unaffected unless it installs a profile.
+extern std::function<hipError_t(void** /*ptr*/, std::size_t /*size*/,
+                                std::size_t /*alignment*/, void* /*addr*/,
+                                unsigned long long /*flags*/)>
+    g_hipMemAddressReserve;
+extern std::function<hipError_t(void* /*devPtr*/, std::size_t /*size*/)>
+    g_hipMemAddressFree;
+extern std::function<hipError_t(hipMemGenericAllocationHandle_t* /*handle*/,
+                                std::size_t /*size*/,
+                                const hipMemAllocationProp* /*prop*/,
+                                unsigned long long /*flags*/)>
+    g_hipMemCreate;
+extern std::function<hipError_t(std::size_t* /*granularity*/,
+                                const hipMemAllocationProp* /*prop*/,
+                                hipMemAllocationGranularity_flags /*option*/)>
+    g_hipMemGetAllocationGranularity;
+extern std::function<hipError_t(hipMemAllocationProp* /*prop*/,
+                                hipMemGenericAllocationHandle_t /*handle*/)>
+    g_hipMemGetAllocationPropertiesFromHandle;
+extern std::function<hipError_t(hipMemGenericAllocationHandle_t* /*handle*/,
+                                void* /*osHandle*/,
+                                hipMemAllocationHandleType /*shHandleType*/)>
+    g_hipMemImportFromShareableHandle;
+extern std::function<hipError_t(void* /*ptr*/, std::size_t /*size*/,
+                                std::size_t /*offset*/,
+                                hipMemGenericAllocationHandle_t /*handle*/,
+                                unsigned long long /*flags*/)>
+    g_hipMemMap;
+extern std::function<hipError_t(void* /*ptr*/, std::size_t /*size*/)>
+    g_hipMemUnmap;
+extern std::function<hipError_t(void* /*ptr*/, std::size_t /*size*/,
+                                const hipMemAccessDesc* /*desc*/,
+                                std::size_t /*count*/)>
+    g_hipMemSetAccess;
+extern std::function<hipError_t(hipStream_t* /*stream*/, unsigned int /*flags*/)>
+    g_hipStreamCreateWithFlags;
+extern std::function<hipError_t(hipStream_t /*stream*/)>
+    g_hipStreamDestroy;
+extern std::function<hipError_t(hipStream_t /*stream*/)>
+    g_hipStreamSynchronize;
+extern std::function<hipError_t(hipStreamCaptureMode* /*mode*/)>
+    g_hipThreadExchangeStreamCaptureMode;
+
 // Restore the HIP controllable seams above to their defaults. Called by
 // ResetP2pFakes(); exposed for tests that only touch HIP hooks.
 void ResetHipFakes();
+
+// Install a host-memory-backed HIP VMM/stream profile onto the seams above,
+// so code that drives the driver VMM API (e.g. dev_runtime.cc's
+// symMemoryObtain / ncclDevrFinalize) runs to completion on a plain CPU with
+// no GPU. Reserves VA with an uncommitted anonymous mapping, treats
+// map/unmap/set-access as no-ops, and hands out sentinel handles. Call after
+// ResetHipFakes() (or once, per test) to opt in; the p2p micro-test leaves the
+// defaults untouched.
+void InstallHostBackedVmm();
 
 #endif  // RCCL_TEST_HOST_HIP_FAKES_H_
