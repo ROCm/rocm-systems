@@ -109,6 +109,11 @@ constexpr std::array<uint32_t, 2> encode_vop2(uint32_t op, uint32_t vdst, uint32
           0u};
 }
 
+constexpr std::array<uint32_t, 2> encode_vop1(uint32_t op, uint32_t vdst, uint32_t src0) {
+  return {(0x3Fu << 25) | ((vdst & 0xFFu) << 17) | ((op & 0xFFu) << 9) | (src0 & 0x1FFu),
+          0u};
+}
+
 constexpr std::array<uint32_t, 2> encode_sop1(uint32_t op, uint32_t sdst, uint32_t ssrc0) {
   return {(ssrc0 & 0xFFu) | ((op & 0xFFu) << 8) | ((sdst & 0x7Fu) << 16) | 0xBE800000u, 0u};
 }
@@ -470,6 +475,70 @@ TEST(InstructionExecutionHarness, Gfx1250) {
 }
 
 #undef RUN_HARNESS
+
+TEST(Gfx1250VectorScanExecution, VClsI32ZeroMatchesScalarScanSemantics) {
+  auto run = [](const std::array<uint32_t, 2> &words, std::string_view mnemonic,
+                bool force_scalar) {
+    ForceScalarGuard force_scalar_guard(force_scalar);
+    amdgpu::GpuMemory gpu_mem(force_scalar ? "gfx1250_vcls_scalar_mem" : "gfx1250_vcls_simd_mem");
+    amdgpu::L2Cache l2(force_scalar ? "gfx1250_vcls_scalar_l2" : "gfx1250_vcls_simd_l2");
+
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = 106;
+    cfg.vgprs_per_wf = 256;
+    cfg.lds_size_kb = 64;
+
+    auto cu = amdgpu::ComputeUnitCore::create("gfx1250_vcls", cfg, &gpu_mem, &l2);
+    ASSERT_NE(cu, nullptr);
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+    ASSERT_EQ(wf->wf_size(), 32u);
+
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    ASSERT_NE(decoder, nullptr);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic);
+
+    const uint32_t vb = wf->vgpr_alloc().base;
+    constexpr std::array<std::pair<uint32_t, uint32_t>, 8> cases{{
+        {0x00000000u, 0xffffffffu},
+        {0xffffffffu, 0xffffffffu},
+        {0x00000001u, 31u},
+        {0xfffffffeu, 31u},
+        {0x00000002u, 30u},
+        {0x80000000u, 1u},
+        {0x40000000u, 1u},
+        {0x7fffffffu, 1u},
+    }};
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      cu->write_vgpr(vb + 0, lane, cases[lane % cases.size()].first);
+      cu->write_vgpr(vb + 2, lane, 0xc1c1c1c1u);
+    }
+    wf->set_exec(0xffffffffu);
+
+    cu->execute_instruction(inst.get(), *wf);
+
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      EXPECT_EQ(cu->read_vgpr(vb + 2, lane), cases[lane % cases.size()].second)
+          << mnemonic << " force_scalar=" << force_scalar << " lane=" << lane << " input=0x"
+          << std::hex << cases[lane % cases.size()].first;
+    }
+  };
+
+  run(encode_vop1(cdna5::kVClsI32Vop1, /*vdst=*/2, /*src0=*/vgpr_src(0)),
+      "v_cls_i32_e32", /*force_scalar=*/true);
+  run(encode_vop1(cdna5::kVClsI32Vop1, /*vdst=*/2, /*src0=*/vgpr_src(0)),
+      "v_cls_i32_e32", /*force_scalar=*/false);
+  run(encode_vop3(cdna5::kVClsI32Vop3, /*vdst=*/2, /*src0=*/vgpr_src(0), /*src1=*/0,
+                  /*src2=*/0),
+      "v_cls_i32", /*force_scalar=*/true);
+  run(encode_vop3(cdna5::kVClsI32Vop3, /*vdst=*/2, /*src0=*/vgpr_src(0), /*src1=*/0,
+                  /*src2=*/0),
+      "v_cls_i32", /*force_scalar=*/false);
+}
 
 TEST(Gfx1250MemoryExecutionHarness, ExecutesRepresentativeValidAddressStores) {
   amdgpu::GpuMemory gpu_mem("gfx1250_memory_harness_mem");

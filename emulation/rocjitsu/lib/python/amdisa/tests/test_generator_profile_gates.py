@@ -1325,6 +1325,20 @@ def test_f32_to_f16_vector_conversion_threads_fp16_ovfl():
     assert 'util::f32_to_f16_mode(s, wf.fp16_ovfl())' in unary
 
 
+def test_v_cls_i32_codegen_preserves_zero_sentinel():
+    unary = gen_vector_unary(['vdst'], ['src0'], 'cls_i32', None)
+
+    assert 'static_cast<uint32_t>(-1)' in unary
+    assert '? 31u' not in unary
+    assert 'std::countl_zero(abs_val)) - 1' not in unary
+
+    simd_probe = simd_probe_line('v_cls_i32_vop1')
+    assert simd_probe is not None
+    assert 'auto c = util::clz_u32_simd(u);' in simd_probe
+    assert '0xFFFFFFFFu' in simd_probe
+    assert ' - 1u' not in simd_probe
+
+
 def test_fp16_ovfl_sensitive_f16_simd_probes_stay_vectorized():
     cvt_probe = simd_probe_line('v_cvt_f16_f32_vop1')
     assert cvt_probe is not None
