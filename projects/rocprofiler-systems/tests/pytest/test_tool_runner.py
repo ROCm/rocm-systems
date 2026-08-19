@@ -248,7 +248,6 @@ class TestOutputFormatSelection(RocprofsysTest):
         )
         assert result.rocpd_files, "expected at least one rocpd database file"
 
-
     @pytest.mark.gpu
     @pytest.mark.rocm_min_version("7.0")
     @pytest.mark.parametrize("target", TARGETS)
@@ -279,15 +278,15 @@ class TestOutputFormatSelection(RocprofsysTest):
         # explicit env vars), so they do not appear in the env dump.  Verify
         # the resolved values from the metadata JSON instead.
         settings = _resolved_settings(result)
-        assert settings["ROCPROFSYS_USE_ROCPD"] is True, (
-            "expected ROCPROFSYS_USE_ROCPD to default to true"
-        )
-        assert settings["ROCPROFSYS_TRACE"] is False, (
-            "expected ROCPROFSYS_TRACE to default to false"
-        )
-        assert settings["ROCPROFSYS_PROFILE"] is False, (
-            "expected ROCPROFSYS_PROFILE to default to false"
-        )
+        assert (
+            settings["ROCPROFSYS_USE_ROCPD"] is True
+        ), "expected ROCPROFSYS_USE_ROCPD to default to true"
+        assert (
+            settings["ROCPROFSYS_TRACE"] is False
+        ), "expected ROCPROFSYS_TRACE to default to false"
+        assert (
+            settings["ROCPROFSYS_PROFILE"] is False
+        ), "expected ROCPROFSYS_PROFILE to default to false"
         assert result.rocpd_files, "default run should produce a rocpd database"
         assert result.perfetto_file is None, (
             f"default run should not produce a perfetto trace, found "

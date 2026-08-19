@@ -54,7 +54,7 @@ public:
      * Defaults to true since rocpd is the default output format.
      */
     [[nodiscard]] bool is_rocpd_output_enabled(std::string_view preset_name,
-                                               bool             default_value = true) const;
+                                               bool default_value = true) const;
 
     /**
      * Translate a legacy preset flag (e.g., "--balanced") to new syntax

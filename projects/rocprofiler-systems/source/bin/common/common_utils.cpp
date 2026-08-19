@@ -281,8 +281,7 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
     }
     if(rocpd_on)
     {
-        std::cerr << "  • rocpd database: " << output_dir
-                  << "/rocpd.db\n";
+        std::cerr << "  \u2022 rocpd database: " << output_dir << "/rocpd.db\n";
     }
     if(tracing_on)
     {
