@@ -76,7 +76,7 @@ struct AmdExtTable {
   void *hsa_amd_signal_async_handler_fn;
   void *hsa_amd_async_function_fn;
   void *hsa_amd_signal_wait_any_fn;
-  void *hsa_amd_queue_cu_set_mask_fn;
+  hsa_amd_queue_cu_set_mask_fn_t hsa_amd_queue_cu_set_mask_fn;
   hsa_amd_memory_pool_get_info_fn_t hsa_amd_memory_pool_get_info_fn;
   hsa_amd_agent_iterate_memory_pools_fn_t hsa_amd_agent_iterate_memory_pools_fn;
   hsa_amd_memory_pool_allocate_fn_t hsa_amd_memory_pool_allocate_fn;
@@ -105,7 +105,7 @@ struct AmdExtTable {
   void *hsa_amd_register_system_event_handler_fn;
   hsa_amd_queue_intercept_create_fn_t hsa_amd_queue_intercept_create_fn;
   hsa_amd_queue_intercept_register_fn_t hsa_amd_queue_intercept_register_fn;
-  void *hsa_amd_queue_set_priority_fn;
+  hsa_amd_queue_set_priority_fn_t hsa_amd_queue_set_priority_fn;
   hsa_amd_memory_async_copy_rect_fn_t hsa_amd_memory_async_copy_rect_fn;
   hsa_amd_runtime_queue_create_register_fn_t hsa_amd_runtime_queue_create_register_fn;
   hsa_amd_memory_lock_to_pool_fn_t hsa_amd_memory_lock_to_pool_fn;
@@ -150,12 +150,20 @@ struct AmdExtTable {
   void *hsa_amd_signal_get_event_id_fn;
   void *hsa_amd_external_semaphore_handle_open_fn;
   void *hsa_amd_external_semaphore_handle_close_fn;
+  void *hsa_amd_vmem_export_fabric_handle_fn;
+  void *hsa_amd_vmem_import_fabric_handle_fn;
+  hsa_amd_queue_create_fn_t hsa_amd_queue_create_fn;
+  void *hsa_amd_queue_signal_external_semaphore_fn;
+  void *hsa_amd_queue_wait_external_semaphore_fn;
+  void *hsa_amd_image_create_v2_fn;
+  void *hsa_amd_interop_map_buffer_with_size_fn;
 };
 static_assert(offsetof(AmdExtTable, hsa_amd_memory_get_preferred_copy_engine_fn) == 592);
 static_assert(offsetof(AmdExtTable, hsa_amd_memory_async_batch_copy_fn) == 640);
 static_assert(offsetof(AmdExtTable, hsa_amd_agent_preload_fn) == 648);
 static_assert(offsetof(AmdExtTable, hsa_amd_external_semaphore_handle_close_fn) == 680);
-static_assert(sizeof(AmdExtTable) == 688);
+static_assert(offsetof(AmdExtTable, hsa_amd_queue_create_fn) == 704);
+static_assert(sizeof(AmdExtTable) == 744);
 
 /// @brief Minimal mirror of ROCR's `CoreApiTable` through agent code-object load.
 ///

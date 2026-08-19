@@ -46,13 +46,15 @@ public:
     } else if (limit_bytes && *required_bytes > *limit_bytes) {
       outcome = ChargeOutcome::LimitExceeded;
     }
-    return {
-        .outcome = outcome,
-        .live_bytes = live_bytes_,
-        .charge_bytes = charge_bytes,
-        .required_bytes = required_bytes,
-        .limit_bytes = limit_bytes,
-    };
+    ChargePlan plan;
+    plan.outcome = outcome;
+    plan.live_bytes = live_bytes_;
+    plan.charge_bytes = charge_bytes;
+    if (required_bytes)
+      plan.required_bytes.emplace(*required_bytes);
+    if (limit_bytes)
+      plan.limit_bytes.emplace(*limit_bytes);
+    return plan;
   }
 
   void commit_charge(const ChargePlan &plan) {

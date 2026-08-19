@@ -36,6 +36,78 @@ using hsa_amd_queue_intercept_create_fn_t = hsa_status_t(HSA_API *)(
 using hsa_amd_queue_intercept_register_fn_t =
     hsa_status_t(HSA_API *)(hsa_queue_t *, hsa_amd_queue_intercept_handler_t, void *);
 
+enum hsa_amd_queue_priority_t : int32_t {
+  HSA_AMD_QUEUE_PRIORITY_LOW = 0,
+  HSA_AMD_QUEUE_PRIORITY_NORMAL = 1,
+  HSA_AMD_QUEUE_PRIORITY_HIGH = 2,
+};
+
+inline constexpr uint16_t HSA_AMD_QUEUE_CREATE_SYSTEM_MEM = 0;
+inline constexpr uint16_t HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF = 1u << 0;
+inline constexpr uint16_t HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR = 1u << 1;
+inline constexpr uint8_t HSA_AMD_QUEUE_ENGINE_COMPUTE = 0;
+inline constexpr uint8_t HSA_AMD_QUEUE_ENGINE_SDMA = 1;
+inline constexpr uint8_t HSA_AMD_QUEUE_ENGINE_AIE = 2;
+inline constexpr uint16_t HSA_AMD_QUEUE_CREATE_DESC_VERSION = 1;
+inline constexpr uint32_t HSA_AMD_PRIVATE_SEGMENT_SIZE_DEFAULT = UINT32_MAX;
+
+struct hsa_amd_compute_queue_params_t {
+  const uint32_t *cu_mask;
+  hsa_queue_type32_t type;
+  uint32_t private_segment_size;
+  uint32_t cu_mask_count;
+  uint32_t reserved[3];
+};
+
+struct hsa_amd_sdma_queue_params_t {
+  uint32_t sdma_engine_id;
+  uint32_t reserved[7];
+};
+
+struct hsa_amd_aie_queue_params_t {
+  uint32_t reserved[8];
+};
+
+/// @brief Minimal layout mirror of ROCR's descriptor-based queue creation ABI.
+struct hsa_amd_queue_create_desc_t {
+  uint16_t version;
+  uint16_t flags;
+  uint8_t engine_type;
+  uint8_t reserved_header[3];
+  uint32_t queue_size_bytes;
+  hsa_amd_queue_priority_t priority;
+  void (*callback)(hsa_status_t, hsa_queue_t *, void *);
+  void *callback_data;
+  hsa_queue_t *queue;
+  union {
+    hsa_amd_compute_queue_params_t compute;
+    hsa_amd_sdma_queue_params_t sdma;
+    hsa_amd_aie_queue_params_t aie;
+    uint8_t reserved[32];
+  } engine;
+  uint32_t traffic_class;
+  uint8_t reserved[20];
+};
+static_assert(offsetof(hsa_amd_queue_create_desc_t, version) == 0);
+static_assert(offsetof(hsa_amd_queue_create_desc_t, flags) == 2);
+static_assert(offsetof(hsa_amd_queue_create_desc_t, engine_type) == 4);
+static_assert(offsetof(hsa_amd_queue_create_desc_t, queue_size_bytes) == 8);
+static_assert(offsetof(hsa_amd_queue_create_desc_t, priority) == 12);
+static_assert(offsetof(hsa_amd_queue_create_desc_t, callback) == 16);
+static_assert(offsetof(hsa_amd_queue_create_desc_t, callback_data) == 24);
+static_assert(offsetof(hsa_amd_queue_create_desc_t, queue) == 32);
+static_assert(offsetof(hsa_amd_queue_create_desc_t, engine) == 40);
+static_assert(offsetof(hsa_amd_queue_create_desc_t, traffic_class) == 72);
+static_assert(offsetof(hsa_amd_queue_create_desc_t, reserved) == 76);
+static_assert(sizeof(hsa_amd_queue_create_desc_t) == 96);
+
+using hsa_amd_queue_create_fn_t = hsa_status_t(HSA_API *)(hsa_agent_t,
+                                                          hsa_amd_queue_create_desc_t *, uint32_t);
+using hsa_amd_queue_set_priority_fn_t = hsa_status_t(HSA_API *)(hsa_queue_t *,
+                                                                hsa_amd_queue_priority_t);
+using hsa_amd_queue_cu_set_mask_fn_t = hsa_status_t(HSA_API *)(const hsa_queue_t *, uint32_t,
+                                                               const uint32_t *);
+
 /// @brief Minimal profiling dispatch-time result mirror.
 struct hsa_amd_profiling_dispatch_time_t {
   uint64_t start;

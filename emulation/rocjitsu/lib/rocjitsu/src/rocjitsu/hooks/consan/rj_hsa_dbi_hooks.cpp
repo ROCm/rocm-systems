@@ -2065,6 +2065,8 @@ hsa_status_t HSA_API rj_dbi_queue_create(hsa_agent_t agent, uint32_t size, hsa_q
                                          void (*callback)(hsa_status_t, hsa_queue_t *, void *),
                                          void *data, uint32_t private_segment_size,
                                          uint32_t group_segment_size, hsa_queue_t **queue);
+hsa_status_t HSA_API rj_dbi_amd_queue_create(hsa_agent_t agent, hsa_amd_queue_create_desc_t *descs,
+                                             uint32_t num_descs);
 
 class RjDbiHsaLayer {
 public:
@@ -2106,6 +2108,12 @@ public:
     original_iterate_agent_symbols_ = core_->hsa_executable_iterate_agent_symbols_fn;
     original_symbol_get_info_ = core_->hsa_executable_symbol_get_info_fn;
     original_queue_create_ = core_->hsa_queue_create_fn;
+    const bool amd_queue_create_table_valid =
+        amd_ext_ != nullptr &&
+        amd_ext_->version.minor_id >= offsetof(AmdExtTable, hsa_amd_queue_create_fn) +
+                                          sizeof(AmdExtTable::hsa_amd_queue_create_fn);
+    original_amd_queue_create_ =
+        amd_queue_create_table_valid ? amd_ext_->hsa_amd_queue_create_fn : nullptr;
     intercept_dispatch_segments_ =
         config.flavor.value_or(rocjitsu::ConSanFlavor::None) != rocjitsu::ConSanFlavor::None;
     const bool require_dispatch_packets =
@@ -2151,6 +2159,8 @@ public:
     }
     if (intercept_dispatch_packets_) {
       core_->hsa_queue_create_fn = rj_dbi_queue_create;
+      if (original_amd_queue_create_ != nullptr)
+        amd_ext_->hsa_amd_queue_create_fn = rj_dbi_amd_queue_create;
     }
     active_ = true;
     ConSanStaticCoverageRegistry::instance().clear();
@@ -2300,6 +2310,10 @@ public:
         core_->hsa_executable_symbol_get_info_fn = original_symbol_get_info_;
       if (core_->hsa_queue_create_fn == rj_dbi_queue_create)
         core_->hsa_queue_create_fn = original_queue_create_;
+    }
+    if (active_ && amd_ext_ != nullptr && original_amd_queue_create_ != nullptr &&
+        amd_ext_->hsa_amd_queue_create_fn == rj_dbi_amd_queue_create) {
+      amd_ext_->hsa_amd_queue_create_fn = original_amd_queue_create_;
     }
 
     const AutoScReportBufferRegistry::Summary sc_report_summary =
@@ -2794,6 +2808,26 @@ public:
     return original_queue_create_;
   }
 
+  [[nodiscard]] hsa_amd_queue_create_fn_t amd_queue_create() const {
+    std::lock_guard lock(mutex_);
+    return original_amd_queue_create_;
+  }
+
+  [[nodiscard]] decltype(hsa_queue_destroy) *queue_destroy() const {
+    std::lock_guard lock(mutex_);
+    return core_ == nullptr ? nullptr : core_->hsa_queue_destroy_fn;
+  }
+
+  [[nodiscard]] hsa_amd_queue_set_priority_fn_t queue_set_priority() const {
+    std::lock_guard lock(mutex_);
+    return amd_ext_ == nullptr ? nullptr : amd_ext_->hsa_amd_queue_set_priority_fn;
+  }
+
+  [[nodiscard]] hsa_amd_queue_cu_set_mask_fn_t queue_cu_set_mask() const {
+    std::lock_guard lock(mutex_);
+    return amd_ext_ == nullptr ? nullptr : amd_ext_->hsa_amd_queue_cu_set_mask_fn;
+  }
+
   [[nodiscard]] bool dispatch_packet_interception_enabled() const {
     std::lock_guard lock(mutex_);
     return intercept_dispatch_packets_;
@@ -2870,6 +2904,7 @@ private:
     original_iterate_agent_symbols_ = nullptr;
     original_symbol_get_info_ = nullptr;
     original_queue_create_ = nullptr;
+    original_amd_queue_create_ = nullptr;
     intercept_dispatch_segments_ = false;
     intercept_dispatch_packets_ = false;
   }
@@ -2904,6 +2939,7 @@ private:
   decltype(hsa_executable_iterate_agent_symbols) *original_iterate_agent_symbols_ = nullptr;
   decltype(hsa_executable_symbol_get_info) *original_symbol_get_info_ = nullptr;
   decltype(hsa_queue_create) *original_queue_create_ = nullptr;
+  hsa_amd_queue_create_fn_t original_amd_queue_create_ = nullptr;
   bool intercept_dispatch_segments_ = false;
   bool intercept_dispatch_packets_ = false;
 };
@@ -3252,6 +3288,85 @@ hsa_status_t HSA_API rj_dbi_queue_create(hsa_agent_t agent, uint32_t size, hsa_q
     *queue = nullptr;
   }
   return register_status;
+}
+
+hsa_status_t HSA_API rj_dbi_amd_queue_create(hsa_agent_t agent, hsa_amd_queue_create_desc_t *descs,
+                                             uint32_t num_descs) {
+  auto *original_create = layer().amd_queue_create();
+  if (original_create == nullptr)
+    return HSA_STATUS_ERROR;
+
+  hsa_status_t status = original_create(agent, descs, num_descs);
+  if (descs == nullptr)
+    return status;
+
+  hsa_status_t replacement_error = HSA_STATUS_SUCCESS;
+  auto note_replacement_error = [&](hsa_status_t error) {
+    if (replacement_error == HSA_STATUS_SUCCESS)
+      replacement_error = error;
+  };
+  auto destroy_queue = [&](hsa_queue_t *queue) {
+    auto *destroy = layer().queue_destroy();
+    return queue == nullptr || destroy == nullptr ? HSA_STATUS_ERROR : destroy(queue);
+  };
+
+  for (uint32_t index = 0; index < num_descs; ++index) {
+    hsa_amd_queue_create_desc_t &desc = descs[index];
+    hsa_queue_t *plain_queue = desc.queue;
+    if (plain_queue == nullptr || desc.engine_type != HSA_AMD_QUEUE_ENGINE_COMPUTE)
+      continue;
+
+    // Descriptor queues are ordinary hardware queues and cannot accept a
+    // ROCr packet interceptor. Replace each successfully created compute queue
+    // with an equivalent InterceptQueue so ConSan can grow the dispatch packet
+    // segment sizes when instrumentation grows the kernel descriptor.
+    const hsa_amd_compute_queue_params_t &compute = desc.engine.compute;
+    const uint32_t packet_count =
+        desc.queue_size_bytes / static_cast<uint32_t>(sizeof(hsa_kernel_dispatch_packet_t));
+    hsa_queue_t *intercept_queue = nullptr;
+    hsa_status_t intercept_status =
+        rj_dbi_queue_create(agent, packet_count, compute.type, desc.callback, desc.callback_data,
+                            compute.private_segment_size, UINT32_MAX, &intercept_queue);
+
+    if (intercept_status == HSA_STATUS_SUCCESS && desc.priority != HSA_AMD_QUEUE_PRIORITY_NORMAL) {
+      auto *set_priority = layer().queue_set_priority();
+      intercept_status = set_priority == nullptr ? HSA_STATUS_ERROR_INVALID_QUEUE_CREATION
+                                                 : set_priority(intercept_queue, desc.priority);
+    }
+    if (intercept_status == HSA_STATUS_SUCCESS && compute.cu_mask_count != 0u) {
+      auto *set_cu_mask = layer().queue_cu_set_mask();
+      intercept_status = set_cu_mask == nullptr
+                             ? HSA_STATUS_ERROR_INVALID_QUEUE_CREATION
+                             : set_cu_mask(intercept_queue, compute.cu_mask_count, compute.cu_mask);
+    }
+
+    if (intercept_status == HSA_STATUS_SUCCESS) {
+      const hsa_status_t destroy_status = destroy_queue(plain_queue);
+      if (destroy_status == HSA_STATUS_SUCCESS) {
+        desc.queue = intercept_queue;
+        if (desc.flags != HSA_AMD_QUEUE_CREATE_SYSTEM_MEM) {
+          log_message(kLogInfo,
+                      "ConSan descriptor queue interception index=%u flags=0x%x "
+                      "ring-placement=system-memory",
+                      index, desc.flags);
+        }
+        continue;
+      }
+      intercept_status = destroy_status;
+    }
+
+    // Never return a successful but uninstrumented compute queue: ConSan may
+    // have increased its scratch or LDS requirements after CLR cached the
+    // original metadata. Preserve batch partial-success semantics by clearing
+    // only the descriptor whose replacement failed.
+    if (intercept_queue != nullptr)
+      (void)destroy_queue(intercept_queue);
+    (void)destroy_queue(plain_queue);
+    desc.queue = nullptr;
+    note_replacement_error(intercept_status);
+  }
+
+  return status != HSA_STATUS_SUCCESS ? status : replacement_error;
 }
 
 [[nodiscard]] std::optional<std::string>

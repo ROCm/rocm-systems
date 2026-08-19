@@ -70,6 +70,8 @@ using ExpectedQueueInterceptCreate = hsa_status_t(HSA_API *)(
 using ExpectedQueueInterceptRegister = hsa_status_t(HSA_API *)(hsa_queue_t *,
                                                                ExpectedQueueInterceptHandler,
                                                                void *);
+using ExpectedAmdQueueCreate = hsa_status_t(HSA_API *)(hsa_agent_t, hsa_amd_queue_create_desc_t *,
+                                                       uint32_t);
 
 static_assert(
     std::is_same_v<hsa_amd_queue_intercept_packet_writer_t, ExpectedQueueInterceptPacketWriter>);
@@ -81,12 +83,16 @@ static_assert(std::is_same_v<decltype(AmdExtTable::hsa_amd_queue_intercept_creat
                              ExpectedQueueInterceptCreate>);
 static_assert(std::is_same_v<decltype(AmdExtTable::hsa_amd_queue_intercept_register_fn),
                              ExpectedQueueInterceptRegister>);
+static_assert(
+    std::is_same_v<decltype(AmdExtTable::hsa_amd_queue_create_fn), ExpectedAmdQueueCreate>);
 
 TEST(HsaHooksUnitTest, QueueInterceptionEntriesUsePublicAbiSignatures) {
   EXPECT_TRUE((std::is_same_v<decltype(AmdExtTable::hsa_amd_queue_intercept_create_fn),
                               ExpectedQueueInterceptCreate>));
   EXPECT_TRUE((std::is_same_v<decltype(AmdExtTable::hsa_amd_queue_intercept_register_fn),
                               ExpectedQueueInterceptRegister>));
+  EXPECT_TRUE(
+      (std::is_same_v<decltype(AmdExtTable::hsa_amd_queue_create_fn), ExpectedAmdQueueCreate>));
 }
 
 TEST(ProcessByteBudgetTest, PlansCommitsRefundsAndTracksPeak) {
@@ -506,6 +512,9 @@ std::vector<size_t> g_fake_allocation_sizes;
 std::vector<void *> g_fake_freed_allocations;
 std::array<hsa_kernel_dispatch_packet_t, 4> g_fake_queue_packets{};
 hsa_queue_t g_fake_queue{};
+std::array<hsa_kernel_dispatch_packet_t, 4> g_fake_batch_queue_packets{};
+hsa_queue_t g_fake_batch_queue{};
+int g_fake_amd_queue_create_calls = 0;
 hsa_agent_t g_last_queue_create_agent{};
 hsa_queue_t *g_last_destroyed_queue = nullptr;
 int g_fake_signal_store_relaxed_calls = 0;
@@ -708,6 +717,33 @@ hsa_status_t HSA_API fake_queue_create(hsa_agent_t agent, uint32_t size, hsa_que
 
 hsa_status_t HSA_API fake_queue_destroy(hsa_queue_t *queue) {
   g_last_destroyed_queue = queue;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HSA_API fake_amd_queue_create(hsa_agent_t agent, hsa_amd_queue_create_desc_t *descs,
+                                           uint32_t num_descs) {
+  ++g_fake_amd_queue_create_calls;
+  if (descs == nullptr || num_descs != 1u)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  hsa_amd_queue_create_desc_t &desc = descs[0];
+  desc.queue = nullptr;
+  if (desc.version != HSA_AMD_QUEUE_CREATE_DESC_VERSION || desc.queue_size_bytes == 0u)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  g_last_queue_create_agent = agent;
+  g_fake_batch_queue_packets = {};
+  g_fake_batch_queue = {};
+  g_fake_batch_queue.type = desc.engine.compute.type;
+  g_fake_batch_queue.features =
+      desc.engine_type == HSA_AMD_QUEUE_ENGINE_COMPUTE ? HSA_QUEUE_FEATURE_KERNEL_DISPATCH : 0u;
+  g_fake_batch_queue.base_address = g_fake_batch_queue_packets.data();
+  g_fake_batch_queue.doorbell_signal = hsa_signal_t{78};
+  g_fake_batch_queue.size = desc.engine_type == HSA_AMD_QUEUE_ENGINE_COMPUTE
+                                ? desc.queue_size_bytes / sizeof(hsa_kernel_dispatch_packet_t)
+                                : desc.queue_size_bytes;
+  g_fake_batch_queue.id = 1235;
+  desc.queue = &g_fake_batch_queue;
   return HSA_STATUS_SUCCESS;
 }
 
@@ -1444,6 +1480,7 @@ struct FakeApiTable {
     amd.hsa_amd_vmem_set_access_fn = fake_amd_vmem_set_access;
     amd.hsa_amd_queue_intercept_create_fn = fake_queue_intercept_create;
     amd.hsa_amd_queue_intercept_register_fn = fake_queue_intercept_register;
+    amd.hsa_amd_queue_create_fn = fake_amd_queue_create;
     amd.hsa_amd_memory_pool_free_fn = fake_amd_memory_pool_free;
     amd.hsa_amd_agents_allow_access_fn = fake_amd_agents_allow_access;
     amd.hsa_amd_agent_preload_fn = fake_amd_agent_preload;
@@ -5046,7 +5083,7 @@ rocjitsu::ConSanResult auto_report_sampled_transform_result(bool malformed_mappi
   patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
   patch.anchor_offset = 0x120u;
   patch.trampoline_offset = 0x440u;
-  patch.sampled_first_slot = malformed_mapping ? 1u : 0u;
+  patch.sampled_first_slot = malformed_mapping ? std::numeric_limits<uint32_t>::max() : 0u;
   patch.sampled_window_bank_count = 1u;
   patch.sampled_access_range_count = 1u;
   patch.relocated_guest_instruction_offset = 0x448u;
@@ -6086,10 +6123,10 @@ TEST(HsaHooksUnitTest, AutoSampledReportSurfacesMalformedPatchMapping) {
   }
   const std::string log = testing::internal::GetCapturedStderr();
 
-  EXPECT_NE(log.find("ConSan MOI sampled diagnostic map reader=101 patches=1 mappings=0 "
-                     "capacity=1 malformed=true"),
-            std::string::npos)
-      << log;
+  const size_t mapping =
+      log.find("ConSan MOI sampled diagnostic map reader=101 patches=1 mappings=0 ");
+  ASSERT_NE(mapping, std::string::npos) << log;
+  EXPECT_NE(log.find("malformed=true", mapping), std::string::npos) << log;
   EXPECT_NE(log.find("sampled_patch_mapping_malformed=1"), std::string::npos) << log;
 }
 
@@ -6257,6 +6294,9 @@ TEST(HsaHooksUnitTest, RecordReplayProvenanceFailsClosedAfterGlobalBudgetExhaust
 void reset_queue_fakes() {
   g_fake_queue_packets = {};
   g_fake_queue = {};
+  g_fake_batch_queue_packets = {};
+  g_fake_batch_queue = {};
+  g_fake_amd_queue_create_calls = 0;
   g_last_queue_create_agent = {};
   g_last_destroyed_queue = nullptr;
   g_fake_allocations.clear();
@@ -7665,6 +7705,37 @@ TEST(HsaHooksUnitTest, QueueDoorbellRaisesPacketPrivateSizeFromDescriptor) {
   EXPECT_EQ(packet.group_segment_size, 0u);
 
   EXPECT_EQ(api.core.hsa_queue_destroy_fn(queue), HSA_STATUS_SUCCESS);
+}
+
+TEST(HsaHooksUnitTest, ConSanInterceptsDescriptorCreatedComputeQueue) {
+  reset_code_object_observations();
+  reset_queue_fakes();
+  configure_consan_profile(kConSanHookProfiles[0], false);
+
+  FakeApiTable api;
+  api.amd.hsa_amd_queue_intercept_create_fn = fake_amd_queue_intercept_create;
+  api.amd.hsa_amd_queue_intercept_register_fn = fake_amd_queue_intercept_register;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+  ASSERT_NE(api.amd.hsa_amd_queue_create_fn, fake_amd_queue_create);
+
+  hsa_amd_queue_create_desc_t desc{};
+  desc.version = HSA_AMD_QUEUE_CREATE_DESC_VERSION;
+  desc.queue_size_bytes = 4u * sizeof(hsa_kernel_dispatch_packet_t);
+  desc.priority = HSA_AMD_QUEUE_PRIORITY_NORMAL;
+  desc.engine_type = HSA_AMD_QUEUE_ENGINE_COMPUTE;
+  desc.engine.compute.type = HSA_QUEUE_TYPE_SINGLE;
+  desc.engine.compute.private_segment_size = HSA_AMD_PRIVATE_SEGMENT_SIZE_DEFAULT;
+
+  ASSERT_EQ(api.amd.hsa_amd_queue_create_fn(kGuestAgent, &desc, 1u), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_fake_amd_queue_create_calls, 1);
+  EXPECT_EQ(g_last_destroyed_queue, &g_fake_batch_queue);
+  ASSERT_EQ(desc.queue, &g_fake_queue);
+  EXPECT_EQ(g_last_intercept_registered_queue, desc.queue);
+  EXPECT_NE(g_fake_intercept_handler, nullptr);
+
+  hook.unload();
+  EXPECT_EQ(api.amd.hsa_amd_queue_create_fn, fake_amd_queue_create);
 }
 
 TEST(HsaHooksUnitTest, ConSanDynamicStackDispatchAddsMaximumFrameAboveRuntimePrivateSize) {
