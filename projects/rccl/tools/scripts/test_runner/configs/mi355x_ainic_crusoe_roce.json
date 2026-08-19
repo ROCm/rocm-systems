@@ -25,6 +25,13 @@
       "NCCL_TOPO_FILE": "/etc/crusoe/rccl_topo/mi355x-288gb-ib.xml",
       "NCCL_DMABUF_ENABLE": "1",
       "NCCL_IB_GID_INDEX": "1",
+      "NCCL_IB_TC": "96",
+      "NCCL_IB_FIFO_TC": "184",
+      "NCCL_IGNORE_CPU_AFFINITY": "1",
+      "NCCL_IB_USE_INLINE": "1",
+      "NCCL_GDR_FLUSH_DISABLE": "1",
+      "NCCL_GDRCOPY_ENABLE": "0",
+      "NET_OPTIONAL_RECV_COMPLETION": "1",
       "TMPDIR": "/dev/shm",
       "HOME": "${HOME}"
     }

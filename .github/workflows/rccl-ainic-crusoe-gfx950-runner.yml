@@ -38,8 +38,9 @@
 # Crusoe scheduler notes (SPUR, not Slurm; sbatch/squeue/scontrol are aliases):
 #   - The client talks to localhost unless SPUR_CONTROLLER_ADDR is set.
 #   - sbatch has no --wait: submit --parsable, stream the NFS log, read ExitCode
-#     from scontrol once the job leaves the queue. Wrap every SPUR CLI call in
-#     `timeout -k 5 30` -- the controller can wedge, and SIGTERM alone is not
+#     from `spur show job` once the job leaves the queue. This image has no
+#     scontrol symlink (only sbatch/squeue/srun/spur). Wrap every SPUR CLI call
+#     in `timeout -k 5 30` -- the controller can wedge, and SIGTERM alone is not
 #     enough.
 #   - Request GPUs with --gpus-per-node, not --gres=gpu:mi355x:N.
 #   - Do not pass --ntasks=1: SPUR then allocates 1 node regardless of -N.
@@ -47,11 +48,12 @@
 #     runs the batch script on every node; the payload parks extra copies and
 #     mpirun fans out ranks.
 #   - Before the 2-node job, 1-node probes fingerprint idle nodes: 8x gfx950,
-#     ionic_0..7 visible in sysfs and ibv_devices with identical names, and the
-#     same CPU/NUMA/NIC-map hash. Pin the allocation to a matching pair. If
-#     none are idle, wait and probe again -- do not submit an asymmetric pair
-#     (Rome topo consensus FATAL) or a node missing an ionic NIC.
-#   - SPUR scontrol has no `show hostnames`. test_runner expands
+#     ionic_0..7 visible in sysfs and ibv_devices, the same CPU/NUMA/NIC-map
+#     hash, and the same RoCE GID-index-1 subnet. Pin the allocation to a
+#     matching pair. If none are idle, wait and probe again -- do not submit an
+#     asymmetric pair (Rome topo consensus FATAL), a node missing an ionic NIC,
+#     or a cross-leaf pair (IBV_WC_RETRY_EXC_ERR on 16-rank alltoall).
+#   - SPUR has no `scontrol show hostnames`. test_runner expands
 #     SLURM_JOB_NODELIST. OpenMPI's plm slurm is pointed at
 #     scripts/spur_srun.sh (installed as `srun` first on PATH) because SPUR's
 #     srun rejects --ntasks-per-node and ignores --nodelist.
@@ -351,7 +353,7 @@ jobs:
             spur_cmd squeue -j "$1" -h -o '%R' 2>/dev/null || true
           }
           job_scontrol_state() {
-            spur_cmd scontrol show job "$1" 2>/dev/null | sed -n 's/.*JobState=\([^ ]*\).*/\1/p' | head -n1
+            spur_cmd spur show job "$1" 2>/dev/null | sed -n 's/.*JobState=\([^ ]*\).*/\1/p' | head -n1
           }
 
           # Wait until the job is RUNNING. PENDING is the expected busy-cluster
@@ -422,7 +424,8 @@ jobs:
           }
 
           # Probe idle GPU nodes. Keep only hosts with 8 gfx950, ionic_0..7 in
-          # both sysfs and ibv_devices, and the same CPU/NUMA/NIC fingerprint.
+          # both sysfs and ibv_devices, the same CPU/NUMA/NIC fingerprint, and
+          # the same RoCE GID-index-1 subnet.
           # stdout is host1,host2,... or empty (caller waits and retries).
           probe_symmetric_pair() {
             local need="$1"
@@ -554,8 +557,8 @@ jobs:
           kill "${TAIL_PID}" 2>/dev/null || true
           wait "${TAIL_PID}" 2>/dev/null || true
 
-          job_state=$(spur_cmd scontrol show job "${JOBID}" | sed -n 's/.*JobState=\([^ ]*\).*/\1/p' | head -n1)
-          exitcode=$(spur_cmd scontrol show job "${JOBID}" | sed -n 's/.*[[:space:]]ExitCode=\([0-9-]*\):.*/\1/p' | head -n1)
+          job_state=$(spur_cmd spur show job "${JOBID}" | sed -n 's/.*JobState=\([^ ]*\).*/\1/p' | head -n1)
+          exitcode=$(spur_cmd spur show job "${JOBID}" | sed -n 's/.*[[:space:]]ExitCode=\([0-9-]*\):.*/\1/p' | head -n1)
           rc="${exitcode:-1}"
           if [ "${job_state}" != "COMPLETED" ]; then
             rc=1
