@@ -22,13 +22,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import atexit
-import contextlib
 import os
 import sys
 import re
 import argparse
-import ctypes
 import textwrap
 import subprocess
 
@@ -126,52 +123,6 @@ def warn_deprecated_output_formats(output_formats):
             "then run `rocpd convert -i <database>.db --output-format csv` when CSV "
             "output is needed."
         )
-
-
-def list_avail_output_filename(library, output_path, output_file):
-    """Resolve the list-avail output file through the same formatter the tool
-    library uses for every other artifact, so the name and the directory
-    creation stay consistent. The resolved string is owned by the library."""
-    # the library aborts rather than returning when the path is unusable, so
-    # diagnose what is visible from here first. Only a literal path that already
-    # exists can be checked: placeholders are expanded by the library, and a
-    # caller with the privilege to override the permissions passes either way.
-    if output_path is not None and os.path.exists(output_path):
-        if not os.path.isdir(output_path):
-            fatal_error(f"Output directory is not a directory: {output_path}")
-        if not os.access(output_path, os.W_OK, effective_ids=True):
-            fatal_error(f"Output directory is not writable: {output_path}")
-
-    try:
-        formatter = ctypes.CDLL(library)
-    except OSError as error:
-        fatal_error(f"Could not load the rocprofv3-avail library: {error}")
-
-    try:
-        resolve = formatter.list_avail_output_filename
-    except AttributeError:
-        fatal_error(f"{library} does not provide list_avail_output_filename")
-
-    resolve.argtypes = [
-        ctypes.c_char_p,
-        ctypes.c_char_p,
-        ctypes.POINTER(ctypes.c_char_p),
-    ]
-    resolve.restype = ctypes.c_int
-
-    resolved = ctypes.c_char_p()
-    if (
-        resolve(
-            os.fsencode(output_path) if output_path else None,
-            os.fsencode(output_file) if output_file else None,
-            ctypes.byref(resolved),
-        )
-        == 0
-        or resolved.value is None
-    ):
-        fatal_error("Could not resolve the list-avail output path")
-
-    return os.fsdecode(resolved.value)
 
 
 def format_help(formatter, w=120, h=40):
@@ -574,7 +525,7 @@ For attachment profiling of running processes:
         "-o",
         "--output-file",
         help="For the output file name. If nothing specified default path is `%%hostname%%/%%pid%%`",
-        default=os.environ.get("ROCPROF_OUTPUT_FILE_NAME", None),
+        default=None,
         type=str,
         required=False,
     )
@@ -582,7 +533,7 @@ For attachment profiling of running processes:
         "-d",
         "--output-directory",
         help="For adding output path where the output files will be saved. If nothing specified default path is `%%hostname%%/%%pid%%`",
-        default=os.environ.get("ROCPROF_OUTPUT_PATH", None),
+        default=None,
         type=str,
         required=False,
     )
@@ -1752,9 +1703,17 @@ def run(app_args, args, **kwargs):
         append=True,
     )
 
-    _output_file = args.output_file
+    # -o/-d default to None so an explicit request stays distinguishable from an
+    # inherited one; fall back to the environment for the effective value here
+    _output_file = (
+        args.output_file
+        if args.output_file is not None
+        else os.environ.get("ROCPROF_OUTPUT_FILE_NAME")
+    )
     _output_path = (
-        args.output_directory if args.output_directory is not None else os.getcwd()
+        args.output_directory
+        if args.output_directory is not None
+        else os.environ.get("ROCPROF_OUTPUT_PATH", os.getcwd())
     )
 
     update_env("ROCPROF_OUTPUT_FILE_NAME", _output_file)
@@ -2101,88 +2060,38 @@ def run(app_args, args, **kwargs):
             sys.stderr.write("\n")
         sys.stderr.flush()
 
-    app_stdout = None
-    avail_stdout = None
-    avail_tempname = None
-    avail_filename = None
-
-    def publish_avail_output():
-        """Rename the listing into place once every section has been written."""
-        nonlocal avail_tempname
-        if avail_tempname is None:
-            return
-        avail_stdout.close()
-        os.replace(avail_tempname, avail_filename)
-        avail_tempname = None
-
-    def discard_avail_output():
-        nonlocal avail_tempname
-        if avail_tempname is None:
-            return
-        avail_stdout.close()
-        with contextlib.suppress(OSError):
-            os.unlink(avail_tempname)
-        avail_tempname = None
-
-    # the listing is published by renaming, so anything left part-written when
-    # the process exits for an unrelated reason has to go
-    atexit.register(discard_avail_output)
-
     if args.list_avail:
         update_env("ROCPROFILER_PC_SAMPLING_BETA_ENABLED", "on")
         path = os.path.join(f"{ROCM_DIR}", "bin/rocprofv3-avail")
 
-        def requested_explicitly(value, variable):
-            # -o/-d fall back to these variables, so merely inheriting one from
-            # the environment must not divert the listing away from stdout
-            return value is not None and value != os.environ.get(variable)
-
-        # --echo reports the command without running it, so it must not create
-        # directories or leave a listing behind
-        if not args.echo and (
-            requested_explicitly(args.output_file, "ROCPROF_OUTPUT_FILE_NAME")
-            or requested_explicitly(args.output_directory, "ROCPROF_OUTPUT_PATH")
-        ):
-            avail_filename = list_avail_output_filename(
-                ROCPROF_LIST_AVAIL_TOOL_LIBRARY,
-                args.output_directory,
-                args.output_file,
-            )
-            # a truncated listing looks complete, so build it out of the way
-            avail_tempname = f"{avail_filename}.tmp"
-            avail_stdout = open(avail_tempname, "w")
-
-        def list_avail(*options):
-            if args.echo:
-                return
-            try:
-                subprocess.check_call(
-                    [sys.executable, path, "info"] + list(options),
-                    env=app_env,
-                    stdout=avail_stdout,
-                )
-            except subprocess.CalledProcessError as error:
-                discard_avail_output()
-                fatal_error("rocprofv3-avail exit with error", exit_code=error.returncode)
+        # rocprofv3-avail owns the library and the output file; pass it options
+        # and let it decide, so a direct invocation behaves the same way. Only an
+        # explicit -o/-d diverts the listing from stdout. It is resolved against
+        # the same -d root, but %pid% there names this helper rather than the
+        # application, so only an explicit -o gives the run a shared stem
+        avail_command = [sys.executable, path]
+        if args.output_file is not None or args.output_directory is not None:
+            avail_command += ["--output-directory", _output_path]
+            if _output_file is not None:
+                avail_command += ["--output-file", _output_file]
+        avail_command += ["info", "--pmc", "--pc-sampling", "--spm-config"]
 
         if app_args:
-            list_avail("--pmc")
-            list_avail("--pc-sampling")
-            list_avail("--spm-config")
-            publish_avail_output()
+            # --echo reports the command without running anything
+            if not args.echo:
+                try:
+                    subprocess.check_call(avail_command, env=app_env)
+                except subprocess.CalledProcessError as error:
+                    fatal_error(
+                        "rocprofv3-avail exit with error", exit_code=error.returncode
+                    )
         else:
-            app_args = [sys.executable, path, "info", "--pmc"]
+            app_args = avail_command
             for itr in ("ROCPROF", "ROCPROFILER", "ROCTX"):
                 update_env(
                     f"{itr}_LOG_LEVEL",
                     "error",
                 )
-            list_avail("--pc-sampling")
-            list_avail("--spm-config")
-            # the remaining listing is launched below as the application
-            if avail_stdout is not None:
-                app_stdout = avail_stdout
-                use_execv = False
 
     elif args.pid:
         update_env("ROCPROF_ATTACH_PID", args.pid)
@@ -2487,13 +2396,11 @@ def run(app_args, args, **kwargs):
             sys.stdout.flush()
             return 0
         try:
-            exit_code = subprocess.check_call(app_args, env=app_env, stdout=app_stdout)
+            exit_code = subprocess.check_call(app_args, env=app_env)
             if exit_code != 0:
                 fatal_error("Application exited with non-zero exit code", exit_code)
         except Exception as e:
-            discard_avail_output()
             fatal_error(f"{e}\n")
-        publish_avail_output()
         return exit_code
 
 

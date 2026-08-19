@@ -326,27 +326,30 @@ agent_info(uint64_t agent_handle, const char** agent_info_str)
 }
 
 int
-list_avail_output_filename(const char*  output_path,
-                           const char*  output_file,
-                           const char** filename) noexcept
+list_avail_output_filename(const char* output_path,
+                           const char* output_file,
+                           char*       buffer,
+                           size_t      buffer_size) noexcept
 {
-    if(filename == nullptr) return 0;
-    *filename = nullptr;
-
     try
     {
-        static thread_local auto resolved = std::string{};
-
         auto cfg = tool::output_config{};
         if(output_path != nullptr && *output_path != '\0') cfg.output_path = output_path;
         if(output_file != nullptr && *output_file != '\0') cfg.output_file = output_file;
 
-        resolved  = tool::get_output_filename(cfg, "list_avail", "txt");
-        *filename = resolved.c_str();
-        return 1;
+        auto resolved = tool::get_output_filename(cfg, "list_avail", "txt");
+
+        if(buffer != nullptr && buffer_size > 0)
+        {
+            auto count = std::min(resolved.size(), buffer_size - 1);
+            resolved.copy(buffer, count);
+            buffer[count] = '\0';
+        }
+
+        return static_cast<int>(resolved.size());
     } catch(...)
     {
-        return 0;
+        return -1;
     }
 }
 
