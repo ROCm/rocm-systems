@@ -24,9 +24,12 @@
 #include "proxy.h"        // ncclProxy* family
 #include "register.h"     // ncclRegLocalIsValid
 #include "shm.h"          // ncclShm*
-#include "comm.h"         // ncclCommGraphRegister / Deregister
+#include "comm.h"         // ncclCommGraphRegister / Deregister, ncclCommEnsureReady
 #include "strongstream.h" // ncclStrongStream*
 #include "mem_manager.h"  // ncclMemTrack / ncclMemUntrack / ncclDynMemMarkExportToPeer
+#include "bootstrap.h"    // bootstrapAllGather / Barrier / IntraNode*
+#include "argcheck.h"     // PtrCheck / CommCheck
+#include "group.h"        // ncclGroupStartInternal / EndInternal
 
 #include "nccl_fakes.h"   // controllable seam hooks
 
@@ -377,6 +380,38 @@ ncclResult_t ncclProxyClientBatchQueryFdBlocking(struct ncclComm*           /*co
 // `multiSegment && ... ncclParamMultiSegmentRegister()` guard in p2p.cc
 // keeps the single-segment path the microtests exercise.
 int64_t ncclParamMultiSegmentRegister() { return 0; }
+
+// ---------------------------------------------------------------------------
+// Generic bootstrap / arg-check / registration / group stubs.
+//
+// Not p2p-specific: any host-only micro-test that #includes a production TU
+// referencing these `nccl*`/`bootstrap*` symbols links them from here rather
+// than redefining its own no-op copies. All are inert success stubs -- no
+// microtest drives a real bootstrap exchange or comm registration.
+// ---------------------------------------------------------------------------
+
+// Error string. (ncclGetErrorString is the public NCCL accessor.)
+const char* ncclGetErrorString(ncclResult_t) { return "ncclSuccess"; }
+
+// Bootstrap collectives.
+ncclResult_t bootstrapAllGather(void*, void*, int) { return ncclSuccess; }
+ncclResult_t bootstrapBarrier(void*, int, int, int) { return ncclSuccess; }
+ncclResult_t bootstrapIntraNodeBarrier(void*, int*, int, int, int) { return ncclSuccess; }
+ncclResult_t bootstrapIntraNodeAllGather(void*, int*, int, int, void*, int) { return ncclSuccess; }
+
+// Arg checks / comm readiness.
+ncclResult_t PtrCheck(const void*, const char*, const char*) { return ncclSuccess; }
+ncclResult_t CommCheck(struct ncclComm*, const char*, const char*) { return ncclSuccess; }
+ncclResult_t ncclCommEnsureReady(ncclComm_t) { return ncclSuccess; }
+
+// Public registration API.
+ncclResult_t ncclCommRegister(const ncclComm_t, void*, size_t, void**) { return ncclSuccess; }
+ncclResult_t ncclCommDeregister(const ncclComm_t, void*) { return ncclSuccess; }
+ncclResult_t ncclCommWindowDeregister(ncclComm_t, ncclWindow_t) { return ncclSuccess; }
+
+// Group state machine.
+ncclResult_t ncclGroupStartInternal() { return ncclSuccess; }
+ncclResult_t ncclGroupEndInternal(ncclSimInfo_t*) { return ncclSuccess; }
 
 // ---------------------------------------------------------------------------
 // Reset

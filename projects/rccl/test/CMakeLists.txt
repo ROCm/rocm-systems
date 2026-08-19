@@ -452,7 +452,8 @@ if(BUILD_TESTS)
     add_executable(rccl-UnitTestsDevRuntime
       DevRuntimeTests.cpp
       DevRuntimeTestsStubs.cc
-      host/fakes/nccl_fakes.cc         # shared reusable stubs for nccl* symbols
+      host/fakes/nccl_fakes.cc         # shared reusable stubs for nccl*/bootstrap*/group symbols
+      host/fakes/devr_fakes.cc         # shared reusable stubs for devr/gin/rma/team/shadow-pool
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/TestChecks.cpp
