@@ -94,7 +94,7 @@ target_link_libraries(
     rocprofiler-systems-common-library
     INTERFACE
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-logger>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-type-traits-library>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-policies-library>
 )
 
 if(ROCPROFSYS_BUILD_TESTING)

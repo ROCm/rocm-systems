@@ -8,7 +8,7 @@
 #include "core/trace_cache/cacheable.hpp"
 
 #include "common/defines.h"
-#include "type_traits/thread_state_policy.hpp"
+#include "policies/thread_state_policy.hpp"
 
 #include <atomic>
 #include <cassert>
@@ -83,7 +83,7 @@ struct flush_worker_factory_t
 };
 
 template <typename WorkerFactory, typename TypeIdentifierEnum,
-          rocprofsys::type_traits::thread_state_policy ThreadStatePolicy = state::thread>
+          rocprofsys::policies::thread_state_policy ThreadStatePolicy = state::thread>
 class buffer_storage
 {
     static_assert(type_traits::is_enum_class_v<TypeIdentifierEnum>,
