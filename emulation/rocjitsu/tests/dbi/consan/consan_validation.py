@@ -1334,21 +1334,22 @@ def _jakub_override(target: _NativeGtestTarget) -> dict[str, object]:
     if target.id != "gfx1250":
         return _single_oracle_override(relative_path, f"{oracle_prefix}/*")
 
-    # The producer-skew case is a schedule discriminator, not a timing row.
-    # Keep clean coverage broad, measure only ordinary variants, and mutate
-    # only the case whose exact oracle is designed to expose a missing handoff.
+    # The producer-skew case is the barrier-fault discriminator, not a timing row.
+    # Keep clean coverage broad, measure the non-pipelined and double-buffered
+    # variants, and mutate only the exact-oracle case selected for inventory.
     return {
         "relative_path": relative_path,
         "clean_filter": f"{oracle_prefix}/*",
         "overhead_filter": (
-            f"{oracle_prefix}/CooperativeLdsK32:"
-            f"{oracle_prefix}/DoubleBufferedLdsK128"
+            f"{oracle_prefix}/NoPipelineProd16x8:"
+            f"{oracle_prefix}/DoubleBufferedProd16x8"
         ),
-        "fault_filter": f"{oracle_prefix}/ProducerSkewLdsK128",
-        # Current full-coverage Record/Replay runs all three exact oracles in
-        # roughly 37 seconds under emulation. Keep a bounded deadline without
-        # rejecting the expanded 62-access inventory as a timeout regression.
-        "run_timeout_seconds": 60,
+        "fault_filter": f"{oracle_prefix}/ProducerSkewProd16x8",
+        # Current full-coverage Record/Replay runs the ordinary exact oracles
+        # in roughly 37 seconds, while the intentionally skewed fault oracle
+        # completes in about 62 seconds under emulation. Keep a bounded margin
+        # without rejecting the expanded 70-access inventory as a timeout.
+        "run_timeout_seconds": 90,
     }
 
 
@@ -2040,6 +2041,16 @@ def _clean_environment(
             raise ValidationError("llama runtime environment requires a target")
         runtime = _llama_runtime(workspace, target, workload.relative_path)
         _llama_library_environment(runtime, environment)
+    if target == "gfx1250":
+        # ROCr loads the gfx1250 A0 HotSwap helper by soname when it is not
+        # installed beside libhsa-runtime64. Standalone RocJITsu builds keep
+        # that companion DSO beside the ConSan hook, so make the complete hook
+        # bundle visible to validation payloads and health probes.
+        companion_dir = str((hook or _hook_path(workspace)).parent)
+        existing = environment.get("LD_LIBRARY_PATH")
+        environment["LD_LIBRARY_PATH"] = os.pathsep.join(
+            (companion_dir, existing) if existing else (companion_dir,)
+        )
     if profile is None:
         return environment
     if hook is None:
@@ -6987,7 +6998,8 @@ def _fault_admission_and_reach(
 def _fault(args: argparse.Namespace) -> int:
     selection = _resolve_workload_selection(args, allow_all=False)
     target = selection.target
-    workload = selection.require_workload()
+    workload = _resolved_workload(target, selection.require_workload())
+    timeout = args.timeout if args.timeout is not None else workload.run_timeout_seconds
     workspace = _workspace_from_environment()
     if not _doctor(workspace, target, (workload.id,), args.launcher)["ok"]:
         raise ValidationError("workspace doctor failed; run the doctor subcommand")
@@ -7113,7 +7125,7 @@ def _fault(args: argparse.Namespace) -> int:
                 "--fault-family",
                 fault["family"],
                 "--timeout",
-                str(args.timeout),
+                str(timeout),
                 "--health-timeout",
                 str(args.health_timeout),
                 "--destructive",
@@ -8160,7 +8172,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     )
     fault.add_argument("--fault", required=True, help="fault id in the JSON spec")
     fault.add_argument("--artifact-root", type=Path, required=True)
-    fault.add_argument("--timeout", type=int, default=TIMEOUT_SECONDS)
+    fault.add_argument(
+        "--timeout",
+        type=int,
+        help="override the workload timeout declared by the executable manifest",
+    )
     fault.add_argument(
         "--health-timeout",
         type=float,

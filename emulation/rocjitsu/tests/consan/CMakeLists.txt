@@ -116,9 +116,19 @@ function(rj_add_consan_gfx1250_jakub_sim_test build_dir)
             --config
             "${CMAKE_SOURCE_DIR}/configs/gfx1250.json"
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
-        TIMEOUT 75
+        # The target manifest allows 90 seconds for the producer-skew payload;
+        # leave room for the separately bounded pre/post health probes.
+        TIMEOUT 180
         LABELS consan gfx1250 hip-moi simulator fault
     )
+    if(IS_DIRECTORY "${ROCM_PATH}/bin")
+        set_property(
+            TEST "${_test_name}"
+            APPEND
+            PROPERTY ENVIRONMENT_MODIFICATION
+                "PATH=path_list_prepend:${ROCM_PATH}/bin"
+        )
+    endif()
     set_property(TEST "${_test_name}" PROPERTY RUN_SERIAL TRUE)
 endfunction()
 

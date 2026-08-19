@@ -61,8 +61,6 @@ def main() -> int:
                     "barrier-drop",
                     "--artifact-root",
                     str(Path(root) / "artifacts"),
-                    "--timeout",
-                    "60",
                     "--health-timeout",
                     "30",
                     "--allow-destructive",

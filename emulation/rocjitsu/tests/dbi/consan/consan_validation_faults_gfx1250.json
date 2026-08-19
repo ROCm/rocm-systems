@@ -245,13 +245,13 @@
           "family": "barrier-drop",
           "environment": {
             "RJ_CONSAN_FAULT_DROP_BARRIER": "1",
-            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:71c39178e2c3786a|function=_ZL20__work_group_barrierj|kind=barrier|pc=0x0000000000007e10|mnemonic=s_barrier_wait|occurrence=1",
-            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:71c39178e2c3786a|function=_ZL20__work_group_barrierj|event=barrier|pc=0x0000000000007e0c|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:71c39178e2c3786a|function=_ZL20__work_group_barrierj|event=barrier|pc=0x0000000000007e10|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
+            "RJ_CONSAN_FAULT_SITE_IDENTITY": "fnv1a64:d050643f089d6be9|function=_ZL20__work_group_barrierj|kind=barrier|pc=0x0000000000009590|mnemonic=s_barrier_wait|occurrence=1",
+            "RJ_CONSAN_FAULT_BARRIER_SEQUENCE_IDENTITY": "fnv1a64:d050643f089d6be9|function=_ZL20__work_group_barrierj|event=barrier|pc=0x000000000000958c|mnemonic=s_barrier_signal|occurrence=0|sequence=singleton|associated-with=fnv1a64:d050643f089d6be9|function=_ZL20__work_group_barrierj|event=barrier|pc=0x0000000000009590|mnemonic=s_barrier_wait|occurrence=1|sequence=singleton"
           },
           "site_provenance": {
-            "corpus_commit": "0fcd57def36188500a19abaf3b6bca3a6e773034",
+            "corpus_commit": "a5054ec6f69fedbd723e528a3ac9881abbe61ec5",
             "executable": "hip_moi_reference_gfx1250_jakub_matmul",
-            "inventory_run": "gfx1250-jakub-skew-volatile16k-inventory-20260801"
+            "inventory_run": "gfx1250-jakub-producer-skew-inventory-20260819"
           },
           "profiles": {
             "supercollider": {

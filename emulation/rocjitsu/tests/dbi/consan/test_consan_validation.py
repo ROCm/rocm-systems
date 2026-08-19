@@ -1960,7 +1960,7 @@ class ConSanValidationTest(unittest.TestCase):
                 "hip_moi_reference_gfx1250_jakub_matmul"
             ),
         )
-        self.assertEqual(workloads["jakub-attention"]["run_timeout_seconds"], 60)
+        self.assertEqual(workloads["jakub-attention"]["run_timeout_seconds"], 90)
         self.assertEqual(
             workloads["tp1-prefill"]["fault_families"],
             ("barrier-move",),
@@ -1968,7 +1968,7 @@ class ConSanValidationTest(unittest.TestCase):
 
     def test_run_uses_target_resolved_workload_timeout(self) -> None:
         with temporary_root() as root:
-            for target, expected_timeout in (("gfx950", 30), ("gfx1250", 60)):
+            for target, expected_timeout in (("gfx950", 30), ("gfx1250", 90)):
                 with self.subTest(target=target):
                     args = validation._parse_args(
                         [
@@ -2096,10 +2096,10 @@ class ConSanValidationTest(unittest.TestCase):
                 jakub_filters = (
                     f"{jakub_prefix}/*",
                     (
-                        f"{jakub_prefix}/CooperativeLdsK32:"
-                        f"{jakub_prefix}/DoubleBufferedLdsK128"
+                        f"{jakub_prefix}/NoPipelineProd16x8:"
+                        f"{jakub_prefix}/DoubleBufferedProd16x8"
                     ),
-                    f"{jakub_prefix}/ProducerSkewLdsK128",
+                    f"{jakub_prefix}/ProducerSkewProd16x8",
                 )
             expected_filters = {
                 "d128-block": (
@@ -2356,6 +2356,22 @@ class ConSanValidationTest(unittest.TestCase):
                 "RJ_CONSAN_MOI_TRACK_BARRIERS": "1",
                 "RJ_CONSAN_MOI_TRACK_ATOMICS": "1",
             },
+        )
+
+    def test_gfx1250_environment_exposes_companion_hotswap_hook(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["jakub-attention"]
+        hook = Path("/workspace/rocjitsu-build/hooks/librocjitsu_dbi_hooks.so")
+        with mock.patch.dict(
+            os.environ,
+            {"LD_LIBRARY_PATH": "/runtime/lib"},
+            clear=True,
+        ):
+            environment = validation._clean_environment(
+                None, workload, hook, "gfx1250", Path("/workspace")
+            )
+        self.assertEqual(
+            environment["LD_LIBRARY_PATH"].split(os.pathsep),
+            [str(hook.parent), "/runtime/lib"],
         )
 
     def test_pytorch_profile_enables_environment_hsa_tool_loading(self) -> None:
@@ -4785,12 +4801,24 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(
             sampled_environment["RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET"], "0"
         )
+        self.assertEqual(
+            fault["environment"]["RJ_CONSAN_FAULT_SITE_IDENTITY"],
+            (
+                "fnv1a64:d050643f089d6be9|function=_ZL20__work_group_barrierj|"
+                "kind=barrier|pc=0x0000000000009590|mnemonic=s_barrier_wait|"
+                "occurrence=1"
+            ),
+        )
+        self.assertEqual(
+            fault["site_provenance"]["corpus_commit"],
+            "a5054ec6f69fedbd723e528a3ac9881abbe61ec5",
+        )
 
         resolved = validation._resolved_workload("gfx1250", workload)
-        self.assertIn("ProducerSkewLdsK128", resolved.fault_filter)
-        self.assertNotIn("ProducerSkewLdsK128", resolved.overhead_filter)
-        self.assertIn("CooperativeLdsK32", resolved.overhead_filter)
-        self.assertIn("DoubleBufferedLdsK128", resolved.overhead_filter)
+        self.assertIn("ProducerSkewProd16x8", resolved.fault_filter)
+        self.assertNotIn("ProducerSkewProd16x8", resolved.overhead_filter)
+        self.assertIn("NoPipelineProd16x8", resolved.overhead_filter)
+        self.assertIn("DoubleBufferedProd16x8", resolved.overhead_filter)
         self.assertTrue(resolved.clean_filter.endswith("/*"))
 
     def test_overhead_uses_bracketing_baseline_mean_and_maximum_mode(self) -> None:
@@ -5835,6 +5863,7 @@ class ConSanValidationTest(unittest.TestCase):
                 )
                 health_index = invocation.index("--health-command-json") + 1
                 smoke_index = invocation.index("--smoke-command-json") + 1
+                timeout_index = invocation.index("--timeout") + 1
                 expected_health = (
                     ["explicit-health"]
                     if explicit_probes
@@ -5845,6 +5874,7 @@ class ConSanValidationTest(unittest.TestCase):
                 )
                 self.assertEqual(json.loads(invocation[health_index]), expected_health)
                 self.assertEqual(json.loads(invocation[smoke_index]), expected_smoke)
+                self.assertEqual(invocation[timeout_index], "90")
                 summary = json.loads(
                     (
                         root
