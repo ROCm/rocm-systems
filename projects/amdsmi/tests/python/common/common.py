@@ -329,10 +329,10 @@ def build_type_lists():
         cond = PASS
         if member.name in ["UNKNOWN"]:
             cond = FAIL
-        elif member.name in ["NPS4", "NPS8"]:
+        elif member.name in ["NPS1", "NPS2", "NPS4", "NPS8"]:
             # NPS4/NPS8 are hardware-dependent; accept success or invalid depending on support
             # BTW - no asic supports NPS8...
-            cond = [PASS, FAIL]
+            cond = [PASS, FAIL, amdsmi.AmdSmiStatus.NOT_SUPPORTED]
         memory_partition_types.append(
             (member.name, amdsmi.AmdSmiMemoryPartitionType(member.value), cond)
         )
@@ -1185,6 +1185,7 @@ class Common:
     def check_ret(self, msg, exc, expected_code_name=None, printIt=True):
         # Returns True if the test FAILED (i.e. the result did not match expected).
         # Callers use the pattern: `if self.check_ret(...): raise_exception = e`
+        expected_code_name = self._normalize_expected(expected_code_name)
         if isinstance(exc, str) and len(exc) == 0:
             error_code_name = expected_code_name
             error_code = "-1"
@@ -1207,8 +1208,13 @@ class Common:
                     if self.verbose > VERBOSITY_QUIET and printIt:
                         if msg:
                             print(f"{msg}\n", end="")
-                        ec_code = self.get_error_code_from_name(ec_name)
-                        print(f"\tTEST SUCCESS, AMDSMI API Returned {ec_code:>2s}, {ec_name}")
+                        status_msg = f"\tTEST SUCCESS, AMDSMI API Returned {error_code:>2s}, {error_code_name}"
+                        for name in expected_code_name:
+                            code = str(self.get_error_code_from_name(name))
+                            status_msg += (
+                                f"\n\t              AMDSMI API Expected {code:>2s}, {name}"
+                            )
+                        print(status_msg)
                     return False
 
             # No expected result matched - print failure (respects same guards as single-condition path)
@@ -1219,10 +1225,8 @@ class Common:
                     f"\tTEST FAILURE, AMDSMI API Returned {error_code:>2s}, {error_code_name}\n"
                 )
                 for ec_name in expected_code_name:
-                    ec_code = self.get_error_code_from_name(ec_name)
-                    status_msg += (
-                        f"\t              AMDSMI API Expected {ec_code:>2s}, {expected_code_name}"
-                    )
+                    ec_code = str(self.get_error_code_from_name(ec_name))
+                    status_msg += f"\t              AMDSMI API Expected {ec_code:>2s}, {ec_name}"
             return True
 
         # Check for single passing condition
