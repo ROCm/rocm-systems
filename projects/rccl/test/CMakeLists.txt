@@ -445,15 +445,16 @@ if(BUILD_TESTS)
 
   # rccl-UnitTestsDevRuntime: self-contained host micro-test that #includes the
   # hipified src/dev_runtime.cc directly to reach its file-static symMemory*
-  # helpers. Links no librccl.so; dependencies come from DevRuntimeTestsStubs.cc.
+  # helpers. Links no librccl.so; every dependency comes from the shared
+  # test/host/fakes/ layer.
   if (ROCM_VERSION VERSION_GREATER_EQUAL "60400")
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsDevRuntime)
 
     add_executable(rccl-UnitTestsDevRuntime
       DevRuntimeTests.cpp
-      DevRuntimeTestsStubs.cc
       host/fakes/nccl_fakes.cc         # shared reusable stubs for nccl*/bootstrap*/group symbols
       host/fakes/devr_fakes.cc         # shared reusable stubs for devr/gin/rma/team/shadow-pool
+      host/fakes/hip_fakes.cc          # HIP runtime seams + host-backed VMM/stream profile
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/TestChecks.cpp
