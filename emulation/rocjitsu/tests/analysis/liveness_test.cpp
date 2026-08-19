@@ -13,6 +13,7 @@
 #include "rocjitsu/code/dbt/binary_translator_internal.h"
 #include "rocjitsu/code/patch/cdna4_instrumentation_builder.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
+#include "rocjitsu/code/patch/rdna4_instrumentation_builder.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/mubuf.h"
@@ -454,7 +455,8 @@ std::vector<IndirectCallFixup> discover_test_indirect_fixups(const std::vector<u
   std::vector<const Instruction *> instructions;
   for (size_t word_index = 0; word_index < words.size();) {
     const uint64_t offset = word_index * sizeof(uint32_t);
-    std::unique_ptr<Instruction> instruction(decoder->decode(words.data() + word_index, offset));
+    std::unique_ptr<Instruction> instruction(
+        decode_valid(*decoder, words.data() + word_index, offset));
     if (!instruction || instruction->size() <= 0)
       return {};
     const size_t instruction_words = static_cast<size_t>(instruction->size()) / sizeof(uint32_t);
@@ -1409,9 +1411,9 @@ TEST(CfgAnalysis, RejectsLiteralSelectedLaneDuringDecode) {
   // A decoded literal value of 135 is numerically identical to inline lane 7.
   // The raw selector still says "literal" and must not become static provenance.
   words.insert(words.begin() + static_cast<ptrdiff_t>(kFirstWritelaneSecondWord + 1u), 135u);
-  EXPECT_THROW(discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_GFX1250, extra_leaders,
-                                             /*wavefront_size=*/64u),
-               util::InvalidInst);
+  EXPECT_TRUE(discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_GFX1250, extra_leaders,
+                                            /*wavefront_size=*/64u)
+                  .empty());
 }
 
 TEST(CfgAnalysis, RejectsRelativeVgprAccessAcrossLaneSavedTarget) {
@@ -1466,10 +1468,10 @@ TEST(CfgAnalysis, RejectsUnprovenLaneSavedTargets) {
 
   const std::vector<uint32_t> invalid_words =
       build_lane_saved_target_program(LaneSavedTargetMutation::SpecialReturnSelector);
-  EXPECT_THROW(discover_test_indirect_fixups(invalid_words, ROCJITSU_CODE_ARCH_CDNA4,
-                                             std::array<uint64_t, 3>{0, 8, 16},
-                                             /*wavefront_size=*/64u),
-               util::InvalidInst);
+  EXPECT_TRUE(discover_test_indirect_fixups(invalid_words, ROCJITSU_CODE_ARCH_CDNA4,
+                                            std::array<uint64_t, 3>{0, 8, 16},
+                                            /*wavefront_size=*/64u)
+                  .empty());
 }
 
 TEST(CfgAnalysis, RejectsNoncanonicalRdna4GetpcSignExtensions) {
@@ -2348,9 +2350,9 @@ TEST(CfgAnalysis, RejectsUnsupportedSpecialPcCarriers) {
   ASSERT_TRUE(append_pc_delta_builder(words, ROCJITSU_CODE_ARCH_CDNA4, kInvalidExecSelector, 16));
   words.push_back(build_s_setpc_b64(kInvalidExecSelector, ROCJITSU_CODE_ARCH_CDNA4));
   words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
-  EXPECT_THROW(discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_CDNA4, {},
-                                             /*wavefront_size=*/64u),
-               util::InvalidInst);
+  EXPECT_TRUE(discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_CDNA4, {},
+                                            /*wavefront_size=*/64u)
+                  .empty());
 }
 
 TEST(CfgAnalysis, RejectsSpecialPcBuilderWithMismatchedConsumer) {
@@ -2412,9 +2414,9 @@ TEST(CfgAnalysis, RejectsLastSelectorPcPairSource) {
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
   };
 
-  EXPECT_THROW(discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_CDNA4, {},
-                                             /*wavefront_size=*/64u),
-               util::InvalidInst);
+  EXPECT_TRUE(discover_test_indirect_fixups(words, ROCJITSU_CODE_ARCH_CDNA4, {},
+                                            /*wavefront_size=*/64u)
+                  .empty());
 }
 
 TEST(CfgAnalysis, RejectsLastSelectorSwappcReturnSelector) {
@@ -4580,6 +4582,265 @@ TEST(CfgAnalysis, Gfx1250PcPairCopyReachesConsumer) {
   }
   ASSERT_NE(copied_call, nullptr);
   EXPECT_EQ(copied_call->source_target_offset, 28u);
+}
+
+TEST(CfgAnalysis, Gfx1250PredecessorlessFunctionLocalPcBuilderRemainsComplete) {
+  // The GFX1250 device libraries build an ordinary PC-relative call target and
+  // schedule unrelated VALU argument setup between the scalar add and the
+  // s_swap_pc_i64. Splitting the recovered consumer into its own block during
+  // fixed-point discovery must not turn that dominated local builder into an
+  // unconstrained predecessor path. The helper function is deliberately not an
+  // external entry: symbol-derived function boundaries split blocks but do not
+  // claim that hardware can enter them with arbitrary SGPR state.
+  std::vector<uint32_t> words = {
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x00: sole external entry.
+      0xBE804700u,                                // 0x04: s_get_pc_i64 s[0:1].
+      0xA980FE00u,
+      36u,
+      0u,          // 0x08: s_add_nc_u64 ..., lit64(36) -> helper at 0x2c.
+      0x7E040281u, // 0x14: v_mov_b32 v2, 1.
+      0x7E060280u, // 0x18: v_mov_b32 v3, 0.
+      0x7E080283u, // 0x1c: v_mov_b32 v4, 3.
+      0xBE9E4900u, // 0x20: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x24: continuation.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_GFX1250), // 0x28: padding.
+      0xBE80481Eu,                                // 0x2c: s_set_pc_i64 s[30:31].
+  };
+
+  TestCodeObject co(std::move(words));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 1> external_entries{0};
+  constexpr std::array<uint64_t, 1> function_boundaries{4};
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_GFX1250, external_entries,
+                                   ExternalEntryPolicy::ExplicitOnly, function_boundaries);
+
+  auto *consumer = block_starting_at(blocks, 0x20);
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+  const auto &fixup = consumer->static_indirect_call_fixups()[0];
+  EXPECT_EQ(fixup.source_target_offset, 0x2cu);
+  EXPECT_FALSE(fixup.source_incomplete);
+  EXPECT_TRUE(fixup.source_targets_exhaustive);
+}
+
+struct Gfx1250ScratchLaneTargetProgram {
+  std::vector<uint32_t> words;
+  uint64_t consumer_offset = 0;
+  uint64_t target_offset = 0;
+};
+
+Gfx1250ScratchLaneTargetProgram
+build_gfx1250_scratch_lane_target_program(bool mismatched_load_offset) {
+  constexpr uint16_t kTargetSreg = 0;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint16_t kSavedExecSreg = 35;
+  constexpr uint16_t kFrameSreg = 33;
+  constexpr uint16_t kCarrierVgpr = 57;
+  constexpr uint16_t kLowLane = 20;
+  constexpr uint16_t kHighLane = 21;
+  constexpr uint32_t kScratchOffset = 64;
+  constexpr uint32_t kLiteralOperand = 255;
+
+  Gfx1250ScratchLaneTargetProgram program;
+  const auto append = [&](const auto &encoded) {
+    program.words.insert(program.words.end(), encoded.begin(), encoded.end());
+  };
+  const auto offset = [&] {
+    return static_cast<uint64_t>(program.words.size()) * sizeof(uint32_t);
+  };
+  const auto append_full_exec_scratch = [&](const auto &encoded) {
+    program.words.push_back(pack_gfx1250_sop1(cdna5::kSOrSaveExecB32Sop1, kSavedExecSreg,
+                                              /*inline -1=*/193));
+    append(encoded.value());
+    program.words.push_back(cdna5::build_sopp(cdna5::kSWaitXcntSopp, {.simm16 = 0})[0]);
+    program.words.push_back(
+        pack_gfx1250_sop1(cdna5::kSMovB32Sop1, /*exec_lo=*/126, kSavedExecSreg));
+  };
+
+  // Build one static call target, stash its halves in two vector lanes, spill
+  // and reload the complete physical VGPR, then reconstruct the scalar pair.
+  // This is the compact behavioral equivalent of the dynamic-stack sequence in
+  // the fp16 WMMA Jakub-attention kernel.
+  program.words.push_back(pack_gfx1250_sop1(cdna5::kSGetPcI64Sop1, kTargetSreg, 0));
+  program.words.push_back(
+      pack_gfx1250_sop2(cdna5::kSAddCoU32Sop2, kTargetSreg, kTargetSreg, kLiteralOperand));
+  const size_t target_delta_word = program.words.size();
+  program.words.push_back(0);
+  program.words.push_back(pack_gfx1250_sop2(cdna5::kSAddCoCiU32Sop2, kTargetSreg + 1,
+                                            kTargetSreg + 1, /*inline 0=*/128));
+  append(build_gfx1250_writelane(kCarrierVgpr, kTargetSreg, 128u + kLowLane));
+  append(build_gfx1250_writelane(kCarrierVgpr, kTargetSreg + 1, 128u + kHighLane));
+  append_full_exec_scratch(build_scratch_store_b32_saddr(kCarrierVgpr, kFrameSreg, kScratchOffset,
+                                                         ROCJITSU_CODE_ARCH_GFX1250));
+  program.words.push_back(
+      cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = /*inline 0=*/128, .vdst = kCarrierVgpr})[0]);
+  append_full_exec_scratch(build_scratch_load_b32_saddr(
+      kCarrierVgpr, kFrameSreg, kScratchOffset + (mismatched_load_offset ? 4u : 0u),
+      ROCJITSU_CODE_ARCH_GFX1250));
+  append(build_gfx1250_readlane(kTargetSreg, kCarrierVgpr, 128u + kLowLane));
+  append(build_gfx1250_readlane(kTargetSreg + 1, kCarrierVgpr, 128u + kHighLane));
+  program.consumer_offset = offset();
+  program.words.push_back(pack_gfx1250_sop1(cdna5::kSSwapPcI64Sop1, kReturnSreg, kTargetSreg));
+  program.words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  program.target_offset = offset();
+  program.words.push_back(pack_gfx1250_sop1(cdna5::kSSetPcI64Sop1, 0, kReturnSreg));
+
+  // s_get_pc_i64 contributes the address immediately after itself.
+  program.words[target_delta_word] = static_cast<uint32_t>(program.target_offset - 4u);
+  return program;
+}
+
+TEST(CfgAnalysis, Gfx1250FullExecScratchSpillPreservesLaneSavedTarget) {
+  const auto program = build_gfx1250_scratch_lane_target_program(false);
+  const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
+      program.words, ROCJITSU_CODE_ARCH_GFX1250, std::array<uint64_t, 1>{0},
+      /*wavefront_size=*/32u);
+  const auto consumer = std::ranges::find_if(fixups, [&](const IndirectCallFixup &fixup) {
+    return fixup.source_call_offset == program.consumer_offset;
+  });
+  ASSERT_NE(consumer, fixups.end());
+  EXPECT_EQ(consumer->source_target_offset, program.target_offset);
+  EXPECT_FALSE(consumer->source_incomplete);
+  EXPECT_TRUE(consumer->source_targets_exhaustive);
+}
+
+TEST(CfgAnalysis, Gfx1250ScratchSpillRejectsMismatchedReloadAddress) {
+  const auto program = build_gfx1250_scratch_lane_target_program(true);
+  const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
+      program.words, ROCJITSU_CODE_ARCH_GFX1250, std::array<uint64_t, 1>{0},
+      /*wavefront_size=*/32u);
+  EXPECT_EQ(std::ranges::find_if(fixups,
+                                 [&](const IndirectCallFixup &fixup) {
+                                   return fixup.source_call_offset == program.consumer_offset;
+                                 }),
+            fixups.end());
+}
+
+Gfx1250ScratchLaneTargetProgram
+build_gfx1250_unsummarized_call_mode_program(std::optional<uint16_t> callee_mode_write) {
+  constexpr uint16_t kTargetSreg = 0;
+  constexpr uint16_t kOuterReturnSreg = 30;
+  constexpr uint16_t kInnerReturnSreg = 28;
+  constexpr uint16_t kTailTargetSreg = 38;
+  constexpr uint16_t kCarrierVgpr = 44;
+
+  Gfx1250ScratchLaneTargetProgram program;
+  const auto append = [&](const auto &encoded) {
+    program.words.insert(program.words.end(), encoded.begin(), encoded.end());
+  };
+  const auto offset = [&] {
+    return static_cast<uint64_t>(program.words.size()) * sizeof(uint32_t);
+  };
+
+  program.words.push_back(pack_gfx1250_sop1(cdna5::kSGetPcI64Sop1, kTargetSreg, 0));
+  const uint64_t getpc_next = offset();
+  append(cdna5::build_sop2(cdna5::kSAddNcU64Sop2,
+                           {.ssrc0 = kTargetSreg, .ssrc1 = 254, .sdst = kTargetSreg}));
+  const size_t target_delta_word = program.words.size();
+  program.words.push_back(0);
+  program.words.push_back(0);
+  append(build_gfx1250_writelane(kCarrierVgpr, kTargetSreg, /*inline lane 0=*/128));
+  append(build_gfx1250_writelane(kCarrierVgpr, kTargetSreg + 1, /*inline lane 1=*/129));
+  const size_t outer_call_word = program.words.size();
+  program.words.push_back(0); // Patched once the outer helper is laid out.
+  append(build_gfx1250_readlane(kTargetSreg, kCarrierVgpr, /*inline lane 0=*/128));
+  append(build_gfx1250_readlane(kTargetSreg + 1, kCarrierVgpr, /*inline lane 1=*/129));
+  program.consumer_offset = offset();
+  program.words.push_back(pack_gfx1250_sop1(cdna5::kSSwapPcI64Sop1, kOuterReturnSreg, kTargetSreg));
+  program.words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+  program.target_offset = offset();
+  program.words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250));
+
+  // The outer helper contains a nested call, so the deliberately bounded exact
+  // callee summary declines it. The narrower control-mode summary must handle
+  // both a write-free helper and an instrumentation-style explicit reset to the
+  // incoming bank-zero state. The nested helper also has a conditional
+  // same-state recursive edge and a recovered tail relay, matching the cyclic
+  // control flow introduced by ConSan call probes. A persistent bank-one
+  // change must fail closed.
+  const uint64_t outer_offset = offset();
+  const size_t inner_call_word = program.words.size();
+  program.words.push_back(0);
+  program.words.push_back(pack_gfx1250_sop1(cdna5::kSSetPcI64Sop1, 0, kOuterReturnSreg));
+  const uint64_t inner_offset = offset();
+  program.words.push_back(cdna5::build_sopp(cdna5::kSCbranchScc0Sopp, {.simm16 = 1})[0]);
+  const size_t recursive_call_word = program.words.size();
+  program.words.push_back(0);
+  program.words.push_back(pack_gfx1250_sop1(cdna5::kSGetPcI64Sop1, kTailTargetSreg, 0));
+  const uint64_t tail_getpc_next = offset();
+  append(cdna5::build_sop2(cdna5::kSAddNcU64Sop2,
+                           {.ssrc0 = kTailTargetSreg, .ssrc1 = 254, .sdst = kTailTargetSreg}));
+  const size_t tail_delta_word = program.words.size();
+  program.words.push_back(0);
+  program.words.push_back(0);
+  program.words.push_back(pack_gfx1250_sop1(cdna5::kSSetPcI64Sop1, 0, kTailTargetSreg));
+  const uint64_t tail_offset = offset();
+  if (callee_mode_write)
+    program.words.push_back(
+        cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = *callee_mode_write})[0]);
+  program.words.push_back(cdna5::build_sopp(cdna5::kSCbranchScc0Sopp, {.simm16 = 1})[0]);
+  program.words.push_back(pack_gfx1250_sop1(cdna5::kSSetPcI64Sop1, 0, kOuterReturnSreg));
+  program.words.push_back(pack_gfx1250_sop1(cdna5::kSSetPcI64Sop1, 0, kInnerReturnSreg));
+
+  const uint64_t outer_call_next = static_cast<uint64_t>(outer_call_word + 1u) * sizeof(uint32_t);
+  program.words[outer_call_word] = rocjitsu::build_s_call_b64(
+      kOuterReturnSreg, static_cast<int16_t>((outer_offset - outer_call_next) / 4u),
+      ROCJITSU_CODE_ARCH_GFX1250);
+  const uint64_t inner_call_next = static_cast<uint64_t>(inner_call_word + 1u) * sizeof(uint32_t);
+  program.words[inner_call_word] = rocjitsu::build_s_call_b64(
+      kInnerReturnSreg, static_cast<int16_t>((inner_offset - inner_call_next) / 4u),
+      ROCJITSU_CODE_ARCH_GFX1250);
+  const uint64_t recursive_call_next =
+      static_cast<uint64_t>(recursive_call_word + 1u) * sizeof(uint32_t);
+  program.words[recursive_call_word] = rocjitsu::build_s_call_b64(
+      kInnerReturnSreg, static_cast<int16_t>((inner_offset - recursive_call_next) / 4u),
+      ROCJITSU_CODE_ARCH_GFX1250);
+  const uint64_t tail_delta = tail_offset - tail_getpc_next;
+  program.words[tail_delta_word] = static_cast<uint32_t>(tail_delta);
+  program.words[tail_delta_word + 1] = static_cast<uint32_t>(tail_delta >> 32);
+  const uint64_t delta = program.target_offset - getpc_next;
+  program.words[target_delta_word] = static_cast<uint32_t>(delta);
+  program.words[target_delta_word + 1] = static_cast<uint32_t>(delta >> 32);
+  return program;
+}
+
+TEST(CfgAnalysis, Gfx1250ProbeRelayModeInvariantSurvivesUnsummarizedCall) {
+  const auto program = build_gfx1250_unsummarized_call_mode_program(std::nullopt);
+  const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
+      program.words, ROCJITSU_CODE_ARCH_GFX1250, std::array<uint64_t, 1>{0},
+      /*wavefront_size=*/32u);
+  const auto consumer = std::ranges::find_if(fixups, [&](const IndirectCallFixup &fixup) {
+    return fixup.source_call_offset == program.consumer_offset;
+  });
+  ASSERT_NE(consumer, fixups.end());
+  EXPECT_EQ(consumer->source_target_offset, program.target_offset);
+  EXPECT_FALSE(consumer->source_incomplete);
+}
+
+TEST(CfgAnalysis, Gfx1250ProbeRelayExplicitModeResetPreservesSelection) {
+  const auto program = build_gfx1250_unsummarized_call_mode_program(uint16_t{0});
+  const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
+      program.words, ROCJITSU_CODE_ARCH_GFX1250, std::array<uint64_t, 1>{0},
+      /*wavefront_size=*/32u);
+  const auto consumer = std::ranges::find_if(fixups, [&](const IndirectCallFixup &fixup) {
+    return fixup.source_call_offset == program.consumer_offset;
+  });
+  ASSERT_NE(consumer, fixups.end());
+  EXPECT_EQ(consumer->source_target_offset, program.target_offset);
+  EXPECT_FALSE(consumer->source_incomplete);
+}
+
+TEST(CfgAnalysis, Gfx1250ProbeRelayPersistentModeChangeFailsClosed) {
+  const auto program = build_gfx1250_unsummarized_call_mode_program(uint16_t{0x41});
+  const std::vector<IndirectCallFixup> fixups = discover_test_indirect_fixups(
+      program.words, ROCJITSU_CODE_ARCH_GFX1250, std::array<uint64_t, 1>{0},
+      /*wavefront_size=*/32u);
+  EXPECT_EQ(std::ranges::find_if(fixups,
+                                 [&](const IndirectCallFixup &fixup) {
+                                   return fixup.source_call_offset == program.consumer_offset;
+                                 }),
+            fixups.end());
 }
 
 TEST(CfgAnalysis, Gfx1250DirectCallOverwritesPcBuilderInReturnPair) {
@@ -6939,7 +7200,8 @@ std::unique_ptr<Instruction> decode_cdna4(const std::array<uint32_t, 2> &words) 
 TEST(GeneratedInstDefUse, Cdna3PackedF32TracksWideScalarSource) {
   constexpr std::array<uint32_t, 2> words{0xD3B04004u, 0x1C0A0810u};
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
-  auto inst = std::unique_ptr<Instruction>(decoder ? decoder->decode(words.data()) : nullptr);
+  auto inst =
+      std::unique_ptr<Instruction>(decoder ? decode_valid(*decoder, words.data()) : nullptr);
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "v_pk_fma_f32");
 
@@ -7269,7 +7531,7 @@ TEST(InstDefUse, Rdna4Vop3ScalarSource) {
   }; // v_add_co_u32 v65, s17, s30, v65
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
-  std::unique_ptr<Instruction> instruction(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
   ASSERT_NE(instruction, nullptr);
 
   const InstDefUse def_use(*instruction);

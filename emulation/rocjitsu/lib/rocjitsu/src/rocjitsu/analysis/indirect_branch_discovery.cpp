@@ -6,6 +6,7 @@
 #include "rocjitsu/analysis/control_flow.h"
 #include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
@@ -20,6 +21,7 @@
 #include <cstring>
 #include <deque>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -2399,6 +2401,11 @@ public:
   [[nodiscard]] bool empty() const { return !values_ || values_->empty(); }
   [[nodiscard]] size_t size() const { return values_ ? values_->size() : 0; }
 
+  template <typename Visitor> void for_each(Visitor &&visitor) const {
+    for (const auto &item : values())
+      visitor(item.first, item.second);
+  }
+
   void set(VectorLaneSlot slot, StashedPcHalf half) {
     if (values_) {
       const auto found = values_->find(slot);
@@ -2435,6 +2442,95 @@ public:
   void clear() { values_.reset(); }
 
   friend bool operator==(const VectorLaneFacts &lhs, const VectorLaneFacts &rhs) {
+    return lhs.values_ == rhs.values_ || lhs.values() == rhs.values();
+  }
+
+private:
+  [[nodiscard]] const Map &values() const {
+    static const Map empty;
+    return values_ ? *values_ : empty;
+  }
+
+  [[nodiscard]] Map &writable_values() {
+    if (!values_)
+      values_ = std::make_shared<Map>();
+    else if (!values_.unique())
+      values_ = std::make_shared<Map>(*values_);
+    return *values_;
+  }
+
+  void reset_if_empty() {
+    if (values_->empty())
+      values_.reset();
+  }
+
+  std::shared_ptr<Map> values_;
+};
+
+/// @brief One dword and wave lane in a compiler-managed private scratch frame.
+///
+/// @details GFX1250 uses an explicit scalar frame offset together with an
+/// address-free vector operand for ordinary spills. The scalar selector is
+/// part of the key: any write to that SGPR invalidates facts based on it.
+struct ScratchLaneSlot {
+  uint16_t saddr = 0;
+  uint32_t byte_offset = 0;
+  uint16_t lane = 0;
+
+  friend bool operator==(const ScratchLaneSlot &, const ScratchLaneSlot &) = default;
+};
+
+struct ScratchLaneSlotHash {
+  size_t operator()(const ScratchLaneSlot &slot) const noexcept {
+    size_t seed = std::hash<uint32_t>{}(slot.byte_offset);
+    seed ^= std::hash<uint16_t>{}(slot.saddr) + 0x9e3779b9u + (seed << 6) + (seed >> 2);
+    seed ^= std::hash<uint16_t>{}(slot.lane) + 0x9e3779b9u + (seed << 6) + (seed >> 2);
+    return seed;
+  }
+};
+
+/// @brief Copy-on-write facts for proven PC halves spilled to private scratch.
+class ScratchLaneFacts {
+  using Map = std::unordered_map<ScratchLaneSlot, StashedPcHalf, ScratchLaneSlotHash>;
+
+public:
+  [[nodiscard]] bool empty() const { return !values_ || values_->empty(); }
+  [[nodiscard]] size_t size() const { return values_ ? values_->size() : 0; }
+
+  void set(ScratchLaneSlot slot, StashedPcHalf half) {
+    if (values_) {
+      const auto found = values_->find(slot);
+      if (found != values_->end() && found->second == half)
+        return;
+    }
+    writable_values().insert_or_assign(slot, std::move(half));
+  }
+
+  template <typename Predicate> void erase_if(Predicate &&predicate) {
+    if (!values_ || std::ranges::none_of(*values_, predicate))
+      return;
+    std::erase_if(writable_values(), std::forward<Predicate>(predicate));
+    reset_if_empty();
+  }
+
+  template <typename Visitor> void for_each(Visitor &&visitor) const {
+    for (const auto &item : values())
+      visitor(item.first, item.second);
+  }
+
+  void intersect_with(const ScratchLaneFacts &other) {
+    if (!values_ || values_ == other.values_)
+      return;
+    const auto conflicts = [&](const auto &item) {
+      const auto incoming = other.values().find(item.first);
+      return incoming == other.values().end() || incoming->second != item.second;
+    };
+    erase_if(conflicts);
+  }
+
+  void clear() { values_.reset(); }
+
+  friend bool operator==(const ScratchLaneFacts &lhs, const ScratchLaneFacts &rhs) {
     return lhs.values_ == rhs.values_ || lhs.values() == rhs.values();
   }
 
@@ -2583,6 +2679,7 @@ private:
 
 struct VectorLaneFlowState {
   VectorLaneFacts slots;
+  ScratchLaneFacts scratch_slots;
   RestoredSgprFacts restored_sgprs;
   std::optional<uint8_t> vgpr_msb_imm;
   std::optional<bool> gpr_idx_enabled;
@@ -2737,6 +2834,71 @@ void update_gpr_idx_enabled(std::optional<bool> &enabled, const Instruction &ins
   return ref;
 }
 
+struct Gfx1250ScratchDword {
+  uint16_t saddr = 0;
+  uint32_t byte_offset = 0;
+  uint16_t vgpr = 0;
+  amdgpu::VgprMsbRole vgpr_role = amdgpu::VgprMsbRole::None;
+  bool load = false;
+};
+
+/// @brief Decode the narrow scratch form used for compiler VGPR spills.
+///
+/// @details Only an address-free vector operand and an unscaled immediate are
+/// accepted. A vector address or scaled offset would need value analysis before
+/// two encoded addresses could be proven equal.
+[[nodiscard]] std::optional<Gfx1250ScratchDword> gfx1250_scratch_dword(const Instruction &inst) {
+  const std::string_view mnemonic = inst.mnemonic();
+  if (mnemonic != "scratch_store_b32" && mnemonic != "scratch_load_b32")
+    return std::nullopt;
+  if (inst.raw_encoding() == nullptr ||
+      inst.size() != static_cast<int>(sizeof(cdna5::VscratchMachineInst)))
+    return std::nullopt;
+
+  static_assert(sizeof(cdna5::VscratchMachineInst) == 3 * sizeof(uint32_t));
+  std::array<uint32_t, 3> words;
+  std::memcpy(words.data(), inst.raw_encoding(), sizeof(words));
+  const cdna5::VscratchMachineInst raw = std::bit_cast<cdna5::VscratchMachineInst>(words);
+  if (raw.vaddr != 0 || raw.scale_offset != 0)
+    return std::nullopt;
+
+  const bool load = mnemonic == "scratch_load_b32";
+  const Operand *vgpr_operand = load ? inst.dst_operand(0) : inst.src_operand(1);
+  const auto vgpr = operand_register(vgpr_operand, RegClass::VGPR);
+  if (!vgpr)
+    return std::nullopt;
+  return Gfx1250ScratchDword{.saddr = static_cast<uint16_t>(raw.saddr),
+                             .byte_offset = raw.ioffset,
+                             .vgpr = vgpr->index,
+                             .vgpr_role = vgpr_operand->vgpr_msb_role(),
+                             .load = load};
+}
+
+/// @brief Prove that a scratch instruction executes for every Wave32 lane and
+/// completes before the compiler restores the old EXEC mask.
+[[nodiscard]] bool gfx1250_full_exec_scratch_transfer(const AnalysisContext &ctx,
+                                                      const AnalysisBlock &block, size_t index) {
+  if (index == block.first_index || index + 2 > block.last_index)
+    return false;
+  const Instruction &save = *ctx.insts[index - 1];
+  const Instruction &wait = *ctx.insts[index + 1];
+  const Instruction &restore = *ctx.insts[index + 2];
+  if (save.mnemonic() != "s_or_saveexec_b32" || save.num_dst_operands() < 1 ||
+      save.num_src_operands() < 1 || (wait.flags() & WAITCNT) == 0 ||
+      wait.raw_encoding() == nullptr || (wait.raw_encoding()[0] & 0xffffu) != 0 ||
+      restore.mnemonic() != "s_mov_b32" || restore.num_dst_operands() != 1 ||
+      restore.num_src_operands() != 1)
+    return false;
+
+  const auto saved_exec = operand_register(save.dst_operand(0), RegClass::SGPR);
+  const auto restored_exec = operand_register(restore.dst_operand(0), RegClass::EXEC);
+  const auto restore_source = operand_register(restore.src_operand(0), RegClass::SGPR);
+  const auto all_ones = save.src_operand(0)->const_value();
+  return saved_exec && restored_exec && restore_source && restored_exec->index == 0 &&
+         saved_exec->index == restore_source->index && all_ones &&
+         static_cast<uint32_t>(*all_ones) == UINT32_MAX;
+}
+
 // Whether a physical VGPR is callee-saved under the AMDGPU device calling
 // convention (CSR_AMDGPU_VGPRs). The callee-saved VGPRs are interleaved with
 // scratch registers in stripes of eight at a stride of sixteen starting at
@@ -2762,10 +2924,11 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
                                      ExternalEntryPolicy entry_policy) {
   // gfx1250 device functions sometimes keep a small static call set in one
   // VGPR: getpc-built low/high halves are written to fixed lanes, then read
-  // back into an SGPR pair before swappc. Track only fixed-lane
-  // writelane/readlane transport. Any ordinary write to the physical VGPR
-  // invalidates every recorded lane, and any SGPR write invalidates a
-  // reconstructed half.
+  // back into an SGPR pair before swappc. Track fixed-lane writelane/readlane
+  // transport and compiler-generated, full-EXEC private-scratch spills of that
+  // table. Any ordinary write to the physical VGPR invalidates every recorded
+  // lane, and any SGPR write invalidates a reconstructed half or a scratch
+  // address based on that scalar frame offset.
   //
   // RCCL carries this stash across branches and repeatedly changes the operand
   // bank selectors in between. VGPR contents do not disappear when MODE changes:
@@ -2991,6 +3154,276 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
     return result;
   };
 
+  struct ControlModeState {
+    std::optional<uint8_t> vgpr_msb_imm;
+    std::optional<bool> gpr_idx_enabled;
+
+    bool operator==(const ControlModeState &) const = default;
+  };
+  struct ControlModeSummary {
+    std::optional<ControlModeState> normal_return;
+    std::optional<ControlModeState> parent_return;
+  };
+  struct ControlModeSummaryKey {
+    CalleeSummaryCacheKey callee;
+    std::optional<uint16_t> parent_return_pair;
+
+    bool operator==(const ControlModeSummaryKey &) const = default;
+  };
+  struct ControlModeSummaryKeyHash {
+    size_t operator()(const ControlModeSummaryKey &key) const {
+      size_t hash = CalleeSummaryCacheKeyHash{}(key.callee);
+      hash ^= std::hash<std::optional<uint16_t>>{}(key.parent_return_pair) + 0x9e3779b9u +
+              (hash << 6) + (hash >> 2);
+      return hash;
+    }
+  };
+  std::unordered_map<ControlModeSummaryKey, std::optional<ControlModeSummary>,
+                     ControlModeSummaryKeyHash>
+      control_mode_summary_cache;
+  std::unordered_set<ControlModeSummaryKey, ControlModeSummaryKeyHash>
+      active_control_mode_summaries;
+
+  // The full clobber summary intentionally declines complex callees. Recover a
+  // smaller, context-sensitive summary of just the two control fields needed
+  // to interpret vector-register operands. Unlike a write-free proof, this
+  // accepts instrumentation helpers that deterministically set a field to its
+  // incoming value (notably `s_set_vgpr_msb 0`) or restore it before return.
+  // A nested helper may tail-return through its caller's return pair; keep
+  // that distinct from an ordinary return so the local continuation is not
+  // considered on that path. Unresolved calls and any other return pair still
+  // fail closed.
+  std::function<std::optional<ControlModeSummary>(uint64_t, uint16_t, std::optional<uint16_t>,
+                                                  ControlModeState, size_t &)>
+      summarize_callee_control_mode;
+  summarize_callee_control_mode =
+      [&](uint64_t target, uint16_t return_pair, std::optional<uint16_t> parent_return_pair,
+          ControlModeState initial_state, size_t &work) -> std::optional<ControlModeSummary> {
+    constexpr size_t kMaxControlModeSummaryBlocks = 4096;
+    constexpr size_t kMaxControlModeSummaryCacheEntries = 4096;
+    const ControlModeSummaryKey key{.callee = {.target = target,
+                                               .return_pair = return_pair,
+                                               .mode = initial_state.vgpr_msb_imm,
+                                               .gpr_idx_enabled = initial_state.gpr_idx_enabled},
+                                    .parent_return_pair = parent_return_pair};
+    if (const auto cached = control_mode_summary_cache.find(key);
+        cached != control_mode_summary_cache.end())
+      return cached->second;
+    if (control_mode_summary_cache.size() >= kMaxControlModeSummaryCacheEntries)
+      return std::nullopt;
+    if (!active_control_mode_summaries.insert(key).second) {
+      // A recursive edge with the identical abstract input is the backedge of
+      // this finite-state dataflow problem. Use that input as the coinductive
+      // value for the edge; concrete return paths in the active invocation are
+      // still scanned and merged, so a mode-changing base case weakens or
+      // replaces the result rather than being hidden by the cycle.
+      return ControlModeSummary{.normal_return = initial_state, .parent_return = std::nullopt};
+    }
+
+    struct WorkItem {
+      size_t block_index;
+      ControlModeState state;
+    };
+    ControlModeSummary result;
+    const auto merge_return_state = [](std::optional<ControlModeState> &combined,
+                                       const ControlModeState &incoming) {
+      if (!combined) {
+        combined = incoming;
+        return;
+      }
+      if (combined->vgpr_msb_imm != incoming.vgpr_msb_imm)
+        combined->vgpr_msb_imm = std::nullopt;
+      if (combined->gpr_idx_enabled != incoming.gpr_idx_enabled)
+        combined->gpr_idx_enabled = std::nullopt;
+    };
+    bool unsupported = false;
+    std::vector<WorkItem> worklist;
+    const auto start = instruction_by_offset.find(target);
+    if (start == instruction_by_offset.end() ||
+        block_for_instruction[start->second] == blocks.size() ||
+        blocks[block_for_instruction[start->second]].first_index != start->second) {
+      unsupported = true;
+    } else {
+      worklist.push_back({block_for_instruction[start->second], initial_state});
+    }
+
+    std::unordered_set<uint64_t> visited;
+    while (!unsupported && !worklist.empty()) {
+      WorkItem item = worklist.back();
+      worklist.pop_back();
+      const uint64_t mode_key = item.state.vgpr_msb_imm ? *item.state.vgpr_msb_imm : uint64_t{256};
+      const uint64_t gpr_idx_key =
+          item.state.gpr_idx_enabled ? (*item.state.gpr_idx_enabled ? 1u : 0u) : 2u;
+      const uint64_t visit_key =
+          (static_cast<uint64_t>(item.block_index) << 11) | (gpr_idx_key << 9) | mode_key;
+      if (!visited.insert(visit_key).second)
+        continue;
+      if (++work > kMaxControlModeSummaryBlocks) {
+        unsupported = true;
+        break;
+      }
+
+      const AnalysisBlock &callee_block = blocks[item.block_index];
+      for (size_t index = callee_block.first_index; index <= callee_block.last_index; ++index) {
+        const Instruction &candidate = *ctx.insts[index];
+        update_vgpr_mode(item.state.vgpr_msb_imm, candidate, ctx.text);
+        update_gpr_idx_enabled(item.state.gpr_idx_enabled, candidate, ctx.text);
+      }
+
+      const Instruction &term = *ctx.insts[callee_block.last_index];
+      const InstructionFacts &term_facts = ctx.facts[callee_block.last_index];
+      if (term_facts.setpc_ssrc) {
+        if (*term_facts.setpc_ssrc == return_pair) {
+          merge_return_state(result.normal_return, item.state);
+        } else if (parent_return_pair && *term_facts.setpc_ssrc == *parent_return_pair) {
+          merge_return_state(result.parent_return, item.state);
+        } else {
+          // ConSan probe relays tail-transfer through a temporary PC pair into
+          // an out-of-line helper, which ultimately returns through the
+          // original call pair. Follow only a complete target set recovered by
+          // the preceding scalar-PC analysis; an unresolved or incomplete
+          // transfer remains indistinguishable from a mismatched return.
+          bool complete = true;
+          std::vector<uint64_t> tail_targets;
+          for (const IndirectCallFixup &fixup : known_fixups) {
+            if (fixup.source_call_offset != term.src_loc())
+              continue;
+            complete &= !fixup.source_incomplete;
+            tail_targets.push_back(fixup.source_target_offset);
+          }
+          if (!complete || tail_targets.empty()) {
+            unsupported = true;
+          } else {
+            std::ranges::sort(tail_targets);
+            tail_targets.erase(std::ranges::unique(tail_targets).begin(), tail_targets.end());
+            for (uint64_t tail_target : tail_targets) {
+              const auto tail_entry = instruction_by_offset.find(tail_target);
+              if (tail_entry == instruction_by_offset.end() ||
+                  block_for_instruction[tail_entry->second] == blocks.size() ||
+                  blocks[block_for_instruction[tail_entry->second]].first_index !=
+                      tail_entry->second) {
+                unsupported = true;
+                break;
+              }
+              worklist.push_back({block_for_instruction[tail_entry->second], item.state});
+            }
+          }
+        }
+        continue;
+      }
+
+      std::vector<uint64_t> nested_targets;
+      std::optional<uint16_t> nested_return_pair;
+      if (term_facts.call_sdst) {
+        nested_return_pair = *term_facts.call_sdst;
+        const uint64_t next_offset = term.src_loc() + static_cast<uint64_t>(term.size());
+        const auto delta = term.branch_offset_bytes();
+        if (!delta || static_cast<int64_t>(next_offset) + *delta < 0) {
+          unsupported = true;
+        } else {
+          nested_targets.push_back(
+              static_cast<uint64_t>(static_cast<int64_t>(next_offset) + *delta));
+        }
+      } else if (term_facts.swappc_sdst) {
+        nested_return_pair = *term_facts.swappc_sdst;
+        bool complete = true;
+        for (const IndirectCallFixup &fixup : known_fixups) {
+          if (fixup.source_call_offset != term.src_loc())
+            continue;
+          complete &= !fixup.source_incomplete;
+          nested_targets.push_back(fixup.source_target_offset);
+        }
+        if (!complete || nested_targets.empty()) {
+          unsupported = true;
+        }
+      } else if (is_indirect_branch(term)) {
+        unsupported = true;
+      }
+      if (unsupported)
+        break;
+
+      if (nested_return_pair) {
+        std::ranges::sort(nested_targets);
+        nested_targets.erase(std::ranges::unique(nested_targets).begin(), nested_targets.end());
+        ControlModeSummary nested_result;
+        const bool recursive_return_pair = *nested_return_pair == return_pair;
+        const std::optional<uint16_t> nested_parent_return_pair =
+            recursive_return_pair ? parent_return_pair : std::optional<uint16_t>{return_pair};
+        for (uint64_t nested_target : nested_targets) {
+          const auto target_result = summarize_callee_control_mode(
+              nested_target, *nested_return_pair, nested_parent_return_pair, item.state, work);
+          if (!target_result) {
+            unsupported = true;
+            break;
+          }
+          if (target_result->normal_return)
+            merge_return_state(nested_result.normal_return, *target_result->normal_return);
+          if (target_result->parent_return)
+            merge_return_state(nested_result.parent_return, *target_result->parent_return);
+        }
+        if (unsupported)
+          break;
+        if (nested_result.parent_return) {
+          // A conventional nested call's parent is this callee. A recursive
+          // or coroutine-style edge reusing the current return pair inherits
+          // this callee's parent instead.
+          merge_return_state(recursive_return_pair ? result.parent_return : result.normal_return,
+                             *nested_result.parent_return);
+        }
+        if (!nested_result.normal_return)
+          continue;
+        const uint64_t continuation = term.src_loc() + static_cast<uint64_t>(term.size());
+        const auto continuation_inst = instruction_by_offset.find(continuation);
+        if (continuation_inst == instruction_by_offset.end() ||
+            block_for_instruction[continuation_inst->second] == blocks.size()) {
+          unsupported = true;
+          break;
+        }
+        worklist.push_back(
+            {block_for_instruction[continuation_inst->second], *nested_result.normal_return});
+        continue;
+      }
+
+      if (callee_block.successors.empty()) {
+        if (!is_program_path_terminator(term)) {
+          unsupported = true;
+        }
+        continue;
+      }
+      for (size_t successor : callee_block.successors)
+        worklist.push_back({successor, item.state});
+    }
+
+    active_control_mode_summaries.erase(key);
+    std::optional<ControlModeSummary> summary_result = result;
+    if (unsupported || (!result.normal_return && !result.parent_return)) {
+      summary_result = std::nullopt;
+    }
+    control_mode_summary_cache.emplace(key, summary_result);
+    return summary_result;
+  };
+
+  const auto summarize_call_targets = [&](std::span<const uint64_t> targets, uint16_t return_pair,
+                                          ControlModeState initial_state) {
+    std::optional<ControlModeState> combined;
+    size_t work = 0;
+    for (uint64_t target : targets) {
+      const auto result =
+          summarize_callee_control_mode(target, return_pair, std::nullopt, initial_state, work);
+      if (!result || !result->normal_return)
+        return std::optional<ControlModeState>{};
+      if (!combined) {
+        combined = *result->normal_return;
+      } else {
+        if (combined->vgpr_msb_imm != result->normal_return->vgpr_msb_imm)
+          combined->vgpr_msb_imm = std::nullopt;
+        if (combined->gpr_idx_enabled != result->normal_return->gpr_idx_enabled)
+          combined->gpr_idx_enabled = std::nullopt;
+      }
+    }
+    return combined;
+  };
+
   const auto scan_block = [&](const AnalysisBlock &block, VectorLaneFlowState state,
                               bool emit_fixups,
                               std::optional<VectorLaneFlowState> *call_entry_state) {
@@ -3041,10 +3474,12 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
           }
         }
       }
-      if (!state.restored_sgprs.empty()) {
+      if (!state.restored_sgprs.empty() || !state.scratch_slots.empty()) {
         ensure_written_sgprs(ctx, index);
-        ctx.facts[index].written_sgprs.for_each(
-            [&](uint16_t sgpr) { state.restored_sgprs.erase(sgpr); });
+        ctx.facts[index].written_sgprs.for_each([&](uint16_t sgpr) {
+          state.restored_sgprs.erase(sgpr);
+          state.scratch_slots.erase_if([&](const auto &item) { return item.first.saddr == sgpr; });
+        });
       }
 
       if (facts.getpc_sdst && *facts.getpc_sdst < kMaxTrackedSgprPair) {
@@ -3057,6 +3492,66 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
       }
       if (try_apply_pair_update(ctx, index, builders))
         continue;
+
+      // Preserve proven lane-table entries across the exact scratch idiom used
+      // by LLVM's GFX1250 dynamic-stack prologue. Both transfer instructions
+      // are wrapped in `s_or_saveexec_b32 ..., -1`, a zero wait, and an exact
+      // EXEC restore, so every Wave32 lane is transferred and complete before
+      // the old mask is reinstated. Partial-EXEC, vector-addressed, scaled, or
+      // aliased accesses deliberately fail closed.
+      const auto scratch = gfx1250_scratch_dword(inst);
+      if (mnemonic.starts_with("scratch_store")) {
+        if (!scratch) {
+          state.scratch_slots.clear();
+        } else {
+          bool possibly_aliased_base = false;
+          state.scratch_slots.for_each([&](const ScratchLaneSlot &slot, const StashedPcHalf &) {
+            possibly_aliased_base |= slot.saddr != scratch->saddr;
+          });
+          if (possibly_aliased_base)
+            state.scratch_slots.clear();
+          state.scratch_slots.erase_if([&](const auto &item) {
+            return item.first.saddr == scratch->saddr &&
+                   item.first.byte_offset == scratch->byte_offset;
+          });
+          const auto source_phys = physical_vgpr(scratch->vgpr, scratch->vgpr_role);
+          if (source_phys && gfx1250_full_exec_scratch_transfer(ctx, block, index)) {
+            state.slots.for_each([&](VectorLaneSlot slot, const StashedPcHalf &half) {
+              if (slot.vgpr == *source_phys) {
+                state.scratch_slots.set(ScratchLaneSlot{.saddr = scratch->saddr,
+                                                        .byte_offset = scratch->byte_offset,
+                                                        .lane = slot.lane},
+                                        half);
+              }
+            });
+          }
+        }
+        continue;
+      }
+      if (!state.scratch_slots.empty() &&
+          (mnemonic.starts_with("scratch_atomic") || mnemonic.starts_with("flat_store") ||
+           mnemonic.starts_with("flat_atomic")))
+        state.scratch_slots.clear();
+      if (scratch && scratch->load) {
+        const auto destination_phys = physical_vgpr(scratch->vgpr, scratch->vgpr_role);
+        if (destination_phys) {
+          state.slots.erase_if(
+              [&](const auto &item) { return item.first.vgpr == *destination_phys; });
+          if (gfx1250_full_exec_scratch_transfer(ctx, block, index)) {
+            state.scratch_slots.for_each([&](const ScratchLaneSlot &slot,
+                                             const StashedPcHalf &half) {
+              if (slot.saddr == scratch->saddr && slot.byte_offset == scratch->byte_offset) {
+                state.slots.set(VectorLaneSlot{.vgpr = *destination_phys, .lane = slot.lane}, half);
+              }
+            });
+          }
+        } else {
+          state.slots.erase_if([&](const auto &item) {
+            return (item.first.vgpr & 0xffu) == (scratch->vgpr & 0xffu);
+          });
+        }
+        continue;
+      }
 
       if (facts.call_sdst) {
         // A direct call can clobber any caller-saved VGPR before its
@@ -3073,12 +3568,14 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
           *call_entry_state = state;
         const uint64_t next_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
         const auto delta = inst.branch_offset_bytes();
+        std::vector<uint64_t> call_targets;
+        if (delta && static_cast<int64_t>(next_offset) + *delta >= 0)
+          call_targets.push_back(static_cast<uint64_t>(static_cast<int64_t>(next_offset) + *delta));
         const std::optional<CalleeSummary> callee_summary =
-            delta && static_cast<int64_t>(next_offset) + *delta >= 0
-                ? statically_bounded_callee_summary(
-                      static_cast<uint64_t>(static_cast<int64_t>(next_offset) + *delta),
-                      *facts.call_sdst, state.vgpr_msb_imm, state.gpr_idx_enabled)
-                : std::nullopt;
+            call_targets.empty()
+                ? std::nullopt
+                : statically_bounded_callee_summary(call_targets.front(), *facts.call_sdst,
+                                                    state.vgpr_msb_imm, state.gpr_idx_enabled);
         const auto survives_call = [&](uint16_t sgpr) {
           return callee_summary ? !callee_summary->sgprs.test(sgpr) : is_callee_saved_sgpr(sgpr);
         };
@@ -3092,10 +3589,22 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
           if (!survives_call(pair_lo) || !survives_call(static_cast<uint16_t>(pair_lo + 1)))
             builders.invalidate_pair(pair_lo);
         }
-        state.vgpr_msb_imm =
-            callee_summary ? callee_summary->return_mode : std::optional<uint8_t>{};
-        state.gpr_idx_enabled =
-            callee_summary ? callee_summary->return_gpr_idx_enabled : std::optional<bool>{};
+        if (callee_summary) {
+          state.vgpr_msb_imm = callee_summary->return_mode;
+          state.gpr_idx_enabled = callee_summary->return_gpr_idx_enabled;
+        } else {
+          const auto control_mode =
+              summarize_call_targets(call_targets, *facts.call_sdst,
+                                     ControlModeState{.vgpr_msb_imm = state.vgpr_msb_imm,
+                                                      .gpr_idx_enabled = state.gpr_idx_enabled});
+          if (control_mode) {
+            state.vgpr_msb_imm = control_mode->vgpr_msb_imm;
+            state.gpr_idx_enabled = control_mode->gpr_idx_enabled;
+          } else {
+            state.vgpr_msb_imm = std::nullopt;
+            state.gpr_idx_enabled = std::nullopt;
+          }
+        }
       }
 
       if (mnemonic == "v_writelane_b32") {
@@ -3238,10 +3747,22 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
           if (!survives_call(active_pair) || !survives_call(static_cast<uint16_t>(active_pair + 1)))
             builders.invalidate_pair(active_pair);
         }
-        state.vgpr_msb_imm =
-            callee_summary ? callee_summary->return_mode : std::optional<uint8_t>{};
-        state.gpr_idx_enabled =
-            callee_summary ? callee_summary->return_gpr_idx_enabled : std::optional<bool>{};
+        if (callee_summary) {
+          state.vgpr_msb_imm = callee_summary->return_mode;
+          state.gpr_idx_enabled = callee_summary->return_gpr_idx_enabled;
+        } else {
+          const auto control_mode =
+              summarize_call_targets(targets, *facts.swappc_sdst,
+                                     ControlModeState{.vgpr_msb_imm = state.vgpr_msb_imm,
+                                                      .gpr_idx_enabled = state.gpr_idx_enabled});
+          if (control_mode) {
+            state.vgpr_msb_imm = control_mode->vgpr_msb_imm;
+            state.gpr_idx_enabled = control_mode->gpr_idx_enabled;
+          } else {
+            state.vgpr_msb_imm = std::nullopt;
+            state.gpr_idx_enabled = std::nullopt;
+          }
+        }
       }
 
       // VGPR defs are decoded only to invalidate tracked slots; no slots makes
@@ -3375,7 +3896,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
     worklist.push_back(block_index);
 
   const auto state_units = [](const VectorLaneFlowState &state) {
-    return state.slots.size() + state.restored_sgprs.size();
+    return state.slots.size() + state.scratch_slots.size() + state.restored_sgprs.size();
   };
   size_t worklist_visits = 0;
   const size_t max_worklist_visits = std::max<size_t>(4096, blocks.size() * 64);
@@ -3400,6 +3921,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         return;
       }
       new_entry.slots.intersect_with(incoming.slots);
+      new_entry.scratch_slots.intersect_with(incoming.scratch_slots);
       new_entry.restored_sgprs.intersect_with(incoming.restored_sgprs);
       if (new_entry.vgpr_msb_imm != incoming.vgpr_msb_imm)
         new_entry.vgpr_msb_imm = std::nullopt;
@@ -3440,6 +3962,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         new_entry = std::move(external_entry);
       } else {
         new_entry.slots.clear();
+        new_entry.scratch_slots.clear();
         new_entry.restored_sgprs.clear();
         if (new_entry.vgpr_msb_imm != external_entry.vgpr_msb_imm)
           new_entry.vgpr_msb_imm = std::nullopt;
@@ -4461,28 +4984,55 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
       if (std::ranges::none_of(iteration_recovered, [&](const IndirectCallFixup &candidate) {
             return same_observation(existing, candidate);
           })) {
-        if (existing.source_call_carrier.cls != RegClass::SGPR) {
-          const auto consumer_block = std::ranges::find_if(blocks, [&](const AnalysisBlock &block) {
-            const uint64_t begin = ctx.insts[block.first_index]->src_loc();
-            const Instruction &last = *ctx.insts[block.last_index];
-            const uint64_t end = last.src_loc() + static_cast<uint64_t>(last.size());
-            return existing.source_call_offset >= begin && existing.source_call_offset < end;
+        const auto consumer_block = std::ranges::find_if(blocks, [&](const AnalysisBlock &block) {
+          const uint64_t begin = ctx.insts[block.first_index]->src_loc();
+          const Instruction &last = *ctx.insts[block.last_index];
+          const uint64_t end = last.src_loc() + static_cast<uint64_t>(last.size());
+          return existing.source_call_offset >= begin && existing.source_call_offset < end;
+        });
+        if (consumer_block != blocks.end() && !consumer_block->external_entry) {
+          const size_t consumer_index =
+              static_cast<size_t>(std::distance(blocks.begin(), consumer_block));
+          const auto predecessor = std::ranges::find_if(blocks, [&](const AnalysisBlock &block) {
+            return std::ranges::find(block.successors, consumer_index) != block.successors.end();
           });
-          if (consumer_block != blocks.end()) {
-            const size_t consumer_index =
-                static_cast<size_t>(std::distance(blocks.begin(), consumer_block));
-            const size_t predecessor_count =
-                std::ranges::count_if(blocks, [&](const AnalysisBlock &block) {
-                  return std::ranges::find(block.successors, consumer_index) !=
-                         block.successors.end();
-                });
-            // Adding a recovered consumer leader splits an otherwise closed
-            // special-pair template at the transfer itself. That mechanical
-            // split is not a new runtime path; preserve the proof unless the
-            // consumer has become an external root or gained another incoming
-            // edge.
-            if (!consumer_block->external_entry && predecessor_count == 1)
+          const bool has_second_predecessor =
+              predecessor != blocks.end() &&
+              std::ranges::find_if(std::next(predecessor), blocks.end(),
+                                   [&](const AnalysisBlock &block) {
+                                     return std::ranges::find(block.successors, consumer_index) !=
+                                            block.successors.end();
+                                   }) != blocks.end();
+          if (predecessor != blocks.end() && !has_second_predecessor) {
+            if (existing.source_call_carrier.cls != RegClass::SGPR) {
+              // Adding a recovered consumer leader splits an otherwise closed
+              // special-pair template at the transfer itself. That mechanical
+              // split is not a new runtime path; preserve the proof unless the
+              // consumer has become an external root or gained another incoming
+              // edge.
               continue;
+            }
+
+            // A scalar builder and consumer can likewise be split between
+            // fixed-point rounds. A predecessorless device function is not a
+            // hardware entry, so its block-entry fact remains dataflow BOTTOM;
+            // nevertheless, the sole predecessor's SET transfer proves that
+            // every runtime path to the consumer overwrites the pair with this
+            // exact builder. Preserve only that exact observation. A kill,
+            // pass-through, different builder, external consumer, or additional
+            // predecessor still takes the conservative downgrade below.
+            const auto transfer = predecessor->transfers.find(existing.source_call_sreg);
+            if (transfer != predecessor->transfers.end() &&
+                transfer->second.kind == PairTransfer::Kind::Set) {
+              const PcValue &value = transfer->second.value;
+              if (value.offset >= 0 &&
+                  static_cast<uint64_t>(value.offset) == existing.source_target_offset &&
+                  value.source_getpc_offset == existing.source_getpc_offset &&
+                  value.source_recovery_begin_offset == existing.source_recovery_begin_offset &&
+                  value.source_recovery_end_offset == existing.source_recovery_end_offset) {
+                continue;
+              }
+            }
           }
         }
         existing.source_incomplete = true;

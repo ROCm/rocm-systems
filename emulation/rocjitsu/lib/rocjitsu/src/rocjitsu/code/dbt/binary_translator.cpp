@@ -1286,6 +1286,121 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
     // simpler than the outer one.
     std::function<bool(BasicBlock *, const Instruction *, uint16_t, bool)> caller_value_reaches;
 
+    const auto instruction_clobbers_vgpr_lane = [](const Instruction &inst, uint16_t vgpr,
+                                                   uint16_t lane) {
+      const std::string_view mnemonic = inst.mnemonic();
+      // Without tracking MODE/GPR-index state, a later low selector cannot be
+      // mapped to one physical VGPR. Refuse the exact-clobber proof instead of
+      // assuming the default bank survives.
+      if (mnemonic == "s_set_vgpr_msb" || mnemonic.starts_with("s_set_gpr_idx") ||
+          mnemonic == "s_setreg_b32" || mnemonic == "s_setreg_imm32_b32" ||
+          mnemonic.starts_with("v_movrel") || mnemonic.starts_with("v_swaprel")) {
+        return true;
+      }
+
+      if (mnemonic == "v_writelane_b32") {
+        const Operand *dst = inst.dst_operand(0);
+        const Operand *written_lane = inst.src_operand(1);
+        const auto dst_ref = dst == nullptr ? std::optional<RegisterRef>{} : dst->to_register_ref();
+        if (!dst_ref || dst_ref->cls != RegClass::VGPR || written_lane == nullptr ||
+            written_lane->encoding_value() < 0) {
+          return true;
+        }
+        return dst_ref->index == vgpr &&
+               static_cast<uint16_t>(written_lane->encoding_value()) == lane;
+      }
+
+      for (int i = 0; i < inst.num_dst_operands(); ++i) {
+        const Operand *dst = inst.dst_operand(i);
+        const auto ref = dst == nullptr ? std::optional<RegisterRef>{} : dst->to_register_ref();
+        if (!ref || (ref->cls != RegClass::VGPR && ref->cls != RegClass::ACC_VGPR))
+          continue;
+        const uint16_t width = std::max<uint16_t>(1, ref->width);
+        if (vgpr >= ref->index && vgpr < static_cast<uint16_t>(ref->index + width))
+          return true;
+      }
+
+      RegisterSet implicit;
+      inst.implicit_defs(implicit);
+      return implicit.contains(RegisterRef{RegClass::VGPR, vgpr, 1}) ||
+             implicit.contains(RegisterRef{RegClass::ACC_VGPR, vgpr, 1});
+    };
+
+    // A caller-saved lane may still carry a return address across a statically
+    // recovered call when every decoded target is known not to write that exact
+    // lane. This is the compiler-emitted OCKL shape on gfx1250: a non-leaf
+    // address-taken function saves s[30:31] in v24 lanes, calls a helper chain
+    // that uses other VGPRs, restores the lanes, and returns. The ABI alone
+    // cannot prove v24 survives, so walk the already-validated call edges and
+    // their tail-call successors. Any unresolved call, dynamic register bank,
+    // or exact explicit/implicit write keeps the old fail-closed result.
+    const auto call_targets_preserve_vgpr_lane = [&](BasicBlock &call_block, uint16_t vgpr,
+                                                     uint16_t lane) {
+      if (call_block.call_edges().empty())
+        return false;
+
+      using VisitKey = std::pair<BasicBlock *, uint16_t>;
+      std::set<VisitKey> visiting;
+      std::set<VisitKey> proven;
+      std::function<bool(BasicBlock *, uint16_t)> visit = [&](BasicBlock *block,
+                                                              uint16_t return_sreg) {
+        if (block == nullptr)
+          return false;
+        const VisitKey key{block, return_sreg};
+        if (proven.contains(key) || visiting.contains(key))
+          return true;
+        visiting.insert(key);
+
+        for (const Instruction &inst : block->instructions()) {
+          const std::string_view mnemonic = inst.mnemonic();
+          const bool is_call = (inst.flags() & INDIRECT_CALL) != 0 || mnemonic == "s_call_i64" ||
+                               mnemonic == "s_call_b64" || mnemonic == "s_swap_pc_i64" ||
+                               mnemonic == "s_swappc_b64";
+          if (is_call) {
+            if (block->call_edges().empty())
+              return false;
+            for (const BasicBlock::CallEdge &nested : block->call_edges()) {
+              if (!visit(nested.callee, nested.return_sreg))
+                return false;
+            }
+            continue;
+          }
+          if (instruction_clobbers_vgpr_lane(inst, vgpr, lane))
+            return false;
+        }
+
+        const Instruction *term = block->terminator();
+        if (term != nullptr && term->size() == sizeof(uint32_t)) {
+          const std::string_view mnemonic = term->mnemonic();
+          if ((mnemonic == "s_setpc_b64" || mnemonic == "s_set_pc_i64") &&
+              static_cast<uint16_t>(text_word_at(text, term->src_loc()) & 0xffu) == return_sreg) {
+            visiting.erase(key);
+            proven.insert(key);
+            return true;
+          }
+        }
+
+        for (BasicBlock *successor : block->successors()) {
+          if (!visit(successor, return_sreg))
+            return false;
+        }
+        for (const BasicBlock::CallEdge &nested : block->call_edges()) {
+          if (!visit(nested.continuation, return_sreg))
+            return false;
+        }
+
+        visiting.erase(key);
+        proven.insert(key);
+        return true;
+      };
+
+      for (const BasicBlock::CallEdge &call : call_block.call_edges()) {
+        if (!visit(call.callee, call.return_sreg))
+          return false;
+      }
+      return true;
+    };
+
     auto lane_holds_saved_sgpr = [&](BasicBlock *start, const Instruction *from, uint16_t vgpr,
                                      uint16_t lane, uint16_t sgpr) {
       std::vector<std::pair<BasicBlock *, const Instruction *>> work{{start, from}};
@@ -1330,8 +1445,13 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
           const bool is_call = (inst.flags() & INDIRECT_CALL) != 0 ||
                                lane_mnemonic == "s_call_i64" || lane_mnemonic == "s_swap_pc_i64" ||
                                lane_mnemonic == "s_swappc_b64";
-          if (is_call && !is_callee_saved_vgpr(vgpr))
-            return false;
+          if (is_call) {
+            if (!is_callee_saved_vgpr(vgpr) &&
+                !call_targets_preserve_vgpr_lane(*block, vgpr, lane)) {
+              return false;
+            }
+            continue;
+          }
           const Operand *vdst = inst.dst_operand(0);
           const bool writes_lane =
               lane_mnemonic == "v_writelane_b32" && vdst != nullptr && vdst->encoding_value() >= 0;
@@ -1354,27 +1474,7 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
             break;
           }
           // Any other definition of the VGPR rewrites every lane, including this one.
-          bool clobbers = false;
-          for (int i = 0; i < inst.num_dst_operands(); ++i) {
-            const Operand *dst = inst.dst_operand(i);
-            if (dst == nullptr || dst->encoding_value() < 0)
-              continue;
-            const auto base = static_cast<uint16_t>(dst->encoding_value());
-            const int halves = dst->size_bits() > 32 ? dst->size_bits() / 32 : 1;
-            if (vgpr >= base && vgpr < base + halves)
-              clobbers = true;
-          }
-          // A destination operand is not the only way to write a VGPR. Ask the instruction for the
-          // registers it writes without naming them, so a producer that touches this lane through a
-          // hidden definition cannot slip past the operand walk above.
-          if (!clobbers) {
-            RegisterSet implicit;
-            inst.implicit_defs(implicit);
-            if (implicit.contains(RegisterRef{RegClass::VGPR, vgpr, 1}) ||
-                implicit.contains(RegisterRef{RegClass::ACC_VGPR, vgpr, 1}))
-              clobbers = true;
-          }
-          if (clobbers)
+          if (instruction_clobbers_vgpr_lane(inst, vgpr, lane))
             return false;
         }
         if (resolved)
@@ -1413,11 +1513,11 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
       bool defines = false;
       for (int i = 0; i < inst.num_dst_operands(); ++i) {
         const Operand *dst = inst.dst_operand(i);
-        if (dst == nullptr || dst->encoding_value() < 0)
+        const auto ref = dst == nullptr ? std::optional<RegisterRef>{} : dst->to_register_ref();
+        if (!ref || ref->cls != RegClass::SGPR)
           continue;
-        const auto base = static_cast<uint16_t>(dst->encoding_value());
-        const int halves = dst->size_bits() > 32 ? dst->size_bits() / 32 : 1;
-        if (sgpr >= base && sgpr < base + halves)
+        const uint16_t width = std::max<uint16_t>(1, ref->width);
+        if (sgpr >= ref->index && sgpr < static_cast<uint16_t>(ref->index + width))
           defines = true;
       }
       // Destination operands are not the only way to write an SGPR; ask the instruction for the
@@ -1439,12 +1539,14 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
       // cannot vouch for and must not be mistaken for a return address.
       const Operand *vsrc = inst.src_operand(0);
       const Operand *lane = inst.src_operand(1);
-      if (vsrc == nullptr || lane == nullptr || vsrc->encoding_value() < 0 ||
+      const auto vsrc_ref =
+          vsrc == nullptr ? std::optional<RegisterRef>{} : vsrc->to_register_ref();
+      if (!vsrc_ref || vsrc_ref->cls != RegClass::VGPR || lane == nullptr ||
           lane->encoding_value() < 0) {
         return Effect::kRedefines;
       }
       // Ask at this instruction, not of the body: the save has to reach this read on every path.
-      if (!lane_holds_saved_sgpr(block, &inst, static_cast<uint16_t>(vsrc->encoding_value()),
+      if (!lane_holds_saved_sgpr(block, &inst, vsrc_ref->index,
                                  static_cast<uint16_t>(lane->encoding_value()), sgpr))
         return Effect::kRedefines;
       return Effect::kRestores;
@@ -1510,9 +1612,10 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
 
     for (const auto &[block, ssrc0] : candidates) {
       const Instruction *term = block->terminator();
-      if (caller_value_reaches(block, term, ssrc0, /*allow_lane_restore=*/true) &&
-          caller_value_reaches(block, term, static_cast<uint16_t>(ssrc0 + 1),
-                               /*allow_lane_restore=*/true))
+      const bool lo = caller_value_reaches(block, term, ssrc0, /*allow_lane_restore=*/true);
+      const bool hi = caller_value_reaches(block, term, static_cast<uint16_t>(ssrc0 + 1),
+                                           /*allow_lane_restore=*/true);
+      if (lo && hi)
         returns.insert(term->src_loc());
     }
   }

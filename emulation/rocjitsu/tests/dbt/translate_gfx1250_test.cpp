@@ -2704,6 +2704,84 @@ TEST(BinaryTranslatorE2E, Gfx1250StopsAdoptedRootReturnWalkAtTheNextRoot) {
       "indirect branch or call target recovery is not implemented"));
 }
 
+namespace {
+
+[[nodiscard]] rocjitsu::TranslatedCodeObject
+translate_adopted_nonleaf_lane_restore(bool callee_clobbers_saved_lane) {
+  constexpr uint32_t kEndpgm = 0xBFB00000u;
+  constexpr uint32_t kNop = 0xBF800000u;
+  constexpr uint32_t kSetPcS30 = 0xBE80481Eu;
+  constexpr uint32_t kGetPcS0 = 0xBE804700u;
+  constexpr uint32_t kAddNcU64S0Literal64 = 0xA980FE00u;
+  constexpr uint32_t kSwapPcS30FromS0 = 0xBE9E4900u;
+
+  // Two inert kernel entries are followed by two address-taken functions. The
+  // second saves its incoming return pair in v24 lanes, calls the first through
+  // a recovered PC-relative target, restores the lanes, and returns. v24 is
+  // caller-saved, so the return is valid only when the decoded callee closure
+  // proves that exact lane survives.
+  const std::vector<uint32_t> words = {
+      rocjitsu::build_s_getpc_b64(10, ROCJITSU_CODE_ARCH_GFX1250),
+      // word 0: kernel 0 leaves an unresolved PC producer, preventing the
+      // whole-object relocated-by-construction fallback from masking whether
+      // the adopted return itself was proven.
+      kEndpgm, // word 1: kernel 1.
+      kNop,
+      kNop,
+      callee_clobbers_saved_lane ? 0x7E300280u : kNop, // word 4: v_mov_b32 v24, 0 or nop.
+      kSetPcS30,                                       // word 5: callee return.
+      kNop,
+      kNop,
+      0xD7610018u,
+      0x0201001Eu, // word 8: v_writelane_b32 v24, s30, 0.
+      0xD7610018u,
+      0x0201021Fu, // word 10: v_writelane_b32 v24, s31, 1.
+      kGetPcS0,    // word 12.
+      kAddNcU64S0Literal64,
+      0xFFFFFFDCu,
+      0xFFFFFFFFu,      // word 13: target word 4 (getpc-next 52 - 36 = 16).
+      0x7E040281u,      // word 16: unrelated v_mov_b32 v2, 1.
+      kSwapPcS30FromS0, // word 17: call callee.
+      0xD760001Eu,
+      0x02010118u, // word 18: v_readlane_b32 s30, v24, 0.
+      0xD760001Fu,
+      0x02010318u, // word 20: v_readlane_b32 s31, v24, 1.
+      kSetPcS30,   // word 22: adopted-root return.
+      kEndpgm,
+  };
+
+  auto image =
+      rocjitsu::test_support::make_minimal_amdgpu_elf_with_two_kernels_and_function_pointers(
+          words, /*kernel1_entry_word=*/1,
+          {{.offset_word = 4, .words = 2}, {.offset_word = 8, .words = 15}});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  EXPECT_TRUE(source.is_valid());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  return translator.translate(source);
+}
+
+} // namespace
+
+TEST(BinaryTranslatorE2E, Gfx1250AdoptedNonleafReturnTracksExactCallerSavedLane) {
+  const auto result = translate_adopted_nonleaf_lane_restore(/*callee_clobbers_saved_lane=*/false);
+  ASSERT_TRUE(result.ok())
+      << (result.diagnostics.empty()
+              ? ""
+              : result.diagnostics.front().message + " at " +
+                    std::to_string(result.diagnostics.front().guest_offset.value_or(~0ULL)));
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250AdoptedNonleafReturnRejectsCalleeLaneClobber) {
+  const auto result = translate_adopted_nonleaf_lane_restore(/*callee_clobbers_saved_lane=*/true);
+  EXPECT_FALSE(result.ok());
+  EXPECT_TRUE(rocjitsu::test_support::has_error_containing(
+      result, rocjitsu::DiagnosticKind::Legalization,
+      "indirect branch or call target recovery is not implemented"));
+}
+
 TEST(BinaryTranslatorE2E, Gfx1250RefusesFunctionPointerIntoTheMiddleOfAnInstruction) {
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   constexpr uint16_t kPcSreg = 4;
