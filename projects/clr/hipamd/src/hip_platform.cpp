@@ -176,7 +176,7 @@ void** __hipRegisterFatBinary(const void* data) {
   }
 
   bool success = false;
-  hip::FatBinaryInfo** fat_binary_info = nullptr;
+  hip::FatBinaryInfoPtr* fat_binary_info = nullptr;
 
   // Check for HIPK magic (kpack'd binary with external device code)
   if (fbwrapper->magic == symbols::kHipkMagic) {
@@ -198,8 +198,8 @@ void** __hipRegisterFatBinary(const void* data) {
 void __hipRegisterFunction(void** modules, const void* hostFunction, char* deviceFunction,
                            const char* deviceName, unsigned int threadLimit, uint3* tid, uint3* bid,
                            dim3* blockDim, dim3* gridDim, int* wSize) {
-  auto* fat_binary_modules = reinterpret_cast<hip::FatBinaryInfo**>(modules);
-  
+  auto* fat_binary_modules = reinterpret_cast<hip::FatBinaryInfoPtr*>(modules);
+
   static const bool enable_deferred_loading = []() {
     const char* var = getenv("HIP_ENABLE_DEFERRED_LOADING");
     return var ? atoi(var) != 0 : true;
@@ -236,7 +236,7 @@ void __hipRegisterVar(void** modules,       // The device modules containing cod
                       size_t size,          // Size of the variable
                       int constant,         // Whether this variable is constant
                       int global) {         // Unknown, always 0
-  auto* fat_binary_modules = reinterpret_cast<hip::FatBinaryInfo**>(modules);
+  auto* fat_binary_modules = reinterpret_cast<hip::FatBinaryInfoPtr*>(modules);
   hip::Var* var_ptr = new hip::Var(std::string(hostVar), hip::Var::DeviceVarKind::DVK_Variable,
                                    size, 0, 0, fat_binary_modules);
   hipError_t err = PlatformState::Instance().StatCO().RegisterGlobalVar(var, var_ptr);
@@ -250,7 +250,7 @@ void __hipRegisterSurface(
     char* hostVar,        // Variable name in host code
     char* deviceVar,      // Variable name in device code
     int type, int ext) {
-  auto* fat_binary_modules = reinterpret_cast<hip::FatBinaryInfo**>(modules);
+  auto* fat_binary_modules = reinterpret_cast<hip::FatBinaryInfoPtr*>(modules);
   hip::Var* var_ptr = new hip::Var(std::string(hostVar), hip::Var::DeviceVarKind::DVK_Surface,
                                    sizeof(surfaceReference), 0, 0, fat_binary_modules);
   hipError_t err = PlatformState::Instance().StatCO().RegisterGlobalVar(var, var_ptr);
@@ -274,8 +274,9 @@ void __hipRegisterManagedVar(
 #endif
   }();
 
-  hip::Var* var_ptr = new hip::Var(std::string(name), hip::Var::DeviceVarKind::DVK_Managed, pointer,
-                                   size, align, reinterpret_cast<hip::FatBinaryInfo**>(hipModule));
+  hip::Var* var_ptr =
+      new hip::Var(std::string(name), hip::Var::DeviceVarKind::DVK_Managed, pointer, size, align,
+                   reinterpret_cast<hip::FatBinaryInfoPtr*>(hipModule));
   hipError_t status = PlatformState::Instance().StatCO().RegisterManagedVar(var_ptr);
   guarantee(status == hipSuccess, "Cannot register Static Managed Var, error: %d", status);
 
@@ -308,7 +309,7 @@ void __hipRegisterTexture(
     char* hostVar,        // Variable name in host code
     char* deviceVar,      // Variable name in device code
     int type, int norm, int ext) {
-  auto* fat_binary_modules = reinterpret_cast<hip::FatBinaryInfo**>(modules);
+  auto* fat_binary_modules = reinterpret_cast<hip::FatBinaryInfoPtr*>(modules);
   hip::Var* var_ptr = new hip::Var(std::string(hostVar), hip::Var::DeviceVarKind::DVK_Texture,
                                    sizeof(textureReference), 0, 0, fat_binary_modules);
   hipError_t err = PlatformState::Instance().StatCO().RegisterGlobalVar(var, var_ptr);
@@ -317,7 +318,7 @@ void __hipRegisterTexture(
 
 // ================================================================================================
 void __hipUnregisterFatBinary(void** modules) {
-  auto* fat_binary_modules = reinterpret_cast<hip::FatBinaryInfo**>(modules);
+  auto* fat_binary_modules = reinterpret_cast<hip::FatBinaryInfoPtr*>(modules);
   static std::once_flag unregister_device_sync;
   // If SKIP ABORT is set and GPU is in error, dont need to sync streams.
   if (!HIP_SKIP_ABORT_ON_GPU_ERROR || !amd::Device::IsGPUInError()) {

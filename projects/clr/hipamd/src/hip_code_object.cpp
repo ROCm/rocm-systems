@@ -298,10 +298,10 @@ StatCO::~StatCO() {
   vars_.clear();
 }
 
-hipError_t StatCO::DigestFatBinary(const void* data, FatBinaryInfo*& programs) {
+hipError_t StatCO::DigestFatBinary(const void* data, FatBinaryInfoPtr& programs) {
   std::scoped_lock lock(sclock_);
 
-  if (programs != nullptr) {
+  if (programs.load(std::memory_order_acquire) != nullptr) {
     return hipSuccess;
   }
 
@@ -334,18 +334,18 @@ hipError_t StatCO::DigestFatBinary(const void* data, FatBinaryInfo*& programs) {
     FatBinaryInfo* fatBinaryInfo = new FatBinaryInfo(
         FatBinaryInfo::KpackParams{wrapper->binary, std::move(binary_path), bundle_index});
     hipError_t err = fatBinaryInfo->ExtractKpackBinary(g_devices);
-    programs = fatBinaryInfo;
+    programs.store(fatBinaryInfo, std::memory_order_release);
     return err;
   }
 
   // Create a new fat binary object and extract the fat binary for all devices.
   FatBinaryInfo* fatBinaryInfo = new FatBinaryInfo(nullptr, data);
   hipError_t err = fatBinaryInfo->ExtractFatBinaryUsingCOMGR(g_devices);
-  programs = fatBinaryInfo;
+  programs.store(fatBinaryInfo, std::memory_order_release);
   return err;
 }
 
-FatBinaryInfo** StatCO::AddFatBinary(const void* data, bool& success) {
+FatBinaryInfoPtr* StatCO::AddFatBinary(const void* data, bool& success) {
   std::scoped_lock lock(sclock_);
   module_to_hostModule_.insert(std::make_pair(&modules_[data], data));
 
@@ -360,8 +360,8 @@ FatBinaryInfo** StatCO::AddFatBinary(const void* data, bool& success) {
   return &modules_[data];
 }
 
-FatBinaryInfo** StatCO::AddKpackBinary(const void* hipk_metadata, const void* wrapper_addr,
-                                       bool& success) {
+FatBinaryInfoPtr* StatCO::AddKpackBinary(const void* hipk_metadata, const void* wrapper_addr,
+                                         bool& success) {
   std::scoped_lock lock(sclock_);
 
   // Use wrapper_addr as the key (same as data pointer for normal path)
@@ -380,7 +380,7 @@ FatBinaryInfo** StatCO::AddKpackBinary(const void* hipk_metadata, const void* wr
   return &modules_[wrapper_addr];
 }
 
-hipError_t StatCO::RemoveFatBinary(FatBinaryInfo** module) {
+hipError_t StatCO::RemoveFatBinary(FatBinaryInfoPtr* module) {
   std::scoped_lock lock(sclock_);
 
   auto hostVarsIter = module_to_hostVars_.find(module);
@@ -433,7 +433,7 @@ hipError_t StatCO::RemoveFatBinary(FatBinaryInfo** module) {
     auto hostModule = hostModuleIter->second;
     auto moduleIter = modules_.find(hostModule);
     if (moduleIter != modules_.end()) {
-      delete moduleIter->second;
+      delete moduleIter->second.load(std::memory_order_relaxed);
       modules_.erase(moduleIter);
     } else {
       LogPrintfError("RemoveFatBinary: Unable to find module 0x%x via hostModule 0x%x", module,
@@ -496,7 +496,7 @@ void StatCO::RemoveAllFatBinaries() {
 
   // Delete all fat binary info objects and clear the modules container
   for (auto const& [_, fb_info] : modules_) {
-    delete fb_info;
+    delete fb_info.load(std::memory_order_relaxed);
   }
   modules_.clear();
 }
@@ -533,16 +533,16 @@ hipError_t StatCO::GetFunc(hipFunction_t* hfunc, const void* hostFunction, int d
   }
 
   // Lazy load
-  FatBinaryInfo** module = it->second->ModuleInfo();
+  FatBinaryInfoPtr* module = it->second->ModuleInfo();
   if (module == nullptr) {
     return hipErrorInvalidDeviceFunction;
   }
 
   // Only take sclock_ when the module has not been loaded yet. Once loaded the
   // fast path avoids the lock entirely.
-  if (*(module) == nullptr) {
+  if (module->load(std::memory_order_acquire) == nullptr) {
     std::scoped_lock lock(sclock_);
-    if (*(module) == nullptr) {
+    if (module->load(std::memory_order_relaxed) == nullptr) {
       hipError_t err = DigestFatBinary(module_to_hostModule_[module], *module);
 
       if (err != hipSuccess) {
@@ -564,8 +564,8 @@ hipError_t StatCO::GetFuncAttr(hipFuncAttributes* func_attr, const void* hostFun
   }
 
   // Lazy load
-  FatBinaryInfo** module = it->second->ModuleInfo();
-  if (*(module) == nullptr) {
+  FatBinaryInfoPtr* module = it->second->ModuleInfo();
+  if (module->load(std::memory_order_relaxed) == nullptr) {
     std::ignore = DigestFatBinary(module_to_hostModule_[module], *module);
   }
 
@@ -595,8 +595,8 @@ hipError_t StatCO::GetGlobalVar(const void* hostVar, int deviceId, hipDeviceptr_
   }
 
   // Lazy load
-  FatBinaryInfo** module = it->second->ModuleInfo();
-  if (*(module) == nullptr) {
+  FatBinaryInfoPtr* module = it->second->ModuleInfo();
+  if (module->load(std::memory_order_relaxed) == nullptr) {
     std::ignore = DigestFatBinary(module_to_hostModule_[module], *module);
   }
 
@@ -657,8 +657,8 @@ hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
     for (auto& vecIter : managedVars_) {
       for (auto& var : vecIter.second) {
         // Lazy load
-        FatBinaryInfo** module = var->ModuleInfo();
-        if (*(module) == nullptr) {
+        FatBinaryInfoPtr* module = var->ModuleInfo();
+        if (module->load(std::memory_order_relaxed) == nullptr) {
           std::ignore = DigestFatBinary(module_to_hostModule_[module], *module);
         }
         hip::Stream* stream = g_devices.at(deviceId)->NullStream();

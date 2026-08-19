@@ -7,6 +7,7 @@
 #ifndef HIP_GLOBAL_HPP
 #define HIP_GLOBAL_HPP
 
+#include <atomic>
 #include <vector>
 #include <string>
 
@@ -31,10 +32,14 @@ inline hipDeviceptr_t memDevPtr(const amd::Memory* m) {
   return reinterpret_cast<hipDeviceptr_t>(m->getSvmPtr());
 }
 
+// Atomic module-pointer handle element type; stored value for the opaque module handle
+// (FatBinaryInfoPtr* replaces the previous FatBinaryInfo** handle type).
+using FatBinaryInfoPtr = std::atomic<FatBinaryInfo*>;
+
 // Abstract Structures
 class Function {
  public:
-  Function(const std::string& name, FatBinaryInfo** modules = nullptr);
+  Function(const std::string& name, FatBinaryInfoPtr* modules = nullptr);
   ~Function();
 
   hipError_t GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod);
@@ -42,7 +47,7 @@ class Function {
   hipError_t GetStatFunc(hipFunction_t* hfunc, int deviceId);
   hipError_t GetStatFuncAttr(hipFuncAttributes* func_attr, int deviceId);
   void ResizeDFunc(size_t size) { dFunc_.resize(size); }
-  FatBinaryInfo** ModuleInfo() { return modules_; }
+  FatBinaryInfoPtr* ModuleInfo() { return modules_; }
   const std::string& GetName() const { return name_; }
 
  private:
@@ -50,7 +55,7 @@ class Function {
 
   std::vector<amd::Kernel*> dFunc_;  //!< Per-device kernel objects; index matches g_devices
   std::string name_;                 //!< Symbol name for kernel lookup in the program
-  FatBinaryInfo** modules_;          //!< Owning fat binary; nullptr for dynamic COs
+  FatBinaryInfoPtr* modules_;        //!< Owning fat binary; nullptr for dynamic COs
 };
 
 class Var {
@@ -59,10 +64,10 @@ class Var {
   enum DeviceVarKind { DVK_Variable = 0, DVK_Surface, DVK_Texture, DVK_Managed };
 
   Var(const std::string& name, DeviceVarKind dVarKind, size_t size, int type, int norm,
-      FatBinaryInfo** modules = nullptr);
+      FatBinaryInfoPtr* modules = nullptr);
 
   Var(const std::string& name, DeviceVarKind dVarKind, void* pointer, size_t size, unsigned align,
-      FatBinaryInfo** modules = nullptr);
+      FatBinaryInfoPtr* modules = nullptr);
 
   ~Var();
 
@@ -74,7 +79,7 @@ class Var {
 
   void ResizeDVar(size_t size) { dMem_.resize(size); }
 
-  FatBinaryInfo** ModuleInfo() { return modules_; }
+  FatBinaryInfoPtr* ModuleInfo() { return modules_; }
   DeviceVarKind GetVarKind() const { return dVarKind_; }
   size_t GetSize() const { return size_; }
   size_t GetAlignment() const { return align_; }
@@ -98,7 +103,7 @@ class Var {
   size_t size_;                     //!< Size of the variable in bytes
   int type_;                        //!< Channel type (textures/surfaces only)
   int norm_;                        //!< Normalisation flag (textures/surfaces only)
-  FatBinaryInfo** modules_;         //!< Owning fat binary; nullptr for dynamic COs
+  FatBinaryInfoPtr* modules_;       //!< Owning fat binary; nullptr for dynamic COs
   void* managedVarPtr_;             //!< Host pointer to managed-memory allocation (DVK_Managed)
   size_t align_;                    //!< Alignment of the managed allocation in bytes
   bool allocFlag_;                  //!< false = host alloc; true = ihipMallocManaged alloc

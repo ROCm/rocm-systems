@@ -43,7 +43,7 @@ namespace hip {
 hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
 
 // ================================================================================================
-Function::Function(const std::string& name, FatBinaryInfo** modules)
+Function::Function(const std::string& name, FatBinaryInfoPtr* modules)
     : name_(name), modules_(modules) {
   dFunc_.resize(g_devices.size());
 }
@@ -90,15 +90,16 @@ hipError_t Function::GetStatFunc(hipFunction_t* hfunc, int deviceId) {
     *hfunc = asHipFunction(dFunc_[deviceId]);
     return hipSuccess;
   }
-  std::scoped_lock lock((*modules_)->FatBinaryLock());
+  FatBinaryInfo* fb = modules_->load(std::memory_order_acquire);
+  std::scoped_lock lock(fb->FatBinaryLock());
   // Check again after acquiring lock — another thread may have built it
   if (dFunc_[deviceId] != nullptr) {
     *hfunc = asHipFunction(dFunc_[deviceId]);
     return hipSuccess;
   }
   hipModule_t hmod = nullptr;
-  IHIP_RETURN_ONFAIL((*modules_)->BuildProgram(deviceId));
-  IHIP_RETURN_ONFAIL((*modules_)->GetModule(deviceId, &hmod));
+  IHIP_RETURN_ONFAIL(fb->BuildProgram(deviceId));
+  IHIP_RETURN_ONFAIL(fb->GetModule(deviceId, &hmod));
   dFunc_[deviceId] = BuildKernel(hmod);
   *hfunc = asHipFunction(dFunc_[deviceId]);
   return hipSuccess;
@@ -106,7 +107,7 @@ hipError_t Function::GetStatFunc(hipFunction_t* hfunc, int deviceId) {
 
 // ================================================================================================
 hipError_t Function::GetStatFuncAttr(hipFuncAttributes* func_attr, int deviceId) {
-  if (modules_ == nullptr || *modules_ == nullptr) {
+  if (modules_ == nullptr || modules_->load(std::memory_order_acquire) == nullptr) {
     return hipErrorInvalidDeviceFunction;
   }
   // Ensure kernel is built for this device (reuses getStatFunc path)
@@ -135,7 +136,7 @@ hipError_t Function::GetStatFuncAttr(hipFuncAttributes* func_attr, int deviceId)
 
 // ================================================================================================
 Var::Var(const std::string& name, DeviceVarKind dVarKind, size_t size, int type, int norm,
-         FatBinaryInfo** modules)
+         FatBinaryInfoPtr* modules)
     : name_(name),
       dVarKind_(dVarKind),
       size_(size),
@@ -149,7 +150,7 @@ Var::Var(const std::string& name, DeviceVarKind dVarKind, size_t size, int type,
 
 // ================================================================================================
 Var::Var(const std::string& name, DeviceVarKind dVarKind, void* pointer, size_t size,
-         unsigned align, FatBinaryInfo** modules)
+         unsigned align, FatBinaryInfoPtr* modules)
     : name_(name),
       dVarKind_(dVarKind),
       size_(size),
@@ -242,8 +243,9 @@ hipError_t Var::GetStatDeviceVar(amd::Memory** mem, int deviceId) {
             "Invalid DeviceId, greater than no of code objects");
   if (dMem_[deviceId] == nullptr) {
     hipModule_t hmod = nullptr;
-    IHIP_RETURN_ONFAIL((*modules_)->BuildProgram(deviceId));
-    IHIP_RETURN_ONFAIL((*modules_)->GetModule(deviceId, &hmod));
+    FatBinaryInfo* fb = modules_->load(std::memory_order_acquire);
+    IHIP_RETURN_ONFAIL(fb->BuildProgram(deviceId));
+    IHIP_RETURN_ONFAIL(fb->GetModule(deviceId, &hmod));
     IHIP_RETURN_ONFAIL(createVarMem(&dMem_[deviceId], name_, hmod, deviceId));
   }
   *mem = dMem_[deviceId];

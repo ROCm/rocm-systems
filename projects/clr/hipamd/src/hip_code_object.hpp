@@ -161,11 +161,11 @@ class StatCO : public CodeObject {
   virtual ~StatCO();
 
   // Add/Remove/Digest Fat Binaries passed to us from "__hipRegisterFatBinary"
-  FatBinaryInfo** AddFatBinary(const void* data, bool& success);
-  FatBinaryInfo** AddKpackBinary(const void* hipk_metadata, const void* wrapper_addr,
-                                 bool& success);
-  hipError_t RemoveFatBinary(FatBinaryInfo** module);
-  hipError_t DigestFatBinary(const void* data, FatBinaryInfo*& programs);
+  FatBinaryInfoPtr* AddFatBinary(const void* data, bool& success);
+  FatBinaryInfoPtr* AddKpackBinary(const void* hipk_metadata, const void* wrapper_addr,
+                                   bool& success);
+  hipError_t RemoveFatBinary(FatBinaryInfoPtr* module);
+  hipError_t DigestFatBinary(const void* data, FatBinaryInfoPtr& programs);
   void RemoveAllFatBinaries();
 
   // Register vars/funcs given to use from __hipRegister[Var/Func/ManagedVar]
@@ -197,18 +197,20 @@ class StatCO : public CodeObject {
   mutable std::recursive_mutex sclock_;    //!< Guards Static Code object
   const PlatformState& owner_;             //!< Reference to owning PlatformState
   //! Populated during __hipRegisterFatBinary
-  std::unordered_map<const void*, FatBinaryInfo*> modules_;
+  std::unordered_map<const void*, FatBinaryInfoPtr> modules_;
+  static_assert(sizeof(FatBinaryInfoPtr) == sizeof(FatBinaryInfo*));
+  static_assert(FatBinaryInfoPtr::is_always_lock_free);
   //! Populated during __hipRegisterFuncs
   std::unordered_map<const void*, Function*> functions_;
   std::unordered_map<const void*, Var*> vars_;               //!< Populated during __hipRegisterVars
   //! Populated during __hipRegisterManagedVar
-  std::unordered_map<FatBinaryInfo**, std::vector<Var*> > managedVars_;
+  std::unordered_map<FatBinaryInfoPtr*, std::vector<Var*> > managedVars_;
   //! Reverse mapping of modules to speed up removal
-  std::unordered_map<FatBinaryInfo**, const void*> module_to_hostModule_;
+  std::unordered_map<FatBinaryInfoPtr*, const void*> module_to_hostModule_;
   //! Reverse mapping of functions
-  std::unordered_map<FatBinaryInfo**, std::vector<const void*> > module_to_hostFunctions_;
+  std::unordered_map<FatBinaryInfoPtr*, std::vector<const void*> > module_to_hostFunctions_;
   //! Reverse mapping of vars
-  std::unordered_map<FatBinaryInfo**, std::vector<const void*> > module_to_hostVars_;
+  std::unordered_map<FatBinaryInfoPtr*, std::vector<const void*> > module_to_hostVars_;
   //! Tracks managed var initialization per device
   std::unique_ptr<std::atomic<bool>[]> managedVarsDevicePtrInitialized_;
   //! Number of entries in managedVarsDevicePtrInitialized_
