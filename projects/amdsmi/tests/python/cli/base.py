@@ -14,10 +14,52 @@ files each subclass ``TestCliBase`` and add their own test_* methods.
 import json
 import os
 import stat
+import sys
 import unittest
 
 import common.common as common
 import common.runcmd as runcmd
+
+
+def _build_exit_code_names():
+    """Exit code -> name. Library statuses reach the shell folded to their low
+    byte by the CLI's library_code_to_exit_code(); the CLI's own codes occupy a
+    reserved high band and come straight from AmdSmiExitCode."""
+    names = {}
+    for value, name in getattr(common, "ERROR_MAP", {}).items():
+        try:
+            names.setdefault(abs(int(value)) & 0xFF, name)
+        except (TypeError, ValueError):
+            continue
+    cli_dir = common.find_cli_dir(common.amdsmi_path, os.path.dirname(os.path.abspath(__file__)))
+    if cli_dir and cli_dir not in sys.path:
+        sys.path.append(cli_dir)
+    try:
+        import amdsmi_cli_exceptions
+
+        for member in amdsmi_cli_exceptions.AmdSmiExitCode:
+            if member.value:
+                names[int(member.value)] = member.name
+    except ImportError as exc:
+        # Non-fatal: names are a display aid. Announce it, though -- silently
+        # losing them degrades every failure line to a bare rc.
+        print(f"WARNING: amd-smi CLI exit-code names unavailable ({cli_dir}): {exc}", flush=True)
+    return names
+
+
+EXIT_CODE_NAMES = _build_exit_code_names()
+
+
+def _exit_code_for(status_name, fallback):
+    """Exit code the CLI reports for a library status, looked up by name so it
+    tracks the enum instead of hard-coding a number."""
+    for code, name in EXIT_CODE_NAMES.items():
+        if name == status_name:
+            return code
+    return fallback
+
+
+NOT_SUPPORTED_EXIT = _exit_code_for("AMDSMI_STATUS_NOT_SUPPORTED", 2)
 
 
 class TestCliBase(unittest.TestCase):
@@ -31,6 +73,18 @@ class TestCliBase(unittest.TestCase):
 
     TMP_FILENAME = "_tmp.log"
     TMP_FOLDER = "_tmp"
+
+    # TODO(amdsmi_team): drop these once the CLI tests supports automated
+    #                     input
+    SWEEP_EXCLUDED_ARGS = {
+        "set": {
+            "--memory-partition": "waits for confirmation",
+            "--compute-partition": "waits for confirmation",
+        }
+    }
+
+    # TODO(amdsmi_team): User input is not a problem, we just need to test above ^
+    PROMPT_ANSWERS = {"set": {"--fan": "y\n"}}
 
     # Scaffolding shared across every CLI test class.  setUpClass populates
     # these once, directly on ``TestCliBase``; subclasses then resolve them
@@ -71,13 +125,6 @@ class TestCliBase(unittest.TestCase):
         TestCliBase.gpus = baseline["gpus"]
         TestCliBase.sub_args = baseline["sub_args"]
         TestCliBase._initialized = True
-
-        # TODO: Remove this condition when CLI supports User automated input
-        # Commands that need User permission to run
-        TestCliBase.cmds_need_permission = {
-            "set": ["--fan", "--memory-partition", "--compute-partition"],
-            "reset": ["--gtt"],
-        }
 
     @classmethod
     def _build_baseline(cls):
@@ -156,6 +203,10 @@ class TestCliBase(unittest.TestCase):
 
         self.PASS = 0
         self.FAIL = 1
+        # Condition for help-derived sweeps (CreateCmds), which enumerate every
+        # advertised option without knowing what this ASIC supports. Any other
+        # non-zero code still fails.
+        self.PASS_OR_UNSUPPORTED = "pass_or_unsupported"
         self.tab = "    "
         self.tmp_filename = self.TMP_FILENAME
         self.tmp_folder = self.TMP_FOLDER
@@ -365,7 +416,7 @@ class TestCliBase(unittest.TestCase):
                                 options.append(f"{items[item_index]} 0")
                                 options.append(f"{items[item_index]} 1")
                             else:
-                                print(
+                                self.common.print(
                                     f"TODO: set {items[item_index]} sub_arg={sub_arg}  match_str={match_str}"
                                 )
                     if not sub_found:
@@ -398,33 +449,31 @@ class TestCliBase(unittest.TestCase):
 
         cmds = []
         cmd = f"amd-smi {cmd_name}"
+        ok = self.PASS_OR_UNSUPPORTED
         for list1_arg in list1_args:
             if list1_arg != "pass":
-                cmds.append((f"{cmd} {list1_arg} {self.AddLogLevel}", self.PASS))
+                cmds.append((f"{cmd} {list1_arg} {self.AddLogLevel}", ok))
                 if not list1_arg:
-                    cmds.append((f"{cmd} --file {self.tmp_filename} {self.AddLogLevel}", self.PASS))
-                    cmds.append((f"{cmd} {{json}} {self.AddLogLevel}", self.PASS))
-                    cmds.append((f"{cmd} {{json_file}} {self.AddLogLevel}", self.PASS))
-                    cmds.append((f"{cmd} {{json_file_append}} {self.AddLogLevel}", self.PASS))
-                    cmds.append((f"{cmd} {{json_file_overwrite}} {self.AddLogLevel}", self.PASS))
-                    cmds.append((f"{cmd} {{csv}} {self.AddLogLevel}", self.PASS))
-                    cmds.append((f"{cmd} {{csv_file}} {self.AddLogLevel}", self.PASS))
-                    cmds.append((f"{cmd} {{csv_file_append}} {self.AddLogLevel}", self.PASS))
-                    cmds.append((f"{cmd} {{csv_file_overwrite}} {self.AddLogLevel}", self.PASS))
+                    cmds.append((f"{cmd} --file {self.tmp_filename} {self.AddLogLevel}", ok))
+                    cmds.append((f"{cmd} {{json}} {self.AddLogLevel}", ok))
+                    cmds.append((f"{cmd} {{json_file}} {self.AddLogLevel}", ok))
+                    cmds.append((f"{cmd} {{json_file_append}} {self.AddLogLevel}", ok))
+                    cmds.append((f"{cmd} {{json_file_overwrite}} {self.AddLogLevel}", ok))
+                    cmds.append((f"{cmd} {{csv}} {self.AddLogLevel}", ok))
+                    cmds.append((f"{cmd} {{csv_file}} {self.AddLogLevel}", ok))
+                    cmds.append((f"{cmd} {{csv_file_append}} {self.AddLogLevel}", ok))
+                    cmds.append((f"{cmd} {{csv_file_overwrite}} {self.AddLogLevel}", ok))
             else:
                 list1_arg = ""
             for list2_arg in list2_args:
                 if list2_arg != "pass":
-                    cmds.append((f"{cmd} {list1_arg} {list2_arg} {self.AddLogLevel}", self.PASS))
+                    cmds.append((f"{cmd} {list1_arg} {list2_arg} {self.AddLogLevel}", ok))
                 else:
                     list2_arg = ""
                 for list3_arg in list3_args:
                     if list3_arg != "pass":
                         cmds.append(
-                            (
-                                f"{cmd} {list1_arg} {list2_arg} {list3_arg} {self.AddLogLevel}",
-                                self.PASS,
-                            )
+                            (f"{cmd} {list1_arg} {list2_arg} {list3_arg} {self.AddLogLevel}", ok)
                         )
                     else:
                         list3_arg = ""
@@ -433,7 +482,7 @@ class TestCliBase(unittest.TestCase):
                             cmds.append(
                                 (
                                     f"{cmd} {list1_arg} {list2_arg} {list3_arg} {list4_arg} {self.AddLogLevel}",
-                                    self.PASS,
+                                    ok,
                                 )
                             )
 
@@ -703,25 +752,11 @@ class TestCliBase(unittest.TestCase):
 
                 cmds[index] = (cmd, cond)
 
-        # Remove commands requiring input
-        _skipped_cmds = []
+        # Remove commands the sweep must not run
         for index, cmd_cond in enumerate(cmds):
             cmd, cond = cmd_cond
-            if not cmd:
-                continue
-            items = cmd.split()
-            if len(items) < 3:
-                continue
-            if items[1] in self.cmds_need_permission:
-                if items[2] in self.cmds_need_permission[items[1]]:
-                    cmd = ""
-                    key = f"{items[1]}_{items[2]}"
-                    if key not in _skipped_cmds:
-                        print(f"TODO: Skip needs permission: {items[1]} {items[2]}")
-                        _skipped_cmds.append(key)
-            # Update cmds when cmd has changed
-            if not cmd:
-                cmds[index] = (cmd, cond)
+            if cmd and self._lookup(self.SWEEP_EXCLUDED_ARGS, cmd) is not None:
+                cmds[index] = ("", cond)
 
         # Remove empty (cmd,cond) arguments
         cmds = [cmd_cond for cmd_cond in cmds if cmd_cond[0] != ""]
@@ -736,6 +771,48 @@ class TestCliBase(unittest.TestCase):
             print(f"cmds: {'*' * 80}")
             print(json.dumps(cmds, sort_keys=False, indent=4), flush=True)
         return cmds
+
+    @staticmethod
+    def _lookup(table, cmd):
+        """Value for *cmd* in a ``{command: {sub-arg: value}}`` table, else None.
+
+        Matches on the words the command contains rather than where they sit, so
+        an option that moves (``set --gpu 0 --fan 50``) is still found.
+        """
+        words = cmd.split()
+        for command, sub_args in table.items():
+            if command not in words:
+                continue
+            for sub_arg, value in sub_args.items():
+                if sub_arg in words:
+                    return value
+        return None
+
+    def _prompt_answer_for(self, cmd):
+        """Reply to pipe to a command whose parser prompts, else None."""
+        return self._lookup(self.PROMPT_ANSWERS, cmd)
+
+    def _grade(self, cond, rc, file_error, detail):
+        """Judge one command result -> (message suffix, counts as a failure).
+
+        Ordered most-specific first so each case reads on its own; the tolerated
+        case has to come first or every later branch needs to exclude it.
+        """
+        # The device lacks the feature. Only the help-derived sweep asks for this
+        # leniency, and only for this one code -- any other failure still counts.
+        if cond == self.PASS_OR_UNSUPPORTED and rc == NOT_SUPPORTED_EXIT:
+            return f" Unsupported: Received and Allowed FAIL ({detail})", False
+
+        expects_pass = cond in (self.PASS, self.PASS_OR_UNSUPPORTED)
+        if rc and expects_pass:
+            return f" Failure: Received FAIL ({detail}), expected PASS (0)", True
+        if not rc and not expects_pass:
+            return " Failure: Received PASS (0), expected FAIL (!0)", True
+        if file_error is not None and expects_pass:
+            return f" Failure: {file_error}", True
+
+        expected = "PASS" if not rc else "FAIL"
+        return f" Success: Received and Expected {expected} ({detail})", False
 
     def RunCmds(self, cmds):
         errors = []
@@ -756,23 +833,13 @@ class TestCliBase(unittest.TestCase):
             if "--file" in cmd and os.path.exists(self.tmp_filename):
                 os.chmod(self.tmp_filename, stat.S_IWRITE)
                 os.remove(self.tmp_filename)
-            (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
+            (rc, std_out, std_err) = self.util.RunCmdSync(cmd, msg_in=self._prompt_answer_for(cmd))
+            # Name the code from the same tables the CLI maps it with. Scraping
+            # stderr yielded its last word instead ("...without setting value"),
+            # and most failures write nothing to stderr at all.
             error_code = rc
-            if rc and std_err:
-                items = std_err.split()
-                if "amdsmi_exception" in std_err:
-                    # error code from amdsmi library exception
-                    for index, item in enumerate(items):
-                        if item == "Error":
-                            error_code_str = items[index + 4]
-                            error_code = error_code_str
-                            # break
-                else:
-                    # error code from amd-smi CLI
-                    error_code = items[-1]
-                    # Check for parse error 'choice'
-                    if "CRITICAL" in error_code:
-                        error_code = "Bad loglevel"
+            reason = EXIT_CODE_NAMES.get(rc, "") if rc else ""
+            detail = f"rc={error_code}" + (f" {reason}" if reason else "")
 
             msg = f"{cmd:{msg_len}s}:"
             file_error = None
@@ -787,21 +854,10 @@ class TestCliBase(unittest.TestCase):
                     os.chmod(self.tmp_filename, stat.S_IWRITE)
                     os.remove(self.tmp_filename)
 
-            if rc and cond == self.PASS:
-                msg += f" Failure: Received FAIL ({error_code}), expected PASS (0)"
+            outcome, is_error = self._grade(cond, rc, file_error, detail)
+            msg += outcome
+            if is_error:
                 errors.append(msg)
-            elif not rc and cond != self.PASS:
-                msg += " Failure: Received PASS (0), expected FAIL (!0)"
-                errors.append(msg)
-            elif file_error is not None and cond == self.PASS:
-                msg += f" Failure: {file_error}"
-                errors.append(msg)
-            else:
-                if not rc:
-                    expected = "PASS"
-                else:
-                    expected = "FAIL"
-                msg += f" Success: Received and Expected {expected} ({error_code})"
 
             self.common.print(f"{self.tab}{msg}")
             if self.Debug:
