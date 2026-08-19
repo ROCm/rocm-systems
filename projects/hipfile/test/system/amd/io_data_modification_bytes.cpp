@@ -89,7 +89,7 @@ struct HipFileVerifyBytes : public testing::TestWithParam<std::tuple<IoTestParam
         // hipMemset is not synchronous w.r.t. the host, and hipFileRead is not ordered w.r.t. the stream.
         ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
 
-        if (backend() == IoTestBackend::Fastpath) {
+        if (backend == IoTestBackend::Fastpath) {
             enforceFastpathGate(tmpfile_handle, device_buffer);
         }
     }
