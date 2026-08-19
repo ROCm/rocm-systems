@@ -196,6 +196,7 @@ fail:
 // Typically 12 user-defined planes + 1 plane for undefined plane IDs
 #define NCCL_IB_PLANE_MAX_INDEX 14
 #define NCCL_IB_PLANE_VIRT_BIT (0x1 << NCCL_IB_PLANE_MAX_INDEX)
+static_assert(NCCL_IB_PLANE_MAX_INDEX < 15, "NCCL_IB_PLANE_MAX_INDEX must be < 15: plane IDs are stored in int16_t and bit 15 is the sign bit");
 
 static ncclResult_t IbCastGetPlaneIndex(int devPlane, int16_t* count, int16_t* planes, int16_t* idx) {
   int16_t p = 0;
