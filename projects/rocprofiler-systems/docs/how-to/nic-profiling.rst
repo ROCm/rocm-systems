@@ -6,28 +6,62 @@
 Network performance profiling
 ********************************************
 
-`ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ supports network performance profiling. It can be performed using two methods:
+`ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_
+supports network performance profiling for two classes of network interface:
 
-* :ref:`event-based-profiling`
-* :ref:`AINIC-metric-collection`
+* **Conventional NICs** — standard TCP/IP interfaces (such as ``enp7s0``), profiled
+  via PAPI network counters that read ``/proc/net/dev``.
+* **AI NICs** — AMD Pensando RDMA interfaces, profiled via ``amd-smi``.
+
+Both classes are configured through the unified ``--nics`` option
+(``ROCPROFSYS_SAMPLING_NICS``). ROCm Systems Profiler automatically classifies
+each requested interface as conventional or AI and routes it to the appropriate
+backend.
+
+.. code-block:: shell
+
+   # Profile a single interface (works for both conventional and AI NICs)
+   rocprof-sys-sample --nics=enp7s0 -- <your command>
+
+   # Profile multiple interfaces in one run
+   rocprof-sys-sample --nics=enp7s0,enp229s0 -- <your command>
+
+   # Profile all available interfaces
+   rocprof-sys-sample --nics=all -- <your command>
+
+The equivalent environment variable is:
+
+.. code-block:: shell
+
+   ROCPROFSYS_SAMPLING_NICS=enp7s0,enp229s0
 
 .. _event-based-profiling:
 
-Sampling conventional NIC metrics using PAPI
-============================================
+Profiling conventional NIC metrics using PAPI
+==============================================
 
-Network performance profiling for conventional network interfaces that support TCP/IP is done using Performance Application Programming Interface (PAPI). This method profiles standard network events. You can sample the events based on standard network interface counters. Follow the steps to list all the network events, sample them using configuration parameters, instrument and run the generated binary, and visualize the Perfetto trace.
+Network performance profiling for conventional network interfaces that support
+TCP/IP is done using PAPI. This method profiles standard network events read
+from ``/proc/net/dev``. By default, four counters per interface are collected:
+received bytes, transmitted bytes, received packets, and transmitted packets.
+
+.. note::
+
+   PAPI network counters (``net:::`` events) read ``/proc/net/dev`` directly and
+   do not require kernel perf event access. They work regardless of the value of
+   ``/proc/sys/kernel/perf_event_paranoid``, so no special privileges or kernel
+   configuration changes are needed.
 
 List available network events
 -------------------------------
 
-List all the network events that can be traced on the system by running the command:
+To see the full list of per-interface counters available on the system, run:
 
 .. code-block:: shell
 
     rocprof-sys-avail -H -r net
 
-For example, if the name of system's NIC is ``enp7s0``, the output is:
+For example, if the system's NIC is ``enp7s0``, the output is:
 
 .. code-block:: shell
 
@@ -52,36 +86,22 @@ For example, if the name of system's NIC is ``enp7s0``, the output is:
   | net:::enp7s0:tx:compresse     |   CPU   |   true    | enp7s0 transmit compresse     |
   |-------------------------------|---------|-----------|-------------------------------|
 
+Configure and run
+------------------
 
-Configure the parameters
----------------------------
-
-To track bytes and packets sent and received by NIC ``enp7s0``, configure the parameters as follows:
-
-.. code-block:: shell
-
-  ROCPROFSYS_PAPI_EVENTS = net:::enp7s0:tx:byte net:::enp7s0:rx:byte net:::enp7s0:tx:packet net:::enp7s0:rx:packet
-
-Sample configuration parameter settings look like:
+Pass the interface name to ``--nics``:
 
 .. code-block:: shell
 
-  ROCPROFSYS_SAMPLING_FREQ=10
-  ROCPROFSYS_USE_SAMPLING=ON
-  ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock papi_array network_stats
-  ROCPROFSYS_NETWORK_INTERFACE=enp7s0
-  ROCPROFSYS_PAPI_EVENTS=net:::enp7s0:tx:byte net:::enp7s0:rx:byte net:::enp7s0:rx:packet net:::enp7s0:tx:packet
-  PAPI_NET_REFRESH_LATENCY=100000
+   rocprof-sys-sample --nics=enp7s0 -- <your command>
 
-Details of the configuration parameter settings configured in the example are:
+The equivalent configuration-file setting is:
 
-* **Sampling Frequency**: 10 samples per second
-* **TIMEMORY**:  Outputs the summaries for the ``wall_clock``, ``papi_array``, and ``network_stats`` components.
-* **Network Interface**: ``enp7s0`` is the predictable network interface device name.
-* **Events for the network device to be sampled**: Bytes transmitted, bytes received, packets transmitted, and packets received.
-* **PAPI_NET_REFRESH_LATENCY**: The shortest latency (in microseconds) with which PAPI updates network statistics. The default value is 1000000 (1s).
+.. code-block:: shell
 
-You can save the configuration parameter settings in a configuration file. For example, ``rocprofsys.cfg``:
+   ROCPROFSYS_SAMPLING_NICS=enp7s0
+
+A complete sample configuration file (``rocprofsys.cfg``) looks like:
 
 .. code-block:: shell
 
@@ -100,24 +120,23 @@ You can save the configuration parameter settings in a configuration file. For e
   ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock papi_array network_stats
   ROCPROFSYS_USE_PID=OFF
   ROCPROFSYS_OUTPUT_PREFIX=foo/
-  ROCPROFSYS_NETWORK_INTERFACE=enp7s0
-  ROCPROFSYS_PAPI_EVENTS=net:::enp7s0:tx:byte net:::enp7s0:rx:byte net:::enp7s0:rx:packet net:::enp7s0:tx:packet
+  ROCPROFSYS_SAMPLING_NICS=enp7s0
   PAPI_NET_REFRESH_LATENCY=100000
 
-To specify the configuration file, use the ``ROCPROFSYS_CONFIG_FILE`` setting:
+Details of the configuration settings:
+
+* **Sampling Frequency**: 10 samples per second.
+* **TIMEMORY**: Outputs summaries for the ``wall_clock``, ``papi_array``, and
+  ``network_stats`` components.
+* **ROCPROFSYS_SAMPLING_NICS**: The network interface to profile (``enp7s0``).
+* **PAPI_NET_REFRESH_LATENCY**: The shortest latency (in microseconds) with which
+  PAPI updates network statistics. The default value is 1000000 (1 second).
+
+To use the configuration file, set:
 
 .. code-block:: shell
 
   ROCPROFSYS_CONFIG_FILE=/path/to/rocprofsys.cfg
-
-This setting defines the location of the ROCm Systems Profiler configuration file.
-
-.. note::
-
-   PAPI network counters (``net:::`` events) read ``/proc/net/dev`` directly and
-   do not require kernel perf event access. They work regardless of the value of
-   ``/proc/sys/kernel/perf_event_paranoid``, so no special privileges or kernel
-   configuration changes are needed.
 
 Instrument and run the binary
 -------------------------------------
@@ -155,7 +174,7 @@ To view the generated ``.proto`` file in the browser, follow the steps:
 
 .. _AINIC-metric-collection:
 
-Sampling AI NIC metrics using amd-smi
+Profiling AI NIC metrics using amd-smi
 =========================================
 
 On a host system that has AI network interface cards, ROCm Systems Profiler can track the following metrics:
@@ -174,7 +193,7 @@ On a host system that has AI network interface cards, ROCm Systems Profiler can 
 AI NIC support in ROCm Systems Profiler
 ---------------------------------------
 AI NIC interfaces support the Remote Direct Memory Access (RDMA) standard. RDMA
-enables one computer to access another computer’s memory directly, without
+enables one computer to access another computer's memory directly, without
 operating-system involvement. This capability provides high-throughput, low‑latency
 data transfer, which is needed for large-scale clusters and high-performance
 networking. You can measure AI NIC network performance by using ``amd-smi``.
@@ -250,58 +269,48 @@ Sampling the AI NICs
 -----------------------
 
 After the AI NIC support is enabled, specify the names of the AI NICs for which
-you want to track the values. For example, if the host has an AI NIC named ``enp229s0``
-there are multiple options to track its performance:
+you want to track the values using ``--nics``. For example, to profile an AI NIC
+named ``enp229s0``:
 
-* **Option 1:** Set ``ROCPROFSYS_SAMPLING_AINICS`` in the configuration file.
+.. code-block:: shell
 
-  Example:
+   rocprof-sys-sample --nics=enp229s0 -- <your command>
 
-  .. code-block:: shell
+To profile multiple AI NICs, provide them as a comma-separated list:
 
-     ROCPROFSYS_SAMPLING_AINICS=enp229s0
+.. code-block:: shell
 
-* **Option 2:** Set ``ROCPROFSYS_SAMPLING_AINICS`` as an environment variable.
+   rocprof-sys-sample --nics=enp229s0,enp229s1 -- <your command>
 
-  Example:
+The equivalent environment variable is:
 
-  .. code-block:: shell
+.. code-block:: shell
 
-     export ROCPROFSYS_SAMPLING_AINICS=enp229s0
+   ROCPROFSYS_SAMPLING_NICS=enp229s0
+
+You can also pass ``all`` to profile every available NIC on the host:
+
+.. code-block:: shell
+
+   rocprof-sys-sample --nics=all -- <your command>
+
+ROCm Systems Profiler automatically identifies which interfaces are AI NICs and
+routes them to the ``amd-smi`` backend; no manual classification is needed.
 
 .. _ai_nics_option_3:
 
-* **Option 3:** Pass ``--ai-nics`` to ``rocprof-sys-sample`` on the command line. (Preferred)
+As a concrete example, to profile the AI NIC interface ``enp229s0`` while running
+``wget -O /dev/null --no-check-certificate https://example.com``:
 
-  Example:
+.. code-block:: shell
 
-  .. code-block:: shell
-
-     rocprof-sys-sample --ai-nics=enp229s0 -- <your command>
-
-  * If you use ``rocprof-sys-sample`` to profile the AI NIC interface ``enp229s0`` while running the command
-    ``wget -O /dev/null --no-check-certificate https://example.com``, the full command is:
-
-    .. code-block:: shell
-
-       rocprof-sys-sample --ai-nics=enp229s0 --device -- \ wget -O /dev/null --no-check-certificate https://example.com
-
-  * If you want to track multiple NICs on the host, provide them as a comma-separated list:
-
-    .. code-block:: shell
-
-       rocprof-sys-sample --ai-nics=enp229s0,enp229s1 --device -- \ wget -O /dev/null --no-check-certificate https://example.com
-
-
-  The value of the ``--ai-nics`` parameter can also be:
-
-  * all: tracking all NICs available on the host.
-  * none: not tracking any NICs.
+   rocprof-sys-sample --nics=enp229s0 --device -- \
+     wget -O /dev/null --no-check-certificate https://example.com
 
 Visualize the AI NIC profiling results
 ------------------------------------------
 
-To view the ``.proto`` file generated by ``rocprof-sys-sample`` in the browser, follow the steps :
+To view the ``.proto`` file generated by ``rocprof-sys-sample`` in the browser, follow the steps:
 
 1. Open the `Perfetto UI page <https://ui.perfetto.dev/>`_.
 
@@ -314,8 +323,8 @@ To view the ``.proto`` file generated by ``rocprof-sys-sample`` in the browser, 
 Save the profiling output to rocpd
 -------------------------------------
 
-To save the output to ``rocpd``, run ``rocprof-sys-sample`` as described above in
-:ref:`Option 3 <ai_nics_option_3>` with the ``--output-format rocpd`` argument. This
+To save the output to ``rocpd``, run ``rocprof-sys-sample`` as described
+:ref:`above <ai_nics_option_3>` with the ``--output-format rocpd`` argument. This
 generates a ``.db`` file, for example ``rocpd-2594634.db``.
 
 .. code-block:: shell
@@ -328,3 +337,20 @@ The AI NIC tracks look like this:
 .. image:: ../data/rocprof-sys-ai-nic-optiq.png
    :alt: Visualization of a performance graph in Perfetto with AI NIC network tracks
    :width: 800
+
+.. _deprecated-ai-nics:
+
+Deprecated: ``--ai-nics`` / ``ROCPROFSYS_SAMPLING_AINICS``
+===========================================================
+
+.. deprecated::
+
+   The ``--ai-nics`` command-line flag and the ``ROCPROFSYS_SAMPLING_AINICS``
+   environment variable are deprecated and will be removed in a future release.
+   Use ``--nics`` / ``ROCPROFSYS_SAMPLING_NICS`` instead. AI NIC classification
+   is now automatic: any interface that is recognized as an AMD Pensando device
+   is routed to the ``amd-smi`` backend, while all other interfaces are profiled
+   via PAPI.
+
+   If both ``--nics`` and ``--ai-nics`` are specified, ``--nics`` takes full
+   control and ``--ai-nics`` is ignored.
