@@ -306,8 +306,7 @@ def main():
     # `git status`. Override the base dir with ROCDECODE_PERF_RESULTS_DIR.
     results_base = Path(os.path.expanduser(os.environ.get(
         "ROCDECODE_PERF_RESULTS_DIR", str(Path.home() / "rocDecode_perf_results"))))
-    out_dir = results_base / ts
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = results_base / ts  # created only if there are results to write
     detail_rows = []
     summary_rows = []
     overall_ok = True
@@ -369,6 +368,7 @@ def main():
             summary_rows.append((f"{disp} ({compared} streams)", "PASSED"))
 
     if detail_rows:
+        out_dir.mkdir(parents=True, exist_ok=True)
         csv_path = out_dir / "perf_comparison.csv"
         pd.DataFrame(detail_rows).to_csv(csv_path, index=False)
         summary_box(summary_rows, overall_ok)
