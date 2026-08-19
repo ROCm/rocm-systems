@@ -269,6 +269,9 @@ class _RecordingLogger:
 class _StubHelpers:
     """Minimal ``self.helpers`` stub for the GPU ``set`` path."""
 
+    def __init__(self):
+        self.recorded_errors = []
+
     def check_required_groups(self):
         pass
 
@@ -283,6 +286,12 @@ class _StubHelpers:
 
     def get_gpu_id_from_device_handle(self, handle):
         return 0
+
+    def store_device_error(self, logger, device, key, message, exception=None, code=None):
+        # Mirrors AMDSMIHelpers.store_device_error: show the error and note it so
+        # the run resolves to a non-zero exit code.
+        self.recorded_errors.append(exception if exception is not None else code)
+        logger.store_output(device, key, message)
 
 
 _ClkLimit = collections.namedtuple("_ClkLimit", ["clk_type", "lim_type", "val"])
@@ -497,7 +506,3 @@ class TestSetGpuClkLimitCallSite(unittest.TestCase):
         set_calls, message = self._run_clk_limit("fclk", "min", 2500, min_clk=1000, max_clk=2000)
         self.assertEqual(set_calls, [])
         self.assertIn("greater than max", message)
-
-
-if __name__ == "__main__":
-    unittest.main()

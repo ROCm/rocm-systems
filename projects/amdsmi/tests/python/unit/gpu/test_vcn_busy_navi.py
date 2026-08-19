@@ -239,8 +239,22 @@ class TestVcnBusyNaviFallback(unittest.TestCase):
     def setUpClass(cls):
         if not os.path.isfile(METRIC_PATH):
             raise unittest.SkipTest(f"amd-smi CLI metric.py not found at {METRIC_PATH}")
+        cls._saved_modules = {
+            name: sys.modules.get(name)
+            for name in ("amdsmi", "amdsmi.amdsmi_interface", "amdsmi.amdsmi_exception")
+        }
         cls.interface = _install_fake_amdsmi()
         cls.metric_module = _load_metric_module()
+
+    @classmethod
+    def tearDownClass(cls):
+        # The fake amdsmi is process-global; leaving it installed fails the
+        # suite runner's sys.modules isolation guard and corrupts later tests.
+        for name, module in cls._saved_modules.items():
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
 
     def test_navi_vcn_busy_reads_sysfs(self):
         # gpu_partition_metrics is None and num_partition is "N/A": the new
@@ -331,7 +345,3 @@ class TestVcnBusyNaviFallback(unittest.TestCase):
         self.assertIsInstance(vcn, dict)
         self.assertIn("xcp_0", vcn)
         self.assertIn("xcp_1", vcn)
-
-
-if __name__ == "__main__":
-    unittest.main()
