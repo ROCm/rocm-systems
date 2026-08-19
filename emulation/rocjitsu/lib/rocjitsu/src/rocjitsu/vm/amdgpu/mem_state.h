@@ -122,7 +122,13 @@ struct VectorMemState : DynamicInstState {
   // 0 and scratch_addr_stride (= lane_count * sizeof(uint32_t)) is the per-element
   // destination-address stride; the register/LDS buffer indexing is unchanged.
   // See rocm-dbgapi memory.cpp private_swizzled conversion.
+  // FLAT routing is per lane: one wave can mix private-aperture lanes with
+  // global ones. scratch_lane_mask records exactly which lanes were swizzled,
+  // so the stride is applied to those and not to their global neighbours.
+  // For dedicated SCRATCH ops every active lane is private and this equals
+  // lane_mask.
   bool scratch_swizzle = false;
+  uint64_t scratch_lane_mask = 0;
   uint32_t scratch_addr_stride = 0;
   bool d16_hi = false;                 ///< D16_HI load: write to upper 16 bits, preserve lower 16.
   bool d16_lo = false;                 ///< D16 load: write to lower 16 bits, preserve upper 16.

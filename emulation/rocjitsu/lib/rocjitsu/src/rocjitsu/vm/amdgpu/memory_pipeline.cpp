@@ -494,15 +494,32 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
     return;
   }
 
+  // A FLAT wave can route some lanes to the private aperture and others to
+  // global memory. The swizzle stride is a property of the lanes that landed in
+  // scratch, not of the instruction, so issue the two groups separately rather
+  // than striding a global lane's second dword by lane_count*4. Uniform waves
+  // (including every dedicated SCRATCH op) take the single-request path.
+  const uint64_t scratch_lanes = d.scratch_swizzle ? d.scratch_lane_mask & d.lane_mask : 0;
+  const uint64_t plain_lanes = d.lane_mask & ~scratch_lanes;
+  const uint32_t stride = d.scratch_addr_stride;
+
   if (d.is_load) {
     d.response_data.resize(d.wf_size * d.num_elems * d.elem_size);
-    l1_->load(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems, d.response_data.data(),
-              d.mtype, d.non_temporal, d.request_force_l1_bypass, d.wf_size, wf.process_id(),
-              d.scratch_swizzle ? d.scratch_addr_stride : 0);
+    if (scratch_lanes)
+      l1_->load(d.per_lane_addr.data(), scratch_lanes, d.elem_size, d.num_elems,
+                d.response_data.data(), d.mtype, d.non_temporal, d.request_force_l1_bypass,
+                d.wf_size, wf.process_id(), stride);
+    if (plain_lanes)
+      l1_->load(d.per_lane_addr.data(), plain_lanes, d.elem_size, d.num_elems,
+                d.response_data.data(), d.mtype, d.non_temporal, d.request_force_l1_bypass,
+                d.wf_size, wf.process_id(), 0);
   } else {
-    l1_->store(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems, d.store_data.data(),
-               d.mtype, d.non_temporal, d.wf_size, wf.process_id(),
-               d.scratch_swizzle ? d.scratch_addr_stride : 0);
+    if (scratch_lanes)
+      l1_->store(d.per_lane_addr.data(), scratch_lanes, d.elem_size, d.num_elems,
+                 d.store_data.data(), d.mtype, d.non_temporal, d.wf_size, wf.process_id(), stride);
+    if (plain_lanes)
+      l1_->store(d.per_lane_addr.data(), plain_lanes, d.elem_size, d.num_elems,
+                 d.store_data.data(), d.mtype, d.non_temporal, d.wf_size, wf.process_id(), 0);
   }
 }
 

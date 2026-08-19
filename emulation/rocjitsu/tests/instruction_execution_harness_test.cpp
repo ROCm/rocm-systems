@@ -12,10 +12,13 @@
 #include "decode_test_util.h"
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
@@ -177,6 +180,29 @@ public:
 
   Gfx1250MemoryTestCu(std::string name, const amdgpu::ComputeUnitCore::Config &config,
                       amdgpu::GpuMemory *memory, amdgpu::L2Cache *l2)
+      : Base(std::move(name), config, memory, l2) {
+    if (l2)
+      l2->set_backing_memory(memory);
+    set_memory(memory);
+    set_l2(l2);
+  }
+
+  void execute_and_route(Instruction *inst, amdgpu::Wavefront &wf) {
+    execute_instruction(inst, wf);
+    if (inst->is_memory_op())
+      route_memory_inst(inst, wf);
+    else
+      delete inst;
+  }
+};
+
+class Cdna4MemoryTestCu
+    : public amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, cdna4::Isa> {
+public:
+  using Base = amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, cdna4::Isa>;
+
+  Cdna4MemoryTestCu(std::string name, const amdgpu::ComputeUnitCore::Config &config,
+                    amdgpu::GpuMemory *memory, amdgpu::L2Cache *l2)
       : Base(std::move(name), config, memory, l2) {
     if (l2)
       l2->set_backing_memory(memory);
@@ -6120,3 +6146,84 @@ TEST(D16FormatExecution, PackedFormatD16LoadStoreThrowUnimplemented) {
 }
 
 } // namespace
+
+// FLAT routing is decided per lane against the private aperture, so one wave can
+// mix scratch lanes with global ones. The dword-interleaved scratch swizzle is a
+// property of the private lanes only: applying its stride instruction-wide put a
+// global lane's second dword at addr + wf_size*4 instead of addr + 4.
+TEST(Cdna4FlatMixedApertureTest, ScratchSwizzleDoesNotStrideGlobalLanes) {
+  amdgpu::GpuMemory gpu_mem("cdna4_flat_mixed_mem");
+  amdgpu::L2Cache l2("cdna4_flat_mixed_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  Cdna4MemoryTestCu cu("cdna4", cfg, &gpu_mem, &l2);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint64_t kPrivateBase = 0x0000200000000000ULL;
+  constexpr uint64_t kScratchBase = 0x8000;
+  constexpr uint64_t kGlobalAddr = 0x2000;
+  constexpr uint32_t kScratchWord0 = 0xAA0000A0u;
+  constexpr uint32_t kScratchWord1 = 0xAA0000A1u;
+  constexpr uint32_t kGlobalWord0 = 0xBB0000B0u;
+  constexpr uint32_t kGlobalWord1 = 0xBB0000B1u;
+
+  wf->set_apertures(0, 0, kPrivateBase, kPrivateBase + 0x10000);
+  wf->set_scratch_base(kScratchBase);
+  wf->set_exec(0x3u); // lane 0 -> private aperture, lane 1 -> global
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  const uint64_t lane_addr[2] = {kPrivateBase, kGlobalAddr};
+  const uint32_t lane_data[2][2] = {{kScratchWord0, kScratchWord1},
+                                    {kGlobalWord0, kGlobalWord1}};
+  for (uint32_t lane = 0; lane < 2; ++lane) {
+    cu.write_vgpr(vb + 0, lane, static_cast<uint32_t>(lane_addr[lane]));
+    cu.write_vgpr(vb + 1, lane, static_cast<uint32_t>(lane_addr[lane] >> 32));
+    cu.write_vgpr(vb + 2, lane, lane_data[lane][0]);
+    cu.write_vgpr(vb + 3, lane, lane_data[lane][1]);
+  }
+
+  const uint32_t stride = wf->wf_size() * static_cast<uint32_t>(sizeof(uint32_t));
+  for (uint64_t a : {kGlobalAddr, kGlobalAddr + 4, kGlobalAddr + stride, kScratchBase,
+                     kScratchBase + 4, kScratchBase + stride})
+    gpu_mem.write32(a, 0u);
+
+  // flat_store_dwordx2 v[0:1], v[2:3]
+  cdna4::FlatMachineInst enc{};
+  enc.encoding = cdna4::encoding::kFlat >> 3;
+  enc.op = cdna4::kFlatStoreDwordx2;
+  enc.seg = 0; // FLAT
+  enc.addr = 0;
+  enc.data = 2;
+  enc.saddr = 0x7F;
+  const auto words = std::bit_cast<std::array<uint32_t, 2>>(enc);
+
+  std::unique_ptr<Instruction> store(decode_valid(*decoder, words.data()));
+  ASSERT_NE(store, nullptr);
+  ASSERT_EQ(std::string_view(store->mnemonic()), "flat_store_dwordx2");
+  cu.execute_and_route(store.release(), *wf);
+  cu.flush_all();
+
+  // The global lane stays contiguous even though lane 0 went to scratch.
+  EXPECT_EQ(gpu_mem.read32(kGlobalAddr), kGlobalWord0);
+  EXPECT_EQ(gpu_mem.read32(kGlobalAddr + 4), kGlobalWord1);
+  EXPECT_EQ(gpu_mem.read32(kGlobalAddr + stride), 0u)
+      << "global lane was strided by the scratch swizzle";
+
+  // The private lane keeps the dword-interleaved layout rocm-dbgapi reads.
+  EXPECT_EQ(gpu_mem.read32(kScratchBase), kScratchWord0);
+  EXPECT_EQ(gpu_mem.read32(kScratchBase + stride), kScratchWord1);
+  EXPECT_EQ(gpu_mem.read32(kScratchBase + 4), 0u);
+
+  if (!wf->is_halted())
+    wf->halt();
+}
