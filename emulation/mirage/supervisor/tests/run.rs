@@ -1164,6 +1164,70 @@ async fn a_reparented_workload_of_a_live_borrower_is_spared() {
 }
 
 #[tokio::test]
+async fn a_borrower_the_kernel_would_not_name_is_still_protected_by_its_exec_mark() {
+    // The two handles are independent protections, so losing one must not
+    // withdraw the other.
+    //
+    // A borrower's pid comes from `SO_PEERCRED` on its connection, and it
+    // is not always there to be had: the call can fail, and a pid the
+    // kernel reports from a namespace this process cannot resolve is no
+    // use either. The lease was registered only when the pid was known,
+    // so such a borrower was recorded as nothing at all — and the exec id
+    // it had supplied, which is the handle that does not need the pid,
+    // protected nothing. The next borrower to disconnect normally sent
+    // its live workload `SIGTERM` and then `SIGKILL`.
+    //
+    // Nothing here is reparented: the point is that ancestry is not
+    // available *as a question* when there is no pid to ask it about, so
+    // the mark has to carry the whole answer on its own.
+    let run = start(1).await;
+    let exec = format!("x-{}-pidless", std::process::id());
+    let mut workload = Borrowed::tagged(run.id(), &exec);
+
+    let held = run
+        .attach(None, Some(ExecId::new(&exec).unwrap()))
+        .expect("a healthy session accepts a borrower");
+
+    // A different borrower comes and goes, which is what runs the sweep.
+    let (path, served) = serving(&run).await;
+    let leaving = attach_over_the_socket(&path).await;
+    let mut stranded = Borrowed::spawn(run.id());
+    drop(leaving);
+
+    // The sweep really did run, so the assertion below is about being
+    // spared rather than about nothing having happened yet.
+    assert!(
+        stranded.ends_within(Duration::from_secs(30)).await,
+        "the departed borrower's leftover survived the sweep"
+    );
+    // `ends_within`, not `process_alive`: this workload is a child of the
+    // test process, so a killed one is a zombie until the guard reaps it
+    // — and `kill(pid, 0)` succeeds on a zombie, which would pass this
+    // assertion for a process the sweep had provably just killed.
+    assert!(
+        !workload.ends_within(Duration::from_secs(3)).await,
+        "pid {} is the workload of a live borrower whose credentials the \
+         kernel would not give up, and was killed because a different \
+         borrower left",
+        workload.pid()
+    );
+
+    // And the mark stops protecting it the moment the lease ends, exactly
+    // as it does for a borrower that had a pid.
+    drop(held);
+    let second = attach_over_the_socket(&path).await;
+    drop(second);
+    assert!(
+        workload.ends_within(Duration::from_secs(30)).await,
+        "a pidless borrower's lease went on sparing its workload after the \
+         lease had ended"
+    );
+
+    served.abort();
+    run.destroy().await;
+}
+
+#[tokio::test]
 async fn a_reparented_workload_is_still_reaped_once_its_borrower_leaves() {
     // The complement, and the reason the one above is not simply "spare
     // anything with an exec mark". Sparing by mark is scoped to marks a

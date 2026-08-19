@@ -114,11 +114,14 @@ pub struct Session {
     /// The only question ever asked of this is "is this leftover process
     /// one a *live* borrower is still using?" — see
     /// [`Session::reap_departed_borrowers`] — and it is answered two
-    /// ways, because neither alone is enough. A borrower that could not
-    /// be identified at all, because the kernel would not give up its
-    /// connection's credentials, is absent rather than recorded as some
-    /// placeholder: a placeholder would either protect nothing or
-    /// protect everything descended from it.
+    /// ways, because neither alone is enough. Either handle on its own is
+    /// worth recording, so a borrower is listed when it has one: a pid
+    /// with no exec id still spares everything descended from it, and an
+    /// exec id with no pid still spares everything carrying the mark.
+    /// Only a borrower with *neither* — no credentials from the kernel
+    /// and no exec id from the client — is absent, because there is
+    /// nothing about it to record that would not be a placeholder, and a
+    /// placeholder would either protect nothing or protect everything.
     borrowers: Arc<Mutex<BTreeMap<u64, Borrower>>>,
     /// Set when teardown wants its borrowers to let go.
     ///
@@ -574,7 +577,10 @@ impl Session {
     /// lease is made of.
     ///
     /// `borrower` is the pid of the process taking the lease, where the
-    /// connection could say — see the `borrowers` field.
+    /// connection could say, and `exec` the id it stamped into its
+    /// workload's environment, where the client said. Either one is
+    /// enough to be listed as a live borrower and neither is required —
+    /// see the `borrowers` field.
     #[must_use]
     pub fn attach(&self, borrower: Option<u32>, exec: Option<ExecId>) -> Option<SessionLease> {
         let mut inner = self.lock();
@@ -583,8 +589,19 @@ impl Session {
         }
         let entry = inner.next_lease;
         inner.next_lease += 1;
-        if let Some(pid) = borrower {
-            lock(&self.borrowers).insert(entry, Borrower { pid, exec });
+        // Recorded on either handle. Requiring the pid meant a lease
+        // taken over a connection whose credentials the kernel would not
+        // give up was registered as nothing at all, so the exec id it
+        // *had* supplied protected nothing and the next borrower to
+        // disconnect swept its live workload.
+        if borrower.is_some() || exec.is_some() {
+            lock(&self.borrowers).insert(
+                entry,
+                Borrower {
+                    pid: borrower,
+                    exec,
+                },
+            );
         }
         // Under the lock, so the increment cannot land between another
         // thread setting `tearing_down` and teardown reading the count.
@@ -1244,7 +1261,7 @@ impl Session {
         let (live_pids, live_execs): (Vec<u32>, std::collections::BTreeSet<String>) = {
             let borrowers = lock(&self.borrowers);
             (
-                borrowers.values().map(|b| b.pid).collect(),
+                borrowers.values().filter_map(|b| b.pid).collect(),
                 borrowers
                     .values()
                     .filter_map(|b| b.exec.as_ref())
@@ -1334,10 +1351,18 @@ impl Session {
 /// thing a false one buys is that the sweep spares somebody else's
 /// leftovers — and the socket already grants `exec` into the session,
 /// which is arbitrary code execution as its owner.
+///
+/// Both are optional and for the same reason: the two protections are
+/// independent, so the absence of one must not withdraw the other. A
+/// `getsockopt(SO_PEERCRED)` that fails — or a pid the kernel reports
+/// from a namespace this process cannot resolve — leaves a borrower with
+/// only its exec id, and that borrower's workload is no less live for
+/// it. A value is only ever added to this map when at least one of the
+/// two is present; see [`Session::attach`].
 #[derive(Debug, Clone)]
 struct Borrower {
-    /// The client process holding the lease.
-    pid: u32,
+    /// The client process holding the lease, when the kernel said.
+    pid: Option<u32>,
     /// The exec id its workload carries, when the client said.
     exec: Option<ExecId>,
 }
