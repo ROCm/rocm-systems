@@ -320,7 +320,10 @@ public:
   /// inaccessible. In daemon mode, pageable host pointers are accessed through
   /// process_vm_readv/process_vm_writev while GPU allocations use their mapped
   /// daemon backing. Transfers are split at both source and destination page
-  /// boundaries so no translated pointer is used beyond its page.
+  /// boundaries so each chunk resolves within one page, and each read and write
+  /// runs inside the page-table mapping callback: no host pointer outlives the
+  /// lock that keeps its allocation alive, so a concurrent process teardown
+  /// cannot unmap the storage mid-copy.
   bool copy_block(uint64_t dst_addr, uint64_t src_addr, size_t len, uint32_t vmid = 0) {
     std::array<uint8_t, PAGE_SIZE> buffer{};
     size_t offset = 0;
@@ -330,14 +333,12 @@ public:
       const size_t chunk = std::min(
           {len - offset, PAGE_SIZE - (src_ea & PAGE_MASK), PAGE_SIZE - (dst_ea & PAGE_MASK)});
 
-      if (auto *src = translate(src_ea, vmid, chunk))
-        std::memcpy(buffer.data(), src, chunk);
-      else if (vmid == 0 || !read_client_memory(src_ea, buffer.data(), chunk, vmid))
+      if (!copy_from_mapped(src_ea, buffer.data(), chunk, vmid) &&
+          (vmid == 0 || !read_client_memory(src_ea, buffer.data(), chunk, vmid)))
         return false;
 
-      if (auto *dst = translate(dst_ea, vmid, chunk))
-        std::memcpy(dst, buffer.data(), chunk);
-      else if (vmid == 0 || !write_client_memory(dst_ea, buffer.data(), chunk, vmid))
+      if (!copy_to_mapped(dst_ea, buffer.data(), chunk, vmid) &&
+          (vmid == 0 || !write_client_memory(dst_ea, buffer.data(), chunk, vmid)))
         return false;
 
       offset += chunk;
@@ -994,6 +995,54 @@ private:
                         span_size);
           });
         });
+  }
+
+  /// @brief Run @p fn over a fully-backed, page-bounded host span with the
+  /// page-table lock held for the duration.
+  /// @details Applies exactly translate()'s resolution rules -- the range must
+  /// be contiguous, host-backed and addressable -- but hands the pointer to a
+  /// callback instead of returning it, so a concurrent unmap or VMID
+  /// unregistration cannot free the storage between resolution and use.
+  /// @return true if the span resolved and @p fn ran.
+  template <typename F>
+  bool with_translated_span(uint64_t addr, uint32_t vmid, size_t size, F &&fn) const {
+    if (size == 0 || (addr & PAGE_MASK) + size > PAGE_SIZE)
+      return false;
+    bool copied = false;
+    with_page_mapping(
+        addr, vmid, [&](const KfdProcess::PageTableEntry *pte, uint8_t *passthrough_page) {
+          const size_t page_offset = addr & PAGE_MASK;
+          uint8_t *candidate = nullptr;
+          if (pte) {
+            const auto *extent = host_extent_at(*pte, page_offset);
+            if (!extent ||
+                size > extent->host_backed_bytes - (page_offset - extent->gpu_page_offset))
+              return;
+            candidate = extent->host_ptr + (page_offset - extent->gpu_page_offset);
+          } else {
+            if (addr >= kUserSpaceLimit || size > kUserSpaceLimit - addr)
+              return;
+            candidate = passthrough_page + page_offset;
+          }
+          if (addressable_prefix(candidate, size) != size)
+            return;
+          fn(candidate);
+          copied = true;
+        });
+    return copied;
+  }
+
+  /// @brief Read a mapped span into @p dst without ever exposing a bare pointer.
+  bool copy_from_mapped(uint64_t addr, void *dst, size_t size, uint32_t vmid) const {
+    return with_translated_span(addr, vmid, size, [&](const uint8_t *host_ptr) {
+      std::memcpy(dst, host_ptr, size);
+    });
+  }
+
+  /// @brief Write @p src into a mapped span without ever exposing a bare pointer.
+  bool copy_to_mapped(uint64_t addr, const void *src, size_t size, uint32_t vmid) const {
+    return with_translated_span(addr, vmid, size,
+                                [&](uint8_t *host_ptr) { std::memcpy(host_ptr, src, size); });
   }
 
   uint8_t *translate(uint64_t addr, uint32_t vmid, size_t size) const {
