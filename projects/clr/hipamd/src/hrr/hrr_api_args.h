@@ -13,7 +13,7 @@
  * One packed struct per HIP API covering both HipDispatchTable (runtime) and
  * HipCompilerDispatchTable (compiler stubs).
  *
- * Archive format (v5):
+ * Archive format (v6):
  *   events.bin:
  *     [0..7]   hrr_file_header  { magic, version, reserved }
  *     [8..]    hrr_event_header (32 bytes) + payload bytes, repeated per event
@@ -59,10 +59,14 @@
 /* v4: payload_length widened from uint16_t to uint32_t so kernel-launch events
  * larger than 65535 bytes (many args / long mangled names / large by-value
  * structs) are no longer dropped.
- * v5: pointer arguments whose pointee used to be dropped now carry it inline
- * (DEREF_FIELDS). Event payloads grew for ~50 APIs, so a v4 archive cannot be
- * read by a v5 reader: re-capture rather than replay an old recording. */
-#define HRR_VERSION ((uint16_t)5u)
+ * v5: hrr_api_id_t derived from HipDispatchTable member order rather than
+ * typedef declaration order, which shifted most API IDs. Landed separately;
+ * this branch picks it up when it rebases onto develop.
+ * v6: pointer arguments whose pointee used to be dropped now carry it inline
+ * (DEREF_FIELDS). Event payloads grew for ~50 APIs, so an archive written
+ * before v6 cannot be read by a v6 reader: re-capture rather than replay an
+ * old recording. */
+#define HRR_VERSION ((uint16_t)6u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
