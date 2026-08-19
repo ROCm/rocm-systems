@@ -594,7 +594,12 @@ static ncclResult_t commFree(ncclComm_t comm) {
 
   NCCLCHECK(ncclRegCleanup(comm));
 
-  NCCLCHECK(ncclDestroySideStream(comm->cudaDev));
+  // Safety net: release the side stream if init failed/aborted before it was
+  // released on the normal init-completion path. No-op after normal success.
+  if (comm->sideStreamAcquired) {
+    NCCLCHECK(ncclSideStreamRelease(comm->cudaDev, comm->sideStreamPriority));
+    comm->sideStreamAcquired = false;
+  }
 
   INFO(NCCL_DESTROY, "comm %p rank %d nranks %d cudaDev %d busId %lx - %s COMPLETE", comm, comm->rank, comm->nRanks,
        comm->cudaDev, comm->busId, abort ? "Abort" : "Destroy");
@@ -751,8 +756,12 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->lastStream = nullptr;
   comm->lastStreamValid = false;
 
-  // RCCL: create persistent stream for calloc
-  NCCLCHECK(ncclCreateSideStream(comm->cudaDev));
+  // RCCL: acquire a scoped side stream for init-time allocations. It is
+  // released once init completes (see ncclCommInitRankFunc) so it does not hold
+  // a scarce GPU hardware queue through the steady-state collective phase.
+  comm->sideStreamPriority = 0;
+  NCCLCHECK(ncclSideStreamAcquire(comm->cudaDev, comm->sideStreamPriority));
+  comm->sideStreamAcquired = true;
 
   if (ncclParamLaunchOrderImplicit()) {
     NCCLCHECK(ncclCudaContextTrack(&comm->context));
@@ -2801,6 +2810,12 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     }
   }
 
+  // RCCL: init-time allocations are done; release the side stream now so its GPU
+  // hardware queue is freed before the steady-state collective phase begins.
+  if (comm->sideStreamAcquired) {
+    NCCLCHECKGOTO(ncclSideStreamRelease(comm->cudaDev, comm->sideStreamPriority), res, fail);
+    comm->sideStreamAcquired = false;
+  }
   timers[TIMER_INIT_TOTAL] = clockNano() - timers[TIMER_INIT_TOTAL];
 
   // Trace this call for replay tool

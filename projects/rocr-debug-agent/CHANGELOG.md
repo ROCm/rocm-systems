@@ -3,6 +3,12 @@
 Full documentation for the ROCR Debug Agent library is available at
 [rocm.docs.amd.com/rocr_debug_agent](https://rocm.docs.amd.com/projects/rocr_debug_agent/en/latest/).
 
+## ROCR Debug Agent 2.2.0  for ROCm 10.1
+
+- The `--output` and `--save-code-objects` options now support '%' format
+  tokens to produce the output file names.  The `%p`, `%h`, `%t`, `%e`, `%u`,
+  `%g` and `%%` tokens are supported.
+
 ## ROCR Debug Agent 2.1.0 for ROCm 7.0
 
 ### Added

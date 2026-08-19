@@ -18,6 +18,7 @@
 /// ±0 and NaN in both operand orders on the low lanes — the corner cases the
 /// earlier (reverted) f16 min/max shipped without and silently diverged on.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -194,7 +195,7 @@ void check_case(const MinMaxCase &c, uint64_t exec) {
     EXPECT_NE(fx.wf, nullptr);
     uint32_t enc = vop2_encode(c.opcode, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256);
     uint32_t words[4] = {enc, 0u, 0u, 0u};
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.label << ": decode failed";
     nan_lane = fx.seed_inputs(SEED, c.is_f16, exec);
     fx.cu->execute_instruction(inst, *fx.wf);

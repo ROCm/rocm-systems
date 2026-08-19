@@ -101,6 +101,8 @@ struct TranslateOptions {
   bool skip_failed_kernels = false;
   /// @brief Rerun a same-architecture translation and require identical ELF bytes.
   bool verify_idempotence = false;
+  /// @brief Require every audited semantic rewrite to be discharged in final output.
+  bool verify_rewrite_discharge = false;
   DisassemblyMode disassembly = DisassemblyMode::None;
 };
 
@@ -126,6 +128,10 @@ struct TranslateOutput {
   bool idempotence_checked = false;
   /// @brief True when the requested second translation matched the first output.
   bool idempotence_verified = false;
+  /// @brief True when the requested final-output applicability scan was attempted.
+  bool rewrite_discharge_checked = false;
+  /// @brief True when no registered rewrite remained actionable.
+  bool rewrite_discharge_verified = false;
 
   /// @brief True if translation produced no error diagnostics.
   [[nodiscard]] bool ok() const { return !has_error_diagnostic(diagnostics); }
