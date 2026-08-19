@@ -123,8 +123,7 @@ TEST_P(HipFileVerifyUnaligned, RoundTripGuardsAllRegions)
 
     // Device layout (each sentinel region ~4_KiB (+-1), data n bytes):
     // [head device sentinel region][data][tail device sentinel region]
-    uint8_t *data = buffer_start + static_cast<size_t>(buf_off);
-    assertVerifyAndModifyBytes(buffer_start, buffer_bytes, data, n, defaultGrid(n),
+    assertVerifyAndModifyBytes(buffer_start, buffer_bytes, static_cast<size_t>(buf_off), n, defaultGrid(n),
                                dim3(kDefaultWorkgroupSize), kStride);
 
     ASSERT_EQ(static_cast<ssize_t>(io_bytes),
@@ -278,10 +277,10 @@ TEST_P(HipFileExtendUnaligned, Extends)
     const size_t     n       = io_bytes;
     constexpr size_t kStride = 2;
 
-    uint8_t *data = buffer_start + static_cast<size_t>(buf_off);
-    ASSERT_EQ(hipSuccess, hipMemset(data, kByteEntry, n));
+    const size_t data_start = static_cast<size_t>(buf_off);
+    ASSERT_EQ(hipSuccess, hipMemset(buffer_start + data_start, kByteEntry, n));
 
-    assertVerifyAndModifyBytes(buffer_start, buffer_bytes, data, n, defaultGrid(n),
+    assertVerifyAndModifyBytes(buffer_start, buffer_bytes, data_start, n, defaultGrid(n),
                                dim3(kDefaultWorkgroupSize), kStride);
 
     // File layout after the write (preserved region is preserved_n ints, data is n ints, hole spans

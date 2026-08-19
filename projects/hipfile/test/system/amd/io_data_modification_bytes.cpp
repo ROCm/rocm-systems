@@ -127,8 +127,7 @@ TEST_P(HipFileVerifyBytes, RoundTripGuardsAllRegions)
     // Device layout (each sentinel region 4_KiB, data n bytes; data begins at buffer
     // offset buf_off = 4_KiB):
     // [head device sentinel region][data][tail device sentinel region]
-    uint8_t *data = buffer_start + 4_KiB;
-    assertVerifyAndModifyBytes(buffer_start, buffer_bytes, data, n, defaultGrid(n),
+    assertVerifyAndModifyBytes(buffer_start, buffer_bytes, 4_KiB, n, defaultGrid(n),
                                dim3(kDefaultWorkgroupSize), kStride);
 
     ASSERT_EQ(static_cast<ssize_t>(io_bytes),

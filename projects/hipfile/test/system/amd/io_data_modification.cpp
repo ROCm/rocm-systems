@@ -108,8 +108,7 @@ TEST_P(HipFileVerify, WritePersistsDoubledData)
     const size_t n = io_elems;
     seedDevicePattern(device_buffer, 0, n);
 
-    assertVerifyAndModify(buffer_start, buffer_elems, buffer_start, n, defaultGrid(n),
-                          dim3(kDefaultWorkgroupSize));
+    assertVerifyAndModify(buffer_start, buffer_elems, 0, n, defaultGrid(n), dim3(kDefaultWorkgroupSize));
 
     ASSERT_EQ(static_cast<ssize_t>(io_bytes), hipFileWrite(tmpfile_handle, device_buffer, io_bytes, 0, 0));
 
@@ -125,8 +124,7 @@ TEST_P(HipFileVerify, ReadDeliversDoubledData)
 
     ASSERT_EQ(static_cast<ssize_t>(io_bytes), hipFileRead(tmpfile_handle, device_buffer, io_bytes, 0, 0));
 
-    assertVerifyAndModify(buffer_start, buffer_elems, buffer_start, n, defaultGrid(n),
-                          dim3(kDefaultWorkgroupSize));
+    assertVerifyAndModify(buffer_start, buffer_elems, 0, n, defaultGrid(n), dim3(kDefaultWorkgroupSize));
 
     std::vector<int32_t> buf = readbackInts(device_buffer, 0, n);
     assertDoubledPattern(buf.data(), n);
@@ -145,8 +143,8 @@ TEST_P(HipFileVerify, RoundTripGuardsDeviceSlack)
 
     // Device layout (each sentinel region slackElems() ints, data n ints):
     // [head device sentinel region][data][tail device sentinel region]
-    int32_t *data = buffer_start + slackElems();
-    assertVerifyAndModify(buffer_start, buffer_elems, data, n, defaultGrid(n), dim3(kDefaultWorkgroupSize));
+    assertVerifyAndModify(buffer_start, buffer_elems, slackElems(), n, defaultGrid(n),
+                          dim3(kDefaultWorkgroupSize));
 
     ASSERT_EQ(static_cast<ssize_t>(io_bytes),
               hipFileWrite(tmpfile_handle, device_buffer, io_bytes, 0, buf_off));
@@ -174,8 +172,7 @@ TEST_P(HipFileVerify, RoundTripGuardsFileSlack)
     ASSERT_EQ(static_cast<ssize_t>(io_bytes),
               hipFileRead(tmpfile_handle, device_buffer, io_bytes, file_off, 0));
 
-    assertVerifyAndModify(buffer_start, buffer_elems, buffer_start, n, defaultGrid(n),
-                          dim3(kDefaultWorkgroupSize));
+    assertVerifyAndModify(buffer_start, buffer_elems, 0, n, defaultGrid(n), dim3(kDefaultWorkgroupSize));
 
     ASSERT_EQ(static_cast<ssize_t>(io_bytes),
               hipFileWrite(tmpfile_handle, device_buffer, io_bytes, file_off, 0));
@@ -333,8 +330,7 @@ TEST_P(HipFileVerifyCombined, RoundTripGuardsAllRegions)
 
     // Device layout (each sentinel region slackElems() ints, data n ints):
     // [head device sentinel region][data][tail device sentinel region].
-    int32_t *data = buffer_start + slackElems();
-    assertVerifyAndModify(buffer_start, buffer_elems, data, n, gridFor(grid_mode, n),
+    assertVerifyAndModify(buffer_start, buffer_elems, slackElems(), n, gridFor(grid_mode, n),
                           dim3(kDefaultWorkgroupSize), stride);
 
     ASSERT_EQ(static_cast<ssize_t>(io_bytes),
@@ -476,10 +472,9 @@ TEST_P(HipFileExtend, Extends)
     // Device layout (each sentinel region slack_n ints, data n ints):
     // [head device sentinel region][data][tail device sentinel region].
     // data starts after the head device sentinel region; seed the index pattern there.
-    int32_t *data = buffer_start + slack_n;
     seedDevicePattern(device_buffer, buf_off, n);
 
-    assertVerifyAndModify(buffer_start, buffer_elems, data, n, defaultGrid(n), dim3(kDefaultWorkgroupSize),
+    assertVerifyAndModify(buffer_start, buffer_elems, slack_n, n, defaultGrid(n), dim3(kDefaultWorkgroupSize),
                           kStride);
 
     // File layout after the write (preserved region is preserved_n ints, data is n ints, hole spans

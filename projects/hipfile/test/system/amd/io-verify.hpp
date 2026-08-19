@@ -255,15 +255,15 @@ assertConstant(const int32_t *arr, size_t from, size_t to, int32_t value)
 // Launches the int32 verify+modify kernel and asserts neither the payload pattern nor the
 // device sentinel region was corrupted.
 inline void
-assertVerifyAndModify(int32_t *start, size_t alloc_n, int32_t *arr, size_t n, dim3 grid, dim3 workgroup,
+assertVerifyAndModify(int32_t *start, size_t alloc_n, size_t data_start, size_t n, dim3 grid, dim3 workgroup,
                       size_t modify_stride = 1)
 {
     ASSERT_NE(0U, modify_stride) << "modify_stride must be >= 1";
     BadIdxFlag bad;
     BadIdxFlag bad_slack;
     ASSERT_TRUE(bad.allocated() && bad_slack.allocated()) << "kernel bad-index flag allocation failed";
-    ASSERT_EQ(hipSuccess, launchVerifyAndModify(start, alloc_n, arr, n, kPatternBase, bad.dev, kSentinel,
-                                                bad_slack.dev, grid, workgroup, modify_stride));
+    ASSERT_EQ(hipSuccess, launchVerifyAndModify(start, alloc_n, data_start, n, kPatternBase, bad.dev,
+                                                kSentinel, bad_slack.dev, grid, workgroup, modify_stride));
     ASSERT_EQ(-1, bad.value()) << "payload pattern corrupted";
     ASSERT_EQ(-1, bad_slack.value()) << "untouched device sentinel region was clobbered";
 }
@@ -291,16 +291,16 @@ readFileBytes(int fd, hoff_t byte_offset, size_t n)
 // Launches the byte verify+modify kernel and asserts neither the payload bytes nor the
 // device sentinel region was corrupted.
 inline void
-assertVerifyAndModifyBytes(uint8_t *start, size_t alloc_bytes, uint8_t *arr, size_t n, dim3 grid,
+assertVerifyAndModifyBytes(uint8_t *start, size_t alloc_bytes, size_t data_start, size_t n, dim3 grid,
                            dim3 workgroup, size_t modify_stride)
 {
     ASSERT_NE(0U, modify_stride) << "modify_stride must be >= 1";
     BadIdxFlag bad;
     BadIdxFlag bad_slack;
     ASSERT_TRUE(bad.allocated() && bad_slack.allocated()) << "kernel bad-index flag allocation failed";
-    ASSERT_EQ(hipSuccess,
-              launchVerifyAndModifyBytes(start, alloc_bytes, arr, n, kByteEntry, kByteModified, bad.dev,
-                                         kByteDevSlack, bad_slack.dev, grid, workgroup, modify_stride));
+    ASSERT_EQ(hipSuccess, launchVerifyAndModifyBytes(start, alloc_bytes, data_start, n, kByteEntry,
+                                                     kByteModified, bad.dev, kByteDevSlack, bad_slack.dev,
+                                                     grid, workgroup, modify_stride));
     ASSERT_EQ(-1, bad.value()) << "payload bytes corrupted";
     ASSERT_EQ(-1, bad_slack.value()) << "untouched device sentinel region was clobbered";
 }

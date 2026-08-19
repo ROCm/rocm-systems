@@ -51,11 +51,10 @@ verifyAndModify(int32_t *device_buffer_start, size_t device_buffer_size, size_t 
 }
 
 hipError_t
-launchVerifyAndModify(int32_t *device_buffer_start, size_t device_buffer_size, int32_t *arr, size_t n,
+launchVerifyAndModify(int32_t *device_buffer_start, size_t device_buffer_size, size_t data_start, size_t n,
                       int32_t expect_base, int32_t *first_bad_idx, int32_t slack_sentinel,
                       int32_t *first_bad_slack_idx, dim3 grid, dim3 workgroup, size_t modify_stride)
 {
-    const size_t data_start = static_cast<size_t>(arr - device_buffer_start);
     verifyAndModify<<<grid, workgroup>>>(device_buffer_start, device_buffer_size, data_start, n, expect_base,
                                          first_bad_idx, slack_sentinel, first_bad_slack_idx, modify_stride);
     hipError_t launch_err = hipGetLastError();
@@ -105,11 +104,10 @@ verifyAndModifyBytes(uint8_t *buf, size_t buf_size, size_t data_start, size_t n,
 }
 
 hipError_t
-launchVerifyAndModifyBytes(uint8_t *buf, size_t buf_size, uint8_t *arr, size_t n, uint8_t entry,
+launchVerifyAndModifyBytes(uint8_t *buf, size_t buf_size, size_t data_start, size_t n, uint8_t entry,
                            uint8_t modified, int32_t *first_bad_idx, uint8_t slack_sentinel,
                            int32_t *first_bad_slack_idx, dim3 grid, dim3 workgroup, size_t modify_stride)
 {
-    const size_t data_start = static_cast<size_t>(arr - buf);
     verifyAndModifyBytes<<<grid, workgroup>>>(buf, buf_size, data_start, n, entry, modified, first_bad_idx,
                                               slack_sentinel, first_bad_slack_idx, modify_stride);
     hipError_t launch_err = hipGetLastError();
