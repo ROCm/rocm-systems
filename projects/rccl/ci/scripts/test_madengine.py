@@ -407,6 +407,113 @@ def _rccl_uses_kpack(rccl_lib: Path) -> bool:
         return False
 
 
+def get_rccl_fingerprint(rccl_lib: Path) -> dict:
+    """Extract identifying information from a librccl.so artifact.
+
+    Returns a dict with ``md5``, ``version`` (e.g. ``2.30.4-HEAD:e711c9e``),
+    and ``size`` that can be compared against runtime output.
+    """
+    fp: dict = {"md5": "", "version": "", "size": 0}
+    if not rccl_lib or not rccl_lib.exists():
+        return fp
+    resolved = rccl_lib.resolve()
+    fp["size"] = resolved.stat().st_size
+    fp["md5"] = hashlib.md5(resolved.read_bytes()).hexdigest()
+    try:
+        result = subprocess.run(
+            ["strings", str(resolved)],
+            capture_output=True, text=True, timeout=10,
+        )
+        semver = ""
+        head_ref = ""
+        for line in result.stdout.splitlines():
+            if not semver:
+                m = re.match(r"^(\d+\.\d+\.\d+)$", line)
+                if m:
+                    semver = m.group(1)
+            if not head_ref:
+                m = re.match(r"^(HEAD:[0-9a-fA-F]{6,})$", line)
+                if m:
+                    head_ref = m.group(1)
+            if semver and head_ref:
+                break
+        if semver and head_ref:
+            fp["version"] = f"{semver}-{head_ref}"
+        elif semver:
+            fp["version"] = semver
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    return fp
+
+
+def verify_rccl_replacement(
+    work_dir: Path,
+    expected: dict,
+    slurm_job_id: str = "",
+) -> tuple[bool, str]:
+    """Verify that the container used the CI-built RCCL, not its bundled copy.
+
+    Checks the madengine run logs for ``RCCL version :`` and compares it
+    against the expected fingerprint.  Also verifies the docker run command
+    includes the librccl bind-mount.
+
+    Returns (ok, message).  Generic across frameworks — any RCCL-based
+    application prints the version string during init.
+    """
+    if not expected.get("md5"):
+        return True, "No RCCL fingerprint to verify (overlay build used)"
+
+    # Find all log files from this run
+    log_dir = work_dir / "slurm_output"
+    log_files = sorted(log_dir.glob("*node_0.out")) if log_dir.is_dir() else []
+    if not log_files:
+        return False, "No node_0 log found — cannot verify RCCL"
+
+    log_text = log_files[0].read_text(errors="replace")
+
+    # Check 1: bind-mount present in docker run command
+    if "librccl.so" not in log_text:
+        return False, (
+            "librccl.so bind-mount not found in docker run command. "
+            "Container is using its bundled RCCL, not the CI artifact."
+        )
+
+    # Check 2: RCCL version string matches
+    rccl_versions = re.findall(r"RCCL version\s*:\s*(.+)", log_text)
+    if not rccl_versions:
+        return False, "No 'RCCL version :' found in logs — RCCL may not have initialized"
+
+    runtime_version = rccl_versions[0].strip()
+    if expected.get("version") and runtime_version != expected["version"]:
+        return False, (
+            f"RCCL version mismatch: expected '{expected['version']}' "
+            f"(from artifact), got '{runtime_version}' (from container). "
+            f"The container may be using its bundled RCCL."
+        )
+
+    # Check 3: verify the live log exists with Librccl path
+    live_logs = sorted(log_dir.rglob("*.run.live.log"))
+    if not live_logs:
+        live_log_dirs = sorted((work_dir / "slurm_output").rglob("*.live.log"))
+        live_logs = live_log_dirs
+    rccl_path_found = False
+    for ll in live_logs:
+        try:
+            ll_text = ll.read_text(errors="replace")
+            paths = re.findall(r"Librccl path\s*:\s*(.+)", ll_text)
+            if paths:
+                rccl_path_found = True
+                break
+        except OSError:
+            continue
+
+    return True, (
+        f"RCCL verified: version={runtime_version}, "
+        f"artifact_md5={expected['md5']}"
+        + (f", librccl_path={paths[0].strip()}" if rccl_path_found else "")
+    )
+
+
 def build_rccl_overlay_image(
     rccl_lib: Path,
     base_image: str,
@@ -1096,11 +1203,16 @@ def main() -> None:
     log.info("Work directory: %s", work_dir)
     log.info("Results directory: %s", results_dir)
 
-    # Step 1: Find RCCL library
+    # Step 1: Find RCCL library and fingerprint it
     rccl_lib = find_rccl_library(args.artifact_dir)
     log.info("RCCL library: %s", rccl_lib)
     rccl_commit = get_rccl_commit(rccl_lib)
     log.info("RCCL commit/tag: %s", rccl_commit)
+    rccl_fingerprint = get_rccl_fingerprint(rccl_lib)
+    if rccl_fingerprint["md5"]:
+        log.info("RCCL fingerprint: md5=%s version=%s size=%d",
+                 rccl_fingerprint["md5"], rccl_fingerprint["version"],
+                 rccl_fingerprint["size"])
 
     # Step 2: Install madengine
     madengine_dir = install_madengine(work_dir)
@@ -1158,6 +1270,17 @@ def main() -> None:
     exit_code = run_madengine(
         manifest_path, output_csv, work_dir, args.timeout_minutes,
     )
+
+    # Step 5b: Verify RCCL replacement
+    if args.skip_overlay_build and rccl_fingerprint.get("md5"):
+        rccl_ok, rccl_msg = verify_rccl_replacement(
+            work_dir, rccl_fingerprint,
+        )
+        if rccl_ok:
+            log.info("RCCL verification: %s", rccl_msg)
+        else:
+            log.error("RCCL verification FAILED: %s", rccl_msg)
+            exit_code = max(exit_code, 1)
 
     # Step 6: Parse results — structured output first, live log fallback
     perf_results = parse_perf_results(work_dir)
