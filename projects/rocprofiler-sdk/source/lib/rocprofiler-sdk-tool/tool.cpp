@@ -28,6 +28,7 @@
 #include "execution_profile.hpp"
 #include "graph_stack.hpp"
 #include "helper.hpp"
+#include "kernel_iteration_filter.hpp"
 #include "stream_stack.hpp"
 
 #include "lib/att-tool/att_lib_wrapper.hpp"
@@ -333,47 +334,21 @@ bool
 is_targeted_kernel(uint64_t                                        _kern_id,
                    common::Synchronized<kernel_iteration_t, true>& _kernel_iteration)
 {
-    const std::unordered_set<size_t>* range = target_kernels.rlock(
-        [](const auto& _targets_v, uint64_t _kern_id_v) -> const std::unordered_set<size_t>* {
-            if(_targets_v.find(_kern_id_v) != _targets_v.end()) return &_targets_v.at(_kern_id_v);
-            return nullptr;
+    // hold target_kernels around kernel_iteration so the range stays valid; both
+    // are only locked here / in add_kernel_target(), so the nesting is safe
+    return target_kernels.rlock(
+        [&_kernel_iteration](const targeted_kernels_map_t& _targets_v, uint64_t _kern_id_v) {
+            return _kernel_iteration.wlock(
+                [&_targets_v](kernel_iteration_t& _kernel_iter, uint64_t _kernel_id) {
+                    return tool::is_targeted_kernel_iteration(
+                        _kernel_id,
+                        _targets_v,
+                        _kernel_iter,
+                        tool::get_config().advanced_thread_trace);
+                },
+                _kern_id_v);
         },
         _kern_id);
-
-    if(range)
-    {
-        _kernel_iteration.wlock(
-            [](auto& _kernel_iter, rocprofiler_kernel_id_t _kernel_id) {
-                auto itr = _kernel_iter.find(_kernel_id);
-                if(itr == _kernel_iter.end())
-                    _kernel_iter.emplace(_kernel_id, 1);
-                else
-                    itr->second++;
-            },
-            _kern_id);
-
-        return _kernel_iteration.rlock(
-            [](const auto&                       _kernel_iter,
-               uint64_t                          _kernel_id,
-               const std::unordered_set<size_t>& _range) {
-                auto itr = _kernel_iter.at(_kernel_id);
-                // If the iteration range is not given then all iterations of the kernel is profiled
-                if(_range.empty())
-                {
-                    if(!tool::get_config().advanced_thread_trace)
-                        return true;
-                    else if(itr == 1)
-                        return true;
-                }
-                else if(_range.find(itr) != _range.end())
-                    return true;
-                return false;
-            },
-            _kern_id,
-            *range);
-    }
-
-    return false;
 }
 
 auto&
@@ -2948,6 +2923,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         bool     exclude_nontarget = tool::get_config().att_param_target_only;
         auto&    att_perf          = tool::get_config().att_param_perfcounters;
         bool     att_serialize_all = tool::get_config().att_serialize_all;
+        bool     att_no_detail     = tool::get_config().att_no_detail;
         bool     att_no_intercept  = tool::get_config().att_no_intercept;
 
         global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, {target_cu}});
@@ -2958,6 +2934,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             {ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {shader_mask}});
         global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SERIALIZE_ALL,
                                      {static_cast<uint64_t>(att_serialize_all)}});
+        if(att_no_detail)
+            global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL, {1}});
         if(att_no_intercept)
             global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_NUM_BUFFERS, {6}});
 

@@ -10,8 +10,10 @@
 /// in execution_plugin_test.cpp.
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/operand.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -27,6 +29,7 @@
 #include <bit>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <type_traits>
 #include <vector>
@@ -41,6 +44,11 @@ concept ExposesRawComputeUnit = requires(T &value) { value.raw_cu(); };
 
 template <typename T>
 concept ExposesRawVgprData = requires(T &value) { value.raw_vgpr_data(0); };
+
+template <typename T>
+concept ExposesReadRegionRegData = requires(const T &value) { value.reg_data(0); };
+
+static_assert(!ExposesReadRegionRegData<RegisterAccess::VgprReadRegion>);
 
 template <typename T>
 concept ExposesUnobservedVgprWrite = requires(T &value) { value.write_vgpr_storage(0, 0, 0); };
@@ -91,6 +99,7 @@ public:
 };
 
 struct Fixture {
+  ScopedIsaExecutionBackend execution_backend_scope;
   GpuMemory gpu_mem{"register_access_mem"};
   L2Cache l2{"register_access_l2"};
   std::unique_ptr<ComputeUnitCore> cu;
@@ -98,7 +107,9 @@ struct Fixture {
   RecordingPlugin *plugin = nullptr;
   Wavefront *wf = nullptr;
 
-  explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4) {
+  explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4)
+      : execution_backend_scope(arch == ROCJITSU_CODE_ARCH_RDNA4 ? &rdna4::execution_backend()
+                                                                 : &cdna4::execution_backend()) {
     ComputeUnitCore::Config cfg{};
     cfg.arch = arch;
     cfg.num_wf_slots = 1;
@@ -256,6 +267,39 @@ TEST(RegisterAccessTest, ReadRegionObservesAllRegistersAndReturnsLaneSpans) {
   EXPECT_EQ(region.lanes(1)[5], 0x4444u);
 }
 
+TEST(RegisterAccessTest, ReadRegionTraversesAndCopiesLogicalRegisterRange) {
+  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_GFX1250}) {
+    Fixture fx(arch);
+    ASSERT_NE(fx.wf, nullptr);
+    SCOPED_TRACE(arch);
+
+    const uint32_t wf_size = fx.wf->wf_size();
+    constexpr uint32_t reg_count = 64;
+    const uint32_t physical_base = fx.vgpr_base() + 7;
+    fx.cu->write_vgpr(physical_base, 3, 0x11112222u);
+    fx.cu->write_vgpr(physical_base + reg_count / 2, 3, 0x33334444u);
+    fx.cu->write_vgpr(physical_base + reg_count - 1, 3, 0x55556666u);
+
+    RegisterAccess regs(*fx.cu);
+    auto region = regs.read_vgpr_region(physical_base, reg_count,
+                                        /*lane_mask=*/uint64_t{1} << 3);
+
+    std::vector<uint32_t> copied(static_cast<size_t>(reg_count) * wf_size);
+    region.copy_to(copied);
+    EXPECT_EQ(copied[3], 0x11112222u);
+    EXPECT_EQ(copied[(reg_count / 2) * wf_size + 3], 0x33334444u);
+    EXPECT_EQ(copied[(reg_count - 1) * wf_size + 3], 0x55556666u);
+
+    uint32_t relative_reg = 0;
+    const auto visitor = [&](std::span<const uint32_t> lanes) {
+      EXPECT_EQ(lanes[3], copied[static_cast<size_t>(relative_reg) * wf_size + 3]);
+      ++relative_reg;
+    };
+    region.for_each(visitor);
+    EXPECT_EQ(relative_reg, reg_count);
+  }
+}
+
 TEST(RegisterAccessTest, PartialByteReadRegionMasksReturnedValues) {
   Fixture fx;
   ASSERT_NE(fx.wf, nullptr);
@@ -270,7 +314,6 @@ TEST(RegisterAccessTest, PartialByteReadRegionMasksReturnedValues) {
   EXPECT_EQ(fx.plugin->reads[0].byte_mask, 0b0110);
   EXPECT_EQ(region.lane(/*relative_reg=*/0, /*lane=*/3), 0x00BBCC00u);
   EXPECT_THROW((void)region.lanes(), std::logic_error);
-  EXPECT_THROW((void)region.reg_data(), std::logic_error);
 }
 
 TEST(RegisterAccessTest, WriteRegionObservesWritesAndHonorsLaneMask) {
@@ -681,7 +724,7 @@ TEST(RegisterAccessTest, OperandWriteViewsRejectUnobservedLanes) {
 }
 
 TEST(RegisterAccessTest, OperandReadViewFallbackUsesLaneSemantics) {
-  Fixture fx;
+  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(fx.wf, nullptr);
 
   rdna4::Operand inline_one(16, rdna4::OperandType::OPR_SRC, 242);

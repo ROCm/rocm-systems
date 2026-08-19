@@ -39,7 +39,9 @@ ncclResult_t busIdToInt64(const char* busId, int64_t* id) {
     if (c == '.' || c == ':') continue;
     if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f')) {
       hexStr[hexOffset++] = busId[i];
-    } else break;
+    } else {
+      break;
+    }
   }
   hexStr[hexOffset] = '\0';
   *id = strtol(hexStr, NULL, 16);
@@ -188,34 +190,29 @@ uint64_t getPidHash(void) {
 int parseStringList(const char* string, struct netIf* ifList, int maxList) {
   if (!string) return 0;
 
-  const char* ptr = string;
+  char* str = strdup(string);
+  if (!str) return 0;
 
   int ifNum = 0;
-  int ifC = 0;
-  char c;
-  do {
-    c = *ptr;
-    if (c == ':') {
-      if (ifC > 0) {
-        ifList[ifNum].prefix[ifC] = '\0';
-        ifList[ifNum].port = atoi(ptr + 1);
-        ifNum++;
-        ifC = 0;
-      }
-      while (c != ',' && c != '\0') c = *(++ptr);
-    } else if (c == ',' || c == '\0') {
-      if (ifC > 0) {
-        ifList[ifNum].prefix[ifC] = '\0';
-        ifList[ifNum].port = -1;
-        ifNum++;
-        ifC = 0;
-      }
-    } else {
-      ifList[ifNum].prefix[ifC] = c;
-      ifC++;
+  char* savePtr = NULL;
+  char* entry = strtok_r(str, ",", &savePtr);
+  while (entry != NULL && ifNum < maxList) {
+    char* c = entry;
+    char* tok = ncclOsStrSep(&c, ":");
+    if (tok && tok[0] != '\0') {
+      snprintf(ifList[ifNum].prefix, sizeof(ifList[ifNum].prefix), "%s", tok);
+      // port, rail, and plane will default to -1 if absent or empty
+      tok = ncclOsStrSep(&c, ":");
+      ifList[ifNum].port = (tok && tok[0] != '\0') ? atoi(tok) : -1;
+      tok = ncclOsStrSep(&c, ":");
+      ifList[ifNum].rail = (tok && tok[0] != '\0') ? atoi(tok) : -1;
+      tok = ncclOsStrSep(&c, ":");
+      ifList[ifNum].plane = (tok && tok[0] != '\0') ? atoi(tok) : -1;
+      ifNum++;
     }
-    ptr++;
-  } while (ifNum < maxList && c);
+    entry = strtok_r(NULL, ",", &savePtr);
+  }
+  free(str);
   return ifNum;
 }
 
@@ -232,12 +229,14 @@ static bool matchPort(const int port1, const int port2) {
   return false;
 }
 
-bool matchIfList(const char* string, int port, struct netIf* ifList, int listSize, bool matchExact) {
+bool matchIfList(const char* string, int port, struct netIf* ifList, int listSize, bool matchExact, int* ifId) {
   // Make an exception for the case where no user list is defined
+  if (ifId) *ifId = -1;
   if (listSize == 0) return true;
 
   for (int i = 0; i < listSize; i++) {
     if (matchIf(string, ifList[i].prefix, matchExact) && matchPort(port, ifList[i].port)) {
+      if (ifId) *ifId = i;
       return true;
     }
   }
@@ -281,7 +280,7 @@ void* ncclMemoryStack::allocateSpilled(struct ncclMemoryStack* me, size_t size, 
     // At this point we must need another hunk, either to fit the object
     // itself or its Unhunk proxy.
     mallocSize = nextSize;
-    INFO(NCCL_ALLOC, "%s:%d memory stack hunk malloc(%llu)", __FILE__, __LINE__, (unsigned long long)mallocSize);
+    INFO_LOC(NCCL_ALLOC_HOST, "memory stack hunk malloc(%llu)", (unsigned long long)mallocSize);
     struct Hunk* top1 = (struct Hunk*)malloc(mallocSize);
     if (top1 == nullptr) goto malloc_exhausted;
     top1->size = nextSize;
@@ -311,14 +310,13 @@ unhunked:
     me->topFrame.unhunks = proxy;
     mallocSize = size;
     proxy->obj = malloc(mallocSize);
-    INFO(NCCL_ALLOC, "%s:%d memory stack non-hunk malloc(%llu)", __FILE__, __LINE__, (unsigned long long)mallocSize);
+    INFO_LOC(NCCL_ALLOC_HOST, "memory stack non-hunk malloc(%llu)", (unsigned long long)mallocSize);
     if (proxy->obj == nullptr) goto malloc_exhausted;
     return proxy->obj;
   }
 
 malloc_exhausted:
-  WARN("%s:%d Unrecoverable error detected: malloc(size=%llu) returned null.", __FILE__, __LINE__,
-       (unsigned long long)mallocSize);
+  WARN("Unrecoverable error detected: malloc(size=%llu) returned null.", (unsigned long long)mallocSize);
   abort();
 }
 
@@ -420,6 +418,7 @@ static inline void writeNextPtr(void* object, int nextFieldOffset, void* value) 
 
 ncclResult_t ncclIntruAddressMapInsert_untyped(struct ncclIntruAddressMap_untyped* map, int keySize, int keyFieldOffset,
                                                int nextFieldOffset, uintptr_t key, void* object) {
+  // Runtime validation
   if (map == nullptr) {
     WARN("Intrusive address map pointer is NULL");
     return ncclInvalidUsage;
@@ -434,17 +433,20 @@ ncclResult_t ncclIntruAddressMapInsert_untyped(struct ncclIntruAddressMap_untype
   }
 
   if (map->hbits == 0) {
-    map->hbits = 4;
-    map->table = (void**)calloc((size_t)1 << map->hbits, sizeof(void*));
+    const int initHbits = 4;
+    const size_t tableEntries = (size_t)1 << initHbits;
+    map->hbits = initHbits;
+    map->table = (void**)calloc(tableEntries, sizeof(void*));
     if (map->table == nullptr) {
       map->hbits = 0; // Reset on failure
-      WARN("Intrusive address map initialization failed: calloc(%zu entries) returned null", (size_t)1 << map->hbits);
+      WARN("Intrusive address map initialization failed: calloc(%zu entries) returned null", tableEntries);
       return ncclSystemError;
     }
   }
 
   int hbits = map->hbits;
 
+  // Check for address map size increase before inserting. Maintain 2:1 object:bucket ratio.
   if (map->count + 1 > 2 << hbits) {
     int oldHbits = hbits;
     int oldSize = 1 << oldHbits;
@@ -498,6 +500,7 @@ ncclResult_t ncclIntruAddressMapInsert_untyped(struct ncclIntruAddressMap_untype
 
 ncclResult_t ncclIntruAddressMapFind_untyped(struct ncclIntruAddressMap_untyped* map, int keySize, int keyFieldOffset,
                                              int nextFieldOffset, uintptr_t key, void** object) {
+  // Runtime validation
   if (map == nullptr) {
     WARN("Intrusive address map pointer is NULL");
     return ncclInvalidUsage;
@@ -534,6 +537,7 @@ ncclResult_t ncclIntruAddressMapFind_untyped(struct ncclIntruAddressMap_untyped*
 
 ncclResult_t ncclIntruAddressMapRemove_untyped(struct ncclIntruAddressMap_untyped* map, int keySize, int keyFieldOffset,
                                                int nextFieldOffset, uintptr_t key) {
+  // Runtime validation
   if (map == nullptr) {
     WARN("Intrusive address map pointer is NULL");
     return ncclInvalidUsage;

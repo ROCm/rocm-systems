@@ -49,6 +49,7 @@
 #include <cstring>
 #include <map>
 #include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 #include <memory>
@@ -134,8 +135,35 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   const bool is_apu_node = (properties_.NumCPUCores > 0);
   profile_ = (is_apu_node) ? HSA_PROFILE_FULL : HSA_PROFILE_BASE;
 
-  if (node_props.Capability.ui32.DoorbellType != 2)
-    throw AMD::hsa_exception(HSA_STATUS_ERROR, "Agent creation failed.\nThe GPU node uses a deprecated doorbell type\n");
+  // Only DoorbellType 2 (HSA_CAP_DOORBELL_TYPE_2_0) is supported by the HSA runtime.
+  // Doorbell types are assigned by the kernel in kfd_topology.c based on ASIC generation:
+  //   0 = PRE_1_0: Kaveri, Hawaii, Tonga
+  //   1 = 1_0:     Carrizo, Fiji, Polaris10, Polaris11, Polaris12, Vegam
+  //   2 = 2_0:     Vega and newer (GCN 5.0+, GC IP >= 9.0.1)
+  //   3 =          Reserved for future use
+  //
+  // NOTE: DoorbellType is currently a 2-bit field (bits 12-13 of capability).
+  // As AMD adds new GPU generations, this field may be widened or new values
+  // added. When that happens, update this switch to accept the new type(s).
+  // The default case ensures unrecognized future types are skipped gracefully
+  // rather than aborting HSA initialization for all devices in the system.
+  switch (node_props.Capability.ui32.DoorbellType) {
+    case 2: // HSA_CAP_DOORBELL_TYPE_2_0 — supported
+      break;
+    case 0: // HSA_CAP_DOORBELL_TYPE_PRE_1_0 — deprecated (Kaveri, Hawaii, Tonga)
+    case 1: // HSA_CAP_DOORBELL_TYPE_1_0 — deprecated (Fiji, Polaris, Vegam)
+    default: {
+      // Fall through to default for any unrecognized future doorbell types.
+      // This prevents a single unsupported/new GPU from killing initialization
+      // for all devices. DiscoverGpu will catch this and skip the device.
+      std::ostringstream msg;
+      msg << "Agent creation failed.\nThe GPU node uses unsupported doorbell type "
+          << node_props.Capability.ui32.DoorbellType
+          << " (only type 2 is currently supported).\n";
+      const std::string msg_str = msg.str();
+      throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ISA, msg_str.c_str());
+    }
+  }
 
   hsa_status_t err = driver().GetClockCounters(node_id(), &t0_);
   t1_ = t0_;
@@ -908,10 +936,21 @@ void GpuAgent::InitDma() {
     return queue;
   };
 
-  // Dedicated compute queue for host-to-device blits.
-  queues_[QueueBlitOnly].reset(queue_lambda);
+  // Enable profiling on the internal blit copy queues right after creation to avoid
+  // having to unmap and remap the queue for CP FW to re-read the queue properties when
+  // profiling is later turned on. If profiling is disabled later on these queues, then
+  // the queue unmap and remap will be triggered.
+  queues_[QueueBlitOnly].reset([queue_lambda]() {
+    auto queue = queue_lambda();
+    queue->SetProfiling(true);
+    return queue;
+  });
   // Share utility queue with device-to-host blits.
-  queues_[QueueUtility].reset(queue_lambda);
+  queues_[QueueUtility].reset([queue_lambda]() {
+    auto queue = queue_lambda();
+    queue->SetProfiling(true);
+    return queue;
+  });
 
   // Dedicated compute queue for PC Sampling CP-DMA commands. We need a dedicated queue that runs at
   // highest priority because we do not want the CP-DMA commands to be delayed/blocked due to
@@ -1056,20 +1095,6 @@ void GpuAgent::ReleaseResources() {
       }
     }
 
-    if (ape1_base_ != 0) {
-      _aligned_free(reinterpret_cast<void*>(ape1_base_));
-    }
-
-    scratch_cache_.trim(true);
-    scratch_cache_.free_reserve();
-
-    if (scratch_pool_.base() != NULL) {
-      core::DriverMemoryHandle scratch_handle{};
-      scratch_handle.handle = reinterpret_cast<uint64_t>(scratch_pool_.base());
-      scratch_handle.size = scratch_pool_.size();
-      driver().FreeMemory(scratch_handle);
-    }
-
     for (int i = 0; i < QueueCount; i++)
       queues_[i].reset();
     // Destroy the GWS-access queue here. It is a GpuAgent member that would
@@ -1083,6 +1108,26 @@ void GpuAgent::ReleaseResources() {
       std::lock_guard<std::mutex> gws_lock(gws_queue_.lock_);
       gws_queue_.queue_.reset();
       gws_queue_.ref_ct_ = 0;
+    }
+
+    // hsa_shut_down invalidates application-owned queues. Destroy any queues
+    // still registered after the runtime-owned queue pools have been cleaned.
+    for (auto* queue : GetAqlQueues()) {
+      queue->Destroy();
+    }
+
+    if (ape1_base_ != 0) {
+      _aligned_free(reinterpret_cast<void*>(ape1_base_));
+    }
+
+    scratch_cache_.trim(true);
+    scratch_cache_.free_reserve();
+
+    if (scratch_pool_.base() != NULL) {
+      core::DriverMemoryHandle scratch_handle{};
+      scratch_handle.handle = reinterpret_cast<uint64_t>(scratch_pool_.base());
+      scratch_handle.size = scratch_pool_.size();
+      driver().FreeMemory(scratch_handle);
     }
 
     system_deallocator()(doorbell_queue_map_);

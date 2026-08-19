@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna1/target_provider.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/target_provider.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/target_provider.h"
@@ -23,7 +24,11 @@ namespace {
 
 class FixtureDecoder final : public Decoder {
 public:
-  Instruction *decode(const rj_code_binary_inst_t *) override { return nullptr; }
+  std::size_t max_instruction_words() const override { return 1; }
+
+  DecodeResult decode(const rj_code_binary_inst_t *, const DecodeErrorEmitter &) override {
+    return Result::failure();
+  }
 };
 
 std::unique_ptr<Decoder> create_fixture_decoder() { return std::make_unique<FixtureDecoder>(); }
@@ -353,9 +358,15 @@ TEST(IsaTargetRegistryTest, BuiltinRegistryUsesDescriptorOwnedPublicEnumBindings
   std::unique_ptr<Decoder> risc_v_decoder = Decoder::create(registry, ROCJITSU_CODE_ARCH_RV64I);
   ASSERT_NE(risc_v_decoder, nullptr);
   constexpr rj_code_binary_inst_t kAddiX1X0One = 0x00100093;
-  std::unique_ptr<Instruction> risc_v_instruction(risc_v_decoder->decode(&kAddiX1X0One));
+  std::unique_ptr<Instruction> risc_v_instruction(decode_valid(*risc_v_decoder, &kAddiX1X0One));
   ASSERT_NE(risc_v_instruction, nullptr);
   EXPECT_NE(risc_v_instruction->execute, nullptr);
+
+  constexpr rj_code_binary_inst_t kInvalidRiscV = 0xffffffffu;
+  std::vector<std::string> diagnostics;
+  auto collect = [&](std::string_view message) { diagnostics.emplace_back(message); };
+  EXPECT_TRUE(risc_v_decoder->decode(&kInvalidRiscV, DecodeErrorEmitter(collect)).failed());
+  EXPECT_EQ(diagnostics, std::vector<std::string>{"Invalid instruction opcode"});
 }
 
 TEST(IsaTargetRegistryTest, PublicCEntryPointAcceptsCanonicalTargetIds) {

@@ -27,6 +27,9 @@ on:
       - '.github/actions/rocprofiler-sdk-util/action.yml'
       - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/**'
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -176,6 +179,7 @@ jobs:
           apt-get update
           apt-get install -y cmake gcc g++ libdw-dev libsqlite3-dev rpm
           python3 -m pip install -r requirements.txt
+          python3 -m pip install -U --user cmake==3.25.0
 
       - name: Build ROCProfiler SDK Dependencies
         uses: ./.github/actions/rocprofiler-sdk-util

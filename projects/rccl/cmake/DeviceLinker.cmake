@@ -291,10 +291,16 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   target_link_libraries(${_dev_target} PRIVATE rccl_device_defs)
 
   add_dependencies(${_dev_target} hipify_all copy_nccl_device_headers)
-  if(ENABLE_ROCSHMEM AND TARGET rocshmem_static)
-    # rocSHMEM headers land in ext/rocshmem/include only after ExternalProject
-    # completes; ensure they are installed before device kernels start compiling.
+  if((ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN) AND TARGET rocshmem_static)
     add_dependencies(${_dev_target} rocshmem_static)
+  endif()
+  # Pass rocshmem device bitcode to per-kernel compiles so rocshmem device
+  # symbols resolve during the per-arch device.elf link step.
+  # ENABLE_ROCSHMEM: rocshmem_n_pes, alltoall_wg, etc.
+  # ENABLE_ROCSHMEM_GIN: QueuePair::put_nbi, atomic_add, etc.
+  if((ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN) AND ROCSHMEM_INSTALL_DIR)
+    set(_rocshmem_bc "${ROCSHMEM_INSTALL_DIR}/lib/librocshmem_device_${DL_GPU_TARGET}.bc")
+    target_compile_options(${_dev_target} PRIVATE --rocshmem-bitcode=${_rocshmem_bc})
   endif()
 
   # =========================================================================
@@ -345,13 +351,9 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   # present in the device ELF — they cannot be imported from a shared library.
   set(_rocshmem_bitcode_arg "")
   set(_rocshmem_link_depends "")
-  if(ENABLE_ROCSHMEM AND ROCSHMEM_INSTALL_DIR)
+  if((ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN) AND ROCSHMEM_INSTALL_DIR)
     set(_rocshmem_bc "${ROCSHMEM_INSTALL_DIR}/lib/librocshmem_device_${DL_GPU_TARGET}.bc")
     set(_rocshmem_bitcode_arg "--rocshmem-bitcode=${_rocshmem_bc}")
-    # Do NOT add _rocshmem_bc to DEPENDS: rocSHMEM only supports a subset of
-    # GPU_TARGETS (e.g. gfx90a, gfx942, gfx950) and the bitcode files don't
-    # exist at cmake configure time (ExternalProject).  The Python driver checks
-    # existence at build time and skips silently for unsupported arches.
     if(TARGET rocshmem_static)
       list(APPEND _rocshmem_link_depends rocshmem_static)
     endif()
@@ -522,7 +524,7 @@ add_custom_command(
 )
 
 # ===========================================================================
-# collectives.cc: contains a __global__ kernel launch (hierarchicalAGShuffle)
+# collectives.cc: contains a __global__ kernel launch (hierarchicalShuffle)
 # so it needs full HIP compilation, not --offload-host-only.
 # ===========================================================================
 # Dependency tracking note (CMake >= 3.20 vs < 3.20):
@@ -914,32 +916,44 @@ add_custom_command(
 )
 
 # ===========================================================================
-# ce_reduce.cc: minimal device-only file containing ncclCeLocalReduceKernel
-# (__global__) and its host-callable launcher ncclCeLaunchLocalReduce.
-# Compiled with full HIP here so the fat binary is embedded in ce_reduce.o.
-# ce_coll.cc (main target, --offload-host-only) has no __global__ call sites
-# and therefore produces no undefined __hip_fatbin_<hash> reference.
+# CE-reduce kernels: per-instantiation device TUs from gensrc/ce_reduce/.
+# Each instantiation file defines one ncclCeLocalReduceKernelVec<T,RedOp,U>
+# (__global__) and its host-callable launcher. Compiled with full HIP here so
+# each fat binary is self-contained (ce_coll.cc, the main target, has no
+# __global__ call sites and stays --offload-host-only).
+#
+# CE_REDUCE_FAT_OBJS is plural (mirroring SYM_FAT_OBJS below) because
+# src/device/ce_reduce/generate.py emits one TU per (type, redop)
+# instantiation instead of one aggregate ce_reduce.cc -- see that script for
+# why: two of the 40 instantiations (int8_t/uint8_t Min/Max) individually
+# generate ~56K instructions each and used to dominate the whole build's
+# wall-clock time by serializing all 40 kernels' codegen into one TU.
 # ===========================================================================
-set(CE_REDUCE_FAT_OBJ "${DEVICE_BUILD_DIR}/ce_reduce.o")
-
-add_custom_command(
-  OUTPUT  ${CE_REDUCE_FAT_OBJ}
-  COMMAND ${DL_CLANG}
-    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-    ${DL_HIP_COMPILER_FLAGS}
-    -DRCCL_DEVICE_LINKER
-    ${_link_def_flags}
-    ${_host_inc_flags}
-    ${DL_OPT_FLAGS}
-    -std=c++17
-    -fPIC
-    -w
-    -c -o ${CE_REDUCE_FAT_OBJ}
-    ${HIPIFY_DIR}/src/device/ce_reduce.cc
-  DEPENDS ${HIPIFY_DIR}/src/device/ce_reduce.cc
-  COMMENT "DL compile: device/ce_reduce.cc (CE AllReduce reduce kernel)"
-  VERBATIM
-)
+set(CE_REDUCE_FAT_OBJS "")
+file(GLOB _ce_reduce_srcs CONFIGURE_DEPENDS "${HIPIFY_DIR}/gensrc/ce_reduce/*.cpp")
+foreach(_ce_reduce_src IN LISTS _ce_reduce_srcs)
+  get_filename_component(_ce_reduce_name "${_ce_reduce_src}" NAME_WE)
+  set(_ce_reduce_obj "${DEVICE_BUILD_DIR}/${_ce_reduce_name}.o")
+  add_custom_command(
+    OUTPUT  ${_ce_reduce_obj}
+    COMMAND ${DL_CLANG}
+      -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+      ${DL_HIP_COMPILER_FLAGS}
+      -DRCCL_DEVICE_LINKER
+      ${_link_def_flags}
+      ${_host_inc_flags}
+      ${DL_OPT_FLAGS}
+      -std=c++17
+      -fPIC
+      -w
+      -c -o ${_ce_reduce_obj}
+      ${_ce_reduce_src}
+    DEPENDS ${_ce_reduce_src}
+    COMMENT "DL compile: ${_ce_reduce_name} (CE AllReduce reduce kernel)"
+    VERBATIM
+  )
+  list(APPEND CE_REDUCE_FAT_OBJS ${_ce_reduce_obj})
+endforeach()
 
 # ===========================================================================
 # Symmetric kernels: per-instantiation device TUs from gensrc/symmetric/.
@@ -951,10 +965,83 @@ add_custom_command(
 # ===========================================================================
 set(SYM_FAT_OBJS "")
 if(GENERATE_SYM_KERNELS)
+  # When ENABLE_ROCSHMEM_GIN is set, GIN device templates reference rocshmem
+  # device symbols (QueuePair::put_nbi, atomic_add, etc.). The installed per-arch
+  # .bc files are arch-optimized (opt -mcpu=) and can't be used with
+  # -mlink-builtin-bitcode across archs. Instead, llvm-link the pre-opt
+  # individual source .bc files (arch-agnostic) into a minimal QP-only bitcode.
+  set(_sym_rocshmem_bc_flag "")
+  set(_sym_rocshmem_deps "")
+  if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_SOURCE_DIR)
+    # Pick the first arch's pre-opt bitcode dir (all archs produce identical
+    # unoptimized IR since -Xclang -disable-llvm-passes is used).
+    list(GET DL_GPU_TARGETS 0 _bc_arch)
+    set(_bc_dir "${ROCSHMEM_SOURCE_DIR}/build/bitcode/${_bc_arch}")
+    set(_qp_bc "${DEVICE_BUILD_DIR}/rocshmem_qp_device.bc")
+    find_program(_llvm_link llvm-link HINTS ${ROCM_PATH}/llvm/bin REQUIRED)
+    find_program(_llvm_dis  llvm-dis  HINTS ${ROCM_PATH}/llvm/bin REQUIRED)
+    find_program(_llvm_as   llvm-as   HINTS ${ROCM_PATH}/llvm/bin REQUIRED)
+
+    # Pipeline:
+    #  1. Compile gin_rocshmem_constmem.hip → device-only .bc (provides
+    #     rocshmem::constmem and rocshmem::logd_constants definitions that
+    #     queue_pair.bc references as external)
+    #  2. llvm-link QP .bc files + constmem .bc into one module
+    #  3. Strip @llvm.compiler.used and @__hip_cuid_ via text round-trip
+    #     (these AMDGCN addrspace(1) appending globals clash with the
+    #     host-side addrspace(0) equivalents in fat-object compilation)
+    set(_cm_src "${CMAKE_SOURCE_DIR}/src/gin/gin_rocshmem_constmem.hip")
+    set(_cm_bc  "${DEVICE_BUILD_DIR}/gin_rocshmem_constmem.bc")
+    set(_qp_raw "${DEVICE_BUILD_DIR}/rocshmem_qp_raw.bc")
+
+    add_custom_command(
+      OUTPUT ${_cm_bc}
+      COMMAND ${DL_CLANG}
+        -x hip --cuda-device-only --offload-arch=${_bc_arch}
+        -emit-llvm -Xclang -disable-llvm-passes
+        -std=c++17 -fPIC
+        -I${ROCSHMEM_SOURCE_DIR}/src
+        -I${ROCSHMEM_SOURCE_DIR}/include
+        -c -o ${_cm_bc} ${_cm_src}
+      DEPENDS ${_cm_src}
+      COMMENT "DL: compiling rocshmem constmem stubs to device bitcode"
+      VERBATIM)
+
+    add_custom_command(
+      OUTPUT ${_qp_bc}
+      COMMAND ${_llvm_link}
+        ${_bc_dir}/queue_pair.bc
+        ${_bc_dir}/queue_pair_mlx5.bc
+        ${_bc_dir}/queue_pair_bnxt.bc
+        ${_bc_dir}/queue_pair_ionic.bc
+        ${_cm_bc}
+        -o ${_qp_raw}
+      COMMAND ${_llvm_dis} -o ${_qp_raw}.ll ${_qp_raw}
+      COMMAND grep -v -E "@llvm[.]compiler[.]used|@__hip_cuid_"
+        ${_qp_raw}.ll > ${_qp_raw}.clean.ll
+      COMMAND ${_llvm_as} ${_qp_raw}.clean.ll -o ${_qp_bc}
+      DEPENDS ${_cm_bc}
+      COMMENT "DL: linking rocshmem QP device bitcode (with constmem, stripped)"
+      VERBATIM)
+    add_custom_target(dl_rocshmem_qp_bc DEPENDS ${_qp_bc})
+    if(TARGET rocshmem_static)
+      add_dependencies(dl_rocshmem_qp_bc rocshmem_static)
+    endif()
+    set(_sym_rocshmem_bc_flag -Xclang -mlink-builtin-bitcode -Xclang ${_qp_bc})
+    set(_sym_rocshmem_deps dl_rocshmem_qp_bc)
+  endif()
   file(GLOB _sym_srcs CONFIGURE_DEPENDS "${HIPIFY_DIR}/gensrc/symmetric/*.cpp")
   foreach(_sym_src IN LISTS _sym_srcs)
     get_filename_component(_sym_name "${_sym_src}" NAME_WE)
     set(_sym_obj "${DEVICE_BUILD_DIR}/sym_${_sym_name}.o")
+    # Only GIN symmetric kernels need the QP bitcode; non-GIN ones would
+    # just ingest and DCE it, wasting compile time.
+    set(_this_bc_flag "")
+    set(_this_bc_deps "")
+    if(_sym_name MATCHES "_gin_")
+      set(_this_bc_flag "${_sym_rocshmem_bc_flag}")
+      set(_this_bc_deps "${_sym_rocshmem_deps}")
+    endif()
     add_custom_command(
       OUTPUT  ${_sym_obj}
       COMMAND ${DL_CLANG}
@@ -967,9 +1054,10 @@ if(GENERATE_SYM_KERNELS)
         ${DL_INHERITED_FLAGS}
         -std=c++17
         -fPIC
+        ${_this_bc_flag}
         -c -o ${_sym_obj}
         ${_sym_src}
-      DEPENDS ${_sym_src}
+      DEPENDS ${_sym_src} ${_this_bc_deps}
       COMMENT "DL compile: sym ${_sym_name} (multi-arch fat object)"
       VERBATIM
     )
@@ -981,7 +1069,7 @@ endif()
 # Top-level target
 # ===========================================================================
 add_custom_target(device_linker_build ALL
-  DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${DDA_ALL_REDUCE_IPC_FAT_OBJ} ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ} ${DDA_ALL_GATHER_IPC_FAT_OBJ} ${DDA_ALLTOALL_IPC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ} ${CE_REDUCE_FAT_OBJ} ${SYM_FAT_OBJS}
+  DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${DDA_ALL_REDUCE_IPC_FAT_OBJ} ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ} ${DDA_ALL_GATHER_IPC_FAT_OBJ} ${DDA_ALLTOALL_IPC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ} ${CE_REDUCE_FAT_OBJS} ${SYM_FAT_OBJS}
 )
 add_dependencies(device_linker_build hipify_all copy_nccl_device_headers)
 
@@ -989,7 +1077,7 @@ set(DEVICE_LINKER_OBJECTS
   ${COMMON_FAT_OBJ}
   ${ONERANK_FAT_OBJ}
   ${COLLECTIVES_FAT_OBJ}
-  ${CE_REDUCE_FAT_OBJ}
+  ${CE_REDUCE_FAT_OBJS}
   ${DDA_ALL_REDUCE_IPC_FAT_OBJ}
   ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ}
   ${DDA_ALL_GATHER_IPC_FAT_OBJ}
