@@ -187,7 +187,8 @@ namespace RcclUnitTesting
   // Shared sweep body for the LL128 latency-bound P2P send/recv regression tests.
   //
   // RCCL's P2P send/recv uses the LL128 protocol (in place of the legacy LL) for per-channel
-  // payloads <= NCCL_P2P_LL_THRESHOLD, and SIMPLE above it. The switch requires converting between
+  // payloads <= the active latency threshold (NCCL_P2P_LL128_THRESHOLD for the LL128 path,
+  // NCCL_P2P_LL_THRESHOLD for the legacy LL path), and SIMPLE above it. The switch requires converting between
   // LL128 "wire" chunk sizes (data lines carry an extra flag word) and "data" chunk sizes in the
   // enqueue path, plus matching proxy byte accounting. Those conversions are size-sensitive, so a
   // bug typically corrupts data only at specific sizes near the protocol boundary or at sizes that
@@ -203,8 +204,10 @@ namespace RcclUnitTesting
   //
   // Protocol selection is asserted (not just data correctness, which SIMPLE also satisfies) by
   // scraping the NCCL_DEBUG=INFO protocol line. Protocol is chosen per channel (payload <=
-  // nChannels * P2P_LL_THRESHOLD), so the caller pins NCCL_MAX_P2P_NCHANNELS=1 to make the 16 KiB
-  // threshold deterministic (single channel).
+  // nChannels * <threshold>), so the caller pins NCCL_MAX_P2P_NCHANNELS=1 (single channel) and pins
+  // the relevant threshold env var (NCCL_P2P_LL128_THRESHOLD or NCCL_P2P_LL_THRESHOLD) to 16384 so
+  // the 16 KiB boundary the element counts below straddle is deterministic and independent of the
+  // (differing) default threshold values.
   //
   // The caller pins the transport + NCCL_ALLOC_P2P_NET_LL_BUFFERS to make one latency protocol the
   // deterministic choice for below-threshold sizes, and passes the matching `expect`:
@@ -222,10 +225,10 @@ namespace RcclUnitTesting
   enum class ExpectProto { LegacyLL, LL128, NoLL128 };
   static void RunLL128BoundarySweep(TestBed& testBed, const std::string& debugGlob, ExpectProto expect)
   {
-    // Configuration: int8 (1B) and float32 (4B) so the 16 KiB/channel LL128 threshold is crossed at
-    // 16384 and 4096 elements respectively. With NCCL_MAX_P2P_NCHANNELS=1 (single channel) the
-    // per-channel threshold is exactly 16384 bytes, so below-threshold sizes pick LL128 and
-    // above-threshold sizes pick SIMPLE deterministically:
+    // Configuration: int8 (1B) and float32 (4B) so the caller-pinned 16 KiB/channel latency threshold
+    // is crossed at 16384 and 4096 elements respectively. With NCCL_MAX_P2P_NCHANNELS=1 (single
+    // channel) the per-channel threshold is exactly 16384 bytes, so below-threshold sizes pick the
+    // latency protocol and above-threshold sizes pick SIMPLE deterministically:
     //   int8:  16385 B  -> SIMPLE, 4097 B    -> LL128, 1 B -> LL128
     //   fp32:  1 MiB     -> SIMPLE, 65540 B   -> SIMPLE, 16388 B -> SIMPLE, 4 B -> LL128
     std::vector<ncclDataType_t> const& testDataTypes = {ncclInt8, ncclFloat32};
@@ -416,6 +419,7 @@ namespace RcclUnitTesting
     // the LL staging buffer -> legacy LL is the deterministic below-threshold choice.
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "0", 1); // force useLL128SendRecv=false even on gfx942/gfx950
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
+    setenv("NCCL_P2P_LL_THRESHOLD", "16384", 1);     // pin legacy-LL threshold to the 16 KiB boundary the sweep straddles
     std::string const debugGlob = "/tmp/rccl_legacy_ll_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
     setenv("NCCL_DEBUG", "INFO", 1);
@@ -429,6 +433,7 @@ namespace RcclUnitTesting
     unsetenv("NCCL_DEBUG_FILE");
     unsetenv("NCCL_DEBUG_SUBSYS");
     unsetenv("NCCL_DEBUG");
+    unsetenv("NCCL_P2P_LL_THRESHOLD");
     unsetenv("NCCL_MAX_P2P_NCHANNELS");
     unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
   }
@@ -443,6 +448,7 @@ namespace RcclUnitTesting
     setenv("NCCL_SHM_DISABLE", "1", 1);              // disable SHM so send/recv falls through to NET
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "0", 1); // disabled case
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
+    setenv("NCCL_P2P_LL_THRESHOLD", "16384", 1);     // legacy-LL threshold governs when the LL128 path is off
     // Capture the per-op protocol selection so we can assert LL128/SIMPLE were used (see helper).
     std::string const debugGlob = "/tmp/rccl_ll128_disabled_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
@@ -457,6 +463,7 @@ namespace RcclUnitTesting
     unsetenv("NCCL_DEBUG_FILE");
     unsetenv("NCCL_DEBUG_SUBSYS");
     unsetenv("NCCL_DEBUG");
+    unsetenv("NCCL_P2P_LL_THRESHOLD");
     unsetenv("NCCL_MAX_P2P_NCHANNELS");
     unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
     unsetenv("NCCL_SHM_DISABLE");
@@ -476,6 +483,7 @@ namespace RcclUnitTesting
     setenv("RCCL_LL128_FORCE_ENABLE", "1", 1);       // ll128Enabled=true (required by the P2P LL128 gate)
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "1", 1); // enabled case
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
+    setenv("NCCL_P2P_LL128_THRESHOLD", "16384", 1);  // pin LL128 threshold to the 16 KiB boundary the sweep straddles
     // Capture the per-op protocol selection so we can assert LL128 was actually chosen (see helper).
     std::string const debugGlob = "/tmp/rccl_ll128_enabled_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
@@ -497,6 +505,7 @@ namespace RcclUnitTesting
     unsetenv("NCCL_DEBUG_FILE");
     unsetenv("NCCL_DEBUG_SUBSYS");
     unsetenv("NCCL_DEBUG");
+    unsetenv("NCCL_P2P_LL128_THRESHOLD");
     unsetenv("NCCL_MAX_P2P_NCHANNELS");
     unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
     unsetenv("RCCL_LL128_FORCE_ENABLE");
@@ -515,6 +524,7 @@ namespace RcclUnitTesting
     // ll128Enabled left at its gfx942/gfx950 default (off): RCCL_LL128_FORCE_ENABLE is NOT set.
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "1", 1); // P2P opt-in ON, but ll128Enabled off -> no LL128
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
+    setenv("NCCL_P2P_LL_THRESHOLD", "16384", 1);     // legacy-LL threshold governs the fallback path
     std::string const debugGlob = "/tmp/rccl_ll128_disabled_gate_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
     setenv("NCCL_DEBUG", "INFO", 1);
@@ -528,6 +538,7 @@ namespace RcclUnitTesting
     unsetenv("NCCL_DEBUG_FILE");
     unsetenv("NCCL_DEBUG_SUBSYS");
     unsetenv("NCCL_DEBUG");
+    unsetenv("NCCL_P2P_LL_THRESHOLD");
     unsetenv("NCCL_MAX_P2P_NCHANNELS");
     unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
   }
@@ -546,6 +557,7 @@ namespace RcclUnitTesting
     setenv("RCCL_LL128_FORCE_ENABLE", "1", 1);       // force comm->topo->ll128Enabled = true
     setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "0", 1); // P2P LL128 opt-in OFF -> useLL128SendRecv=false
     setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
+    setenv("NCCL_P2P_LL_THRESHOLD", "16384", 1);     // legacy-LL threshold governs the fallback path
     std::string const debugGlob = "/tmp/rccl_ll128_indep_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
     setenv("NCCL_DEBUG", "INFO", 1);
@@ -559,9 +571,89 @@ namespace RcclUnitTesting
     unsetenv("NCCL_DEBUG_FILE");
     unsetenv("NCCL_DEBUG_SUBSYS");
     unsetenv("NCCL_DEBUG");
+    unsetenv("NCCL_P2P_LL_THRESHOLD");
     unsetenv("NCCL_MAX_P2P_NCHANNELS");
     unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
     unsetenv("RCCL_LL128_FORCE_ENABLE");
+  }
+
+  // ---------------------------------------------------------------------------
+  // Independent latency thresholds: the LL128 path is governed solely by
+  // NCCL_P2P_LL128_THRESHOLD and the legacy LL path solely by NCCL_P2P_LL_THRESHOLD. The two knobs
+  // have different defaults (legacy LL 4 KiB, LL128 16 KiB) because legacy LL's ~2x wire overhead
+  // stops beating SIMPLE at smaller sizes than LL128's much lower per-line flag overhead. The two
+  // tests below cross the knobs (set the OTHER protocol's threshold to 0) and confirm the active
+  // path still selects its latency protocol below its OWN 16 KiB threshold -- proving neither path
+  // reads the other's env var. See RunLL128BoundarySweep.
+  // ---------------------------------------------------------------------------
+
+  // LL128 path reads NCCL_P2P_LL128_THRESHOLD only: force NCCL_P2P_LL_THRESHOLD=0 (which would push
+  // legacy LL to SIMPLE at every size) while keeping NCCL_P2P_LL128_THRESHOLD=16384. LL128 must
+  // still be selected below 16 KiB, proving the LL128 path ignores the legacy-LL knob. Same NET +
+  // ll128Enabled setup as LL128NetBuffersEnabled. Skipped on archs without the LL128 send/recv
+  // kernel (via ExpectProto::LL128).
+  TEST(SendRecv, SeparateThresholdLL128UsesLL128Knob)
+  {
+    setenv("NCCL_P2P_DISABLE", "1", 1);              // disable P2P/IPC so send/recv does not use it
+    setenv("NCCL_SHM_DISABLE", "1", 1);              // disable SHM so send/recv falls through to NET
+    setenv("RCCL_LL128_FORCE_ENABLE", "1", 1);       // ll128Enabled=true (required by the P2P LL128 gate)
+    setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "1", 1); // enable the LL128 staging buffer
+    setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
+    setenv("NCCL_P2P_LL_THRESHOLD", "0", 1);         // legacy-LL knob at 0: must NOT affect the LL128 path
+    setenv("NCCL_P2P_LL128_THRESHOLD", "16384", 1);  // LL128 knob governs -> LL128 below 16 KiB
+    std::string const debugGlob = "/tmp/rccl_sep_ll128_" + std::to_string(getpid()) + ".*";
+    RemoveGlobbedFiles(debugGlob);
+    setenv("NCCL_DEBUG", "INFO", 1);
+    setenv("NCCL_DEBUG_SUBSYS", "INIT", 1);
+    setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_sep_ll128_" + std::to_string(getpid()) + ".%p").c_str(), 1);
+    {
+      TestBed testBed;
+#if defined(ENABLE_LL128)
+      RunLL128BoundarySweep(testBed, debugGlob, ExpectProto::LL128);
+#else
+      RunLL128BoundarySweep(testBed, debugGlob, ExpectProto::NoLL128);
+#endif
+    }
+    RemoveGlobbedFiles(debugGlob);
+    unsetenv("NCCL_DEBUG_FILE");
+    unsetenv("NCCL_DEBUG_SUBSYS");
+    unsetenv("NCCL_DEBUG");
+    unsetenv("NCCL_P2P_LL128_THRESHOLD");
+    unsetenv("NCCL_P2P_LL_THRESHOLD");
+    unsetenv("NCCL_MAX_P2P_NCHANNELS");
+    unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
+    unsetenv("RCCL_LL128_FORCE_ENABLE");
+    unsetenv("NCCL_SHM_DISABLE");
+    unsetenv("NCCL_P2P_DISABLE");
+  }
+
+  // Legacy LL path reads NCCL_P2P_LL_THRESHOLD only: force NCCL_P2P_LL128_THRESHOLD=0 (irrelevant on
+  // this path) while keeping NCCL_P2P_LL_THRESHOLD=16384. Legacy LL must still be selected below
+  // 16 KiB, proving the legacy-LL path ignores the LL128 knob. Same intranode setup as
+  // LegacyLLIntranode (NCCL_ALLOC_P2P_NET_LL_BUFFERS=0 -> useLL128SendRecv=false on every arch).
+  TEST(SendRecv, SeparateThresholdLegacyLLUsesLLKnob)
+  {
+    setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "0", 1); // force useLL128SendRecv=false even on gfx942/gfx950
+    setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
+    setenv("NCCL_P2P_LL128_THRESHOLD", "0", 1);      // LL128 knob at 0: must NOT affect the legacy-LL path
+    setenv("NCCL_P2P_LL_THRESHOLD", "16384", 1);     // legacy-LL knob governs -> legacy LL below 16 KiB
+    std::string const debugGlob = "/tmp/rccl_sep_legacy_ll_" + std::to_string(getpid()) + ".*";
+    RemoveGlobbedFiles(debugGlob);
+    setenv("NCCL_DEBUG", "INFO", 1);
+    setenv("NCCL_DEBUG_SUBSYS", "INIT", 1);
+    setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_sep_legacy_ll_" + std::to_string(getpid()) + ".%p").c_str(), 1);
+    {
+      TestBed testBed;
+      RunLL128BoundarySweep(testBed, debugGlob, ExpectProto::LegacyLL);
+    }
+    RemoveGlobbedFiles(debugGlob);
+    unsetenv("NCCL_DEBUG_FILE");
+    unsetenv("NCCL_DEBUG_SUBSYS");
+    unsetenv("NCCL_DEBUG");
+    unsetenv("NCCL_P2P_LL_THRESHOLD");
+    unsetenv("NCCL_P2P_LL128_THRESHOLD");
+    unsetenv("NCCL_MAX_P2P_NCHANNELS");
+    unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
   }
 
   TEST(SendRecv, UserBufferRegister)

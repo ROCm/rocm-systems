@@ -1131,11 +1131,17 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
   return ncclSuccess;
 }
 
-// Per-channel payload (in bytes) at/below which P2P send/recv uses the LL128 protocol; above it SIMPLE.
-// Default 16 KiB: internode alltoall/scatter/gather sweeps (1-16 nodes) show LL128 is faster than
-// SIMPLE for every per-peer size <= 16 KiB at all scales, with the crossover at ~32 KiB; LL128's low
-// (~1/16) flag overhead keeps it beneficial well past the legacy-LL 8 KiB cutoff.
-NCCL_PARAM(P2pLLThreshold, "P2P_LL_THRESHOLD", 16384);
+// Per-channel payload (in bytes) at/below which P2P send/recv uses the legacy LL protocol; above it
+// SIMPLE. Legacy LL carries one flag word per data word (~2x wire overhead), so it loses to SIMPLE
+// relatively early -- internode alltoall sweeps show it regressing past ~16-32 KiB/channel. Default
+// 4 KiB: the largest cutoff that avoids the legacy-LL mid-size regressions while keeping its win.
+NCCL_PARAM(P2pLLThreshold, "P2P_LL_THRESHOLD", 4096);
+// Separate, independent threshold for the LL128 latency path (used on gfx942/gfx950 with
+// NCCL_ALLOC_P2P_NET_LL_BUFFERS=1 and comm LL128 enabled). Default 16 KiB: internode alltoall/
+// scatter/gather sweeps (1-16 nodes) show LL128 beats SIMPLE for every per-peer size <= 16 KiB at
+// all scales; LL128's low (~1/8 gfx950, ~1/16 gfx1250) flag overhead keeps it beneficial well past
+// the legacy-LL crossover, so it warrants a higher threshold than legacy LL.
+NCCL_PARAM(P2pLL128Threshold, "P2P_LL128_THRESHOLD", 16384);
 RCCL_PARAM(P2pNetThreshold, "P2P_NET_THRESHOLD", 131072);
 NCCL_PARAM(ChunkSize, "CHUNK_SIZE", 0);
 
@@ -1279,10 +1285,12 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     // Update number of channels propagated to the profiler
     if (p2pTasks[dir]) p2pTasks[dir]->nChannels = nChannels[dir];
 
-    // Select protocol based on per-channel payload: <= P2P_LL_THRESHOLD uses the latency
-    // protocol (LL128 on gfx942/gfx950 with NCCL_ALLOC_P2P_NET_LL_BUFFERS=1, else legacy LL),
-    // above it SIMPLE.
-    if (bytes[dir] != -1) protoLatency[dir] &= bytes[dir] <= nChannels[dir] * ncclParamP2pLLThreshold();
+    // Select protocol based on per-channel payload: at/below the latency threshold use the latency
+    // protocol (LL128 on gfx942/gfx950 with NCCL_ALLOC_P2P_NET_LL_BUFFERS=1, else legacy LL), above
+    // it SIMPLE. LL128 and legacy LL use independent thresholds (P2P_LL128_THRESHOLD vs
+    // P2P_LL_THRESHOLD) because LL128's lower wire overhead stays beneficial to larger sizes.
+    ssize_t latencyThreshold = useLL128SendRecv ? ncclParamP2pLL128Threshold() : ncclParamP2pLLThreshold();
+    if (bytes[dir] != -1) protoLatency[dir] &= bytes[dir] <= nChannels[dir] * latencyThreshold;
     protocol[dir] = protoLatency[dir] ? (useLL128SendRecv ? NCCL_PROTO_LL128 : NCCL_PROTO_LL) : NCCL_PROTO_SIMPLE;
 
     // Emit the selected protocol so tests (and NCCL_DEBUG=INFO) can confirm the latency protocol
