@@ -49,7 +49,7 @@ Checks: >
   cppcoreguidelines-use-enum-class,
   cppcoreguidelines-virtual-class-destructor,
   misc-anonymous-namespace-in-header,
-  isc-const-correctness,
+  misc-const-correctness,
   misc-definitions-in-headers,
   misc-include-cleaner,
   misc-unused-alias-decls,
