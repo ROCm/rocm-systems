@@ -11410,7 +11410,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             if uses_packed_16bit_sources
             else ''
         )
-        selector_validation = ''
+        selector_validation_cases = []
         for selector in sorted(
             self.isa_spec.opnd_selectors, key=lambda item: item.operand_type
         ):
@@ -11438,11 +11438,19 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 f'(encoding_value >= {lo} && encoding_value <= {hi})'
                 for lo, hi in intervals
             )
-            selector_validation += (
-                f'  if (opr_type == OperandType::{operand_type} && '
-                f'!({valid_expr}))\n'
-                f'    defer_encoding_error(EncodingError::{error});\n'
+            selector_validation_cases.append(
+                f'  case OperandType::{operand_type}:\n'
+                f'    if (!({valid_expr}))\n'
+                f'      defer_encoding_error(EncodingError::{error});\n'
+                f'    break;\n'
             )
+        selector_validation = (
+            '  switch (opr_type) {\n'
+            + ''.join(selector_validation_cases)
+            + '  default:\n'
+            + '    break;\n'
+            + '  }\n'
+        )
         packed_16bit_ctor_impl = []
         if uses_packed_16bit_sources:
             packed_16bit_ctor_impl.append(
@@ -11492,12 +11500,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 cgen.Line(
                     'Operand::Operand(int size_bits, OperandType opr_type, int encoding_value,\n'
                     '                 uint16_t literal16_display_value, bool has_literal16_display)\n'
-                    f'    : {operand_base_init}(size_bits, opr_type, encoding_value)'
-                    f'{execution_backend_ctor_init},\n'
-                    '      literal16_display_value_(literal16_display_value),\n'
-                    '      has_literal16_display_(has_literal16_display) {\n'
-                    f'{selector_validation}'
-                    '  is_vgpr_ = is_vgpr_operand_type(opr_type);\n'
+                    '    : Operand(size_bits, opr_type, encoding_value) {\n'
+                    '  literal16_display_value_ = literal16_display_value;\n'
+                    '  has_literal16_display_ = has_literal16_display;\n'
                     '}'
                 ),
                 cgen.Line(
