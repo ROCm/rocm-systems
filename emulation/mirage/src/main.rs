@@ -106,6 +106,22 @@ fn main() -> ExitCode {
     }
 }
 
+/// The `mirage` command tree, built once.
+///
+/// Everything on the argv-rewrite path asks clap rather than a list of
+/// its own — which is the right answer to "what does mirage accept?" and
+/// was three separate answers to "build me the whole tree":
+/// [`is_subcommand`], [`takes_a_workload`] and [`check_flags`] each called
+/// `Cli::command()`, so one invocation materialised every subcommand,
+/// every argument and every help string three times over before clap had
+/// parsed a single token. The tree cannot differ between those calls — it
+/// is generated from the same types — so it is built once and shared.
+fn cli() -> &'static clap::Command {
+    use clap::CommandFactory as _;
+    static COMMAND: std::sync::OnceLock<clap::Command> = std::sync::OnceLock::new();
+    COMMAND.get_or_init(Cli::command)
+}
+
 /// Whether `name` is a top-level subcommand `mirage` understands.
 ///
 /// Used to decide whether an invocation is a normal `mirage <subcommand>
@@ -120,12 +136,12 @@ fn main() -> ExitCode {
 /// declaration.
 ///
 /// Aliases count. A subcommand reachable under a second name is still a
-/// subcommand, and missing one would resurrect exactly the bug above.
+/// subcommand, and missing one would resurrect exactly the bug above —
+/// which is why this asks [`clap::Command::find_subcommand`], whose alias
+/// rule is the one clap itself dispatches on, rather than spelling the
+/// same comparison out a second time.
 fn is_subcommand(name: &str) -> bool {
-    use clap::CommandFactory as _;
-    Cli::command()
-        .get_subcommands()
-        .any(|sub| sub.get_name() == name || sub.get_all_aliases().any(|alias| alias == name))
+    cli().find_subcommand(name).is_some()
 }
 
 /// The third-party dependency/license manifest, generated at build time
@@ -271,11 +287,29 @@ fn looks_like_a_program(arg: &str) -> bool {
 /// workload's", so it is what the question is asked of; aliases come
 /// free, because `find_subcommand` resolves them.
 fn takes_a_workload(name: &str) -> bool {
-    use clap::CommandFactory as _;
-    Cli::command().find_subcommand(name).is_some_and(|sub| {
-        sub.get_positionals()
+    cli().find_subcommand(name).is_some_and(ends_in_a_workload)
+}
+
+/// Whether `sub` declares that everything from some point on is the
+/// workload's.
+///
+/// Both of clap's spellings, because either one produces the parse this
+/// guard exists in front of. `#[arg(trailing_var_arg = true)]` on the
+/// positional is the current one and what `run` and `exec` use;
+/// `#[command(trailing_var_arg = true)]` is the clap 3 spelling, still
+/// accepted and still setting the same behaviour, and it leaves every
+/// `Arg` unset — so reading only the positionals would answer "no" for a
+/// subcommand that parses exactly like `run` and leave it unguarded.
+///
+/// Shared with the test that derives the population it checks from this
+/// same question, so the two cannot disagree about who must be guarded.
+fn ends_in_a_workload(sub: &clap::Command) -> bool {
+    #[allow(deprecated)]
+    let command_level = sub.is_trailing_var_arg_set();
+    command_level
+        || sub
+            .get_positionals()
             .any(clap::Arg::is_trailing_var_arg_set)
-    })
 }
 
 /// Check the span of `args` that belongs to mirage rather than to the
@@ -291,10 +325,9 @@ fn takes_a_workload(name: &str) -> bool {
 /// Returns the message to print for the first flag-shaped token mirage
 /// does not accept.
 fn check_flags(args: &[String], from: usize, sep: Option<usize>, sub: &str) -> Result<(), String> {
-    use clap::CommandFactory as _;
     use mirage_ctl::usage::{AcceptedFlags, Span, misplaced_flag, unknown_flag_error};
 
-    let known = AcceptedFlags::of(&Cli::command(), sub);
+    let known = AcceptedFlags::of(cli(), sub);
     let (span, stop) = match sep {
         Some(sep) => (&args[from.min(sep)..sep], Span::BeforeSeparator),
         None => (&args[from.min(args.len())..], Span::UntilTheCommand),
@@ -473,7 +506,7 @@ mod tests {
 
     use mirage_ctl::usage::AcceptedFlags;
 
-    use super::{Cli, dropin_argv, is_global_flag, is_subcommand};
+    use super::{Cli, cli, dropin_argv, ends_in_a_workload, is_global_flag, is_subcommand};
 
     fn v_args(args: &[&str]) -> Vec<String> {
         args.iter().map(|s| s.to_string()).collect()
@@ -890,15 +923,15 @@ mod tests {
     /// no `--` is the one that used to be undecidable.
     #[test]
     fn every_subcommand_that_ends_in_a_workload_is_guarded() {
-        use clap::CommandFactory as _;
-
         let mut guarded = 0;
-        for sub in Cli::command().get_subcommands() {
+        for sub in cli().get_subcommands() {
             let name = sub.get_name().to_string();
-            if !sub
-                .get_positionals()
-                .any(clap::Arg::is_trailing_var_arg_set)
-            {
+            // Through the same predicate the guard itself uses, so the
+            // population this test checks cannot be narrower than the
+            // population that gets guarded. Asking a second, hand-written
+            // question here would let a subcommand fall out of both at
+            // once and the test still go green.
+            if !ends_in_a_workload(sub) {
                 // No trailing positional, so an unknown flag is clap's to
                 // report and the rewriter must leave the line alone.
                 let args = v_args(&["mirage", &name, "--not-a-mirage-flag"]);
