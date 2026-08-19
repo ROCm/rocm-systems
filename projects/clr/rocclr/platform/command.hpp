@@ -1488,6 +1488,9 @@ class NDRangeKernelCommand : public Command {
   uint64_t allGridSum_;      //!< A sum of all grids in multi GPU launch
   uint32_t firstDevice_;     //!< Device index of the first device in the gridc
   uint32_t numWorkgroups_;   //!< Total number of workgroups in the current launch
+  //! Device-wide max co-resident blocks for a coop launch (0=unknown). Set at construction (before
+  //! enqueue) and read at submit (after dequeue), so the queue handoff already publishes it.
+  uint32_t coopMaxGridBlocks_ = 0;
   DynDataPrefetchConfig dynDataPrefetchConfig_;  //!< Dynamic data prefetch configuration
 
  public:
@@ -1557,6 +1560,10 @@ class NDRangeKernelCommand : public Command {
   uint64_t firstDevice() const { return firstDevice_; }
 
   uint32_t numWorkgroups() const { return numWorkgroups_; }
+
+  //! Device-wide capacity (max co-resident blocks) for this cooperative launch; 0 if unknown.
+  uint32_t coopMaxGridBlocks() const { return coopMaxGridBlocks_; }
+  void setCoopMaxGridBlocks(uint32_t blocks) { coopMaxGridBlocks_ = blocks; }
 
   const DynDataPrefetchConfig& dynDataPrefetchConfig() const { return dynDataPrefetchConfig_; }
   void setDynDataPrefetchConfig(const DynDataPrefetchConfig& cfg) { dynDataPrefetchConfig_ = cfg; }

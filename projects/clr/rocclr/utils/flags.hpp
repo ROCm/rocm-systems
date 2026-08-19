@@ -291,7 +291,7 @@ release(uint, DEBUG_CLR_AQL_DEV_QUEUE, 0,                                     \
         "(1=enabled, 0=force system mem (default))")                          \
 release(uint, DEBUG_CLR_USE_MOVDIR64B, 1,                                     \
         "Use MOVDIR64B full-packet writes for AQL + metadata rings"           \
-        "(1=enabled (default), 0=non-temporal store path)")                   \
+        "(1=enabled (default), 0=non-temporal store path)")
 
 namespace amd {
 

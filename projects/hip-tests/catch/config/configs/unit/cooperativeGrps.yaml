@@ -103,6 +103,37 @@ cooperativeGrps:
   Unit_hipLaunchCooperativeKernel_Basic:
     <<: *level_2
     tags: [cooperative, launch]
+  Unit_ConcurrentCooperativeKernel_GridSync_Correctness:
+    <<: *level_2
+    # Concurrent cooperative grids sized near occupancy; ASAN shrinks occupancy
+    # which can prevent co-residency and deadlock grid.sync().
+    disabled: [asan]
+    tags: [cooperative, launch]
+  Unit_ConcurrentCooperativeKernel_GridSync_SameStreamOrdering:
+    <<: *level_2
+    # Same-stream coop dispatch chain sized near occupancy; ASAN shrinks occupancy.
+    disabled: [asan]
+    tags: [cooperative, launch]
+  Unit_ConcurrentCooperativeKernel_GridSync_EqualGrids:
+    <<: *level_2
+    # Equal coop grids sized near occupancy; ASAN shrinks occupancy.
+    disabled: [asan]
+    tags: [cooperative, launch]
+  Unit_ConcurrentCooperativeKernel_GridSync_Oversubscription:
+    <<: *level_2
+    # Oversubscribed coop grids; ASAN shrinks occupancy and can deadlock grid.sync().
+    disabled: [asan]
+    tags: [cooperative, launch]
+  Unit_ConcurrentCooperativeKernel_GridSync_QueuedConcurrency:
+    <<: *level_2
+    # Three coop grids past capacity; ASAN shrinks occupancy and can deadlock grid.sync().
+    disabled: [asan]
+    tags: [cooperative, launch]
+  Unit_ConcurrentCooperativeKernel_GridSync_MixedRegularCoop:
+    <<: *level_2
+    # Mixed regular/coop chain sized near occupancy; ASAN shrinks occupancy.
+    disabled: [asan]
+    tags: [cooperative, launch]
   Unit_hipLaunchCooperativeKernelMultiDevice_Basic:
     <<: *level_2
     # Kernel uses runtime sized shared memory which is not adjusted to handle ASAN extra memory requirements
