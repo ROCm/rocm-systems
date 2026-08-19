@@ -25,9 +25,7 @@ import utils.utils_profile_csv as csv_ops
 @pytest.fixture
 def temp_csv_file():
     """Create a temporary CSV file for testing."""
-    with tempfile.NamedTemporaryFile(
-        mode="w", delete=False, suffix=".csv", newline=""
-    ) as f:
+    with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".csv.gz") as f:
         yield f.name
     # Cleanup
     Path(f.name).unlink(missing_ok=True)
@@ -51,7 +49,7 @@ def sample_csv_data():
 def test_read_csv_as_dicts(temp_csv_file):
     """Test reading CSV file."""
     # Write test data
-    with open(temp_csv_file, "w", newline="") as f:
+    with gzip.open(temp_csv_file, "wt", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=["a", "b", "c"])
         writer.writeheader()
         writer.writerow({"a": "1", "b": "2", "c": "3"})
@@ -78,7 +76,7 @@ def test_read_csv_empty_file(temp_csv_file):
 def test_read_csv_nonexistent_file():
     """Test reading nonexistent file raises error."""
     with pytest.raises(FileNotFoundError):
-        csv_ops.read_csv_as_dicts("/nonexistent/file.csv")
+        csv_ops.read_csv_as_dicts("/nonexistent/file.csv.gz")
 
 
 def test_write_csv_from_dicts(temp_csv_file, sample_csv_data):
@@ -122,13 +120,14 @@ def test_iter_csv_dicts_matches_read_csv_as_dicts(temp_csv_file, sample_csv_data
 
 def test_iter_csv_dicts_empty_body(temp_csv_file):
     """A CSV with only a header yields zero rows."""
-    Path(temp_csv_file).write_text("a,b,c\n", encoding="utf-8")
+    with gzip.open(temp_csv_file, "wt", newline="", encoding="utf-8") as f:
+        f.write("a,b,c\n")
     assert list(csv_ops.iter_csv_dicts(temp_csv_file)) == []
 
 
 def test_iter_csv_dicts_no_header_raises(temp_csv_file):
     """An empty file (no header) raises ValueError."""
-    Path(temp_csv_file).write_text("", encoding="utf-8")
+    Path(temp_csv_file).write_bytes(b"")
     with pytest.raises(ValueError, match="no header row"):
         list(csv_ops.iter_csv_dicts(temp_csv_file))
 
@@ -193,30 +192,33 @@ def test_full_workflow(temp_csv_file):
 
 def test_stream_csv_to_file_copies_rows(tmp_path):
     """A row-for-row copy with the header preserved."""
-    src = tmp_path / "in.csv"
-    src.write_text("a,b\n1,2\n3,4\n")
-    dest = tmp_path / "out.csv"
+    src = tmp_path / "in.csv.gz"
+    with gzip.open(src, "wt", newline="", encoding="utf-8") as f:
+        f.write("a,b\n1,2\n3,4\n")
+    dest = tmp_path / "out.csv.gz"
 
     assert csv_ops.stream_csv_to_file(str(src), str(dest)) == 2
-    assert dest.read_text() == "a,b\n1,2\n3,4\n"
+    with gzip.open(dest, "rt", encoding="utf-8") as f:
+        assert f.read() == "a,b\n1,2\n3,4\n"
 
 
 def test_stream_csv_to_file_header_only_writes_no_rows(tmp_path):
     """A workload that dispatched no kernels yields a header-only CSV; the caller
     detects that from the returned count."""
-    src = tmp_path / "in.csv"
-    src.write_text("a,b\n")
-    dest = tmp_path / "out.csv"
+    src = tmp_path / "in.csv.gz"
+    with gzip.open(src, "wt", newline="", encoding="utf-8") as f:
+        f.write("a,b\n")
+    dest = tmp_path / "out.csv.gz"
 
     assert csv_ops.stream_csv_to_file(str(src), str(dest)) == 0
 
 
 def test_stream_csv_to_file_rejects_headerless_input(tmp_path):
-    src = tmp_path / "empty.csv"
-    src.write_text("")
+    src = tmp_path / "empty.csv.gz"
+    src.write_bytes(b"")
 
     with pytest.raises(ValueError, match="no header row"):
-        csv_ops.stream_csv_to_file(str(src), str(tmp_path / "out.csv"))
+        csv_ops.stream_csv_to_file(str(src), str(tmp_path / "out.csv.gz"))
 
 
 def test_group_id_assigner_reuses_ids_for_repeated_keys():
@@ -232,8 +234,7 @@ def test_group_id_assigner_reuses_ids_for_repeated_keys():
 # =============================================================================
 # Compression
 #
-# The helpers open through csv_compression, so a .gz name compresses on write
-# and either form reads back the same rows.
+# Every artifact these helpers touch is gzip, on both read and write.
 # =============================================================================
 
 
@@ -261,22 +262,3 @@ def test_iter_csv_dicts_reads_compressed(tmp_path, sample_csv_data):
     csv_ops.write_csv_from_dicts(str(path), sample_csv_data)
 
     assert list(csv_ops.iter_csv_dicts(str(path))) == sample_csv_data
-
-
-def test_stream_csv_to_file_across_compressed_and_plain(tmp_path):
-    """A compressed source streams to either form of destination, and the
-    destination name alone decides whether the output is compressed."""
-    src = tmp_path / "in.csv.gz"
-    with gzip.open(src, "wt", newline="", encoding="utf-8") as f:
-        f.write("a,b\n1,2\n3,4\n")
-    compressed_dest = tmp_path / "out.csv.gz"
-    plain_dest = tmp_path / "out.csv"
-
-    assert csv_ops.stream_csv_to_file(str(src), str(compressed_dest)) == 2
-    assert csv_ops.stream_csv_to_file(str(src), str(plain_dest)) == 2
-
-    assert plain_dest.read_text() == "a,b\n1,2\n3,4\n"
-    # Compression is the only difference: the two destinations hold the same
-    # bytes once the container is stripped.
-    with gzip.open(compressed_dest, "rb") as f:
-        assert f.read() == plain_dest.read_bytes()
