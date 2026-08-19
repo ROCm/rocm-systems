@@ -2728,6 +2728,11 @@ rccl_static ncclResult_t getAlgoInfo(struct ncclComm* comm, struct ncclTaskColl*
   // Direct ReduceScatter only works with the RING/Simple kernel (reduceCopy path
   // is compiled only for ProtoSimple). Force RING/SIMPLE regardless of tuner choice.
   if (info->func == ncclFuncReduceScatter && comm->enableDirectReduceScatter) {
+    if (info->algorithm != NCCL_ALGO_RING || info->protocol != NCCL_PROTO_SIMPLE) {
+      INFO(NCCL_TUNING, "%s: %ld Bytes -> Direct ReduceScatter overrides tuner Algo %s proto %s with Ring/Simple",
+           ncclFuncToString(info->func), (long)nBytes, ncclAlgoToString(info->algorithm),
+           ncclProtoToString(info->protocol));
+    }
     info->algorithm = NCCL_ALGO_RING;
     info->protocol = NCCL_PROTO_SIMPLE;
     info->nWarps = comm->maxThreads[info->algorithm][info->protocol] / comm->WarpSize;
