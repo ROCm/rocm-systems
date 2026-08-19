@@ -161,7 +161,13 @@ class KernelBuilder:
         # hipcc may ignore -o with --cuda-device-only and emit an auto-named .s
         auto_name = f"{shader.stem}-hip-amdgcn-amd-amdhsa-{arch}.s"
         auto_path = Path.cwd() / auto_name
+        
+        for stale in (output, auto_path):
+            stale.unlink(missing_ok=True)
+
         r = run_cmd(cmd)
+        if r.returncode != 0:
+            return False, r.stderr
 
         # Prefer the explicitly requested output if it exists
         if output.is_file():
