@@ -258,6 +258,10 @@ if(THEROCK_TOOLCHAIN_ROOT)
   )
 endif()
 
+# rocSHMEM's exported target conditionally references MPI::MPI_CXX when the
+# selected package was built with external MPI. Its package config does not yet
+# create that target, so retain discovery here. Do not link MPI directly:
+# roc::rocshmem must be the authority on whether the extension requires MPI.
 find_package(MPI QUIET)
 
 if(hip_FOUND)
@@ -272,11 +276,6 @@ else()
     amdhip64
     hsa-runtime64
   )
-endif()
-
-if(MPI_FOUND)
-  target_link_libraries(_rocshmem4py PRIVATE ${MPI_CXX_LIBRARIES})
-  target_include_directories(_rocshmem4py PRIVATE ${MPI_CXX_INCLUDE_DIRS})
 endif()
 
 target_link_libraries(_rocshmem4py PRIVATE
