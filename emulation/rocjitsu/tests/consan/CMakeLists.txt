@@ -281,6 +281,30 @@ function(rj_add_consan_hip_case)
     endif()
     rj_add_test(${_test_args})
 
+    if(_case_CONFIG AND ROCM_PATH AND UNIX)
+        # Simulator configurations may load HSA hotswap libraries from the
+        # selected ROCm installation. TheRock keeps those libraries in lib/
+        # and their bundled system dependencies in lib/rocm_sysdeps/lib.
+        # Amend this test's loader path at execution time, preserving the
+        # caller's environment and keeping ROCM_PATH relocatable.
+        foreach(
+            _rocm_library_dir
+            IN ITEMS
+                "${ROCM_PATH}/lib"
+                "${ROCM_PATH}/lib64"
+                "${ROCM_PATH}/lib/rocm_sysdeps/lib"
+        )
+            if(IS_DIRECTORY "${_rocm_library_dir}")
+                set_property(
+                    TEST "${_case_NAME}"
+                    APPEND
+                    PROPERTY ENVIRONMENT_MODIFICATION
+                        "LD_LIBRARY_PATH=path_list_prepend:${_rocm_library_dir}"
+                )
+            endif()
+        endforeach()
+    endif()
+
     # The checked-output wrapper above keeps an expected diagnostic from
     # overriding a nonzero child exit status.
     set(_case_fail_regex "\\[  FAILED  \\]|FAILED TEST")
