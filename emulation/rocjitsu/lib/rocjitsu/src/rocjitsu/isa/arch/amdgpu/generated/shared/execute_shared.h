@@ -11381,6 +11381,21 @@ inline void execute_v_fmaak_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused
 }
 
 template <typename Inst>
+inline void execute_v_fmaak_f64_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane));
+    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.vsrc1, lane));
+    double k =
+        std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.literal64, lane));
+    sdwa::write_lane64<true>(inst, wf, inst.vdst, lane,
+                             std::bit_cast<uint64_t>(std::fma(s0, s1, k)));
+  }
+}
+
+template <typename Inst>
 inline void execute_v_fmac_dx9_zero_f32_vop2([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP2_TERNARY_ACC(
@@ -11689,6 +11704,21 @@ inline void execute_v_fmamk_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused
     float k = std::bit_cast<float>(inst.simm32.encoding_value_);
     float s2 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane));
     sdwa::write_lane<true>(inst, wf, inst.vdst, lane, std::bit_cast<uint32_t>(std::fma(s0, k, s2)));
+  }
+}
+
+template <typename Inst>
+inline void execute_v_fmamk_f64_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane));
+    double k =
+        std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.literal64, lane));
+    double s2 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.vsrc1, lane));
+    sdwa::write_lane64<true>(inst, wf, inst.vdst, lane,
+                             std::bit_cast<uint64_t>(std::fma(s0, k, s2)));
   }
 }
 

@@ -859,6 +859,24 @@ def _fma_inst(*, with_simm32: bool) -> Instruction:
     return Instruction('V_FMAMK_F32', 'ENC_VOP2', 0, ops)
 
 
+def _f64_literal_fma_inst(name: str) -> Instruction:
+    if name == 'V_FMAMK_F64':
+        ops = [
+            Operand('vdst', 64, 'OPR_VGPR', False, True, False, False, 1),
+            Operand('src0', 64, 'OPR_SRC', True, False, False, False, 2),
+            Operand('literal64', 64, 'OPR_SIMM64', True, False, False, False, 3),
+            Operand('vsrc1', 64, 'OPR_VGPR', True, False, False, False, 4),
+        ]
+    else:
+        ops = [
+            Operand('vdst', 64, 'OPR_VGPR', False, True, False, False, 1),
+            Operand('src0', 64, 'OPR_SRC', True, False, False, False, 2),
+            Operand('vsrc1', 64, 'OPR_VGPR', True, False, False, False, 3),
+            Operand('literal64', 64, 'OPR_SIMM64', True, False, False, False, 4),
+        ]
+    return Instruction(name, 'ENC_VOP2', 0, ops)
+
+
 @pytest.mark.parametrize('cls', ['vector_fmamk', 'vector_fmaak'])
 def test_inline_literal_fma_raises_without_literal_source(cls):
     # Only two field-bearing sources (src0, vsrc1) -> src_ops has length 2, so
@@ -866,7 +884,7 @@ def test_inline_literal_fma_raises_without_literal_source(cls):
     # src_ops[2] / src_ops[1] out of / into the wrong slot.
     cg = _fma_codegen()
     sem = InstructionSemantics('V_FMAMK_F32', cls, data_type='f32')
-    with pytest.raises(ValueError, match='expected fieldless simm32 operand'):
+    with pytest.raises(ValueError, match='expected inline literal operand'):
         cg._gen_execute_body(_fma_inst(with_simm32=False), sem, 'ENC_VOP2')
 
 
@@ -878,3 +896,21 @@ def test_inline_literal_fma_emits_body_with_literal_source():
     sem = InstructionSemantics('V_FMAMK_F32', 'vector_fmamk', data_type='f32')
     body = cg._gen_execute_body(_fma_inst(with_simm32=True), sem, 'ENC_VOP2')
     assert 'simm32.encoding_value_' in body
+
+
+@pytest.mark.parametrize(
+    ('name', 'cls', 'expression'),
+    [
+        ('V_FMAMK_F64', 'vector_fmamk', 'std::fma(s0, k, s2)'),
+        ('V_FMAAK_F64', 'vector_fmaak', 'std::fma(s0, s1, k)'),
+    ],
+)
+def test_inline_literal_fma_f64_emits_lane64_body(name, cls, expression):
+    cg = _fma_codegen()
+    sem = InstructionSemantics(name, cls, data_type='f64')
+    body = cg._gen_execute_body(_f64_literal_fma_inst(name), sem, 'ENC_VOP2')
+
+    assert 'read_lane64(src0, lane)' in body
+    assert 'read_lane64(literal64, lane)' in body
+    assert 'write_lane64(vdst, lane' in body
+    assert expression in body

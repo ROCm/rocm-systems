@@ -945,6 +945,10 @@ def _derive_vop2(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'vector_fmamk', data_type='f32')
     if name == 'V_FMAAK_F32':
         return InstructionSemantics(name, 'vector_fmaak', data_type='f32')
+    if name == 'V_FMAMK_F64':
+        return InstructionSemantics(name, 'vector_fmamk', data_type='f64')
+    if name == 'V_FMAAK_F64':
+        return InstructionSemantics(name, 'vector_fmaak', data_type='f64')
     if name in ('V_MADMK_F16', 'V_FMAMK_F16'):
         return InstructionSemantics(name, 'vector_fmamk', data_type='f16')
     if name in ('V_MADAK_F16', 'V_FMAAK_F16'):

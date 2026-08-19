@@ -27,6 +27,19 @@ public:
   std::vector<std::vector<uint32_t>> workgroup_ids;
 };
 
+void write_f64_bits(amdgpu::ComputeUnitCore &cu, uint32_t reg, uint32_t lane, uint64_t bits) {
+  cu.write_vgpr(reg, lane, static_cast<uint32_t>(bits));
+  cu.write_vgpr(reg + 1, lane, static_cast<uint32_t>(bits >> 32));
+}
+
+void write_f64(amdgpu::ComputeUnitCore &cu, uint32_t reg, uint32_t lane, double value) {
+  write_f64_bits(cu, reg, lane, std::bit_cast<uint64_t>(value));
+}
+
+uint64_t read_f64_bits(const amdgpu::ComputeUnitCore &cu, uint32_t reg, uint32_t lane) {
+  return (static_cast<uint64_t>(cu.read_vgpr(reg + 1, lane)) << 32) | cu.read_vgpr(reg, lane);
+}
+
 TEST(Gfx1250SimulationTest, SGetPcI64ReturnsNextInstructionAddress) {
   constexpr uint64_t kKernelAddr = 0x10000;
   const uint32_t code[] = {
@@ -1403,6 +1416,80 @@ TEST(Gfx1250SimulationTest, Vop2FmamkUsesSrc2HighBank) {
   inst.execute_impl(*wf);
 
   EXPECT_EQ(cu.read_vgpr(vb + kDst, 0), std::bit_cast<uint32_t>(6.0f));
+}
+
+TEST(Gfx1250SimulationTest, Vop2FmamkF64ExecutesLiteralMultiplier) {
+  Gfx1250Sim sim;
+  amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  constexpr uint64_t kExec = 0b1011u;
+  wf->set_exec(kExec);
+
+  constexpr uint32_t kSrc0 = 4;
+  constexpr uint32_t kAddend = 8;
+  constexpr uint32_t kDst = 12;
+  constexpr uint64_t kOldDst = 0xDEADBEEF12345678ull;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  auto &cu = *sim.cu();
+
+  for (uint32_t lane = 0; lane < 4; ++lane) {
+    write_f64(cu, vb + kSrc0, lane, 3.0 + lane);
+    write_f64(cu, vb + kAddend, lane, 10.0 + lane);
+    write_f64_bits(cu, vb + kDst, lane, kOldDst + lane);
+  }
+
+  const uint64_t literal = std::bit_cast<uint64_t>(2.0);
+  const auto vop2 = cdna5::build_vop2(
+      cdna5::kVFmamkF64Vop2,
+      {.src0 = static_cast<uint16_t>(256 + kSrc0), .vsrc1 = kAddend, .vdst = kDst});
+  const std::array<uint32_t, 3> raw = {vop2[0], static_cast<uint32_t>(literal),
+                                       static_cast<uint32_t>(literal >> 32)};
+  cdna5::VFmamkF64Vop2 inst(reinterpret_cast<const cdna5::MachineInst *>(raw.data()));
+  inst.execute_impl(*wf);
+
+  for (uint32_t lane = 0; lane < 4; ++lane) {
+    uint64_t expected = kOldDst + lane;
+    if (kExec & (1ULL << lane))
+      expected = std::bit_cast<uint64_t>(std::fma(3.0 + lane, 2.0, 10.0 + lane));
+    EXPECT_EQ(read_f64_bits(cu, vb + kDst, lane), expected) << "lane " << lane;
+  }
+}
+
+TEST(Gfx1250SimulationTest, Vop2FmaakF64ExecutesLiteralAddend) {
+  Gfx1250Sim sim;
+  amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  constexpr uint64_t kExec = 0b1101u;
+  wf->set_exec(kExec);
+
+  constexpr uint32_t kSrc0 = 4;
+  constexpr uint32_t kMul = 8;
+  constexpr uint32_t kDst = 12;
+  constexpr uint64_t kOldDst = 0x12345678DEADBEEFull;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  auto &cu = *sim.cu();
+
+  for (uint32_t lane = 0; lane < 4; ++lane) {
+    write_f64(cu, vb + kSrc0, lane, 3.0 + lane);
+    write_f64(cu, vb + kMul, lane, 4.0 + lane);
+    write_f64_bits(cu, vb + kDst, lane, kOldDst + lane);
+  }
+
+  const uint64_t literal = std::bit_cast<uint64_t>(5.0);
+  const auto vop2 = cdna5::build_vop2(
+      cdna5::kVFmaakF64Vop2,
+      {.src0 = static_cast<uint16_t>(256 + kSrc0), .vsrc1 = kMul, .vdst = kDst});
+  const std::array<uint32_t, 3> raw = {vop2[0], static_cast<uint32_t>(literal),
+                                       static_cast<uint32_t>(literal >> 32)};
+  cdna5::VFmaakF64Vop2 inst(reinterpret_cast<const cdna5::MachineInst *>(raw.data()));
+  inst.execute_impl(*wf);
+
+  for (uint32_t lane = 0; lane < 4; ++lane) {
+    uint64_t expected = kOldDst + lane;
+    if (kExec & (1ULL << lane))
+      expected = std::bit_cast<uint64_t>(std::fma(3.0 + lane, 4.0 + lane, 5.0));
+    EXPECT_EQ(read_f64_bits(cu, vb + kDst, lane), expected) << "lane " << lane;
+  }
 }
 
 TEST(Gfx1250SimulationTest, VopdFmamkUsesSrc2HighBank) {

@@ -362,13 +362,11 @@ void VSubrevCoCiU32Vop2::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VFmamkF64Vop2::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_v_fmamk_f64_vop2(*this, wf);
 }
 
 void VFmaakF64Vop2::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_v_fmaak_f64_vop2(*this, wf);
 }
 
 void VAddNcU32Vop2::execute_impl(amdgpu::Wavefront &wf) {

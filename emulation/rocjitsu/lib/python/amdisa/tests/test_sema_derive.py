@@ -1893,6 +1893,19 @@ class TestDeriveVectorLaneOps:
 
 
 class TestDeriveVectorFmaVariants:
+    @pytest.mark.parametrize(
+        ('name', 'expected_class'),
+        [
+            ('V_FMAMK_F64', 'vector_fmamk'),
+            ('V_FMAAK_F64', 'vector_fmaak'),
+        ],
+    )
+    def test_f64_literal_fma_semantics(self, name, expected_class):
+        sem = derive_semantics(name, 'ENC_VOP2')
+        assert sem is not None
+        assert sem.semantic_class == expected_class
+        assert sem.data_type == 'f64'
+
     def test_fmaak(self):
         sem = _FakeSem('V_FMAAK_F32', 'vector_fmaak', 'fma', 'f32')
         block = derive_sema_block(sem)

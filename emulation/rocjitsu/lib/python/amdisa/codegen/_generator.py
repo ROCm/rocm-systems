@@ -5381,7 +5381,7 @@ class CodeGenerator:
             # D = S0 * K + S2, K is inline constant (second src operand)
             if len(src_ops) < 3:
                 raise ValueError(
-                    f'{inst.name}: expected fieldless simm32 operand for {cls}'
+                    f'{inst.name}: expected inline literal operand for {cls}'
                 )
             k_expr = f'{src_ops[1]}.encoding_value_'
             s2_expr = src_ops[2]
@@ -5401,6 +5401,19 @@ class CodeGenerator:
                 L.append(
                     f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, util::f32_to_f16_mode(std::fma(s0, k, s2), wf.fp16_ovfl()));'
                 )
+            elif dtype == 'f64':
+                L.append(
+                    f'    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64({src_ops[0]}, lane));'
+                )
+                L.append(
+                    f'    double k = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64({src_ops[1]}, lane));'
+                )
+                L.append(
+                    f'    double s2 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64({s2_expr}, lane));'
+                )
+                L.append(
+                    f'    amdgpu::RegisterAccess(wf).write_lane64({dst_ops[0]}, lane, std::bit_cast<uint64_t>(std::fma(s0, k, s2)));'
+                )
             else:
                 L.append(
                     f'    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src_ops[0]}, lane));'
@@ -5419,7 +5432,7 @@ class CodeGenerator:
             # D = S0 * S1 + K, K is inline constant (third src operand)
             if len(src_ops) < 3:
                 raise ValueError(
-                    f'{inst.name}: expected fieldless simm32 operand for {cls}'
+                    f'{inst.name}: expected inline literal operand for {cls}'
                 )
             k_expr = f'{src_ops[2]}.encoding_value_'
             L.append('  uint64_t exec = wf.exec();')
@@ -5437,6 +5450,19 @@ class CodeGenerator:
                 )
                 L.append(
                     f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, util::f32_to_f16_mode(std::fma(s0, s1, k), wf.fp16_ovfl()));'
+                )
+            elif dtype == 'f64':
+                L.append(
+                    f'    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64({src_ops[0]}, lane));'
+                )
+                L.append(
+                    f'    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64({src_ops[1]}, lane));'
+                )
+                L.append(
+                    f'    double k = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64({src_ops[2]}, lane));'
+                )
+                L.append(
+                    f'    amdgpu::RegisterAccess(wf).write_lane64({dst_ops[0]}, lane, std::bit_cast<uint64_t>(std::fma(s0, s1, k)));'
                 )
             else:
                 L.append(
