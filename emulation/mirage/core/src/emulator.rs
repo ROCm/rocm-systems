@@ -272,6 +272,33 @@ pub trait EmulatorBackend: Sync + Send + std::fmt::Debug {
         let _ = ctx;
         Ok(None)
     }
+
+    /// Whether this backend could host a daemon here, asked without
+    /// creating anything.
+    ///
+    /// [`Self::start_daemon`] is the last step of bring-up, and for a
+    /// containerised session everything expensive has happened by the
+    /// time it runs: the image is pulled, the network is up, every node
+    /// container is created. A backend whose runtime simply cannot host a
+    /// daemon — an installed library that predates the daemon API, say —
+    /// fails all of that at the very end, on a fact that was knowable
+    /// before any of it started. The supervisor asks this first, so the
+    /// same session fails in a second with the same message.
+    ///
+    /// This must be cheap and side-effect-free enough to ask on every
+    /// bring-up and from [`Self::health`]: it decides nothing a backend
+    /// has to *do*, only what it would find if it tried. Backends that
+    /// host no daemon need not implement it — the default agrees with
+    /// [`Self::start_daemon`]'s, which is that there is nothing to host
+    /// and therefore nothing that can be missing.
+    ///
+    /// # Errors
+    ///
+    /// A human-readable reason the daemon could not be started here,
+    /// phrased for a user who has just been refused a run.
+    fn daemon_capability(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// A running, host-side emulator daemon owned by a per-node host.

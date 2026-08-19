@@ -130,6 +130,40 @@ impl std::fmt::Debug for Daemon {
 }
 
 impl Daemon {
+    /// Whether the library at `lib_path` can host a daemon at all.
+    ///
+    /// The daemon half of the rocjitsu C API is newer than the rest, and a
+    /// library that predates it is not broken — it emulates a workload
+    /// in-process perfectly well. It simply has no `rj_daemon_start` to
+    /// call, and nothing discovers that until something tries to call it.
+    /// For mirage that was at the *end* of bring-up, after the image pull,
+    /// the network and every container: the run failed on a fact about a
+    /// file that was knowable before any of it was created.
+    ///
+    /// This is [`Daemon::start`]'s own load step and nothing else — the same
+    /// `dlopen`, the same symbols, no VM, no socket, no threads — so a
+    /// library this accepts is one `start` will not reject for want of an
+    /// entry point. Answering it costs a `dlopen`, which is why callers ask
+    /// once and remember rather than asking per session.
+    ///
+    /// # Errors
+    ///
+    /// [`DaemonError::Load`] when the library cannot be loaded or does not
+    /// export the daemon entry points; the loader's own message distinguishes
+    /// the two.
+    pub fn probe(lib_path: &Path) -> Result<(), DaemonError> {
+        // SAFETY: the same contract as `Daemon::start` — `lib_path` is a
+        // rocjitsu library located by mirage's own discovery, and loading it
+        // runs its initialisers. Nothing is kept: the handle is dropped at
+        // the end of this scope, and no C call is made through it.
+        unsafe { Lib::open(lib_path) }
+            .map(drop)
+            .map_err(|source| DaemonError::Load {
+                path: lib_path.to_path_buf(),
+                source,
+            })
+    }
+
     /// Load `lib_path` and start a daemon on `<runtime_dir>/daemon.sock`
     /// using the configuration at `config_path`.
     ///
@@ -305,6 +339,44 @@ mod tests {
         assert!(
             msg.contains("missing.json") || msg.contains("libnope.so"),
             "{msg}"
+        );
+    }
+
+    #[test]
+    fn probing_a_library_without_the_daemon_api_reports_the_missing_symbol() {
+        // The case the probe exists for, and the one that is *not* a
+        // missing file: a shared library that loads perfectly and does
+        // not export the rocjitsu daemon entry points. A rocjitsu that
+        // predates the daemon API looks exactly like this, and mirage
+        // used to discover it only after pulling an image, creating a
+        // network and starting every container.
+        //
+        // The C library stands in for it: it is here, it loads, and it
+        // has never heard of `rj_daemon_start`. Anything else with those
+        // three properties would do; if it cannot be loaded at all this
+        // host cannot host the test, which is not a failure of the probe.
+        let libc = Path::new("libc.so.6");
+        let Err(err) = Daemon::probe(libc) else {
+            panic!("libc.so.6 exports the rocjitsu C API?");
+        };
+        let DaemonError::Load { path, source } = &err else {
+            panic!("expected a load error, got {err:?}");
+        };
+        if matches!(
+            source,
+            libloading::Error::DlOpen { .. } | libloading::Error::DlOpenUnknown
+        ) {
+            // No glibc `libc.so.6` to borrow. Nothing to assert here.
+            return;
+        }
+        assert_eq!(path, libc);
+        assert!(
+            matches!(
+                source,
+                libloading::Error::DlSym { .. } | libloading::Error::DlSymUnknown
+            ),
+            "a library that loads and lacks the symbols must be reported as \
+             a missing symbol rather than a missing file: {source:?}"
         );
     }
 

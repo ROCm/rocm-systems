@@ -106,7 +106,22 @@ impl EmulatorBackend for Rocjitsu {
     fn supported(&self) -> SupportStatus {
         // rocjitsu emulates the GPU in software, so it runs on any host
         // regardless of the physical hardware present.
-        SupportStatus::supported("software emulator; no special hardware required")
+        //
+        // Still supported when the located library cannot host a daemon,
+        // and deliberately: `--in-process` emulation goes through the
+        // interposer and needs none of the daemon API, so calling the
+        // host unsupported would refuse a mode that works. What it costs
+        // is multi-process sharing of emulated GPU memory, so the reason
+        // — which is what `mirage emulators -l` prints — says so, rather
+        // than leaving a user to find out at the end of a bring-up.
+        match self.daemon_capability() {
+            Ok(()) => SupportStatus::supported("software emulator; no special hardware required"),
+            Err(e) => SupportStatus::supported(format!(
+                "software emulator; no special hardware required. This host's \
+                 library cannot host the emulator daemon, so runs need \
+                 `--in-process`: {e}"
+            )),
+        }
     }
 
     fn discover_plugins(&self) -> Vec<PluginsDef> {
@@ -125,17 +140,38 @@ impl EmulatorBackend for Rocjitsu {
             .collect()
     }
 
-    fn health(&self, _ctx: &SessionContext) -> SessionHealth {
-        let installed = is_installed();
+    fn health(&self, ctx: &SessionContext) -> SessionHealth {
+        if !is_installed() {
+            return SessionHealth {
+                healthy: false,
+                state: Some("error".to_string()),
+                terminal: false,
+                message: Some(format!("rocjitsu KMD library ({LIB_NAME}) not found")),
+                ..Default::default()
+            };
+        }
+        // Located is not the same as usable *for this session*. A library
+        // that predates the daemon API emulates a workload in-process
+        // perfectly well and cannot host the daemon a multi-process
+        // session needs, so a session that wants one is not ready however
+        // present the library is — and saying "ready" here is what let
+        // such a run reach its last step before finding out.
+        if ctx.daemon
+            && let Err(e) = self.daemon_capability()
+        {
+            return SessionHealth {
+                healthy: false,
+                state: Some("error".to_string()),
+                terminal: false,
+                message: Some(e.to_string()),
+                ..Default::default()
+            };
+        }
         SessionHealth {
-            healthy: installed,
-            state: Some(if installed { "ready" } else { "error" }.to_string()),
+            healthy: true,
+            state: Some("ready".to_string()),
             terminal: false,
-            message: if installed {
-                None
-            } else {
-                Some(format!("rocjitsu KMD library ({LIB_NAME}) not found"))
-            },
+            message: None,
             ..Default::default()
         }
     }
@@ -248,6 +284,13 @@ impl EmulatorBackend for Rocjitsu {
             libraries,
             host_gpus: false,
         })
+    }
+
+    fn daemon_capability(&self) -> Result<()> {
+        // Answered once per process; see `located_daemon_capability`.
+        located_daemon_capability()
+            .as_ref()
+            .map_or_else(|e| Err(MirageError::Other(e.to_string())), |()| Ok(()))
     }
 
     fn start_daemon(&self, ctx: &SessionContext) -> Result<Option<Box<dyn EmulatorDaemon>>> {
@@ -768,6 +811,62 @@ pub fn is_installed() -> bool {
     kmd_preload().is_some()
 }
 
+/// Whether the rocjitsu library at `lib` can host a daemon.
+///
+/// The daemon entry points are newer than the rest of the C API, so a
+/// perfectly good older `librocjitsu.so` loads, emulates in-process, and
+/// has no `rj_daemon_start`. Nothing found that out until the daemon was
+/// started, which for a containerised session is after the image pull,
+/// the network and every container — so the run failed at its last step
+/// on a fact about a file.
+///
+/// Split out from [`Rocjitsu::daemon_capability`] and taking the path
+/// explicitly so the answer can be tested against a library known to lack
+/// the symbols, with no installed rocjitsu and no environment override to
+/// point the search at one.
+///
+/// # Errors
+///
+/// A reason phrased for a user who has just been refused a run: what is
+/// wrong, what it costs, and the one flag that runs without it.
+pub fn daemon_capability_of(lib: &std::path::Path) -> Result<()> {
+    rocjitsu_sys::daemon::Daemon::probe(lib).map_err(|e| {
+        MirageError::Other(format!(
+            "the rocjitsu library at {} cannot host the emulator daemon: {e}\n\
+             The daemon is what lets several processes share emulated GPU \
+             memory, so multi-GPU collectives need it. An installation \
+             predating the daemon API looks exactly like this; updating \
+             rocjitsu (see docs/building.md) is the fix. Pass `--in-process` \
+             to run without it — results from a single process are still \
+             correct.",
+            lib.display()
+        ))
+    })
+}
+
+/// The one-per-process answer to [`daemon_capability_of`] for the located
+/// library.
+///
+/// `health` is asked on every status request and bring-up asks once more,
+/// and the answer costs a `dlopen` of a large shared library whose
+/// initialisers run. It cannot change under a running process — the
+/// search reads the filesystem and the environment, neither of which this
+/// process rewrites — so it is answered once and kept.
+///
+/// A library that is not installed at all is `Ok`: that is a different
+/// problem, already reported by `runtime`, `health` and `injection_def`,
+/// and `start_daemon` answers `Ok(None)` to it rather than failing.
+/// Saying it again here would refuse an in-process run, which does not
+/// need a daemon, for a missing library, with a worse message than the
+/// one it is about to get.
+fn located_daemon_capability() -> &'static Result<()> {
+    static ANSWER: std::sync::OnceLock<Result<()>> = std::sync::OnceLock::new();
+    ANSWER.get_or_init(|| match kmd_preload() {
+        Some(lib) => daemon_capability_of(&lib),
+        None => Ok(()),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -786,6 +885,63 @@ mod tests {
         let backend = Rocjitsu;
         assert_eq!(backend.installed(), backend.runtime().installed);
         assert_eq!(backend.installed(), is_installed());
+    }
+
+    #[test]
+    fn a_library_without_the_daemon_api_is_refused_before_anything_is_created() {
+        // The regression for the whole point of this check: a library
+        // that is *here* and cannot host a daemon. A rocjitsu predating
+        // the daemon API is exactly that — it loads, it emulates a
+        // workload in-process, and it has no `rj_daemon_start` — and
+        // nothing noticed until `start_daemon`, which for a containerised
+        // session runs after the image pull, the network and every
+        // container.
+        //
+        // The C library stands in for it: present, loadable, and it has
+        // never heard of the rocjitsu C API. Anything with those three
+        // properties would do; a host with no glibc `libc.so.6` to borrow
+        // cannot run this, which is not a failure of the check.
+        let libc = std::path::Path::new("libc.so.6");
+        let Err(e) = daemon_capability_of(libc) else {
+            panic!("libc.so.6 hosts a rocjitsu daemon?");
+        };
+        let msg = e.to_string();
+        if msg.contains("cannot open shared object") || msg.contains("No such file") {
+            return;
+        }
+
+        // The message a user gets is the whole value of failing early, so
+        // it has to say which file, what it costs them, and the one flag
+        // that runs without it.
+        assert!(msg.contains("libc.so.6"), "{msg}");
+        assert!(msg.contains("cannot host the emulator daemon"), "{msg}");
+        assert!(msg.contains("--in-process"), "{msg}");
+    }
+
+    #[test]
+    fn an_installed_library_is_not_reported_ready_for_a_daemon_it_cannot_host() {
+        // `health` said "ready" for any located library, which is what
+        // let a doomed run start at all. It is only a session that wants
+        // a daemon that this refuses: `--in-process` needs none of the
+        // daemon API, so the same library is ready for it.
+        //
+        // Driven through `daemon_capability` rather than by pointing the
+        // discovery search at a stand-in, because the located answer is
+        // memoised for the process and an environment override would not
+        // be seen by a second test in the same binary.
+        let backend = Rocjitsu;
+        if !is_installed() {
+            // Nothing located, so `health` is answering the missing
+            // library instead and there is no capability to report.
+            return;
+        }
+        let capable = backend.daemon_capability().is_ok();
+        assert_eq!(
+            capable,
+            backend.supported().reason.find("--in-process").is_none(),
+            "`mirage emulators` must say when the located library cannot \
+             host a daemon"
+        );
     }
 
     /// An [`EmulatorDef`] with an owned topology of `gpus_per_node`

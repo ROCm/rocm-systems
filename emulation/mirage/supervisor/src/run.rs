@@ -379,6 +379,18 @@ impl Run {
         let injection = Self::resolve_injection(&ctx).await?;
         session.set_injection(injection.clone());
 
+        // And whether the backend could host the daemon this session
+        // needs — before anything is created, not after everything is.
+        // `start_daemon` is the last step below, so a runtime that simply
+        // cannot host one used to fail the run at the very end: image
+        // pulled, network up, every container created and then removed
+        // again, for a fact about a file that was knowable here. The
+        // check is cheap and the message is the same one, arriving in a
+        // second instead of a few minutes.
+        if session.ctx.daemon {
+            Self::check_daemon_capability(&ctx).await?;
+        }
+
         if session.ctx.profile.containerize.is_some() {
             Self::bring_up_containers(session, &injection).await?;
         }
@@ -450,6 +462,25 @@ impl Run {
         }
 
         Ok(())
+    }
+
+    /// Fail now if the backend could not host this session's daemon.
+    ///
+    /// Blocking for the same reason [`Self::resolve_injection`] is: the
+    /// answer comes from the filesystem, and for a backend that hosts a
+    /// daemon by `dlopen`ing a library it comes from loading one.
+    ///
+    /// An unknown backend is not this check's business — `resolve_injection`
+    /// has already refused the session by the time anything calls here —
+    /// so it passes rather than inventing a second phrasing of that error.
+    async fn check_daemon_capability(ctx: &SessionContext) -> Result<()> {
+        let kind = ctx.profile.emulator.emulator.clone();
+        tokio::task::spawn_blocking(move || {
+            mirage_core::emulator::get_emulator_backend(&kind)
+                .map_or(Ok(()), |backend| backend.daemon_capability())
+        })
+        .await
+        .map_err(|e| MirageError::other(format!("emulator capability task failed: {e}")))?
     }
 
     /// Compute the emulator injection for a session.
