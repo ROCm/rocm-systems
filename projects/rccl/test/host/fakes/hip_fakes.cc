@@ -258,15 +258,21 @@ static hipError_t DefaultHipMemSetAccess(void*, std::size_t,
 {
     return hipErrorInvalidValue;
 }
+// The stream-lifecycle defaults delegate to the plain result seams
+// (g_hipStreamCreateResult / g_hipAsyncOpsResult) so the init micro-test, which
+// opts into the happy path by setting those results to hipSuccess, still drives
+// devCommSetup to completion. rccl-UnitTestsDevRuntime overrides these hooks
+// wholesale via InstallHostBackedVmm(), so its behaviour is unaffected.
 static hipError_t DefaultHipStreamCreateWithFlags(hipStream_t* stream,
                                                   unsigned int)
 {
-    if (stream) *stream = nullptr;
-    return hipErrorInvalidValue;
+    if (stream) *stream = (g_hipStreamCreateResult == hipSuccess)
+                              ? reinterpret_cast<hipStream_t>(0x1) : nullptr;
+    return g_hipStreamCreateResult;
 }
 static hipError_t DefaultHipStreamDestroy(hipStream_t)
 {
-    return hipErrorInvalidValue;
+    return hipSuccess;  // benign teardown (ncclDestroySideStream)
 }
 static hipError_t DefaultHipStreamSynchronize(hipStream_t)
 {
@@ -275,7 +281,7 @@ static hipError_t DefaultHipStreamSynchronize(hipStream_t)
 static hipError_t DefaultHipThreadExchangeStreamCaptureMode(
     hipStreamCaptureMode*)
 {
-    return hipErrorInvalidValue;
+    return g_hipAsyncOpsResult;
 }
 
 std::function<hipError_t(void**, std::size_t, std::size_t, void*,
@@ -479,6 +485,11 @@ hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle,
                                         void* addr)
 {
     return g_hipMemRetainAllocationHandle(handle, addr);
+}
+
+hipError_t hipIpcGetMemHandle(hipIpcMemHandle_t* handle, void* devPtr)
+{
+    return g_hipIpcGetMemHandle(handle, devPtr);
 }
 
 hipError_t hipMemRelease(hipMemGenericAllocationHandle_t handle)
