@@ -72,7 +72,19 @@ struct HwQueue {
   uint64_t last_doorbell = 0;
   bool host_accessible = false;
   bool is_sdma = false;
+  bool debug_suspended = false;
+  bool runtime_suspended = false;
+  /// A command-processor pass observed this queue while its debugger gate was closed.
+  /// Cleared on resume after scheduling one pass to process the deferred work.
+  bool debug_work_deferred = false;
   uint64_t queue_desc_va = 0;
+  uint64_t exception_status_va = 0;
+  uint32_t exception_event_id = 0;
+  /// CP-private monotonic fetch cursor: the next ring index to fetch. Normally
+  /// tracks read_ptr_va exactly, but stays ahead of it while the debugger holds
+  /// the queue's read_dispatch_id at a trapped dispatch (so packets are not
+  /// re-fetched). See fetch_from_queue and serialize_queue_debug_waves.
+  uint64_t fetch_cursor = 0;
 };
 
 enum class SdmaPacketDialect {
@@ -139,10 +151,24 @@ public:
     scratch_allocator_ = std::move(cb);
   }
 
+  /// @brief Number of shader engines per XCC (array_count / simd_arrays_per_engine).
+  /// Used as the divisor when publishing COMPUTE_TMPRING_SIZE.WAVES so that
+  /// rocm-dbgapi's scratch_memory_region does not disable private access.
+  void set_scratch_wave_divisor(uint32_t se_per_xcc) {
+    scratch_wave_divisor_ = se_per_xcc == 0 ? 1 : se_per_xcc;
+  }
+
   void register_queue(HwQueue queue);
   void unregister_queue(uint32_t queue_id, uint32_t process_id);
   void update_queue(uint32_t queue_id, uint32_t process_id, uint64_t ring_base_va,
-                    uint32_t ring_size);
+                    uint32_t ring_size, uint32_t queue_percentage);
+  void set_queue_debug_suspended(uint32_t queue_id, uint32_t process_id, bool suspended);
+  bool signal_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status);
+  uint64_t read_process_memory64(uint64_t address, uint32_t process_id) const {
+    return memory_ && memory_->is_fetchable(address, process_id)
+               ? memory_->read64(address, process_id)
+               : 0;
+  }
 
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
@@ -209,6 +235,28 @@ public:
     return doorbell_running_;
   }
 
+  /// @brief Test-only view of one queue's debugger suspension gate.
+  [[nodiscard]] bool queue_debug_suspended_for_test(uint32_t queue_id, uint32_t process_id) {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    auto queue = std::find_if(hw_queues_.begin(), hw_queues_.end(), [&](const auto &candidate) {
+      return candidate.queue_id == queue_id && candidate.process_id == process_id;
+    });
+    return queue != hw_queues_.end() && queue->debug_suspended;
+  }
+
+  [[nodiscard]] bool queue_runtime_suspended_for_test(uint32_t queue_id, uint32_t process_id) {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    auto queue = std::find_if(hw_queues_.begin(), hw_queues_.end(), [&](const auto &candidate) {
+      return candidate.queue_id == queue_id && candidate.process_id == process_id;
+    });
+    return queue != hw_queues_.end() && queue->runtime_suspended;
+  }
+
+  /// @brief Test-only count of executed command-processor doorbell passes.
+  [[nodiscard]] uint64_t doorbell_handle_count_for_test() const {
+    return doorbell_handle_count_.load(std::memory_order_relaxed);
+  }
+
 private:
   struct ClusterWorkgroupPlacement;
   struct ClusterBarrierState;
@@ -258,9 +306,10 @@ private:
   void flush_gpu_caches();
 
   /// @brief Parse an AQL dispatch packet, read its kernel descriptor, and create a DispatchEntry.
+  /// @param aql_packet_id AQL ring packet id (queue read index) for debugger correlation.
   void process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt, const HwQueue &queue,
                           uint64_t pkt_addr, uint32_t queue_packet_id, HwQueueState &qs,
-                          ClusterDispatchShape cluster_shape = {});
+                          uint64_t aql_packet_id = 0, ClusterDispatchShape cluster_shape = {});
 
   rocr::llvm::amdhsa::kernel_descriptor_t
   read_kernel_descriptor(uint64_t kernel_object, uint32_t vmid, bool host_accessible = false);
@@ -282,6 +331,9 @@ private:
   void mark_cluster_workgroup_complete(uint32_t dispatch_id, uint32_t wg_id);
   void erase_cluster_workgroup(uint32_t dispatch_id, uint32_t wg_id);
   void erase_cluster_workgroups(uint32_t dispatch_id);
+  /// @brief Drop cluster LDS pins collected under cluster_placements_mutex_.
+  /// @warning Must run with that lock released; it reaches the CUs' wave-state lock.
+  void release_cluster_lds_pins(const std::vector<std::pair<ComputeUnitCore *, uint64_t>> &unpin);
 
   /// @brief Asynchronous Compute Engine (ACE): dispatch workgroups from all
   /// active queues to SPIs and run CUs to completion.
@@ -362,6 +414,16 @@ private:
     std::vector<uint32_t> peer_wg_ids;
   };
   std::unordered_map<uint64_t, ClusterWorkgroupPlacement> cluster_wg_placements_;
+  /// @brief Guards @ref cluster_wg_placements_ and @ref cluster_barriers_, not the
+  /// queue state.
+  /// @details A multicast LDS write resolves its peers from the CU's execute
+  /// path, which already holds that CU's wave-state lock, while a dispatch takes
+  /// hw_queue_mutex_ and then the wave-state lock. Sharing hw_queue_mutex_ here
+  /// would close that cycle, so the map gets its own lock, ordered after both.
+  /// Nothing may call into a CU while holding it -- see
+  /// erase_cluster_workgroup(), which collects its LDS cleanup and runs it after
+  /// the unlock.
+  mutable std::recursive_mutex cluster_placements_mutex_;
   struct ClusterBarrierState {
     uint32_t expected_member_count = 0;
     uint32_t member_count = 0;
@@ -369,7 +431,6 @@ private:
     std::array<std::unordered_set<uint32_t>, 2> signaled_workgroups;
   };
   std::unordered_map<uint64_t, ClusterBarrierState> cluster_barriers_;
-  mutable std::recursive_mutex cluster_barrier_mutex_;
 
   simdojo::Event doorbell_event_{this, simdojo::EventType::TIMER_CALLBACK};
   std::recursive_mutex hw_queue_mutex_;
@@ -403,9 +464,12 @@ private:
   InterruptCallback interrupt_cb_;
   ScratchBackingResolver scratch_resolver_;
   ScratchBackingAllocator scratch_allocator_;
+  uint32_t scratch_wave_divisor_ = 1;
   std::unique_ptr<CompletionTracker> completion_;
 
   std::atomic<bool> invalid_pending_{false};
+
+  std::atomic<uint64_t> doorbell_handle_count_{0};
 
   // Set when a queue stalls on an unsatisfied barrier/dependency signal (or an
   // SDMA VA not yet translatable) — a wait on progress that is external to the

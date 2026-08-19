@@ -4,6 +4,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -167,11 +168,9 @@ BufferResource decode_buffer_resource(uint32_t srd0, uint32_t srd1, uint32_t srd
 
 uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf,
                                 uint32_t access_size_bytes) {
-  auto &cu = wf.cu();
   assert(access_size_bytes != 0);
-  uint32_t sbase = wf.sgpr_alloc().base + inst.sbase * 2;
-  uint64_t base = (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_sgpr(sbase + 1)) << 32) |
-                  amdgpu::RegisterAccess(cu).read_sgpr(sbase);
+  const uint32_t sbase_sel = inst.sbase * 2;
+  uint64_t base = amdgpu::read_scalar_selector64(wf, sbase_sel);
   int64_t off = static_cast<int64_t>(signed_ioffset(inst.ioffset));
   uint32_t scale = inst.scale_offset ? access_size_bytes : 1;
   if (has_smem_offset(inst.soffset))
@@ -243,11 +242,14 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   auto &cu = wf.cu();
   init_vector_mem_state(wf, d);
   uint64_t exec = d.exec_mask;
-  uint32_t sb = wf.sgpr_alloc().base + inst.rsrc;
-  uint32_t srd0 = amdgpu::RegisterAccess(cu).read_sgpr(sb);
-  uint32_t srd1 = amdgpu::RegisterAccess(cu).read_sgpr(sb + 1);
-  uint32_t srd2 = amdgpu::RegisterAccess(cu).read_sgpr(sb + 2);
-  uint32_t srd3 = amdgpu::RegisterAccess(cu).read_sgpr(sb + 3);
+  // Read through the scalar selector rather than the SGPR allocation: a
+  // descriptor sourced from TTMPs lives in the trap-temporary file, and
+  // read_sgpr() would fetch whatever the allocation holds at that index.
+  const uint32_t sb_sel = inst.rsrc;
+  uint32_t srd0 = amdgpu::read_scalar_selector(wf, sb_sel);
+  uint32_t srd1 = amdgpu::read_scalar_selector(wf, sb_sel + 1);
+  uint32_t srd2 = amdgpu::read_scalar_selector(wf, sb_sel + 2);
+  uint32_t srd3 = amdgpu::read_scalar_selector(wf, sb_sel + 3);
   BufferResource resource = decode_buffer_resource(srd0, srd1, srd2, srd3);
   uint32_t soffset_val = has_smem_offset(inst.soffset) ? read_sreg_m0_operand(wf, inst.soffset) : 0;
   int32_t ioff = signed_ioffset(inst.ioffset);

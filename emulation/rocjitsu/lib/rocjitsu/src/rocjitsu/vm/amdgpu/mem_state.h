@@ -72,6 +72,15 @@ struct ScalarMemState : DynamicInstState {
   ScalarMemState() { tag_ = SCALAR_MEM; }
   uint64_t addr = 0;
   uint32_t dst_reg_base = 0;
+  /// @brief The SDATA operand selector, before it was resolved to a physical
+  /// register.
+  /// @details Selectors 108..123 name the trap-temporary file rather than a
+  /// slot in the wave's SGPR allocation, so the load write-back has to dispatch
+  /// on the selector; dst_reg_base is meaningless for those. The ROCr trap
+  /// handler loads straight into TTMPs (`s_load_dwordx2 ttmp[2:3], ...`), so
+  /// this is a live path, and writing dst_reg_base for one would land outside
+  /// the wave's own allocation.
+  uint32_t dst_selector = 0;
   uint32_t num_dwords = 0;
   uint32_t elem_size = 4;
   bool sign_extend = false;
@@ -110,6 +119,21 @@ struct VectorMemState : DynamicInstState {
   // cacheability and response policy used by the downstream memory path.
   bool request_force_l1_bypass = false;
   bool sign_extend = false;
+  // Scratch (private) accesses store data in the hardware dword-interleaved
+  // ("swizzled") layout that rocm-dbgapi reads: consecutive dwords of a lane's
+  // private space are lane_count*4 bytes apart, not contiguous. When
+  // scratch_swizzle is set, per_lane_addr holds the swizzled address of element
+  // 0 and scratch_addr_stride (= lane_count * sizeof(uint32_t)) is the per-element
+  // destination-address stride; the register/LDS buffer indexing is unchanged.
+  // See rocm-dbgapi memory.cpp private_swizzled conversion.
+  // FLAT routing is per lane: one wave can mix private-aperture lanes with
+  // global ones. scratch_lane_mask records exactly which lanes were swizzled,
+  // so the stride is applied to those and not to their global neighbours.
+  // For dedicated SCRATCH ops every active lane is private and this equals
+  // lane_mask.
+  bool scratch_swizzle = false;
+  uint64_t scratch_lane_mask = 0;
+  uint32_t scratch_addr_stride = 0;
   bool d16_hi = false;                 ///< D16_HI load: write to upper 16 bits, preserve lower 16.
   bool d16_lo = false;                 ///< D16 load: write to lower 16 bits, preserve upper 16.
   AtomicOp atomic_op = AtomicOp::NONE; ///< Atomic RMW operation (NONE for regular loads/stores).
