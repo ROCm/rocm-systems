@@ -6,7 +6,6 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h"
-#include "util/except.h"
 #include <format>
 #include <optional>
 #include <stdexcept>
