@@ -1686,6 +1686,152 @@ TEST(GenericDataHazardEngineTest, GlobalShadowIsDispatchScoped) {
   EXPECT_EQ(warnings[0].finding.source_instruction.execution.dispatch_id, 1u);
 }
 
+namespace {
+
+/// Runs *first* then *second* as global accesses from two distinct workgroups
+/// of one dispatch and returns the warnings raised.
+struct SubDwordAccess {
+  uint64_t address;
+  uint32_t size_bytes;
+  bool is_write;
+};
+
+std::vector<EngineWarning> run_cross_workgroup_global_accesses(DataHazardEngine &engine,
+                                                               const SubDwordAccess &first,
+                                                               const SubDwordAccess &second) {
+  engine.on_workgroup_begin(1, 0, 0);
+  engine.on_workgroup_begin(1, 0, 1);
+
+  ExecutionKey first_wave{1, 0, 0, 0, 0};
+  ExecutionKey second_wave{1, 0, 1, 0, 0};
+  engine.on_wave_begin(first_wave);
+  engine.on_wave_begin(second_wave);
+
+  EntityId next_id = 1;
+  for (const auto &[access, wave] :
+       {std::pair{first, first_wave}, std::pair{second, second_wave}}) {
+    InstructionEvent inst;
+    inst.instruction = make_instruction(next_id, 0x100 * next_id);
+    inst.instruction.execution = wave;
+    engine.on_instruction(inst);
+
+    ResourceAccessEvent event;
+    event.instruction = inst.instruction;
+    event.resource_kind = ResourceKind::GlobalMemory;
+    event.address = access.address;
+    event.size_bytes = access.size_bytes;
+    event.is_write = access.is_write;
+    event.is_read = !access.is_write;
+    engine.on_resource_access(event);
+    ++next_id;
+  }
+  return engine.warning_snapshot();
+}
+
+} // namespace
+
+TEST(GenericDataHazardEngineTest, DisjointSubDwordAccessesInOneGranuleDoNotRace) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  // Both bytes live in the 4-byte granule at 0x3000, but the byte ranges are
+  // disjoint, so the workgroups never touch the same memory.
+  const auto warnings =
+      run_cross_workgroup_global_accesses(engine, {0x3000, 1, true}, {0x3001, 1, true});
+
+  EXPECT_TRUE(warnings.empty())
+      << "byte 0x3000 and byte 0x3001 do not overlap, so this is not a race";
+}
+
+TEST(GenericDataHazardEngineTest, OverlappingSubDwordWritesRace) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  const auto warnings =
+      run_cross_workgroup_global_accesses(engine, {0x3000, 1, true}, {0x3000, 1, true});
+
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+}
+
+TEST(GenericDataHazardEngineTest, PartiallyOverlappingSubDwordWritesRace) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  // Bytes 0-1 against bytes 1-2: they share byte 0x3001.
+  const auto warnings =
+      run_cross_workgroup_global_accesses(engine, {0x3000, 2, true}, {0x3001, 2, true});
+
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+}
+
+TEST(GenericDataHazardEngineTest, DisjointSubDwordWriteAfterReadDoesNotRace) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  const auto warnings =
+      run_cross_workgroup_global_accesses(engine, {0x3002, 1, false}, {0x3003, 1, true});
+
+  EXPECT_TRUE(warnings.empty()) << "a write only races a read that covers the same byte";
+}
+
+TEST(GenericDataHazardEngineTest, SubDwordAccessMasksApplyPerGranuleOfASpanningAccess) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  // 0x3002..0x3005 covers the top half of granule 0x3000 and the bottom half of
+  // granule 0x3004, so each granule needs its own mask rather than the first.
+  const auto disjoint =
+      run_cross_workgroup_global_accesses(engine, {0x3002, 4, true}, {0x3001, 1, true});
+  EXPECT_TRUE(disjoint.empty()) << "byte 0x3001 lies below the spanning write";
+
+  auto &overlap_engine = reset_generic_engine(formatter);
+  const auto overlap =
+      run_cross_workgroup_global_accesses(overlap_engine, {0x3002, 4, true}, {0x3005, 1, true});
+  ASSERT_EQ(overlap.size(), 1u);
+  EXPECT_EQ(overlap[0].finding.kind, HazardKind::GlobalMemoryRace);
+}
+
+TEST(GenericDataHazardEngineTest, DisjointWriterDoesNotDisplaceTheWriterItDoesNotOverlap) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  // Workgroup 1 writes a byte that workgroup 0 never touched, so it takes a
+  // slot of its own. Retaining workgroup 0 is what lets workgroup 2 still see
+  // the byte it truly conflicts over.
+  const std::array<SubDwordAccess, 3> writes{SubDwordAccess{0x3000, 1, true},
+                                             SubDwordAccess{0x3001, 1, true},
+                                             SubDwordAccess{0x3000, 1, true}};
+
+  for (EntityId workgroup = 0; workgroup < writes.size(); ++workgroup) {
+    engine.on_workgroup_begin(1, 0, workgroup);
+    ExecutionKey wave{1, 0, workgroup, 0, 0};
+    engine.on_wave_begin(wave);
+
+    InstructionEvent inst;
+    inst.instruction = make_instruction(workgroup + 1, 0x100 * (workgroup + 1));
+    inst.instruction.execution = wave;
+    engine.on_instruction(inst);
+
+    ResourceAccessEvent event;
+    event.instruction = inst.instruction;
+    event.resource_kind = ResourceKind::GlobalMemory;
+    event.address = writes[workgroup].address;
+    event.size_bytes = writes[workgroup].size_bytes;
+    event.is_write = true;
+    engine.on_resource_access(event);
+
+    if (workgroup == 1)
+      EXPECT_TRUE(engine.warning_snapshot().empty()) << "byte 0x3001 overlaps nothing";
+  }
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u) << "workgroup 2 overwrites the byte workgroup 0 wrote";
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_EQ(warnings[0].finding.source_instruction.execution.workgroup_id, 0u);
+}
+
 TEST(GenericDataHazardEngineTest, RejectsInvalidGlobalAccessSizes) {
   FakeFormatter formatter;
   auto &engine = reset_generic_engine(formatter);

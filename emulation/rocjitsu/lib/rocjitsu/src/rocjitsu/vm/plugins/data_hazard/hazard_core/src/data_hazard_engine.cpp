@@ -198,26 +198,63 @@ bool same_workgroup(const EngineGlobalAccessInfo &info, const EngineInstructionC
          info.workgroup_id == ctx.workgroup_id;
 }
 
-/// A retained reader that @p ctx would race with, or null when every reader of
-/// the address belongs to the accessing workgroup.
-const EngineGlobalAccessInfo *find_conflicting_reader(const EngineGlobalShadowEntry &entry,
-                                                      const EngineInstructionContext &ctx) {
-  for (const auto &reader : entry.readers) {
-    if (reader.valid && !same_workgroup(reader, ctx))
-      return &reader;
+/// Bits of the four-byte shadow entry at @p entry_address that [@p start, @p
+/// end) covers. An access reaching neither end of the entry leaves the bytes it
+/// misses clear, so a disjoint access to the same entry does not conflict.
+uint8_t entry_byte_mask(uint64_t entry_address, uint64_t start, uint64_t end) {
+  uint8_t mask = 0;
+  // entry_address is aligned down, so adding a byte index cannot wrap.
+  for (uint64_t byte = 0; byte < kGlobalShadowAlignment; ++byte) {
+    const uint64_t address = entry_address + byte;
+    if (address >= start && address < end)
+      mask = static_cast<uint8_t>(mask | (1u << byte));
+  }
+  return mask;
+}
+
+/// A retained access that @p ctx would race with over @p byte_mask, or null when
+/// every overlapping access belongs to the accessing workgroup.
+const EngineGlobalAccessInfo *find_conflicting_access(const EngineGlobalAccessSlots &slots,
+                                                      const EngineInstructionContext &ctx,
+                                                      uint8_t byte_mask) {
+  for (const auto &slot : slots) {
+    if (slot.valid && (slot.byte_mask & byte_mask) != 0 && !same_workgroup(slot, ctx))
+      return &slot;
   }
   return nullptr;
 }
 
-/// Records a read while keeping the two slots on distinct workgroups: the first
-/// tracks the latest reader, and a reader from elsewhere displaces the second
-/// rather than the workgroup already held.
-void record_global_reader(EngineGlobalShadowEntry &entry, const EngineInstructionContext &ctx,
-                          const EngineGlobalAccessInfo &current) {
-  if (!entry.readers[0].valid || same_workgroup(entry.readers[0], ctx))
-    entry.readers[0] = current;
-  else
-    entry.readers[1] = current;
+/// Whether the accessing workgroup itself already covered one of @p byte_mask.
+bool covered_by_same_workgroup(const EngineGlobalAccessSlots &slots,
+                               const EngineInstructionContext &ctx, uint8_t byte_mask) {
+  for (const auto &slot : slots) {
+    if (slot.valid && (slot.byte_mask & byte_mask) != 0 && same_workgroup(slot, ctx))
+      return true;
+  }
+  return false;
+}
+
+/// Retains @p current while keeping the slots on distinct workgroups: a repeat
+/// from a workgroup already held widens that slot's byte coverage instead of
+/// consuming the slot holding the other workgroup, and a newcomer takes a free
+/// slot before displacing the second.
+void record_access(EngineGlobalAccessSlots &slots, const EngineInstructionContext &ctx,
+                   const EngineGlobalAccessInfo &current) {
+  for (auto &slot : slots) {
+    if (slot.valid && same_workgroup(slot, ctx)) {
+      const uint8_t covered = static_cast<uint8_t>(slot.byte_mask | current.byte_mask);
+      slot = current;
+      slot.byte_mask = covered;
+      return;
+    }
+  }
+  for (auto &slot : slots) {
+    if (!slot.valid) {
+      slot = current;
+      return;
+    }
+  }
+  slots[1] = current;
 }
 
 EngineWarning make_global_race_warning(const EngineInstructionContext &ctx,
@@ -1168,33 +1205,36 @@ void DataHazardEngine::check_global_access_for_races(const EngineInstructionCont
   const uint64_t end = event.address > max_address - event.size_bytes
                            ? max_address
                            : event.address + event.size_bytes;
-  const auto current = make_global_access_info(ctx);
+  auto current = make_global_access_info(ctx);
 
   std::vector<EngineWarning> warnings_to_emit;
   {
     std::lock_guard<std::shared_mutex> lock(state_.mutex);
     for (uint64_t addr = aligned_start; addr < end;) {
       auto &entry = state_.global_shadow[EngineGlobalShadowKey{ctx.dispatch_id, addr}];
+      const uint8_t byte_mask = entry_byte_mask(addr, event.address, end);
+      current.byte_mask = byte_mask;
 
       if (!entry.race_reported) {
         const EngineGlobalAccessInfo *conflicting_access = nullptr;
         const char *conflict_type = nullptr;
+        const auto *conflicting_writer = find_conflicting_access(entry.writers, ctx, byte_mask);
 
         if (event.is_write && !event.is_atomic) {
-          if (entry.writer.valid && !same_workgroup(entry.writer, ctx)) {
-            conflicting_access = &entry.writer;
+          if (conflicting_writer) {
+            conflicting_access = conflicting_writer;
             conflict_type = "WAW";
-          } else if (const auto *reader = find_conflicting_reader(entry, ctx)) {
+          } else if (const auto *reader = find_conflicting_access(entry.readers, ctx, byte_mask)) {
             conflicting_access = reader;
             conflict_type = "WAR";
           }
         } else if (event.is_read && !event.is_atomic) {
-          if (entry.writer.valid && !same_workgroup(entry.writer, ctx)) {
-            conflicting_access = &entry.writer;
+          if (conflicting_writer) {
+            conflicting_access = conflicting_writer;
             conflict_type = "RAW";
           }
-        } else if (event.is_atomic && entry.writer.valid && !same_workgroup(entry.writer, ctx)) {
-          conflicting_access = &entry.writer;
+        } else if (event.is_atomic && conflicting_writer) {
+          conflicting_access = conflicting_writer;
           conflict_type = event.is_write ? "WAW" : "RAW";
         }
 
@@ -1208,9 +1248,10 @@ void DataHazardEngine::check_global_access_for_races(const EngineInstructionCont
       }
 
       if (event.is_write && !event.is_atomic)
-        entry.writer = current;
-      if (event.is_read && !event.is_atomic && !same_workgroup(entry.writer, ctx))
-        record_global_reader(entry, ctx, current);
+        record_access(entry.writers, ctx, current);
+      if (event.is_read && !event.is_atomic &&
+          !covered_by_same_workgroup(entry.writers, ctx, byte_mask))
+        record_access(entry.readers, ctx, current);
 
       if (addr > max_address - kGlobalShadowAlignment)
         break;
