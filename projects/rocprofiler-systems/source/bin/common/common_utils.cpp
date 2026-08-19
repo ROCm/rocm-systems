@@ -279,14 +279,13 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
         std::cerr << "  \u2022 Text profile:  " << output_dir << "/wall_clock.txt\n"
                   << "  \u2022 JSON data:      " << output_dir << "/wall_clock.json\n";
     }
-    if(tracing_on)
-    {
     if(rocpd_on)
     {
         std::cerr << "  • rocpd database: " << output_dir
-                  << "/rocpd.db
-";
+                  << "/rocpd.db\n";
     }
+    if(tracing_on)
+    {
         std::cerr << "  \u2022 Trace (visual): " << output_dir
                   << "/perfetto-trace.proto\n";
     }
