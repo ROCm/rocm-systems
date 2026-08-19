@@ -1232,6 +1232,7 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
 
     ++entry.dispatched_wgs;
     ++dispatched;
+    dispatched_workgroups_.fetch_add(1, std::memory_order_relaxed);
     return true;
   };
 
