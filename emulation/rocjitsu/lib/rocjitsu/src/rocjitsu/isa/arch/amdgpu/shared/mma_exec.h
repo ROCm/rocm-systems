@@ -33,10 +33,15 @@
 
 #include <algorithm>
 #include <bit>
+#include <cassert>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <limits>
 #include <optional>
+#include <span>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -75,7 +80,11 @@ struct PackedOutputLoc {
 /// AccVGPR bank (acc_cd=1, gfx942 separate bank model).
 /// Encoding 0-255 = v[0-255] or acc[0-255] depending on acc_cd.
 /// Encoding 512-767 = acc[0-255] via OpSel (always AccVGPR bank).
+/// Encoding 768-1023 = acc[0-255] on CDNA1, which types MFMA/accvgpr destinations
+/// as OPR_ACCVGPR (OPR_ACCVGPR_ACC_MIN = 768) rather than the 512-based range.
 inline uint32_t dst_base(uint32_t vb, int ev, uint32_t acc_cd = 1) {
+  if (ev >= 768)
+    return vb + ACC_VGPR_OFFSET + static_cast<uint32_t>(ev - 768);
   if (ev >= 512)
     return vb + ACC_VGPR_OFFSET + static_cast<uint32_t>(ev - 512);
   if (acc_cd)
@@ -335,11 +344,9 @@ inline InputLoc wmma_f8f6f4_input_loc(uint32_t dim, uint32_t K, uint32_t i, uint
 }
 
 inline InputLoc wmma_f4_32x16x128_a_input_loc(uint32_t row, uint32_t k) {
-  const uint32_t row_group = row >> 3;
-  const uint32_t lane_row = row - 8u * ((row_group + 1u) >> 1u);
-  const uint32_t lane = lane_row + 16u * ((k >> 2) & 1u);
-  const uint32_t slot = 64u * (row_group & 1u) + (k & 3u) + 4u * (k >> 3);
-  return wmma_packed_input_loc(lane, slot, 4);
+  auto loc = wmma_f8f6f4_input_loc(16, 128, row % 16, k, 4, /*mixed_subbyte=*/false);
+  loc.vgpr_offset += 8 * (row / 16);
+  return loc;
 }
 
 inline InputLoc wmma_a_input_loc(uint32_t M, uint32_t K, uint32_t row, uint32_t k, uint32_t a_bits,
@@ -369,6 +376,12 @@ inline InputLoc gfx12_wmma_b_input_loc(uint32_t wave_size, uint32_t N, uint32_t 
 }
 
 inline OutputLoc wmma_output_loc_32(uint32_t M, uint32_t N, uint32_t row, uint32_t col) {
+  if (M == 32 && N == 16) {
+    const uint32_t local_row = row % 16;
+    const uint32_t lane = (local_row / 8) * N + col;
+    const uint32_t reg = 8 * (row / 16) + local_row % 8;
+    return {reg, lane};
+  }
   uint32_t elems_per_lane = (M * N) / WMMA_WAVE32;
   uint32_t lane = (row / elems_per_lane) * N + col;
   uint32_t reg = row % elems_per_lane;
@@ -777,14 +790,7 @@ inline uint32_t wmma_scale_lane(uint32_t index, uint32_t scale_select) {
   return index + ((scale_select & 0x1u) ? 16u : 0u);
 }
 
-inline uint32_t wmma_f4_32x16x128_a_scale_lane(uint32_t row) {
-  const uint32_t row_group = row >> 3;
-  if (row_group == 1)
-    return row + 8u;
-  if (row_group == 2)
-    return row - 8u;
-  return row;
-}
+inline uint32_t wmma_f4_32x16x128_a_scale_lane(uint32_t row) { return row; }
 
 inline uint32_t wmma_a_scale_lane(uint32_t M, uint32_t K, uint32_t row, uint32_t scale_select,
                                   uint32_t a_bits, uint32_t b_bits) {
@@ -1024,9 +1030,9 @@ inline uint32_t mfma_dense_reg_count(uint64_t element_count, uint32_t element_bi
 //
 // MFMA/WMMA specializations below read dense source regions through
 // RegisterAccess views. Acquiring a read view observes the whole physical VGPR
-// region, then the fast path can use zero-copy lane spans/pointers for the math.
-// Keep the matrix-specific size calculations here so individual specializations
-// do not open-code plugin notification or raw region sizing.
+// region. Logical traversal and copying remain independent of the backing-store
+// layout. Keep the matrix-specific size calculations here so individual
+// specializations do not open-code plugin notification or raw region sizing.
 //
 // This is still only the physical-register-region layer. The broader cleanup is
 // to move operand-based SIMD paths onto the same facade and then make direct raw
@@ -1063,7 +1069,74 @@ inline RegisterAccess::VgprWriteRegion write_mfma_acc32_region(auto &cu, uint32_
   return regs.write_vgpr_region(base, reg_count, mfma_full_lane_mask(wf_size));
 }
 
-struct MatrixReadRegions {
+template <typename Destination, typename Convert>
+void convert_packed_matrix_region(const RegisterAccess::VgprReadRegion &source,
+                                  Destination *destination, size_t element_count,
+                                  uint32_t elements_per_word, Convert convert) {
+  const size_t elements_per_reg = static_cast<size_t>(source.wf_size()) * elements_per_word;
+  size_t converted = 0;
+  source.for_each([&](std::span<const uint32_t> lanes) {
+    if (converted == element_count)
+      return;
+    const size_t count = std::min(elements_per_reg, element_count - converted);
+    convert(lanes.data(), destination + converted, count);
+    converted += count;
+  });
+  assert(converted == element_count && "packed conversion exceeds matrix read region");
+}
+
+template <size_t Capacity>
+void copy_matrix_region_words(const RegisterAccess::VgprReadRegion &source,
+                              uint32_t (&destination)[Capacity]) {
+  const size_t word_count = static_cast<size_t>(source.reg_count()) * source.wf_size();
+  assert(word_count <= Capacity && "matrix read region exceeds snapshot capacity");
+  if (word_count > Capacity)
+    std::abort();
+  source.copy_to({destination, word_count});
+}
+
+inline void convert_f16_matrix_region(const RegisterAccess::VgprReadRegion &source,
+                                      float *destination, size_t element_count) {
+  convert_packed_matrix_region(source, destination, element_count, /*elements_per_word=*/2,
+                               [](const uint32_t *words, float *out, size_t count) {
+                                 util::f16_to_f32_block(reinterpret_cast<const uint16_t *>(words),
+                                                        out, count);
+                               });
+}
+
+inline void convert_bf16_matrix_region(const RegisterAccess::VgprReadRegion &source,
+                                       float *destination, size_t element_count) {
+  convert_packed_matrix_region(source, destination, element_count, /*elements_per_word=*/2,
+                               [](const uint32_t *words, float *out, size_t count) {
+                                 util::bf16_to_f32_block(reinterpret_cast<const uint16_t *>(words),
+                                                         out, count);
+                               });
+}
+
+inline void convert_i8_matrix_region(const RegisterAccess::VgprReadRegion &source,
+                                     int32_t *destination, size_t element_count) {
+  convert_packed_matrix_region(source, destination, element_count, /*elements_per_word=*/4,
+                               [](const uint32_t *words, int32_t *out, size_t count) {
+                                 util::i8_to_i32_block(reinterpret_cast<const int8_t *>(words), out,
+                                                       count);
+                               });
+}
+
+inline void convert_u8_matrix_region(const RegisterAccess::VgprReadRegion &source,
+                                     int32_t *destination, size_t element_count) {
+  convert_packed_matrix_region(source, destination, element_count, /*elements_per_word=*/4,
+                               [](const uint32_t *words, int32_t *out, size_t count) {
+                                 util::u8_to_i32_block(reinterpret_cast<const uint8_t *>(words),
+                                                       out, count);
+                               });
+}
+
+class MatrixReadRegions {
+public:
+  explicit MatrixReadRegions(RegisterAccess::VgprReadRegion a, RegisterAccess::VgprReadRegion b,
+                             std::optional<RegisterAccess::VgprReadRegion> acc)
+      : a(std::move(a)), b(std::move(b)), acc(std::move(acc)) {}
+
   RegisterAccess::VgprReadRegion a;
   RegisterAccess::VgprReadRegion b;
   std::optional<RegisterAccess::VgprReadRegion> acc;
@@ -1082,8 +1155,8 @@ inline MatrixReadRegions read_mfma_fast_path_regions(auto &cu, uint32_t s0, uint
     uint32_t acc_regs = mfma_dense_reg_count(static_cast<uint64_t>(M) * N * B, 32, wf_size);
     acc_region.emplace(regs.read_vgpr_region(s2, acc_regs, lane_mask));
   }
-  return {regs.read_vgpr_region(s0, a_regs, lane_mask),
-          regs.read_vgpr_region(s1, b_regs, lane_mask), acc_region};
+  return MatrixReadRegions(regs.read_vgpr_region(s0, a_regs, lane_mask),
+                           regs.read_vgpr_region(s1, b_regs, lane_mask), std::move(acc_region));
 }
 
 inline void observe_mfma_fast_path_reads(auto &cu, uint32_t s0, uint32_t s1, uint32_t s2,
@@ -1106,8 +1179,8 @@ inline MatrixReadRegions read_wmma_fast_path_regions(auto &cu, uint32_t s0, uint
     uint32_t acc_regs = mfma_dense_reg_count(static_cast<uint64_t>(M) * N, acc_bits, wf_size);
     acc_region.emplace(regs.read_vgpr_region(s2, acc_regs, lane_mask));
   }
-  return {regs.read_vgpr_region(s0, a_regs, lane_mask),
-          regs.read_vgpr_region(s1, b_regs, lane_mask), acc_region};
+  return MatrixReadRegions(regs.read_vgpr_region(s0, a_regs, lane_mask),
+                           regs.read_vgpr_region(s1, b_regs, lane_mask), std::move(acc_region));
 }
 
 inline void observe_wmma_fast_path_reads(auto &cu, uint32_t s0, uint32_t s1, uint32_t s2,
@@ -1839,13 +1912,13 @@ inline void exec_wmma_f32_16x16x32_f16(auto &cu, uint32_t dst, uint32_t s0, uint
     const uint32_t wf = cu.wf_size();
     auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32,
                                              const_acc, wf);
-    const uint32_t *a_words = reads.a.reg_data();
-    const uint32_t *b_words = reads.b.reg_data();
-    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
     auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/32, wf);
     alignas(64) float A_buf[M * K]; // A[row][k]
     alignas(64) float B_buf[K * N]; // B[k][col]
     alignas(64) float C_buf[M * N]; // C[row][col]
+    alignas(64) uint32_t C_words[M * N];
+    if (reads.acc)
+      copy_matrix_region_words(*reads.acc, C_words);
     // A and B each occupy 8 VGPRs x wf lanes = 2*8*wf packed f16 (16 f16/lane
     // for K=32). Bulk-convert the region to f32 once, then the hoist is a pure
     // f32 index-shuffle (f16 j of word w sub s -> flat (w*wf+lane)*2+s).
@@ -1853,14 +1926,14 @@ inline void exec_wmma_f32_16x16x32_f16(auto &cu, uint32_t dst, uint32_t s0, uint
     const uint32_t n_halves = 2 * NUM_IN_REGS * wf;
     alignas(64) float A_f32[2 * NUM_IN_REGS * 64];
     alignas(64) float B_f32[2 * NUM_IN_REGS * 64];
-    util::f16_to_f32_block(reinterpret_cast<const uint16_t *>(a_words), A_f32, n_halves);
-    util::f16_to_f32_block(reinterpret_cast<const uint16_t *>(b_words), B_f32, n_halves);
+    convert_f16_matrix_region(reads.a, A_f32, n_halves);
+    convert_f16_matrix_region(reads.b, B_f32, n_halves);
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_32(M, N, row, col);
         C_buf[row * N + col] = apply_wmma_c_modifier(
             (const_acc != ACC_FROM_VGPR) ? std::bit_cast<float>(const_acc)
-                                         : std::bit_cast<float>(c_words[out.reg * wf + out.lane]),
+                                         : std::bit_cast<float>(C_words[out.reg * wf + out.lane]),
             c_modifier);
       }
     for (uint32_t row = 0; row < M; ++row)
@@ -1917,13 +1990,13 @@ inline void exec_wmma_f32_16x16x32_bf16(auto &cu, uint32_t dst, uint32_t s0, uin
     const uint32_t wf = cu.wf_size();
     auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32,
                                              const_acc, wf);
-    const uint32_t *a_words = reads.a.reg_data();
-    const uint32_t *b_words = reads.b.reg_data();
-    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
     auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/32, wf);
     alignas(64) float A_buf[M * K]; // A[row][k]
     alignas(64) float B_buf[K * N]; // B[k][col]
     alignas(64) float C_buf[M * N]; // C[row][col]
+    alignas(64) uint32_t C_words[M * N];
+    if (reads.acc)
+      copy_matrix_region_words(*reads.acc, C_words);
     // A and B each occupy 8 VGPRs x wf lanes = 2*8*wf packed bf16 (16 bf16/lane
     // for K=32). Bulk-convert the region to f32 once, then the hoist is a pure
     // f32 index-shuffle (bf16 j of word w sub s -> flat (w*wf+lane)*2+s).
@@ -1931,14 +2004,14 @@ inline void exec_wmma_f32_16x16x32_bf16(auto &cu, uint32_t dst, uint32_t s0, uin
     const uint32_t n_halves = 2 * NUM_IN_REGS * wf;
     alignas(64) float A_f32[2 * NUM_IN_REGS * 64];
     alignas(64) float B_f32[2 * NUM_IN_REGS * 64];
-    util::bf16_to_f32_block(reinterpret_cast<const uint16_t *>(a_words), A_f32, n_halves);
-    util::bf16_to_f32_block(reinterpret_cast<const uint16_t *>(b_words), B_f32, n_halves);
+    convert_bf16_matrix_region(reads.a, A_f32, n_halves);
+    convert_bf16_matrix_region(reads.b, B_f32, n_halves);
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_32(M, N, row, col);
         C_buf[row * N + col] = apply_wmma_c_modifier(
             (const_acc != ACC_FROM_VGPR) ? std::bit_cast<float>(const_acc)
-                                         : std::bit_cast<float>(c_words[out.reg * wf + out.lane]),
+                                         : std::bit_cast<float>(C_words[out.reg * wf + out.lane]),
             c_modifier);
       }
     for (uint32_t row = 0; row < M; ++row)
@@ -2003,6 +2076,15 @@ void f8_to_f32_block(const uint32_t *words, float *dst, size_t n) {
     util::bf8_e5m2_ocp_to_f32_block(reinterpret_cast<const uint8_t *>(words), dst, n);
 }
 
+template <bool FP8, bool FNUZ = false>
+void convert_f8_matrix_region(const RegisterAccess::VgprReadRegion &source, float *destination,
+                              size_t element_count) {
+  convert_packed_matrix_region(source, destination, element_count, /*elements_per_word=*/4,
+                               [](const uint32_t *words, float *out, size_t count) {
+                                 f8_to_f32_block<FP8, FNUZ>(words, out, count);
+                               });
+}
+
 /// Fast path for the dense f32-out fp8/bf8-input WMMA shapes
 /// (v_wmma_f32_16x16x{64,128}_{fp8,bf8}_{fp8,bf8}, gfx1250, wave32). Identical
 /// to the f16/bf16 specializations except the bulk input convert is the f8 LUT
@@ -2033,25 +2115,25 @@ void exec_wmma_f32_f8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uin
     const uint32_t wf = cu.wf_size();
     auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32,
                                              const_acc, wf);
-    const uint32_t *a_words = reads.a.reg_data();
-    const uint32_t *b_words = reads.b.reg_data();
-    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
     auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/32, wf);
     alignas(64) float A_buf[M * K]; // A[row][k]
     alignas(64) float B_buf[K * N]; // B[k][col]
     alignas(64) float C_buf[M * N]; // C[row][col]
+    alignas(64) uint32_t C_words[M * N];
+    if (reads.acc)
+      copy_matrix_region_words(*reads.acc, C_words);
     // Bulk-convert each whole packed f8 region to f32 once, then the hoist is a
     // pure f32 index-shuffle (byte of word w lane l sub s -> (w*wf+l)*4+s).
     alignas(64) float A_f32[M * K];
     alignas(64) float B_f32[N * K];
-    f8_to_f32_block<A_FP8, FNUZ>(a_words, A_f32, M * K);
-    f8_to_f32_block<B_FP8, FNUZ>(b_words, B_f32, N * K);
+    convert_f8_matrix_region<A_FP8, FNUZ>(reads.a, A_f32, M * K);
+    convert_f8_matrix_region<B_FP8, FNUZ>(reads.b, B_f32, N * K);
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_32(M, N, row, col);
         C_buf[row * N + col] = apply_wmma_c_modifier(
             (const_acc != ACC_FROM_VGPR) ? std::bit_cast<float>(const_acc)
-                                         : std::bit_cast<float>(c_words[out.reg * wf + out.lane]),
+                                         : std::bit_cast<float>(C_words[out.reg * wf + out.lane]),
             c_modifier);
       }
     for (uint32_t row = 0; row < M; ++row)
@@ -2113,30 +2195,34 @@ void exec_wmma_f32_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
     const uint32_t wf = cu.wf_size();
     auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32,
                                              const_acc, wf);
-    const uint32_t *a_words = reads.a.reg_data();
-    const uint32_t *b_words = reads.b.reg_data();
-    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
     auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/32, wf);
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
     alignas(64) float C_buf[M * N];
+    alignas(64) uint32_t A_words[M * K];
+    alignas(64) uint32_t B_words[N * K];
+    alignas(64) uint32_t C_words[M * N];
+    copy_matrix_region_words(reads.a, A_words);
+    copy_matrix_region_words(reads.b, B_words);
+    if (reads.acc)
+      copy_matrix_region_words(*reads.acc, C_words);
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_32(M, N, row, col);
         C_buf[row * N + col] = apply_wmma_c_modifier(
             (const_acc != ACC_FROM_VGPR) ? std::bit_cast<float>(const_acc)
-                                         : std::bit_cast<float>(c_words[out.reg * wf + out.lane]),
+                                         : std::bit_cast<float>(C_words[out.reg * wf + out.lane]),
             c_modifier);
       }
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t k = 0; k < K; ++k) {
         auto al = wmma_input_loc(M, K, row, k, in_bits);
-        A_buf[row * K + k] = std::bit_cast<float>(a_words[al.vgpr_offset * wf + al.lane]);
+        A_buf[row * K + k] = std::bit_cast<float>(A_words[al.vgpr_offset * wf + al.lane]);
       }
     for (uint32_t k = 0; k < K; ++k)
       for (uint32_t col = 0; col < N; ++col) {
         auto bl = wmma_input_loc(N, K, col, k, in_bits);
-        B_buf[k * N + col] = std::bit_cast<float>(b_words[bl.vgpr_offset * wf + bl.lane]);
+        B_buf[k * N + col] = std::bit_cast<float>(B_words[bl.vgpr_offset * wf + bl.lane]);
       }
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t c0 = 0; c0 < N; c0 += W) {
@@ -2515,17 +2601,32 @@ void exec_swmmac_packed16(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t
   }
 }
 
+/// @brief Round a WMMA f32 accumulator to f16 under MODE.FP16_OVFL.
+///
+/// @details MI400 Shader Programming 4.6.12 gives WMMA and SWMMAC results of 16
+/// bits or fewer +/-MAX instead of +/-infinity when the mode bit is set, and the
+/// MODE table records that WMMA saturates INF on this generation while every
+/// other opcode preserves it. Ordinary conversions therefore keep using
+/// util::f32_to_f16_mode, which clamps finite overflow only. Architectures whose
+/// WMMA has no FP16_OVFL support pass false and keep the plain rounding.
+inline uint16_t wmma_round_f16(float val, bool fp16_ovfl) {
+  if (fp16_ovfl && std::isinf(val))
+    return std::signbit(val) ? uint16_t{0xFBFF} : uint16_t{0x7BFF};
+  return util::f32_to_f16_mode(val, fp16_ovfl);
+}
+
 template <typename ExtractA, typename ExtractB>
 void exec_wmma_f16(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t in_bits, uint32_t dst,
                    uint32_t s0, uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb,
-                   uint32_t const_acc = ACC_FROM_VGPR, uint32_t wave_size = WMMA_WAVE32) {
+                   uint32_t const_acc = ACC_FROM_VGPR, uint32_t wave_size = WMMA_WAVE32,
+                   bool fp16_ovfl = false) {
   exec_wmma_packed16(
       cu, M, N, K, in_bits, dst, s0, s1, s2, ea, eb,
       [](auto &cu, uint32_t reg, uint32_t lane, uint32_t sub) {
         uint32_t raw = RegisterAccess(cu).read_vgpr(reg, lane);
         return util::f16_to_f32(static_cast<uint16_t>((raw >> (sub * 16)) & 0xFFFF));
       },
-      [](float val) { return util::f32_to_f16(val); }, const_acc, wave_size);
+      [fp16_ovfl](float val) { return wmma_round_f16(val, fp16_ovfl); }, const_acc, wave_size);
 }
 
 /// Fast path for the f16-output WMMA shapes (v_wmma_f16_*_f16). Like the f32-out
@@ -2554,24 +2655,24 @@ void exec_wmma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32
     const uint32_t wf = cu.wf_size();
     auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/16,
                                              const_acc, wf);
-    const uint32_t *a_words = reads.a.reg_data();
-    const uint32_t *b_words = reads.b.reg_data();
-    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
     auto writes = readwrite_wmma_output_region(cu, dst, M, N, /*output_bits=*/16, wf);
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
     alignas(64) float C_buf[M * N];
     alignas(64) float A_f32[M * K];
     alignas(64) float B_f32[N * K];
-    util::f16_to_f32_block(reinterpret_cast<const uint16_t *>(a_words), A_f32, M * K);
-    util::f16_to_f32_block(reinterpret_cast<const uint16_t *>(b_words), B_f32, N * K);
+    alignas(64) uint32_t C_words[M * N];
+    if (reads.acc)
+      copy_matrix_region_words(*reads.acc, C_words);
+    convert_f16_matrix_region(reads.a, A_f32, M * K);
+    convert_f16_matrix_region(reads.b, B_f32, N * K);
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_16(M, N, row, col);
         if (const_acc != ACC_FROM_VGPR) {
           C_buf[row * N + col] = std::bit_cast<float>(const_acc);
         } else {
-          uint32_t raw = c_words[out.reg * wf + out.lane];
+          uint32_t raw = C_words[out.reg * wf + out.lane];
           C_buf[row * N + col] =
               util::f16_to_f32(static_cast<uint16_t>((raw >> (out.sub_element * 16)) & 0xFFFF));
         }
@@ -2680,24 +2781,24 @@ void exec_wmma_bf16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint3
     const uint32_t wf = cu.wf_size();
     auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/16,
                                              const_acc, wf);
-    const uint32_t *a_words = reads.a.reg_data();
-    const uint32_t *b_words = reads.b.reg_data();
-    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
     auto writes = readwrite_wmma_output_region(cu, dst, M, N, /*output_bits=*/16, wf);
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
     alignas(64) float C_buf[M * N];
     alignas(64) float A_f32[M * K];
     alignas(64) float B_f32[N * K];
-    util::bf16_to_f32_block(reinterpret_cast<const uint16_t *>(a_words), A_f32, M * K);
-    util::bf16_to_f32_block(reinterpret_cast<const uint16_t *>(b_words), B_f32, N * K);
+    alignas(64) uint32_t C_words[M * N];
+    if (reads.acc)
+      copy_matrix_region_words(*reads.acc, C_words);
+    convert_bf16_matrix_region(reads.a, A_f32, M * K);
+    convert_bf16_matrix_region(reads.b, B_f32, N * K);
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_16(M, N, row, col);
         if (const_acc != ACC_FROM_VGPR) {
           C_buf[row * N + col] = std::bit_cast<float>(const_acc);
         } else {
-          uint32_t raw = c_words[out.reg * wf + out.lane];
+          uint32_t raw = C_words[out.reg * wf + out.lane];
           C_buf[row * N + col] =
               util::bf16_to_f32(static_cast<uint16_t>((raw >> (out.sub_element * 16)) & 0xFFFF));
         }
@@ -2761,13 +2862,13 @@ void exec_wmma_bf16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint3
 /// force-scalar.
 template <uint32_t M, uint32_t N, uint32_t K, bool A_FP8, bool B_FP8, bool FNUZ = false>
 void exec_wmma_f16_f8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
-                           uint32_t const_acc = ACC_FROM_VGPR) {
+                           uint32_t const_acc = ACC_FROM_VGPR, bool fp16_ovfl = false) {
   constexpr uint32_t in_bits = 8;
   static_assert(N % 16 == 0, "specialized f8 WMMA assumes N is a multiple of the zmm width");
   constexpr auto ea = f8_extract_fn<A_FP8, FNUZ>();
   constexpr auto eb = f8_extract_fn<B_FP8, FNUZ>();
   auto fallback = [&]() {
-    exec_wmma_f16(cu, M, N, K, in_bits, dst, s0, s1, s2, ea, eb, const_acc);
+    exec_wmma_f16(cu, M, N, K, in_bits, dst, s0, s1, s2, ea, eb, const_acc, WMMA_WAVE32, fp16_ovfl);
   };
   if constexpr (!util::has_stdx_simd) {
     fallback();
@@ -2782,24 +2883,24 @@ void exec_wmma_f16_f8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uin
     const uint32_t wf = cu.wf_size();
     auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/16,
                                              const_acc, wf);
-    const uint32_t *a_words = reads.a.reg_data();
-    const uint32_t *b_words = reads.b.reg_data();
-    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
     auto writes = readwrite_wmma_output_region(cu, dst, M, N, /*output_bits=*/16, wf);
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
     alignas(64) float C_buf[M * N];
     alignas(64) float A_f32[M * K];
     alignas(64) float B_f32[N * K];
-    f8_to_f32_block<A_FP8, FNUZ>(a_words, A_f32, M * K);
-    f8_to_f32_block<B_FP8, FNUZ>(b_words, B_f32, N * K);
+    alignas(64) uint32_t C_words[M * N];
+    if (reads.acc)
+      copy_matrix_region_words(*reads.acc, C_words);
+    convert_f8_matrix_region<A_FP8, FNUZ>(reads.a, A_f32, M * K);
+    convert_f8_matrix_region<B_FP8, FNUZ>(reads.b, B_f32, N * K);
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = wmma_output_loc_16(M, N, row, col);
         if (const_acc != ACC_FROM_VGPR) {
           C_buf[row * N + col] = std::bit_cast<float>(const_acc);
         } else {
-          uint32_t raw = c_words[out.reg * wf + out.lane];
+          uint32_t raw = C_words[out.reg * wf + out.lane];
           C_buf[row * N + col] =
               util::f16_to_f32(static_cast<uint16_t>((raw >> (out.sub_element * 16)) & 0xFFFF));
         }
@@ -2835,7 +2936,7 @@ void exec_wmma_f16_f8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uin
         auto out = wmma_output_loc_16(M, N, row, col);
         uint32_t idx = out.reg * WMMA_WAVE32 + out.lane;
         uint32_t shift = out.sub_element * 16;
-        uint16_t v = util::f32_to_f16(C_buf[row * N + col]);
+        uint16_t v = wmma_round_f16(C_buf[row * N + col], fp16_ovfl);
         words[idx] = (words[idx] & ~(0xFFFFu << shift)) | (static_cast<uint32_t>(v) << shift);
         masks[idx] |= 1u << out.sub_element;
       }
@@ -3335,26 +3436,26 @@ inline void exec_wmma_i32_16x16x64_iu8(auto &cu, uint32_t dst, uint32_t s0, uint
     const uint32_t wf = cu.wf_size();
     auto reads = read_wmma_fast_path_regions(cu, s0, s1, s2, M, N, K, in_bits, /*acc_bits=*/32,
                                              const_acc, wf);
-    const uint32_t *a_words = reads.a.reg_data();
-    const uint32_t *b_words = reads.b.reg_data();
-    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
     // Accumulate in unsigned 32-bit (wrap is well-defined; identical mod 2^32
     // to the intended signed wrap), sign-restore via int32 cast at pack time.
     alignas(64) uint32_t A_buf[M * K]; // A[row][k] (sign-/zero-extended bits)
     alignas(64) uint32_t B_buf[K * N]; // B[k][col] (sign-/zero-extended bits)
     alignas(64) uint32_t S_buf[M * N]; // sum-of-products, accumulator added at pack
+    alignas(64) uint32_t C_words[M * N];
+    if (reads.acc)
+      copy_matrix_region_words(*reads.acc, C_words);
     // Bulk-extend the packed byte regions to int32 once, then the hoist is a
     // pure i32 index-shuffle (byte j of word w lane l sub s -> (w*wf+l)*4+s).
     alignas(64) int32_t A_i32[M * K];
     alignas(64) int32_t B_i32[N * K];
     if (a_signed)
-      util::i8_to_i32_block(reinterpret_cast<const int8_t *>(a_words), A_i32, M * K);
+      convert_i8_matrix_region(reads.a, A_i32, M * K);
     else
-      util::u8_to_i32_block(reinterpret_cast<const uint8_t *>(a_words), A_i32, M * K);
+      convert_u8_matrix_region(reads.a, A_i32, M * K);
     if (b_signed)
-      util::i8_to_i32_block(reinterpret_cast<const int8_t *>(b_words), B_i32, N * K);
+      convert_i8_matrix_region(reads.b, B_i32, N * K);
     else
-      util::u8_to_i32_block(reinterpret_cast<const uint8_t *>(b_words), B_i32, N * K);
+      convert_u8_matrix_region(reads.b, B_i32, N * K);
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t k = 0; k < K; ++k) {
         auto al = wmma_input_loc(M, K, row, k, in_bits);
@@ -3386,7 +3487,7 @@ inline void exec_wmma_i32_16x16x64_iu8(auto &cu, uint32_t dst, uint32_t s0, uint
         int64_t acc =
             (const_acc != ACC_FROM_VGPR)
                 ? static_cast<int64_t>(static_cast<int32_t>(const_acc))
-                : static_cast<int64_t>(static_cast<int32_t>(c_words[out.reg * wf + out.lane]));
+                : static_cast<int64_t>(static_cast<int32_t>(C_words[out.reg * wf + out.lane]));
         acc += static_cast<int64_t>(static_cast<int32_t>(S_buf[row * N + col]));
         writes.set_linear_word(out.reg * wf + out.lane, pack_i32_acc(acc, clamp));
       }
@@ -4019,10 +4120,12 @@ void exec_smfmac_f32_32x32x64_fp8(auto &cu, uint32_t dst, uint32_t s0, uint32_t 
 /// the compiler fully unroll the 16-row x 32-K inner matmul into straight-line
 /// AVX-512 FMAs — a runtime-dimension loop is materially slower on this hot
 /// path. Hoists A and B into dense f32 buffers via extract_f16, runs the
-/// matmul as 16 zmm-wide f32 FMA rows (512 zmm FMAs per MFMA), and scatters
-/// directly back to VGPRs (no Result staging vector). VGPR access is batched
-/// through observed register-access regions (one view per operand, no
-/// per-element virtual read_vgpr/write_vgpr). Falls back to the generic exec_f32 when:
+/// matmul as 16 zmm-wide f32 FMA rows (512 zmm FMAs per MFMA). Batched shapes
+/// stage every result on the stack and publish only after all operand reads,
+/// preserving destructive-overlap semantics without a heap-backed Result
+/// vector. VGPR access is batched through observed register-access regions
+/// (one view per operand, no per-element virtual read_vgpr/write_vgpr). Falls
+/// back to the generic exec_f32 when:
 ///   - <experimental/simd> is unavailable
 ///   - host native_simd<float> is not 16 lanes (i.e. no AVX-512)
 ///   - cbsz/blgp lane permutation is non-default
@@ -4054,53 +4157,62 @@ void exec_f32_mfma_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
     const uint32_t wf = cu.wf_size();
     auto reads =
         read_mfma_fast_path_regions(cu, s0, s1, s2, M, N, K, BATCH, in_bits, const_acc, wf);
-    const uint32_t *a_words = reads.a.reg_data();
-    const uint32_t *b_words = reads.b.reg_data();
-    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
     auto writes = write_mfma_acc32_region(cu, dst, M, N, BATCH, wf);
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
-    alignas(64) float C_buf[M * N];
+    static_assert(M * N * BATCH * sizeof(float) <= 8 * 1024,
+                  "specialized MFMA result staging exceeds the stack budget");
+    alignas(64) float C_buf[M * N * BATCH];
+    alignas(64) uint32_t A_words[M * K * BATCH];
+    alignas(64) uint32_t B_words[N * K * BATCH];
+    alignas(64) uint32_t C_words[M * N * BATCH];
+    copy_matrix_region_words(reads.a, A_words);
+    copy_matrix_region_words(reads.b, B_words);
+    if (reads.acc)
+      copy_matrix_region_words(*reads.acc, C_words);
     bool has_nan_or_inf = false;
     for (uint32_t b = 0; b < BATCH; ++b) {
+      float *C_batch = &C_buf[b * M * N];
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t col = 0; col < N; ++col) {
           auto out = output_loc_32(M, N, row, col, b);
-          C_buf[row * N + col] = (const_acc != ACC_FROM_VGPR)
-                                     ? std::bit_cast<float>(const_acc)
-                                     : std::bit_cast<float>(c_words[out.reg * wf + out.lane]);
+          C_batch[row * N + col] = (const_acc != ACC_FROM_VGPR)
+                                       ? std::bit_cast<float>(const_acc)
+                                       : std::bit_cast<float>(C_words[out.reg * wf + out.lane]);
         }
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t k = 0; k < K; ++k) {
           auto al = input_loc(M, K, BATCH, row, k, b, in_bits);
-          A_buf[row * K + k] = std::bit_cast<float>(a_words[al.vgpr_offset * wf + al.lane]);
+          A_buf[row * K + k] = std::bit_cast<float>(A_words[al.vgpr_offset * wf + al.lane]);
         }
       for (uint32_t k = 0; k < K; ++k)
         for (uint32_t col = 0; col < N; ++col) {
           auto bl = input_loc(N, K, BATCH, col, k, b, in_bits);
-          B_buf[k * N + col] = std::bit_cast<float>(b_words[bl.vgpr_offset * wf + bl.lane]);
+          B_buf[k * N + col] = std::bit_cast<float>(B_words[bl.vgpr_offset * wf + bl.lane]);
         }
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t c0 = 0; c0 < N; c0 += W) {
           util::native<float> c_row;
-          c_row.copy_from(&C_buf[row * N + c0], util::stdx::vector_aligned);
+          c_row.copy_from(&C_batch[row * N + c0], util::stdx::vector_aligned);
           for (uint32_t k = 0; k < K; ++k) {
             util::native<float> a_bcast(A_buf[row * K + k]);
             util::native<float> b_row;
             b_row.copy_from(&B_buf[k * N + c0], util::stdx::vector_aligned);
             c_row = util::stdx::fma(a_bcast, b_row, c_row);
           }
-          c_row.copy_to(&C_buf[row * N + c0], util::stdx::vector_aligned);
+          c_row.copy_to(&C_batch[row * N + c0], util::stdx::vector_aligned);
         }
+    }
+    // Publish only after every batch has consumed its inputs.
+    for (uint32_t b = 0; b < BATCH; ++b)
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t col = 0; col < N; ++col) {
           auto out = output_loc_32(M, N, row, col, b);
-          float fv = C_buf[row * N + col];
+          float fv = C_buf[(b * M + row) * N + col];
           writes.set_linear_word(out.reg * wf + out.lane, std::bit_cast<uint32_t>(fv));
           if (std::isnan(fv) || std::isinf(fv))
             has_nan_or_inf = true;
         }
-    }
     if (has_nan_or_inf) {
       util::Logger::vm([&](auto &os) {
         os << std::format("MFMA_NAN_DETECTED (simd) dst=v{} s0=v{} s1=v{} s2=v{} {}x{}x{}_f32", dst,
@@ -4129,29 +4241,32 @@ void exec_f32_mfma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
     constexpr uint32_t W = 16; // guaranteed by the native<float>::size()==16 guard above
     const uint32_t wf = cu.wf_size();
     auto reads = read_mfma_fast_path_regions(cu, s0, s1, s2, M, N, K, B, in_bits, const_acc, wf);
-    const uint32_t *a_words = reads.a.reg_data();
-    const uint32_t *b_words = reads.b.reg_data();
-    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
     auto writes = write_mfma_acc32_region(cu, dst, M, N, B, wf);
     alignas(64) float A_buf[M * K]; // A[row][k] (one batch block)
     alignas(64) float B_buf[K * N]; // B[k][col] (one batch block)
-    alignas(64) float C_buf[M * N]; // C[row][col] (one batch block)
+    static_assert(M * N * B * sizeof(float) <= 8 * 1024,
+                  "specialized MFMA result staging exceeds the stack budget");
+    alignas(64) float C_buf[M * N * B]; // C[batch][row][col]
+    alignas(64) uint32_t C_words[M * N * B];
+    if (reads.acc)
+      copy_matrix_region_words(*reads.acc, C_words);
     // A/B occupy M*K*B and N*K*B packed f16 over their VGPRs. Bulk-convert each
     // whole region to f32 once with F16C (one vector op per 16 halves) instead
     // of branchy per-element f16_to_f32, then the hoist is a pure f32
     // index-shuffle (f16 of word w lane l sub s -> flat (w*wf+l)*2+s).
     alignas(64) float A_f32[M * K * B];
     alignas(64) float B_f32[N * K * B];
-    util::f16_to_f32_block(reinterpret_cast<const uint16_t *>(a_words), A_f32, M * K * B);
-    util::f16_to_f32_block(reinterpret_cast<const uint16_t *>(b_words), B_f32, N * K * B);
+    convert_f16_matrix_region(reads.a, A_f32, M * K * B);
+    convert_f16_matrix_region(reads.b, B_f32, N * K * B);
     bool has_nan_or_inf = false;
     for (uint32_t b = 0; b < B; ++b) {
+      float *C_batch = &C_buf[b * M * N];
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t col = 0; col < N; ++col) {
           auto out = output_loc_32(M, N, row, col, b);
-          C_buf[row * N + col] = (const_acc != ACC_FROM_VGPR)
-                                     ? std::bit_cast<float>(const_acc)
-                                     : std::bit_cast<float>(c_words[out.reg * wf + out.lane]);
+          C_batch[row * N + col] = (const_acc != ACC_FROM_VGPR)
+                                       ? std::bit_cast<float>(const_acc)
+                                       : std::bit_cast<float>(C_words[out.reg * wf + out.lane]);
         }
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t k = 0; k < K; ++k) {
@@ -4167,25 +4282,28 @@ void exec_f32_mfma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t c0 = 0; c0 < N; c0 += W) {
           util::native<float> c_row;
-          c_row.copy_from(&C_buf[row * N + c0], util::stdx::vector_aligned);
+          c_row.copy_from(&C_batch[row * N + c0], util::stdx::vector_aligned);
           for (uint32_t k = 0; k < K; ++k) {
             util::native<float> a_bcast(A_buf[row * K + k]);
             util::native<float> b_row;
             b_row.copy_from(&B_buf[k * N + c0], util::stdx::vector_aligned);
             c_row = util::stdx::fma(a_bcast, b_row, c_row);
           }
-          c_row.copy_to(&C_buf[row * N + c0], util::stdx::vector_aligned);
+          c_row.copy_to(&C_batch[row * N + c0], util::stdx::vector_aligned);
         }
-      // Scatter directly back to VGPRs (no Result staging vector).
+    }
+    // Publish only after every batch has consumed its inputs. This preserves
+    // instruction-level snapshot semantics when dst overlaps a later batch's
+    // source or accumulator registers.
+    for (uint32_t b = 0; b < B; ++b)
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t col = 0; col < N; ++col) {
           auto out = output_loc_32(M, N, row, col, b);
-          float fv = C_buf[row * N + col];
+          float fv = C_buf[(b * M + row) * N + col];
           writes.set_linear_word(out.reg * wf + out.lane, std::bit_cast<uint32_t>(fv));
           if (std::isnan(fv) || std::isinf(fv))
             has_nan_or_inf = true;
         }
-    }
     if (has_nan_or_inf) {
       util::Logger::vm([&](auto &os) {
         os << std::format("MFMA_NAN_DETECTED (simd) dst=v{} s0=v{} s1=v{} s2=v{} {}x{}x{}_f16", dst,
@@ -4218,27 +4336,30 @@ void exec_f32_mfma_bf16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, u
     constexpr uint32_t W = 16; // guaranteed by the native<float>::size()==16 guard above
     const uint32_t wf = cu.wf_size();
     auto reads = read_mfma_fast_path_regions(cu, s0, s1, s2, M, N, K, B, in_bits, const_acc, wf);
-    const uint32_t *a_words = reads.a.reg_data();
-    const uint32_t *b_words = reads.b.reg_data();
-    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
     auto writes = write_mfma_acc32_region(cu, dst, M, N, B, wf);
     alignas(64) float A_buf[M * K]; // A[row][k] (one batch block)
     alignas(64) float B_buf[K * N]; // B[k][col] (one batch block)
-    alignas(64) float C_buf[M * N]; // C[row][col] (one batch block)
+    static_assert(M * N * B * sizeof(float) <= 8 * 1024,
+                  "specialized MFMA result staging exceeds the stack budget");
+    alignas(64) float C_buf[M * N * B]; // C[batch][row][col]
+    alignas(64) uint32_t C_words[M * N * B];
+    if (reads.acc)
+      copy_matrix_region_words(*reads.acc, C_words);
     // Bulk-convert the packed bf16 regions to f32 once (zero-extend + shift),
     // then the hoist is a pure f32 index-shuffle.
     alignas(64) float A_f32[M * K * B];
     alignas(64) float B_f32[N * K * B];
-    util::bf16_to_f32_block(reinterpret_cast<const uint16_t *>(a_words), A_f32, M * K * B);
-    util::bf16_to_f32_block(reinterpret_cast<const uint16_t *>(b_words), B_f32, N * K * B);
+    convert_bf16_matrix_region(reads.a, A_f32, M * K * B);
+    convert_bf16_matrix_region(reads.b, B_f32, N * K * B);
     bool has_nan_or_inf = false;
     for (uint32_t b = 0; b < B; ++b) {
+      float *C_batch = &C_buf[b * M * N];
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t col = 0; col < N; ++col) {
           auto out = output_loc_32(M, N, row, col, b);
-          C_buf[row * N + col] = (const_acc != ACC_FROM_VGPR)
-                                     ? std::bit_cast<float>(const_acc)
-                                     : std::bit_cast<float>(c_words[out.reg * wf + out.lane]);
+          C_batch[row * N + col] = (const_acc != ACC_FROM_VGPR)
+                                       ? std::bit_cast<float>(const_acc)
+                                       : std::bit_cast<float>(C_words[out.reg * wf + out.lane]);
         }
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t k = 0; k < K; ++k) {
@@ -4254,25 +4375,26 @@ void exec_f32_mfma_bf16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, u
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t c0 = 0; c0 < N; c0 += W) {
           util::native<float> c_row;
-          c_row.copy_from(&C_buf[row * N + c0], util::stdx::vector_aligned);
+          c_row.copy_from(&C_batch[row * N + c0], util::stdx::vector_aligned);
           for (uint32_t k = 0; k < K; ++k) {
             util::native<float> a_bcast(A_buf[row * K + k]);
             util::native<float> b_row;
             b_row.copy_from(&B_buf[k * N + c0], util::stdx::vector_aligned);
             c_row = util::stdx::fma(a_bcast, b_row, c_row);
           }
-          c_row.copy_to(&C_buf[row * N + c0], util::stdx::vector_aligned);
+          c_row.copy_to(&C_batch[row * N + c0], util::stdx::vector_aligned);
         }
-      // Scatter directly back to VGPRs (no Result staging vector).
+    }
+    // Publish only after every batch has consumed its inputs.
+    for (uint32_t b = 0; b < B; ++b)
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t col = 0; col < N; ++col) {
           auto out = output_loc_32(M, N, row, col, b);
-          float fv = C_buf[row * N + col];
+          float fv = C_buf[(b * M + row) * N + col];
           writes.set_linear_word(out.reg * wf + out.lane, std::bit_cast<uint32_t>(fv));
           if (std::isnan(fv) || std::isinf(fv))
             has_nan_or_inf = true;
         }
-    }
     if (has_nan_or_inf) {
       util::Logger::vm([&](auto &os) {
         os << std::format("MFMA_NAN_DETECTED (simd) dst=v{} s0=v{} s1=v{} s2=v{} {}x{}x{}_bf16",
@@ -4307,26 +4429,26 @@ void exec_f32_mfma_f8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uin
     constexpr uint32_t W = 16; // guaranteed by the native<float>::size()==16 guard above
     const uint32_t wf = cu.wf_size();
     auto reads = read_mfma_fast_path_regions(cu, s0, s1, s2, M, N, K, B, in_bits, const_acc, wf);
-    const uint32_t *a_words = reads.a.reg_data();
-    const uint32_t *b_words = reads.b.reg_data();
-    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
     auto writes = write_mfma_acc32_region(cu, dst, M, N, B, wf);
     alignas(64) float A_buf[M * K]; // A[row][k]
     alignas(64) float B_buf[K * N]; // B[k][col]
     alignas(64) float C_buf[M * N]; // C[row][col]
+    alignas(64) uint32_t C_words[M * N];
+    if (reads.acc)
+      copy_matrix_region_words(*reads.acc, C_words);
     // Bulk-convert the packed f8 regions to f32 once through the LUTs, then the
     // hoist is a pure f32 index-shuffle (byte of word w lane l sub s ->
     // (w*wf+l)*4+s).
     alignas(64) float A_f32[M * K];
     alignas(64) float B_f32[N * K];
-    f8_to_f32_block<A_FP8, FNUZ>(a_words, A_f32, M * K);
-    f8_to_f32_block<B_FP8, FNUZ>(b_words, B_f32, N * K);
+    convert_f8_matrix_region<A_FP8, FNUZ>(reads.a, A_f32, M * K);
+    convert_f8_matrix_region<B_FP8, FNUZ>(reads.b, B_f32, N * K);
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = output_loc_32(M, N, row, col, 0);
         C_buf[row * N + col] = (const_acc != ACC_FROM_VGPR)
                                    ? std::bit_cast<float>(const_acc)
-                                   : std::bit_cast<float>(c_words[out.reg * wf + out.lane]);
+                                   : std::bit_cast<float>(C_words[out.reg * wf + out.lane]);
       }
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t k = 0; k < K; ++k) {
@@ -4395,28 +4517,31 @@ void exec_i32_mfma_i8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uin
     constexpr uint32_t W = 16; // guaranteed by the native<float>::size()==16 guard above
     const uint32_t wf = cu.wf_size();
     auto reads = read_mfma_fast_path_regions(cu, s0, s1, s2, M, N, K, B, in_bits, const_acc, wf);
-    const uint32_t *a_words = reads.a.reg_data();
-    const uint32_t *b_words = reads.b.reg_data();
-    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
     auto writes = write_mfma_acc32_region(cu, dst, M, N, B, wf);
     // Accumulate in unsigned 32-bit (wrap is well-defined and identical mod
     // 2^32 to the intended signed wrap), so the SIMD path has no signed-
     // overflow UB.
     alignas(64) uint32_t A_buf[M * K]; // A[row][k] (sign-extended bits, one batch block)
     alignas(64) uint32_t B_buf[K * N]; // B[k][col] (sign-extended bits, one batch block)
-    alignas(64) uint32_t C_buf[M * N]; // C[row][col] (one batch block)
+    static_assert(M * N * B * sizeof(uint32_t) <= 8 * 1024,
+                  "specialized MFMA result staging exceeds the stack budget");
+    alignas(64) uint32_t C_buf[M * N * B]; // C[batch][row][col]
+    alignas(64) uint32_t C_words[M * N * B];
+    if (reads.acc)
+      copy_matrix_region_words(*reads.acc, C_words);
     // Bulk sign-extend the packed i8 regions to int32 once, then the hoist is
     // a pure i32 index-shuffle (byte of word w lane l sub s -> (w*wf+l)*4+s).
     alignas(64) int32_t A_i32[M * K * B];
     alignas(64) int32_t B_i32[N * K * B];
-    util::i8_to_i32_block(reinterpret_cast<const int8_t *>(a_words), A_i32, M * K * B);
-    util::i8_to_i32_block(reinterpret_cast<const int8_t *>(b_words), B_i32, N * K * B);
+    convert_i8_matrix_region(reads.a, A_i32, M * K * B);
+    convert_i8_matrix_region(reads.b, B_i32, N * K * B);
     for (uint32_t b = 0; b < B; ++b) {
+      uint32_t *C_batch = &C_buf[b * M * N];
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t col = 0; col < N; ++col) {
           auto out = output_loc_32(M, N, row, col, b);
-          C_buf[row * N + col] =
-              (const_acc != ACC_FROM_VGPR) ? const_acc : c_words[out.reg * wf + out.lane];
+          C_batch[row * N + col] =
+              (const_acc != ACC_FROM_VGPR) ? const_acc : C_words[out.reg * wf + out.lane];
         }
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t k = 0; k < K; ++k) {
@@ -4433,22 +4558,23 @@ void exec_i32_mfma_i8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uin
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t c0 = 0; c0 < N; c0 += W) {
           util::native<uint32_t> c_row;
-          c_row.copy_from(&C_buf[row * N + c0], util::stdx::vector_aligned);
+          c_row.copy_from(&C_batch[row * N + c0], util::stdx::vector_aligned);
           for (uint32_t k = 0; k < K; ++k) {
             util::native<uint32_t> a_bcast(A_buf[row * K + k]);
             util::native<uint32_t> b_row;
             b_row.copy_from(&B_buf[k * N + c0], util::stdx::vector_aligned);
             c_row += a_bcast * b_row;
           }
-          c_row.copy_to(&C_buf[row * N + c0], util::stdx::vector_aligned);
+          c_row.copy_to(&C_batch[row * N + c0], util::stdx::vector_aligned);
         }
-      // Scatter directly back to VGPRs (no Result staging vector).
+    }
+    // Publish only after every batch has consumed its inputs.
+    for (uint32_t b = 0; b < B; ++b)
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t col = 0; col < N; ++col) {
           auto out = output_loc_32(M, N, row, col, b);
-          writes.set_linear_word(out.reg * wf + out.lane, C_buf[row * N + col]);
+          writes.set_linear_word(out.reg * wf + out.lane, C_buf[(b * M + row) * N + col]);
         }
-    }
   }
 }
 

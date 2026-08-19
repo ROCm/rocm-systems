@@ -123,11 +123,30 @@ function(hip_gen_exe_target)
     if (DEFINED HIP_TEST_LABELS)
       list(APPEND _DISCOVER_PROPERTIES LABELS "${HIP_TEST_LABELS}")
     endif()
-    catch_discover_tests("${_EXE_NAME}"
-      DISCOVERY_MODE PRE_TEST
-      ADD_TAGS_AS_LABELS
-      PROPERTIES ${_DISCOVER_PROPERTIES}
-    )
+    if(HIP_TESTS_RUN_DISABLED)
+      # ON: register all tests (including [disabled]-tagged ones) as enabled in ctest.
+      # Binary tags are unchanged; ctest just does not set DISABLED TRUE for them.
+      catch_discover_tests("${_EXE_NAME}"
+        DISCOVERY_MODE PRE_TEST
+        ADD_TAGS_AS_LABELS
+        PROPERTIES ${_DISCOVER_PROPERTIES}
+      )
+    else()
+      # Default: exclude [disabled] from enabled set, register separately as DISABLED TRUE.
+      catch_discover_tests("${_EXE_NAME}"
+        TEST_SPEC "~[disabled]"
+        DISCOVERY_MODE PRE_TEST
+        ADD_TAGS_AS_LABELS
+        PROPERTIES ${_DISCOVER_PROPERTIES}
+      )
+      catch_discover_tests("${_EXE_NAME}"
+        TEST_SPEC "[disabled]"
+        TEST_LIST "${_EXE_NAME}_DISABLED_TESTS"
+        DISCOVERY_MODE PRE_TEST
+        ADD_TAGS_AS_LABELS
+        PROPERTIES ${_DISCOVER_PROPERTIES} DISABLED TRUE
+      )
+    endif()
     file(GLOB CTEST_INC_FILES "${CMAKE_CURRENT_BINARY_DIR}/${_EXE_NAME}-*_include.cmake")
     set_property(GLOBAL APPEND PROPERTY G_INSTALL_CTEST_INCLUDE_FILES ${CTEST_INC_FILES})
 

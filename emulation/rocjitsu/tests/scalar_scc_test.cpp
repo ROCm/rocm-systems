@@ -4,6 +4,7 @@
 /// @file scalar_scc_test.cpp
 /// @brief Cross-architecture scalar SCC execution and preservation tests.
 
+#include "decode_test_util.h"
 #include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
@@ -14,16 +15,16 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 
-#include "rocjitsu/isa/arch/amdgpu/cdna1/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna2/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna1/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna2/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3_5/test_encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/test_encodings.h"
 
 #include <gtest/gtest.h>
 
@@ -96,7 +97,7 @@ std::optional<EncodingWords> rdna4_encoding(std::string_view mnemonic) {
 }
 
 std::optional<EncodingWords> gfx1250_encoding(std::string_view mnemonic) {
-  return find_test_encoding(gfx1250::test_data::ENCODINGS, mnemonic);
+  return find_test_encoding(cdna5::test_data::ENCODINGS, mnemonic);
 }
 
 class ScalarSccProfile {
@@ -211,7 +212,7 @@ public:
 
   std::unique_ptr<Instruction> decode(const EncodingWords &words,
                                       std::string_view expected_mnemonic) {
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     if (inst) {
       EXPECT_EQ(std::string_view(inst->mnemonic()), expected_mnemonic) << profile.name;
     }
@@ -278,7 +279,7 @@ void expect_wrexec_def_use(const ScalarSccProfile &profile, const WrexecPair &pa
   const uint8_t width = pair.is_b64 ? 2 : 1;
   for (const auto mnemonic : {pair.first, pair.second}) {
     const auto words = encode_sop1(profile, mnemonic, kDestSgpr, kSourceSgpr);
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr) << profile.name << " " << mnemonic;
     ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic) << profile.name;
 
@@ -684,7 +685,7 @@ TEST(ScalarSccTest, AddkAndMulkRegisterDestinationRead) {
     const std::array mnemonics{addk_mnemonic(profile), std::string_view{"s_mulk_i32"}};
     for (const auto mnemonic : mnemonics) {
       const auto words = encode_sopk(profile, mnemonic, /*sdst=*/4, /*simm16=*/1);
-      std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr) << profile.name << " " << mnemonic;
       ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic) << profile.name;
 

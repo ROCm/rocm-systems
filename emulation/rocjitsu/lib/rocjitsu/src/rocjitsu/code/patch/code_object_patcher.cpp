@@ -6,7 +6,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
-#include "rocjitsu/isa/arch/amdgpu/isa_properties.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -153,13 +153,16 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
   return alignment;
 }
 
-[[nodiscard]] std::optional<size_t> find_text_section(std::span<const Elf64_Shdr> shdrs,
-                                                      uint64_t text_offset, uint64_t text_size) {
-  for (size_t i = 0; i < shdrs.size(); ++i) {
-    if (shdrs[i].sh_offset == text_offset && shdrs[i].sh_size == text_size)
-      return i;
-  }
-  return std::nullopt;
+[[nodiscard]] std::optional<size_t> validated_text_section(std::span<const Elf64_Shdr> shdrs,
+                                                           std::optional<size_t> text_index,
+                                                           uint64_t text_offset,
+                                                           uint64_t text_size) {
+  if (!text_index || *text_index >= shdrs.size())
+    return std::nullopt;
+  const Elf64_Shdr &text = shdrs[*text_index];
+  if (text.sh_type == SHT_NOBITS || text.sh_offset != text_offset || text.sh_size != text_size)
+    return std::nullopt;
+  return text_index;
 }
 
 [[nodiscard]] bool target_supports_wave32(rj_code_arch_t arch) {
@@ -203,8 +206,38 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
   return file_offset <= limit && size <= limit - file_offset;
 }
 
-void apply_kernel_descriptor_resource_translation(KD &desc, const KdTranslation &translation,
-                                                  rj_code_arch_t target_arch) {
+/// @brief Read a kernel descriptor struct out of the in-memory image.
+///
+/// @returns nullopt if the descriptor does not fit within the image. Shared by
+/// DBT's resource translation and DBI's narrower scratch-grow so both agree on
+/// bounds checking and struct-sized copy.
+[[nodiscard]] std::optional<KD> read_kernel_descriptor(std::span<const uint8_t> image,
+                                                       uint64_t file_offset) {
+  if (!image_contains_range(image.size(), file_offset, sizeof(KD)))
+    return std::nullopt;
+  KD desc;
+  std::memcpy(&desc, image.data() + file_offset, sizeof(desc));
+  return desc;
+}
+
+/// @brief Write a kernel descriptor struct back into the in-memory image.
+///
+/// @returns false if the descriptor does not fit within the image.
+[[nodiscard]] bool write_kernel_descriptor(std::span<uint8_t> image, uint64_t file_offset,
+                                           const KD &desc) {
+  if (!image_contains_range(image.size(), file_offset, sizeof(KD)))
+    return false;
+  std::memcpy(image.data() + file_offset, &desc, sizeof(desc));
+  return true;
+}
+
+/// @brief Write the translated resource fields into a descriptor.
+///
+/// @returns False when the request cannot be encoded without changing what the
+/// kernel body may use, which the caller must surface as a failed translation.
+[[nodiscard]] bool apply_kernel_descriptor_resource_translation(KD &desc,
+                                                                const KdTranslation &translation,
+                                                                rj_code_arch_t target_arch) {
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
                   translation.target_vgpr_granulated);
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
@@ -241,10 +274,59 @@ void apply_kernel_descriptor_resource_translation(KD &desc, const KdTranslation 
   }
 
   if (target_uses_gfx10_plus_mode_bits(target_arch)) {
-    desc.compute_pgm_rsrc3 = 0;
-    if (const uint32_t inst_pref = target_default_inst_pref_size(target_arch); inst_pref != 0) {
-      AMDHSA_BITS_SET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE,
-                      inst_pref);
+    // RSRC3 is not one register; its layout differs per family. A source whose
+    // layout does not match the target's must be rebuilt -- a GFX9/CDNA source
+    // encodes ACCUM_OFFSET here, GFX10 has no INST_PREF_SIZE at all, and GFX11
+    // disagrees with GFX12 on that field's width and on bits 10:11. When the
+    // layouts do match, the word is the producing compiler's own
+    // configuration -- INST_PREF_SIZE (its sizing of the instruction preload),
+    // and on GFX12+ also GLG_EN, NAMED_BAR_CNT, ENABLE_DYNAMIC_VGPR, TCP_SPLIT
+    // and ENABLE_DIDT_THROTTLE. None of those are DBT's to invent, and none of
+    // them change meaning across a revision translation, so carry the word over
+    // verbatim.
+    //
+    // Rebuilding it instead was a source of real corruption: it discarded
+    // NAMED_BAR_CNT (set by 27 of 1036 kernels in the gfx1250 Gluon suites) and,
+    // because INST_PREF_SIZE widens from 6 bits on GFX11 to 8 on GFX12+,
+    // truncated any preload above 63 units -- 25% of those same kernels.
+    const Rsrc3Layout target_layout = rsrc3_layout(target_arch);
+    if (!rsrc3_carries_verbatim(translation.source_arch, target_arch)) {
+      desc.compute_pgm_rsrc3 = 0;
+      if (const uint32_t inst_pref = target_default_inst_pref_size(target_arch); inst_pref != 0) {
+        // The field is 6 bits on GFX11 and 8 on GFX12+; write it through the
+        // target's own definition rather than assuming the narrower one.
+        if (target_layout == Rsrc3Layout::Gfx120 || target_layout == Rsrc3Layout::Gfx125) {
+          AMDHSA_BITS_SET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE,
+                          inst_pref);
+        } else {
+          AMDHSA_BITS_SET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE,
+                          inst_pref);
+        }
+      }
+    } else if (rsrc3_layout_has_shared_vgpr_count(target_layout)) {
+      // SHARED_VGPR_COUNT is the one carried field this function invalidates by
+      // its own edits: it rewrites both the wave size and the RSRC1 VGPR
+      // allocation that the field is constrained against. Per LLVM the count
+      // must be 0 for wave32, and for wave64 must satisfy
+      // (compute_pgm_rsrc1.vgprs + 1) * 4 + shared_vgpr_count * 8 <= 256.
+      //
+      // The count describes registers the unchanged kernel body uses, so a
+      // smaller descriptor does not make the body need fewer of them. Clamping
+      // the field to fit would therefore hand the target an allocation the body
+      // overruns; refuse instead, the way LLVM refuses the same overcommit.
+      // Resource planning reserves these blocks before choosing the allocation,
+      // so reaching this point means the request was inconsistent.
+      const uint32_t shared = AMDHSA_BITS_GET(desc.compute_pgm_rsrc3,
+                                              kd::COMPUTE_PGM_RSRC3_GFX10_PLUS_SHARED_VGPR_COUNT);
+      if (shared != 0) {
+        if (translation.target_wave_size == 32)
+          return false;
+        const uint32_t granulated = AMDHSA_BITS_GET(
+            desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
+        const uint32_t arch_vgprs = (granulated + 1u) * 4u;
+        if (arch_vgprs + rsrc3_shared_vgpr_reserved_registers(shared) > 256u)
+          return false;
+      }
     }
   } else if (target_uses_gfx90a_accum_offset(target_arch) && translation.target_accvgpr_base != 0) {
     // On GFX90A/GFX942/GFX950, AccVGPRs are placed by ACCUM_OFFSET rather than
@@ -316,6 +398,7 @@ void apply_kernel_descriptor_resource_translation(KD &desc, const KdTranslation 
     desc.kernel_code_properties = 0;
     desc.kernarg_preload = 0;
   }
+  return true;
 }
 
 [[nodiscard]] bool set_kernel_entry_from_vaddr(KD &desc, uint64_t descriptor_vaddr,
@@ -426,24 +509,42 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
   }
 }
 
-[[nodiscard]] bool relocate_text_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr,
-                                         std::span<const Elf64_Shdr> shdrs, size_t text_index,
-                                         uint64_t old_text_size, uint64_t new_text_size,
-                                         std::span<const TextOffsetRelocation> relocations) {
-  if (relocations.empty())
-    return true;
-
+struct TextPlacementIndex {
   std::unordered_map<uint64_t, uint64_t> target_by_source;
-  target_by_source.reserve(relocations.size());
+  std::unordered_set<uint64_t> conflicting_sources;
+};
+
+/// @brief Build the one source-to-output placement policy used by every text reference.
+///
+/// A shared source block can be emitted into multiple kernel-local bodies. The first
+/// placement remains useful for unreferenced tooling/debug labels, but a runtime-dereferenced
+/// ABS64 symbol or RELATIVE64 addend cannot safely choose among semantically distinct clones.
+/// Construct this index once so named and anonymous runtime references cannot drift into
+/// different ambiguity policies.
+[[nodiscard]] std::optional<TextPlacementIndex>
+build_text_placement_index(uint64_t old_text_size, uint64_t new_text_size,
+                           std::span<const TextOffsetRelocation> relocations) {
+  TextPlacementIndex placements;
+  placements.target_by_source.reserve(relocations.size());
+  placements.conflicting_sources.reserve(relocations.size());
   for (const TextOffsetRelocation &relocation : relocations) {
     if (relocation.source_offset > old_text_size || relocation.target_offset > new_text_size)
-      return false;
-    // A helper block can be copied into more than one kernel-local body. ELF
-    // has only one value for its local label, so retain the first deterministic
-    // placement. Control-flow fixups remain kernel-local and do not depend on
-    // this tooling/debug symbol choice.
-    target_by_source.try_emplace(relocation.source_offset, relocation.target_offset);
+      return std::nullopt;
+    auto [it, inserted] =
+        placements.target_by_source.try_emplace(relocation.source_offset, relocation.target_offset);
+    if (!inserted && it->second != relocation.target_offset)
+      placements.conflicting_sources.insert(relocation.source_offset);
   }
+  return placements;
+}
+
+[[nodiscard]] bool relocate_text_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr,
+                                         std::span<const Elf64_Shdr> shdrs, size_t text_index,
+                                         uint64_t old_text_size,
+                                         const TextPlacementIndex &placements,
+                                         bool require_every_text_symbol_mapped) {
+  if (placements.target_by_source.empty())
+    return true;
 
   const Elf64_Shdr &text = shdrs[text_index];
   // Only referenced symbols are correctness-critical. Debug and tooling symbol
@@ -454,10 +555,16 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
   std::unordered_map<size_t, std::unordered_set<uint32_t>> referenced_by_symtab;
   for (const Elf64_Shdr &relocs : shdrs) {
     if (relocs.sh_type != SHT_RELA || relocs.sh_entsize != sizeof(Elf64_Rela) ||
-        relocs.sh_link >= shdrs.size() ||
+        relocs.sh_size % sizeof(Elf64_Rela) != 0 ||
         !image_contains_range(image.size(), relocs.sh_offset, relocs.sh_size)) {
       continue;
     }
+    const RocrRelocationSectionMode section_mode =
+        classify_rocr_relocation_section(ehdr, shdrs, relocs);
+    if (section_mode == RocrRelocationSectionMode::Malformed)
+      return false;
+    if (relocs.sh_link >= shdrs.size())
+      continue;
     const Elf64_Shdr &symtab = shdrs[relocs.sh_link];
     if (symtab.sh_entsize != sizeof(Elf64_Sym) ||
         !image_contains_range(image.size(), symtab.sh_offset, symtab.sh_size)) {
@@ -467,6 +574,8 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
     for (size_t i = 0; i < count; ++i) {
       Elf64_Rela rela{};
       std::memcpy(&rela, image.data() + relocs.sh_offset + i * sizeof(rela), sizeof(rela));
+      if (!elf_relocation_place_is_allocated(ehdr, shdrs, relocs, rela.r_offset))
+        continue;
       const uint32_t symbol_index = elf_reloc_sym(rela.r_info);
       if (symbol_index == 0 ||
           static_cast<uint64_t>(symbol_index) * sizeof(Elf64_Sym) + sizeof(Elf64_Sym) >
@@ -476,8 +585,11 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
       Elf64_Sym symbol{};
       std::memcpy(&symbol, image.data() + symtab.sh_offset + symbol_index * sizeof(symbol),
                   sizeof(symbol));
+      const TextSymbolRelocationAction action = classify_text_symbol_relocation(
+          section_mode, rela.r_info, /*has_explicit_addend=*/true, rela.r_addend, symbol);
       if (symbol.st_shndx == text_index &&
-          elf_symbol_type(symbol.st_info) != kElfSymbolTypeSection) {
+          (action == TextSymbolRelocationAction::RequiresSymbolMapping ||
+           action == TextSymbolRelocationAction::RequiresExecutableEntry)) {
         referenced_by_symtab[relocs.sh_link].insert(symbol_index);
       }
     }
@@ -500,14 +612,54 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
         continue;
 
       const auto referenced = referenced_by_symtab.find(symtab_index);
+      // An unreferenced symbol normally may stay unmapped, because debug and tooling tables
+      // legitimately label padding this translation does not emit. When the caller is relying on
+      // every `.text` address being relocated, that tolerance is a hole: a host can resolve such a
+      // symbol and hand the stale address back in, so such a symbol may not stay unmapped.
+      //
+      // The hole is only as wide as what a host can actually resolve, which is external linkage.
+      // A local symbol names a compilation-unit-private body that no loader interface hands out,
+      // so its address can only come from this object's own getpc builders or relocation addends --
+      // and those are exactly what the caller's claim already accounts for, the builders through
+      // the code-address audit and the addends through relocate_relative_text_addends(), which
+      // still fails closed on an addend it cannot map. Requiring local symbols to map too would
+      // refuse every separately compiled device library: RCCL's gfx1250 object carries 21446
+      // function symbols, of which 12 are global, and its unreferenced locals are dead bodies no
+      // scope needs to emit.
+      const bool externally_resolvable =
+          elf_symbol_is_externally_resolvable(symbol.st_info, symbol.st_other);
       const bool must_relocate =
-          referenced != referenced_by_symtab.end() && referenced->second.contains(i);
+          (require_every_text_symbol_mapped && externally_resolvable) ||
+          (referenced != referenced_by_symtab.end() && referenced->second.contains(i));
 
       uint64_t source_text_offset = symbol.st_value;
       if (ehdr.e_type != ET_REL) {
         if (symbol.st_value < text.sh_addr) {
           if (must_relocate)
             return false;
+          // The body this symbol names was not emitted, so its old st_value now points into
+          // whatever got relocated onto that address. Left alone it masquerades as a function entry
+          // on re-translation -- passing the sized-STT_FUNC filter and being adopted as a root that
+          // the first pass never had. Undefine it instead: a symbol with no body is exactly what
+          // this is, and saying so keeps the next pass's view identical to this one's.
+          // An externally resolvable symbol is part of this object's interface -- HSA hands out
+          // indirect-function symbols -- so undefining one would delete an exported entry, and
+          // would also change what object_defines_only_kernels() sees on the next pass and with it
+          // the kernarg fence. Only a symbol nothing outside can name may be dropped.
+          //
+          // This is reached only with strict mapping off, so nothing in this translation rests on
+          // the promise that the symbol still names its body: an object that could make that
+          // promise adopts these bodies up front, under the same predicate that grants it.
+          // Refusing here instead was tried and is too strong -- it rejects objects that translate
+          // correctly and never claimed anything about the symbol. What is left open is that its
+          // st_value is now stale, which a later pass could rediscover as a sized STT_FUNC at an
+          // offset that has moved; that hazard predates this change and is not closed here.
+          if (externally_resolvable)
+            continue;
+          symbol.st_shndx = SHN_UNDEF;
+          symbol.st_value = 0;
+          symbol.st_size = 0;
+          std::memcpy(image.data() + symbol_offset, &symbol, sizeof(symbol));
           continue;
         }
         source_text_offset = symbol.st_value - text.sh_addr;
@@ -515,19 +667,67 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
       if (source_text_offset > old_text_size) {
         if (must_relocate)
           return false;
+        // The body this symbol names was not emitted, so its old st_value now points into
+        // whatever got relocated onto that address. Left alone it masquerades as a function entry
+        // on re-translation -- passing the sized-STT_FUNC filter and being adopted as a root that
+        // the first pass never had. Undefine it instead: a symbol with no body is exactly what
+        // this is, and saying so keeps the next pass's view identical to this one's.
+        // An externally resolvable symbol is part of this object's interface -- HSA hands out
+        // indirect-function symbols -- so undefining one would delete an exported entry, and would
+        // also change what object_defines_only_kernels() sees on the next pass and with it the
+        // kernarg fence. Only a symbol nothing outside can name may be dropped.
+        //
+        // This is reached only with strict mapping off, so nothing in this translation rests on the
+        // promise that the symbol still names its body: an object that could make that promise
+        // adopts these bodies up front, under the same predicate that grants it. Refusing here
+        // instead was tried and is too strong -- it rejects objects that translate correctly and
+        // never claimed anything about the symbol. What is left open is that its st_value is now
+        // stale, which a later pass could rediscover as a sized STT_FUNC at an offset that has
+        // moved; that hazard predates this change and is not closed here.
+        if (externally_resolvable)
+          continue;
+        symbol.st_shndx = SHN_UNDEF;
+        symbol.st_value = 0;
+        symbol.st_size = 0;
+        std::memcpy(image.data() + symbol_offset, &symbol, sizeof(symbol));
         continue;
       }
-      const auto relocated_start = target_by_source.find(source_text_offset);
-      if (relocated_start == target_by_source.end()) {
+      if (must_relocate && placements.conflicting_sources.contains(source_text_offset))
+        return false;
+      const auto relocated_start = placements.target_by_source.find(source_text_offset);
+      if (relocated_start == placements.target_by_source.end()) {
         if (must_relocate)
           return false;
+        // The body this symbol names was not emitted, so its old st_value now points into
+        // whatever got relocated onto that address. Left alone it masquerades as a function entry
+        // on re-translation -- passing the sized-STT_FUNC filter and being adopted as a root that
+        // the first pass never had. Undefine it instead: a symbol with no body is exactly what
+        // this is, and saying so keeps the next pass's view identical to this one's.
+        // An externally resolvable symbol is part of this object's interface -- HSA hands out
+        // indirect-function symbols -- so undefining one would delete an exported entry, and would
+        // also change what object_defines_only_kernels() sees on the next pass and with it the
+        // kernarg fence. Only a symbol nothing outside can name may be dropped.
+        //
+        // This is reached only with strict mapping off, so nothing in this translation rests on the
+        // promise that the symbol still names its body: an object that could make that promise
+        // adopts these bodies up front, under the same predicate that grants it. Refusing here
+        // instead was tried and is too strong -- it rejects objects that translate correctly and
+        // never claimed anything about the symbol. What is left open is that its st_value is now
+        // stale, which a later pass could rediscover as a sized STT_FUNC at an offset that has
+        // moved; that hazard predates this change and is not closed here.
+        if (externally_resolvable)
+          continue;
+        symbol.st_shndx = SHN_UNDEF;
+        symbol.st_value = 0;
+        symbol.st_size = 0;
+        std::memcpy(image.data() + symbol_offset, &symbol, sizeof(symbol));
         continue;
       }
 
       const uint64_t old_size = symbol.st_size;
       if (old_size <= old_text_size - source_text_offset) {
-        const auto relocated_end = target_by_source.find(source_text_offset + old_size);
-        if (relocated_end != target_by_source.end() &&
+        const auto relocated_end = placements.target_by_source.find(source_text_offset + old_size);
+        if (relocated_end != placements.target_by_source.end() &&
             relocated_end->second >= relocated_start->second) {
           symbol.st_size = relocated_end->second - relocated_start->second;
         }
@@ -540,37 +740,13 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
   return true;
 }
 
-[[nodiscard]] bool
-relocate_relative_text_addends(std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr,
-                               std::span<const Elf64_Shdr> shdrs, size_t text_index,
-                               uint64_t old_text_size, uint64_t new_text_size,
-                               std::span<const TextOffsetRelocation> relocations) {
-  if (relocations.empty() || ehdr.e_type != ET_DYN)
+[[nodiscard]] bool relocate_relative_text_addends(
+    std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr, std::span<const Elf64_Shdr> shdrs,
+    size_t text_index, uint64_t old_text_size, uint64_t new_text_size,
+    const TextPlacementIndex &placements,
+    const std::unordered_map<uint64_t, uint64_t> *canonical_code_pointer_placement) {
+  if (placements.target_by_source.empty() || ehdr.e_type != ET_DYN)
     return true;
-
-  std::unordered_map<uint64_t, uint64_t> target_by_source;
-  target_by_source.reserve(relocations.size());
-  // A shared helper block is emitted once per kernel-local scope, so the same
-  // source offset can appear here with DIFFERENT target placements — and the
-  // scopes are not interchangeable (e.g. a hardware-LDS clone vs a virtual-LDS
-  // sidecar clone with different LDS lowering, liveness, and resources). For a
-  // RELATIVE64 addend (a RUNTIME-DEREFERENCED function pointer) we cannot know
-  // which clone a given dispatcher belongs to from the source offset alone, so
-  // collapsing to one clone would let a sidecar dispatch jump into the wrong one.
-  // Record which source offsets have conflicting placements and fail closed below
-  // if any such offset is actually referenced by a function-table addend. Source
-  // offsets that are copied to multiple scopes but never used as a RELATIVE64
-  // pointer are harmless (control-flow fixups stay kernel-local), so a conflict
-  // that is never dereferenced does not reject the translation.
-  std::unordered_set<uint64_t> conflicting_sources;
-  for (const TextOffsetRelocation &relocation : relocations) {
-    if (relocation.source_offset > old_text_size || relocation.target_offset > new_text_size)
-      return false;
-    auto [it, inserted] =
-        target_by_source.try_emplace(relocation.source_offset, relocation.target_offset);
-    if (!inserted && it->second != relocation.target_offset)
-      conflicting_sources.insert(relocation.source_offset);
-  }
 
   const Elf64_Shdr &text = shdrs[text_index];
   for (const Elf64_Shdr &relocs : shdrs) {
@@ -584,6 +760,8 @@ relocate_relative_text_addends(std::vector<uint8_t> &image, const Elf64_Ehdr &eh
       const uint64_t rela_offset = relocs.sh_offset + i * sizeof(Elf64_Rela);
       Elf64_Rela rela{};
       std::memcpy(&rela, image.data() + rela_offset, sizeof(rela));
+      if (!elf_relocation_place_is_allocated(ehdr, shdrs, relocs, rela.r_offset))
+        continue;
       if (elf_reloc_type(rela.r_info) != R_AMDGPU_RELATIVE64 || rela.r_addend < 0)
         continue;
 
@@ -594,20 +772,42 @@ relocate_relative_text_addends(std::vector<uint8_t> &image, const Elf64_Ehdr &eh
       if (source_offset >= old_text_size)
         continue;
 
-      // This addend IS dereferenced as a function pointer. If its source block
-      // was emitted at conflicting placements across scopes, no single rewrite is
-      // correct — fail closed rather than pick an arbitrary clone.
-      if (conflicting_sources.contains(source_offset))
+      // This addend IS dereferenced as a function pointer. If its source block was emitted at
+      // conflicting placements across scopes, nothing drawn from the placement map alone is the
+      // right answer -- a pointer holds one value and cannot choose between clones. The translator
+      // settles that by nominating one clone canonical for each address-taken body, which is the
+      // copy every stored pointer must name. Use it when the caller supplied one, and keep failing
+      // closed when it did not.
+      uint64_t canonical_target = 0;
+      bool have_canonical = false;
+      if (canonical_code_pointer_placement != nullptr) {
+        const auto canonical = canonical_code_pointer_placement->find(source_offset);
+        if (canonical != canonical_code_pointer_placement->end()) {
+          canonical_target = canonical->second;
+          have_canonical = true;
+        }
+      }
+      if (placements.conflicting_sources.contains(source_offset) && !have_canonical)
         return false;
-      const auto relocated = target_by_source.find(source_offset);
+      const auto relocated = placements.target_by_source.find(source_offset);
       // Leaving an in-text addend unchanged would silently preserve a stale PC.
       // Compatibility was established from the relocation form, but final
       // materialization must also prove that this exact target was emitted.
-      if (relocated == target_by_source.end())
+      //
+      // The proof is unconditional. A canonical entry says WHICH clone a stored pointer must name
+      // when several were emitted; it is not evidence that any was. This helper takes the
+      // canonical map as an independent input, so treating a canonical hit as its own proof would
+      // let a stale or fabricated entry through -- the translator happens to derive both from the
+      // same placements today, which is not something this function can check.
+      if (relocated == placements.target_by_source.end())
         return false;
-      if (relocated->second > std::numeric_limits<uint64_t>::max() - text.sh_addr)
+      const uint64_t placement = have_canonical ? canonical_target : relocated->second;
+      // Whichever clone was chosen still has to lie inside the text actually emitted.
+      if (placement > new_text_size)
         return false;
-      const uint64_t target_addend = text.sh_addr + relocated->second;
+      if (placement > std::numeric_limits<uint64_t>::max() - text.sh_addr)
+        return false;
+      const uint64_t target_addend = text.sh_addr + placement;
       if (target_addend > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
         return false;
       rela.r_addend = static_cast<int64_t>(target_addend);
@@ -634,6 +834,46 @@ relocate_relative_text_addends(std::vector<uint8_t> &image, const Elf64_Ehdr &eh
       return true;
   }
   return false;
+}
+
+/// @brief Shift `R_AMDGPU_RELATIVE64` addends that name an address past the growing `.text`.
+///
+/// @details Growing `.text` moves every allocated section above it, and the loader computes a
+/// relative relocation as load bias plus addend -- so an addend naming a moved section still names
+/// where that section used to be. The sibling pass above moves the relocation's *place*; this moves
+/// what it *points at*. Without it a C++ object's vptr slot is written with the pre-growth vtable
+/// address, and the first virtual call reads its function pointers out of whatever now occupies
+/// that memory.
+///
+/// Addends into `.text` are deliberately untouched: those name code, which does not simply shift,
+/// and relocate_relative_text_addends() rewrites them through the block placement map instead. The
+/// two are disjoint because a `.text` addend is below @p old_text_end_vaddr by construction.
+void shift_relative_addends_into_moved_sections(std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr,
+                                                std::span<const Elf64_Shdr> shdrs,
+                                                uint64_t old_text_end_vaddr, uint64_t delta) {
+  if (delta == 0)
+    return;
+  for (const Elf64_Shdr &relocs : shdrs) {
+    if (relocs.sh_type != SHT_RELA || relocs.sh_entsize != sizeof(Elf64_Rela) ||
+        !image_contains_range(image.size(), relocs.sh_offset, relocs.sh_size)) {
+      continue;
+    }
+    const size_t count = relocs.sh_size / sizeof(Elf64_Rela);
+    for (size_t i = 0; i < count; ++i) {
+      const uint64_t place = relocs.sh_offset + i * sizeof(Elf64_Rela);
+      Elf64_Rela rela{};
+      std::memcpy(&rela, image.data() + place, sizeof(rela));
+      if (elf_reloc_type(rela.r_info) != R_AMDGPU_RELATIVE64 || rela.r_addend < 0)
+        continue;
+      if (!elf_relocation_place_is_allocated(ehdr, shdrs, relocs, rela.r_offset))
+        continue;
+      const auto addend = static_cast<uint64_t>(rela.r_addend);
+      if (addend < old_text_end_vaddr || addend > std::numeric_limits<uint64_t>::max() - delta)
+        continue;
+      rela.r_addend = static_cast<int64_t>(addend + delta);
+      std::memcpy(image.data() + place, &rela, sizeof(rela));
+    }
+  }
 }
 
 void shift_relocation_offsets_in_moved_sections(std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr,
@@ -777,11 +1017,35 @@ void adjust_kernel_descriptor_entry_offsets_in_moved_sections(
 
 } // namespace
 
+std::optional<AllocatedDataSectionAddress>
+resolve_allocated_data_section_address(std::span<const Elf64_Shdr> sections, uint64_t vaddr) {
+  const auto section = std::ranges::find_if(sections, [&](const Elf64_Shdr &candidate) {
+    return (candidate.sh_flags & SHF_ALLOC) != 0 && (candidate.sh_flags & SHF_EXECINSTR) == 0 &&
+           candidate.sh_size != 0 && vaddr >= candidate.sh_addr &&
+           vaddr - candidate.sh_addr <= candidate.sh_size;
+  });
+  if (section == sections.end())
+    return std::nullopt;
+  return AllocatedDataSectionAddress{
+      .section_index = static_cast<size_t>(section - sections.begin()),
+      .section_offset = vaddr - section->sh_addr,
+  };
+}
+
+std::optional<AllocatedDataSectionAddress>
+resolve_pc_relative_data_section_address(std::span<const Elf64_Shdr> sections, uint64_t vaddr,
+                                         uint64_t text_vaddr, uint64_t text_size) {
+  if (vaddr >= text_vaddr && vaddr - text_vaddr < text_size)
+    return std::nullopt;
+  return resolve_allocated_data_section_address(sections, vaddr);
+}
+
 CodeObjectPatcher::CodeObjectPatcher(const AmdGpuCodeObject &obj)
     : image_(obj.image_data(), obj.image_data() + obj.image_size()), text_offset_(0), text_size_(0),
       text_vaddr_(0), text_tail_size_(0) {
   auto &text_secs = obj.text_sections();
   if (!text_secs.empty()) {
+    text_section_index_ = text_secs[0]->sectionHeaderIndex();
     text_offset_ = text_secs[0]->sectionOffset();
     text_size_ = text_secs[0]->size();
     text_vaddr_ = text_secs[0]->vaddr();
@@ -796,6 +1060,19 @@ std::span<const uint8_t> CodeObjectPatcher::text_bytes() const {
   return {image_.data() + text_offset_, text_size_};
 }
 
+std::vector<Elf64_Shdr> CodeObjectPatcher::section_headers() const {
+  if (image_.size() < sizeof(Elf64_Ehdr))
+    return {};
+  Elf64_Ehdr header{};
+  std::memcpy(&header, image_.data(), sizeof(header));
+  const uint64_t table_size = static_cast<uint64_t>(header.e_shnum) * sizeof(Elf64_Shdr);
+  if (header.e_shentsize != sizeof(Elf64_Shdr) || header.e_shoff > image_.size() ||
+      table_size > image_.size() - header.e_shoff) {
+    return {};
+  }
+  return read_section_headers(image_, header);
+}
+
 bool CodeObjectPatcher::has_relocations_within_text() const {
   if (text_size_ == 0)
     return false;
@@ -804,7 +1081,8 @@ bool CodeObjectPatcher::has_relocations_within_text() const {
 
   auto header = *reinterpret_cast<const Elf64_Ehdr *>(image_.data());
   const auto shdrs = read_section_headers(image_, header);
-  const auto text_index = find_text_section(shdrs, text_offset_, text_size_);
+  const auto text_index =
+      validated_text_section(shdrs, text_section_index_, text_offset_, text_size_);
   if (!text_index)
     return false;
 
@@ -835,15 +1113,20 @@ bool CodeObjectPatcher::has_relocations_within_text() const {
     for (size_t i = 0; i < count; ++i) {
       const uint64_t offset = relocs.sh_offset + i * entsize;
       uint64_t r_offset = 0;
+      uint64_t r_info = 0;
       if (is_rela) {
         Elf64_Rela rela{};
         std::memcpy(&rela, image_.data() + offset, sizeof(rela));
         r_offset = rela.r_offset;
+        r_info = rela.r_info;
       } else {
         Elf64_Rel rel{};
         std::memcpy(&rel, image_.data() + offset, sizeof(rel));
         r_offset = rel.r_offset;
+        r_info = rel.r_info;
       }
+      if (elf_relocation_is_inert(r_info))
+        continue;
       const bool in_text = is_rel_object
                                ? r_offset < text_size_
                                : (r_offset >= text.sh_addr && r_offset < text.sh_addr + text_size_);
@@ -854,6 +1137,52 @@ bool CodeObjectPatcher::has_relocations_within_text() const {
   return false;
 }
 
+bool CodeObjectPatcher::has_rocr_rejected_none_relocation() const {
+  if (image_.size() < sizeof(Elf64_Ehdr))
+    return false;
+
+  const auto header = *reinterpret_cast<const Elf64_Ehdr *>(image_.data());
+  const auto shdrs = section_headers();
+  if (shdrs.empty())
+    return false;
+
+  for (const Elf64_Shdr &relocs : shdrs) {
+    if (relocs.sh_type != SHT_RELA || relocs.sh_entsize != sizeof(Elf64_Rela) ||
+        relocs.sh_size % sizeof(Elf64_Rela) != 0 ||
+        !image_contains_range(image_.size(), relocs.sh_offset, relocs.sh_size)) {
+      continue;
+    }
+    const RocrRelocationSectionMode section_mode =
+        classify_rocr_relocation_section(header, shdrs, relocs);
+    if (section_mode == RocrRelocationSectionMode::Malformed)
+      continue;
+    const size_t count = relocs.sh_size / sizeof(Elf64_Rela);
+    for (size_t relocation_index = 0; relocation_index < count; ++relocation_index) {
+      Elf64_Rela relocation{};
+      std::memcpy(&relocation,
+                  image_.data() + relocs.sh_offset + relocation_index * sizeof(relocation),
+                  sizeof(relocation));
+      if (classify_rocr_none_relocation(section_mode, relocation.r_info) ==
+          RocrNoneRelocationAction::Rejected) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool CodeObjectPatcher::has_malformed_rocr_relocation_section() const {
+  if (image_.size() < sizeof(Elf64_Ehdr))
+    return false;
+
+  const auto header = *reinterpret_cast<const Elf64_Ehdr *>(image_.data());
+  const auto shdrs = section_headers();
+  return std::ranges::any_of(shdrs, [&](const Elf64_Shdr &section) {
+    return classify_rocr_relocation_section(header, shdrs, section) ==
+           RocrRelocationSectionMode::Malformed;
+  });
+}
+
 bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
   if (text_size_ == 0)
     return false;
@@ -862,7 +1191,8 @@ bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
 
   auto header = *reinterpret_cast<const Elf64_Ehdr *>(image_.data());
   const auto shdrs = read_section_headers(image_, header);
-  const auto text_index = find_text_section(shdrs, text_offset_, text_size_);
+  const auto text_index =
+      validated_text_section(shdrs, text_section_index_, text_offset_, text_size_);
   if (!text_index)
     return false;
 
@@ -874,8 +1204,8 @@ bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
   const uint64_t text_addr_hi = text.sh_addr + text_size_;
 
   // Return the referenced symbol only when it is defined in .text. Keeping the
-  // complete symbol is necessary because ordinary named symbols and STT_SECTION
-  // symbols require different relocation strategies.
+  // complete symbol is necessary because the shared relocation policy also
+  // classifies how the runtime derives its address.
   auto text_symbol = [&](const Elf64_Shdr &symtab, uint32_t sym_index) -> std::optional<Elf64_Sym> {
     if (symtab.sh_entsize != sizeof(Elf64_Sym))
       return std::nullopt;
@@ -896,42 +1226,49 @@ bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
       continue;
     if (!image_contains_range(image_.size(), relocs.sh_offset, relocs.sh_size))
       continue;
+    const bool is_rela = relocs.sh_type == SHT_RELA;
+    const size_t entsize = is_rela ? sizeof(Elf64_Rela) : sizeof(Elf64_Rel);
+    if (relocs.sh_entsize != entsize || relocs.sh_size % entsize != 0)
+      continue;
+    const RocrRelocationSectionMode section_mode =
+        classify_rocr_relocation_section(header, shdrs, relocs);
+    if (section_mode == RocrRelocationSectionMode::Malformed)
+      continue;
     // sh_link names the symbol table this relocation section indexes into.
     if (relocs.sh_link >= shdrs.size())
       continue;
     const Elf64_Shdr &symtab = shdrs[relocs.sh_link];
-    const bool is_rela = relocs.sh_type == SHT_RELA;
-    const size_t entsize = is_rela ? sizeof(Elf64_Rela) : sizeof(Elf64_Rel);
-    if (relocs.sh_entsize != entsize)
-      continue;
     const size_t count = relocs.sh_size / entsize;
     for (size_t i = 0; i < count; ++i) {
       const uint64_t offset = relocs.sh_offset + i * entsize;
+      Elf64_Rela rela{};
+      uint64_t r_offset = 0;
       uint64_t r_info = 0;
-      int64_t r_addend = 0;
       if (is_rela) {
-        Elf64_Rela rela{};
         std::memcpy(&rela, image_.data() + offset, sizeof(rela));
+        r_offset = rela.r_offset;
         r_info = rela.r_info;
-        r_addend = rela.r_addend;
       } else {
         Elf64_Rel rel{};
         std::memcpy(&rel, image_.data() + offset, sizeof(rel));
         r_info = rel.r_info;
+        r_offset = rel.r_offset;
       }
+      if (classify_rocr_none_relocation(section_mode, r_info) !=
+          RocrNoneRelocationAction::NotNone) {
+        continue;
+      }
+      if (!elf_relocation_place_is_allocated(header, shdrs, relocs, r_offset))
+        continue;
       const uint32_t sym_index = elf_reloc_sym(r_info);
       if (sym_index != 0) {
         const auto symbol = text_symbol(symtab, sym_index);
         if (!symbol)
           continue;
 
-        // A zero-addend RELA reference to an ordinary text symbol follows the
-        // relocated symbol value written by relocate_text_symbols(). A section
-        // symbol leaves the source offset in the addend, while REL keeps an
-        // implicit addend at the relocation place; neither form can be repaired
-        // safely without interpreting the individual relocation type.
-        if (!is_rela || elf_symbol_type(symbol->st_info) == kElfSymbolTypeSection ||
-            r_addend != 0) {
+        const TextSymbolRelocationAction action =
+            classify_text_symbol_relocation(section_mode, r_info, is_rela, rela.r_addend, *symbol);
+        if (action == TextSymbolRelocationAction::Unsupported) {
           return true;
         }
         continue;
@@ -942,7 +1279,7 @@ bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
       // replace_text() remaps an in-text addend exactly. Other symbol-zero forms
       // provide no generic way to identify a .text target here.
       if (is_rela && elf_reloc_type(r_info) == R_AMDGPU_RELATIVE64) {
-        const uint64_t target = static_cast<uint64_t>(r_addend);
+        const uint64_t target = static_cast<uint64_t>(rela.r_addend);
         if (target >= text_addr_lo && target < text_addr_hi)
           continue;
       }
@@ -951,9 +1288,12 @@ bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
   return false;
 }
 
-bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
-                                     std::span<const TextOffsetRelocation> text_relocations,
-                                     std::span<const PcRelativeDataRelocation> data_relocations) {
+bool CodeObjectPatcher::replace_text(
+    std::span<const uint8_t> new_text, std::span<const TextOffsetRelocation> text_relocations,
+    std::span<const PcRelativeDataRelocation> data_relocations,
+    std::span<const PcRelativeTextRelocation> code_relocations,
+    bool require_every_text_symbol_mapped,
+    const std::unordered_map<uint64_t, uint64_t> *canonical_code_pointer_placement) {
   // Keep fail-closed behavior for callers that assume word-aligned executable
   // sections; accepting a non-word-aligned replacement can break downstream
   // PC-relative patching and branch-distance checks.
@@ -966,15 +1306,22 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
     return false;
   if (!image_contains_range(image_.size(), text_offset_, text_size_))
     return false;
+  if (has_malformed_rocr_relocation_section() || has_rocr_rejected_none_relocation())
+    return false;
   if (!text_relocations.empty() && has_unsupported_relocation_to_text())
+    return false;
+  const auto text_placements =
+      build_text_placement_index(text_size_, new_text.size(), text_relocations);
+  if (!text_placements)
     return false;
 
   auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(image_.data());
   auto header = *ehdr;
-  auto shdrs = read_section_headers(image_, header);
+  auto shdrs = section_headers();
   auto phdrs = read_program_headers(image_, header);
 
-  const auto text_index = find_text_section(shdrs, text_offset_, text_size_);
+  const auto text_index =
+      validated_text_section(shdrs, text_section_index_, text_offset_, text_size_);
   if (!text_index) {
     assert(false && "text section header not found");
     return false;
@@ -995,17 +1342,15 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
         sizeof(uint64_t) > new_text.size() - relocation.target_literal_offset) {
       return false;
     }
-    const auto section = std::ranges::find_if(shdrs, [&](const Elf64_Shdr &candidate) {
-      return (candidate.sh_flags & SHF_ALLOC) != 0 && (candidate.sh_flags & SHF_EXECINSTR) == 0 &&
-             relocation.source_target_vaddr >= candidate.sh_addr &&
-             relocation.source_target_vaddr - candidate.sh_addr < candidate.sh_size;
-    });
-    if (section == shdrs.end())
+    const auto target =
+        resolve_allocated_data_section_address(shdrs, relocation.source_target_vaddr);
+    if (!target)
       return false;
-    resolved_data_relocations.push_back(
-        {.relocation = relocation,
-         .target_section = static_cast<size_t>(section - shdrs.begin()),
-         .target_section_offset = relocation.source_target_vaddr - section->sh_addr});
+    // In a well-formed image, abutting allocated sections lie on the same side of .text and shift
+    // by the same delta below, so either section reconstructs their shared boundary after growth.
+    resolved_data_relocations.push_back({.relocation = relocation,
+                                         .target_section = target->section_index,
+                                         .target_section_offset = target->section_offset});
   }
   const uint64_t old_text_end_file = text_offset_ + text_size_;
   const uint64_t old_text_end_vaddr = text_header.sh_addr + text_size_;
@@ -1050,6 +1395,8 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
     shift_symbols_in_moved_sections(image_, header, shdrs, shift_section_vaddr, padded_file_delta);
     shift_relocation_offsets_in_moved_sections(image_, header, shdrs, shift_section_vaddr,
                                                padded_file_delta);
+    shift_relative_addends_into_moved_sections(image_, header, shdrs, old_text_end_vaddr,
+                                               padded_file_delta);
     adjust_kernel_descriptor_entry_offsets_in_moved_sections(image_, shdrs, shift_section_vaddr,
                                                              padded_file_delta);
 
@@ -1068,8 +1415,9 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
 
   std::memcpy(image_.data() + text_offset_, new_text.data(), new_text.size());
   for (const ResolvedDataRelocation &resolved : resolved_data_relocations) {
+    // Unlike a code target, a data address may be the non-dereferenced end of a [begin, end) range.
     if (resolved.target_section >= shdrs.size() ||
-        resolved.target_section_offset >= shdrs[resolved.target_section].sh_size) {
+        resolved.target_section_offset > shdrs[resolved.target_section].sh_size) {
       return false;
     }
     const uint64_t target_vaddr =
@@ -1086,13 +1434,40 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text,
     std::memcpy(image_.data() + text_offset_ + resolved.relocation.target_literal_offset, &delta,
                 sizeof(delta));
   }
+
+  // A code target needs no section lookup: both ends are offsets in the text just written, so the
+  // literal is their difference. `s_get_pc_i64` leaves the address of the following instruction, so
+  // the distance to make up is measured from one word past the getpc.
+  for (const PcRelativeTextRelocation &relocation : code_relocations) {
+    // Subtract from the size only after proving the offset is inside it: a text shorter than the
+    // field being written would otherwise wrap the subtraction and admit an out-of-bounds write.
+    // The target is a branch destination, so it must be a whole instruction inside the new text.
+    // Allowing it to equal the size would name the byte one past the end, which is not an
+    // instruction and would leave the literal pointing outside `.text`. Being inside the section
+    // is not enough either: an unaligned offset names a byte interior to an instruction, so the
+    // literal would send a transfer into the middle of one.
+    if (relocation.target_getpc_offset > new_text.size() ||
+        sizeof(uint32_t) > new_text.size() - relocation.target_getpc_offset ||
+        relocation.target_literal_offset > new_text.size() ||
+        sizeof(uint64_t) > new_text.size() - relocation.target_literal_offset ||
+        relocation.target_text_offset > new_text.size() ||
+        sizeof(uint32_t) > new_text.size() - relocation.target_text_offset ||
+        relocation.target_text_offset % sizeof(uint32_t) != 0) {
+      return false;
+    }
+    const uint64_t getpc_result = relocation.target_getpc_offset + sizeof(uint32_t);
+    const uint64_t delta = relocation.target_text_offset - getpc_result;
+    std::memcpy(image_.data() + text_offset_ + relocation.target_literal_offset, &delta,
+                sizeof(delta));
+  }
   shdrs[*text_index].sh_size = new_text.size();
-  if (!relocate_text_symbols(image_, header, shdrs, *text_index, text_size_, new_text.size(),
-                             text_relocations)) {
+  if (!relocate_text_symbols(image_, header, shdrs, *text_index, text_size_, *text_placements,
+                             require_every_text_symbol_mapped)) {
     return false;
   }
   if (!relocate_relative_text_addends(image_, header, shdrs, *text_index, text_size_,
-                                      new_text.size(), text_relocations)) {
+                                      new_text.size(), *text_placements,
+                                      canonical_code_pointer_placement)) {
     return false;
   }
   // Instrumentation appends a cave without relocating the original body and
@@ -1127,16 +1502,27 @@ bool CodeObjectPatcher::patch_kernel_descriptor(uint64_t file_offset,
   return true;
 }
 
-bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation &translation,
-                                                            rj_code_arch_t target_arch) {
-  if (!image_contains_range(image_.size(), translation.descriptor_file_offset, sizeof(KD)))
+bool CodeObjectPatcher::set_private_segment_fixed_size(uint64_t descriptor_file_offset,
+                                                       uint32_t bytes) {
+  auto desc = read_kernel_descriptor(image_, descriptor_file_offset);
+  if (!desc)
     return false;
 
-  KD desc;
-  std::memcpy(&desc, image_.data() + translation.descriptor_file_offset, sizeof(desc));
-  apply_kernel_descriptor_resource_translation(desc, translation, target_arch);
+  desc->private_segment_fixed_size = bytes;
+  return write_kernel_descriptor(image_, descriptor_file_offset, *desc);
+}
 
-  std::memcpy(image_.data() + translation.descriptor_file_offset, &desc, sizeof(desc));
+bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation &translation,
+                                                            rj_code_arch_t target_arch) {
+  auto desc = read_kernel_descriptor(image_, translation.descriptor_file_offset);
+  if (!desc)
+    return false;
+
+  if (!apply_kernel_descriptor_resource_translation(*desc, translation, target_arch))
+    return false;
+
+  if (!write_kernel_descriptor(image_, translation.descriptor_file_offset, *desc))
+    return false;
   if (!redirect_kernel_entry(translation.descriptor_file_offset, translation.entry_text_offset,
                              translation.target_entry_text_offset))
     return false;
@@ -1159,7 +1545,8 @@ CodeObjectPatcher::append_sidecar_descriptor_translations(
   auto shdrs = read_section_headers(image_, header);
   auto phdrs = read_program_headers(image_, header);
 
-  const auto text_index = find_text_section(shdrs, text_offset_, text_size_);
+  const auto text_index =
+      validated_text_section(shdrs, text_section_index_, text_offset_, text_size_);
   if (!text_index)
     return std::nullopt;
 
@@ -1197,7 +1584,8 @@ CodeObjectPatcher::append_sidecar_descriptor_translations(
     static_assert(sizeof(KD) == 64, "sidecar descriptor snapshot size mismatch");
     KD desc{};
     std::memcpy(&desc, translation.source_descriptor_bytes.data(), sizeof(desc));
-    apply_kernel_descriptor_resource_translation(desc, translation, target_arch);
+    if (!apply_kernel_descriptor_resource_translation(desc, translation, target_arch))
+      return std::nullopt;
     if (!set_kernel_entry_from_vaddr(desc, descriptor_vaddr, text_vaddr_,
                                      translation.target_entry_text_offset))
       return std::nullopt;

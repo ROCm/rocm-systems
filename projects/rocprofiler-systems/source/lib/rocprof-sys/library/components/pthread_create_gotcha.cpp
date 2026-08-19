@@ -176,14 +176,15 @@ pthread_create_gotcha::wrapper::operator()() const
         // execute the original function
         return m_routine(m_arg);
     }
-    push_thread_state(ThreadState::Internal);
+
+    state::thread::push(state::thread::Internal);
 
     std::int64_t _tid         = -1;
     void*        _ret         = nullptr;
     auto         _is_sampling = false;
     auto         _bundle      = std::shared_ptr<bundle_t>{};
     auto         _signals     = std::set<int>{};
-    auto         _coverage    = (get_mode() == Mode::Coverage);
+    auto         _coverage    = (get_mode() == state::process::Mode::Coverage);
     const auto&  _parent_info = thread_info::get(m_config.parent_tid, InternalTID);
     const auto&  _info        = thread_info::init(m_config.offset);
     if(!_info)
@@ -192,7 +193,7 @@ pthread_create_gotcha::wrapper::operator()() const
         return m_routine(m_arg);
     }
     auto _dtor = [&]() {
-        set_thread_state(ThreadState::Internal);
+        state::thread::set(state::thread::Internal);
         if(_is_sampling)
         {
             if(m_config.enable_causal)
@@ -209,8 +210,9 @@ pthread_create_gotcha::wrapper::operator()() const
 
         if(_tid >= 0)
         {
-            auto _active = (get_state() == ::rocprofsys::State::Active &&
-                            bundles != nullptr && bundles_mutex != nullptr);
+            auto _active =
+                (state::process::get() == ::rocprofsys::state::process::Active &&
+                 bundles != nullptr && bundles_mutex != nullptr);
             if(!_active) return;
             thread_info::set_stop(comp::wall_clock::record());
             auto& _thr_bundle = thread_bundle_data_t::instance();
@@ -225,8 +227,8 @@ pthread_create_gotcha::wrapper::operator()() const
         }
     };
 
-    auto _active = (get_state() == ::rocprofsys::State::Active && bundles != nullptr &&
-                    bundles_mutex != nullptr);
+    auto _active = (state::process::get() == ::rocprofsys::state::process::Active &&
+                    bundles != nullptr && bundles_mutex != nullptr);
 
     if(m_config.offset)
     {
@@ -252,7 +254,7 @@ pthread_create_gotcha::wrapper::operator()() const
         }
         if(bundles && bundles_mutex)
         {
-            std::unique_lock<std::mutex> _lk{ *bundles_mutex };
+            const std::unique_lock<std::mutex> _lk{ *bundles_mutex };
             _bundle = bundles->emplace(_tid, std::make_shared<bundle_t>("start_thread"))
                           .first->second;
         }
@@ -289,21 +291,21 @@ pthread_create_gotcha::wrapper::operator()() const
     if(m_config.promise) m_config.promise->set_value();
 
     // Internal -> Enabled
-    pop_thread_state();
+    state::thread::pop();
 
-    push_thread_state(ThreadState::Enabled);
+    state::thread::push(state::thread::Enabled);
 
     // execute the original function
     _ret = m_routine(m_arg);
 
-    if(get_state() < ::rocprofsys::State::Finalized)
+    if(state::process::get() < ::rocprofsys::state::process::Finalized)
     {
-        pop_thread_state();
+        state::thread::pop();
 
         // execute the destructor actions
         _dtor();
 
-        set_thread_state(ThreadState::Completed);
+        state::thread::set(state::thread::Completed);
     }
 
     return _ret;
@@ -326,7 +328,7 @@ pthread_create_gotcha::wrapper::wrap(void* _arg)
     }
 
     static thread_local auto _remover = scope::destructor{ []() {
-        if(get_state() >= rocprofsys::State::Finalized) return;
+        if(state::process::get() >= rocprofsys::state::process::Finalized) return;
         // remove the handle even if original function aborts
         auto                 _lk      = locking::atomic_lock{ native_handles_mutex };
         native_handles.erase(pthread_self());
@@ -418,9 +420,9 @@ pthread_create_gotcha::shutdown()
             // skip sending signals to internal threads
             if(internal_native_handles.count(itr) != 0) continue;
 
-            bool                         has_bundle = false;
-            std::unique_lock<std::mutex> _bundle_lk{ *bundles_mutex };
-            const auto&                  thread_info = thread_info::get(itr);
+            bool                               has_bundle = false;
+            const std::unique_lock<std::mutex> _bundle_lk{ *bundles_mutex };
+            const auto&                        thread_info = thread_info::get(itr);
             // Check if this thread has a corresponding bundle entry
             // With the new gotcha update more external threads are tracked
             // but we only want to send signals to threads that have bundles
@@ -474,7 +476,7 @@ pthread_create_gotcha::shutdown()
     _ndangling -= shutdown_signals_delivered;
 
     // stop any remaining dangling bundles on this thread
-    std::unique_lock<std::mutex> _lk{ *bundles_mutex };
+    const std::unique_lock<std::mutex> _lk{ *bundles_mutex };
     for(auto itr : *bundles)
     {
         if(itr.second)
@@ -502,8 +504,8 @@ pthread_create_gotcha::shutdown(std::int64_t _tid)
 
     if(!bundles_mutex || !bundles) return;
 
-    std::unique_lock<std::mutex> _lk{ *bundles_mutex };
-    auto                         itr = bundles->find(_tid);
+    const std::unique_lock<std::mutex> _lk{ *bundles_mutex };
+    auto                               itr = bundles->find(_tid);
     if(itr != bundles->end())
     {
         if(itr->second) stop_bundle(*itr->second, itr->first);
@@ -517,13 +519,13 @@ std::mutex pthread_create_gotcha::s_mutex = {};
 void
 pthread_create_gotcha::pause()
 {
-    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    const std::scoped_lock<std::mutex> _lk{ s_mutex };
     pthread_create_gotcha_t::set_ready(false);
 }
 void
 pthread_create_gotcha::resume()
 {
-    std::scoped_lock<std::mutex> _lk{ s_mutex };
+    const std::scoped_lock<std::mutex> _lk{ s_mutex };
     pthread_create_gotcha_t::set_ready(true);
 }
 
@@ -557,7 +559,7 @@ is_rocm_internal_thread(void* func_ptr)
         return false;
     }
 
-    std::string_view lib_name{ info.dli_fname };
+    const std::string_view lib_name{ info.dli_fname };
 
     for(const auto* lib : rocm_internal_libraries)
     {
@@ -587,24 +589,24 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
         warn_thread_limit_once();
         return (*m_wrappee)(thread, attr, func, arg);
     }
-    auto        _thr_state    = get_thread_state();
-    auto        _glob_state   = get_state();
-    auto        _mode         = get_mode();
-    auto        _disabled     = (_thr_state == ThreadState::Disabled);
-    auto        _enabled      = (_thr_state == ThreadState::Enabled);
-    auto        _bundle       = std::optional<bundle_t>{};
-    auto        _sample_child = sampling_enabled_on_child_threads();
-    auto        _active = (_glob_state == ::rocprofsys::State::Active && !_disabled);
-    const auto& _info   = thread_info::init(!_active || !_sample_child || _disabled);
+    auto _thr_state    = state::thread::get();
+    auto _glob_state   = state::process::get();
+    auto _mode         = get_mode();
+    auto _disabled     = (_thr_state == state::thread::Disabled);
+    auto _enabled      = (_thr_state == state::thread::Enabled);
+    auto _bundle       = std::optional<bundle_t>{};
+    auto _sample_child = sampling_enabled_on_child_threads();
+    auto _active = (_glob_state == ::rocprofsys::state::process::Active && !_disabled);
+    const auto& _info = thread_info::init(!_active || !_sample_child || _disabled);
     if(!_info)
     {
         // Untracked parent threads cannot safely create wrapped/profiled child threads.
         return (*m_wrappee)(thread, attr, func, arg);
     }
 
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
+    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
-    auto _coverage     = (_mode == Mode::Coverage);
+    auto _coverage     = (_mode == state::process::Mode::Coverage);
     auto _use_sampling = config::get_use_sampling();
     auto _use_causal   = config::get_use_causal();
     auto _offset       = (!_enabled || !_active || _info->is_offset);
@@ -614,7 +616,7 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     auto _enable_causal =
         (_use_causal && _sample_child && _active && !_coverage && !_offset);
 
-    static bool debug_threading_get_id =
+    static const bool debug_threading_get_id =
         get_env<bool>(TIMEMORY_SETTINGS_PREFIX "DEBUG_THREADING_GET_ID", false);
 
     if(debug_threading_get_id)
@@ -624,12 +626,12 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
             "active={}, "
             "coverage={}, use_causal={}, use_sampling={}, sample_children={}, tid={}, "
             "use_bundle={}, enable_causal={}, enable_sampling={}, thread_info={}...",
-            std::to_string(_glob_state), std::to_string(_thr_state),
-            std::to_string(_mode), std::to_string(_active), std::to_string(_coverage),
-            std::to_string(_use_causal), std::to_string(_use_sampling),
-            std::to_string(_sample_child), std::to_string(_tid),
-            std::to_string(_use_bundle), std::to_string(_enable_causal),
-            std::to_string(_enable_sampling), _info->as_string());
+            _glob_state, _thr_state, _mode, std::to_string(_active),
+            std::to_string(_coverage), std::to_string(_use_causal),
+            std::to_string(_use_sampling), std::to_string(_sample_child),
+            std::to_string(_tid), std::to_string(_use_bundle),
+            std::to_string(_enable_causal), std::to_string(_enable_sampling),
+            _info->as_string());
 
         std::stringstream _backtrace_ss;
         timemory_print_demangled_backtrace<8>(_backtrace_ss, std::string{},
@@ -653,13 +655,13 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
         get_cpu_cid_stack();
     }
 
-    set_thread_state(ThreadState::Disabled);
+    state::thread::set(state::thread::Disabled);
     auto _blocked = get_sampling_signals();
     auto _promise = (_active) ? std::make_shared<std::promise<void>>() : promise_t{};
     auto _config =
         wrapper_config{ _enable_causal, _enable_sampling, _offset, _tid, _promise };
     auto* _wrap = new wrapper{ func, arg, _config };
-    set_thread_state(ThreadState::Internal);
+    state::thread::set(state::thread::Internal);
 
     // block the signals in entire process
     if(_enable_sampling && !_blocked.empty())

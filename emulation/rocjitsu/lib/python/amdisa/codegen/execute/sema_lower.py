@@ -272,12 +272,12 @@ def _vcc_write_stmt(ctx: LoweringContext) -> str:
     if ctx.vcc_dst and ctx.vcc_dst != '__vcc__':
         return _write_vcc_mask_to_explicit_dst(ctx.vcc_dst)
     if ctx.vcc_dst == '__vcc__':
-        return 'wf.set_vcc(vcc);'
+        return 'wf.set_vcc_mask(vcc);'
     if ctx.operand_map:
         dst = ctx.operand_map.dst(0)
         if dst:
             return _write_vcc_mask_to_explicit_dst(dst.name)
-    return 'wf.set_vcc(vcc);'
+    return 'wf.set_vcc_mask(vcc);'
 
 
 def _indent(ctx: LoweringContext) -> str:
@@ -1702,6 +1702,27 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
 
     args = [_lower_expr(c, ctx) for c in node.children[1:]]
     args_str = ', '.join(args)
+
+    pseudo_scalar_operations = {
+        'exp2': 'EXP2',
+        'log2': 'LOG2',
+        'rcp': 'RCP',
+        'rsq': 'RSQ',
+        'sqrt': 'SQRT',
+    }
+    if len(args) == 1 and callee.startswith('pseudo_scalar_'):
+        precision = callee.rsplit('_', 1)[-1]
+        operation = callee.removeprefix('pseudo_scalar_').removesuffix(f'_{precision}')
+        operation_name = pseudo_scalar_operations[operation]
+        mode_suffix = 'f32' if precision == 'f32' else 'f16_f64'
+        fp16_ovfl = ', wf.fp16_ovfl()' if precision == 'f16' else ''
+        return (
+            f'amdgpu::pseudo_scalar::execute_{precision}('
+            f'amdgpu::pseudo_scalar::Operation::{operation_name}, {args[0]}, '
+            f'(inst_.abs & 1u) != 0, (inst_.neg & 1u) != 0, '
+            f'wf.fp_round_mode_{mode_suffix}(), wf.fp_denorm_mode_{mode_suffix}(), '
+            f'inst_.omod, inst_.clamp{fp16_ovfl})'
+        )
 
     if len(args) == 1 and callee in (
         'cvt_f32_fp8',

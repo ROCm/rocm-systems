@@ -720,10 +720,10 @@ class TestDeriveScalarMovrel:
 
 
 class TestDeriveScalarSplitBarrier:
-    def test_barrier_wait_derives_current_workgroup_barrier_model(self):
+    def test_barrier_wait_derives_barrier_wait_model(self):
         sem = derive_semantics('S_BARRIER_WAIT', 'ENC_SOPP')
         assert sem is not None
-        assert sem.semantic_class == 'barrier'
+        assert sem.semantic_class == 'scalar_barrier_wait'
         assert sem.sets_scc is None
 
     def test_get_barrier_state_derives_idle_state_read(self):
@@ -734,19 +734,30 @@ class TestDeriveScalarSplitBarrier:
         assert sem.sets_scc is None
 
     @pytest.mark.parametrize(
-        'name',
+        ('name', 'semantic_class', 'operation'),
         [
-            'S_BARRIER_SIGNAL',
-            'S_BARRIER_SIGNAL_ISFIRST',
-            'S_BARRIER_INIT',
-            'S_BARRIER_JOIN',
-            'S_WAKEUP_BARRIER',
+            ('S_BARRIER_SIGNAL', 'scalar_barrier_signal', 'signal'),
+            ('S_BARRIER_SIGNAL_ISFIRST', 'scalar_barrier_signal', 'signal_isfirst'),
+            ('S_BARRIER_INIT', 'scalar_barrier_init', None),
+            ('S_BARRIER_JOIN', 'scalar_barrier_join', None),
+            ('S_WAKEUP_BARRIER', 'true_nop', None),
         ],
     )
-    def test_named_barrier_ops_derive_current_noop_model(self, name):
+    def test_named_barrier_ops_derive_execution_model(
+        self, name, semantic_class, operation
+    ):
         sem = derive_semantics(name, 'ENC_SOP1')
         assert sem is not None
-        assert sem.semantic_class == 'true_nop'
+        assert sem.semantic_class == semantic_class
+        assert sem.operation == operation
+        if name == 'S_BARRIER_SIGNAL_ISFIRST':
+            assert sem.sets_scc == 'nonzero'
+
+    def test_barrier_leave_derives_execution_model(self):
+        sem = derive_semantics('S_BARRIER_LEAVE', 'ENC_SOPP')
+        assert sem is not None
+        assert sem.semantic_class == 'scalar_barrier_leave'
+        assert sem.sets_scc == 'nonzero'
 
 
 class TestDeriveVectorUnary:
@@ -1476,6 +1487,42 @@ class TestDeriveVectorUnary:
             assert 'util::f32_to_bf16(' not in cpp
 
 
+class TestDerivePseudoScalarUnary:
+    @pytest.mark.parametrize(
+        ('name', 'operation'),
+        [
+            ('V_S_EXP_F32', 'exp2'),
+            ('V_S_LOG_F32', 'log2'),
+            ('V_S_RCP_F32', 'rcp'),
+            ('V_S_RSQ_F32', 'rsq'),
+            ('V_S_SQRT_F32', 'sqrt'),
+            ('V_S_EXP_F16', 'exp2'),
+            ('V_S_LOG_F16', 'log2'),
+            ('V_S_RCP_F16', 'rcp'),
+            ('V_S_RSQ_F16', 'rsq'),
+            ('V_S_SQRT_F16', 'sqrt'),
+        ],
+    )
+    def test_ignores_exec(self, name, operation):
+        sem = derive_semantics(name, 'ENC_VOP3')
+        assert sem is not None
+        assert sem.semantic_class == 'pseudo_scalar_unary'
+        assert sem.operation == operation
+
+        block = derive_sema_block(sem)
+        assert block is not None
+        assert block.pragma == ExecModel.SCALAR
+
+        cpp = lower_sema_block(block)
+        assert 'wf.exec()' not in cpp
+        assert 'if (exec != 0)' not in cpp
+        assert 'for (uint32_t lane = 0' not in cpp
+        assert 'write_scalar' in cpp
+        assert 'amdgpu::pseudo_scalar::execute_' in cpp
+        assert 'wf.fp_round_mode_' in cpp
+        assert 'wf.fp_denorm_mode_' in cpp
+
+
 class TestDeriveVectorBinop:
     def test_add_f32(self):
         sem = _FakeSem('V_ADD_F32', 'vector_binop', 'add', 'f32')
@@ -2191,7 +2238,7 @@ class TestDeriveDsRead:
             ('DS_LOAD_TR_B64', 'ds_read_tr_b8', 2, 3),
             ('DS_LOAD_TR16_B128', 'ds_read_tr_b16', 4, 4),
             ('DS_LOAD_TR_B128', 'ds_read_tr_b16', 4, 4),
-            ('DS_READ_B64_TR_B16', 'ds_read_tr_b16', 2, 4),
+            ('DS_READ_B64_TR_B16', 'ds_read_tr_b16', 2, 5),
         ],
     )
     def test_gfx1250_ds_transpose_loads(
@@ -2814,6 +2861,7 @@ class TestDeriveAllClassesLower:
         }
         for cls_name in sorted(_DERIVE_REGISTRY.keys()):
             operation = {
+                'pseudo_scalar_unary': 'sqrt',
                 'scalar_saveexec': 'and',
                 'scalar_wrexec': 'andn1',
             }.get(cls_name, 'add')
@@ -2872,3 +2920,146 @@ class TestDeriveFingerprinting:
         dual_block = derive_sema_block(dual)
 
         assert fingerprint(single_block) != fingerprint(dual_block)
+
+
+class TestDeriveBufferFormat:
+    """Buffer/typed-buffer FORMAT load/store classification.
+
+    RDNA3+ renames these to a ``D16[_HI]_FORMAT_*`` ordering; the derivation
+    normalizes it back to the legacy ``FORMAT_D16[_HI]_*`` ordering.
+
+    Non-D16 FORMAT (one dword per component) executes correctly and keeps the
+    executable ``buffer_load``/``tbuffer_load`` classes. Packed D16 FORMAT (two
+    16-bit components per VGPR) is not modeled by the memory pipeline, so it is
+    classified into the non-executable ``buffer_{load,store}_format_d16`` classes
+    that carry only the partial-def metadata for liveness.
+    """
+
+    def test_untyped_format_load_is_buffer_load(self):
+        sem = derive_semantics('BUFFER_LOAD_FORMAT_X', 'ENC_MUBUF')
+        assert sem is not None
+        assert sem.semantic_class == 'buffer_load'
+        assert (sem.elem_size, sem.num_elems) == (4, 1)
+
+    def test_typed_format_load_is_tbuffer_load(self):
+        sem = derive_semantics('TBUFFER_LOAD_FORMAT_XYZW', 'ENC_MTBUF')
+        assert sem is not None
+        assert sem.semantic_class == 'tbuffer_load'
+        assert (sem.elem_size, sem.num_elems) == (4, 4)
+
+    def test_d16_format_load_is_non_executable_metadata_class(self):
+        sem = derive_semantics('BUFFER_LOAD_FORMAT_D16_X', 'ENC_MUBUF')
+        assert sem is not None
+        assert sem.semantic_class == 'buffer_load_format_d16'
+
+    def test_d16_format_store_is_non_executable_metadata_class(self):
+        sem = derive_semantics('BUFFER_STORE_FORMAT_D16_X', 'ENC_MUBUF')
+        assert sem is not None
+        assert sem.semantic_class == 'buffer_store_format_d16'
+
+    def test_non_d16_format_store_stays_executable(self):
+        sem = derive_semantics('BUFFER_STORE_FORMAT_XYZW', 'ENC_MUBUF')
+        assert sem is not None
+        assert sem.semantic_class == 'buffer_store'
+        assert (sem.elem_size, sem.num_elems) == (4, 4)
+
+    def test_single_component_d16_is_partial_def(self):
+        sem = derive_semantics('BUFFER_LOAD_FORMAT_D16_X', 'ENC_MUBUF')
+        assert sem.num_elems == 1
+        assert (sem.num_elems * sem.elem_size) % 4 != 0
+        assert sem.d16_lo and not sem.d16_hi
+
+    def test_d16_hi_component_sets_hi_flag(self):
+        sem = derive_semantics('BUFFER_LOAD_FORMAT_D16_HI_X', 'ENC_MUBUF')
+        assert sem.num_elems == 1
+        assert sem.d16_hi and not sem.d16_lo
+
+    def test_multi_component_d16_is_not_single_element(self):
+        sem = derive_semantics('BUFFER_LOAD_FORMAT_D16_XYZW', 'ENC_MUBUF')
+        assert sem.num_elems == 4
+
+    def test_rdna4_typed_d16_load_under_vbuffer_is_partial_def(self):
+        # RDNA4 folds typed buffers into ENC_VBUFFER (routed to _derive_mubuf),
+        # which previously only matched BUFFER_ and left TBUFFER_ as 'nop' with
+        # no preserved-destination use. It must now carry the partial-def metadata.
+        sem = derive_semantics('TBUFFER_LOAD_FORMAT_D16_X', 'ENC_VBUFFER')
+        assert sem is not None
+        assert sem.semantic_class == 'buffer_load_format_d16'
+        assert sem.num_elems == 1
+        assert sem.d16_lo and not sem.d16_hi
+
+    def test_typed_non_d16_load_under_vbuffer_stays_nop(self):
+        sem = derive_semantics('TBUFFER_LOAD_FORMAT_XYZW', 'ENC_VBUFFER')
+        assert sem is not None
+        assert sem.semantic_class == 'nop'
+
+    @pytest.mark.parametrize(
+        'legacy,rdna_ordered,enc',
+        [
+            ('BUFFER_LOAD_FORMAT_D16_X', 'BUFFER_LOAD_D16_FORMAT_X', 'ENC_VBUFFER'),
+            (
+                'BUFFER_LOAD_FORMAT_D16_HI_X',
+                'BUFFER_LOAD_D16_HI_FORMAT_X',
+                'ENC_VBUFFER',
+            ),
+            (
+                'TBUFFER_LOAD_FORMAT_D16_XYZW',
+                'TBUFFER_LOAD_D16_FORMAT_XYZW',
+                'ENC_MTBUF',
+            ),
+        ],
+    )
+    def test_rdna3plus_ordering_matches_legacy(self, legacy, rdna_ordered, enc):
+        legacy_sem = derive_semantics(legacy, enc)
+        rdna_sem = derive_semantics(rdna_ordered, enc)
+        assert rdna_sem is not None
+        assert rdna_sem.semantic_class == legacy_sem.semantic_class
+        assert rdna_sem.num_elems == legacy_sem.num_elems
+        assert rdna_sem.elem_size == legacy_sem.elem_size
+        assert rdna_sem.d16_lo == legacy_sem.d16_lo
+        assert rdna_sem.d16_hi == legacy_sem.d16_hi
+
+    def test_plain_buffer_load_unaffected(self):
+        sem = derive_semantics('BUFFER_LOAD_DWORDX4', 'ENC_MUBUF')
+        assert sem.semantic_class == 'buffer_load'
+        assert (sem.elem_size, sem.num_elems) == (4, 4)
+        assert not sem.d16_lo and not sem.d16_hi
+
+
+class TestDeriveFlatLoadD16:
+    """GLOBAL/SCRATCH D16 loads share the FLAT 'flat_load' classification.
+
+    They decode into separate generated files (vglobal.cpp / vscratch.cpp) from
+    FLAT (vflat.cpp), so confirm all three segments derive the same partial-def
+    shape (single sub-dword element with a d16 half flag). This is what
+    _d16_load_reads_dst() keys on to model the preserved-destination read.
+    """
+
+    @pytest.mark.parametrize(
+        'name,enc',
+        [
+            ('FLAT_LOAD_SHORT_D16', 'ENC_FLAT'),
+            ('GLOBAL_LOAD_SHORT_D16', 'ENC_VGLOBAL'),
+            ('SCRATCH_LOAD_SHORT_D16', 'ENC_VSCRATCH'),
+        ],
+    )
+    def test_short_d16_load_is_partial_flat_load(self, name, enc):
+        sem = derive_semantics(name, enc)
+        assert sem is not None
+        assert sem.semantic_class == 'flat_load'
+        assert sem.num_elems == 1
+        assert (sem.num_elems * sem.elem_size) % 4 != 0
+        assert sem.d16_lo and not sem.d16_hi
+
+    @pytest.mark.parametrize(
+        'name,enc',
+        [
+            ('GLOBAL_LOAD_SHORT_D16_HI', 'ENC_VGLOBAL'),
+            ('GLOBAL_LOAD_D16_HI_B16', 'ENC_VGLOBAL'),
+        ],
+    )
+    def test_d16_hi_variant_sets_hi_flag(self, name, enc):
+        sem = derive_semantics(name, enc)
+        assert sem is not None
+        assert sem.semantic_class == 'flat_load'
+        assert sem.d16_hi and not sem.d16_lo

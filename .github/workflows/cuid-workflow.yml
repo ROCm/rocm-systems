@@ -1,0 +1,158 @@
+name: CUID CI
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'projects/cuid/**'
+      - '.github/workflows/cuid-workflow.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  DEBCONF_NONINTERACTIVE_SEEN: true
+  BUILD_TYPE: Release
+  ROCM_DIR: /opt/rocm
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    runs-on:
+      - self-hosted
+      - ${{ vars.RUNNER_TYPE }}
+    continue-on-error: true
+    strategy:
+      max-parallel: 10
+      matrix:
+        os:
+          - Ubuntu20
+          - Ubuntu22
+          - Debian10
+          - SLES
+          - RHEL8
+          - RHEL9
+          - RHEL10
+          - AzureLinux3
+          - AlmaLinux8
+    container:
+      image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
+      options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set Project Directory
+        run: |
+          # Find the directory containing the main CMakeLists.txt for CUID
+          # Prioritize finding it in projects/cuid
+          TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/cuid/CMakeLists.txt" -exec dirname {} \;)
+
+          if [ -z "$TARGET_DIR" ]; then
+            echo "Could not find CMakeLists.txt in projects/cuid. Searching workspace..."
+            TARGET_DIR=$(find $GITHUB_WORKSPACE -name "CMakeLists.txt" | grep "projects/cuid" | head -n 1 | xargs dirname)
+          fi
+
+          if [ -z "$TARGET_DIR" ]; then
+             echo "Could not find CMakeLists.txt for CUID."
+             exit 1
+          fi
+
+          echo "PROJECT_DIR=$TARGET_DIR" >> $GITHUB_ENV
+
+      - name: Build and Install OpenSSL 3.0 (if needed)
+        id: openssl
+        run: |
+          set -e
+
+          # Check OpenSSL version
+          OPENSSL_VER=$(openssl version | awk '{print $2}')
+          echo "Current OpenSSL version: $OPENSSL_VER"
+          if [[ "$OPENSSL_VER" != 3.* ]]; then
+             echo "Installing OpenSSL 3.0..."
+
+             # Install build tools
+             if command -v apt-get &> /dev/null; then
+                 apt-get update
+                 apt-get install -y wget build-essential zlib1g-dev perl
+             elif command -v dnf &> /dev/null; then
+                 dnf install -y wget make gcc perl zlib-devel perl-core
+             elif command -v zypper &> /dev/null; then
+                 zypper install -y wget make gcc perl zlib-devel perl-core
+             fi
+
+             cd /tmp
+             wget https://github.com/openssl/openssl/releases/download/openssl-3.0.21/openssl-3.0.21.tar.gz
+             echo "617e29af8e421f46649484a4937e48c685e47f46488167c982f88bc4ec1d522f  openssl-3.0.21.tar.gz" | sha256sum -c -
+             tar -xzvf openssl-3.0.21.tar.gz
+             cd openssl-3.0.21
+             ./config
+             make -j $(nproc)
+             make install
+             ldconfig
+             echo "OPENSSL_ROOT_DIR=/usr/local" >> $GITHUB_ENV
+          else
+             echo "OpenSSL 3.0+ already installed."
+          fi
+
+      - name: Build and Install CUID
+        run: |
+          set -e
+          echo 'Building on ${{ matrix.os }}'
+
+          # Ensure build directory exists
+          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
+          rm -rf $BUILD_FOLDER
+          mkdir -p $BUILD_FOLDER
+          cd $BUILD_FOLDER
+
+          # Configure
+          cmake ${{ env.PROJECT_DIR }} -DOPENSSL_ROOT_DIR=${{ env.OPENSSL_ROOT_DIR }} -DBUILD_TESTS=ON -DBUILD_DAEMON=OFF
+
+          # Build
+          make -j $(nproc)
+
+          # Install
+          # This requires sudo or root, container runs as root
+          make install
+
+          # run post install step
+          /opt/rocm/core/share/amdcuid/amdcuid_postinst.sh
+
+      - name: Run CUID Tests
+        run: |
+          set -e
+          echo 'Running CUID tests on ${{ matrix.os }}'
+
+          OUTPUT_DIR="/tmp/test-results-${{ matrix.os }}"
+          mkdir -p $OUTPUT_DIR
+          TEST_LOG="$OUTPUT_DIR/amdcuid_test.log"
+
+          # Start daemon if present (daemon is not built in this workflow).
+          if [ -x /opt/rocm/core/bin/amdcuid_daemon ]; then
+            /opt/rocm/core/bin/amdcuid_daemon &
+          fi
+          # Run the test binary
+          if /opt/rocm/core/share/amdcuid/tests/amdcuid_test > $TEST_LOG 2>&1; then
+             echo "CUID tests passed"
+          else
+             echo "CUID tests failed"
+             cat $TEST_LOG
+             exit 1
+          fi
+
+      - name: Display Test Results
+        if: always()
+        run: |
+          echo "Displaying CUID test results for ${{ matrix.os }}"
+          cat /tmp/test-results-${{ matrix.os }}/amdcuid_test.log || echo "No CUID test results found for ${{ matrix.os }}"
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cuid-test-results-${{ matrix.os }}
+          path: /tmp/test-results-${{ matrix.os }}

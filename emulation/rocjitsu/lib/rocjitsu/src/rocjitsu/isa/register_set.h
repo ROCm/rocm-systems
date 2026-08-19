@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include "rocjitsu/isa/arch/amdgpu/isa_properties.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/cdna_isa_base.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
 

@@ -7,15 +7,16 @@
 #ifndef ROCJITSU_ISA_OPERAND_H_
 #define ROCJITSU_ISA_OPERAND_H_
 
-#include "rocjitsu/isa/arch/amdgpu/vgpr_msb.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/register_set.h"
+#include "rocjitsu/result.h"
+#include "util/diagnostic.h"
 
 #include <cassert>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
-#include <utility>
 
 namespace simdojo {
 template <size_t NUM_ELEMS, typename VecElem> class VectorReg;
@@ -25,6 +26,8 @@ namespace rocjitsu {
 template <typename Isa> class AmdgpuIsaOperand;
 
 namespace amdgpu {
+class ComputeUnitCore;
+class InstructionComputeUnitView;
 class RegisterAccess;
 class Wavefront;
 
@@ -58,6 +61,8 @@ void amdgpu_isa_write_lane_chunk_base(const AmdgpuIsaOperand<Isa> &op, amdgpu::W
                                       uint64_t mask);
 } // namespace detail
 
+class ScopedOperandDelegate;
+
 /// @brief Base class for an instruction operand with value resolution.
 ///
 /// @details Instruction execution code treats Operand as a descriptor: it can
@@ -71,6 +76,7 @@ public:
   // operand value-access backend. Keep these hooks private so generated
   // instruction bodies cannot bypass read observation by calling them directly.
   friend class amdgpu::RegisterAccess;
+  friend class ScopedOperandDelegate;
   template <typename Isa> friend class AmdgpuIsaOperand;
 
   Operand() = default;
@@ -81,6 +87,14 @@ public:
   Operand(int size_bits, int encoding_value)
       : size_bits_(size_bits), encoding_value_(encoding_value) {}
   virtual ~Operand() = default;
+
+  /// Validate encoding constraints deferred until the complete instruction is
+  /// decoded. Literal sentinels may replace their provisional operands first.
+  Result validate_encoding(const util::DiagnosticEmitter &emit_error = {}) const {
+    if (encoding_error_ == EncodingError::None) [[likely]]
+      return Result::success();
+    return emit_encoding_error(emit_error);
+  }
 
   /// @brief Human-readable name for this operand (e.g. "v0", "s4", or a literal).
   virtual std::string name() const { return std::to_string(encoding_value_); }
@@ -98,6 +112,18 @@ public:
 
   /// @brief Full 64-bit literal value when this operand came from a literal64 encoding.
   [[nodiscard]] virtual std::optional<uint64_t> literal64_value() const { return std::nullopt; }
+
+  /// @brief Compile-time constant value of this operand, resolved without any
+  /// register/wavefront state, or nullopt for registers and other non-constant
+  /// operands.
+  ///
+  /// @details Unlike `literal64_value()` (which only reports the literal64
+  /// encoding), this also resolves inline constants — small integers and the
+  /// inline float constants whose value is implied by the encoding. The base
+  /// default covers only the literal case; ISA subclasses override it to add
+  /// inline-constant resolution. Useful for static analysis (e.g. detecting
+  /// `s_mov exec, -1`) where no wavefront is available.
+  [[nodiscard]] virtual std::optional<uint64_t> const_value() const { return literal64_value(); }
 
   /// @brief Operand width in bits.
   int size_bits() const { return size_bits_; }
@@ -175,6 +201,8 @@ public:
   }
 
 private:
+  Result emit_encoding_error(const util::DiagnosticEmitter &emit_error) const;
+
   // Value access is intentionally private. Instruction implementations use
   // RegisterAccess; Operand remains the ISA-specific resolver/backend.
 
@@ -226,12 +254,10 @@ private:
   virtual void write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const;
 
 public:
-  /// @brief Set a delegate operand that overrides read methods.
+  /// @brief Return the active read delegate, if any.
   ///
-  /// @details Supports temporary source substitution without changing the
-  /// concrete operand member type.
-  void set_delegate(Operand *d) { delegate_ = d; }
-  void clear_delegate() { delegate_ = nullptr; }
+  /// Delegate mutation is restricted to ScopedOperandDelegate so restoration
+  /// cannot be skipped on exceptions or early returns.
   Operand *delegate() const { return delegate_; }
 
   /// @brief Whether `read_lane_chunk` / `write_lane_chunk` produce correct,
@@ -249,6 +275,8 @@ public:
   }
 
 private:
+  void set_delegate(Operand *delegate) { delegate_ = delegate; }
+
   /// @brief Fill `out[0..count)` with operand values for lanes
   /// `[lane_base, lane_base + count)`.
   ///
@@ -284,6 +312,18 @@ public:
   amdgpu::VgprMsbRole vgpr_msb_role_ = amdgpu::VgprMsbRole::None;
 
 protected:
+  enum class EncodingError : uint8_t {
+    None,
+    InvalidSelector,
+    InvalidScalarRegisterSelector,
+    InvalidLaneSelector,
+    InvalidExecSelector,
+    InvalidVgprSourceSelector,
+    InvalidScalarSourceSelector,
+  };
+
+  void defer_encoding_error(EncodingError error) { encoding_error_ = error; }
+
   /// @brief Capability/role flags, set once at construction and never
   /// mutated afterward. Subclass constructors set is_vgpr_; fieldless
   /// operands get their (reads_value, writable, is_vgpr) triple from
@@ -298,6 +338,7 @@ protected:
   bool reads_value_ = true;
   bool writable_ = true;
   bool fieldless_ = false;
+  EncodingError encoding_error_ = EncodingError::None;
 
 private:
   // Private SIMD fast-path backend for RegisterAccess.
@@ -487,8 +528,9 @@ public:
 /// (e.g. RISC-V) inherit directly from `IsaOperand` and use the base
 /// `Operand` defaults.
 ///
-/// The declaration remains in the core ISA layer because conventional targets
-/// and split model/execution targets share it. Execution-only definitions live
+/// This remains as the generator fallback for AMDGPU profiles that opt out of
+/// split execution sources. Built-in AMDGPU targets use `IsaOperand` plus a
+/// per-target execution table instead. Execution-only fallback definitions live
 /// in `isa_operand_simd_inl.h`.
 ///
 /// @tparam Isa AMDGPU arch ISA traits providing the SIMD helpers above.
@@ -536,6 +578,39 @@ private:
                                     uint8_t byte_mask) const override;
 };
 
+/// @brief Temporarily redirect operand reads through another operand.
+///
+/// Restores the previous delegate on scope exit, including exception and early
+/// return paths. A null delegate leaves the operand unchanged.
+class ScopedOperandDelegate {
+public:
+  ScopedOperandDelegate(Operand &operand, Operand *delegate) noexcept {
+    if (!delegate)
+      return;
+    operand_ = &operand;
+    previous_ = operand.delegate();
+    operand.set_delegate(delegate);
+  }
+
+  ~ScopedOperandDelegate() noexcept { restore(); }
+
+  ScopedOperandDelegate(const ScopedOperandDelegate &) = delete;
+  ScopedOperandDelegate &operator=(const ScopedOperandDelegate &) = delete;
+  ScopedOperandDelegate(ScopedOperandDelegate &&) = delete;
+  ScopedOperandDelegate &operator=(ScopedOperandDelegate &&) = delete;
+
+private:
+  void restore() noexcept {
+    if (!operand_)
+      return;
+    operand_->set_delegate(previous_);
+    operand_ = nullptr;
+  }
+
+  Operand *operand_ = nullptr;
+  Operand *previous_ = nullptr;
+};
+
 /// @brief Operand backed by instruction-scoped staged lane values.
 ///
 /// Holds source values prepared before semantic execution, including lane
@@ -556,7 +631,7 @@ public:
   /// @brief Construct from 64-bit staged lane values.
   StagedOperand(const Operand &base, const uint64_t *data, int lane_count);
 
-  std::string name() const override { return "dpp_src"; }
+  std::string name() const override { return "staged_src"; }
 
   bool simd_capable() const override { return true; }
 
@@ -580,7 +655,7 @@ private:
   int lane_count_ = 0;
 };
 
-// Compatibility name used by generated encoding members.
+// Compatibility name for generated output predating StagedOperand.
 using DppOperand = StagedOperand;
 
 } // namespace rocjitsu
