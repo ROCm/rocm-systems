@@ -1156,6 +1156,8 @@ By default, multiple ``--pmc`` groups are collected using *application replay*: 
 
 This is useful when re-running the whole application per group is expensive or non-deterministic. Without the flag, multiple ``--pmc`` groups use application replay as usual.
 
+Because capture is per-agent rather than per-kernel -- replay makes no attempt to determine which allocations a kernel actually reaches -- host memory use during a replayed dispatch is proportional to the agent's entire tracked device footprint, and both the initial snapshot and every restore between passes scale with it.
+
 .. code-block:: shell
 
    rocprofv3 --pmc SQ_WAVES GRBM_COUNT --pmc GRBM_GUI_ACTIVE --kernel-replay-beta-enabled -- <application_path>
@@ -1175,6 +1177,8 @@ The preceding command collects both counter groups in a single run of ``<applica
    - Only coarse-grained device allocations (and module-scope ``__device__`` / ``__constant__`` variables) are restored. Unified, managed, and ``hipMallocAsync`` memory are not. Snapshot is a full in-memory copy; dirty-page hashing is not implemented in this version.
 
    - HIP graph launches are not supported.
+
+   - Only single-packet, single-dispatch submissions are replayed. A multi-packet submission runs once without replay and warns once.
 
 For usage, limitations, and when to prefer application replay, see :ref:`using-kernel-replay`. Tool authors should see :ref:`kernel-replay-sdk-api`.
 
