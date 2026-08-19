@@ -1,0 +1,44 @@
+[project]
+name = "rccl_ep"
+version = "0.1.0"
+requires-python = ">=3.9"
+description = "rccl_ep: intranode expert-parallel dispatch and combine for RCCL on AMD GPUs (ctypes bindings)"
+# No `license` key: PEP 639 emits it as a machine-readable License-Expression,
+# and no single SPDX identifier fits RCCL's BSD-3-Clause variant with its MIT
+# portions. See LICENSE.txt.
+authors = [
+    { name = "Advanced Micro Devices, Inc." },
+    { name = "Meta Platforms, Inc." },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Natural Language :: English",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Environment :: GPU",
+]
+
+# torch is a hard runtime requirement -- the surface takes and returns tensors --
+# but the version is pinned from both ends by the ROCm build it must match, so it
+# is left to the environment rather than resolved by pip.
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.packages.find]
+include = ["rccl_ep*"]
+
+# librccl_ep.so is produced by ../CMakeLists.txt and installed beside
+# rccl_ep/__init__.py, which is where the package looks for it.
+[tool.setuptools.package-data]
+rccl_ep = ["librccl_ep.so"]
