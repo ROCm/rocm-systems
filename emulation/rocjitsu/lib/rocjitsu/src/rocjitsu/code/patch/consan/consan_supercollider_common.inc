@@ -480,7 +480,8 @@ constexpr uint16_t kRdna4ExecHi = 127u;
   }
   const int64_t delta =
       static_cast<int64_t>(target_text_offset) - static_cast<int64_t>(pc_after_getpc);
-  if (!append_pc_delta_builder(words, arch, pc_sgpr, delta, /*minimum_words=*/3u))
+  if (!append_pc_delta_builder(words, arch, pc_sgpr, delta, /*minimum_words=*/3u,
+                               /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_GFX1250))
     return false;
   const auto restore_scc =
       instrumentation::build_s_cmp_lg_u32(saved_scc_sgpr, scalar_positive_inline_u32(0), arch);
@@ -508,7 +509,8 @@ append_lds_check_trap_indirect_return(std::vector<uint32_t> &words, uint64_t wor
   }
   const int64_t delta =
       static_cast<int64_t>(target_text_offset) - static_cast<int64_t>(pc_after_getpc);
-  if (!append_pc_delta_builder(words, arch, pc_sgpr, delta, /*minimum_words=*/3u))
+  if (!append_pc_delta_builder(words, arch, pc_sgpr, delta, /*minimum_words=*/3u,
+                               /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_GFX1250))
     return false;
   const auto restore_scc =
       instrumentation::build_s_cmp_lg_u32(captured_scc_sgpr, scalar_positive_inline_u32(0), arch);
@@ -769,13 +771,11 @@ build_mismatch_action_words(const ConSanOptions &options, rj_code_arch_t arch,
   return words;
 }
 
-[[nodiscard]] std::optional<std::vector<uint32_t>>
-build_lds_check_trap_words(std::span<const uint8_t> original_bytes, const ConSanLdsSite &site,
-                           rj_code_arch_t arch, const ConSanOptions &options, uint32_t delay_words,
-                           uint16_t scratch_vgpr, uint16_t vcc_save_sgpr,
-                           uint16_t gfx1250_vgpr_msb_mode,
-                           std::optional<uint32_t> &guest_instruction_word_offset,
-                           std::vector<std::string> &errors) {
+[[nodiscard]] std::optional<std::vector<uint32_t>> build_lds_check_trap_words(
+    std::span<const uint8_t> original_bytes, const ConSanLdsSite &site, rj_code_arch_t arch,
+    const ConSanOptions &options, uint32_t delay_words, uint16_t scratch_vgpr,
+    uint16_t vcc_save_sgpr, uint16_t gfx1250_vgpr_msb_mode,
+    std::optional<uint32_t> &guest_instruction_word_offset, std::vector<std::string> &errors) {
   guest_instruction_word_offset.reset();
   auto required_vgprs = lds_dword_count(site);
   if (!required_vgprs) {

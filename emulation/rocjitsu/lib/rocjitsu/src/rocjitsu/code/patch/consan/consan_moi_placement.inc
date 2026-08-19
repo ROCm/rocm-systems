@@ -32,12 +32,11 @@ moi_record_replay_entry_island_words(bool spill_backed_scalar_assignment) {
   return kMoiRecordReplayIndirectIslandWords + (spill_backed_scalar_assignment ? 1u : 0u);
 }
 
-[[nodiscard]] constexpr uint32_t
-moi_dense_barrier_entry_island_words(bool spill_backed_scalar_assignment) {
-  // Spill-backed dense barrier routers derive the dispatcher key at entry:
+[[nodiscard]] constexpr uint32_t moi_dense_entry_island_words(bool derive_key_at_entry) {
+  // Relocatable dense routers derive the dispatcher key at entry:
   // key = call return - island offset. The prologue captures SCC itself, so
   // the following indirect jump omits its ordinary SCC-capture word.
-  return spill_backed_scalar_assignment
+  return derive_key_at_entry
              ? kMoiDenseBarrierEntryKeyPrologueWords + (kMoiRecordReplayIndirectIslandWords - 1u)
              : kMoiRecordReplayIndirectIslandWords;
 }
@@ -115,8 +114,10 @@ public:
            word_offset += sizeof(uint32_t)) {
         uint32_t word = 0;
         std::memcpy(&word, text.data() + word_offset, sizeof(word));
-        if (word == nop_ && !overlaps_patch(word_offset, word_offset + sizeof(uint32_t)))
+        if (word == nop_ && !overlaps_patch(word_offset, word_offset + sizeof(uint32_t))) {
           available_word_offsets_.insert(word_offset);
+          available_word_owner_entries_.emplace(word_offset, unique[owner_index].entry);
+        }
       }
       uint64_t cursor = gap_begin;
       while (cursor + island_bytes <= gap_end) {
@@ -128,6 +129,7 @@ public:
         }
         if (all_nops) {
           available_offsets_.insert(cursor);
+          available_owner_entries_.emplace(cursor, unique[owner_index].entry);
           cursor += island_bytes;
         } else {
           cursor += sizeof(uint32_t);
@@ -147,6 +149,35 @@ public:
       if (!claim_fits(*candidate, claim_words) ||
           !compute_sopp_branch_simm16(anchor_offset, *candidate))
         continue;
+      const uint64_t distance =
+          anchor_offset < *candidate ? *candidate - anchor_offset : anchor_offset - *candidate;
+      if (distance < best_distance) {
+        best = candidate;
+        best_distance = distance;
+      }
+    }
+    if (best == available_offsets_.end())
+      return std::nullopt;
+    const uint64_t offset = *best;
+    retire_overlaps(offset, claim_words);
+    return offset;
+  }
+
+  [[nodiscard]] std::optional<uint64_t> claim_reachable_for_owner(uint64_t anchor_offset,
+                                                                  uint64_t owner_entry,
+                                                                  uint32_t claim_words = 0u) {
+    claim_words = claim_words == 0u ? island_words_ : claim_words;
+    auto best = available_offsets_.end();
+    uint64_t best_distance = std::numeric_limits<uint64_t>::max();
+    const auto [first_reachable, last_reachable] = reachable_target_bounds(anchor_offset);
+    for (auto candidate = available_offsets_.lower_bound(first_reachable);
+         candidate != available_offsets_.end() && *candidate <= last_reachable; ++candidate) {
+      const auto owner = available_owner_entries_.find(*candidate);
+      if (owner == available_owner_entries_.end() || owner->second != owner_entry ||
+          !claim_fits(*candidate, claim_words) ||
+          !compute_sopp_branch_simm16(anchor_offset, *candidate)) {
+        continue;
+      }
       const uint64_t distance =
           anchor_offset < *candidate ? *candidate - anchor_offset : anchor_offset - *candidate;
       if (distance < best_distance) {
@@ -216,6 +247,99 @@ public:
     return offset;
   }
 
+  [[nodiscard]] std::optional<uint64_t>
+  claim_reachable_from_all_for_owner(std::span<const uint64_t> anchor_offsets, uint64_t owner_entry,
+                                     uint32_t claim_words = 0u) {
+    if (anchor_offsets.empty())
+      return std::nullopt;
+    claim_words = claim_words == 0u ? island_words_ : claim_words;
+    uint64_t first_reachable = 0u;
+    uint64_t last_reachable = std::numeric_limits<uint64_t>::max();
+    for (uint64_t anchor_offset : anchor_offsets) {
+      const auto [first, last] = reachable_target_bounds(anchor_offset);
+      first_reachable = std::max(first_reachable, first);
+      last_reachable = std::min(last_reachable, last);
+    }
+    if (first_reachable > last_reachable)
+      return std::nullopt;
+    auto best = available_offsets_.end();
+    uint64_t best_max_distance = std::numeric_limits<uint64_t>::max();
+    for (auto candidate = available_offsets_.lower_bound(first_reachable);
+         candidate != available_offsets_.end() && *candidate <= last_reachable; ++candidate) {
+      const auto owner = available_owner_entries_.find(*candidate);
+      if (owner == available_owner_entries_.end() || owner->second != owner_entry ||
+          !claim_fits(*candidate, claim_words)) {
+        continue;
+      }
+      uint64_t max_distance = 0;
+      bool reachable = true;
+      for (uint64_t anchor_offset : anchor_offsets) {
+        if (!compute_sopp_branch_simm16(anchor_offset, *candidate)) {
+          reachable = false;
+          break;
+        }
+        max_distance =
+            std::max(max_distance, anchor_offset < *candidate ? *candidate - anchor_offset
+                                                              : anchor_offset - *candidate);
+      }
+      if (reachable && max_distance < best_max_distance) {
+        best = candidate;
+        best_max_distance = max_distance;
+      }
+    }
+    if (best == available_offsets_.end())
+      return std::nullopt;
+    const uint64_t offset = *best;
+    retire_overlaps(offset, claim_words);
+    return offset;
+  }
+
+  [[nodiscard]] std::optional<uint64_t>
+  claim_word_reachable_from_all_for_owner(std::span<const uint64_t> anchor_offsets,
+                                          uint64_t owner_entry) {
+    if (anchor_offsets.empty())
+      return std::nullopt;
+    uint64_t first_reachable = 0u;
+    uint64_t last_reachable = std::numeric_limits<uint64_t>::max();
+    for (uint64_t anchor_offset : anchor_offsets) {
+      const auto [first, last] = reachable_target_bounds(anchor_offset);
+      first_reachable = std::max(first_reachable, first);
+      last_reachable = std::min(last_reachable, last);
+    }
+    if (first_reachable > last_reachable)
+      return std::nullopt;
+    auto best = available_word_offsets_.end();
+    uint64_t best_max_distance = std::numeric_limits<uint64_t>::max();
+    for (auto candidate = available_word_offsets_.lower_bound(first_reachable);
+         candidate != available_word_offsets_.end() && *candidate <= last_reachable; ++candidate) {
+      const auto owner = available_word_owner_entries_.find(*candidate);
+      if (owner == available_word_owner_entries_.end() || owner->second != owner_entry ||
+          !claim_fits(*candidate, /*claim_words=*/1u)) {
+        continue;
+      }
+      uint64_t max_distance = 0u;
+      bool reachable = true;
+      for (uint64_t anchor_offset : anchor_offsets) {
+        if (!compute_sopp_branch_simm16(anchor_offset, *candidate)) {
+          reachable = false;
+          break;
+        }
+        max_distance =
+            std::max(max_distance, anchor_offset < *candidate ? *candidate - anchor_offset
+                                                              : anchor_offset - *candidate);
+      }
+      if (reachable && max_distance < best_max_distance) {
+        best = candidate;
+        best_max_distance = max_distance;
+      }
+    }
+    if (best == available_word_offsets_.end())
+      return std::nullopt;
+    const uint64_t offset = *best;
+    retire_overlaps(offset, /*claim_words=*/1u);
+    return offset;
+  }
+
   [[nodiscard]] std::vector<uint64_t> available_word_offsets() const {
     return {available_word_offsets_.begin(), available_word_offsets_.end()};
   }
@@ -282,7 +406,9 @@ private:
   uint32_t nop_ = 0;
   uint32_t island_words_ = 0;
   std::set<uint64_t> available_offsets_;
+  std::unordered_map<uint64_t, uint64_t> available_owner_entries_;
   std::set<uint64_t> available_word_offsets_;
+  std::unordered_map<uint64_t, uint64_t> available_word_owner_entries_;
   std::vector<std::pair<uint64_t, uint64_t>> claimed_ranges_;
 };
 

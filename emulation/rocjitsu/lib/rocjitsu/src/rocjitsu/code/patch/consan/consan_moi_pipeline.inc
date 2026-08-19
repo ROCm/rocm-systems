@@ -470,8 +470,9 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
           island_words.push_back(build_s_getpc_b64(jump_sgprs->pc_sgpr, arch));
           const int64_t delta = static_cast<int64_t>(placement->body_offset) -
                                 static_cast<int64_t>(getpc_offset + sizeof(uint32_t));
-          const bool delta_encoded =
-              append_pc_delta_builder(island_words, arch, jump_sgprs->pc_sgpr, delta);
+          const bool delta_encoded = append_pc_delta_builder(
+              island_words, arch, jump_sgprs->pc_sgpr, delta, /*minimum_words=*/0u,
+              /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_GFX1250);
           if (const auto delay = instrumentation::build_salu_dependency_delay(arch);
               delta_encoded && delay) {
             island_words.push_back(*delay);
@@ -767,8 +768,7 @@ sampled_atomic_disposition_reason(std::string_view reason) {
 }
 
 [[nodiscard]] ConSanSiteDispositionReason
-first_light_atomic_disposition_reason(const ConSanAtomicSite &site,
-                                      bool allow_ordered_lds_atomic) {
+first_light_atomic_disposition_reason(const ConSanAtomicSite &site, bool allow_ordered_lds_atomic) {
   if (!site.mnemonic.starts_with("flat_atomic") && !site.mnemonic.starts_with("global_atomic") &&
       !(allow_ordered_lds_atomic && site.mnemonic.starts_with("ds_")))
     return ConSanSiteDispositionReason::NonFlatAtomicAddress;
@@ -864,8 +864,7 @@ void append_moi_barrier_site_dispositions(const Container &container, const ConS
     ConSanSiteDispositionReason reason = ConSanSiteDispositionReason::None;
     const bool unavailable_cluster_form =
         site.scope == ConSanBarrierSite::Scope::Cluster &&
-        !consan_arch_supports_capability_form(result.arch,
-                                              ConSanCapabilityForm::ClusterBarrier);
+        !consan_arch_supports_capability_form(result.arch, ConSanCapabilityForm::ClusterBarrier);
     if (unavailable_cluster_form) {
       reason = ConSanSiteDispositionReason::UnsupportedScope;
     } else if (options.moi_engine == ConSanMoiEngine::Sampled) {

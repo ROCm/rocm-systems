@@ -5248,6 +5248,105 @@ TEST(ConSanMoi, RecordReplayDynamicStackKernelEntryRelayUsesSpecialStateOnly) {
   EXPECT_EQ(text_words_at_offset(patched, relay_offset, 7u * sizeof(uint32_t)), expected);
 }
 
+TEST(ConSanMoi, Gfx1250OwnerPrologueUsesOwnerLocalEntryAndReturnRelays) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
+  constexpr size_t kFirstAccessWord = 27'750u;
+  constexpr size_t kOwnerCodeWords = kFirstAccessWord + 3u;
+  constexpr size_t kTotalTextWords = 60'000u;
+  constexpr auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0u, .data0 = 1u});
+  const uint32_t nop = build_s_nop(0u, kArch);
+
+  std::vector<uint32_t> text_words(kOwnerCodeWords, build_s_mov_b32(0u, 0u, kArch));
+  std::ranges::copy(store, text_words.begin() + kFirstAccessWord);
+  text_words.back() = build_s_endpgm(kArch);
+  text_words.resize(kTotalTextWords, nop);
+  std::vector<uint8_t> bytes = make_gfx1250_code_object(
+      text_words, "owner_local_prologue_relay", kRdna4Wave64AllVgprsGranulated,
+      /*wave32=*/true, /*uses_dynamic_stack=*/true);
+  mutate_elf_symbol_by_name(bytes, "owner_local_prologue_relay", [](Elf64_Sym &symbol) {
+    symbol.st_size = kOwnerCodeWords * sizeof(uint32_t);
+  });
+
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  ASSERT_EQ(original.kernels().size(), 1u);
+  const AmdGpuKernelInfo &owner = original.kernels().front();
+  ASSERT_EQ(owner.entry_text_offset, 0u);
+  ASSERT_EQ(owner.code_size, kOwnerCodeWords * sizeof(uint32_t));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8u;
+  options.moi_exec_save_sgpr = 80u;
+  options.moi_owner_vgpr = 40u;
+  options.moi_epoch_vgpr = 41u;
+  options.moi_init_owner_epoch = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1u, 0u, 0u, 0u);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = 1u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  const auto access = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(access, result.patches.end());
+  EXPECT_EQ(access->owner_descriptor_file_offsets,
+            std::vector<uint64_t>{owner.descriptor_file_offset});
+
+  const uint64_t owner_gap_begin = owner.code_size;
+  const uint64_t owner_gap_end = kTotalTextWords * sizeof(uint32_t);
+  const std::vector<uint64_t> descriptor = {owner.descriptor_file_offset};
+  const auto prologue = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue &&
+           patch.anchor_offset == owner.entry_text_offset &&
+           patch.owner_descriptor_file_offsets == descriptor;
+  });
+  ASSERT_NE(prologue, result.patches.end()) << testing::PrintToString(result.patches);
+  EXPECT_FALSE(compute_sopp_branch_simm16(prologue->trampoline_offset,
+                                          owner.entry_text_offset + prologue->original_size));
+
+  const auto entry_island = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+           patch.anchor_offset == owner.entry_text_offset &&
+           patch.trampoline_size == 7u * sizeof(uint32_t) &&
+           patch.owner_descriptor_file_offsets == descriptor;
+  });
+  ASSERT_NE(entry_island, result.patches.end());
+  EXPECT_GE(entry_island->trampoline_offset, owner_gap_begin);
+  EXPECT_LT(entry_island->trampoline_offset, owner_gap_end);
+
+  const auto return_relay = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+           patch.anchor_offset == owner.entry_text_offset &&
+           patch.trampoline_size == sizeof(uint32_t) &&
+           patch.owner_descriptor_file_offsets == descriptor;
+  });
+  ASSERT_NE(return_relay, result.patches.end());
+  EXPECT_GE(return_relay->trampoline_offset, owner_gap_begin);
+  EXPECT_LT(return_relay->trampoline_offset, owner_gap_end);
+
+  const uint64_t return_branch_offset =
+      prologue->trampoline_offset + prologue->trampoline_size - sizeof(uint32_t);
+  const uint64_t return_target = owner.entry_text_offset + prologue->original_size;
+  const auto to_relay =
+      compute_sopp_branch_simm16(return_branch_offset, return_relay->trampoline_offset);
+  const auto from_relay =
+      compute_sopp_branch_simm16(return_relay->trampoline_offset, return_target);
+  ASSERT_TRUE(to_relay);
+  ASSERT_TRUE(from_relay);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  EXPECT_EQ(text_words_at_offset(patched, return_branch_offset, sizeof(uint32_t)),
+            std::vector<uint32_t>{build_s_branch(*to_relay, kArch)});
+  EXPECT_EQ(text_words_at_offset(patched, return_relay->trampoline_offset, sizeof(uint32_t)),
+            std::vector<uint32_t>{build_s_branch(*from_relay, kArch)});
+}
+
 TEST(ConSanMoi, RecordReplaySpillBackedLocalEntryIslandsDoNotOverlap) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
   constexpr uint32_t kAccessCount = 65u;

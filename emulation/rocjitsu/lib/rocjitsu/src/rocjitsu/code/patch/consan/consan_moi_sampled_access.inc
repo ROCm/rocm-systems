@@ -897,7 +897,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       patches.push_back(std::move(island_info));
 
       std::vector<uint32_t> dispatcher_words;
-      if (!explicit_dense_key) {
+      if (!explicit_dense_key && arch != ROCJITSU_CODE_ARCH_GFX1250) {
         const auto subtract_pc = instrumentation::build_s_sub_u32(
             key_sgpr, collapsed_spill_router ? key_sgpr : call_return_sgpr, pc_sgpr, arch);
         if (!subtract_pc) {
@@ -910,14 +910,24 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         dispatcher_words.push_back(static_cast<uint32_t>(dispatcher_offset - island_offset));
       }
       if (entry_host != dense_entry_hosts.end()) {
-        const auto compare_entry =
-            instrumentation::build_s_cmp_eq_u32(key_sgpr, scalar_positive_inline_u32(0), arch);
-        if (!compare_entry) {
-          result.errors.emplace_back(
-              "ConSan MOI sampled probe could not encode its dense entry-host comparison");
-          return;
+        if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+          if (!append_moi_call_return_match(dispatcher_words, dispatcher_offset,
+                                            entry_host->second.host_offset + sizeof(uint32_t),
+                                            pc_sgpr, call_return_sgpr, arch)) {
+            result.errors.emplace_back(
+                "ConSan MOI sampled probe could not encode its relocatable entry-host match");
+            return;
+          }
+        } else {
+          const auto compare_entry =
+              instrumentation::build_s_cmp_eq_u32(key_sgpr, scalar_positive_inline_u32(0), arch);
+          if (!compare_entry) {
+            result.errors.emplace_back(
+                "ConSan MOI sampled probe could not encode its dense entry-host comparison");
+            return;
+          }
+          dispatcher_words.push_back(*compare_entry);
         }
-        dispatcher_words.push_back(*compare_entry);
         std::vector<uint32_t> matched_words;
         const uint64_t matched_offset =
             dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
@@ -947,20 +957,23 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       for (size_t group_index = 0; group_index < group.size(); ++group_index) {
         const PlannedSampledPatch *planned_patch = group[group_index];
         const ConSanMoiCandidate &candidate = *planned_patch->candidate;
-        const auto compare = instrumentation::build_s_cmp_eq_u32(
-            key_sgpr,
-            explicit_dense_key ? scalar_positive_inline_u32(static_cast<uint16_t>(group_index + 1u))
-                               : 255u,
-            arch);
-        if (!compare) {
-          result.errors.emplace_back(
-              "ConSan MOI sampled probe could not encode its dense dispatch comparison");
-          return;
-        }
-        dispatcher_words.push_back(*compare);
-        if (!explicit_dense_key) {
-          dispatcher_words.push_back(
-              static_cast<uint32_t>(candidate.text_offset + sizeof(uint32_t) - island_offset));
+        if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+          if (!append_moi_call_return_match(dispatcher_words, dispatcher_offset,
+                                            candidate.text_offset + sizeof(uint32_t), pc_sgpr,
+                                            call_return_sgpr, arch)) {
+            result.errors.emplace_back(
+                "ConSan MOI sampled probe could not encode its relocatable caller match");
+            return;
+          }
+        } else {
+          const auto compare = instrumentation::build_s_cmp_eq_u32(
+              key_sgpr, scalar_positive_inline_u32(static_cast<uint16_t>(group_index + 1u)), arch);
+          if (!compare) {
+            result.errors.emplace_back(
+                "ConSan MOI sampled probe could not encode its dense dispatch comparison");
+            return;
+          }
+          dispatcher_words.push_back(*compare);
         }
         std::vector<uint32_t> matched_words;
         if (!explicit_dense_key && !collapsed_spill_router && candidate.size > sizeof(uint32_t)) {

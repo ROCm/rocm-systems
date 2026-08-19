@@ -369,6 +369,27 @@ TEST(ConSanMoi, Gfx1250DenseSampledAccessesPartitionRelayWindowsAcrossLargeKerne
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
                                &ConSanPatchInfo::kind),
             4u); // One host relay and one appended dispatcher per reachability window.
+  constexpr uint32_t kDenseEntryIslandWords = 7u;
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  uint32_t checked_hosts = 0u;
+  uint32_t checked_dispatchers = 0u;
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland)
+      continue;
+    if (patch.original_size != 0u) {
+      ASSERT_EQ(patch.original_size, (kDenseEntryIslandWords + 1u) * sizeof(uint32_t));
+      ++checked_hosts;
+    } else {
+      const std::vector<uint32_t> dispatcher =
+          text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
+      ASSERT_GE(dispatcher.size(), 2u);
+      EXPECT_EQ(dispatcher[0], build_s_getpc_b64(/*sdst=*/80u, ROCJITSU_CODE_ARCH_GFX1250));
+      ++checked_dispatchers;
+    }
+  }
+  EXPECT_EQ(checked_hosts, 2u);
+  EXPECT_EQ(checked_dispatchers, 2u);
   EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
     return warning.find("inside a relocated prefix") != std::string::npos;
   }));
@@ -2349,6 +2370,71 @@ TEST(ConSanMoi, Gfx1250SampledSpillsExecVccStateWithSeparateDeadDenseRouter) {
     }
     EXPECT_TRUE(result.final_validation_passed);
   }
+}
+
+TEST(ConSanMoi, Gfx1250SampledDenseBarrierUsesCloneInvariantCallerKey) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
+  constexpr uint32_t kBarrierCount = 2u;
+  constexpr uint32_t kDenseEntryIslandWords = 12u;
+  constexpr uint16_t kExecSaveSgpr = 80u;
+  constexpr uint16_t kDispatchKeySgpr = kExecSaveSgpr + 5u;
+
+  std::vector<uint32_t> words;
+  for (uint32_t index = 0u; index < kBarrierCount; ++index) {
+    words.push_back(0xD8340000u | index * sizeof(uint32_t));
+    words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
+    words.push_back(0xBE804EC1u); // s_barrier_signal -1
+    words.push_back(0xBF94FFFFu); // s_barrier_wait -1
+  }
+  words.resize(256u, build_s_nop(0u, kArch));
+  words.push_back(build_s_endpgm(kArch));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.scratch_vgpr = 8u;
+  options.moi_exec_save_sgpr = kExecSaveSgpr;
+  options.moi_owner_vgpr = 40u;
+  options.moi_epoch_vgpr = 41u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(2u * kBarrierCount);
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = 4u * kBarrierCount;
+
+  const ConSanResult result = try_patch_consan(
+      make_gfx1250_code_object(words, "gfx1250_relocatable_dense_barrier_key"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
+                               &ConSanPatchInfo::kind),
+            kBarrierCount);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const auto dense_host = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+           patch.original_size == (kDenseEntryIslandWords + 1u) * sizeof(uint32_t);
+  });
+  ASSERT_NE(dense_host, result.patches.end());
+
+  const auto dispatcher = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+           patch.original_size == 0u;
+  });
+  ASSERT_NE(dispatcher, result.patches.end());
+  const std::vector<uint32_t> dispatcher_words =
+      text_words_at_offset(patched, dispatcher->trampoline_offset, dispatcher->trampoline_size);
+  ASSERT_GE(dispatcher_words.size(), 2u);
+  const auto compare_key =
+      instrumentation::build_s_cmp_eq_u32(kDispatchKeySgpr, /*literal=*/255u, kArch);
+  ASSERT_TRUE(compare_key);
+  EXPECT_EQ(dispatcher_words[0], *compare_key);
+  // The host call returns to the entry island itself, so its clone-invariant
+  // caller-to-island key is zero. Shared-helper barrier calls use their
+  // corresponding in-helper deltas and remain stable when translation clones
+  // the complete helper.
+  EXPECT_EQ(dispatcher_words[1], 0u);
+  EXPECT_TRUE(result.final_validation_passed);
 }
 
 void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj_code_arch_t arch) {
@@ -5794,6 +5880,14 @@ TEST(ConSanMoi, Gfx1250SampledBarrierDoesNotGateWorkgroupsForAddressSampling) {
            item.anchor_offset == 401u * sizeof(uint32_t);
   });
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
+  // A nearby single barrier must use the direct cave route. An absolute-PC
+  // dense dispatcher is not owner-stable when B0-to-A0 translation clones a
+  // shared helper, because every owner receives a different caller PC.
+  EXPECT_TRUE(compute_sopp_branch_simm16(patch->anchor_offset, patch->trampoline_offset));
+  EXPECT_TRUE(std::ranges::none_of(result.patches, [&](const ConSanPatchInfo &candidate) {
+    return candidate.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+           candidate.anchor_offset == patch->anchor_offset;
+  }));
   expect_sampled_barrier_exact_existing_metadata_path(result, *patch, ROCJITSU_CODE_ARCH_GFX1250);
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());

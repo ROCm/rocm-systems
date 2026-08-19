@@ -316,7 +316,8 @@ append_record_replay_workgroup_capture(std::vector<uint32_t> &words,
   }
   const int64_t delta =
       static_cast<int64_t>(original_entry_text_offset) - static_cast<int64_t>(pc_after_getpc);
-  if (!append_pc_delta_builder(words, arch, *long_return_pc_sgpr, delta)) {
+  if (!append_pc_delta_builder(words, arch, *long_return_pc_sgpr, delta, /*minimum_words=*/0u,
+                               /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_GFX1250)) {
     errors.emplace_back("ConSan MOI " + std::string(prologue_name) +
                         " could not encode its long return");
     return false;
@@ -352,7 +353,8 @@ append_record_replay_workgroup_capture(std::vector<uint32_t> &words,
   }
   const int64_t delta =
       static_cast<int64_t>(target_text_offset) - static_cast<int64_t>(pc_after_getpc);
-  if (!append_pc_delta_builder(words, arch, pc_sgpr, delta, /*minimum_words=*/3u))
+  if (!append_pc_delta_builder(words, arch, pc_sgpr, delta, /*minimum_words=*/3u,
+                               /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_GFX1250))
     return false;
   const auto restore_scc =
       instrumentation::build_s_cmp_lg_u32(saved_scc_sgpr, scalar_positive_inline_u32(0), arch);
@@ -363,19 +365,12 @@ append_record_replay_workgroup_capture(std::vector<uint32_t> &words,
   return true;
 }
 
-struct MoiDenseBarrierRouterScalarAbi {
-  uint16_t jump_pc_sgpr = 0;
-  uint16_t saved_scc_sgpr = 0;
-  uint16_t key_sgpr = 0;
-  uint16_t call_return_sgpr = 0;
-};
-
 [[nodiscard]] std::optional<std::vector<uint32_t>>
 build_moi_dense_barrier_entry_island(uint64_t island_text_offset, uint64_t dispatcher_text_offset,
                                      const MoiDenseBarrierRouterScalarAbi &abi,
-                                     bool spill_backed_scalar_assignment, rj_code_arch_t arch) {
+                                     bool derive_key_at_entry, rj_code_arch_t arch) {
   std::vector<uint32_t> words;
-  if (spill_backed_scalar_assignment) {
+  if (derive_key_at_entry) {
     const auto save_scc = instrumentation::build_s_cselect_b32(
         abi.saved_scc_sgpr, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), arch);
     const auto subtract_pc =
@@ -391,10 +386,10 @@ build_moi_dense_barrier_entry_island(uint64_t island_text_offset, uint64_t dispa
     words.push_back(build_s_add_u32(abi.key_sgpr, abi.key_sgpr, /*literal=*/255u, arch));
     words.push_back(pc_after_getpc_from_island);
   }
-  if (!append_moi_scc_preserving_indirect_jump(
-          words, island_text_offset, dispatcher_text_offset, abi.jump_pc_sgpr, abi.saved_scc_sgpr,
-          /*capture_scc=*/!spill_backed_scalar_assignment, arch) ||
-      words.size() != moi_dense_barrier_entry_island_words(spill_backed_scalar_assignment)) {
+  if (!append_moi_scc_preserving_indirect_jump(words, island_text_offset, dispatcher_text_offset,
+                                               abi.jump_pc_sgpr, abi.saved_scc_sgpr,
+                                               /*capture_scc=*/!derive_key_at_entry, arch) ||
+      words.size() != moi_dense_entry_island_words(derive_key_at_entry)) {
     return std::nullopt;
   }
   return words;
@@ -479,7 +474,8 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
       !append_pc_delta_builder(words, arch, kRdna4VccLo,
                                static_cast<int64_t>(cave_text_offset) -
                                    static_cast<int64_t>(pc_after_getpc),
-                               /*minimum_words=*/3u)) {
+                               /*minimum_words=*/3u,
+                               /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_GFX1250)) {
     errors.emplace_back(std::string(context) + " could not encode its indirect entry island");
     return false;
   }
@@ -1885,18 +1881,17 @@ moi_entry_scalar_backup_preserves_persistent_outputs(const ConSanOptions &option
     return true;
   const uint16_t epoch_width =
       workgroup_shadow
-          ? static_cast<uint16_t>(options.automatic_moi_persistent_vgprs &&
-                                          arch == ROCJITSU_CODE_ARCH_GFX1250
-                                      ? 4u
-                                      : 2u)
+          ? static_cast<uint16_t>(
+                options.automatic_moi_persistent_vgprs && arch == ROCJITSU_CODE_ARCH_GFX1250 ? 4u
+                                                                                             : 2u)
           : 1u;
-  if (overlaps(options.moi_epoch_vgpr, epoch_width) ||
-      overlaps(options.moi_workgroup_key_vgpr) || overlaps(options.moi_dispatch_id_vgpr, 2u)) {
+  if (overlaps(options.moi_epoch_vgpr, epoch_width) || overlaps(options.moi_workgroup_key_vgpr) ||
+      overlaps(options.moi_dispatch_id_vgpr, 2u)) {
     return true;
   }
-  for (const std::optional<uint16_t> reg : {options.moi_record_replay_workgroup_vgprs.x,
-                                            options.moi_record_replay_workgroup_vgprs.y,
-                                            options.moi_record_replay_workgroup_vgprs.z}) {
+  for (const std::optional<uint16_t> reg :
+       {options.moi_record_replay_workgroup_vgprs.x, options.moi_record_replay_workgroup_vgprs.y,
+        options.moi_record_replay_workgroup_vgprs.z}) {
     if (overlaps(reg))
       return true;
   }
@@ -2216,8 +2211,8 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
       const uint32_t tail_end = has_live_accvgpr_bank ? original_allocation : kMaxVgprs;
       std::optional<uint16_t> backup_vgpr;
       for (uint32_t candidate = tail_begin; candidate < tail_end; ++candidate) {
-        if (!moi_owner_epoch_prologue_uses_vgpr(
-                kernel_options, workgroup_shadow, static_cast<uint16_t>(candidate), arch)) {
+        if (!moi_owner_epoch_prologue_uses_vgpr(kernel_options, workgroup_shadow,
+                                                static_cast<uint16_t>(candidate), arch)) {
           backup_vgpr = static_cast<uint16_t>(candidate);
           break;
         }
@@ -2229,8 +2224,8 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
       // window is restored before the displaced guest entry executes.
       for (uint32_t candidate = entry_abi_vgpr_count;
            !backup_vgpr && candidate < std::min(original_allocation, kMaxVgprs); ++candidate) {
-        if (!moi_owner_epoch_prologue_uses_vgpr(
-                kernel_options, workgroup_shadow, static_cast<uint16_t>(candidate), arch)) {
+        if (!moi_owner_epoch_prologue_uses_vgpr(kernel_options, workgroup_shadow,
+                                                static_cast<uint16_t>(candidate), arch)) {
           backup_vgpr = static_cast<uint16_t>(candidate);
         }
       }
@@ -2301,6 +2296,13 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
   MoiLocalNopIslandAllocator entry_islands(old_text, result, arch, 7u);
   for (const PlannedOwnerEpochPrologue &item : target_kernels) {
     const ConSanKernelInfo &kernel = item.kernel;
+    const auto canonical_kernel =
+        std::ranges::find(result.kernels, kernel.name, &ConSanKernelInfo::name);
+    if (canonical_kernel == result.kernels.end()) {
+      result.errors.emplace_back("ConSan MOI owner/epoch prologue lost its canonical kernel owner");
+      return;
+    }
+    const std::array<uint64_t, 1> canonical_owner = {canonical_kernel->descriptor_file_offset};
     const ConSanOptions &kernel_options = item.persistent_options;
     const ConSanMoiDispatchIdCapture dispatch_capture{.sgpr = kernel_options.moi_dispatch_id_sgpr,
                                                       .vgpr = kernel_options.moi_dispatch_id_vgpr};
@@ -2399,43 +2401,66 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     const uint64_t prologue_text_offset = static_cast<uint64_t>(new_text.size());
     if (instrument_entry_in_place &&
         !compute_sopp_branch_simm16(kernel.entry_text_offset, prologue_text_offset)) {
-      entry_island_offset = entry_islands.claim_reachable(kernel.entry_text_offset);
+      entry_island_offset = entry_islands.claim_reachable_for_owner(kernel.entry_text_offset,
+                                                                    kernel.entry_text_offset);
       if (!entry_island_offset) {
-        if (chains_existing_entry_trampoline) {
-          result.errors.emplace_back(
-              "ConSan MOI dynamic-stack owner/epoch prologue found no reachable entry relay "
-              "without clobbering an existing entry instrumentation patch");
-          return;
-        }
-        constexpr size_t kDirectEntryRelayWords = 7u;
-        while (displaced_entry_words.size() < kDirectEntryRelayWords) {
-          std::vector<std::string> relocation_errors;
-          auto decoded = decode_relocatable_entry_instruction(
-              old_text, kernel.entry_text_offset + displaced_entry_words.size() * sizeof(uint32_t),
-              arch, relocation_errors, relocation_decoder.get());
-          if (!decoded) {
-            if (requires_in_place_entry) {
-              result.errors.insert(result.errors.end(), relocation_errors.begin(),
-                                   relocation_errors.end());
-              return;
-            }
-            // The expanded in-place relay is only an optimization for ordinary
-            // kernels. If a later entry instruction is PC-relative, leave the
-            // hardware entry intact and use descriptor redirection instead.
-            instrument_entry_in_place = false;
-            displaced_entry_words.clear();
-            prologue_return_target = kernel.entry_text_offset;
-            break;
+        if (arch == ROCJITSU_CODE_ARCH_GFX1250 && !requires_in_place_entry &&
+            !chains_existing_entry_trampoline) {
+          // B0-to-A0 translation can move an appended prologue independently
+          // of a hardware-entry indirect jump. Leave the entry intact and let
+          // the translated descriptor name the prologue when no same-owner
+          // direct relay exists.
+          instrument_entry_in_place = false;
+          displaced_entry_words.clear();
+          prologue_return_target = kernel.entry_text_offset;
+        } else {
+          if (chains_existing_entry_trampoline) {
+            result.errors.emplace_back(
+                "ConSan MOI dynamic-stack owner/epoch prologue found no reachable entry relay "
+                "without clobbering an existing entry instrumentation patch");
+            return;
           }
-          displaced_entry_words.insert(displaced_entry_words.end(), decoded->begin(),
-                                       decoded->end());
-        }
-        if (instrument_entry_in_place) {
-          indirect_at_entry = true;
-          prologue_return_target =
-              kernel.entry_text_offset + displaced_entry_words.size() * sizeof(uint32_t);
+          constexpr size_t kDirectEntryRelayWords = 7u;
+          while (displaced_entry_words.size() < kDirectEntryRelayWords) {
+            std::vector<std::string> relocation_errors;
+            auto decoded = decode_relocatable_entry_instruction(
+                old_text,
+                kernel.entry_text_offset + displaced_entry_words.size() * sizeof(uint32_t), arch,
+                relocation_errors, relocation_decoder.get());
+            if (!decoded) {
+              if (requires_in_place_entry) {
+                result.errors.insert(result.errors.end(), relocation_errors.begin(),
+                                     relocation_errors.end());
+                return;
+              }
+              // The expanded in-place relay is only an optimization for ordinary
+              // kernels. If a later entry instruction is PC-relative, leave the
+              // hardware entry intact and use descriptor redirection instead.
+              instrument_entry_in_place = false;
+              displaced_entry_words.clear();
+              prologue_return_target = kernel.entry_text_offset;
+              break;
+            }
+            displaced_entry_words.insert(displaced_entry_words.end(), decoded->begin(),
+                                         decoded->end());
+          }
+          if (instrument_entry_in_place) {
+            indirect_at_entry = true;
+            prologue_return_target =
+                kernel.entry_text_offset + displaced_entry_words.size() * sizeof(uint32_t);
+          }
         }
       }
+    }
+    const uint64_t final_prologue_return_target = prologue_return_target;
+    std::optional<uint64_t> prologue_return_relay;
+    if (arch == ROCJITSU_CODE_ARCH_GFX1250 && !item.has_kernarg_preload &&
+        !compute_sopp_branch_simm16(prologue_text_offset, prologue_return_target)) {
+      const std::array relay_anchors = {prologue_text_offset, prologue_return_target};
+      prologue_return_relay = entry_islands.claim_word_reachable_from_all_for_owner(
+          relay_anchors, kernel.entry_text_offset);
+      if (prologue_return_relay)
+        prologue_return_target = *prologue_return_relay;
     }
     const std::optional<uint16_t> owner_shift =
         moi_kernel_owner_shift(active_bytes, kernel, result.errors);
@@ -2456,14 +2481,36 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
         item.workgroup_sources, displaced_entry_words, arch, result.errors);
     if (!words)
       return;
+    if (prologue_return_relay) {
+      const uint64_t return_branch_offset =
+          prologue_text_offset + (words->size() - 1u) * sizeof(uint32_t);
+      const auto to_relay =
+          compute_sopp_branch_simm16(return_branch_offset, *prologue_return_relay);
+      const auto from_relay =
+          compute_sopp_branch_simm16(*prologue_return_relay, final_prologue_return_target);
+      if (!to_relay || !from_relay || words->back() != build_s_branch(*to_relay, arch) ||
+          !write_word_bytes(new_text, *prologue_return_relay, build_s_branch(*from_relay, arch))) {
+        result.errors.emplace_back(
+            "ConSan MOI owner/epoch prologue could not encode its same-owner return relay");
+        return;
+      }
+      ConSanPatchInfo relay_info;
+      relay_info.kind = ConSanPatchKind::TrampolineMoiIndirectBranchIsland;
+      relay_info.anchor_offset = kernel.entry_text_offset;
+      relay_info.trampoline_offset = *prologue_return_relay;
+      relay_info.trampoline_size = sizeof(uint32_t);
+      relay_info.owner_descriptor_file_offsets.assign(canonical_owner.begin(),
+                                                      canonical_owner.end());
+      patches.push_back(std::move(relay_info));
+    }
     if (instrument_entry_in_place) {
       size_t first_padding_word = 1u;
       if (indirect_at_entry) {
         const size_t patch_count_before_entry_relay = patches.size();
         if (!emit_moi_local_indirect_kernel_entry_island(
                 new_text, kernel.entry_text_offset, prologue_text_offset, kernel.entry_text_offset,
-                std::span<const uint64_t>(&kernel.descriptor_file_offset, 1u), arch, patches,
-                result.errors, "ConSan MOI dynamic-stack owner/epoch prologue")) {
+                canonical_owner, arch, patches, result.errors,
+                "ConSan MOI dynamic-stack owner/epoch prologue")) {
           return;
         }
         // The prologue record below owns this same entry anchor, so retain
@@ -2491,8 +2538,8 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
       if (!indirect_at_entry && entry_island_offset &&
           !emit_moi_local_indirect_kernel_entry_island(
               new_text, *entry_island_offset, prologue_text_offset, kernel.entry_text_offset,
-              std::span<const uint64_t>(&kernel.descriptor_file_offset, 1u), arch, patches,
-              result.errors, "ConSan MOI dynamic-stack owner/epoch prologue")) {
+              canonical_owner, arch, patches, result.errors,
+              "ConSan MOI dynamic-stack owner/epoch prologue")) {
         return;
       }
     } else if (!patcher.redirect_kernel_entry(kernel.descriptor_file_offset,
@@ -2623,13 +2670,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     }
     if (item.dispatch_plan && dispatch_capture.present())
       note_dispatch_id_patch_info(info, *item.dispatch_plan, dispatch_capture);
-    const auto canonical_kernel =
-        std::ranges::find(result.kernels, kernel.name, &ConSanKernelInfo::name);
-    if (canonical_kernel == result.kernels.end()) {
-      result.errors.emplace_back("ConSan MOI owner/epoch prologue lost its canonical kernel owner");
-      return;
-    }
-    info.owner_descriptor_file_offsets.push_back(canonical_kernel->descriptor_file_offset);
+    info.owner_descriptor_file_offsets.assign(canonical_owner.begin(), canonical_owner.end());
     if (composed_branch_only_trampoline_offset) {
       for (uint64_t relay : composed_branch_only_entry_relays) {
         if (!write_word_bytes(new_text, relay, build_s_nop(0, arch))) {

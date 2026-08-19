@@ -1076,8 +1076,18 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
                                           : 0u;
   constexpr uint64_t kIndirectIslandWords = kMoiRecordReplayIndirectIslandWords;
   std::vector<ConSanPatchInfo> patches;
-  const bool use_dense_barrier_relay = arch == ROCJITSU_CODE_ARCH_GFX1250 ||
-                                       (arch == ROCJITSU_CODE_ARCH_RDNA4 && selected.size() >= 8u);
+  // A single nearby gfx1250 barrier needs no shared call router. Keeping that
+  // case on the ordinary direct-cave path is also important for a shared
+  // helper: B0-to-A0 translation clones the helper per kernel owner, whereas
+  // an absolute call-return dispatcher only names one physical clone.
+  const bool gfx1250_single_direct_barrier =
+      arch == ROCJITSU_CODE_ARCH_GFX1250 && selected.size() == 1u &&
+      compute_sopp_branch_simm16(selected.front().candidate.barrier.site.text_offset,
+                                 new_text.size())
+          .has_value();
+  const bool use_dense_barrier_relay =
+      (arch == ROCJITSU_CODE_ARCH_GFX1250 && !gfx1250_single_direct_barrier) ||
+      (arch == ROCJITSU_CODE_ARCH_RDNA4 && selected.size() >= 8u);
   if (use_dense_barrier_relay) {
     constexpr uint64_t kDispatcherWordsPerSite = 20u;
 
@@ -1202,6 +1212,11 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       const uint16_t call_return_sgpr =
           spill_backed_router ? *group_options.moi_record_replay_call_return_sgpr
                               : static_cast<uint16_t>(*group_options.moi_exec_save_sgpr + 6u);
+      // gfx1250 revision translation can clone a shared helper once per
+      // owning kernel. Compare a caller-to-island delta captured inside that
+      // clone, rather than an absolute B0 caller PC materialized in the
+      // appended dispatcher (which is not cloned with the helper).
+      const bool derive_key_at_entry = spill_backed_router || arch == ROCJITSU_CODE_ARCH_GFX1250;
       const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
         if (arch == ROCJITSU_CODE_ARCH_GFX1250)
           return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
@@ -1209,7 +1224,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
           return build_s_call_b64(call_return_sgpr, simm16, arch);
         return std::nullopt;
       };
-      const uint64_t island_words_count = moi_dense_barrier_entry_island_words(spill_backed_router);
+      const uint64_t island_words_count = moi_dense_entry_island_words(derive_key_at_entry);
       const uint64_t host_words_count = island_words_count + 1u;
       const uint64_t host_bytes = host_words_count * sizeof(uint32_t);
       const std::vector<MoiSgprRange> host_bootstrap_ranges = moi_relocatable_host_scalar_ranges(
@@ -1310,7 +1325,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
                                                 .saved_scc_sgpr = saved_scc_sgpr,
                                                 .key_sgpr = key_sgpr,
                                                 .call_return_sgpr = call_return_sgpr},
-                                               spill_backed_router, arch);
+                                               derive_key_at_entry, arch);
       if (!island_words || island_words->size() != island_words_count) {
         result.errors.emplace_back(
             "ConSan MOI sampled dense barrier relay could not encode its island");
@@ -1327,7 +1342,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       std::memcpy(new_text.data() + host_offset, &*host_call, sizeof(uint32_t));
 
       std::vector<uint32_t> dispatcher_words;
-      if (!spill_backed_router) {
+      if (!derive_key_at_entry) {
         const auto subtract_pc =
             instrumentation::build_s_sub_u32(key_sgpr, call_return_sgpr, jump_pc_sgpr, arch);
         if (!subtract_pc) {
@@ -1339,12 +1354,12 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         dispatcher_words.push_back(build_s_add_u32(key_sgpr, key_sgpr, /*literal=*/255u, arch));
         dispatcher_words.push_back(static_cast<uint32_t>(dispatcher_offset - island_offset));
       }
-      const auto append_target = [&](uint32_t key, uint64_t target) -> bool {
+      const auto append_target = [&](uint64_t caller_return, uint64_t target) -> bool {
         const auto compare = instrumentation::build_s_cmp_eq_u32(key_sgpr, /*literal=*/255u, arch);
         if (!compare)
           return false;
         dispatcher_words.push_back(*compare);
-        dispatcher_words.push_back(key);
+        dispatcher_words.push_back(static_cast<uint32_t>(caller_return - island_offset));
         std::vector<uint32_t> matched_words;
         const uint64_t matched_offset =
             dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
@@ -1360,13 +1375,11 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         dispatcher_words.insert(dispatcher_words.end(), matched_words.begin(), matched_words.end());
         return true;
       };
-      if (!append_target(/*entry host key=*/0u, host_body_offset))
+      if (!append_target(/*caller_return=*/island_offset, host_body_offset))
         return;
       for (const DenseBody &body : bodies) {
         const ConSanBarrierSite &site = selected[body.selected_index].candidate.barrier.site;
-        if (!append_target(
-                static_cast<uint32_t>(site.text_offset + sizeof(uint32_t) - island_offset),
-                body.offset))
+        if (!append_target(site.text_offset + sizeof(uint32_t), body.offset))
           return;
       }
       dispatcher_words.push_back(build_s_endpgm(arch));

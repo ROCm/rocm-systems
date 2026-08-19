@@ -1474,7 +1474,6 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         return ReusedDenseRelayResult::Failed;
       }
       const MoiIndirectJumpSgprs indirect_state = scalar_abi->indirect_jump;
-      const uint16_t key_sgpr = scalar_abi->dispatch_key_sgpr;
       const uint16_t call_return_sgpr = *scalar_abi->call_return_sgpr;
       const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
         if (arch == ROCJITSU_CODE_ARCH_GFX1250)
@@ -1554,15 +1553,13 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         }
         staged_body_bytes += body_bytes;
 
-        const auto compare = instrumentation::build_s_cmp_eq_u32(key_sgpr, /*literal=*/255u, arch);
-        if (!compare) {
+        if (!append_moi_call_return_match(dispatcher_words, dispatcher.trampoline_offset,
+                                          site.text_offset + sizeof(uint32_t),
+                                          indirect_state.pc_sgpr, call_return_sgpr, arch)) {
           result.errors.emplace_back(
-              "ConSan MOI reused barrier relay could not encode its dispatch comparison");
+              "ConSan MOI reused barrier relay could not encode its relocatable caller match");
           return ReusedDenseRelayResult::Failed;
         }
-        dispatcher_words.push_back(*compare);
-        dispatcher_words.push_back(
-            static_cast<uint32_t>(site.text_offset + sizeof(uint32_t) - relay->island_offset));
         std::vector<uint32_t> matched_words;
         const uint64_t matched_offset =
             dispatcher.trampoline_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
@@ -1714,6 +1711,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         key_sgpr = *group_options.moi_record_replay_dispatch_key_sgpr;
         call_return_sgpr = *group_options.moi_record_replay_call_return_sgpr;
       }
+      const bool derive_key_at_entry = spill_backed_router;
       const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
         if (arch == ROCJITSU_CODE_ARCH_GFX1250)
           return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
@@ -1722,7 +1720,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           return build_s_call_b64(call_return_sgpr, simm16, arch);
         return std::nullopt;
       };
-      const uint64_t island_words_count = moi_dense_barrier_entry_island_words(spill_backed_router);
+      const uint64_t island_words_count = moi_dense_entry_island_words(derive_key_at_entry);
       const uint64_t host_words_count = island_words_count + 1u;
       const uint64_t host_bytes = host_words_count * sizeof(uint32_t);
       std::vector<uint64_t> anchors;
@@ -1840,7 +1838,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                                                 .saved_scc_sgpr = saved_scc_sgpr,
                                                 .key_sgpr = key_sgpr,
                                                 .call_return_sgpr = call_return_sgpr},
-                                               spill_backed_router, arch);
+                                               derive_key_at_entry, arch);
       if (!island_words || island_words->size() != island_words_count) {
         result.errors.emplace_back("ConSan MOI dense barrier relay could not encode its island");
         return;
@@ -1855,7 +1853,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       std::memcpy(new_text.data() + host_offset, &*host_call, sizeof(uint32_t));
 
       std::vector<uint32_t> dispatcher_words;
-      if (!spill_backed_router) {
+      if (!derive_key_at_entry && arch != ROCJITSU_CODE_ARCH_GFX1250) {
         const auto subtract_pc =
             instrumentation::build_s_sub_u32(key_sgpr, call_return_sgpr, jump_pc_sgpr, arch);
         if (!subtract_pc) {
@@ -1867,12 +1865,19 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         dispatcher_words.push_back(static_cast<uint32_t>(dispatcher_offset - island_offset));
       }
 
-      const auto append_dispatch_target = [&](uint32_t key, uint64_t target) -> bool {
-        const auto compare = instrumentation::build_s_cmp_eq_u32(key_sgpr, /*literal=*/255u, arch);
-        if (!compare)
-          return false;
-        dispatcher_words.push_back(*compare);
-        dispatcher_words.push_back(key);
+      const auto append_dispatch_target = [&](uint64_t caller_return, uint64_t target) -> bool {
+        if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+          if (!append_moi_call_return_match(dispatcher_words, dispatcher_offset, caller_return,
+                                            jump_pc_sgpr, call_return_sgpr, arch))
+            return false;
+        } else {
+          const auto compare =
+              instrumentation::build_s_cmp_eq_u32(key_sgpr, /*literal=*/255u, arch);
+          if (!compare)
+            return false;
+          dispatcher_words.push_back(*compare);
+          dispatcher_words.push_back(static_cast<uint32_t>(caller_return - island_offset));
+        }
         std::vector<uint32_t> matched_words;
         const uint64_t matched_offset =
             dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);
@@ -1888,16 +1893,14 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         dispatcher_words.insert(dispatcher_words.end(), matched_words.begin(), matched_words.end());
         return true;
       };
-      if (!append_dispatch_target(/*entry host key=*/0u, host_body_offset)) {
+      if (!append_dispatch_target(/*caller_return=*/island_offset, host_body_offset)) {
         result.errors.emplace_back(
             "ConSan MOI dense barrier relay could not encode its host dispatch");
         return;
       }
       for (const DenseBarrierBody &body : bodies) {
         const ConSanBarrierSite &site = planned_candidates[body.planned_index].candidate.site;
-        if (!append_dispatch_target(
-                static_cast<uint32_t>(site.text_offset + sizeof(uint32_t) - island_offset),
-                body.offset)) {
+        if (!append_dispatch_target(site.text_offset + sizeof(uint32_t), body.offset)) {
           result.errors.emplace_back(
               "ConSan MOI dense barrier relay could not encode a barrier dispatch");
           return;

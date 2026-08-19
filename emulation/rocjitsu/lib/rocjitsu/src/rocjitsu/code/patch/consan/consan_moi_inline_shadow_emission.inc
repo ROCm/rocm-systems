@@ -3275,3 +3275,43 @@
 [[nodiscard]] bool append_moi_scc_preserving_indirect_jump(
     std::vector<uint32_t> &words, uint64_t words_text_offset, uint64_t target_text_offset,
     uint16_t pc_sgpr, uint16_t saved_scc_sgpr, bool capture_scc, rj_code_arch_t arch);
+
+// Emit a call-return comparison whose expected PC is rebuilt from a canonical
+// get-PC sequence. Revision translation can then relocate the expected caller
+// independently of the dispatcher and its in-kernel entry island.
+[[nodiscard]] bool append_moi_call_return_match(std::vector<uint32_t> &words,
+                                                uint64_t words_text_offset,
+                                                uint64_t caller_return_text_offset,
+                                                uint16_t pc_sgpr, uint16_t call_return_sgpr,
+                                                rj_code_arch_t arch) {
+  const uint64_t getpc_text_offset =
+      words_text_offset + static_cast<uint64_t>(words.size()) * sizeof(uint32_t);
+  words.push_back(build_s_getpc_b64(pc_sgpr, arch));
+  const uint64_t pc_after_getpc = getpc_text_offset + sizeof(uint32_t);
+  if (caller_return_text_offset > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
+      pc_after_getpc > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+    return false;
+  }
+  const int64_t delta =
+      static_cast<int64_t>(caller_return_text_offset) - static_cast<int64_t>(pc_after_getpc);
+  if (!append_pc_delta_builder(words, arch, pc_sgpr, delta, /*minimum_words=*/3u,
+                               /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_GFX1250))
+    return false;
+  const auto compare = instrumentation::build_s_cmp_eq_u32(call_return_sgpr, pc_sgpr, arch);
+  if (!compare)
+    return false;
+  words.push_back(*compare);
+  return true;
+}
+
+struct MoiDenseBarrierRouterScalarAbi {
+  uint16_t jump_pc_sgpr = 0;
+  uint16_t saved_scc_sgpr = 0;
+  uint16_t key_sgpr = 0;
+  uint16_t call_return_sgpr = 0;
+};
+
+[[nodiscard]] std::optional<std::vector<uint32_t>>
+build_moi_dense_barrier_entry_island(uint64_t island_text_offset, uint64_t dispatcher_text_offset,
+                                     const MoiDenseBarrierRouterScalarAbi &abi,
+                                     bool derive_key_at_entry, rj_code_arch_t arch);
