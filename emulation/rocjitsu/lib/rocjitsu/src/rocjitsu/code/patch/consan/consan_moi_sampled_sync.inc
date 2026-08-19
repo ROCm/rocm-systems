@@ -1212,11 +1212,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       const uint16_t call_return_sgpr =
           spill_backed_router ? *group_options.moi_record_replay_call_return_sgpr
                               : static_cast<uint16_t>(*group_options.moi_exec_save_sgpr + 6u);
-      // gfx1250 revision translation can clone a shared helper once per
-      // owning kernel. Compare a caller-to-island delta captured inside that
-      // clone, rather than an absolute B0 caller PC materialized in the
-      // appended dispatcher (which is not cloned with the helper).
-      const bool derive_key_at_entry = spill_backed_router || arch == ROCJITSU_CODE_ARCH_GFX1250;
+      const bool derive_key_at_entry = spill_backed_router;
       const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
         if (arch == ROCJITSU_CODE_ARCH_GFX1250)
           return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
@@ -1342,7 +1338,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       std::memcpy(new_text.data() + host_offset, &*host_call, sizeof(uint32_t));
 
       std::vector<uint32_t> dispatcher_words;
-      if (!derive_key_at_entry) {
+      if (!derive_key_at_entry && arch != ROCJITSU_CODE_ARCH_GFX1250) {
         const auto subtract_pc =
             instrumentation::build_s_sub_u32(key_sgpr, call_return_sgpr, jump_pc_sgpr, arch);
         if (!subtract_pc) {
@@ -1355,11 +1351,23 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         dispatcher_words.push_back(static_cast<uint32_t>(dispatcher_offset - island_offset));
       }
       const auto append_target = [&](uint64_t caller_return, uint64_t target) -> bool {
-        const auto compare = instrumentation::build_s_cmp_eq_u32(key_sgpr, /*literal=*/255u, arch);
-        if (!compare)
-          return false;
-        dispatcher_words.push_back(*compare);
-        dispatcher_words.push_back(static_cast<uint32_t>(caller_return - island_offset));
+        if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+          // B0-to-A0 translation can move each caller and the in-kernel entry
+          // island by different amounts. Rebuild the expected caller address
+          // with a canonical PC-relative sequence so DBT relocates it along
+          // with the direct call, rather than comparing a source-layout
+          // caller-to-island delta.
+          if (!append_moi_call_return_match(dispatcher_words, dispatcher_offset, caller_return,
+                                            jump_pc_sgpr, call_return_sgpr, arch))
+            return false;
+        } else {
+          const auto compare =
+              instrumentation::build_s_cmp_eq_u32(key_sgpr, /*literal=*/255u, arch);
+          if (!compare)
+            return false;
+          dispatcher_words.push_back(*compare);
+          dispatcher_words.push_back(static_cast<uint32_t>(caller_return - island_offset));
+        }
         std::vector<uint32_t> matched_words;
         const uint64_t matched_offset =
             dispatcher_offset + (dispatcher_words.size() + 1u) * sizeof(uint32_t);

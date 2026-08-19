@@ -2372,12 +2372,12 @@ TEST(ConSanMoi, Gfx1250SampledSpillsExecVccStateWithSeparateDeadDenseRouter) {
   }
 }
 
-TEST(ConSanMoi, Gfx1250SampledDenseBarrierUsesCloneInvariantCallerKey) {
+TEST(ConSanMoi, Gfx1250SampledDenseBarrierUsesRelocatableCallerAddresses) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
   constexpr uint32_t kBarrierCount = 2u;
-  constexpr uint32_t kDenseEntryIslandWords = 12u;
   constexpr uint16_t kExecSaveSgpr = 80u;
   constexpr uint16_t kDispatchKeySgpr = kExecSaveSgpr + 5u;
+  constexpr uint16_t kCallReturnSgpr = kExecSaveSgpr + 6u;
 
   std::vector<uint32_t> words;
   for (uint32_t index = 0u; index < kBarrierCount; ++index) {
@@ -2411,11 +2411,16 @@ TEST(ConSanMoi, Gfx1250SampledDenseBarrierUsesCloneInvariantCallerKey) {
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
-  const auto dense_host = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
-           patch.original_size == (kDenseEntryIslandWords + 1u) * sizeof(uint32_t);
-  });
-  ASSERT_NE(dense_host, result.patches.end());
+  const auto call_opcode = instrumentation::build_s_call_i64(kCallReturnSgpr, 0, kArch);
+  ASSERT_TRUE(call_opcode);
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind != ConSanPatchKind::TrampolineMoiSampledSyncMetadata)
+      continue;
+    const std::vector<uint32_t> anchor =
+        text_words_at_offset(patched, patch.anchor_offset, sizeof(uint32_t));
+    ASSERT_EQ(anchor.size(), 1u);
+    EXPECT_EQ(anchor.front() & 0xffff0000u, *call_opcode & 0xffff0000u);
+  }
 
   const auto dispatcher = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
@@ -2424,16 +2429,18 @@ TEST(ConSanMoi, Gfx1250SampledDenseBarrierUsesCloneInvariantCallerKey) {
   ASSERT_NE(dispatcher, result.patches.end());
   const std::vector<uint32_t> dispatcher_words =
       text_words_at_offset(patched, dispatcher->trampoline_offset, dispatcher->trampoline_size);
-  ASSERT_GE(dispatcher_words.size(), 2u);
-  const auto compare_key =
+  const auto compare_return =
+      instrumentation::build_s_cmp_eq_u32(kCallReturnSgpr, kExecSaveSgpr, kArch);
+  const auto compare_layout_key =
       instrumentation::build_s_cmp_eq_u32(kDispatchKeySgpr, /*literal=*/255u, kArch);
-  ASSERT_TRUE(compare_key);
-  EXPECT_EQ(dispatcher_words[0], *compare_key);
-  // The host call returns to the entry island itself, so its clone-invariant
-  // caller-to-island key is zero. Shared-helper barrier calls use their
-  // corresponding in-helper deltas and remain stable when translation clones
-  // the complete helper.
-  EXPECT_EQ(dispatcher_words[1], 0u);
+  ASSERT_TRUE(compare_return);
+  ASSERT_TRUE(compare_layout_key);
+  EXPECT_EQ(std::ranges::count(dispatcher_words, *compare_return), kBarrierCount + 1u);
+  EXPECT_EQ(std::ranges::find(dispatcher_words, *compare_layout_key), dispatcher_words.end())
+      << "gfx1250 dispatch must not compare a source-layout caller-to-island delta";
+  EXPECT_GE(std::ranges::count(dispatcher_words, build_s_getpc_b64(kExecSaveSgpr, kArch)),
+            kBarrierCount + 1u)
+      << "each expected caller must use a DBT-relocatable PC materializer";
   EXPECT_TRUE(result.final_validation_passed);
 }
 
@@ -2568,6 +2575,18 @@ void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj
   const auto compare_key =
       instrumentation::build_s_cmp_eq_u32(*assignment.dispatch_key_sgpr, /*literal=*/255u, arch);
   ASSERT_TRUE(compare_key);
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+    const auto compare_return = instrumentation::build_s_cmp_eq_u32(
+        *assignment.call_return_sgpr, *assignment.indirect_pc_sgpr, arch);
+    ASSERT_TRUE(compare_return);
+    EXPECT_EQ(std::ranges::count(dispatcher_words, *compare_return), kBarrierCount + 1u);
+    EXPECT_EQ(std::ranges::find(dispatcher_words, *compare_key), dispatcher_words.end());
+    EXPECT_GE(
+        std::ranges::count(dispatcher_words, build_s_getpc_b64(*assignment.indirect_pc_sgpr, arch)),
+        kBarrierCount + 1u);
+    EXPECT_TRUE(result.final_validation_passed);
+    return;
+  }
   std::vector<uint32_t> actual_dispatch_keys;
   for (size_t index = 0u; index + 1u < dispatcher_words.size(); ++index) {
     if (dispatcher_words[index] == *compare_key)
@@ -2579,7 +2598,7 @@ void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj
   EXPECT_TRUE(result.final_validation_passed);
 }
 
-TEST(ConSanMoi, Gfx1250SampledDenseBarrierRoutesThroughDeadPairUnderScalarSpill) {
+TEST(ConSanMoi, Gfx1250SampledDenseBarrierUsesRelocatableCallerAddressesUnderScalarSpill) {
   expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(
       ROCJITSU_CODE_ARCH_GFX1250);
 }
@@ -5904,6 +5923,7 @@ TEST(ConSanMoi, Gfx1250SampledBarrierDoesNotGateWorkgroupsForAddressSampling) {
   ASSERT_NE(owner, trampoline.end());
   EXPECT_LT(barrier, owner);
   EXPECT_EQ(std::ranges::find(trampoline, obsolete_workgroup_gate_shift), trampoline.end());
+
   EXPECT_TRUE(result.final_validation_passed);
 }
 
