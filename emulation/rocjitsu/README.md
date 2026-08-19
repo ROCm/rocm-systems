@@ -81,10 +81,10 @@ not found.
 
 ```bash
 # Local mode (in-process simulation)
-rocjitsu --config configs/gfx950_cdna4_kmd.json -- ./my_hip_app
+rocjitsu --config configs/gfx950_mi355x_kmd.json -- ./my_hip_app
 
 # Daemon mode (separate daemon process)
-rocjitsu --daemon --config configs/gfx950_cdna4_kmd.json -- ./my_hip_app
+rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json -- ./my_hip_app
 ```
 
 See [docs/rocjitsu-cli.md](docs/rocjitsu-cli.md) for all CLI modes.
@@ -106,7 +106,7 @@ See
 ## Running PyTorch
 
 ```bash
-rocjitsu --daemon --config configs/gfx950_cdna4_kmd.json -- \
+rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json -- \
   python3 -c "import torch; x = torch.randn(4, 4, device='cuda'); print(x @ x)"
 ```
 

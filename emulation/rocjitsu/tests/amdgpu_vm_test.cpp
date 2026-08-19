@@ -419,7 +419,7 @@ TEST(AqlDispatchTest, InitializesModeFromComputePgmRsrc1) {
       {"rdna3", kGfx11Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
       {"rdna3_5", kGfx11Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
       {"rdna4", kGfx11Endpgm, common_mode},
-      {"gfx1250", kGfx11Endpgm, common_mode},
+      {"cdna5", kGfx11Endpgm, common_mode},
   };
 
   for (const ModeInitCase &mode_case : cases) {
@@ -442,7 +442,7 @@ TEST(AqlDispatchTest, InitializesModeFromComputePgmRsrc1) {
 
 TEST(RdnaDispatchTest, Gfx1250DoesNotEnableWgpMode) {
   const uint32_t code[] = {SOPP_S_ENDPGM};
-  VmFixture f("gfx1250", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+  VmFixture f("cdna5", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
   uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, 128 * 1024,
                                /*wgp_mode=*/true);
   test::AqlQueue queue(f.mem(), f.cp());
@@ -1909,7 +1909,7 @@ TEST_P(IsaTest, VendorSpecificRejectsUnsupportedFormats) {
 }
 
 TEST(ClusterDispatchTest, RejectsClusterThatCannotFitWithoutSpinning) {
-  VmFixture f("gfx1250", 1, 1);
+  VmFixture f("cdna5", 1, 1);
 
   const uint32_t code[] = {0xBFB00000u}; // s_endpgm
   uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
@@ -1926,7 +1926,7 @@ TEST(ClusterDispatchTest, RejectsClusterThatCannotFitWithoutSpinning) {
 }
 
 TEST(ClusterDispatchTest, AccountsForPerWorkgroupLdsAlignmentWhenPlanningCluster) {
-  VmFixture f("gfx1250", 1, 3, /*lds_size_kb=*/1);
+  VmFixture f("cdna5", 1, 3, /*lds_size_kb=*/1);
 
   const uint32_t code[] = {0xBFB00000u}; // s_endpgm
   uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));

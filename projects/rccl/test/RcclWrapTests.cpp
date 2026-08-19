@@ -11,6 +11,7 @@
 #include <cstring>
 #include <memory>
 
+#include "ce_coll.h"
 #include "comm.h"
 #include "common/ErrCode.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
@@ -2204,6 +2205,76 @@ TEST(Rcclwrap, AdjustChannels_Gfx950SingleNode8Ranks_MainColl_NoDouble)
 }
 
 #endif // ENABLE_WARP_SPEED
+
+// Builds a mock comm that satisfies every CE AllReduce eligibility rule except
+// the one under test, so a single field or argument decides the outcome.
+static void CreateCeAllReduceEligibleComm(
+    ncclComm_t&            mockComm,
+    struct ncclTopoSystem& mockTopo,
+    struct ncclTopoNode&   mockGpuNode,
+    int                    nRanks
+)
+{
+    CreateMockComm(mockComm, mockTopo, mockGpuNode, "gfx950", nRanks);
+    mockComm->nNodes             = 1;
+    mockComm->symmetricSupport   = 1;
+    mockComm->config.CTAPolicy   = NCCL_CTA_POLICY_ZERO;
+}
+
+// A count of float32 divisible by the 8 mock ranks; well within NCCL_CE_AR_MAX_MSG_BYTES.
+static constexpr size_t kCeAllReduceCount = 4096;
+
+// rcclUseCeAllReduce gates the Copy Engine AllReduce path. The CE kernels never
+// read the bias buffer, so an eligible-looking ncclAllReduceWithBias call must
+// still be refused; taking CE there silently drops the bias from the result.
+TEST(Rcclwrap, RcclUseCeAllReduce_BiasBuffer)
+{
+    RUN_ISOLATED_TESTS(
+        ProcessIsolatedTestRunner::TestConfig(
+            "RcclUseCeAllReduce_BiasBufferRejected",
+            []()
+            {
+                ncclComm_t            comm = nullptr;
+                struct ncclTopoSystem topo;
+                struct ncclTopoNode   gpu;
+                CreateCeAllReduceEligibleComm(comm, topo, gpu, /*nRanks=*/8);
+
+                int biasBuffer = 0;
+                EXPECT_FALSE(rcclUseCeAllReduce(comm,
+                                                kCeAllReduceCount,
+                                                ncclFloat32,
+                                                ncclSum,
+                                                /*acc=*/&biasBuffer))
+                    << "CE AllReduce must be refused when a bias buffer is present";
+
+                CleanupMockComm(comm);
+            })
+            .withEnvironment({{"RCCL_CE_ALLREDUCE", "1"}}),
+
+        // Control case: identical arguments with no bias must still select CE,
+        // proving the rejection above is caused by the bias and not by an
+        // unrelated ineligibility in the mock comm.
+        ProcessIsolatedTestRunner::TestConfig(
+            "RcclUseCeAllReduce_NoBiasAccepted",
+            []()
+            {
+                ncclComm_t            comm = nullptr;
+                struct ncclTopoSystem topo;
+                struct ncclTopoNode   gpu;
+                CreateCeAllReduceEligibleComm(comm, topo, gpu, /*nRanks=*/8);
+
+                EXPECT_TRUE(rcclUseCeAllReduce(comm,
+                                               kCeAllReduceCount,
+                                               ncclFloat32,
+                                               ncclSum,
+                                               /*acc=*/nullptr))
+                    << "CE AllReduce should be selected when no bias buffer is present";
+
+                CleanupMockComm(comm);
+            })
+            .withEnvironment({{"RCCL_CE_ALLREDUCE", "1"}})
+    );
+}
 
 // ---------------------------------------------------------------------------
 // rcclAllReduceShouldTakeDdaPath: the AllReduce DDA-vs-CE dispatch decision.

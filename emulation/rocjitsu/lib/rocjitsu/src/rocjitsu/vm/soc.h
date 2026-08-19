@@ -113,6 +113,23 @@ public:
     return xcds_[idx]->command_processor();
   }
 
+  /// @brief Per-XCD histogram of workgroups placed by each XCD's command processor.
+  ///
+  /// @details Index i is the count for xcd(i). Each entry is that CP's lifetime
+  /// running total, so this describes one grid only when it is the sole dispatch,
+  /// as in the tests; otherwise diff a snapshot taken before the dispatch against
+  /// one taken after. A single non-zero bucket means the work ran on one XCD.
+  /// @returns One entry per XCD, in XCD index order.
+  std::vector<uint64_t> dispatched_workgroups_per_xcd() const {
+    std::vector<uint64_t> counts;
+    counts.reserve(xcds_.size());
+    for (const auto *xcd_ptr : xcds_) {
+      const auto *cp = xcd_ptr->command_processor();
+      counts.push_back(cp ? cp->dispatched_workgroups() : 0);
+    }
+    return counts;
+  }
+
   /// @brief Apply a function to all XCD command processors.
   ///
   /// @details Used for broadcast operations (setting callbacks, flushing, etc.)

@@ -43,6 +43,23 @@ uint32_t for_each_coalesced_lane_run(const uint64_t *addrs, uint64_t lane_mask, 
   return run_count;
 }
 
+bool all_elements_use_lane_mask(std::span<const uint64_t> element_lane_masks, uint64_t lane_mask,
+                                uint32_t num_elems) {
+  if (element_lane_masks.empty())
+    return true;
+  assert(element_lane_masks.size() == num_elems);
+  (void)num_elems;
+  return std::ranges::all_of(element_lane_masks,
+                             [lane_mask](uint64_t mask) { return mask == lane_mask; });
+}
+
+uint64_t fully_valid_lane_mask(std::span<const uint64_t> element_lane_masks, uint64_t lane_mask) {
+  uint64_t full_lane_mask = lane_mask;
+  for (uint64_t element_mask : element_lane_masks)
+    full_lane_mask &= element_mask;
+  return full_lane_mask;
+}
+
 } // namespace
 
 L1VectorCache::L1VectorCache(L2Cache *l2)
@@ -193,10 +210,30 @@ void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size
 
 void L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                          uint32_t num_elems, uint8_t *dst, Mtype mtype, bool non_temporal,
-                         bool request_l1_bypass, uint32_t wf_size, uint32_t vmid) {
+                         bool request_l1_bypass, uint32_t wf_size, uint32_t vmid,
+                         std::span<const uint64_t> element_lane_masks) {
   auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
   synchronize_epoch_locked();
   uint32_t stride = num_elems * elem_size;
+  if (!all_elements_use_lane_mask(element_lane_masks, lane_mask, num_elems)) {
+    uint64_t full_lane_mask = fully_valid_lane_mask(element_lane_masks, lane_mask);
+    for_each_coalesced_lane_run(
+        addrs, full_lane_mask, wf_size, stride, [&](uint32_t first_lane, uint32_t run_lanes) {
+          read_bytes(addrs[first_lane], dst + first_lane * stride, run_lanes * stride, mtype,
+                     non_temporal, request_l1_bypass, vmid);
+        });
+    for (uint32_t elem = 0; elem < num_elems; ++elem) {
+      uint64_t mask = element_lane_masks[elem] & lane_mask & ~full_lane_mask;
+      while (mask) {
+        const uint32_t lane = std::countr_zero(mask);
+        mask &= ~(uint64_t{1} << lane);
+        read_bytes(addrs[lane] + static_cast<uint64_t>(elem) * elem_size,
+                   dst + lane * stride + elem * elem_size, elem_size, mtype, non_temporal,
+                   request_l1_bypass, vmid);
+      }
+    }
+    return;
+  }
   for_each_coalesced_lane_run(
       addrs, lane_mask, wf_size, stride, [&](uint32_t first_lane, uint32_t run_lanes) {
         read_bytes(addrs[first_lane], dst + first_lane * stride, run_lanes * stride, mtype,
@@ -206,7 +243,8 @@ void L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, uint32_t ele
 
 void L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                           uint32_t num_elems, const uint8_t *src, Mtype mtype, bool non_temporal,
-                          uint32_t wf_size, uint32_t vmid) {
+                          uint32_t wf_size, uint32_t vmid,
+                          std::span<const uint64_t> element_lane_masks) {
   auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
   synchronize_epoch_locked();
   uint32_t stride = num_elems * elem_size;
@@ -214,6 +252,25 @@ void L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, uint32_t el
   ++store_count_;
   if (active_lanes > 0)
     ++store_active_count_;
+  if (!all_elements_use_lane_mask(element_lane_masks, lane_mask, num_elems)) {
+    uint64_t full_lane_mask = fully_valid_lane_mask(element_lane_masks, lane_mask);
+    store_l2_writes_ += for_each_coalesced_lane_run(
+        addrs, full_lane_mask, wf_size, stride, [&](uint32_t first_lane, uint32_t run_lanes) {
+          write_bytes(addrs[first_lane], src + first_lane * stride, run_lanes * stride, mtype,
+                      non_temporal, vmid);
+        });
+    for (uint32_t elem = 0; elem < num_elems; ++elem) {
+      uint64_t mask = element_lane_masks[elem] & lane_mask & ~full_lane_mask;
+      store_l2_writes_ += std::popcount(mask);
+      while (mask) {
+        const uint32_t lane = std::countr_zero(mask);
+        mask &= ~(uint64_t{1} << lane);
+        write_bytes(addrs[lane] + static_cast<uint64_t>(elem) * elem_size,
+                    src + lane * stride + elem * elem_size, elem_size, mtype, non_temporal, vmid);
+      }
+    }
+    return;
+  }
   store_l2_writes_ += for_each_coalesced_lane_run(
       addrs, lane_mask, wf_size, stride, [&](uint32_t first_lane, uint32_t run_lanes) {
         write_bytes(addrs[first_lane], src + first_lane * stride, run_lanes * stride, mtype,

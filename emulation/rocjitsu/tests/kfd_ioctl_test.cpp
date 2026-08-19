@@ -37,7 +37,7 @@
 
 namespace {
 
-const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_cdna4.json";
+const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x.json";
 constexpr uint32_t kGpuId = 38144;
 
 uint32_t query_gb_addr_config(const std::string &config_path, uint32_t gpu_id) {

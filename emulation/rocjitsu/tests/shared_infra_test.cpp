@@ -133,21 +133,20 @@ static_assert(!HasMonolithicWaitcnt<cdna5::Isa>);
 static_assert(!HasMonolithicWaitcnt<rdna4::Isa>);
 static_assert(!isa_properties(ROCJITSU_CODE_ARCH_CDNA3).supports_wgp_mode);
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).supports_wgp_mode);
-static_assert(!isa_properties(ROCJITSU_CODE_ARCH_GFX1250).supports_wgp_mode);
+static_assert(!isa_properties(ROCJITSU_CODE_ARCH_CDNA5).supports_wgp_mode);
 static_assert(!isa_properties(ROCJITSU_CODE_ARCH_CDNA3).uses_ttmp_workgroup_ids);
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).uses_ttmp_workgroup_ids);
 static_assert(!isa_properties(ROCJITSU_CODE_ARCH_RDNA4).uses_cluster_ttmp_workgroup_ids);
-static_assert(isa_properties(ROCJITSU_CODE_ARCH_GFX1250).uses_ttmp_workgroup_ids);
-static_assert(isa_properties(ROCJITSU_CODE_ARCH_GFX1250).uses_cluster_ttmp_workgroup_ids);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA5).uses_ttmp_workgroup_ids);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA5).uses_cluster_ttmp_workgroup_ids);
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA2).descriptor_vgpr_count_granule_wave32 == 0);
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA2).descriptor_vgpr_count_granule_wave64 == 8);
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA3).descriptor_vgpr_count_granule_wave32 == 0);
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA3).descriptor_vgpr_count_granule_wave64 == 8);
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).descriptor_vgpr_count_granule_wave32 == 8);
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).descriptor_vgpr_count_granule_wave64 == 4);
-static_assert(isa_properties(ROCJITSU_CODE_ARCH_GFX1250).descriptor_vgpr_count_granule_wave32 ==
-              16);
-static_assert(isa_properties(ROCJITSU_CODE_ARCH_GFX1250).descriptor_vgpr_count_granule_wave64 == 0);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA5).descriptor_vgpr_count_granule_wave32 == 16);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA5).descriptor_vgpr_count_granule_wave64 == 0);
 
 // RDNA3/3.5 retain monolithic S_WAITCNT (GFX11 layout).
 static_assert(HasMonolithicWaitcnt<rdna3::Isa>);
@@ -185,7 +184,7 @@ TEST(IsaPropertiesTest, DescriptorVgprGranuleSupportsEveryAmdgpuWavefrontMode) {
       ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA3_5, 64, 4},
       ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA4, 32, 8},
       ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA4, 64, 4},
-      ExpectedGranule{ROCJITSU_CODE_ARCH_GFX1250, 32, 16},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_CDNA5, 32, 16},
   };
 
   for (const auto &[arch, wavefront_size, granule] : cases) {
@@ -203,7 +202,7 @@ TEST(IsaPropertiesTest, DescriptorVgprGranuleRejectsUnsupportedInputs) {
   EXPECT_FALSE(
       descriptor_vgpr_count_granule_for_wavefront(ROCJITSU_CODE_ARCH_CDNA2, 32).has_value());
   EXPECT_FALSE(
-      descriptor_vgpr_count_granule_for_wavefront(ROCJITSU_CODE_ARCH_GFX1250, 64).has_value());
+      descriptor_vgpr_count_granule_for_wavefront(ROCJITSU_CODE_ARCH_CDNA5, 64).has_value());
 }
 
 TEST(CommandProcessorTest, ConfigureForCdna2UsesEightVgprDescriptorGranule) {
@@ -1764,6 +1763,114 @@ TEST(L1VectorCacheTest, UcDwordx4RoundTripPreservesVectorTransaction) {
   EXPECT_EQ(std::memcmp(load_bytes.data() + sizeof(kLane0), kLane1.data(), sizeof(kLane1)), 0);
 }
 
+TEST(L1VectorCacheTest, PartialElementMasksSkipMaskedLoads) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::L1VectorCache l1(&l2);
+  l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kAddr = 0x7880;
+  constexpr std::array<uint32_t, 4> kLane0 = {0x101u, 0x102u, 0x103u, 0x104u};
+  constexpr std::array<uint32_t, 4> kLane1 = {0x201u, 0x202u, 0x203u, 0x204u};
+  for (uint32_t elem = 0; elem < 4; ++elem) {
+    mem.write32(kAddr + elem * sizeof(uint32_t), kLane0[elem]);
+    mem.write32(kAddr + 0x40 + elem * sizeof(uint32_t), kLane1[elem]);
+  }
+
+  uint64_t addrs[64] = {};
+  addrs[0] = kAddr;
+  addrs[1] = kAddr + 0x40;
+  constexpr std::array<uint64_t, 4> kElementMasks = {0x3, 0x1, 0x1, 0x0};
+  std::array<uint8_t, 64 * 4 * sizeof(uint32_t)> bytes{};
+  l1.load(addrs, /*lane_mask=*/0x3, /*elem_size=*/4, /*num_elems=*/4, bytes.data(),
+          amdgpu::Mtype::UC, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE, /*vmid=*/0, kElementMasks);
+
+  std::array<uint32_t, 4> lane0{};
+  std::array<uint32_t, 4> lane1{};
+  std::memcpy(lane0.data(), bytes.data(), sizeof(lane0));
+  std::memcpy(lane1.data(), bytes.data() + sizeof(lane0), sizeof(lane1));
+  EXPECT_EQ(lane0, (std::array<uint32_t, 4>{0x101u, 0x102u, 0x103u, 0u}));
+  EXPECT_EQ(lane1, (std::array<uint32_t, 4>{0x201u, 0u, 0u, 0u}));
+}
+
+TEST(L1VectorCacheTest, PartialElementMasksDropSkippedStores) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::L1VectorCache l1(&l2);
+  l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kAddr = 0x78c0;
+  constexpr std::array<uint32_t, 4> kInitial = {0xA0u, 0xA1u, 0xA2u, 0xA3u};
+  constexpr std::array<uint32_t, 4> kStored = {0xB0u, 0xB1u, 0xB2u, 0xB3u};
+  for (uint32_t elem = 0; elem < 4; ++elem)
+    mem.write32(kAddr + elem * sizeof(uint32_t), kInitial[elem]);
+
+  uint64_t addrs[64] = {};
+  addrs[0] = kAddr;
+  std::array<uint8_t, 64 * sizeof(kStored)> bytes{};
+  std::memcpy(bytes.data(), kStored.data(), sizeof(kStored));
+  constexpr std::array<uint64_t, 4> kElementMasks = {0x1, 0x1, 0x0, 0x0};
+  l1.store(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/4, bytes.data(),
+           amdgpu::Mtype::UC, /*non_temporal=*/false, cdna3::Isa::WF_SIZE, /*vmid=*/0,
+           kElementMasks);
+
+  EXPECT_EQ(mem.read32(kAddr), kStored[0]);
+  EXPECT_EQ(mem.read32(kAddr + 4), kStored[1]);
+  EXPECT_EQ(mem.read32(kAddr + 8), kInitial[2]);
+  EXPECT_EQ(mem.read32(kAddr + 12), kInitial[3]);
+}
+
+TEST(L1VectorCacheTest, PartialElementMasksCoalesceFullyValidLanes) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::L1VectorCache l1(&l2);
+  l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kAddr = 0x78e0;
+  constexpr std::array<uint32_t, 4> kLane0 = {0x101u, 0x102u, 0x103u, 0x104u};
+  constexpr std::array<uint32_t, 4> kLane1 = {0x201u, 0x202u, 0x203u, 0x204u};
+  constexpr std::array<uint32_t, 4> kLane2 = {0x301u, 0x302u, 0x303u, 0x304u};
+  uint64_t addrs[64] = {};
+  addrs[0] = kAddr;
+  addrs[1] = kAddr + sizeof(kLane0);
+  addrs[2] = kAddr + 2 * sizeof(kLane0);
+  std::array<uint8_t, 64 * sizeof(kLane0)> store_bytes{};
+  std::memcpy(store_bytes.data(), kLane0.data(), sizeof(kLane0));
+  std::memcpy(store_bytes.data() + sizeof(kLane0), kLane1.data(), sizeof(kLane1));
+  std::memcpy(store_bytes.data() + 2 * sizeof(kLane0), kLane2.data(), sizeof(kLane2));
+  constexpr std::array<uint64_t, 4> kElementMasks = {0x7, 0x7, 0x3, 0x3};
+
+  l1.store(addrs, /*lane_mask=*/0x7, /*elem_size=*/4, /*num_elems=*/4, store_bytes.data(),
+           amdgpu::Mtype::UC, /*non_temporal=*/false, cdna3::Isa::WF_SIZE, /*vmid=*/0,
+           kElementMasks);
+  EXPECT_EQ(l1.store_l2_writes(), 3u);
+  EXPECT_EQ(l2.backing_write_transactions(), 3u);
+  EXPECT_EQ(mem.read32(kAddr + 0), kLane0[0]);
+  EXPECT_EQ(mem.read32(kAddr + 4), kLane0[1]);
+  EXPECT_EQ(mem.read32(kAddr + 8), kLane0[2]);
+  EXPECT_EQ(mem.read32(kAddr + 12), kLane0[3]);
+  EXPECT_EQ(mem.read32(kAddr + 16), kLane1[0]);
+  EXPECT_EQ(mem.read32(kAddr + 20), kLane1[1]);
+  EXPECT_EQ(mem.read32(kAddr + 24), kLane1[2]);
+  EXPECT_EQ(mem.read32(kAddr + 28), kLane1[3]);
+  EXPECT_EQ(mem.read32(kAddr + 32), kLane2[0]);
+  EXPECT_EQ(mem.read32(kAddr + 36), kLane2[1]);
+  EXPECT_EQ(mem.read32(kAddr + 40), 0u);
+  EXPECT_EQ(mem.read32(kAddr + 44), 0u);
+
+  std::array<uint8_t, 64 * sizeof(kLane0)> load_bytes{};
+  l1.load(addrs, /*lane_mask=*/0x7, /*elem_size=*/4, /*num_elems=*/4, load_bytes.data(),
+          amdgpu::Mtype::UC, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE, /*vmid=*/0, kElementMasks);
+  EXPECT_EQ(l2.backing_read_transactions(), 3u);
+  EXPECT_EQ(std::memcmp(load_bytes.data(), kLane0.data(), sizeof(kLane0)), 0);
+  EXPECT_EQ(std::memcmp(load_bytes.data() + sizeof(kLane0), kLane1.data(), sizeof(kLane1)), 0);
+  std::array<uint32_t, 4> loaded_lane2{};
+  std::memcpy(loaded_lane2.data(), load_bytes.data() + 2 * sizeof(kLane0), sizeof(loaded_lane2));
+  EXPECT_EQ(loaded_lane2, (std::array<uint32_t, 4>{kLane2[0], kLane2[1], 0u, 0u}));
+}
+
 TEST(L1VectorCacheTest, UcDwordx4CoalescesAdjacentLanes) {
   amdgpu::GpuMemory mem("test_mem");
   amdgpu::L2Cache l2("test_l2");
@@ -2043,7 +2150,7 @@ TEST(CuFactoryTest, CdnaAccVgprsAreClearedOnRedispatch) {
 INSTANTIATE_TEST_SUITE_P(AllIsas, CuFactoryTest,
                          ::testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
                                            ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4,
-                                           ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_RDNA1,
+                                           ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA1,
                                            ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
                                            ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4));
 
@@ -2443,7 +2550,7 @@ struct Rdna3_5DppTraits {
 
 struct Gfx1250DppTraits {
   static constexpr const char *name = "gfx1250";
-  static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_GFX1250;
+  static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA5;
   static const IsaExecutionBackend &backend() { return cdna5::execution_backend(); }
   using MachineInst = cdna5::MachineInst;
   using VopcMachineInst = cdna5::VopcMachineInst;
@@ -4039,7 +4146,7 @@ TEST(Gfx1250AddrCalcTest, FlatPrivateScratchDecodesLaneBits) {
   amdgpu::GpuMemory mem("gfx1250_flat_private_mem");
   amdgpu::L2Cache l2("gfx1250_flat_private_l2");
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 128;
   cfg.vgprs_per_wf = 32;
@@ -4226,11 +4333,53 @@ TEST(RdnaAddrCalcTest, Rdna4VbufferWrapsOffsetPartBeforeBaseAddition) {
   EXPECT_EQ(d.per_lane_addr[0], kBase);
 }
 
-TEST(RdnaAddrCalcTest, Gfx1250VbufferWrapsOffsetPartBeforeBoundsCheck) {
+std::array<uint32_t, 4> encode_gfx1250_buffer_resource(uint64_t base, uint64_t num_records,
+                                                       uint32_t stride = 0,
+                                                       uint32_t stride_scale = 0,
+                                                       bool swizzle = false,
+                                                       bool oob_select = false, uint32_t type = 0) {
+  return {
+      static_cast<uint32_t>(base),
+      static_cast<uint32_t>((base >> 32) & 0x01FF'FFFFu) |
+          static_cast<uint32_t>((num_records & 0x7Fu) << 25),
+      static_cast<uint32_t>(num_records >> 7),
+      static_cast<uint32_t>((num_records >> 39) & 0x3Fu) | ((stride & 0x3FFFu) << 12) |
+          ((stride_scale & 0x3u) << 26) | (static_cast<uint32_t>(swizzle) << 28) |
+          (static_cast<uint32_t>(oob_select) << 29) | ((type & 0x3u) << 30),
+  };
+}
+
+void write_gfx1250_buffer_resource(amdgpu::ComputeUnitCore &cu, amdgpu::Wavefront &wf,
+                                   uint32_t first_sgpr, const std::array<uint32_t, 4> &resource) {
+  for (uint32_t i = 0; i < resource.size(); ++i)
+    cu.write_sgpr(wf.sgpr_alloc().base + first_sgpr + i, resource[i]);
+}
+
+TEST(Gfx1250AddrCalcTest, DecodesBufferResourceFields) {
+  constexpr uint64_t kBase = 0x0101'2345'6789'ABCDULL;
+  constexpr uint64_t kNumRecords = 0x0123'4567'89ABULL;
+  constexpr uint32_t kRawStride = 0x1234;
+  auto words = encode_gfx1250_buffer_resource(kBase, kNumRecords, kRawStride,
+                                              /*stride_scale=*/3, /*swizzle=*/true,
+                                              /*oob_select=*/true, /*type=*/2);
+
+  cdna5::BufferResource resource =
+      cdna5::decode_buffer_resource(words[0], words[1], words[2], words[3]);
+  EXPECT_EQ(resource.base_address, kBase);
+  EXPECT_EQ(resource.num_records, kNumRecords);
+  EXPECT_EQ(resource.raw_stride, kRawStride);
+  EXPECT_EQ(resource.stride_scale, 3);
+  EXPECT_EQ(resource.stride, kRawStride * 32);
+  EXPECT_TRUE(resource.swizzle_enabled);
+  EXPECT_TRUE(resource.oob_select);
+  EXPECT_EQ(resource.type, 2);
+}
+
+TEST(Gfx1250AddrCalcTest, VbufferUses45BitBufferOffsetAnd57BitBase) {
   amdgpu::GpuMemory mem("gfx1250_vbuffer_wrap_mem");
   amdgpu::L2Cache l2("gfx1250_vbuffer_wrap_l2");
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 128;
   cfg.vgprs_per_wf = 16;
@@ -4242,13 +4391,10 @@ TEST(RdnaAddrCalcTest, Gfx1250VbufferWrapsOffsetPartBeforeBoundsCheck) {
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1ULL);
 
-  constexpr uint64_t kBase = 0x2'0000'1000ULL;
-  uint32_t sbase = wf->sgpr_alloc().base;
+  constexpr uint64_t kBase = 0x0010'0002'0000'1000ULL;
+  constexpr uint64_t kOffset = uint64_t{1} << 32;
   uint32_t vbase = wf->vgpr_alloc().base;
-  cu->write_sgpr(sbase + 4, static_cast<uint32_t>(kBase));
-  cu->write_sgpr(sbase + 5, static_cast<uint32_t>(kBase >> 32));
-  cu->write_sgpr(sbase + 6, 0x100);
-  cu->write_sgpr(sbase + 7, 0);
+  write_gfx1250_buffer_resource(*cu, *wf, 4, encode_gfx1250_buffer_resource(kBase, kOffset + 4));
   cu->write_vgpr(vbase + 4, 0, 0xFFFF'8200u);
 
   cdna5::VbufferMachineInst inst{};
@@ -4260,16 +4406,112 @@ TEST(RdnaAddrCalcTest, Gfx1250VbufferWrapsOffsetPartBeforeBoundsCheck) {
   inst.ioffset = 0x7E00;
 
   amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+  d.elem_size = 4;
+  d.num_elems = 1;
   cdna5::mubuf_calculate_addresses(inst, *wf, d);
   EXPECT_EQ(d.lane_mask, 1ULL);
+  EXPECT_EQ(d.per_lane_addr[0], kBase + kOffset);
+  EXPECT_EQ(d.element_lane_masks, (std::vector<uint64_t>{1ULL}));
+}
+
+TEST(Gfx1250AddrCalcTest, VbufferRangeCheckDoesNotWrapAt45Bits) {
+  amdgpu::GpuMemory mem("gfx1250_vbuffer_range_wrap_mem");
+  amdgpu::L2Cache l2("gfx1250_vbuffer_range_wrap_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250_vbuffer_range_wrap_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, 128, 16);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x1FULL);
+
+  constexpr uint64_t kBase = 0x2'0000'1000ULL;
+  constexpr uint64_t kMaxNumRecords = (uint64_t{1} << 45) - 1;
+  constexpr uint32_t kRawStride = 8192;
+  write_gfx1250_buffer_resource(
+      *cu, *wf, 40,
+      encode_gfx1250_buffer_resource(kBase, kMaxNumRecords, kRawStride, /*stride_scale=*/1));
+  uint32_t vbase = wf->vgpr_alloc().base;
+  cu->write_vgpr(vbase + 4, 0, 0);
+  cu->write_vgpr(vbase + 5, 0, 0);
+  cu->write_vgpr(vbase + 4, 1, uint32_t{1} << 30);
+  cu->write_vgpr(vbase + 5, 1, 0);
+  cu->write_vgpr(vbase + 4, 2, (uint32_t{1} << 30) - 1);
+  cu->write_vgpr(vbase + 5, 2, 32763);
+  cu->write_vgpr(vbase + 4, 3, (uint32_t{1} << 30) - 1);
+  cu->write_vgpr(vbase + 5, 3, 32764);
+  cu->write_vgpr(vbase + 4, 4, uint32_t{1} << 30);
+  cu->write_vgpr(vbase + 5, 4, 1);
+
+  cdna5::VbufferMachineInst inst{};
+  inst.rsrc = 40;
+  inst.soffset = cdna5::OPR_SREG_NULL;
+  inst.idxen = 1;
+  inst.offen = 1;
+  inst.vaddr = 4;
+
+  amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+  d.elem_size = 4;
+  d.num_elems = 1;
+  cdna5::mubuf_calculate_addresses(inst, *wf, d);
+  EXPECT_EQ(d.lane_mask, 0x5ULL);
+  EXPECT_EQ(d.element_lane_masks, (std::vector<uint64_t>{0x5ULL}));
   EXPECT_EQ(d.per_lane_addr[0], kBase);
+  EXPECT_EQ(d.per_lane_addr[1], 0ULL);
+  EXPECT_EQ(d.per_lane_addr[2], kBase + kMaxNumRecords - 4);
+  EXPECT_EQ(d.per_lane_addr[3], 0ULL);
+  EXPECT_EQ(d.per_lane_addr[4], 0ULL);
+}
+
+TEST(Gfx1250AddrCalcTest, VbufferRangeCheckAcceptsExactEndOnly) {
+  amdgpu::GpuMemory mem("gfx1250_vbuffer_exact_end_mem");
+  amdgpu::L2Cache l2("gfx1250_vbuffer_exact_end_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250_vbuffer_exact_end_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, 128, 16);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x3ULL);
+
+  constexpr uint64_t kBase = 0x2'0000'1800ULL;
+  write_gfx1250_buffer_resource(*cu, *wf, 40,
+                                encode_gfx1250_buffer_resource(kBase, /*num_records=*/8));
+  uint32_t vbase = wf->vgpr_alloc().base;
+  cu->write_vgpr(vbase + 4, 0, 4);
+  cu->write_vgpr(vbase + 4, 1, 5);
+
+  cdna5::VbufferMachineInst inst{};
+  inst.rsrc = 40;
+  inst.soffset = cdna5::OPR_SREG_NULL;
+  inst.offen = 1;
+  inst.vaddr = 4;
+
+  amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+  d.elem_size = 4;
+  d.num_elems = 1;
+  cdna5::mubuf_calculate_addresses(inst, *wf, d);
+  EXPECT_EQ(d.lane_mask, 0x1ULL);
+  EXPECT_EQ(d.element_lane_masks, (std::vector<uint64_t>{0x1ULL}));
+  EXPECT_EQ(d.per_lane_addr[0], kBase + 4);
+  EXPECT_EQ(d.per_lane_addr[1], 0ULL);
 }
 
 TEST(Gfx1250AddrCalcTest, VbufferZeroNumRecordsMasksAllLanes) {
   amdgpu::GpuMemory mem("gfx1250_vbuffer_zero_records_mem");
   amdgpu::L2Cache l2("gfx1250_vbuffer_zero_records_l2");
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 128;
   cfg.vgprs_per_wf = 16;
@@ -4281,9 +4523,9 @@ TEST(Gfx1250AddrCalcTest, VbufferZeroNumRecordsMasksAllLanes) {
   ASSERT_NE(wf, nullptr);
   wf->set_exec(0x3ULL);
 
-  // A null optional pointer is represented by an all-zero descriptor. Its
-  // zero-sized range makes every access out of bounds, so loads return zero
-  // and stores are dropped without touching address zero.
+  // The rocjitsu runtime represents a null optional pointer with an all-zero
+  // descriptor. This is a runtime convention, not a distinguished ISA
+  // descriptor encoding. Its zero-sized range makes every access out of bounds.
   uint32_t vbase = wf->vgpr_alloc().base;
   cu->write_vgpr(vbase + 4, 0, 0);
   cu->write_vgpr(vbase + 4, 1, 0x1000);
@@ -4296,6 +4538,8 @@ TEST(Gfx1250AddrCalcTest, VbufferZeroNumRecordsMasksAllLanes) {
   inst.vaddr = 4;
 
   amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+  d.elem_size = 4;
+  d.num_elems = 1;
   cdna5::mubuf_calculate_addresses(inst, *wf, d);
   EXPECT_EQ(d.exec_mask, 0x3ULL);
   EXPECT_EQ(d.lane_mask, 0ULL);
@@ -4307,7 +4551,7 @@ TEST(Gfx1250AddrCalcTest, VbufferStructuredStrideChecksIndexBounds) {
   amdgpu::GpuMemory mem("gfx1250_vbuffer_structured_stride_mem");
   amdgpu::L2Cache l2("gfx1250_vbuffer_structured_stride_l2");
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 128;
   cfg.vgprs_per_wf = 16;
@@ -4320,16 +4564,13 @@ TEST(Gfx1250AddrCalcTest, VbufferStructuredStrideChecksIndexBounds) {
   wf->set_exec(0x3ULL);
 
   constexpr uint64_t kBase = 0x2'0000'1000ULL;
-  constexpr uint32_t kNumRecords = 2;
+  constexpr uint32_t kNumBytes = 32;
   constexpr uint32_t kStride = 16;
-  uint32_t sbase = wf->sgpr_alloc().base;
   uint32_t vbase = wf->vgpr_alloc().base;
-  cu->write_sgpr(sbase + 40, static_cast<uint32_t>(kBase));
-  cu->write_sgpr(sbase + 41, static_cast<uint32_t>(kBase >> 32) | (kNumRecords << 25));
-  cu->write_sgpr(sbase + 42, 0);
-  cu->write_sgpr(sbase + 43, kStride << 12);
-  cu->write_vgpr(vbase + 4, 0, kNumRecords - 1);
-  cu->write_vgpr(vbase + 4, 1, kNumRecords);
+  write_gfx1250_buffer_resource(*cu, *wf, 40,
+                                encode_gfx1250_buffer_resource(kBase, kNumBytes, kStride));
+  cu->write_vgpr(vbase + 4, 0, 1);
+  cu->write_vgpr(vbase + 4, 1, 2);
 
   cdna5::VbufferMachineInst inst{};
   inst.rsrc = 40;
@@ -4339,11 +4580,244 @@ TEST(Gfx1250AddrCalcTest, VbufferStructuredStrideChecksIndexBounds) {
   inst.vaddr = 4;
 
   amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+  d.elem_size = 4;
+  d.num_elems = 1;
   cdna5::mubuf_calculate_addresses(inst, *wf, d);
   EXPECT_EQ(d.exec_mask, 0x3ULL);
   EXPECT_EQ(d.lane_mask, 0x1ULL);
-  EXPECT_EQ(d.per_lane_addr[0], kBase + (kNumRecords - 1) * kStride);
+  EXPECT_EQ(d.per_lane_addr[0], kBase + kStride);
   EXPECT_EQ(d.per_lane_addr[1], 0ULL);
+}
+
+TEST(Gfx1250AddrCalcTest, VbufferChecksB64B96AndB128DwordsIndependently) {
+  amdgpu::GpuMemory mem("gfx1250_vbuffer_partial_mem");
+  amdgpu::L2Cache l2("gfx1250_vbuffer_partial_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250_vbuffer_partial_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, 128, 16);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1ULL);
+
+  constexpr uint64_t kBase = 0x2'0000'2000ULL;
+  cdna5::VbufferMachineInst inst{};
+  inst.rsrc = 40;
+  inst.soffset = cdna5::OPR_SREG_NULL;
+
+  write_gfx1250_buffer_resource(*cu, *wf, 40,
+                                encode_gfx1250_buffer_resource(kBase, /*num_records=*/6));
+  amdgpu::VectorMemState b64(amdgpu::GLOBAL_MEM);
+  b64.elem_size = 4;
+  b64.num_elems = 2;
+  cdna5::mubuf_calculate_addresses(inst, *wf, b64);
+  EXPECT_EQ(b64.lane_mask, 1ULL);
+  EXPECT_EQ(b64.element_lane_masks, (std::vector<uint64_t>{1ULL, 0ULL}));
+
+  write_gfx1250_buffer_resource(*cu, *wf, 40,
+                                encode_gfx1250_buffer_resource(kBase, /*num_records=*/10));
+  amdgpu::VectorMemState b96(amdgpu::GLOBAL_MEM);
+  b96.elem_size = 4;
+  b96.num_elems = 3;
+  cdna5::mubuf_calculate_addresses(inst, *wf, b96);
+  EXPECT_EQ(b96.lane_mask, 1ULL);
+  EXPECT_EQ(b96.element_lane_masks, (std::vector<uint64_t>{1ULL, 1ULL, 0ULL}));
+
+  amdgpu::VectorMemState b128(amdgpu::GLOBAL_MEM);
+  b128.elem_size = 4;
+  b128.num_elems = 4;
+  cdna5::mubuf_calculate_addresses(inst, *wf, b128);
+  EXPECT_EQ(b128.lane_mask, 1ULL);
+  EXPECT_EQ(b128.element_lane_masks, (std::vector<uint64_t>{1ULL, 1ULL, 0ULL, 0ULL}));
+}
+
+TEST(Gfx1250AddrCalcTest, VbufferNegativeIoffsetCannotReachL1) {
+  amdgpu::GpuMemory mem("gfx1250_vbuffer_negative_ioffset_mem");
+  amdgpu::L2Cache l2("gfx1250_vbuffer_negative_ioffset_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250_vbuffer_negative_ioffset_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, 128, 16);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1ULL);
+
+  constexpr uint64_t kBase = 0x2'0000'2400ULL;
+  write_gfx1250_buffer_resource(*cu, *wf, 40,
+                                encode_gfx1250_buffer_resource(kBase, /*num_records=*/4));
+  cdna5::VbufferMachineInst inst{};
+  inst.rsrc = 40;
+  inst.soffset = cdna5::OPR_SREG_NULL;
+  inst.ioffset = 0x00FF'FFFCu; // -4 as a signed 24-bit VBUFFER IOFFSET.
+
+  amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+  d.elem_size = 4;
+  d.num_elems = 2;
+  cdna5::mubuf_calculate_addresses(inst, *wf, d);
+
+  EXPECT_EQ(d.exec_mask, 1ULL);
+  EXPECT_EQ(d.lane_mask, 0ULL);
+  EXPECT_EQ(d.element_lane_masks, (std::vector<uint64_t>{0ULL, 0ULL}));
+  EXPECT_EQ(d.per_lane_addr[0], 0ULL);
+}
+
+TEST(Gfx1250AddrCalcTest, VbufferSoffsetParticipatesInNumRecordsAndStrideBounds) {
+  amdgpu::GpuMemory mem("gfx1250_vbuffer_soffset_bounds_mem");
+  amdgpu::L2Cache l2("gfx1250_vbuffer_soffset_bounds_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250_vbuffer_soffset_bounds_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, 128, 16);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1ULL);
+
+  constexpr uint64_t kBase = 0x2'0000'2800ULL;
+  write_gfx1250_buffer_resource(
+      *cu, *wf, 40,
+      encode_gfx1250_buffer_resource(kBase, /*num_records=*/16, /*stride=*/16,
+                                     /*stride_scale=*/0, /*swizzle=*/false,
+                                     /*oob_select=*/true));
+
+  cdna5::VbufferMachineInst inst{};
+  inst.rsrc = 40;
+  inst.soffset = 8;
+
+  uint32_t sbase = wf->sgpr_alloc().base;
+  cu->write_sgpr(sbase + 8, 8);
+  amdgpu::VectorMemState exact_end(amdgpu::GLOBAL_MEM);
+  exact_end.elem_size = 4;
+  exact_end.num_elems = 2;
+  cdna5::mubuf_calculate_addresses(inst, *wf, exact_end);
+  EXPECT_EQ(exact_end.lane_mask, 1ULL);
+  EXPECT_EQ(exact_end.element_lane_masks, (std::vector<uint64_t>{1ULL, 1ULL}));
+  EXPECT_EQ(exact_end.per_lane_addr[0], kBase + 8);
+
+  cu->write_sgpr(sbase + 8, 9);
+  amdgpu::VectorMemState one_byte_over(amdgpu::GLOBAL_MEM);
+  one_byte_over.elem_size = 4;
+  one_byte_over.num_elems = 2;
+  cdna5::mubuf_calculate_addresses(inst, *wf, one_byte_over);
+  EXPECT_EQ(one_byte_over.lane_mask, 1ULL);
+  EXPECT_EQ(one_byte_over.element_lane_masks, (std::vector<uint64_t>{1ULL, 0ULL}));
+  EXPECT_EQ(one_byte_over.per_lane_addr[0], kBase + 9);
+}
+
+TEST(Gfx1250AddrCalcTest, VbufferOobSelectAlsoChecksRecordStride) {
+  amdgpu::GpuMemory mem("gfx1250_vbuffer_oob_select_mem");
+  amdgpu::L2Cache l2("gfx1250_vbuffer_oob_select_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250_vbuffer_oob_select_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, 128, 16);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1ULL);
+
+  constexpr uint64_t kBase = 0x2'0000'3000ULL;
+  write_gfx1250_buffer_resource(
+      *cu, *wf, 40,
+      encode_gfx1250_buffer_resource(kBase, /*num_records=*/64, /*stride=*/8,
+                                     /*stride_scale=*/0, /*swizzle=*/false,
+                                     /*oob_select=*/true));
+  cu->write_vgpr(wf->vgpr_alloc().base + 4, 0, 4);
+
+  cdna5::VbufferMachineInst inst{};
+  inst.rsrc = 40;
+  inst.soffset = cdna5::OPR_SREG_NULL;
+  inst.offen = 1;
+  inst.vaddr = 4;
+
+  amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+  d.elem_size = 4;
+  d.num_elems = 2;
+  cdna5::mubuf_calculate_addresses(inst, *wf, d);
+  EXPECT_EQ(d.lane_mask, 1ULL);
+  EXPECT_EQ(d.element_lane_masks, (std::vector<uint64_t>{1ULL, 0ULL}));
+}
+
+TEST(Gfx1250AddrCalcTest, VbufferSwizzleDefersBoundsWithNoElementMasks) {
+  amdgpu::GpuMemory mem("gfx1250_vbuffer_swizzle_mem");
+  amdgpu::L2Cache l2("gfx1250_vbuffer_swizzle_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250_vbuffer_swizzle_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, 128, 16);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1ULL);
+  write_gfx1250_buffer_resource(
+      *cu, *wf, 40,
+      encode_gfx1250_buffer_resource(/*base=*/0x4000, /*num_records=*/0, /*stride=*/16,
+                                     /*stride_scale=*/0, /*swizzle=*/true));
+
+  cdna5::VbufferMachineInst inst{};
+  inst.rsrc = 40;
+  inst.soffset = cdna5::OPR_SREG_NULL;
+
+  amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+  d.elem_size = 4;
+  d.num_elems = 4;
+  cdna5::mubuf_calculate_addresses(inst, *wf, d);
+  EXPECT_EQ(d.lane_mask, 1ULL);
+  EXPECT_TRUE(d.element_lane_masks.empty());
+}
+
+TEST(Gfx1250AddrCalcTest, VbufferAtomicChecksWholePayload) {
+  amdgpu::GpuMemory mem("gfx1250_vbuffer_atomic_oob_mem");
+  amdgpu::L2Cache l2("gfx1250_vbuffer_atomic_oob_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250_vbuffer_atomic_oob_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, 128, 16);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1ULL);
+  write_gfx1250_buffer_resource(*cu, *wf, 40,
+                                encode_gfx1250_buffer_resource(/*base=*/0x5000, /*num_records=*/6));
+
+  cdna5::VbufferMachineInst inst{};
+  inst.rsrc = 40;
+  inst.soffset = cdna5::OPR_SREG_NULL;
+
+  amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+  d.elem_size = 8;
+  d.num_elems = 1;
+  d.atomic_op = amdgpu::AtomicOp::ADD;
+  cdna5::mubuf_calculate_addresses(inst, *wf, d);
+  EXPECT_EQ(d.lane_mask, 0ULL);
+  EXPECT_EQ(d.element_lane_masks, (std::vector<uint64_t>{0ULL}));
+  EXPECT_EQ(d.per_lane_addr[0], 0ULL);
 }
 
 void expect_vector_lane_reads_use_own_wave_vgprs(rj_code_arch_t arch) {

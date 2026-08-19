@@ -3,8 +3,8 @@
 
 /// @file Multi-XCD vector addition stress test with golden reference validation.
 ///
-/// Loads a compiled vector_add.hip kernel and dispatches 256 workgroups across
-/// all 8 XCDs (CDNA4 topology), one workgroup per CU. Each wavefront of 64
+/// Loads a compiled vector_add.hip kernel and dispatches 288 workgroups across
+/// all 8 XCDs (CDNA4 physical topology), one workgroup per CU. Each wavefront of 64
 /// threads computes C[gid] = A[gid] + B[gid]. Results are compared against a
 /// CPU golden reference.
 
@@ -46,14 +46,14 @@ namespace {
 
 using namespace rocjitsu;
 
-const std::string CONFIG_PATH = test::config_path("gfx950_cdna4.json");
+const std::string CONFIG_PATH = test::config_path("gfx950_mi355x.json");
 using test::kernel_path;
 
 constexpr uint32_t TOTAL_XCDS = 8;
-constexpr uint32_t CUS_PER_XCD = 32; // 4 SEs x 8 CUs
+constexpr uint32_t CUS_PER_XCD = 36; // 4 SEs x 9 physical CUs
 constexpr uint32_t TOTAL_CUS = TOTAL_XCDS * CUS_PER_XCD;
 constexpr uint32_t WF_SIZE = 64;
-constexpr uint32_t N = TOTAL_CUS * WF_SIZE; // 16384 elements, one WG per CU
+constexpr uint32_t N = TOTAL_CUS * WF_SIZE; // 18432 elements, one WG per physical CU
 
 constexpr uint64_t KD_ADDR = 0x10000;
 constexpr uint64_t A_ADDR = 0x100000;

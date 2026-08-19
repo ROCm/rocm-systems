@@ -268,7 +268,7 @@ TEST(RegisterAccessTest, ReadRegionObservesAllRegistersAndReturnsLaneSpans) {
 }
 
 TEST(RegisterAccessTest, ReadRegionTraversesAndCopiesLogicalRegisterRange) {
-  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_GFX1250}) {
+  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     Fixture fx(arch);
     ASSERT_NE(fx.wf, nullptr);
     SCOPED_TRACE(arch);

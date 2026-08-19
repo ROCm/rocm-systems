@@ -119,7 +119,7 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
     ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA3, rdna3::Isa);
     ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA3_5, rdna3_5::Isa);
     ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA4, rdna4::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_GFX1250, cdna5::Isa);
+    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA5, cdna5::Isa);
   default:
     break;
   }

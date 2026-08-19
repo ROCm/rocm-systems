@@ -402,6 +402,7 @@ add_executable(
     daemon_api_test.cpp
     matmul_test.cpp
     vector_add_test.cpp
+    xcd_distribution_test.cpp
     cdna5_architecture_test.cpp
     cdna5_cluster_test.cpp
     cdna5_dispatch_memory_test.cpp
@@ -883,9 +884,9 @@ rj_configure_target(scaling_test TEST)
 # The CLI handles LD_PRELOAD and config discovery. rj_add_test gives launcher
 # tests isolated runtime directories, so no RESOURCE_LOCK is needed.
 
-set(RJ_CDNA4_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd.json")
+set(RJ_CDNA4_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx950_mi355x_kmd.json")
 set(RJ_CDNA4_KMD_2GPU_CONFIG
-    "${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd_2gpu.json"
+    "${CMAKE_SOURCE_DIR}/configs/gfx950_mi355x_kmd_2gpu.json"
 )
 set(RJ_CDNA3_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3_kmd.json")
 set(RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG
@@ -982,7 +983,7 @@ endif()
 
 set(RJ_KMD_PRELOAD_ENV
     "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}$<TARGET_FILE:rocjitsu_shared>"
-    "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4.json"
+    "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/gfx950_mi355x.json"
 )
 
 add_executable(guest_kfd_test guest_kfd_test.cpp)
@@ -1433,6 +1434,11 @@ endif()
 rj_add_interposer_test_suite(InterposerDupTest ${_rj_interposer_dup_tests})
 
 rj_add_interposer_test_suite(
+    InterposerDrmTest
+    DeviceInfoReportsActiveCuCount
+)
+
+rj_add_interposer_test_suite(
     InterposerGemTest
     GemNamespaceIsPrivateButSharedByDuplicates
     IndependentDrmFilesRejectOverlappingMappings
@@ -1534,6 +1540,8 @@ if(ROCMINFO_EXECUTABLE AND RJ_HAS_KFD_DEVICE)
             DetectsGpuAgent
             ReportsGfx950
             ReportsWavefrontSize
+            ReportsMi350xActiveComputeUnits
+            ReportsMi350xMaxClockFrequency
     )
         rj_add_test(
             NAME "RocminfoTest.${_rocminfo_test}"

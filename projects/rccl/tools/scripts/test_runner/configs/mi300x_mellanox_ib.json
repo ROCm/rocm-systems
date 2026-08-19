@@ -875,6 +875,7 @@
       "tests": [
         {"name": "HostApi_WindowRegisterDeregister", "description": "Host API: window register/deregister", "test_filter": "HostApiTest.WindowRegisterDeregister"},
         {"name": "HostApi_SinglePutRank0ToRank1", "description": "Host API: single put rank0 to rank1", "test_filter": "HostApiTest.SinglePutRank0ToRank1"},
+        {"name": "HostApi_GraphCaptureReplayPutWait", "description": "Host API: graph capture and repeated replay of PutSignal/WaitSignal", "test_filter": "HostApiTest.GraphCaptureReplayPutWait", "timeout": 180},
         {"name": "HostApi_PutSignalEnqueueIsAsync", "description": "Host API: putSignal enqueue is async", "test_filter": "HostApiTest.PutSignalEnqueueIsAsync"},
         {"name": "HostApi_PutWithNonZeroOffset", "description": "Host API: put with non-zero offset", "test_filter": "HostApiTest.PutWithNonZeroOffset"},
         {"name": "HostApi_PutMultipleDataTypes", "description": "Host API: put multiple data types", "test_filter": "HostApiTest.PutMultipleDataTypes"},
@@ -912,6 +913,20 @@
       "env_variables": {
         "NCCL_CUMEM_ENABLE": "0"
       }
+    },
+    "host_api_graph_proxy": {
+      "extends": "net_ib_base",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "RCCL_RMA_USE_DMABUF": "1"
+      },
+      "tests": [
+        {"name": "HostApi_GraphCaptureReplayPutWait_Proxy", "description": "Host API: two-node proxy graph capture and repeated replay", "test_filter": "HostApiTest.GraphCaptureReplayPutWait"}
+      ]
     },
 
     "unit_tests_standard": {
@@ -4515,6 +4530,16 @@
       "name": "Host API Tests - Default",
       "description": "Host API tests with default memory support",
       "config": "host_api_tests_default",
+      "enabled": true
+    },
+    {
+      "name": "Host API Graph Capture - Proxy",
+      "description": "Two-node proxy graph capture and repeated replay for PutSignal/WaitSignal",
+      "config": "host_api_graph_proxy",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 180,
       "enabled": true
     },
     {
