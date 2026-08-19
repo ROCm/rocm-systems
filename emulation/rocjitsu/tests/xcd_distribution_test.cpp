@@ -34,10 +34,10 @@ namespace {
 
 using namespace rocjitsu;
 
-const std::string CONFIG_PATH = test::config_path("gfx950_cdna4.json");
+const std::string CONFIG_PATH = test::config_path("gfx950_mi355x.json");
 
 constexpr uint32_t kTotalXcds = 8;
-constexpr uint32_t kCusPerXcd = 32; // 4 SEs x 8 CUs
+constexpr uint32_t kCusPerXcd = 36; // 4 SEs x 9 CUs
 constexpr uint32_t kTotalCus = kTotalXcds * kCusPerXcd;
 constexpr uint64_t kKdAddr = 0x10000;
 constexpr uint32_t kWavefrontSize = 64;
@@ -89,7 +89,7 @@ uint32_t assigned_xcd_index(const SoC &soc, const amdgpu::CommandProcessor *cp) 
 //
 // This pins CURRENT behavior, which is a fidelity gap: a multi-XCD part running
 // as one partition spreads a dispatch over every XCD. The topology here
-// advertises 256 CUs, so a single-queue application reaches an eighth of them.
+// instantiates 288 CUs, so a single-queue application reaches an eighth of them.
 // Follow-on work in this stack flips this expectation to an even spread.
 TEST(XcdDistributionTest, SingleQueueGridLandsOnOneXcd) {
   XcdDistributionFixture fx;
