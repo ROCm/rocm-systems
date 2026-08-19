@@ -45,6 +45,15 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
 
 PERF_DATASTORE = "madengine_results.jsonl"
+
+# madengine's perf_entry_super.json uses short metric names that differ
+# from our canonical workload-config keys.  Map each config key to the
+# set of madengine metric names we accept as a match.
+_METRIC_ALIASES: dict[str, set[str]] = {
+    "tokens_per_second_per_gpu": {"tok_per_s_per_gpu"},
+}
+_TFLOPS_METRICS = {"TFLOPS_per_gpu"}
+
 REGRESSION_WINDOW = 5
 REGRESSION_THRESHOLD_TRAINING = 0.02  # 2%
 REGRESSION_THRESHOLD_INFERENCE = 0.05  # 5%
@@ -1150,12 +1159,15 @@ def main() -> None:
     if perf_results:
         # perf_entry_super.json rows are long-format: metric name is a
         # value in the ``metric`` column, performance in ``performance``.
-        # Filter to the configured metric_key and key by precision.
+        # Filter to the configured metric_key (or its madengine alias)
+        # and key by precision.
+        accepted_metrics = _METRIC_ALIASES.get(metric_key, {metric_key})
         for row in perf_results:
-            if row.get("metric") != metric_key:
+            if row.get("metric") not in accepted_metrics:
                 continue
             perf_val = row.get("performance", "")
-            precision = row.get("training_precision", "")
+            precision = (row.get("training_precision")
+                         or row.get("multi_results", {}).get("precision", ""))
             row_status = row.get("status", "")
             if not perf_val:
                 continue
@@ -1166,11 +1178,27 @@ def main() -> None:
             precision_results.append({
                 "precision": precision,
                 "metric_value": val,
-                "status": "pass" if row_status in ("", "pass", "PASS") else "fail",
+                "status": ("pass" if row_status.upper() in ("", "PASS", "SUCCESS")
+                           else "fail"),
                 "source": "structured",
             })
             log.info("Structured result: %s %s = %.1f (status=%s)",
                      precision, metric_key, val, row_status)
+
+        # Attach TFLOPS from companion rows, keyed by precision.
+        tflops_by_precision: dict[str, float] = {}
+        for row in perf_results:
+            if row.get("metric") not in _TFLOPS_METRICS:
+                continue
+            prec = (row.get("training_precision")
+                    or row.get("multi_results", {}).get("precision", ""))
+            try:
+                tflops_by_precision[prec] = float(row["performance"])
+            except (KeyError, ValueError, TypeError):
+                pass
+        for pr in precision_results:
+            if "tflops_avg" not in pr:
+                pr["tflops_avg"] = tflops_by_precision.get(pr["precision"])
 
     if not precision_results and live_log_runs:
         for run in live_log_runs:
