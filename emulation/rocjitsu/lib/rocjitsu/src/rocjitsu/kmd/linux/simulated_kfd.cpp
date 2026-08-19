@@ -3603,25 +3603,38 @@ void SimulatedKfd::runtime_debugger_handshake(pid_t target_pid, bool enabling) {
     if (session == debug_sessions_.end() || !session->second.enabled)
       return;
     self_debugged = session->second.debugger_pid == target_pid;
-  }
-  // Drop any ack or cancellation left over from an earlier transition for this
-  // pid before the event goes out. The disable direction reports without
-  // waiting, so nothing consumes the ack it draws; a later enable would
-  // otherwise find that stale entry already in runtime_acked_, satisfy its wait
-  // immediately, and let the inferior dispatch before the debugger has
-  // installed its breakpoints -- the exact failure the deadline below exists to
-  // prevent.
-  //
-  // A cancellation does the same thing and is easier to leave behind, because
-  // cancel_runtime_handshake() inserts unconditionally: a detach with no waiter
-  // parked -- which every explicit DBG_TRAP_DISABLE performs -- leaves an entry
-  // nobody consumes, and the wait predicate below accepts it just as readily as
-  // a real ack. Clearing both under the same lock a real cancel would take
-  // means a cancel racing this clear necessarily lands on the new wait.
-  if (enabling) {
-    std::lock_guard<std::mutex> lk(runtime_handshake_mutex_);
-    runtime_acked_.erase(target_pid);
-    runtime_handshake_cancelled_.erase(target_pid);
+
+    // Drop any ack or cancellation left over from an earlier transition for this
+    // pid before the event goes out. The disable direction reports without
+    // waiting, so nothing consumes the ack it draws; a later enable would
+    // otherwise find that stale entry already in runtime_acked_, satisfy its wait
+    // immediately, and let the inferior dispatch before the debugger has
+    // installed its breakpoints -- the exact failure the deadline below exists to
+    // prevent.
+    //
+    // A cancellation does the same thing and is easier to leave behind, because
+    // cancel_runtime_handshake() inserts unconditionally: a detach with no waiter
+    // parked -- which every explicit DBG_TRAP_DISABLE performs -- leaves an entry
+    // nobody consumes, and the wait predicate below accepts it just as readily as
+    // a real ack. Clearing both under the same lock a real cancel would take
+    // means a cancel racing this clear necessarily lands on the new wait.
+    //
+    // That last part only holds while debug_sessions_mutex_ is still held, which
+    // is why the clear lives here rather than after the lookup returns. An
+    // explicit DBG_TRAP_DISABLE erases the session, drops the mutex, and only
+    // then calls cancel_runtime_handshake(). Clearing after releasing the mutex
+    // left a window in which the detach's cancellation was recorded after this
+    // function had already decided the session was live, and was then erased by
+    // this very clear -- so nothing remained to satisfy the wait below, no acker
+    // was left to provide one, and the inferior paid the full 60s deadline.
+    // Holding the mutex across both means a detach either erases the session
+    // before the lookup (which returns early) or blocks until after the clear,
+    // in which case its cancellation lands on the wait.
+    if (enabling) {
+      std::lock_guard<std::mutex> hlk(runtime_handshake_mutex_);
+      runtime_acked_.erase(target_pid);
+      runtime_handshake_cancelled_.erase(target_pid);
+    }
   }
   raise_process_debug_event(target_pid, KFD_EC_MASK(EC_PROCESS_RUNTIME));
   // A process debugging itself cannot answer its own handshake: the ack would
