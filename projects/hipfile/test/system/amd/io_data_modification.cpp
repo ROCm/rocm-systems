@@ -40,19 +40,22 @@ HIPFILE_WARN_NO_GLOBAL_CTOR_OFF
 // ---------------------------------------------------------------------------
 struct HipFileVerify : public testing::TestWithParam<std::tuple<IoTestParam, SizeParam>> {
 
+    const IoTestBackend backend{std::get<0>(GetParam()).backend}; // backend fulfilling the I/O request
+    const size_t        io_bytes{std::get<1>(GetParam()).bytes};  // bytes transferred using the hipFile API
+    // The data modification kernel will also verify that the sentinel regions of the device buffer are
+    // unmodified. Device layout (each sentinel region is 4_KiB, data is io_bytes): [head device
+    // sentinel region][data][tail device sentinel region]
+    const size_t buffer_bytes{io_bytes + 2 * 4_KiB};           // total device buffer size
+    const size_t io_elems{io_bytes / sizeof(int32_t)};         // transferred elements
+    const size_t buffer_elems{buffer_bytes / sizeof(int32_t)}; // elements spanning the whole buffer
+
     Tmpfile         tmpfile;
     hipFileHandle_t tmpfile_handle{nullptr};
-    void           *device_buffer{nullptr};
-    size_t          io_bytes{0};     // bytes transferred using the hipFile API
-    size_t          buffer_bytes{0}; // total device buffer size
+    void           *device_buffer{nullptr}; // allocated by SetUp
+    int32_t        *buffer_start{nullptr};  // typed view of device_buffer
 
     HipFileVerify() : tmpfile{test_env.ais_capable_dir}
     {
-    }
-
-    IoTestBackend backend() const
-    {
-        return std::get<0>(GetParam()).backend;
     }
 
     void SetUp() override
@@ -60,7 +63,7 @@ struct HipFileVerify : public testing::TestWithParam<std::tuple<IoTestParam, Siz
         Context<Configuration>::get()->fastpath(false);
         Context<Configuration>::get()->fallback(false);
 
-        switch (backend()) {
+        switch (backend) {
             case IoTestBackend::Fastpath:
                 Context<Configuration>::get()->fastpath(true);
                 break;
@@ -71,12 +74,6 @@ struct HipFileVerify : public testing::TestWithParam<std::tuple<IoTestParam, Siz
                 FAIL() << "Unsupported IoTestBackend";
         }
 
-        io_bytes = std::get<1>(GetParam()).bytes;
-        // The data modification kernel will also verify that the sentinel regions of the device buffer are
-        // unmodified. Device layout (each sentinel region is 4_KiB, data is io_bytes): [head device
-        // sentinel region][data][tail device sentinel region]
-        buffer_bytes = io_bytes + 2 * 4_KiB;
-
         // Size the file to hold io_bytes of data plus a leading empty chunk.
         ASSERT_EQ(0, ftruncate(tmpfile.fd, static_cast<off_t>(io_bytes + kChunkBytes)));
 
@@ -86,6 +83,7 @@ struct HipFileVerify : public testing::TestWithParam<std::tuple<IoTestParam, Siz
         ASSERT_EQ(HIPFILE_SUCCESS, hipFileHandleRegister(&tmpfile_handle, &descr));
 
         ASSERT_EQ(hipSuccess, hipMalloc(&device_buffer, buffer_bytes));
+        buffer_start = static_cast<int32_t *>(device_buffer);
         ASSERT_EQ(hipSuccess, hipMemset(device_buffer, kSentinelByte, buffer_bytes));
         // hipMemset is not synchronous w.r.t. the host, and hipFileRead is not ordered w.r.t. the stream.
         ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
@@ -102,30 +100,15 @@ struct HipFileVerify : public testing::TestWithParam<std::tuple<IoTestParam, Siz
         }
         hipFileHandleDeregister(tmpfile_handle);
     }
-
-    size_t elems() const
-    {
-        return io_bytes / sizeof(int32_t);
-    }
-
-    size_t bufferElems() const
-    {
-        return buffer_bytes / sizeof(int32_t);
-    }
-
-    int32_t *bufferStart() const
-    {
-        return static_cast<int32_t *>(device_buffer);
-    }
 };
 
 // Isolated hipFileWrite test.
 TEST_P(HipFileVerify, WritePersistsDoubledData)
 {
-    const size_t n = elems();
+    const size_t n = io_elems;
     seedDevicePattern(device_buffer, 0, n);
 
-    assertVerifyAndModify(bufferStart(), bufferElems(), bufferStart(), n, defaultGrid(n),
+    assertVerifyAndModify(buffer_start, buffer_elems, buffer_start, n, defaultGrid(n),
                           dim3(kDefaultWorkgroupSize));
 
     ASSERT_EQ(static_cast<ssize_t>(io_bytes), hipFileWrite(tmpfile_handle, device_buffer, io_bytes, 0, 0));
@@ -137,12 +120,12 @@ TEST_P(HipFileVerify, WritePersistsDoubledData)
 // Isolated hipFileRead test.
 TEST_P(HipFileVerify, ReadDeliversDoubledData)
 {
-    const size_t n = elems();
+    const size_t n = io_elems;
     seedFilePattern(tmpfile.fd, 0, n);
 
     ASSERT_EQ(static_cast<ssize_t>(io_bytes), hipFileRead(tmpfile_handle, device_buffer, io_bytes, 0, 0));
 
-    assertVerifyAndModify(bufferStart(), bufferElems(), bufferStart(), n, defaultGrid(n),
+    assertVerifyAndModify(buffer_start, buffer_elems, buffer_start, n, defaultGrid(n),
                           dim3(kDefaultWorkgroupSize));
 
     std::vector<int32_t> buf = readbackInts(device_buffer, 0, n);
@@ -153,7 +136,7 @@ TEST_P(HipFileVerify, ReadDeliversDoubledData)
 // i.e., verify that data from hipFileRead does not clobber outside specified device buffer.
 TEST_P(HipFileVerify, RoundTripGuardsDeviceSlack)
 {
-    const size_t n       = elems();
+    const size_t n       = io_elems;
     const hoff_t buf_off = static_cast<hoff_t>(4_KiB); // one head device sentinel region
 
     seedFilePattern(tmpfile.fd, 0, n);
@@ -162,8 +145,8 @@ TEST_P(HipFileVerify, RoundTripGuardsDeviceSlack)
 
     // Device layout (each sentinel region slackElems() ints, data n ints):
     // [head device sentinel region][data][tail device sentinel region]
-    int32_t *data = bufferStart() + slackElems();
-    assertVerifyAndModify(bufferStart(), bufferElems(), data, n, defaultGrid(n), dim3(kDefaultWorkgroupSize));
+    int32_t *data = buffer_start + slackElems();
+    assertVerifyAndModify(buffer_start, buffer_elems, data, n, defaultGrid(n), dim3(kDefaultWorkgroupSize));
 
     ASSERT_EQ(static_cast<ssize_t>(io_bytes),
               hipFileWrite(tmpfile_handle, device_buffer, io_bytes, 0, buf_off));
@@ -176,7 +159,7 @@ TEST_P(HipFileVerify, RoundTripGuardsDeviceSlack)
 // i.e., verify that data from hipFileWrite does not clobber outside specified file buffer.
 TEST_P(HipFileVerify, RoundTripGuardsFileSlack)
 {
-    const size_t n         = elems();
+    const size_t n         = io_elems;
     const size_t bracket_n = 4_KiB / sizeof(int32_t);    // file sentinel region head/tail each
     const hoff_t file_off  = static_cast<hoff_t>(4_KiB); // data starts after head
     const size_t total_n   = bracket_n + n + bracket_n;  // head + data + tail
@@ -191,7 +174,7 @@ TEST_P(HipFileVerify, RoundTripGuardsFileSlack)
     ASSERT_EQ(static_cast<ssize_t>(io_bytes),
               hipFileRead(tmpfile_handle, device_buffer, io_bytes, file_off, 0));
 
-    assertVerifyAndModify(bufferStart(), bufferElems(), bufferStart(), n, defaultGrid(n),
+    assertVerifyAndModify(buffer_start, buffer_elems, buffer_start, n, defaultGrid(n),
                           dim3(kDefaultWorkgroupSize));
 
     ASSERT_EQ(static_cast<ssize_t>(io_bytes),
@@ -263,29 +246,24 @@ struct StrideParam {
 struct HipFileVerifyCombined
     : public testing::TestWithParam<std::tuple<IoTestParam, SizeParam, WorkgroupParam, StrideParam>> {
 
+    const IoTestBackend backend{std::get<0>(GetParam()).backend}; // backend fulfilling the I/O request
+    const size_t        io_bytes{std::get<1>(GetParam()).bytes};  // bytes transferred using the hipFile API
+    const GridMode      grid_mode{std::get<2>(GetParam()).mode};  // workgroup count the kernel launches with
+    const size_t        stride{std::get<3>(GetParam()).stride};   // stride between modified cache lines
+    // Over-allocate a device sentinel region on each side of the data.
+    // Device layout (each sentinel region 4_KiB, data io_bytes):
+    // [head device sentinel region][data][tail device sentinel region].
+    const size_t buffer_bytes{io_bytes + 2 * 4_KiB};           // total device buffer size
+    const size_t io_elems{io_bytes / sizeof(int32_t)};         // transferred elements
+    const size_t buffer_elems{buffer_bytes / sizeof(int32_t)}; // elements spanning the whole buffer
+
     Tmpfile         tmpfile;
     hipFileHandle_t tmpfile_handle{nullptr};
-    void           *device_buffer{nullptr};
-    size_t          io_bytes{0};     // bytes transferred using the hipFile API
-    size_t          buffer_bytes{0}; // total device buffer size
+    void           *device_buffer{nullptr}; // allocated by SetUp
+    int32_t        *buffer_start{nullptr};  // typed view of device_buffer
 
     HipFileVerifyCombined() : tmpfile{test_env.ais_capable_dir}
     {
-    }
-
-    IoTestBackend backend() const
-    {
-        return std::get<0>(GetParam()).backend;
-    }
-
-    GridMode gridMode() const
-    {
-        return std::get<2>(GetParam()).mode;
-    }
-
-    size_t stride() const
-    {
-        return std::get<3>(GetParam()).stride;
     }
 
     void SetUp() override
@@ -293,7 +271,7 @@ struct HipFileVerifyCombined
         Context<Configuration>::get()->fastpath(false);
         Context<Configuration>::get()->fallback(false);
 
-        switch (backend()) {
+        switch (backend) {
             case IoTestBackend::Fastpath:
                 Context<Configuration>::get()->fastpath(true);
                 break;
@@ -303,12 +281,6 @@ struct HipFileVerifyCombined
             default:
                 FAIL() << "Unsupported IoTestBackend";
         }
-
-        io_bytes = std::get<1>(GetParam()).bytes;
-        // Over-allocate a device sentinel region on each side of the data.
-        // Device layout (each sentinel region 4_KiB, data io_bytes):
-        // [head device sentinel region][data][tail device sentinel region].
-        buffer_bytes = io_bytes + 2 * 4_KiB;
 
         // File layout (each sentinel region 4_KiB, data io_bytes; data begins at file
         // offset kCombinedFileOff past the chunk boundary):
@@ -322,6 +294,7 @@ struct HipFileVerifyCombined
         ASSERT_EQ(HIPFILE_SUCCESS, hipFileHandleRegister(&tmpfile_handle, &descr));
 
         ASSERT_EQ(hipSuccess, hipMalloc(&device_buffer, buffer_bytes));
+        buffer_start = static_cast<int32_t *>(device_buffer);
         ASSERT_EQ(hipSuccess, hipMemset(device_buffer, kSentinelByte, buffer_bytes));
         // hipMemset is not synchronous w.r.t. the host, and hipFileRead is not ordered w.r.t. the stream.
         ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
@@ -338,32 +311,16 @@ struct HipFileVerifyCombined
         }
         hipFileHandleDeregister(tmpfile_handle);
     }
-
-    size_t elems() const
-    {
-        return io_bytes / sizeof(int32_t);
-    }
-
-    size_t bufferElems() const
-    {
-        return buffer_bytes / sizeof(int32_t);
-    }
-
-    int32_t *bufferStart() const
-    {
-        return static_cast<int32_t *>(device_buffer);
-    }
 };
 
 TEST_P(HipFileVerifyCombined, RoundTripGuardsAllRegions)
 {
-    const size_t n        = elems();
+    const size_t n        = io_elems;
     const size_t slack_n  = 4_KiB / sizeof(int32_t);
     const hoff_t buf_off  = static_cast<hoff_t>(4_KiB); // device head device sentinel region
     const hoff_t file_off = kCombinedFileOff;
     const hoff_t head_off = file_off - static_cast<hoff_t>(4_KiB); // head file sentinel region
     const hoff_t tail_off = file_off + static_cast<hoff_t>(io_bytes);
-    const size_t kStride  = stride();
 
     // File layout (hole is kChunkBytes, each sentinel region slack_n ints, data n ints):
     // [unwritten hole = 0][head file sentinel region = -1][data = i+1][tail file sentinel region = -1].
@@ -376,9 +333,9 @@ TEST_P(HipFileVerifyCombined, RoundTripGuardsAllRegions)
 
     // Device layout (each sentinel region slackElems() ints, data n ints):
     // [head device sentinel region][data][tail device sentinel region].
-    int32_t *data = bufferStart() + slackElems();
-    assertVerifyAndModify(bufferStart(), bufferElems(), data, n, gridFor(gridMode(), n),
-                          dim3(kDefaultWorkgroupSize), kStride);
+    int32_t *data = buffer_start + slackElems();
+    assertVerifyAndModify(buffer_start, buffer_elems, data, n, gridFor(grid_mode, n),
+                          dim3(kDefaultWorkgroupSize), stride);
 
     ASSERT_EQ(static_cast<ssize_t>(io_bytes),
               hipFileWrite(tmpfile_handle, device_buffer, io_bytes, file_off, buf_off));
@@ -387,7 +344,7 @@ TEST_P(HipFileVerifyCombined, RoundTripGuardsAllRegions)
     std::vector<int32_t> head = readFileInts(tmpfile.fd, head_off, slack_n);
     assertConstant(head.data(), 0, slack_n, kSentinel);
     std::vector<int32_t> body = readFileInts(tmpfile.fd, file_off, n);
-    assertModifiedPattern(body.data(), n, kStride);
+    assertModifiedPattern(body.data(), n, stride);
     std::vector<int32_t> tail = readFileInts(tmpfile.fd, tail_off, slack_n);
     assertConstant(tail.data(), 0, slack_n, kSentinel);
 }
@@ -446,28 +403,30 @@ HIPFILE_WARN_NO_EXIT_DTOR_ON
 
 struct HipFileExtend : public testing::TestWithParam<std::tuple<IoTestParam, ScenarioParam, SizeParam>> {
 
+    const IoTestBackend backend{std::get<0>(GetParam()).backend};       // backend fulfilling the I/O request
+    const hoff_t        base_len{std::get<1>(GetParam()).ext.base_len}; // file length before the write
+    const hoff_t        file_off{std::get<1>(GetParam()).ext.file_off}; // file offset the write starts at
+    const size_t        io_bytes{std::get<2>(GetParam()).bytes}; // bytes transferred using the hipFile API
+    // One head sentinel region + data + one tail sentinel region.
+    // [head device sentinel region][data][tail device sentinel region].
+    const size_t buffer_bytes{io_bytes + 2 * 4_KiB};           // total device buffer size
+    const size_t io_elems{io_bytes / sizeof(int32_t)};         // transferred elements
+    const size_t buffer_elems{buffer_bytes / sizeof(int32_t)}; // elements spanning the whole buffer
+
     Tmpfile         tmpfile;
     hipFileHandle_t tmpfile_handle{nullptr};
-    void           *device_buffer{nullptr};
-    size_t          io_bytes{0};
-    size_t          buffer_bytes{0};
-    hoff_t          base_len{0};
-    hoff_t          file_off{0};
+    void           *device_buffer{nullptr}; // allocated by SetUp;
+    int32_t        *buffer_start{nullptr};  // typed view of device_buffer
 
     HipFileExtend() : tmpfile{test_env.ais_capable_dir}
     {
-    }
-
-    IoTestBackend backend() const
-    {
-        return std::get<0>(GetParam()).backend;
     }
 
     void SetUp() override
     {
         Context<Configuration>::get()->fastpath(false);
         Context<Configuration>::get()->fallback(false);
-        switch (backend()) {
+        switch (backend) {
             case IoTestBackend::Fastpath:
                 Context<Configuration>::get()->fastpath(true);
                 break;
@@ -478,20 +437,11 @@ struct HipFileExtend : public testing::TestWithParam<std::tuple<IoTestParam, Sce
                 FAIL() << "Unsupported IoTestBackend";
         }
 
-        const ScenarioParam &sc = std::get<1>(GetParam());
-        base_len                = sc.ext.base_len;
-        file_off                = sc.ext.file_off;
-        io_bytes                = std::get<2>(GetParam()).bytes;
-
         // Every scenario must actually extend the file; the final-size assertion below depends on it.
         ASSERT_GT(file_off + static_cast<hoff_t>(io_bytes), base_len);
 
         // Size file to base_len to be extended.
         ASSERT_EQ(0, ftruncate(tmpfile.fd, static_cast<off_t>(base_len)));
-
-        // One head sentinel region + data + one tail sentinel region.
-        // [head device sentinel region][data][tail device sentinel region].
-        buffer_bytes = io_bytes + 2 * 4_KiB;
 
         hipFileDescr_t descr{};
         descr.type      = hipFileHandleTypeOpaqueFD;
@@ -499,6 +449,7 @@ struct HipFileExtend : public testing::TestWithParam<std::tuple<IoTestParam, Sce
         ASSERT_EQ(HIPFILE_SUCCESS, hipFileHandleRegister(&tmpfile_handle, &descr));
 
         ASSERT_EQ(hipSuccess, hipMalloc(&device_buffer, buffer_bytes));
+        buffer_start = static_cast<int32_t *>(device_buffer);
         ASSERT_EQ(hipSuccess, hipMemset(device_buffer, kSentinelByte, buffer_bytes));
 
         if (backend() == IoTestBackend::Fastpath) {
@@ -513,24 +464,11 @@ struct HipFileExtend : public testing::TestWithParam<std::tuple<IoTestParam, Sce
         }
         hipFileHandleDeregister(tmpfile_handle);
     }
-
-    size_t elems() const
-    {
-        return io_bytes / sizeof(int32_t);
-    }
-    size_t bufferElems() const
-    {
-        return buffer_bytes / sizeof(int32_t);
-    }
-    int32_t *bufferStart() const
-    {
-        return static_cast<int32_t *>(device_buffer);
-    }
 };
 
 TEST_P(HipFileExtend, Extends)
 {
-    const size_t     n       = elems();
+    const size_t     n       = io_elems;
     const size_t     slack_n = slackElems();
     const hoff_t     buf_off = static_cast<hoff_t>(4_KiB);
     constexpr size_t kStride = 2;
@@ -538,10 +476,10 @@ TEST_P(HipFileExtend, Extends)
     // Device layout (each sentinel region slack_n ints, data n ints):
     // [head device sentinel region][data][tail device sentinel region].
     // data starts after the head device sentinel region; seed the index pattern there.
-    int32_t *data = bufferStart() + slack_n;
+    int32_t *data = buffer_start + slack_n;
     seedDevicePattern(device_buffer, buf_off, n);
 
-    assertVerifyAndModify(bufferStart(), bufferElems(), data, n, defaultGrid(n), dim3(kDefaultWorkgroupSize),
+    assertVerifyAndModify(buffer_start, buffer_elems, data, n, defaultGrid(n), dim3(kDefaultWorkgroupSize),
                           kStride);
 
     // File layout after the write (preserved region is preserved_n ints, data is n ints, hole spans
