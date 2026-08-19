@@ -1513,4 +1513,3 @@ When the same configuration can be specified in multiple places, the priority is
 5. **Built-in defaults** (lowest priority)
 
 **Example**: If `ROCM_PATH` is set as an environment variable, it overrides the `rocm_path` value in the JSON configuration file.
-

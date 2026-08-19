@@ -48,5 +48,3 @@ int rcclTestDebugLevel = []() -> int {
 }();
 
 #endif // MPI_TESTS_ENABLED
-
-

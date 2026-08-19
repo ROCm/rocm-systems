@@ -69,7 +69,7 @@ int main(int argc, char* argv[])
       return TOPO_EXPL_INVALID_ARG;
     }
     gpuArch = std::string(archStr);
-    if (gpuArch.find("gfx") == std::string::npos && 
+    if (gpuArch.find("gfx") == std::string::npos &&
       gpuArch.find("GFX") == std::string::npos) {
       gpuArch = "gfx" + gpuArch;
     }
@@ -116,13 +116,13 @@ int main(int argc, char* argv[])
 
   TopoExplContext* context = nullptr;
   TopoExplResult result = topoExplCreate(&config, &context);
-  
+
   if (result != TOPO_EXPL_SUCCESS || !context) {
     printf("Error: Failed to create topology explorer context\n");
     topoExplDestroy(context);
     return TOPO_EXPL_ERROR;
   }
-  
+
   for (int i = 0; i < nranks; i++) {
     int nodeId, cudaDev;
     uint64_t busId;
@@ -134,18 +134,18 @@ int main(int argc, char* argv[])
 
   int numAlgos = topoExplGetNumAlgos();
   int numProtos = topoExplGetNumProtos();
-  
+
   for (uint64_t len = 8; len <= 4294967296L; len *= 2) {
     float minTime = 3600000000.0;
     int bestAlgo = -1;
     int bestProto = -1;
-    
+
     // Try all algorithm/protocol combinations for AllReduce
     for (int a = 0; a < numAlgos; a++) {
       for (int p = 0; p < numProtos; p++) {
         float time;
         TopoExplResult timeResult = topoExplGetAlgoTime(
-            context, TOPO_FUNC_ALLREDUCE, 
+            context, TOPO_FUNC_ALLREDUCE,
             static_cast<TopoExplAlgo>(a),
             static_cast<TopoExplProto>(p),
             len, &time);
@@ -156,14 +156,14 @@ int main(int argc, char* argv[])
         }
       }
     }
-    
+
     if (bestAlgo == -1 || bestProto == -1) {
       printf("Error : no algorithm/protocol available\n");
       WARN("Error : no algorithm/protocol available");
       topoExplDestroy(context);
       return TOPO_EXPL_INTERNAL_ERROR;
     }
-    INFO(NCCL_TUNING, "%10lu %s %s time %f", len, 
+    INFO(NCCL_TUNING, "%10lu %s %s time %f", len,
          ncclAlgoStr[bestAlgo],
          ncclProtoStr[bestProto],
          minTime);
@@ -180,21 +180,21 @@ int main(int argc, char* argv[])
 
   std::cout << "\nRunning fp32 production choices for algorithm/protocol/maxChannels" << std::endl;
   // RCCL tuning results
-  printf("| %-15s | %-15s | %-15s | %-10s | %-10s | %-12s |\n", 
+  printf("| %-15s | %-15s | %-15s | %-10s | %-10s | %-12s |\n",
          "Max Size(B)", "Count", "Collective", "Algorithm", "Protocol", "Max Channels");
   printf("|-----------------|-----------------|-----------------|------------|------------|--------------|\n");
-  
+
   for (size_t i = 0; i < funcTypes.size(); ++i) {
     for (uint64_t count = 8; count <= 1073741824L; count *= 2) { // Up to 1 gigabyte
       TopoExplAlgoInfo info;
-      result = topoExplGetAlgoInfo(context, funcTypes[i], count, 
+      result = topoExplGetAlgoInfo(context, funcTypes[i], count,
                                        TOPO_DTYPE_FLOAT32, &info);
-      
+
       if (result != TOPO_EXPL_SUCCESS) {
         printf("Error: Failed to get algorithm info for count %lu\n", count);
         continue;
       }
-      
+
       printf("| %-15lu | %-15lu | %-15s | %-10s | %-10s | %-12d |\n",
         info.maxSizeBytes,
         count,

@@ -256,7 +256,7 @@ def calc_unroll_and_pipeline_for_local_arch():
   # We want to remove duplicates but cannot use a dictionary since same gfx name can have different cu counts
   # Use (gfx_name, cu_count) as key for dictionary and convert it to list here
   gfx_targets = list(gfx_targets.keys())
-  
+
   # Homogeneous system is required to build for only 1 variant of unroll factor (except for gfx950 and gfx1250)
   if len(gfx_targets) == 1:
     gfx_name, cu_count = gfx_targets[0]
@@ -602,7 +602,7 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
         key = ((coll_idx & 0x3F) | ((reg_idx & 0xF) << 28))
       if fn.coll in ["AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda"]:
         key = ((coll_idx & 0x3F))
-      
+
       out(f'  {{{key}, {fn_id}}}, {comment}\n')
   out("};\n")
 
@@ -685,7 +685,7 @@ for name in name_to_funcs.keys():
         .format(sym=sym, coll=fn.coll, redop_cxx=redop_to_cxx[fn.redop], ty_cxx=ty_to_cxx[fn.ty],
                 algo=(fn.algo or "RING"), proto=(fn.proto or "SIMPLE"), acc=fn.acc, pipeline=fn.pipeline, unroll=fn.unroll, reg=fn.reg)
       )
-      if guard: 
+      if guard:
         out("#endif\n")
 
 ################################################################################

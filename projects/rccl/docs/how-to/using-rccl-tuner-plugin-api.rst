@@ -35,7 +35,7 @@ The following usage notes are relevant when using the RCCL Tuner plugin API:
          if (a == NCCL_ALGO_NVLS && collNetSupport != 1) continue;
 
 .. note::
-   
+
    The `example plugin <https://github.com/ROCm/rocm-systems/blob/develop/projects/rccl/plugins/tuner/example/plugin.c>`_
    uses math models to approximate the bandwidth and latency of the available selection of algorithms and protocols
    and select the one with the lowest calculated latency. It is customized for the AMD Instinct MI300 accelerators and RoCEv2 networks
@@ -52,7 +52,7 @@ Structure: ncclTuner_v1_t
 **Fields**
 
 *  ``name``
-  
+
    *  **Type**: ``const char*``
    *  **Description**: The name of the tuner, which can be used for logging purposes when ``NCCL_DEBUG=info`` and ``NCCL_DEBUG_SUBSYS=tune`` are set.
 
@@ -84,13 +84,13 @@ Structure: ncclTuner_v1_t
       * ``collNetSupport`` (``int``): Whether ``collNet`` supports this type.
       * ``nvlsSupport`` (``int``): Whether NVLink SHARP supports this type.
       * ``numPipeOps`` (``int``): The number of operations in the group.
-  
+
    *  **Outputs**:
 
       * ``algorithm`` (``int*``): The selected algorithm to be used for the given collective.
       * ``protocol`` (``int*``): The selected protocol to be used for the given collective.
       * ``nChannels`` (``int*``): The number of channels (and SMs) to be used.
-     
+
    *  **Description**:
 
       If ``getCollInfo()`` does not return ``ncclSuccess``, RCCL falls back to its default tuning for the given collective.
@@ -107,7 +107,7 @@ Structure: ncclTuner_v1_t
 
    *  **Return**:
 
-      *  **Type**: ``ncclResult_t`` 
+      *  **Type**: ``ncclResult_t``
       *  **Description**: The result of the cleanup process.
 
 Build and usage instructions

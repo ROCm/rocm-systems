@@ -8,7 +8,7 @@
 
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
-#include <transport.h>  
+#include <transport.h>
 #include "TestBed.hpp"
 
 void dumpData(struct ncclConnect* data, int ndata);

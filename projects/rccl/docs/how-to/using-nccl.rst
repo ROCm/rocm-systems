@@ -8,7 +8,7 @@
 Using the NCCL Net plugin API
 *****************************
 
-NCCL provides a way to use external plugins to let NCCL run on many network types. This 
+NCCL provides a way to use external plugins to let NCCL run on many network types. This
 topic describes the NCCL Net plugin API and explains how to implement a network plugin for NCCL.
 
 Plugins implement the NCCL network API and decouple NCCL binary builds, which are built against a
@@ -181,10 +181,10 @@ Initialization
       #define WARN(...) logFunction(NCCL_LOG_WARN, NCCL_ALL, __FILE__, __LINE__, __VA_ARGS__)
       #define INFO(FLAGS, ...) logFunction(NCCL_LOG_INFO, (FLAGS), __func__, __LINE__, __VA_ARGS__)
 
-*  ``devices`` - After the plugin is initialized, NCCL queries the number of devices available. 
+*  ``devices`` - After the plugin is initialized, NCCL queries the number of devices available.
    This should not be zero. Otherwise, NCCL initialization will fail. If no device is present or usable, the ``init`` function should not return ``ncclSuccess``.
 
-*  ``getProperties`` - Right after retrieving the number of devices, NCCL queries the properties for each available network device. 
+*  ``getProperties`` - Right after retrieving the number of devices, NCCL queries the properties for each available network device.
    These properties are necessary when multiple adapters are present to ensure NCCL uses each adapter in the optimal way.
 
    *  The ``name`` is only used for logging.
@@ -279,7 +279,7 @@ then queried using ``test``. Each ``sendComm`` or ``recvComm`` must be able to h
    The network plugin can use the output argument ``mhandle`` to store any reference to the memory registration, because
    ``mhandle`` is returned for all ``isend``, ``irecv``, ``iflush``, and ``deregMr`` calls.
 
-*  ``regMrDmaBuf`` - If the plugin has set the ``NCCL_PTR_DMABUF`` property in ``ptrSupport``, 
+*  ``regMrDmaBuf`` - If the plugin has set the ``NCCL_PTR_DMABUF`` property in ``ptrSupport``,
    NCCL uses ``regMrDmaBuf`` instead of ``regMr``. If the property was not set, ``regMrDmaBuf`` can be set to ``NULL``.
 
 *  ``deregMr`` - When buffers are no longer used for communication, NCCL calls ``deregMr`` to let the plugin

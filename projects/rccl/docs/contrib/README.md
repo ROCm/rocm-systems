@@ -28,4 +28,3 @@ the official docs or source code, the official sources take precedence.
 ### GIN (GPU-Initiated Networking)
 
 * [NCCL GIN and Symmetric Memory](GIN/NCCL_Gin_and_Symmetric_Memory/NCCL_Gin_and_Symmetric_Memory.md) by Anonymous, translated from Chinese.
-

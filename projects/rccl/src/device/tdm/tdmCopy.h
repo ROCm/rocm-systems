@@ -692,4 +692,3 @@ __device__ inline void asyncStoreFromLDS(const uint8_t* ldsSrc, uint8_t* globalD
 // so there is nothing to define here -- any call is a compile-time error.
 
 } // namespace tdm
-

@@ -28,7 +28,7 @@ PROFILER_SO = f"{PROFILER_DIR}/librccl-profiler-example.so"
 INSPECTOR_DIR = f"{RCCL_INSTALL_DIR}/plugins/profiler/inspector"
 INSPECTOR_SO = f"{INSPECTOR_DIR}/librccl-profiler-inspector.so"
 
-# CSV Configs 
+# CSV Configs
 VALID_CONFIG_WITH_WILDCARDS = os.path.join(WORKDIR, "assets/csv_confs/valid_config_with_wildcards.conf")
 VALID_CONFIG_WITHOUT_WILDCARDS = os.path.join(WORKDIR, "assets/csv_confs/valid_config_without_wildcards.conf")
 NO_MATCHING_CONFIG = os.path.join(WORKDIR, "assets/csv_confs/no_matching_config.conf")
@@ -79,33 +79,33 @@ def get_available_nodes():
     try:
         # Get available nodes
         result = subprocess.run(
-            ["scontrol", "show", "hostnames"], 
-            capture_output=True, 
-            text=True, 
+            ["scontrol", "show", "hostnames"],
+            capture_output=True,
+            text=True,
             check=True
         )
         nodelist = result.stdout.strip().split('\n')
         nodelist = [node.strip() for node in nodelist if node.strip()]
-        
+
         return nodelist
-        
+
     except (subprocess.CalledProcessError, FileNotFoundError):
         return []
 
 def validate_json_trace(trace_file):
     """Validate that a trace file is valid JSON and follows chrome trace format"""
-    
+
     if not os.path.exists(trace_file):
         return False, "File does not exist"
-    
+
     try:
         with open(trace_file, 'r') as f:
             data = json.load(f)
-        
+
         # Basic validation for chrome trace format
         if not isinstance(data, list):
             return False, "Trace must be a JSON array"
-        
+
         # Check for at least one valid event
         if len(data) > 1:  # More than just the closing empty object
             # Validate some events have required fields
@@ -113,10 +113,10 @@ def validate_json_trace(trace_file):
             for event in data:
                 if isinstance(event, dict) and 'name' in event and 'ph' in event:
                     valid_events += 1
-            
+
             if valid_events == 0:
                 return False, "No valid trace events found"
-        
+
         return True, f"Valid JSON trace with {len(data)} entries"
     except json.JSONDecodeError as e:
         return False, f"Invalid JSON: {e}"
@@ -127,35 +127,35 @@ def check_event_in_log(log_file, event_string):
     """Check if a specific event string appears in the log file"""
     if not os.path.exists(log_file):
         return False
-    
+
     with open(log_file, 'r') as f:
         content = f.read()
         return event_string in content
 
 def count_events_in_trace(trace_file, event_name=None, category=None):
     """Count events in a trace file, optionally filtered by name or category"""
-    
+
     if not os.path.exists(trace_file):
         return 0
-    
+
     try:
         with open(trace_file, 'r') as f:
             data = json.load(f)
-        
+
         count = 0
         for event in data:
             if not isinstance(event, dict):
                 continue
-            
+
             match = True
             if event_name and event.get('name') != event_name:
                 match = False
             if category and event.get('cat') != category:
                 match = False
-            
+
             if match and 'name' in event:  # Valid event
                 count += 1
-        
+
         return count
     except:
         return 0
@@ -207,7 +207,7 @@ def pytest_runtest_setup(item):
         needs_plugin_so = test_name != "test_config_parser_thread_safety"
         if needs_plugin_so and not os.path.exists(PLUGIN_SO):
             pytest.skip(f"Tuner plugin library not found at: {PLUGIN_SO}")
-    
+
     # Check for ext_profiler marker
     if item.get_closest_marker("ext_profiler"):
         if not os.path.exists(PROFILER_SO):
@@ -223,10 +223,10 @@ def clear_profiler_dump(request):
     """Automatically clear profiler dump folder once before ext_profiler tests"""
     # Check if any test in the session has ext_profiler marker
     has_profiler_tests = any(
-        item.get_closest_marker("ext_profiler") 
+        item.get_closest_marker("ext_profiler")
         for item in request.session.items
     )
-    
+
     if has_profiler_tests:
         # Clear all JSON files in the profiler dump directory (including subdirectories)
         pattern = os.path.join(PROFILER_DUMP_DIR, "**", "*.json")

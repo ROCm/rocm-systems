@@ -100,7 +100,7 @@ namespace RcclUnitTesting
         std::vector<bool>           const inPlaceList     = {false};
         std::vector<bool>           const managedMemList  = {false};
         std::vector<bool>           const useHipGraphList = {false, true};
-        std::vector<const char *>   const channelList     = {"112"}; 
+        std::vector<const char *>   const channelList     = {"112"};
         bool                        const enableSweep     = false;
         for (auto channel : channelList) {
           setenv("NCCL_MIN_NCHANNELS", channel, 1);

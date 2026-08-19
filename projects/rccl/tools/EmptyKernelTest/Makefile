@@ -23,4 +23,3 @@ all: $(EXE)
 
 clean:
 	rm -f ./EmptyKernelTest ./EmptyKernelTestCuda
-

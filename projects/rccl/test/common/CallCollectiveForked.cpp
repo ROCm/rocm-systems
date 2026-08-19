@@ -40,22 +40,22 @@ void callCollective(ncclUniqueId id, int collID, int rank, int nranks, const std
         default:
             TEST_ERROR("This collective is not implemented for callCollective routine");
     }
-    
+
     HIPCALL(hipSetDevice(rank));
     hipStream_t stream;
     HIPCALL(hipStreamCreate(&stream));
     ncclComm_t comm;
-    
-    
+
+
 
     NCCLCHECK(ncclCommInitRank(&comm, nranks, id, rank));
     int *sendbuff;
     int *recvbuff;
     void *sendRegHandle;
     void *recvRegHandle;
-    
 
-    
+
+
     size_t sendSize = 0;
     size_t recvSize = 0;
 
@@ -78,8 +78,8 @@ void callCollective(ncclUniqueId id, int collID, int rank, int nranks, const std
     else{
       HIPCALL(hipMallocManaged((void **)&sendbuff, sendSize * sizeof(int)));
       HIPCALL(hipMallocManaged((void **)&recvbuff, recvSize * sizeof(int)));
-    }    
-   
+    }
+
     NCCLCHECK(ncclCommRegister(comm, sendbuff, sendSize * sizeof(int), &sendRegHandle));
     NCCLCHECK(ncclCommRegister(comm, recvbuff, recvSize * sizeof(int), &recvRegHandle));
 
@@ -98,7 +98,7 @@ void callCollective(ncclUniqueId id, int collID, int rank, int nranks, const std
 
     HIPCALL(hipStreamSynchronize(stream));
     HIPCALL(hipMemcpy(recv.data(), recvbuff, sizeof(int) * recvSize, hipMemcpyDeviceToHost));
-    
+
     NCCLCHECK(ncclCommDeregister(comm, sendRegHandle));
     NCCLCHECK(ncclCommDeregister(comm, recvRegHandle));
 
@@ -115,7 +115,7 @@ void callCollectiveForked(int nranks,  int collID, const std::vector<int>& sendB
     for(int r = 0; r < nranks; ++r){
       if(pipe(childPipes[r].data()) == -1)
         TEST_ERROR("child %i pipe Failed", r);
-    } 
+    }
 
     auto createNCCLid = [&](int rank){
         ncclGetUniqueId(&id);
@@ -162,7 +162,7 @@ void callCollectiveForked(int nranks,  int collID, const std::vector<int>& sendB
     }
 
     getAndDistributeNCCLid(nranks);
-    
+
     for(int r = 0; r < nranks; ++r)
       wait(NULL); // Wait for all children
 }

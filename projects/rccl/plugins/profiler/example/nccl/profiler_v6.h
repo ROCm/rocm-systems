@@ -145,4 +145,3 @@ typedef struct {
 } ncclProfiler_v6_t;
 
 #endif // PROFILER_V6_H_
-

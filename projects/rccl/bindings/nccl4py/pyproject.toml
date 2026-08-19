@@ -120,4 +120,3 @@ archs = ["native"]  # Fast local builds; override in CI for multi-arch
 manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
 repair-wheel-command = "auditwheel repair --exclude libnccl.so.2 --exclude libcuda.so.1 -w {dest_dir} {wheel}"
-

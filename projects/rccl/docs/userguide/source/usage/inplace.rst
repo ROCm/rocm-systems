@@ -14,4 +14,3 @@ More precisely, these calls are considered in place : ::
 
   ncclReduceScatter(data, data+rank*recvcount, recvcount, datatype, op, comm, stream);
   ncclAllGather(data+rank*sendcount, data, sendcount, datatype, op, comm, stream);
-

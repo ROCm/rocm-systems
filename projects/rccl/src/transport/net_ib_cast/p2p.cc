@@ -521,8 +521,8 @@ ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
 
   wr.opcode = IBV_WR_RDMA_WRITE;
   wr.send_flags = comm->remCtsFifo.flags; // IBV_SEND_INLINE
-  // for multi-receive requests, reset inline flag in send_flags as 
-  // QP max_inline_data attribute limits the inline data to 1 request. 
+  // for multi-receive requests, reset inline flag in send_flags as
+  // QP max_inline_data attribute limits the inline data to 1 request.
   if (IbCastAinicCtsInlineData && n > 1) {
     wr.send_flags &= ~(IBV_SEND_INLINE);
   }

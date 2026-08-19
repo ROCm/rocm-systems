@@ -411,7 +411,7 @@ struct AsyncDataCopier{
 };
 
 #if TDM_TOOLCHAIN_AVAILABLE
-// Warp-level data copier.  Moves whole 1D tiles in between global memory and LDS using the TDM.  Both pointers ideally should be a multiple of 128-byte aligned 
+// Warp-level data copier.  Moves whole 1D tiles in between global memory and LDS using the TDM.  Both pointers ideally should be a multiple of 128-byte aligned
 // for maximum performance.
 template<typename T, CachePolicy cp = DEFAULT_CACHE_POLICY>
 struct TileMover{

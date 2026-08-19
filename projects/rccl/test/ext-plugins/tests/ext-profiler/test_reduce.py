@@ -13,17 +13,17 @@ import pytest
 @pytest.mark.reduce
 def test_profiler_initialization(paths):
     """Test profiler functionality with Reduce operations."""
-    
+
     dump_dir = os.path.join(paths.PROFILER_DUMP_DIR, "reduce_profiler_dumps")
     os.makedirs(dump_dir, exist_ok=True)
 
     dump_file_base = os.path.join(dump_dir, "profiler_initialization")
-    
+
     # Remove any existing trace files
     trace_pattern = f"{dump_file_base}*.json"
     for f in glob.glob(trace_pattern):
         os.remove(f)
-    
+
     env = os.environ.copy()
     env.update({
         "PATH": f"{paths.OMPI_INSTALL_DIR}/bin:{env.get('PATH', '')}",
@@ -34,7 +34,7 @@ def test_profiler_initialization(paths):
         "NCCL_PROFILE_DUMP_FILE": dump_file_base,
         "NCCL_DEBUG": "INFO",
     })
-    
+
     args = [
         f"{paths.OMPI_INSTALL_DIR}/bin/mpirun", "-np", "4",
         "--mca", "pml", "ucx",
@@ -45,10 +45,10 @@ def test_profiler_initialization(paths):
         "-f", "2",
         "-g", "1",
     ]
-    
+
     log_dir = os.path.join(paths.LOGDIR, "reduce_ext_profiler_test_logs")
     os.makedirs(log_dir, exist_ok=True)
-    
+
     log_file = os.path.join(log_dir, "profiler_initialization.log")
     with open(log_file, "w") as logfile:
         result = subprocess.run(
@@ -58,27 +58,27 @@ def test_profiler_initialization(paths):
             stderr=subprocess.STDOUT,
             universal_newlines=True
         )
-    
+
     assert result.returncode == 0, f"Reduce test failed, see {log_file}"
-    
+
     # Verify plugin initialized
     assert paths.check_event_in_log(log_file, "PROFILER/Plugin: init"), \
         f"Plugin should have initialized. Check {log_file}"
-    
+
     # Verify trace files were created (one per rank)
     trace_files = glob.glob(trace_pattern)
     assert len(trace_files) == 4, \
         f"Should have 4 trace files (one per rank), found {len(trace_files)}: {trace_files}"
-    
+
     # Validate each trace file
     for trace_file in trace_files:
         is_valid, message = paths.validate_json_trace(trace_file)
         assert is_valid, f"Trace file {trace_file} validation failed: {message}"
-        
+
         # Check for Group API events
         group_events = paths.count_events_in_trace(trace_file, category="GROUP_API")
         assert group_events > 0, f"Should have Group API events in {trace_file}"
-        
+
         # Check for Reduce collective events
         reduce_events = paths.count_events_in_trace(trace_file, event_name="Reduce")
         assert reduce_events > 0, f"Should have Reduce events in {trace_file}"
@@ -88,17 +88,17 @@ def test_profiler_initialization(paths):
 @pytest.mark.reduce
 def test_invalid_mask_value(paths):
     """Test profiler behavior with invalid event mask (0 = no events)"""
-    
+
     dump_dir = os.path.join(paths.PROFILER_DUMP_DIR, "reduce_profiler_dumps")
     os.makedirs(dump_dir, exist_ok=True)
 
     dump_file_base = os.path.join(dump_dir, "invalid_mask_value_profiling")
-    
+
     # Remove any existing trace files
     trace_pattern = f"{dump_file_base}*.json"
     for f in glob.glob(trace_pattern):
         os.remove(f)
-    
+
     env = os.environ.copy()
     env.update({
         "PATH": f"{paths.OMPI_INSTALL_DIR}/bin:{env.get('PATH', '')}",
@@ -109,7 +109,7 @@ def test_invalid_mask_value(paths):
         "NCCL_PROFILE_DUMP_FILE": dump_file_base,
         "NCCL_DEBUG": "INFO",
     })
-    
+
     args = [
         f"{paths.OMPI_INSTALL_DIR}/bin/mpirun", "-np", "4",
         "--mca", "pml", "ucx",
@@ -120,10 +120,10 @@ def test_invalid_mask_value(paths):
         "-f", "2",
         "-g", "1",
     ]
-    
+
     log_dir = os.path.join(paths.LOGDIR, "reduce_ext_profiler_test_logs")
     os.makedirs(log_dir, exist_ok=True)
-    
+
     log_file = os.path.join(log_dir, "invalid_mask_value_profiling.log")
     with open(log_file, "w") as logfile:
         result = subprocess.run(
@@ -133,28 +133,28 @@ def test_invalid_mask_value(paths):
             stderr=subprocess.STDOUT,
             universal_newlines=True
         )
-    
+
     assert result.returncode == 0, f"Reduce test should still succeed even with invalid mask, see {log_file}"
-    
+
     # Verify plugin initialized
     assert paths.check_event_in_log(log_file, "PROFILER/Plugin: init"), \
         f"Plugin should have initialized even with mask=0. Check {log_file}"
-    
+
     # Verify trace files were created (one per rank)
     trace_files = glob.glob(trace_pattern)
     assert len(trace_files) == 4, \
         f"Should have 4 trace files (one per rank), found {len(trace_files)}: {trace_files}"
-    
+
     # Validate each trace file - with mask=0, trace files should be nearly empty
     # They should contain valid JSON but no actual profiling events
     for trace_file in trace_files:
         is_valid, message = paths.validate_json_trace(trace_file)
         assert is_valid, f"Trace file {trace_file} should still be valid JSON: {message}"
-        
+
         # With mask=0, there should be no Group or Collective events
         group_events = paths.count_events_in_trace(trace_file, category="GROUP_API")
         assert group_events == 0, f"Should have no Group API events with mask=0 in {trace_file}, found {group_events}"
-        
+
         reduce_events = paths.count_events_in_trace(trace_file, event_name="Reduce")
         assert reduce_events == 0, f"Should have no Reduce events with mask=0 in {trace_file}, found {reduce_events}"
 
@@ -163,17 +163,17 @@ def test_invalid_mask_value(paths):
 @pytest.mark.reduce
 def test_single_node_detailed_profiling(paths):
     """Test profiler with single-node Reduce using full event mask (255) across wide message range"""
-    
+
     dump_dir = os.path.join(paths.PROFILER_DUMP_DIR, "reduce_profiler_dumps")
     os.makedirs(dump_dir, exist_ok=True)
 
     dump_file_base = os.path.join(dump_dir, "single_node_detailed_profiling")
-    
+
     # Remove any existing trace files
     trace_pattern = f"{dump_file_base}*.json"
     for f in glob.glob(trace_pattern):
         os.remove(f)
-    
+
     env = os.environ.copy()
     env.update({
         "PATH": f"{paths.OMPI_INSTALL_DIR}/bin:{env.get('PATH', '')}",
@@ -184,22 +184,22 @@ def test_single_node_detailed_profiling(paths):
         "NCCL_PROFILE_DUMP_FILE": dump_file_base,
         "NCCL_DEBUG": "INFO",
     })
-    
+
     args = [
         f"{paths.OMPI_INSTALL_DIR}/bin/mpirun", "-np", "8",
         "--bind-to", "none",
         "--mca", "pml", "ucx",
         "--mca", "btl", "^vader,openib",
         f"{paths.RCCL_TESTS_DIR}/build/reduce_perf",
-        "-b", "8",        
-        "-e", "128M",       
-        "-f", "2",        
+        "-b", "8",
+        "-e", "128M",
+        "-f", "2",
         "-g", "1",
     ]
-    
+
     log_dir = os.path.join(paths.LOGDIR, "reduce_ext_profiler_test_logs")
     os.makedirs(log_dir, exist_ok=True)
-    
+
     log_file = os.path.join(log_dir, "single_node_detailed_profiling.log")
     with open(log_file, "w") as logfile:
         result = subprocess.run(
@@ -209,51 +209,51 @@ def test_single_node_detailed_profiling(paths):
             stderr=subprocess.STDOUT,
             universal_newlines=True
         )
-    
+
     assert result.returncode == 0, f"Single-node detailed Reduce profiling test failed, see {log_file}"
-    
+
     # Verify plugin initialized
     assert paths.check_event_in_log(log_file, "PROFILER/Plugin: init"), \
         f"Plugin should have initialized. Check {log_file}"
-    
+
     # Verify trace files were created (one per rank)
     trace_files = glob.glob(trace_pattern)
     assert len(trace_files) == 8, \
         f"Should have 8 trace files (one per rank), found {len(trace_files)}: {trace_files}"
-    
+
     # Validate each trace file
     for trace_file in trace_files:
         is_valid, message = paths.validate_json_trace(trace_file)
         assert is_valid, f"Trace file {trace_file} validation failed: {message}"
-        
+
         # With NCCL_PROFILE_EVENT_MASK=255, we capture all event types
         # However, single-node behavior differs significantly from multi-node
-        
+
         # Check for Group API events
         group_events = paths.count_events_in_trace(trace_file, category="GROUP_API")
         assert group_events > 0, \
             f"Should have Group API events in {trace_file}, found {group_events}"
-        
+
         # Check for Reduce events
         reduce_events = paths.count_events_in_trace(trace_file, event_name="Reduce")
         assert reduce_events > 0, \
             f"Should have Reduce events in {trace_file}, found {reduce_events}"
-        
+
         # With KernelCh enabled (bit 6), we should see GPU kernel channel events
         kernel_events = paths.count_events_in_trace(trace_file, category="GPU")
         assert kernel_events > 0, \
             f"Should have GPU (KernelCh) events in {trace_file}, found {kernel_events}"
-        
+
         # With ProxyCtrl enabled (bit 5), we should see Append/Sleep events
         proxy_ctrl_events = paths.count_events_in_trace(trace_file, category="PROXY")
         assert proxy_ctrl_events > 0, \
             f"Should have PROXY (ProxyCtrl) events in {trace_file}, found {proxy_ctrl_events}"
-        
+
         append_events = paths.count_events_in_trace(trace_file, event_name="Append")
         sleep_events = paths.count_events_in_trace(trace_file, event_name="Sleep")
         assert append_events > 0 or sleep_events > 0, \
             f"Should have ProxyCtrl events (Append or Sleep) in {trace_file}, found Append={append_events}, Sleep={sleep_events}"
-        
+
         # We should NOT see ProxyOp network events (ScheduleSend/Recv, ProgressSend/Recv)
         schedule_send_events = paths.count_events_in_trace(trace_file, event_name="ScheduleSend")
         schedule_recv_events = paths.count_events_in_trace(trace_file, event_name="ScheduleRecv")
@@ -261,12 +261,12 @@ def test_single_node_detailed_profiling(paths):
             f"Single-node should have NO ScheduleSend events (no network) in {trace_file}, found {schedule_send_events}"
         assert schedule_recv_events == 0, \
             f"Single-node should have NO ScheduleRecv events (no network) in {trace_file}, found {schedule_recv_events}"
-        
+
         # Should also NOT see ProxyStep network events (RecvWait, SendWait, etc.)
         net_events = paths.count_events_in_trace(trace_file, category="NET")
         assert net_events == 0, \
             f"Single-node should have NO NET (ProxyStep) events in {trace_file}, found {net_events}"
-        
+
         # Verify trace file exists and has content
         trace_file_size = os.path.getsize(trace_file)
         assert trace_file_size > 0, \
@@ -277,37 +277,37 @@ def test_single_node_detailed_profiling(paths):
 @pytest.mark.reduce
 def test_multinode_detailed_profiling(paths):
     """Test profiler with multi-node Reduce operations using full event mask (255)"""
-    
+
     # Get available nodes using the shared function
     nodelist = paths.get_available_nodes()
-    
+
     # Skip test if no nodes available (SLURM not available) or less than 2 nodes
     if not nodelist:
         pytest.skip("Multinode test requires SLURM allocation")
-    
+
     if len(nodelist) < 2:
         pytest.skip(f"Multinode test requires at least 2 nodes, found {len(nodelist)}: {nodelist}")
-    
+
     # Check for common network interface across all nodes
     common_interface = paths.find_common_interface(nodelist)
     if common_interface is None:
         pytest.skip(f"Multinode test requires all nodes to have the same network interface (eth0 or eth1).")
-    
+
     # Build host specification string (8 processes per node)
     host_spec = ",".join([f"{node}:8" for node in nodelist])
     total_processes = len(nodelist) * 8
     print(f"Using host specification: {host_spec}")
-    
+
     dump_dir = os.path.join(paths.PROFILER_DUMP_DIR, "reduce_profiler_dumps")
     os.makedirs(dump_dir, exist_ok=True)
 
     dump_file_base = os.path.join(dump_dir, "multinode_detailed_profiling")
-    
+
     # Remove any existing trace files
     trace_pattern = f"{dump_file_base}*.json"
     for f in glob.glob(trace_pattern):
         os.remove(f)
-    
+
     env = os.environ.copy()
     env.update({
         "PATH": f"{paths.OMPI_INSTALL_DIR}/bin:{env.get('PATH', '')}",
@@ -326,7 +326,7 @@ def test_multinode_detailed_profiling(paths):
         "NCCL_SOCKET_IFNAME": common_interface,
         "NCCL_DMABUF_ENABLE": "1",
     })
-    
+
     args = [
         f"{paths.OMPI_INSTALL_DIR}/bin/mpirun", "-np", f"{total_processes}",
         "--host", host_spec,
@@ -338,10 +338,10 @@ def test_multinode_detailed_profiling(paths):
         "-f", "2",
         "-g", "1",
     ]
-    
+
     log_dir = os.path.join(paths.LOGDIR, "reduce_ext_profiler_test_logs")
     os.makedirs(log_dir, exist_ok=True)
-    
+
     log_file = os.path.join(log_dir, "multinode_detailed_profiling.log")
     with open(log_file, "w") as logfile:
         result = subprocess.run(
@@ -351,18 +351,18 @@ def test_multinode_detailed_profiling(paths):
             stderr=subprocess.STDOUT,
             universal_newlines=True
         )
-    
+
     assert result.returncode == 0, f"Multi-node Reduce profiling test failed, see {log_file}"
-    
+
     # Verify plugin initialized
     assert paths.check_event_in_log(log_file, "PROFILER/Plugin: init"), \
         f"Plugin should have initialized. Check {log_file}"
-    
+
     # Verify trace files were created (one per rank)
     trace_files = glob.glob(trace_pattern)
     assert len(trace_files) == total_processes, \
         f"Should have {total_processes} trace files (one per rank), found {len(trace_files)}: {trace_files}"
-    
+
     # Validate each trace file
     # Accumulate cross-node event counts across all ranks.
     # Reduce is a tree-based collective so not every rank communicates
@@ -374,39 +374,39 @@ def test_multinode_detailed_profiling(paths):
     for trace_file in trace_files:
         is_valid, message = paths.validate_json_trace(trace_file)
         assert is_valid, f"Trace file {trace_file} validation failed: {message}"
-        
+
         # With NCCL_PROFILE_EVENT_MASK=255, we should capture all event types
-        
+
         # Check for Group API events (one per Reduce call)
         group_events = paths.count_events_in_trace(trace_file, category="GROUP_API")
         assert group_events > 0, f"Should have Group API events in {trace_file}, found {group_events}"
-        
+
         # Check for Reduce events
         reduce_events = paths.count_events_in_trace(trace_file, event_name="Reduce")
         assert reduce_events > 0, \
             f"Should have Reduce events in {trace_file}, found {reduce_events}"
-        
+
         # For multi-node tests, verify ProxyOp events exist
         proxy_events = paths.count_events_in_trace(trace_file, category="PROXY")
         assert proxy_events > 0, \
             f"Should have Proxy events in {trace_file}, found {proxy_events}"
-        
+
         # Accumulate cross-node events (not every rank has these)
         total_schedule_send += paths.count_events_in_trace(trace_file, event_name="ScheduleSend")
         total_schedule_recv += paths.count_events_in_trace(trace_file, event_name="ScheduleRecv")
         total_net_events += paths.count_events_in_trace(trace_file, category="NET")
-        
+
         # With KernelCh enabled (bit 6), we should see GPU kernel channel events
         kernel_events = paths.count_events_in_trace(trace_file, category="GPU")
         assert kernel_events > 0, \
             f"Should have GPU (KernelCh) events in {trace_file}, found {kernel_events}"
-        
+
         # With ProxyCtrl enabled (bit 5), we should see Append/Sleep events
         append_events = paths.count_events_in_trace(trace_file, event_name="Append")
         sleep_events = paths.count_events_in_trace(trace_file, event_name="Sleep")
         assert append_events > 0 or sleep_events > 0, \
             f"Should have ProxyCtrl events (Append or Sleep) in {trace_file}, found Append={append_events}, Sleep={sleep_events}"
-        
+
         # Verify trace file exists and has content
         trace_file_size = os.path.getsize(trace_file)
         assert trace_file_size > 0, \
@@ -417,4 +417,3 @@ def test_multinode_detailed_profiling(paths):
         f"Should have ScheduleSend or ScheduleRecv events across ranks, found Send={total_schedule_send}, Recv={total_schedule_recv}"
     assert total_net_events > 0, \
         f"Should have NET events across ranks, found {total_net_events}"
-

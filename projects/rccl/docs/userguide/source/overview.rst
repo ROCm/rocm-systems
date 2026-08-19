@@ -30,6 +30,3 @@ Next to performance, ease of programming was the primary consideration in the de
 * multi-process, for example, MPI
 
 NCCL has found great application in Deep Learning Frameworks, where the AllReduce collective is heavily used for neural network training. Efficient scaling of neural network training is possible with the multi-GPU and multi-node communication provided by NCCL.
-
-
-

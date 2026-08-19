@@ -185,13 +185,13 @@ TYPED_TEST(BitOpsTemplateAllIntTestsFixture, alignDownSuccess) {
 
 TYPED_TEST(BitOpsTemplateAllIntTestsFixture, BitOpsCountOneBitsSuccess) {
     this->valX_ = 3; // 0b11
-    int expectedBitCount = 2; 
+    int expectedBitCount = 2;
     EXPECT_EQ(countOneBits(this->valX_), expectedBitCount);
 }
 
 TYPED_TEST(BitOpsTemplateAllIntTestsFixture, BitOpsFirstOneBitsSuccess) {
     this->valX_ = 3; // 0b11
-    int expectedFirstOneBitIndex = 0; 
+    int expectedFirstOneBitIndex = 0;
     EXPECT_EQ(firstOneBit(this->valX_), expectedFirstOneBitIndex);
 }
 
@@ -261,9 +261,9 @@ TYPED_TEST(BitOpsTemplateUnsignedTestsFixture, reverseSubBitsSuccess) {
     ret = reverseSubBits<TypeParam, 2>(this->reverseSubBits_);
     EXPECT_EQ(ret, 1);
     ret = reverseSubBits<TypeParam, 4>(this->reverseSubBits_);
-    EXPECT_EQ(ret, 4); 
+    EXPECT_EQ(ret, 4);
     ret = reverseSubBits<TypeParam, 8>(this->reverseSubBits_);
-    EXPECT_EQ(ret, 64); 
+    EXPECT_EQ(ret, 64);
     ret = reverseSubBits<TypeParam, 16>(this->reverseSubBits_);
     EXPECT_EQ(ret, 16384);
     if(!std::is_same<TypeParam, unsigned short>::value) {

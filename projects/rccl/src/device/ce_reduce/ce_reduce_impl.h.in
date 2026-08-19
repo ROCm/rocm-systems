@@ -55,7 +55,7 @@ __device__ __forceinline__ void ncclCeGlobalBlockBarrier(uint32_t* d_barrierSync
 __device__ __forceinline__ void ncclCeBlockBarrier(int blockId, uint64_t* s_gen, uint32_t* d_barrierSync) {
   __shared__ uint64_t s_val;
   __syncthreads();
-  if (threadIdx.x == 0) { 
+  if (threadIdx.x == 0) {
     s_val = (*s_gen)++;
   }
   __syncthreads();
@@ -198,7 +198,7 @@ __global__ __launch_bounds__(256) void ncclCeLocalReduceKernelVec(
   T* __restrict__ out, // recvbuff + rank*shardBytes (final AllReduce shard region)
   int nRanks, size_t baseChunkElems, size_t tailChunkElems, size_t chunksPerShard, size_t slotChunkElems,
   volatile uint32_t* signalBuffer, size_t totalSteps, uint32_t* d_barrierSync, bool coopLaunch) {
-  if (blockIdx.x >= NCCL_CE_REDUCE_MAX_BLOCKS) { 
+  if (blockIdx.x >= NCCL_CE_REDUCE_MAX_BLOCKS) {
     return;
   }
   __shared__ uint64_t s_gen;

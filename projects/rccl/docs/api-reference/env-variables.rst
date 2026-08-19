@@ -95,7 +95,7 @@ in the following table.
       - **Values**
 
     * - | ``NCCL_DEBUG``
-        | Controls debug logging in RCCL for troubleshooting and monitoring collective communication operations. 
+        | Controls debug logging in RCCL for troubleshooting and monitoring collective communication operations.
       - | These are the logging levels in RCCL set via ``NCCL_DEBUG``. Each logging level contains all logging for levels below it. The default logging level is ``ERROR``.
         |
         | ``NONE``: No logging is printed.

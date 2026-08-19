@@ -27,7 +27,7 @@ find_path(ROCSHMEM_INCLUDE_DIR
 find_library(ROCSHMEM_LIBRARY
     NAMES rocshmem
         HINTS ${ROCSHMEM_INSTALL_DIR}/lib)
-  
+
 ## -- todo --- what to do with verbs? add to handle args call below? -- ##
 find_library(IBVERBS ibverbs)
 

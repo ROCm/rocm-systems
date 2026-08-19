@@ -492,4 +492,3 @@ inline NcclCommAutoGuard makeCommAutoGuard(ncclComm_t comm)
 }
 
 } // namespace RCCLTestGuards
-

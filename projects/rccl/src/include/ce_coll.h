@@ -85,7 +85,7 @@ struct ncclCeColl {
   struct ncclDevrWindow* signalWin;
   // Global counter barrier for regular launch: [0]=arrival, [1]=completed generation.
   uint32_t* d_barrierSync;
-  cudaStream_t scatterStream; 
+  cudaStream_t scatterStream;
   cudaEvent_t synceEvent;  // join scatterStream back onto the caller's stream
   // Latched while this comm has live graph-captured plans. CE 2-shot AllReduce
   // can deadlock on eager calls that share a graph-mode comm, so we disable CE

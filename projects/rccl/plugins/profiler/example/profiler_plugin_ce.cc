@@ -564,4 +564,3 @@ ncclResult_t ceProfilerStopCeBatchEvent(void* eHandle) {
   debugEvent(eHandle, "CeBatchStopEvent");
   return ncclSuccess;
 }
-

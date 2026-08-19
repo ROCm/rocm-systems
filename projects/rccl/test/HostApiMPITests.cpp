@@ -146,7 +146,7 @@ inline int winMode()
     static int cumem_ = -1;
     if (cumem_ < 0) {
         const char* e = getenv("NCCL_CUMEM_ENABLE");
-        cumem_ = e ? (atoi(e) != 0) : true; 
+        cumem_ = e ? (atoi(e) != 0) : true;
     }
     return cumem_ ? NCCL_WIN_COLL_SYMMETRIC : NCCL_WIN_DEFAULT;
 }
@@ -933,7 +933,7 @@ TEST_F(HostApiTest, PutSignalNullWindow)
         ASSERT_EQ(ncclSuccess, allocFineGrainBuffer(&srcBuf, kOneMB));
     }
     auto srcBufGuard = makeScopeGuard([&]() { if(srcBuf) freeFineGrainBuffer(srcBuf); });
-    
+
     ncclResult_t res = ncclInvalidArgument;
     if(myRank == 0)
     {
@@ -943,7 +943,7 @@ TEST_F(HostApiTest, PutSignalNullWindow)
             kSigIdx, kCtx, kFlags, comm, stream);
     }
     ASSERT_MPI_NE(ncclSuccess, res);
-    
+
 
     TEST_INFO("E2 rank %d: PutSignalNullWindow done.", myRank);
 }

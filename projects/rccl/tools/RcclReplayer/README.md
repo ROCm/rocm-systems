@@ -13,21 +13,21 @@ As part of the efforts to enhance RCCL Replayer functionality, RCCL now provides
 - HIP Graph compatible - will report if a call is made in graph capture mode. If in capture mode, RCCL will append a CPU callback node to the graph which logs the call when the graph runs.
 
 ## Output format
-Each line in the log is an entry of RCCL API call. `ncclGroupStart()` and 	`ncclGroupEnd()` correspond to opening and closing brackets, each on a separate line, forming a scope. Each line has 2 space of indentation per level of group depth. 
+Each line in the log is an entry of RCCL API call. `ncclGroupStart()` and 	`ncclGroupEnd()` correspond to opening and closing brackets, each on a separate line, forming a scope. Each line has 2 space of indentation per level of group depth.
 
 <!---(As a result there may be empty scopes following certain RCCL calls such as Send, Recv, AllToAll, etc., indicating group start/end in its implementation)--->
 
 Each entry will take the format of
 `Name : [Parameters : Value, ..., context : [...]](, Trailing Data)`
 ### Parameters
-will contain all the parameters and their values of the function call as defined in nccl.h header. Collectives will contain additional data about the communicator size, number of tasks, its rank, and its opCount in communicator. 
+will contain all the parameters and their values of the function call as defined in nccl.h header. Collectives will contain additional data about the communicator size, number of tasks, its rank, and its opCount in communicator.
 
 Wherever applicable, the structured logging preserves underlying RCCL data constructs and how they are filled.
 
-<!---We try to register and flush logging information at the beginning of a function, in case it never completes before termination/hanging of the program. **However**, many RCCL routines, such as communicator creation, user buffer registration, etc. will have pointers for returned handles. We record those value as well, but at the end of the routine, therefore these calls may not be logged in face of deadlock or error.---> 
+<!---We try to register and flush logging information at the beginning of a function, in case it never completes before termination/hanging of the program. **However**, many RCCL routines, such as communicator creation, user buffer registration, etc. will have pointers for returned handles. We record those value as well, but at the end of the routine, therefore these calls may not be logged in face of deadlock or error.--->
 
 <!---Please interpret the parameters with a grain of salt. They are logged exactly as they are used, by user or by NCCL internal implementations. For instance, `ncclSend` entries will always have a null sendbuff but a valid "recvbuff" in the log, as `ncclSend` under the hood always fills the send buffer into the recv buffer field of `ncclInfo` that is enqueued.--->
- 
+
 
 ### Device context
 contains the following fields: `timestamp`, `thread` (caller thread ID), `device` ( GPU ID which the caller was bound to), `captured` (graph capture mode or not), and the `graphID`. If a call was made in graph capture mode and not actually running on GPU device, `captured` will be 1. All entries would have a `graphID`, but their validity depend on whether there were previous captures.
@@ -76,13 +76,13 @@ Replayer is a separate tool which aims to re-run the same set of RCCL calls as r
 *  Replayer can be built from RCCL source using internal headers directly. It links against a RCCL library specified by `RCCL_DIR` (defaults to `../../build/release`). For compatibility, it is recommended that logs are collected using the same RCCL library version.
 ## Running
 * Replayer requires the exact same number of processes and processes per node as the recorded job. And all log files must be accessible by all processes in Replayer, either through shared filesystem or copies.
-* To run Replayer, simply call `mpirun -np ${np} ./rcclReplayer ${filename}.${extension}` 
+* To run Replayer, simply call `mpirun -np ${np} ./rcclReplayer ${filename}.${extension}`
 * For example, we are on node quanta-cyxtera-cx77-11, with 8 logs: `replayer_log.{1270-1278}.quanta-cyxtera-cx77-11.bin`. Run `mpirun -np 8 ./rcclReplayer replayer_log.bin`
 * Replayer will have a parse and replay phase. During parsing it will create communicators as original RCCL job, assign log files to individual processes, and allocate resources. Then actual replay happens, re-running all the RCCL APIs with same parameters and device assignment. It is also able to capture and launch graphs involving RCCL calls, as recorded by structured logging. Actual data in original job such as message payload or vector values are not recorded therefore not replicated.
 
 
 ## Output
-Each rank will print out its progress as it goes through every line of calls, including its rank, line number, RCCL API name, status (INFO/WARNING/ERROR). 
+Each rank will print out its progress as it goes through every line of calls, including its rank, line number, RCCL API name, status (INFO/WARNING/ERROR).
 It will also report time and bandwidth (if the line is a communication call) for that call. In the end, it will report the total time taken by all communication calls.
 Replayer is still under development and experimentations, so the formats of logging or contents of replayer output will be subject to changes.
 
@@ -95,7 +95,7 @@ Replayer is still under development and experimentations, so the formats of logg
 * **Standardize JSON:** `python3 replay_log_converter.py <basename> --standardize`
 * **Sanitize JSON:** `python3 replay_log_converter.py <basename> --sanitize`
 
-An optional output basename can be provided after the mode (tojson/tobin) to customize the output filename: 
+An optional output basename can be provided after the mode (tojson/tobin) to customize the output filename:
 * `python3 replay_log_converter.py <basename> <mode> <output_basename>`
 
 The converter automatically finds all matching log files with pattern `basename.PID.hostname` and processes them.
@@ -104,7 +104,7 @@ The converter automatically finds all matching log files with pattern `basename.
 * Standardized JSON output is saved with `.standard.json` extension and can be parsed with standard JSON libraries.
 * Sanitized files are modified in-place (original files are overwritten with sanitized versions).
 
-**Examples:** 
+**Examples:**
 * `python3 replay_log_converter.py replayer_log tojson` produces `replayer_log.{1270-1278}.quanta-cx77-11.json`
 * `python3 replay_log_converter.py replayer_log tojson converted_log` produces `converted_log.{1270-1278}.quanta-cx77-11.json`
 * `python3 replay_log_converter.py replayer_log --sanitize` sanitizes existing JSON files in-place
@@ -118,4 +118,3 @@ The `--sanitize` option normalizes logs for easier comparison by:
   * Use `--no-timestamp` (or `--nts`) to set all timestamps to 0.0 instead
 * Preserving relationships: same pointer values get the same sanitized identifier
 * Sanitized fields: communicators (`comm`), unique IDs (`uniqueID`), streams (`stream`), buffer addresses (`addr`/`base`/`ptr`/`acc`), handles (`handle`), thread IDs (`thread`), and process IDs (`pid`)
-

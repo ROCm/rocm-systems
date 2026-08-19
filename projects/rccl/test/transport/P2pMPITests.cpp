@@ -1789,4 +1789,3 @@ TEST_F(P2pMPITest, P2pBatchAutoDisableOnSingleNode)
 }
 
 #endif // MPI_TESTS_ENABLED
-

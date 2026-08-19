@@ -1,5 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-# SPDX-License-Identifier: MIT 
+# SPDX-License-Identifier: MIT
 
 import fnmatch
 import json
@@ -45,7 +45,7 @@ def get_modified_paths(base_ref: str) -> Optional[Iterable[str]]:
             file=sys.stderr,
         )
         return None
-    
+
 GITHUB_WORKFLOWS_CI_PATTERNS = [
     "therock*.yml",
 ]
@@ -56,7 +56,7 @@ def is_path_workflow_file_related_to_ci(path: str) -> bool:
         fnmatch.fnmatch(path, ".github/workflows/" + pattern)
         for pattern in GITHUB_WORKFLOWS_CI_PATTERNS
     )
-    
+
 def check_for_workflow_file_related_to_ci(paths: Optional[Iterable[str]]) -> bool:
     if paths is None:
         return False
@@ -99,7 +99,7 @@ def should_ci_run_given_modified_paths(paths: Optional[Iterable[str]]) -> bool:
         [p for p in paths if p.startswith(".github/workflows")]
     )
     other_paths = paths_set - github_workflows_paths
-    
+
     related_to_ci = check_for_workflow_file_related_to_ci(github_workflows_paths)
     contains_other_non_skippable_files = check_for_non_skippable_path(other_paths)
 

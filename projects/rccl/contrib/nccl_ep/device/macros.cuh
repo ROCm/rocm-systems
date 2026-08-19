@@ -169,4 +169,3 @@ cfg.dynamicSmemBytes = smem_size;
         case 8192: case_macro(8192); \
         default: EP_HOST_ASSERT(false and "Unsupported hidden"); \
     } while(0)
-

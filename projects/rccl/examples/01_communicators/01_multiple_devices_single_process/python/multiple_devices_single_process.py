@@ -89,7 +89,7 @@ def main() -> int:
     # =========================================================================
     # STEP 4: Cleanup Resources
     # =========================================================================
-    
+
     print("Cleaning up resources")
     # Finalize and destroy NCCL communicators
     for comm in comms:

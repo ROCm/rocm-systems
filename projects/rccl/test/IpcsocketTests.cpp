@@ -7,7 +7,7 @@
 #include <rccl/rccl.h>
 #include <sys/wait.h>
 #include <sys/un.h> // struct sockaddr_un
-#include<proxy.h> 
+#include<proxy.h>
 #include <comm.h>
 #include <ipcsocket.h>
 
@@ -46,37 +46,37 @@ namespace RcclUnitTesting
   TEST(Ipcsocket, SendAndReceiveFd) {
     int pipeFd[2]; // for sync from child -> parent
     ASSERT_EQ(pipe(pipeFd), 0);
-  
+
     pid_t pid = fork();
     ASSERT_NE(pid, -1);
-  
+
     const int rank = 1;
     const uint64_t hash = 0x12345678;
     volatile uint32_t abortFlag = 0;
-  
+
     if (pid == 0) {
       // === Child: Receiver ===
       close(pipeFd[0]);
-  
+
       char sockPath[108];
       snprintf(sockPath, sizeof(sockPath), "/tmp/ipc_sock_%lx", hash);
       unlink(sockPath);
-      
+
       int listenFd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
       ASSERT_GT(listenFd, 0);
-      
+
       struct sockaddr_un addr = {};
       addr.sun_family = AF_UNIX;
       strncpy(addr.sun_path, sockPath, sizeof(addr.sun_path) - 1);
-      
+
       ASSERT_EQ(bind(listenFd, (struct sockaddr*)&addr, sizeof(addr)), 0);
-      
+
       ASSERT_EQ(listen(listenFd, 1), 0);
       // Signal parent we're ready to accept
       ASSERT_EQ(write(pipeFd[1], "r", 1), 1);
-    
+
       close(pipeFd[1]);
-  
+
       int connFd = accept(listenFd, NULL, NULL);
       if (connFd < 0) { perror("accept"); exit(4); }
       ASSERT_GT(connFd, 0);
@@ -86,17 +86,17 @@ namespace RcclUnitTesting
         .abortFlag = &abortFlag,
       };
       strncpy(handle.socketName, sockPath, sizeof(handle.socketName));
-  
+
       int recvFd = -1;
       ASSERT_EQ(ncclIpcSocketRecvFd(&handle, &recvFd), ncclSuccess);
       ASSERT_GE(recvFd, 0);
-  
+
       // Optionally verify FD
       struct stat st;
       ASSERT_EQ(fstat(recvFd, &st), 0);
-      
+
       close(recvFd);
-      
+
       // Send a new FD back to parent
       int fdToSend = open("/dev/null", O_RDONLY);
       ASSERT_GE(fdToSend, 0);
@@ -106,39 +106,39 @@ namespace RcclUnitTesting
       close(connFd);
       close(listenFd);
       unlink(sockPath);
-      
+
       _exit(0);
     } else {
       // === Parent: Sender ===
       close(pipeFd[1]);
-  
+
       char tmp;
       ASSERT_EQ(read(pipeFd[0], &tmp, 1), 1); // wait for child to listen
       close(pipeFd[0]);
-  
+
       char sockPath[108];
       snprintf(sockPath, sizeof(sockPath), "/tmp/ipc_sock_%lx", hash);
-  
+
       int sockFd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
       ASSERT_GT(sockFd, 0);
-  
+
       struct sockaddr_un addr = {};
       addr.sun_family = AF_UNIX;
       strncpy(addr.sun_path, sockPath, sizeof(addr.sun_path) - 1);
-  
+
       ASSERT_EQ(connect(sockFd, (struct sockaddr*)&addr, sizeof(addr)), 0);
-  
+
       ncclIpcSocket handle = {
         .fd = sockFd,
         .abortFlag = &abortFlag,
       };
       strncpy(handle.socketName, sockPath, sizeof(handle.socketName));
-  
+
       int fdToSend = open("/dev/null", O_RDONLY);
       ASSERT_GE(fdToSend, 0);
       ASSERT_EQ(ncclIpcSocketSendFd(&handle, fdToSend, rank, hash), ncclSuccess);
       close(fdToSend);
-      
+
       // Receive FD from child
       int recvBackFd = -1;
       ASSERT_EQ(ncclIpcSocketRecvFd(&handle, &recvBackFd), ncclSuccess);
@@ -149,7 +149,7 @@ namespace RcclUnitTesting
       close(recvBackFd);
 
       close(sockFd);
-  
+
       int status = 0;
       waitpid(pid, &status, 0);
       EXPECT_TRUE(WIFEXITED(status) && WEXITSTATUS(status) == 0);

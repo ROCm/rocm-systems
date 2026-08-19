@@ -68,4 +68,3 @@ namespace RcclUnitTesting
 #define CHECK_NCCL_RANK(errCode, func) CHECK_NCCL(func)
 #endif
 }
-

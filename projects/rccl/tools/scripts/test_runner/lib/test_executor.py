@@ -2508,4 +2508,3 @@ class TestExecutor:
 
         if getattr(self.args, "db_push", False):
             emitter.push_postgres(timeout=getattr(self.args, "db_timeout", 10))
-

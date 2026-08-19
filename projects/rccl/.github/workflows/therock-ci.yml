@@ -59,14 +59,14 @@ jobs:
       amdgpu_families: ${{ matrix.amdgpu_family }}
       artifact_group: ${{ matrix.amdgpu_family }}
       extra_cmake_options: >
-        -DTHEROCK_ENABLE_ALL=OFF 
-        -DTHEROCK_BUILD_TESTING=ON 
-        -DTHEROCK_BUNDLE_SYSDEPS=ON 
-        -DTHEROCK_ENABLE_COMM_LIBS=ON 
-        -DTHEROCK_ENABLE_ROCPROFV3=ON 
-        -DTHEROCK_USE_EXTERNAL_RCCL=ON 
-        -DTHEROCK_USE_EXTERNAL_RCCL_TESTS=ON 
-        -DTHEROCK_RCCL_SOURCE_DIR=./rccl 
+        -DTHEROCK_ENABLE_ALL=OFF
+        -DTHEROCK_BUILD_TESTING=ON
+        -DTHEROCK_BUNDLE_SYSDEPS=ON
+        -DTHEROCK_ENABLE_COMM_LIBS=ON
+        -DTHEROCK_ENABLE_ROCPROFV3=ON
+        -DTHEROCK_USE_EXTERNAL_RCCL=ON
+        -DTHEROCK_USE_EXTERNAL_RCCL_TESTS=ON
+        -DTHEROCK_RCCL_SOURCE_DIR=./rccl
         -DTHEROCK_RCCL_TESTS_SOURCE_DIR=./rccl-tests
         -DTHEROCK_ENABLE_MPI=ON
 

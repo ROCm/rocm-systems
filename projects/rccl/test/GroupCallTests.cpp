@@ -260,7 +260,7 @@ namespace RcclUnitTesting
     std::vector<int>                     const numStreamsPerGroup = {1, 1, 1};
     std::vector<bool>                    const useHipGraphList    = {true, false, true};
     bool                                 const inPlace            = false;
-    bool                                 const useManagedMem      = false; 
+    bool                                 const useManagedMem      = false;
     bool                                 const useBlocking        = true;
     int                                  const numGroupCalls      = groupCalls.size();
     int                                  const numIterations      = 10;
@@ -289,7 +289,7 @@ namespace RcclUnitTesting
 
       if (testBed.ev.showNames)
         TEST_INFO("%s %d-ranks GroupCall MultiGroupCall", isMultiProcess ? "MP" : "SP", totalRanks);
-      
+
       for (int groupCallIdx = 0; groupCallIdx < groupCalls.size(); ++groupCallIdx)
       {
         std::vector<ncclFunc_t> funcTypes = groupCalls[groupCallIdx];

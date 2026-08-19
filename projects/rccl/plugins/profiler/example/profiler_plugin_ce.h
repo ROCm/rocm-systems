@@ -36,4 +36,3 @@ ncclResult_t ceProfilerStopCeBatchEvent(void* eHandle);
 CeTimingMode_t ceProfilerGetTimingMode(void);
 
 #endif // PROFILER_PLUGIN_CE_H_
-

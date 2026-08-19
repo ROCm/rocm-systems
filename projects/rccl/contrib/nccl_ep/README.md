@@ -443,7 +443,7 @@ Maintains state for a sequence of related MoE operations, i.e. dispatch and comb
 
 The group's RDMA buffer is sized by `config.rdma_buffer_size`:
 
-- **`NCCL_EP_AUTO`** (recommended for most users): the buffer is **not** allocated at `ncclEpCreateGroup` time. 
+- **`NCCL_EP_AUTO`** (recommended for most users): the buffer is **not** allocated at `ncclEpCreateGroup` time.
 The first `ncclEpInitHandle` allocates it sized to that handle's actual `(layout, num_topk)`.
 A later `ncclEpInitHandle` whose layout needs a larger buffer (for example, the first `EXPERT_MAJOR`
 handle on a group that previously only hosted `RANK_MAJOR` handles, or a handle with a larger `num_topk`)
@@ -889,13 +889,13 @@ cudaMalloc(&out_topk_idx_data,     num_recv_tokens * top_k  * sizeof(int64_t));
 
 // Fast in-place initialization of static tensors
 // go away after Dispatch invocation
-ncclEpTensor_t in_tokens        = {                          
+ncclEpTensor_t in_tokens        = {
     NCCL_EP_TENSOR_INIT_INLINE,
     .ndim = 2,
     .datatype = ncclBfloat16,
     .data = in_tokens_data,
     .sizes = in_tokens_dims };
-ncclEpTensor_t out_tokens       = { 
+ncclEpTensor_t out_tokens       = {
     NCCL_EP_TENSOR_INIT_INLINE,
     .ndim = 2,
     .datatype = ncclBfloat16,
@@ -946,13 +946,13 @@ void*  combine_in_data     = nullptr;
 void*  combine_out_data    = nullptr;
 cudaMalloc(&combine_in_data,  num_recv_tokens * hidden * sizeof(uint16_t));
 cudaMalloc(&combine_out_data, num_tokens      * hidden * sizeof(uint16_t));
-ncclEpTensor_t combine_in_tokens  = { 
+ncclEpTensor_t combine_in_tokens  = {
     NCCL_EP_TENSOR_INIT_INLINE,
-    .ndim = 2, 
+    .ndim = 2,
     .datatype = ncclBfloat16,
     .data = combine_in_data,
     .sizes = combine_in_dims };
-ncclEpTensor_t combine_out_tokens = { 
+ncclEpTensor_t combine_out_tokens = {
     NCCL_EP_TENSOR_INIT_INLINE,
     .ndim = 2,
     .datatype = ncclBfloat16,
@@ -1129,7 +1129,7 @@ size_t combine_in_dims[3]  = { num_local_experts,
 void*  combine_in_data     = nullptr;
 cudaMalloc(&combine_in_data,
            combine_in_dims[0] * combine_in_dims[1] * combine_in_dims[2] * sizeof(uint16_t));
-ncclEpTensor_t combine_in_tokens = { 
+ncclEpTensor_t combine_in_tokens = {
     NCCL_EP_TENSOR_INIT_INLINE,
     .ndim = 3, .datatype = ncclBfloat16,
     .data = combine_in_data,
@@ -1143,13 +1143,13 @@ void*  combine_out_data      = nullptr;
 void*  combine_out_w_data    = nullptr;
 cudaMalloc(&combine_out_data,   num_tokens * hidden * sizeof(uint16_t));
 cudaMalloc(&combine_out_w_data, num_tokens * top_k  * sizeof(float));
-ncclEpTensor_t combine_out_tokens  = { 
+ncclEpTensor_t combine_out_tokens  = {
     NCCL_EP_TENSOR_INIT_INLINE,
     .ndim = 2,
     .datatype = ncclBfloat16,
     .data = combine_out_data,
     .sizes = combine_out_dims };
-ncclEpTensor_t combine_out_weights = { 
+ncclEpTensor_t combine_out_weights = {
     NCCL_EP_TENSOR_INIT_INLINE,
     .ndim = 2,
     .datatype = ncclFloat32,

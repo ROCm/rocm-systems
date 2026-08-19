@@ -8,7 +8,7 @@
 RCCL library specification
 ============================
 
-This document provides details of the API library. 
+This document provides details of the API library.
 
 Communicator functions
 ----------------------

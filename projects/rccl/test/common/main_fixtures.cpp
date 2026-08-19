@@ -6,16 +6,16 @@
 
  #include <gtest/gtest.h>
  #include "EnvVars.hpp"
- 
+
  int main(int argc, char **argv)
  {
    ::testing::InitGoogleTest(&argc, argv);
    RcclUnitTesting::EnvVars ev;
    ev.ShowConfig();
    int retCode = RUN_ALL_TESTS();
- 
+
    // Show timing information
- 
+
    if (ev.showTiming)
    {
      size_t totalTimeMsec = 0;
@@ -26,7 +26,7 @@
      {
        auto suiteInfo = unitTest->GetTestSuite(i);
        if (!suiteInfo->should_run()) continue;
- 
+
        for (int j = 0; j < suiteInfo->total_test_count(); j++)
        {
          auto testInfo = suiteInfo->GetTestInfo(j);
@@ -42,4 +42,3 @@
    }
    return retCode;
  }
- 

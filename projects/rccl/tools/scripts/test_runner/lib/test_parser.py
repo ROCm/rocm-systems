@@ -279,4 +279,3 @@ def parse_test_output(output):
     results['errors'] = errors[:10]  # Limit to first 10 errors
 
     return results
-

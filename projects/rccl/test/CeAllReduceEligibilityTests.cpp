@@ -6,7 +6,7 @@
 
 #include "common/CeAllReduceTestHelpers.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
- 
+
 #include "ce_coll.h"
 #include "collectives.h"
 #include "gtest/gtest.h"
@@ -274,4 +274,3 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
 }
 
 } // namespace RcclUnitTesting
-

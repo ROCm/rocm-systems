@@ -1380,7 +1380,7 @@ TEST_F(MemManagerStatsTest, SuspendedFlag_FlipsWithReleased)
 // bookkeeping consistent end-to-end. Real HIP allocations require process
 // isolation (RUN_ISOLATED_TEST).
 //
-// Per-type cases follow the manager's contract 
+// Per-type cases follow the manager's contract
 //  - ncclMemPersist:                  counter-only update; no linked-list entry.
 //  - ncclMemScratch / ncclMemOffload: linked-list entry created + counter update.
 //

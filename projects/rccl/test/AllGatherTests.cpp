@@ -123,7 +123,7 @@ namespace RcclUnitTesting
   }
 
   TEST(AllGather, UserBufferRegistration)
-  {          
+  {
     const int nranks = 8;
     size_t count = 2048;
     std::vector<int> sendBuff(count, 0);
@@ -142,7 +142,7 @@ namespace RcclUnitTesting
   }
 
   TEST(AllGather, ManagedMemUserBufferRegistration)
-  {          
+  {
     const int nranks = 8;
     size_t count = 2048;
     std::vector<int> sendBuff(count, 0);

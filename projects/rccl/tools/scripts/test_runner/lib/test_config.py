@@ -517,4 +517,3 @@ class TestConfigProcessor:
                 raise ValueError(f"Test suite '{suite['name']}' missing 'config' field")
 
         return True
-

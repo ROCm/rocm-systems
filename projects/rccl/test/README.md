@@ -25,4 +25,3 @@ Run tests in isolated processes with clean environment settings.
 Base class for multi-process distributed tests using MPI. Logging: environment-driven **per-rank log files** (`RCCL_MPI_LOG_ALL_RANKS`), **`TEST_*` macros** with `NCCL_DEBUG`, and scoped **`MPIHelpers::TestLogAssertionContext`** for asserting NCCL lines (see the summary tables in the doc).
 
 📄 **[Full Documentation](common/MPITestFramework.md)**
-

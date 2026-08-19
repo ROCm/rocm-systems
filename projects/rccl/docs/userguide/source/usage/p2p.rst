@@ -215,4 +215,3 @@ This could be done with the barrier shown above.
  ncclGroupEnd();
 
  ncclWaitSignal(nranks, waitDescs, comm, stream);
-

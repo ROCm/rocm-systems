@@ -207,7 +207,7 @@ typedef struct {
     // RDMA buffer size in bytes for LL mode. Two modes:
     //   - NCCL_EP_AUTO: the library automatically selects the internal
     //     staging buffer size. The buffer allocation/re-allocation  may be
-    //     performed lazily in ncclEpInitHandle once all relevant sizing 
+    //     performed lazily in ncclEpInitHandle once all relevant sizing
     //     information is known.
     //   - Explicit positive value: the library allocates exactly that
     //     many bytes at ncclEpCreateGroup time. ncclEpInitHandle returns

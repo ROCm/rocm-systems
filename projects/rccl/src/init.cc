@@ -2767,7 +2767,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     NCCLCHECK(ncclMemAlloc((void**)&comm->localSizes, nLocal * sizeof(size_t)));
     NCCLCHECK(ncclMemAlloc((void**)&comm->gatheredSizes, nGather * sizeof(size_t)));
   }
-  
+
   // Initialize hierarchical sub-communicators and temp buffers
   if (!job->parent && !comm->isGrow && comm->nNodes >= 8 && comm->maxLocalRanks > 1 &&
       (rcclParamHierarchicalAllGather() == 1 || rcclParamHierarchicalReduceScatter() == 1)) {

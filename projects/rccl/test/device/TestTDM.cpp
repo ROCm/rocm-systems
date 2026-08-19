@@ -5,7 +5,7 @@
  ************************************************************************/
 
 // Tests for asyncCopy.h
-// 
+//
 // Includes tests for tensor data mover logic
 
 #include "DeviceTestBase.hpp"
@@ -92,18 +92,18 @@ __global__ void kernelNaiveTDMCopy([[maybe_unused]] const T* __restrict__ src, [
 // there rather than failing to build a target that never runs these tests.
 #if TDM_SUPPORTED || ASYNC_COPY_SUPPORTED
    extern __shared__ __align__(128) unsigned char sharedBytes[];
-   T* shmem = reinterpret_cast<T*>(sharedBytes + offAlignmentLDS); // 
+   T* shmem = reinterpret_cast<T*>(sharedBytes + offAlignmentLDS); //
    int waveId = threadIdx.x / warpSize;
    int numWavesPerBlock = blockDim.x / warpSize;
    size_t itemsProcessedPerGridIteration = numElementsPerTile * numWavesPerBlock * gridDim.x;
- 
+
    T* shmemPtr = shmem + numElementsPerTile * waveId;
    // Local per-wave source and destination pointers
    const T* srcPtr = src + numElementsPerTile * (waveId + blockIdx.x * numWavesPerBlock);
    T* dstPtr = dst + numElementsPerTile * (waveId + blockIdx.x * numWavesPerBlock);
- 
+
    TileMoverType tileMover;
-   
+
    while(srcPtr < src + numElements){
      // Handle the last tile of the block, which may be less than num_elements_per_tile.
      if(src + numElements - srcPtr < numElementsPerTile){
@@ -150,8 +150,8 @@ struct AsyncDataCopierTileApiLauncher {
 };
 
 template<typename Launcher>
-class AsyncCopyTestBase : public DeviceTestBase { 
-protected: 
+class AsyncCopyTestBase : public DeviceTestBase {
+protected:
   void SetUp() override {
     DeviceTestBase::SetUp();
     // These kernels reach the tensor data mover and the async-to/from-LDS builtins,
@@ -161,23 +161,23 @@ protected:
       GTEST_SKIP() << "async copy / TDM not supported on this device";
   }
 
-  template<typename T> 
-  void TestRoundTrip(const std::vector<T>& h_in) { 
+  template<typename T>
+  void TestRoundTrip(const std::vector<T>& h_in) {
     const int N = static_cast<int>(h_in.size());
     const int numBlocks = 4;
-    DeviceBuffer<T> d_in(N), d_out(N); 
-    d_in.copyFrom(h_in); 
-    const int numElementsPerTile = 1024 * 4 - 1; 
+    DeviceBuffer<T> d_in(N), d_out(N);
+    d_in.copyFrom(h_in);
+    const int numElementsPerTile = 1024 * 4 - 1;
     const int offAlignmentLDS = 3 * sizeof(T);
     int minSharedMemorySize = numElementsPerTile * sizeof(T) * kDefaultBlockSize / warpSize + offAlignmentLDS;
-    Launcher{}(numBlocks, kDefaultBlockSize, minSharedMemorySize, d_in.ptr, d_out.ptr, N, numElementsPerTile, offAlignmentLDS); 
-    syncAndCheck(); 
-  
-    auto h_out = d_out.copyTo(); 
-    for (int i = 0; i < N; i++) 
-      EXPECT_EQ(h_in[i], h_out[i]) << "at index " << i; 
-  } 
-}; 
+    Launcher{}(numBlocks, kDefaultBlockSize, minSharedMemorySize, d_in.ptr, d_out.ptr, N, numElementsPerTile, offAlignmentLDS);
+    syncAndCheck();
+
+    auto h_out = d_out.copyTo();
+    for (int i = 0; i < N; i++)
+      EXPECT_EQ(h_in[i], h_out[i]) << "at index " << i;
+  }
+};
 
 using TestAsyncDataCopierTileApi = AsyncCopyTestBase<AsyncDataCopierTileApiLauncher>;
 

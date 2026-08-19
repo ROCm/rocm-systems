@@ -48,11 +48,11 @@ std::vector<std::string> splitString(const std::string& str, char delimiter) {
 ArchInfo parseMetadata(const std::vector<std::string>& list) {
     ArchInfo archInfo;
     KernelInfo currKernelInfo;
-    
+
     std::regex amdhsaTargetRegex("amdhsa.target:\\s+(?:'?)amdgcn-amd-amdhsa--(\\w+)(?:'?)");
     std::regex kernelNameRegex("\\.name:\\s+(\\w+)");
     std::regex privateSegmentSizeRegex("\\.private_segment_fixed_size:\\s+(\\d+)");
-    
+
     for (const auto& line : list) {
         std::smatch match;
 
@@ -63,13 +63,13 @@ ArchInfo parseMetadata(const std::vector<std::string>& list) {
         } else if (std::regex_search(line, match, privateSegmentSizeRegex)) {
             currKernelInfo.privateSegmentFixedSize = std::stoi(match[1]);
         }
-        
+
         if (!currKernelInfo.name.empty() && currKernelInfo.privateSegmentFixedSize != 0) {
             archInfo.kernels.push_back(currKernelInfo);
             currKernelInfo = {}; // Empty kernelInfo
         }
     }
-    
+
     return archInfo;
 }
 

@@ -142,4 +142,3 @@ Running fp32 production choices for algorithm/protocol/maxChannels
 | 4294967296      | 1073741824      | AllReduce       | Ring       | Simple     | 64           |
 ...
 ```
-

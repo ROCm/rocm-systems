@@ -78,4 +78,3 @@ potentially block the CUDA device) until all ranks in the communicator launch th
 create such dependencies between devices depending on the MPI implementation.
 
 Using both MPI and NCCL to perform transfers between the same sets of CUDA devices concurrently is therefore not guaranteed to be safe.
-

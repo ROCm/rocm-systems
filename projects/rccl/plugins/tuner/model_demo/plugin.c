@@ -19,7 +19,7 @@ static long log2i(long n) {
 }
 // Latencies in us, Bandwidths in GB/s
 // Tree { LL, LL128, Simple } , Ring { LL, LL128, Simple }
-static const float baseLat  [NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS] = { 
+static const float baseLat  [NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS] = {
        { 12.0, 12.0, 17.0 }, { 12.0, 12.0, 17.0 },   // Tree, Ring
        { 12.0, 12.0, 17.0 }, { 12.0, 12.0, 17.0 },   // Collnet Direct, Chain
        {    0,    0,    0 }, {    0,    0,    0 }};  // NVLS, NVLS Tree
@@ -86,7 +86,7 @@ ncclResult_t ncclTopoGetAlgoTime_Tuner(ncclFunc_t collType, int algorithm, int p
   return ncclSuccess;
 }
 
-__hidden ncclResult_t pluginInit(size_t nRanks, size_t nNodes, ncclDebugLogger_t logFunction) { 
+__hidden ncclResult_t pluginInit(size_t nRanks, size_t nNodes, ncclDebugLogger_t logFunction) {
   if (nRanks <= 1) return ncclSuccess;
   int compCapIndex = HOPPER_COMPCAP_IDX;
   int index2 = nNodes <= 2 ? nNodes-1 : 2;
@@ -120,7 +120,7 @@ __hidden ncclResult_t pluginInit(size_t nRanks, size_t nNodes, ncclDebugLogger_t
         if (collnet == 1) bw = 0.0;
         int nChannels = 28; //nNodes==1 && MI300
         float busBw = nChannels * bw; //comm->topo->baseBw != 0.0 ? comm->topo->baseBw : graphs[a]->nChannels * bw
-        
+
         // Various model refinements
         if (nNodes <= 2)
           busBw *= tuning_model.bwRatio[0][a][p];
@@ -198,7 +198,7 @@ __hidden ncclResult_t pluginInit(size_t nRanks, size_t nNodes, ncclDebugLogger_t
 __hidden ncclResult_t pluginGetCollInfo(void* context, ncclFunc_t collType, size_t nBytes,
                               int collNetSupport, int nvlsSupport, int numPipeOps,
                               int *algorithm, int *protocol, int* nChannels) {
-                                
+
   float minTime = 3600000000.0; // Hopefully no operation will take an hour to complete.
   // Find algorithm / protocol.
   *algorithm = -1;

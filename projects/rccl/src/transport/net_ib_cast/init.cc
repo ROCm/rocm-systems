@@ -640,7 +640,7 @@ ncclResult_t IbCastGetPhysProperties(int dev, ncclNetProperties_t* props) {
   props->maxComms = ibDev->maxQp;
   // AINIC with CTS offload enabled supports max of 1 recv only.
   if (IbCastOffloadEnabled && !rcclParamIbCastP2pDisableCts()) {
-    props->maxRecvs = 1; 
+    props->maxRecvs = 1;
   } else {
     props->maxRecvs = NCCL_NET_IB_MAX_RECVS;
   }

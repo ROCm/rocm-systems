@@ -15,4 +15,3 @@ void* ncclMemoryStack::allocateSpilled(ncclMemoryStack*, size_t, size_t) { retur
 extern "C" ncclResult_t ncclCommMemStats(ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value) {
   return ncclCommMemStats_impl(comm, stat, value);
 }
-

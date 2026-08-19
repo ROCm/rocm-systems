@@ -408,4 +408,3 @@ def test_multinode_verbose(paths, inspector_helpers):
                 verbose_valid, verbose_msg = inspector_helpers.validate_inspector_verbose_record(record)
                 assert verbose_valid, \
                     f"Verbose validation failed at line {lineno} in {dump_file}: {verbose_msg}"
-

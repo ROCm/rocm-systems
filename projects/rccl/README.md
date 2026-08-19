@@ -174,7 +174,7 @@ See the rccl-tests README for more information on how to build and run those tes
 
 RCCL can use rocSHMEM's GPU Direct Async (GDA) backend to accelerate the **AllToAll** collective on supported multi-node setups. This is the only collective that currently uses rocSHMEM GDA inside RCCL.
 
-Please consult the [rocSHMEM documentation](https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/install.html#gda-nic-dependencies) to see which NICs and drivers are required for GDA alltoall support. 
+Please consult the [rocSHMEM documentation](https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/install.html#gda-nic-dependencies) to see which NICs and drivers are required for GDA alltoall support.
 
 **Building with rocSHMEM**
 
@@ -184,7 +184,7 @@ Please consult the [rocSHMEM documentation](https://rocm.docs.amd.com/projects/r
   ```
   By default (without `ROCSHMEM_INSTALL_DIR`), the script creates a sparse git worktree of the mono-repo at a pinned commit and passes that rocSHMEM tree to CMake as `ROCSHMEM_SOURCE_DIR`, so RCCL builds rocSHMEM via CMake `ExternalProject`. To use an already-built rocSHMEM instead, set `ROCSHMEM_INSTALL_DIR` to its install prefix before running the script.
 
-- **Manual CMake (without `install.sh`)**  
+- **Manual CMake (without `install.sh`)**
   You need InfiniBand Verbs development libraries on the system (`libibverbs`; e.g. `rdma-core` / `libibverbs-dev` on Debian/Ubuntu). Then enable rocSHMEM and supply **either** a pre-built install prefix **or** a path to the rocSHMEM CMake source tree (the directory that contains rocSHMEM’s top-level `CMakeLists.txt`, e.g. `projects/rocshmem` in the rocm-systems mono-repo):
 
   ```shell

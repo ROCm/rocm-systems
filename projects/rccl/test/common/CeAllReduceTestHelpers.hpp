@@ -53,4 +53,3 @@ struct CeAllReduceMockComm
 };
 
 } // namespace RcclUnitTesting
-

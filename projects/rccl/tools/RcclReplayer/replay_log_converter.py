@@ -60,7 +60,7 @@ RCCL_CALL_NAMES = {v: k for k, v in RCCL_CALL_TYPES.items()}
 
 # Call type groups for cleaner code
 COMM_LIFECYCLE_CALLS = ["CommDestroy", "CommFinalize", "CommAbort"]
-COLLECTIVE_CALLS = ["AllReduce", "Reduce", "AllGather", "ReduceScatter", "Broadcast", 
+COLLECTIVE_CALLS = ["AllReduce", "Reduce", "AllGather", "ReduceScatter", "Broadcast",
                     "Scatter", "Gather", "Bcast", "Send", "Recv", "AllToAll", "AllToAllv"]
 
 # rcclApiCall struct format (based on recorder.h)
@@ -92,14 +92,14 @@ STRUCT_FORMAT = (
     'i'  # nTasks            - 4 bytes
     'i'  # globalRank        - 4 bytes
     'Q'  # commId            - 8 bytes
-)  # Total: 160 bytes 
+)  # Total: 160 bytes
 
 # Calculate the size of the struct in bytes
-STRUCT_SIZE = struct.calcsize(STRUCT_FORMAT) 
+STRUCT_SIZE = struct.calcsize(STRUCT_FORMAT)
 
 class Sanitizer:
     # Tracks and remaps pointer values to human-readable identifiers.
-    
+
     # Regex patterns for sanitization (compiled once at class level)
     HEX_PATTERN = re.compile(r'0x[0-9a-fA-F]+')
     UNIQUEID_PATTERN = re.compile(r'uniqueID\s*:\s*(\d+)')
@@ -107,7 +107,7 @@ class Sanitizer:
     THREAD_PATTERN = re.compile(r'thread\s*:\s*(\d+)')
     PID_PATTERN = re.compile(r'pid\s*:\s*(\d+)')
     CONTEXT_LOOKBACK = 20  # Characters to look back for context detection
-    
+
     def __init__(self):
         self.comm_map = {}
         self.uniqueid_map = {}
@@ -116,42 +116,42 @@ class Sanitizer:
         self.handle_map = {}
         self.thread_map = {}
         self.pid_map = {}
-    
+
     def _sanitize_value(self, value, mapping, prefix):
         if value is None or value == 0 or value == -1:
             return value
         if value not in mapping:
             mapping[value] = f"{prefix}_{len(mapping) + 1:03d}"
         return mapping[value]
-    
+
     def sanitize_comm(self, value):
         # Sanitize communicator pointer.
         return self._sanitize_value(value, self.comm_map, "comm")
-    
+
     def sanitize_uniqueid(self, value):
         # Sanitize unique ID / commId.
         return self._sanitize_value(value, self.uniqueid_map, "uniqueid")
-    
+
     def sanitize_stream(self, value):
         # Sanitize stream pointer.
         return self._sanitize_value(value, self.stream_map, "stream")
-    
+
     def sanitize_buffer(self, value):
         # Sanitize buffer pointer (sendbuff, recvbuff, acc, base addresses).
         return self._sanitize_value(value, self.buffer_map, "buf")
-    
+
     def sanitize_handle(self, value):
         # Sanitize handle (CommRegister/Deregister).
         return self._sanitize_value(value, self.handle_map, "handle")
-    
+
     def sanitize_thread(self, value):
         # Sanitize thread ID.
         return self._sanitize_value(value, self.thread_map, "thread")
-    
+
     def sanitize_pid(self, value):
         # Sanitize process ID.
         return self._sanitize_value(value, self.pid_map, "pid")
-    
+
     def sanitize_by_type(self, value, value_type):
         # Sanitize a value based on its type.
         if value_type == 'comm':
@@ -165,12 +165,12 @@ class Sanitizer:
         elif value_type == 'handle':
             return self.sanitize_handle(value)
         return value
-    
+
     def determine_hex_type(self, line, match_start):
         # Determine the type of hex value based on context.
         start = max(0, match_start - self.CONTEXT_LOOKBACK)
         context = line[start:match_start]
-        
+
         if 'comm :' in context or 'newcomm :' in context:
             return 'comm'
         elif 'uniqueID :' in context:
@@ -209,7 +209,7 @@ def parse_buffer_field(line, field_name):
     # Matches "field : [... addr : XXX ... base : YYY ... size : ZZZ]" pattern
     pattern = rf'{field_name}\s*:\s*\[.*?addr\s*:\s*(\w+).*?base\s*:\s*(\w+).*?size\s*:\s*(\d+)'
     match = re.search(pattern, line)
-    
+
     if match:
         return {
             'addr': parse_hex_or_int(match.group(1)),
@@ -223,7 +223,7 @@ def parse_array_field(line, field_name):
     # Matches "field : [num1, num2, num3, ...]" pattern
     pattern = rf'{field_name}\s*:\s*\[([\d\s,]+)\]'
     match = re.search(pattern, line)
-    
+
     if match:
         # Split by comma and convert to integers
         return [int(x.strip()) for x in match.group(1).split(',') if x.strip()]
@@ -276,23 +276,23 @@ def extract_context(line):
 def parse_json_line(line):
     # Parse a single line of recorder's JSON format into struct field dict.
     line = line.strip()
-    
+
     # Skip empty, braces, version
     if not line or line in ['{', '}', '},'] or 'version' in line:
         return None
-    
+
     # Extract call type
     # Matches word characters at start of line followed by colon (e.g., "CommInitAll :")
     match = re.match(r'(\w+)\s*:', line)
     if not match:
         return None
-    
+
     call_type_str = match.group(1)
     if call_type_str not in RCCL_CALL_TYPES:
         return None
-    
+
     call_type = RCCL_CALL_TYPES[call_type_str]
-    
+
     # Initialize struct data with defaults
     data = {
         'pid': -1,
@@ -322,7 +322,7 @@ def parse_json_line(line):
         'globalRank': -1,
         'commId': 0
     }
-    
+
     # Extract context
     context = extract_context(line)
     if context:
@@ -333,13 +333,13 @@ def parse_json_line(line):
         data['groupDepth'] = context['groupDepth']
         data['graphCaptured'] = context['captured']
         data['graphID'] = context['graphID']
-    
+
     # Parse call-specific fields
     if call_type_str == "GetUniqueId":
         val = extract_value(line, 'uniqueID')
         if val:
             data['commId'] = parse_hex_or_int(val)
-    
+
     elif call_type_str == "CommInitRank":
         if val := extract_value(line, 'size'):
             data['nRanks'] = parse_hex_or_int(val)
@@ -347,7 +347,7 @@ def parse_json_line(line):
             data['commId'] = parse_hex_or_int(val)
         if val := extract_value(line, 'rank'):
             data['globalRank'] = parse_hex_or_int(val)
-    
+
     elif call_type_str == "CommInitDev":
         if val := extract_value(line, 'comm'):
             data['comm'] = parse_hex_or_int(val)
@@ -359,11 +359,11 @@ def parse_json_line(line):
             data['globalRank'] = parse_hex_or_int(val)
         if val := extract_value(line, 'dev'):
             data['root'] = parse_hex_or_int(val)
-    
+
     elif call_type_str == "CommInitAll":
         if val := extract_value(line, '# of device'):
             data['root'] = parse_hex_or_int(val)
-    
+
     elif call_type_str == "CommSplit":
         if val := extract_value(line, 'comm'):
             data['commId'] = parse_hex_or_int(val)
@@ -373,21 +373,21 @@ def parse_json_line(line):
             data['globalRank'] = parse_hex_or_int(val)
         if val := extract_value(line, 'newcomm'):
             data['comm'] = parse_hex_or_int(val)
-    
+
     elif call_type_str in COMM_LIFECYCLE_CALLS:
         if val := extract_value(line, 'comm'):
             data['comm'] = parse_hex_or_int(val)
-    
+
     elif call_type_str == "MemAlloc":
         if val := extract_value(line, 'returned ptr'):
             data['recvbuff'] = parse_hex_or_int(val)
         if val := extract_value(line, 'size'):
             data['count'] = parse_hex_or_int(val)
-    
+
     elif call_type_str == "MemFree":
         if val := extract_value(line, 'ptr'):
             data['recvbuff'] = parse_hex_or_int(val)
-    
+
     elif call_type_str == "CommRegister":
         if val := extract_value(line, 'comm'):
             data['comm'] = parse_hex_or_int(val)
@@ -399,13 +399,13 @@ def parse_json_line(line):
             data['sendPtrExtent'] = buff_info['size']
         if val := extract_value(line, 'returned handle'):
             data['recvbuff'] = parse_hex_or_int(val)
-    
+
     elif call_type_str == "CommDeregister":
         if val := extract_value(line, 'comm'):
             data['comm'] = parse_hex_or_int(val)
         if val := extract_value(line, 'handle'):
             data['recvbuff'] = parse_hex_or_int(val)
-    
+
     # Collective operations
     elif call_type < RCCL_CALL_TYPES["GroupStart"]:
         # Extract buffer sections
@@ -414,13 +414,13 @@ def parse_json_line(line):
             data['sendbuff'] = sendbuff_info['addr']
             data['sendPtrBase'] = sendbuff_info['base']
             data['sendPtrExtent'] = sendbuff_info['size']
-        
+
         recvbuff_info = parse_buffer_field(line, 'recvbuff')
         if recvbuff_info:
             data['recvbuff'] = recvbuff_info['addr']
             data['recvPtrBase'] = recvbuff_info['base']
             data['recvPtrExtent'] = recvbuff_info['size']
-        
+
         if val := extract_value(line, 'opCount'):
             data['opCount'] = parse_hex_or_int(val)
         if val := extract_value(line, 'acc'):
@@ -443,7 +443,7 @@ def parse_json_line(line):
             data['nTasks'] = parse_hex_or_int(val)
         if val := extract_value(line, 'globalrank'):
             data['globalRank'] = parse_hex_or_int(val)
-        
+
         # AllToAllv has 4 extra arrays appended after the struct
         if call_type_str == "AllToAllv":
             data['alltoallv_arrays'] = {
@@ -452,22 +452,22 @@ def parse_json_line(line):
                 'recvcounts': parse_array_field(line, 'recvcounts'),
                 'rdispls': parse_array_field(line, 'rdispls')
             }
-    
+
     return data
 
 def json_to_bin(json_file, bin_file):
     # Convert JSON log to binary format
     print(f"Converting {json_file} to binary format...")
-    
+
     # Validate input file
     if not os.path.exists(json_file):
         print(f"Error: Input file not found: {json_file}")
         return False
-    
+
     if os.path.getsize(json_file) == 0:
         print(f"Warning: Input file is empty: {json_file}")
         return False
-    
+
     try:
         with open(json_file, 'r') as f:
             lines = f.readlines()
@@ -475,17 +475,17 @@ def json_to_bin(json_file, bin_file):
         print(f"Error: Failed to read input file: {json_file}")
         print(f"  {e}")
         return False
-    
+
     call_count = 0
     with open(bin_file, 'wb') as f:
         for line in lines:
             # Parse the line
             data = parse_json_line(line)
-            
+
             # Skip lines that are just braces or empty
             if not data:
                 continue
-            
+
             # Pack struct
             packed = struct.pack(
                 STRUCT_FORMAT,
@@ -517,12 +517,12 @@ def json_to_bin(json_file, bin_file):
                 data['commId']
             )
             f.write(packed)
-            
+
             # Write extra data for AllToAllv (4 arrays of int32)
             if data['type'] == RCCL_CALL_TYPES["AllToAllv"] and 'alltoallv_arrays' in data:
                 arrays = data['alltoallv_arrays']
                 nRanks = data.get('nRanks', -1)
-                
+
                 # Validate nRanks
                 if nRanks <= 0:
                     print(f"Warning: Invalid nRanks={nRanks} for AllToAllv at call {call_count + 1}")
@@ -538,30 +538,30 @@ def json_to_bin(json_file, bin_file):
                             # Pack as array of int32 (signed 32-bit integers, 4 bytes each)
                             for val in arrays[array_name]:
                                 f.write(struct.pack('i', val))
-            
+
             call_count += 1
-    
+
     print(f"Converted {call_count} calls to binary format: {bin_file} \n")
 
 def bin_to_json(bin_file, json_file):
     # Convert binary log to JSON format
     print(f"Converting {bin_file} to JSON format...")
-    
+
     # Validate input file
     if not os.path.exists(bin_file):
         print(f"Error: Input file not found: {bin_file}")
         return False
-    
+
     if os.path.getsize(bin_file) == 0:
         print(f"Warning: Input file is empty: {bin_file}")
         return False
-    
+
     file_size = os.path.getsize(bin_file)
     if file_size < STRUCT_SIZE:
         print(f"Error: Input file too small: {bin_file}")
         print(f"  File size: {file_size} bytes, minimum expected: {STRUCT_SIZE} bytes")
         return False
-    
+
     # Read binary file
     # Parse all calls first - read sequentially to handle variable-size records
     all_calls = []
@@ -573,7 +573,7 @@ def bin_to_json(bin_file, json_file):
                 chunk = f.read(STRUCT_SIZE)
                 if len(chunk) < STRUCT_SIZE:
                     break  # End of file
-                
+
                 try:
                     unpacked = struct.unpack(STRUCT_FORMAT, chunk)
                 except struct.error as e:
@@ -581,9 +581,9 @@ def bin_to_json(bin_file, json_file):
                     print(f"  Expected {STRUCT_SIZE} bytes, got {len(chunk)} bytes")
                     print(f"  Error: {e}")
                     break
-                
+
                 record_num += 1
-                
+
                 call_data = {
                     'pid': unpacked[0],
                     'tid': unpacked[1],
@@ -612,11 +612,11 @@ def bin_to_json(bin_file, json_file):
                     'globalRank': unpacked[24],
                     'commId': unpacked[25]
                 }
-                
+
                 # Read extra data for AllToAllv (4 arrays of nRanks * int32)
                 if call_data['type'] == RCCL_CALL_TYPES["AllToAllv"]:
                     nRanks = call_data['nRanks']
-                    
+
                     # Validate nRanks before reading arrays
                     if nRanks <= 0:
                         print(f"Warning: Invalid nRanks={nRanks} for AllToAllv at record {record_num}")
@@ -636,74 +636,74 @@ def bin_to_json(bin_file, json_file):
                                     break
                                 array_data.append(struct.unpack('i', val_bytes)[0])
                             call_data['alltoallv_arrays'][array_name] = array_data
-                
+
                 all_calls.append(call_data)
     except IOError as e:
         print(f"Error: Failed to read binary file: {bin_file}")
         print(f"  {e}")
         return False
-    
+
     num_calls = len(all_calls)
-    
+
     # Write JSON file
     with open(json_file, 'w') as f:
         f.write("{\n")
         f.write("  version : 1,\n")
-        
+
         # Track depth for proper indentation (2 + 2*depth spaces)
         # GroupStart adds opening brace and increments depth
         # GroupEnd decrements depth and adds closing brace
         depth = 0
-        
+
         i = 0
         while i < num_calls:
             call_data = all_calls[i]
             call_type_name = RCCL_CALL_NAMES.get(call_data['type'], 'OtherCall')
-            
+
             # Handle GroupEnd: decrement depth BEFORE writing
             if call_type_name == "GroupEnd":
                 depth -= 1
                 # Write closing brace before GroupEnd
                 indent_for_brace = ' ' * (2 + 2 * depth)
                 f.write(f"{indent_for_brace}}},\n")
-            
+
             # Calculate indentation based on current depth
             indent = ' ' * (2 + 2 * depth)
-            
+
             # Format output based on call type
             context = format_context(call_data)
-            
+
             if call_type_name == "GetUniqueId":
                 f.write(f"{indent}{call_type_name} : [uniqueID : {call_data['commId']}, {context}]")
-            
+
             elif call_type_name == "CommInitRank":
                 f.write(f"{indent}{call_type_name} : [size : {call_data['nRanks']}, uniqueID : {call_data['commId']}, rank : {call_data['globalRank']}, {context}]")
-            
+
             elif call_type_name == "CommInitDev":
                 f.write(f"{indent}{call_type_name} : [comm : {hex(call_data['comm'])}, size : {call_data['nRanks']}, uniqueID : {call_data['commId']}, rank : {call_data['globalRank']}, dev : {call_data['root']}, {context}]")
-            
+
             elif call_type_name == "CommInitAll":
                 f.write(f"{indent}{call_type_name} : [# of device : {call_data['root']}, {context}]")
-            
+
             elif call_type_name == "CommSplit":
                 # Single CommSplit (shouldn't happen if grouped correctly, but handle it)
                 f.write(f"{indent}{call_type_name} : [comm : {hex(call_data['commId'])}, color : {call_data['nRanks']}, key : {call_data['globalRank']}, newcomm : {format_pointer(call_data['comm'])}, {context}]")
-            
+
             elif call_type_name in COMM_LIFECYCLE_CALLS:
                 f.write(f"{indent}{call_type_name} : [comm : {format_pointer(call_data['comm'])}, {context}]")
-            
+
             elif call_type_name == "MemAlloc":
                 f.write(f"{indent}{call_type_name} : [returned ptr : {hex(call_data['recvbuff'])}, size : {call_data['count']}, {context}]")
-            
+
             elif call_type_name == "MemFree":
                 f.write(f"{indent}{call_type_name} : [ptr : {hex(call_data['recvbuff'])}, {context}]")
-            
+
             elif call_type_name == "CommRegister":
                 f.write(f"{indent}{call_type_name} : [comm : {hex(call_data['comm'])}, buff : [addr : {hex(call_data['sendbuff'])}, base : {hex(call_data['sendPtrBase'])}, size : {call_data['sendPtrExtent']}], returned handle : {hex(call_data['recvbuff'])}, {context}]")
-            
+
             elif call_type_name == "CommDeregister":
                 f.write(f"{indent}{call_type_name} : [comm : {hex(call_data['comm'])}, handle : {hex(call_data['recvbuff'])}, {context}]")
-            
+
             # Collective operations
             elif call_data['type'] < RCCL_CALL_TYPES["GroupStart"]:
                 # Format acc field using format_pointer
@@ -715,7 +715,7 @@ def bin_to_json(bin_file, json_file):
                 f.write(f"count : {call_data['count']}, datatype : {call_data['datatype']}, op : {call_data['op']}, ")
                 f.write(f"root : {call_data['root']}, comm : {hex(call_data['comm'])}, nranks : {call_data['nRanks']}, ")
                 f.write(f"stream : {hex(call_data['stream'])}, task : {call_data['nTasks']}, globalrank : {call_data['globalRank']}, {context}]")
-                
+
                 # Write AllToAllv arrays if present
                 if call_type_name == "AllToAllv" and 'alltoallv_arrays' in call_data:
                     arrays = call_data['alltoallv_arrays']
@@ -723,10 +723,10 @@ def bin_to_json(bin_file, json_file):
                         if arrays[array_name]:
                             array_str = ', '.join(str(x) for x in arrays[array_name])
                             f.write(f", {array_name} : [{array_str}]")
-            
+
             else:
                 f.write(f"{indent}{call_type_name} : [{context}]")
-            
+
             # Add comma and handle GroupStart opening brace
             if call_type_name == "GroupStart":
                 # Write comma after GroupStart, then opening brace on next line
@@ -739,21 +739,21 @@ def bin_to_json(bin_file, json_file):
                 f.write(",\n")
             else:
                 f.write("\n")
-            
+
             i += 1
-        
+
         f.write("}\n")
-    
+
     print(f"Converted {num_calls} calls to JSON format: {json_file} \n")
 
 def find_log_files(base_name, extension=None):
     # Find all log files matching the base name pattern.
     # Pattern: <basename>.<pid>.<hostname>[.json]
-    
+
     # Handle if user provides extension in base_name
     if base_name.endswith('.json'):
         base_name = base_name[:-5]
-    
+
     # Try different patterns to find matching files
     if extension == ".json":
         # Looking for JSON files: <basename>.*.*.<extension>
@@ -762,7 +762,7 @@ def find_log_files(base_name, extension=None):
         # Looking for binary files: <basename>.*.*
         # But exclude .json files
         pattern = f"{base_name}.*.*"
-    
+
     files = []
     for f in glob.glob(pattern):
         # For binary mode, skip .json files
@@ -774,23 +774,23 @@ def find_log_files(base_name, extension=None):
         parts = base_without_ext.split('.')
         if len(parts) >= 3:  # basename.pid.hostname (at least)
             files.append(f)
-    
+
     return sorted(files)
 
 def sanitize_json_file(input_file, output_file, zero_timestamps=False):
     # Sanitize JSON log file for easier comparison.
     print(f"Sanitizing {input_file} to {output_file}")
-    
+
     try:
         with open(input_file, 'r') as f:
             lines = f.readlines()
     except IOError as e:
         print(f"Error reading {input_file}: {e}")
         return
-    
+
     sanitizer = Sanitizer()
     min_timestamp = float('inf')
-    
+
     # First pass: collect all unique values to build mappings
     for line in lines:
         # Collect hex values
@@ -800,25 +800,25 @@ def sanitize_json_file(input_file, output_file, zero_timestamps=False):
                 value_type = sanitizer.determine_hex_type(line, match.start())
                 if value_type:
                     sanitizer.sanitize_by_type(hex_val, value_type)
-        
+
         # Collect decimal uniqueID values
         for match in Sanitizer.UNIQUEID_PATTERN.finditer(line):
             uniqueid_val = int(match.group(1))
             if uniqueid_val > 0:
                 sanitizer.sanitize_uniqueid(uniqueid_val)
-        
+
         # Collect thread IDs
         for match in Sanitizer.THREAD_PATTERN.finditer(line):
             thread_val = int(match.group(1))
             if thread_val > 0:
                 sanitizer.sanitize_thread(thread_val)
-        
+
         # Collect PIDs
         for match in Sanitizer.PID_PATTERN.finditer(line):
             pid_val = int(match.group(1))
             if pid_val > 0:
                 sanitizer.sanitize_pid(pid_val)
-        
+
         # Find minimum timestamp (only if not zero_timestamps mode)
         if not zero_timestamps:
             time_match = Sanitizer.TIME_PATTERN.search(line)
@@ -826,16 +826,16 @@ def sanitize_json_file(input_file, output_file, zero_timestamps=False):
                 timestamp = float(time_match.group(1))
                 if timestamp > 0:
                     min_timestamp = min(min_timestamp, timestamp)
-    
+
     if min_timestamp == float('inf'):
         min_timestamp = 0.0
-    
+
     # Second pass: replace values in-place
     try:
         with open(output_file, 'w') as f:
             for line in lines:
                 new_line = line
-                
+
                 # Replace hex values
                 for match in reversed(list(Sanitizer.HEX_PATTERN.finditer(line))):
                     hex_val = int(match.group(), 16)
@@ -847,10 +847,10 @@ def sanitize_json_file(input_file, output_file, zero_timestamps=False):
                             replacement = sanitizer.sanitize_by_type(hex_val, value_type)
                         else:
                             replacement = match.group()
-                    
+
                     # Replace from end to start to preserve match positions
                     new_line = new_line[:match.start()] + replacement + new_line[match.end():]
-                
+
                 # Replace decimal uniqueID values
                 for match in reversed(list(Sanitizer.UNIQUEID_PATTERN.finditer(new_line))):
                     uniqueid_val = int(match.group(1))
@@ -858,7 +858,7 @@ def sanitize_json_file(input_file, output_file, zero_timestamps=False):
                         sanitized = sanitizer.sanitize_uniqueid(uniqueid_val)
                         replacement = f"uniqueID : {sanitized}"
                         new_line = new_line[:match.start()] + replacement + new_line[match.end():]
-                
+
                 # Replace thread IDs
                 for match in reversed(list(Sanitizer.THREAD_PATTERN.finditer(new_line))):
                     thread_val = int(match.group(1))
@@ -866,7 +866,7 @@ def sanitize_json_file(input_file, output_file, zero_timestamps=False):
                         sanitized = sanitizer.sanitize_thread(thread_val)
                         replacement = f"thread : {sanitized}"
                         new_line = new_line[:match.start()] + replacement + new_line[match.end():]
-                
+
                 # Replace PIDs
                 for match in reversed(list(Sanitizer.PID_PATTERN.finditer(new_line))):
                     pid_val = int(match.group(1))
@@ -874,7 +874,7 @@ def sanitize_json_file(input_file, output_file, zero_timestamps=False):
                         sanitized = sanitizer.sanitize_pid(pid_val)
                         replacement = f"pid : {sanitized}"
                         new_line = new_line[:match.start()] + replacement + new_line[match.end():]
-                
+
                 # Replace timestamps
                 for match in reversed(list(Sanitizer.TIME_PATTERN.finditer(new_line))):
                     timestamp = float(match.group(1))
@@ -884,7 +884,7 @@ def sanitize_json_file(input_file, output_file, zero_timestamps=False):
                         normalized = timestamp - min_timestamp
                     replacement = f"time : {normalized:.6f}"
                     new_line = new_line[:match.start()] + replacement + new_line[match.end():]
-                
+
                 f.write(new_line)
     except IOError as e:
         print(f"Error writing to {output_file}: {e}")
@@ -893,22 +893,22 @@ def sanitize_json_file(input_file, output_file, zero_timestamps=False):
 def standardize_json_file(input_file, output_file):
     # Convert non-standard JSON to standard parseable JSON
     print(f"Standardizing {input_file} to {output_file}...")
-    
+
     with open(input_file, 'r') as f:
         lines = f.readlines()
-    
+
     # Parse the non-standard JSON and convert to standard
     result = {
         "version": 1,
         "calls": []
     }
-    
+
     in_group = False
     current_group = []
-    
+
     for line in lines:
         stripped = line.strip()
-        
+
         # Skip root braces and version line
         if stripped == '{' and not result["calls"]:  # Root opening brace
             continue
@@ -916,13 +916,13 @@ def standardize_json_file(input_file, output_file):
             continue
         if stripped == '}' and not in_group:  # Root closing brace
             continue
-        
+
         # Detect group start (for CommSplit grouping)
         if stripped == '{':
             in_group = True
             current_group = []
             continue
-        
+
         # Detect group end
         if stripped in ['}', '},']:
             if in_group and current_group:
@@ -933,7 +933,7 @@ def standardize_json_file(input_file, output_file):
                 current_group = []
                 in_group = False
             continue
-        
+
         # Parse call line
         call_dict = parse_nonstandard_json_line(stripped)
         if call_dict:
@@ -941,20 +941,20 @@ def standardize_json_file(input_file, output_file):
                 current_group.append(call_dict)
             else:
                 result["calls"].append(call_dict)
-    
+
     # Write standard JSON
     with open(output_file, 'w') as f:
         json.dump(result, f, indent=2)
-    
+
     # print(f"Standardized to {output_file}")
 
 def transform_struct_to_standard_json(struct_data, call_type_str):
     # Transform struct-format dict (from parse_json_line) to standard JSON format dict.
     if not struct_data:
         return None
-    
+
     call_dict = {"type": call_type_str}
-    
+
     # Transform context - include all available fields
     context = {}
     if struct_data.get('pid') is not None:
@@ -971,20 +971,20 @@ def transform_struct_to_standard_json(struct_data, call_type_str):
         context["captured"] = struct_data['graphCaptured']
     if struct_data.get('graphID') is not None:
         context["graphID"] = struct_data['graphID']
-    
+
     # Only add context if we have fields
     if context:
         call_dict["context"] = context
-    
+
     # Call-specific field transformations
     if call_type_str == "GetUniqueId":
         if struct_data.get('commId'):
             call_dict["uniqueID"] = struct_data['commId']
-    
+
     elif call_type_str == "CommInitAll":
         if struct_data.get('root') != -1:
             call_dict["num_devices"] = struct_data['root']
-    
+
     elif call_type_str == "CommInitRank":
         if struct_data.get('nRanks') != -1:
             call_dict["size"] = struct_data['nRanks']
@@ -992,7 +992,7 @@ def transform_struct_to_standard_json(struct_data, call_type_str):
             call_dict["uniqueID"] = struct_data['commId']
         if struct_data.get('globalRank') != -1:
             call_dict["rank"] = struct_data['globalRank']
-    
+
     elif call_type_str == "CommInitDev":
         if struct_data.get('comm'):
             call_dict["comm"] = format_pointer(struct_data['comm'], None)
@@ -1004,7 +1004,7 @@ def transform_struct_to_standard_json(struct_data, call_type_str):
             call_dict["rank"] = struct_data['globalRank']
         if struct_data.get('root') != -1:
             call_dict["dev"] = struct_data['root']
-    
+
     elif call_type_str == "CommSplit":
         if struct_data.get('commId'):
             call_dict["comm"] = format_hex_or_string(struct_data['commId'])
@@ -1014,21 +1014,21 @@ def transform_struct_to_standard_json(struct_data, call_type_str):
             call_dict["key"] = struct_data['globalRank']
         if struct_data.get('comm'):
             call_dict["newcomm"] = format_pointer(struct_data['comm'], None)
-    
+
     elif call_type_str in COMM_LIFECYCLE_CALLS:
         if struct_data.get('comm'):
             call_dict["comm"] = format_pointer(struct_data['comm'], None)
-    
+
     elif call_type_str == "MemAlloc":
         if struct_data.get('recvbuff'):
             call_dict["returned_ptr"] = format_hex_or_string(struct_data['recvbuff'])
         if struct_data.get('count'):
             call_dict["size"] = struct_data['count']
-    
+
     elif call_type_str == "MemFree":
         if struct_data.get('recvbuff'):
             call_dict["ptr"] = format_hex_or_string(struct_data['recvbuff'])
-    
+
     elif call_type_str == "CommRegister":
         if struct_data.get('comm'):
             call_dict["comm"] = format_hex_or_string(struct_data['comm'])
@@ -1040,18 +1040,18 @@ def transform_struct_to_standard_json(struct_data, call_type_str):
             }
         if struct_data.get('recvbuff'):
             call_dict["returned_handle"] = format_hex_or_string(struct_data['recvbuff'])
-    
+
     elif call_type_str == "CommDeregister":
         if struct_data.get('comm'):
             call_dict["comm"] = format_hex_or_string(struct_data['comm'])
         if struct_data.get('recvbuff'):
             call_dict["handle"] = format_hex_or_string(struct_data['recvbuff'])
-    
+
     # Collective operations
     elif call_type_str in COLLECTIVE_CALLS:
         if struct_data.get('opCount') is not None:
             call_dict["opCount"] = str(struct_data['opCount'])
-        
+
         # sendbuff
         if struct_data.get('sendbuff') or struct_data.get('sendPtrBase') or struct_data.get('sendPtrExtent'):
             call_dict["sendbuff"] = {
@@ -1059,7 +1059,7 @@ def transform_struct_to_standard_json(struct_data, call_type_str):
                 "base": format_hex_or_string(struct_data.get('sendPtrBase', 0)),
                 "size": struct_data.get('sendPtrExtent', 0)
             }
-        
+
         # recvbuff
         if struct_data.get('recvbuff') or struct_data.get('recvPtrBase') or struct_data.get('recvPtrExtent'):
             call_dict["recvbuff"] = {
@@ -1067,7 +1067,7 @@ def transform_struct_to_standard_json(struct_data, call_type_str):
                 "base": format_hex_or_string(struct_data.get('recvPtrBase', 0)),
                 "size": struct_data.get('recvPtrExtent', 0)
             }
-        
+
         if 'acc' in struct_data:
             call_dict["acc"] = format_pointer(struct_data['acc'], None)
         if struct_data.get('count') is not None:
@@ -1088,14 +1088,14 @@ def transform_struct_to_standard_json(struct_data, call_type_str):
             call_dict["task"] = struct_data['nTasks']
         if struct_data.get('globalRank') != -1:
             call_dict["globalrank"] = struct_data['globalRank']
-        
+
         # AllToAllv arrays
         if call_type_str == "AllToAllv" and 'alltoallv_arrays' in struct_data:
             arrays = struct_data['alltoallv_arrays']
             for array_name in ['sendcounts', 'sdispls', 'recvcounts', 'rdispls']:
                 if arrays.get(array_name):
                     call_dict[array_name] = arrays[array_name]
-    
+
     return call_dict
 
 def parse_nonstandard_json_line(line):
@@ -1104,10 +1104,10 @@ def parse_nonstandard_json_line(line):
     struct_data = parse_json_line(line)
     if not struct_data:
         return None
-    
+
     # Get the call type string
     call_type_str = RCCL_CALL_NAMES.get(struct_data['type'], 'OtherCall')
-    
+
     # Transform struct format to standard JSON format
     return transform_struct_to_standard_json(struct_data, call_type_str)
 
@@ -1117,9 +1117,9 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__
     )
-    
+
     parser.add_argument('base_name', help='Base log name (e.g., std-logs-8ranks)')
-    parser.add_argument('mode', nargs='?', choices=['tobin', 'tojson'], 
+    parser.add_argument('mode', nargs='?', choices=['tobin', 'tojson'],
                        help='Conversion mode (optional if using --standardize or --sanitize)')
     parser.add_argument('new_base_name', nargs='?', help='New base name for output files (optional)')
     parser.add_argument('--standardize', action='store_true',
@@ -1128,41 +1128,41 @@ def main():
                        help='Sanitize JSON logs in-place (normalize pointers and timestamps)')
     parser.add_argument('--no-timestamp', '--nts', action='store_true',
                        help='Set all timestamps to 0.0 (use with --sanitize)')
-    
+
     args = parser.parse_args()
-    
+
     base_name = args.base_name
     mode = args.mode.lower() if args.mode else None
     new_base_name = args.new_base_name
     standardize = args.standardize
     sanitize = args.sanitize
     no_timestamp = args.no_timestamp
-    
+
     # Validate that --no-timestamp is only used with --sanitize
     if no_timestamp and not sanitize:
         print("Error: --no-timestamp can only be used with --sanitize")
         sys.exit(1)
-    
+
     # Handle --sanitize without mode (sanitize existing JSON files)
     if sanitize and not mode:
         files = find_log_files(base_name, extension=".json")
-        
+
         if not files:
             print(f"Error: No JSON files found matching pattern '{base_name}.*.*.json'")
             sys.exit(1)
-        
+
         # Filter out files that are already sanitized or standardized
         files = [f for f in files if '.sanitized.' not in f and '.standard.' not in f]
-        
+
         if not files:
             print(f"Error: No non-sanitized JSON files found matching pattern '{base_name}.*.*.json'")
             sys.exit(1)
-        
+
         print(f"Found {len(files)} JSON file(s) to sanitize:")
         for f in files:
             print(f"  - {f}")
         print()
-        
+
         success_count = 0
         for json_file in files:
             # Sanitize JSON file
@@ -1173,30 +1173,30 @@ def main():
                 print(f"Error sanitizing {json_file}: {e}")
                 import traceback
                 traceback.print_exc()
-        
+
         print(f"\nSuccessfully sanitized {success_count}/{len(files)} file(s)")
         return
-    
+
     # Handle --standardize without mode (standardize existing JSON files)
     if standardize and not mode:
         files = find_log_files(base_name, extension=".json")
-        
+
         if not files:
             print(f"Error: No JSON files found matching pattern '{base_name}.*.*.json'")
             sys.exit(1)
-        
+
         # Filter out files that are already standardized (contain .standard. in filename)
         files = [f for f in files if '.standard.' not in f]
-        
+
         if not files:
             print(f"Error: No non-standard JSON files found matching pattern '{base_name}.*.*.json'")
             sys.exit(1)
-        
+
         print(f"Found {len(files)} JSON file(s) to standardize:")
         for f in files:
             print(f"  - {f}")
         print()
-        
+
         success_count = 0
         for json_file in files:
             # Create standard filename: name.json -> name.standard.json
@@ -1204,42 +1204,42 @@ def main():
                 standard_file = json_file.replace(base_name, new_base_name, 1).replace('.json', '.standard.json')
             else:
                 standard_file = json_file.replace('.json', '.standard.json')
-            
+
             try:
                 standardize_json_file(json_file, standard_file)
                 success_count += 1
             except Exception as e:
                 print(f"Error standardizing {json_file}: {e}")
-        
+
         print(f"\nSuccessfully standardized {success_count}/{len(files)} file(s)")
         return
-    
+
     # Require mode if not using --standardize alone
     if not mode:
         print("Error: mode (tobin/tojson) required when not using --standardize alone")
         parser.print_help()
         sys.exit(1)
-    
+
     if mode == "tobin":
         # Find all JSON files matching the pattern
         files = find_log_files(base_name, extension=".json")
-        
+
         if not files:
             print(f"Error: No JSON files found matching pattern '{base_name}.*.*.json'")
             sys.exit(1)
-        
+
         # Filter out files that are already processed (standardized or sanitized)
         files = [f for f in files if '.standard.' not in f and '.sanitized.' not in f]
-        
+
         if not files:
             print(f"Error: No non-converted JSON files found matching pattern '{base_name}.*.*.json'")
             sys.exit(1)
-        
+
         print(f"Found {len(files)} JSON file(s) to convert:")
         for f in files:
             print(f"  - {f}")
         print()
-        
+
         success_count = 0
         for json_file in files:
             if new_base_name:
@@ -1248,28 +1248,28 @@ def main():
             else:
                 # Remove .json extension for binary output
                 bin_file = json_file[:-5]
-            
+
             try:
                 json_to_bin(json_file, bin_file)
                 success_count += 1
             except Exception as e:
                 print(f"Error converting {json_file}: {e}")
-        
+
         print(f"\nSuccessfully converted {success_count}/{len(files)} file(s)")
-    
+
     elif mode == "tojson":
         # Find all binary files matching the pattern
         files = find_log_files(base_name, extension=None)
-        
+
         if not files:
             print(f"Error: No binary files found matching pattern '{base_name}.*.*'")
             sys.exit(1)
-        
+
         print(f"Found {len(files)} binary file(s) to convert:")
         for f in files:
             print(f"  - {f}")
         print()
-        
+
         success_count = 0
         for bin_file in files:
             if new_base_name:
@@ -1278,18 +1278,18 @@ def main():
             else:
                 # Add .json extension for JSON output
                 json_file = bin_file + '.json'
-            
+
             try:
                 bin_to_json(bin_file, json_file)
                 success_count += 1
-                
+
                 # If --sanitize, sanitize the JSON file in-place
                 if sanitize:
                     try:
                         sanitize_json_file(json_file, json_file, no_timestamp)
                     except Exception as e:
                         print(f"Error sanitizing {json_file}: {e}")
-                
+
                 # If --standardize, also generate standard JSON
                 if standardize:
                     standard_file = json_file.replace('.json', '.standard.json')
@@ -1297,20 +1297,19 @@ def main():
                         standardize_json_file(json_file, standard_file)
                     except Exception as e:
                         print(f"Error standardizing {json_file}: {e}")
-                
+
             except Exception as e:
                 print(f"Error converting {bin_file}: {e}")
-        
+
         print(f"\nSuccessfully converted {success_count}/{len(files)} file(s)")
         if sanitize:
             print("Sanitized JSON files")
         if standardize:
             print("Generated standard JSON files with '.standard.json' extension")
-    
+
     else:
         print(f"Error: Unknown mode '{mode}'. Use 'tobin' or 'tojson'")
         sys.exit(1)
 
 if __name__ == "__main__":
     main()
-

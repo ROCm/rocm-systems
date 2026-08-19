@@ -78,7 +78,7 @@ namespace RcclUnitTesting
     std::vector<std::vector<std::vector<CollectiveArgs>>> collArgs;   // Info for each collective for each rank per group call
     std::vector<std::vector<std::vector<hipGraph_t>>> graphs;         // Graphs for executing collectives per group call
     std::vector<std::vector<std::vector<hipGraphExec_t>>> graphExecs; // GraphExecs for executing collectives per group call
-    std::vector<std::vector<std::vector<bool>>> graphEnabled; 
+    std::vector<std::vector<std::vector<bool>>> graphEnabled;
 
     // Constructor
     TestBedChild(int const childId, bool const verbose, int const printValues, bool const useRankThreading);

@@ -63,7 +63,7 @@ void mock_logger(ncclDebugLogLevel level, unsigned long flags,
   // Convert log level to string
   const char* level_str;
   switch(level) {
-    case NCCL_LOG_NONE: level_str = "NONE"; break;	  
+    case NCCL_LOG_NONE: level_str = "NONE"; break;
     case NCCL_LOG_ERROR: level_str = "ERROR"; break;
     case NCCL_LOG_VERSION: level_str = "VERSION"; break;
     case NCCL_LOG_WARN: level_str = "WARN"; break;

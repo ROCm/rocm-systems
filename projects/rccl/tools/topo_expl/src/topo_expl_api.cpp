@@ -71,11 +71,11 @@ struct TopoExplContext {
   struct ncclTopoGraph* ringGraph;
   struct ncclTopoGraph* collNetGraph;
   struct ncclTopoGraph* nvlsGraph;
-  
-  TopoExplContext() 
+
+  TopoExplContext()
     : network(nullptr), comms(nullptr), nRanks(0), nNodes(0),
       peerInfo(nullptr), allGather3Data(nullptr),
-      treeGraph(nullptr), ringGraph(nullptr), 
+      treeGraph(nullptr), ringGraph(nullptr),
       collNetGraph(nullptr), nvlsGraph(nullptr) {}
 };
 
@@ -131,7 +131,7 @@ struct TopoExplContextDestroy {
 TopoExplResult topoExplCreate(
     const TopoExplConfig* config,
     TopoExplContext** context) {
-  
+
   if (!config || !context || !config->xmlTopoFile) {
     return TOPO_EXPL_INVALID_ARG;
   }
@@ -139,41 +139,41 @@ TopoExplResult topoExplCreate(
   try {
     // Use unique_ptr with custom deleter to ensure proper cleanup on all error paths
     std::unique_ptr<TopoExplContext, TopoExplContextDestroy> ctx(new TopoExplContext());
-    
+
     // Initialize CollNet
     initCollNet();
-    
+
     // Create network model from XML file
     ctx->network = new NetworkModel();
     int numNodes = config->numNodes > 0 ? config->numNodes : 1;
-    
+
     for (int i = 0; i < numNodes; i++) {
       NodeModel* node = new NodeModel(config->xmlTopoFile);
       ctx->network->AddNode(node);
     }
-    
+
     ctx->nRanks = ctx->network->GetNRanks();
     ctx->nNodes = ctx->network->GetNNodes();
-    
+
     // Allocate comm structures
     TOPO_NCCLCHECK(ncclCalloc(&ctx->comms, ctx->nRanks));
-    
+
     // Allocate peer info
     TOPO_NCCLCHECK(ncclCalloc(&ctx->peerInfo, ctx->nRanks + 1)); // Extra for CollNet root
-    
+
     // Allocate allGather3Data
     TOPO_NCCLCHECK(ncclCalloc(&ctx->allGather3Data, ctx->nRanks));
-    
+
     // Allocate graphs
     TOPO_NCCLCHECK(ncclCalloc(&ctx->treeGraph, ctx->nRanks));
     TOPO_NCCLCHECK(ncclCalloc(&ctx->ringGraph, ctx->nRanks));
     TOPO_NCCLCHECK(ncclCalloc(&ctx->collNetGraph, ctx->nRanks));
     TOPO_NCCLCHECK(ncclCalloc(&ctx->nvlsGraph, ctx->nRanks));
-    
+
     // Initialize comm structures
     int minCTAs = static_cast<int>(ncclParamMinCTAs());
     int maxCTAs = static_cast<int>(ncclParamMaxCTAs());
-    
+
     for (int i = 0; i < ctx->nRanks; i++) {
       ctx->comms[i].rank = i;
       ctx->comms[i].nRanks = ctx->nRanks;
@@ -181,26 +181,26 @@ TopoExplResult topoExplCreate(
       ctx->comms[i].p2pNetChunkSize = RCCL_VALUE_UNSET;
       TOPO_NCCLCHECK(ncclCalloc(&ctx->comms[i].connectSend, NCCL_MAX_CONNS * ctx->nRanks));
       TOPO_NCCLCHECK(ncclCalloc(&ctx->comms[i].connectRecv, NCCL_MAX_CONNS * ctx->nRanks));
-      
+
       node_model = ctx->network->GetNode(i);
       if (!node_model) {
         return TOPO_EXPL_INTERNAL_ERROR;
       }
-      
+
       ctx->comms[i].busId = node_model->getGpuBusId(i);
       ctx->comms[i].topo = node_model->getSystem(i);
       ctx->comms[i].peerInfo = ctx->peerInfo;
       ctx->comms[i].ncclNet = ncclNet;
       ctx->comms[i].config.maxCTAs = maxCTAs;
       ctx->comms[i].config.minCTAs = minCTAs;
-      
+
       if (ctx->comms[i].topParentRanks == NULL) {
         TOPO_NCCLCHECK(ncclCalloc(&ctx->comms[i].topParentRanks, ctx->nRanks));
         for (int j = 0; j < ctx->nRanks; ++j) {
           ctx->comms[i].topParentRanks[j] = j;
         }
       }
-      
+
       struct ncclSharedResources* sharedRes = NULL;
       TOPO_NCCLCHECK(ncclCalloc(&sharedRes, 1));
       sharedRes->owner = &ctx->comms[i];
@@ -209,26 +209,26 @@ TopoExplResult topoExplCreate(
       ctx->comms[i].sharedRes = sharedRes;
       sharedRes->refCount = 1;
       ncclMemoryStackConstruct(&ctx->comms[i].memPermanent);
-      
+
       // Mark channels as non-initialized
       for (int c = 0; c < MAXCHANNELS; c++) {
         ctx->comms[i].channels[c].id = -1;
       }
-      
+
       TOPO_NCCLCHECK(fillInfo(&ctx->comms[i], ctx->comms[i].peerInfo + ctx->comms[i].rank, 0));
     }
-    
+
     // Initialize transports
     for (int i = 0; i < ctx->nRanks; i++) {
       node_model = ctx->network->GetNode(i);
       if (!node_model) {
         return TOPO_EXPL_INTERNAL_ERROR;
       }
-      TOPO_NCCLCHECK(initTransportsRank_1(&ctx->comms[i], ctx->allGather3Data, 
-                          ctx->treeGraph[i], ctx->ringGraph[i], 
+      TOPO_NCCLCHECK(initTransportsRank_1(&ctx->comms[i], ctx->allGather3Data,
+                          ctx->treeGraph[i], ctx->ringGraph[i],
                           ctx->collNetGraph[i], ctx->nvlsGraph[i]));
     }
-    
+
     for (int i = 0; i < ctx->nRanks; i++) {
       node_model = ctx->network->GetNode(i);
       if (!node_model) {
@@ -237,14 +237,14 @@ TopoExplResult topoExplCreate(
       TOPO_NCCLCHECK(initTransportsRank_3(&ctx->comms[i], ctx->allGather3Data,
                           ctx->treeGraph[i], ctx->ringGraph[i],
                           ctx->collNetGraph[i], ctx->nvlsGraph[i]));
-      TOPO_CUDACHECK(hipDeviceGetAttribute(&ctx->comms[i].WarpSize, 
-                                       hipDeviceAttributeWarpSize, 
+      TOPO_CUDACHECK(hipDeviceGetAttribute(&ctx->comms[i].WarpSize,
+                                       hipDeviceAttributeWarpSize,
                                        ctx->comms[i].cudaDev));
     }
-    
+
     *context = ctx.release();
     return TOPO_EXPL_SUCCESS;
-    
+
   } catch (...) {
     // unique_ptr will automatically call topoExplDestroy() via custom deleter
     return TOPO_EXPL_INTERNAL_ERROR;
@@ -253,7 +253,7 @@ TopoExplResult topoExplCreate(
 
 void topoExplDestroy(TopoExplContext* context) {
   if (!context) return;
-  
+
   // Free comm structures
   if (context->comms) {
     for (int i = 0; i < context->nRanks; i++) {
@@ -278,22 +278,22 @@ void topoExplDestroy(TopoExplContext* context) {
     }
     free(context->comms);
   }
-  
+
   // Free graphs
   if (context->treeGraph) free(context->treeGraph);
   if (context->ringGraph) free(context->ringGraph);
   if (context->collNetGraph) free(context->collNetGraph);
   if (context->nvlsGraph) free(context->nvlsGraph);
-  
+
   // Free other allocations
   if (context->allGather3Data) free(context->allGather3Data);
   if (context->peerInfo) free(context->peerInfo);
-  
+
   // Free network model
   if (context->network) {
     delete context->network;
   }
-  
+
   delete context;
 }
 
@@ -303,32 +303,32 @@ TopoExplResult topoExplGetAlgoInfo(
     uint64_t count,
     TopoExplDataType dataType,
     TopoExplAlgoInfo* info) {
-  
+
   if (!context || !info) {
     return TOPO_EXPL_INVALID_ARG;
   }
-  
+
   // Use rank 0's comm for algorithm selection
   struct ncclComm* comm = &context->comms[0];
-  
+
   ncclFunc_t ncclFunc = toNcclFunc(func);
   ncclDataType_t ncclDataType = toNcclDataType(dataType);
-  
+
   int algo, proto, nChannels;
-  TOPO_NCCLCHECK(rcclGetAlgoInfo(comm, ncclFunc, count, ncclDataType, 
+  TOPO_NCCLCHECK(rcclGetAlgoInfo(comm, ncclFunc, count, ncclDataType,
                                       0, 0, 1, &algo, &proto, &nChannels));
-  
+
   info->algo = fromNcclAlgo(algo);
   info->proto = fromNcclProto(proto);
   info->maxChannels = nChannels;
-  
+
   // Get max send/recv count
   uint64_t maxCount;
   TOPO_NCCLCHECK(rcclFuncMaxSendRecvCount(ncclFunc, comm->nRanks, count, maxCount));
 
   // Support only fp32 production table
   info->maxSizeBytes = maxCount * sizeof(float);
-  
+
   return TOPO_EXPL_SUCCESS;
 }
 
@@ -346,24 +346,24 @@ TopoExplResult topoExplGetRankInfo(
     int* nodeId,
     int* cudaDev,
     uint64_t* busId) {
-  
+
   if (!context || !nodeId || !cudaDev || !busId) {
     return TOPO_EXPL_INVALID_ARG;
   }
-  
+
   if (rank < 0 || rank >= context->nRanks) {
     return TOPO_EXPL_INVALID_ARG;
   }
-  
+
   node_model = context->network->GetNode(rank);
   if (!node_model) {
     return TOPO_EXPL_INTERNAL_ERROR;
   }
-  
+
   *nodeId = node_model->nodeId;
   *cudaDev = node_model->rankToCudaDev(rank);
   *busId = node_model->getGpuBusId(rank);
-  
+
   return TOPO_EXPL_SUCCESS;
 }
 
@@ -374,18 +374,18 @@ TopoExplResult topoExplGetAlgoTime(
     TopoExplProto proto,
     uint64_t count,
     float* time) {
-  
+
   if (!context || !time) {
     return TOPO_EXPL_INVALID_ARG;
   }
-  
+
   struct ncclComm* comm = &context->comms[0];
-  
+
   ncclFunc_t ncclFunc = toNcclFunc(func);
   int ncclAlgo = static_cast<int>(algo);
   int ncclProto = static_cast<int>(proto);
-  
+
   TOPO_NCCLCHECK(ncclTopoGetAlgoTime(comm, ncclFunc, ncclAlgo, ncclProto, count, 1, time));
-  
+
   return TOPO_EXPL_SUCCESS;
 }

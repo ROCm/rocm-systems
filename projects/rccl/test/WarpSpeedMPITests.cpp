@@ -8,7 +8,7 @@
     This test evaluates the capability of the WarpSpeed feature to correctly
     handle back-to-back enqueues of different message sizes, both below and
     above the threshold, without synchronization.
-    This test is requires warpSpeed enablement and will skip if RCCL_WARP_SPEED_AUTO=0 
+    This test is requires warpSpeed enablement and will skip if RCCL_WARP_SPEED_AUTO=0
     or if architecture doesn't support warpSpeed.
 */
 

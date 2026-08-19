@@ -649,7 +649,7 @@ struct ProxyOpsPoolShmRegion
 };
 
 // Process-shared: Arm the pool's mutex/condvar PTHREAD_PROCESS_SHARED, fork, have the child block in
-// cond.wait() and the parent publish an op + notify. Proves a std::mutex / std::condition_variable 
+// cond.wait() and the parent publish an op + notify. Proves a std::mutex / std::condition_variable
 // synchronizes correctly across processes through their pthread native handles.
 TEST(ProxyTests, ProxyOpsPoolMutexCondProcessShared)
 {

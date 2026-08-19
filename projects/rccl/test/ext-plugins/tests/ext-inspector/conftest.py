@@ -198,4 +198,3 @@ def clear_inspector_dump(request, paths):
                 os.remove(log_file)
             except OSError:
                 pass  # Ignore errors if file doesn't exist or can't be removed
-

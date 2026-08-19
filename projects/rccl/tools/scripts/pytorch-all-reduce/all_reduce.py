@@ -45,19 +45,19 @@ def benchmark_all_reduce(rank, size, sequence_lengths, dim, all_reduce_algos, tr
             main_times = []
             tensor = torch.randn(*shape, device='cuda').to(torch.bfloat16)
 
-            # Warm-up - before result collection 
+            # Warm-up - before result collection
             for _ in range(5):
                 dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
                 dist.barrier()
 
-            # Benchmark - result collection and timers disabled if --tracing applied 
+            # Benchmark - result collection and timers disabled if --tracing applied
             for _ in range(n_runs):
-                if not tracing: 
+                if not tracing:
                     start = time.time()
 
                 dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
                 dist.barrier()
-                
+
                 if not tracing:
                     end = time.time()
                     main_time = (end - start) * 1e6  # Convert to microseconds

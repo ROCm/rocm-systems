@@ -104,7 +104,7 @@ void Replayer::parse()
       idRankMap[call.commId];
       break;
     }
-    
+
     case rrCommInitDev:             // which should capture all comm - uniqueID relations
     {
       Ids.push_back(call.commId);
@@ -279,7 +279,7 @@ void Replayer::replay()
           graphLife[call.graphID].events.push_back(event);
           HIP_CALL(hipEventRecord(event, streams[graphLife[call.graphID].stream].first));
           HIP_CALL(hipStreamWaitEvent(streams[call.stream].first, event));
-        }    
+        }
       } else if (call.graphID) {
         if (graphLife[call.graphID].starts.contains(lineNum))
         {
@@ -505,7 +505,7 @@ void Replayer::replay()
       log.read((char*)sdispls.data(), size * sizeof(size_t));
       log.read((char*)recvcounts.data(), size * sizeof(size_t));
       log.read((char*)rdispls.data(), size * sizeof(size_t));
-      
+
       NCCL_CALL(ncclAlltoAllv(sbuffer, sendcounts.data(), sdispls.data(), rbuffer, recvcounts.data(), rdispls.data(),
                               call.datatype, commMap[call.comm], streams[call.stream].first));
       HIP_CALL(hipStreamSynchronize(streams[call.stream].first)); // TODO: remove
@@ -542,7 +542,7 @@ void Replayer::replay()
 
 cleanup:
     printf("[INFO    ] Rank %d - Line %d : cleaning up\n", myRank, lineNum);
-    
+
     // Free resources if possible
     if (call.sendPtrBase && lineNum == dMemMap[call.sendPtrBase].lastLineUsed) {
       // TODO: free contains a sync, may need a second thought

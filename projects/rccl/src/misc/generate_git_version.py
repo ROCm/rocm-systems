@@ -62,4 +62,3 @@ if __name__ == "__main__":
         print("Usage: generate_git_version.py <output_header_path>")
         sys.exit(1)
     main(sys.argv[1])
-

@@ -59,7 +59,7 @@ echo "The number of GPUs is : $NUMBER_OF_GPUS"
 # Step 1: Build UCX with ROCm support
 echo "Step 1: Install UCX?"
 read -p '(y/n) ' RESPONSE
-if [ "$RESPONSE" = "y" ]; then    
+if [ "$RESPONSE" = "y" ]; then
     Build_UCX=PASSED
     echo "Cloning fresh copy of UCX: $MY_UCX_BRANCH"
     rm -rf ucx || Build_UCX=FAILED
@@ -84,7 +84,7 @@ if [ "$RESPONSE" = "y" ]; then
     cd $MY_UCX_DIR/../build || Run_UCX_gtests=FAILED
     ./test/gtest/gtest --gtest_filter=*rocm*:-*Pitch* | tee -a $MY_RESULTS_DIR/results.log || Run_UCX_gtests=FAILED
     cd ../../ || Run_UCX_gtests=FAILED
-else Run_UCX_gtests=SKIPPED 
+else Run_UCX_gtests=SKIPPED
 fi
 
 # Step 3: Install OpenMPI with UCX support
@@ -302,5 +302,3 @@ echo "Step 11: Run RCCL Unittests? : $Run_RCCL_Unittests"
 echo "Step 12: Install RCCL-tests? : $Install_RCCL_tests"
 echo "Step 13: Run RCCL-tests? : $Run_RCCL_tests"
 echo "Step 14: Run TransferBench? : $Install_Run_TransferBench"
-
-

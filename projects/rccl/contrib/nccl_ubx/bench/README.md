@@ -87,4 +87,3 @@ Bandwidth correction factors match nccl-tests:
 | `UBX_GRAPH_POOL_SHARE` | auto-set per call | Pool split between graph and eager allocations. The bench sets `0.5` in graph mode and `0.1` in eager mode automatically. |
 | `CUDA_DEVICE_MAX_CONNECTIONS` | `1` | Reduces GPU scheduling overhead in graph mode. |
 | `NCCL_NVLS_ENABLE` | unset (= enabled) | Set to `0` to disable NVLink multicast. |
-

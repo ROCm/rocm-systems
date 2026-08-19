@@ -213,7 +213,7 @@ use this command to build the package on Debian-based distros:
     sudo dpkg -i *.deb
 
 .. note::
-   
+
    The RCCL package install process requires ``sudo`` or root access because it creates a directory
    named ``rccl`` in ``/opt/rocm/``. This is an optional step. RCCL can be used directly by including the path containing ``librccl.so``.
 

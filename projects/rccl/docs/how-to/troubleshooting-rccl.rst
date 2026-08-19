@@ -61,8 +61,8 @@ Collect this information about the ROCm version, GPU/accelerator, platform, and 
 
       /opt/rocm/bin/hipconfig --full
 
-*  Verify the network settings and setup. Use the ``ibv_devinfo`` command 
-   to display information about the available RDMA devices and determine 
+*  Verify the network settings and setup. Use the ``ibv_devinfo`` command
+   to display information about the available RDMA devices and determine
    whether they are installed and functioning properly. Run ``rdma link``
    to print a summary of the network links.
 
@@ -119,8 +119,8 @@ Collect the following information about the RCCL installation and configuration.
 *  Run rccl-tests and collect the results. For information on how to build and run rccl-tests, see the
    `rccl-tests GitHub <https://github.com/ROCm/rocm-systems/blob/develop/projects/rccl-tests/README.md>`_.
 
-*  Collect the RCCL logging information. Enable the debug logs, 
-   then run rccl-tests or any e2e workload to collect the logs. Use the 
+*  Collect the RCCL logging information. Enable the debug logs,
+   then run rccl-tests or any e2e workload to collect the logs. Use the
    following command to enable the logs.
 
    .. code:: shell
@@ -132,12 +132,12 @@ Collect the following information about the RCCL installation and configuration.
 Using the RCCL Replayer
 ------------------------
 
-The RCCL Replayer is a debugging tool designed to analyze and replay the collective logs obtained from RCCL runs. 
-It can be helpful when trying to reproduce problems, because it uses dummy data and doesn't have any dependencies 
-on non-RCCL calls. For more information, 
+The RCCL Replayer is a debugging tool designed to analyze and replay the collective logs obtained from RCCL runs.
+It can be helpful when trying to reproduce problems, because it uses dummy data and doesn't have any dependencies
+on non-RCCL calls. For more information,
 see `RCCL Replayer GitHub documentation <https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl/tools/RcclReplayer>`_.
 
-You must build the RCCL Replayer before you can use it. To build it, run these commands. Ensure ``MPI_DIR`` is set to 
+You must build the RCCL Replayer before you can use it. To build it, run these commands. Ensure ``MPI_DIR`` is set to
 the path where MPI is installed.
 
 .. code:: shell
@@ -145,7 +145,7 @@ the path where MPI is installed.
    cd rccl/tools/rccl_replayer
    MPI_DIR=/path/to/mpi make
 
-To use the RCCL Replayer, follow these steps: 
+To use the RCCL Replayer, follow these steps:
 
 #. Collect the per-rank logs from the RCCL run by adding the following environment variables.
    This prevents any race conditions that might cause ranks to interrupt the output from other ranks.
@@ -160,8 +160,8 @@ To use the RCCL Replayer, follow these steps:
 
       cat some_name_here_*.log > some_name_here.log
 
-#. Run the RCCL Replayer using the following command. Replace ``<numProcesses>`` with the number of MPI processes to 
-   run, ``</path/to/logfile>`` with the path to the collective log file generated during 
+#. Run the RCCL Replayer using the following command. Replace ``<numProcesses>`` with the number of MPI processes to
+   run, ``</path/to/logfile>`` with the path to the collective log file generated during
    the RCCL runs, and ``<numGpusPerMpiRank>`` with the number of GPUs per MPI rank used in the application.
 
    .. code:: shell
@@ -184,19 +184,19 @@ To use the RCCL Replayer, follow these steps:
 Analyzing performance issues
 =============================
 
-If the issues involve performance issues in an e2e workload, try the following 
+If the issues involve performance issues in an e2e workload, try the following
 microbenchmarks and collect the results. Follow the instructions in the subsequent sections
 to run these benchmarks and provide the results to the support team.
 
 *  TransferBench
 *  RCCL Unit Tests
 *  rccl-tests
-  
+
 Collect the TransferBench data
 ---------------------------------
 
 TransferBench allows you to benchmark simultaneous copies between
-user-specified devices. For more information, 
+user-specified devices. For more information,
 see the :doc:`TransferBench documentation <transferbench:index>`.
 
 To collect the TransferBench data, follow these steps:
@@ -205,7 +205,7 @@ To collect the TransferBench data, follow these steps:
 
    .. code:: shell
 
-      git clone https://github.com/ROCm/TransferBench.git 
+      git clone https://github.com/ROCm/TransferBench.git
 
 #. Change to the new directory and build the component.
 
@@ -237,7 +237,7 @@ To use the RCCL tests to collect the RCCL benchmark data, follow these steps:
 
       cat /proc/sys/kernel/numa_balancing
 
-#. Build MPI, RCCL, and rccl-tests. To download and install MPI, see either 
+#. Build MPI, RCCL, and rccl-tests. To download and install MPI, see either
    `OpenMPI <https://www.open-mpi.org/software/ompi/v5.0/>`_ or `MPICH <https://www.mpich.org/>`_.
    To learn how to build and run rccl-tests, see the `rccl-tests GitHub <https://github.com/ROCm/rocm-systems/blob/develop/projects/rccl-tests/README.md>`_.
 
@@ -247,7 +247,7 @@ RCCL and NCCL comparisons
 =============================
 
 If you are also using NVIDIA hardware or NCCL and notice a performance gap between the two systems,
-collect the system and performance data on the NVIDIA platform. 
+collect the system and performance data on the NVIDIA platform.
 Provide both sets of data to the support team.
 
 .. _heterogeneous-nic-counts:

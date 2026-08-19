@@ -11,7 +11,7 @@ def generateRandomColors(df, colorList):
         g = random.random()
         b = random.random()
         colorList.append(f"rgb({int(r*255)}, {int(g*255)}, {int(b*255)})")
-    
+
     return colorList
 
 def plotCompileTime(log_file, minVal):
@@ -22,8 +22,8 @@ def plotCompileTime(log_file, minVal):
     # et:   end-time (ms)
     # ts:   timestamp
     # file: path to file
-    # hash: command hash 
-    df = pd.read_csv(log_file, delimiter='\t', header=None, 
+    # hash: command hash
+    df = pd.read_csv(log_file, delimiter='\t', header=None,
                      names=['st', 'et', 'ts', 'file', 'hash'])
     df = df.iloc[1:]
 
@@ -39,8 +39,8 @@ def plotCompileTime(log_file, minVal):
 
     if args.include_linking == 0:
         # drop the last two rows which are related to linking
-        df = df.drop(df.index[-2:]) 
-    
+        df = df.drop(df.index[-2:])
+
     # if minVal specified remove the rows from the df where df['dur'] < minVal
     df = df[df['dur'] >= minVal]
 

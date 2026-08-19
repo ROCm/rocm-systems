@@ -36,31 +36,31 @@ static bool run_single_test(int model_id, int num_nodes) {
         printf("ERROR: Invalid model_id %d\n", model_id);
         return false;
     }
-    
+
     NodeModelDesc *desc = &model_descs[model_id];
     int gpusPerNode = 0;
     extractArchAndGpus(desc->description, &gpusPerNode);
-    
+
     if (gpusPerNode == 0) {
         printf("WARN: Could not extract GPU count from model %d description\n", model_id);
         return false;
     }
-    
+
     int expected_nranks = gpusPerNode * num_nodes;
     int expected_nnodes = num_nodes;
-    
+
     // Suppress verbose rank/host output during test execution
     int suppress_verbose = topoExplSuppressVerbose;
     topoExplSuppressVerbose = 1;
-    
+
     // Create topology explorer context
     TopoExplConfig config;
     config.xmlTopoFile = desc->filename;
     config.numNodes = num_nodes;
-    
+
     TopoExplContext* context = nullptr;
     TopoExplResult result = topoExplCreate(&config, &context);
-    
+
     TestResult test_result;
     test_result.model_id = model_id;
     test_result.num_nodes = num_nodes;
@@ -75,7 +75,7 @@ static bool run_single_test(int model_id, int num_nodes) {
         topoExplSuppressVerbose = suppress_verbose;
         return false;
     }
-    
+
     // Verify rank info for first and last rank
     bool rank_info_ok = true;
     for (int r : {0, expected_nranks - 1}) {
@@ -86,12 +86,12 @@ static bool run_single_test(int model_id, int num_nodes) {
             break;
         }
     }
-    
+
     // Try to get algorithm info and algo time for simple cases
     TopoExplAlgoInfo algoInfo, agAlgoInfo;
-    TopoExplResult arAlgoResult = topoExplGetAlgoInfo(context, TOPO_FUNC_ALLREDUCE, 
+    TopoExplResult arAlgoResult = topoExplGetAlgoInfo(context, TOPO_FUNC_ALLREDUCE,
                                                      16384, TOPO_DTYPE_FLOAT32, &algoInfo);
-    TopoExplResult agAlgoResult = topoExplGetAlgoInfo(context, TOPO_FUNC_ALLGATHER, 
+    TopoExplResult agAlgoResult = topoExplGetAlgoInfo(context, TOPO_FUNC_ALLGATHER,
                                                      33554432, TOPO_DTYPE_FLOAT32, &agAlgoInfo);
     bool algo_info_ok = (arAlgoResult == TOPO_EXPL_SUCCESS && agAlgoResult == TOPO_EXPL_SUCCESS);
 
@@ -115,12 +115,12 @@ static bool run_single_test(int model_id, int num_nodes) {
             test_result.error_msg = "No valid algo/proto time (tuning may be broken)";
         }
     }
-    
+
     test_results.push_back(test_result);
     topoExplDestroy(context);
-    
+
     topoExplSuppressVerbose = suppress_verbose;
-    
+
     return test_result.success;
 }
 
@@ -128,17 +128,17 @@ static void print_test_summary() {
     int total_tests = 0;
     int passed_tests = 0;
     int failed_tests = 0;
-    
+
     printf("\n");
     printf("================================================================================\n");
     printf("TEST SUMMARY\n");
     printf("================================================================================\n");
     printf("\n");
-    
+
     // Group by model
     for (int m = 0; m < num_models; m++) {
         std::vector<std::pair<int, TestResult>> model_results;
-        
+
         for (const auto& result : test_results) {
             if (result.model_id == m) {
                 model_results.push_back({result.num_nodes, result});
@@ -149,12 +149,12 @@ static void print_test_summary() {
                     failed_tests++;
                 }
             }
-        }   
+        }
     }
-    
-    printf("TOTAL: %d tests | PASSED: %d | FAILED: %d\n", 
+
+    printf("TOTAL: %d tests | PASSED: %d | FAILED: %d\n",
            total_tests, passed_tests, failed_tests);
-    
+
     if (failed_tests > 0) {
         printf("\nFAILED TESTS:\n");
         printf("--------------------\n");
@@ -190,7 +190,7 @@ int run_test_suite_from_args(int argc, char* argv[]) {
         exclude_models = parse_comma_separated_ints(val);
     if ((val = getCmdOption(argv, argv + argc, "--exclude-nodes")))
         exclude_nodes = parse_comma_separated_ints(val);
-    
+
     int failed_count = run_test_suite(include_models, include_nodes, exclude_models, exclude_nodes);
     return (failed_count == 0) ? TOPO_EXPL_SUCCESS : TOPO_EXPL_ERROR;
 }
@@ -199,17 +199,17 @@ std::set<int> parse_comma_separated_ints(const std::string& str) {
     std::set<int> result;
     std::stringstream ss(str);
     std::string item;
-    
+
     while (std::getline(ss, item, ',')) {
         item.erase(0, item.find_first_not_of(" \t"));
         item.erase(item.find_last_not_of(" \t") + 1);
-        
+
         if (!item.empty()) {
             int value = std::atoi(item.c_str());
             result.insert(value);
         }
     }
-    
+
     return result;
 }
 
@@ -218,7 +218,7 @@ int run_test_suite(const std::set<int>& include_models,
                    const std::set<int>& exclude_models,
                    const std::set<int>& exclude_nodes) {
     test_results.clear();
-    
+
     // Determine which models to test
     std::vector<int> models_to_test;
     for (int m = 0; m < num_models; m++) {
@@ -232,7 +232,7 @@ int run_test_suite(const std::set<int>& include_models,
         }
         models_to_test.push_back(m);
     }
-    
+
     // Determine which node counts to test
     std::vector<int> nodes_to_test;
     if (!include_nodes.empty()) {
@@ -249,13 +249,13 @@ int run_test_suite(const std::set<int>& include_models,
             }
         }
     }
-    
+
     printf("================================================================================\n");
     printf("Topology Explorer Test Suite\n");
     printf("================================================================================\n");
     printf("Testing %zu models with %zu node combination(s)\n", models_to_test.size(), nodes_to_test.size());
     printf("\n");
-    
+
     printf("Number of models : %zu\n", models_to_test.size());
     printf("Number of nodes  : %zu\n", nodes_to_test.size());
     printf("Nodes to test    : ");
@@ -265,21 +265,21 @@ int run_test_suite(const std::set<int>& include_models,
     }
     printf("\n");
     printf("Number of tests  : %zu\n\n", models_to_test.size() * nodes_to_test.size());
-    
+
     // Run tests
     int test_num = 0;
     int total_tests = models_to_test.size() * nodes_to_test.size();
-    
+
     for (int m : models_to_test) {
         for (int num_nodes : nodes_to_test) {
             test_num++;
-            
-            printf("[%3d/%3d] Testing model %2d with %2d nodes...", 
+
+            printf("[%3d/%3d] Testing model %2d with %2d nodes...",
                    test_num, total_tests, m, num_nodes);
             fflush(stdout);
-            
+
             bool success = run_single_test(m, num_nodes);
-            
+
             if (success) {
                 printf(" PASSED\n");
             } else {
@@ -287,15 +287,15 @@ int run_test_suite(const std::set<int>& include_models,
             }
         }
     }
-    
+
     // Print summary
     print_test_summary();
-    
+
     // Return number of failures
     int failed_count = 0;
     for (const auto& result : test_results) {
         if (!result.success) failed_count++;
     }
-    
+
     return failed_count;
 }

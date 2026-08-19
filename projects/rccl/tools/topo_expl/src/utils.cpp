@@ -80,7 +80,7 @@ std::string extractArchAndGpus(const char* desc, int* numGpus) {
            std::isspace(static_cast<unsigned char>(descStr[start]))) {
         start++;
     }
-    
+
     size_t gfxPos = descStr.find("gfx", start);
     if (gfxPos != std::string::npos) {
         if (numGpus && gfxPos > start) {
@@ -151,18 +151,18 @@ void print_available_models(const std::string& gpuArch) {
     printf("┌──────┬─────────────────────────────────────┬────────────────────────────────────────────┐\n");
     printf("│  ID  │ Model Description                   │ Filename                                   │\n");
     printf("├──────┼─────────────────────────────────────┼────────────────────────────────────────────┤\n");
-    
+
     bool foundAny = false;
     for (int i = 0; i < num_models; i++) {
         if (matchesArch(model_descs[i].description, gpuArch)) {
-            printf("│ %4d │ %-35s │ %-42s │\n", 
+            printf("│ %4d │ %-35s │ %-42s │\n",
                    i, model_descs[i].description, model_descs[i].filename);
             foundAny = true;
         }
     }
 
     printf("└──────┴─────────────────────────────────────┴────────────────────────────────────────────┘\n");
-    
+
     if (!foundAny && !gpuArch.empty()) {
         printf("\nNo models found for GPU architecture '%s'\n", gpuArch.c_str());
         printf("Available GPU architectures: gfx906, gfx908, gfx910, gfx942, gfx950\n");

@@ -199,7 +199,7 @@ Ignoring CPU affinity with multi-node
 =====================================
 
 Depending on the job launcher and the requirements of your workload, performance as the communication workload scales
-can be improved by setting ``NCCL_IGNORE_CPU_AFFINITY``.  This allows the RCCL communication library to 
+can be improved by setting ``NCCL_IGNORE_CPU_AFFINITY``.  This allows the RCCL communication library to
 ignore the job's supplied CPU affinity and use the GPU affinity only.
 
 .. code-block:: shell
@@ -286,7 +286,7 @@ XCD as a disparate element). The MI350X doesn't support NPS4; see
 `MI350X partition mode differences`_ for the memory partitioning modes it
 supports instead.
 
-- Compute partition modes 
+- Compute partition modes
 
   - In SPX mode, workgroups launched to the device are distributed
     round-robin to the XCDs in the device, meaning that the programmer cannot
@@ -294,8 +294,8 @@ supports instead.
 
   - In CPX mode, workgroups are launched to a single XCD, meaning the
     programmer has explicit control over work placement onto the XCDs.
-  
-- Memory partition modes 
+
+- Memory partition modes
 
   - In NPS1 mode (compatible with CPX and SPX), the entire memory is accessible
     to all XCDs.
@@ -379,7 +379,7 @@ by RCCL-Tests with the RCCL and CPX optimizations.
    To use RCCL with CPX mode in PyTorch, check the RCCL version used by PyTorch.
 
    For a virtualenv with a .whl-based PyTorch setup (such as nightly/rocm6.2),
-   this would be in 
+   this would be in
    ``<path-to-your-venv>/lib/<python-version>/site-packages/torch/lib/librccl.so``
    This is the version of RCCL that is packaged as part of ROCm version 6.2.
 
@@ -527,7 +527,7 @@ memory was freed, and later resumes it:
    NCCLCHECK(ncclCommResume(comm));
 
 To suspend or resume several communicators together, wrap the calls in
-``ncclGroupStart`` and ``ncclGroupEnd`` 
+``ncclGroupStart`` and ``ncclGroupEnd``
 (see :ref:`communicator-suspend-resume`):
 
 .. code-block:: cpp
@@ -536,4 +536,3 @@ To suspend or resume several communicators together, wrap the calls in
    NCCLCHECK(ncclCommSuspend(commA, NCCL_SUSPEND_MEM));
    NCCLCHECK(ncclCommSuspend(commB, NCCL_SUSPEND_MEM));
    NCCLCHECK(ncclGroupEnd());
-
