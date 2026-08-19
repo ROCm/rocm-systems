@@ -2166,7 +2166,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
 append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptions &options,
                                  const ConSanMoiWorkgroupSources &workgroup_sources,
                                  uint32_t bank_count, uint16_t bank_vgpr, uint16_t temporary_vgpr,
-                                 rj_code_arch_t arch) {
+                                 uint16_t owner_vgpr, rj_code_arch_t arch) {
   if (bank_count == 0 || !std::has_single_bit(bank_count))
     return false;
   if (bank_count == 1) {
@@ -2211,6 +2211,14 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
     if (!mix(temporary_vgpr))
       return false;
   }
+  // A causal-window bank is an evidence-retention bucket, not a workgroup
+  // identity. Include the wave owner so several waves touching the same
+  // sampled address can retain independent windows instead of racing for one
+  // first-publisher slot. Barrier and atomic paths use the same owner-aware
+  // hash, so synchronization metadata remains joined to the corresponding
+  // access window.
+  if (!mix(owner_vgpr))
+    return false;
   const auto shift = instrumentation::build_v_lshrrev_b32(
       temporary_vgpr, scalar_positive_inline_u32(16), bank_vgpr, arch);
   if (!shift)
@@ -2558,7 +2566,7 @@ append_sampled_window_bank_index(std::vector<uint32_t> &words, const ConSanOptio
   }
   if (runtime_sampled || window_bank_count > 1) {
     if (!append_sampled_window_bank_index(words, options, *workgroup_sources, window_bank_count,
-                                          bank_vgpr, high_vgpr, arch)) {
+                                          bank_vgpr, high_vgpr, owner_vgpr, arch)) {
       errors.emplace_back("ConSan MOI sampled probe could not select a window bank");
       return std::nullopt;
     }

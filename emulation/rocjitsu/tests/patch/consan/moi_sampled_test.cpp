@@ -962,9 +962,24 @@ TEST(ConSanMoi, Gfx1250OrderedLdsAtomicComposesSampledAccessAndOrderingMetadata)
   ASSERT_NE(atomic, result.patches.end()) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(access->relocated_guest_instruction_offset);
   ASSERT_TRUE(atomic->relocated_guest_instruction_offset);
+  ASSERT_GT(atomic->sampled_window_bank_count, 1u);
+  ASSERT_TRUE(atomic->scratch_vgpr);
+  ASSERT_TRUE(result.resolved_moi_owner_vgpr);
   EXPECT_EQ(access->anchor_offset, atomic->anchor_offset);
   EXPECT_NE(*access->relocated_guest_instruction_offset,
             *atomic->relocated_guest_instruction_offset);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> atomic_body =
+      text_words_at_offset(patched, atomic->trampoline_offset, atomic->trampoline_size);
+  // Distinct wave owners at one ordered LDS atomic must retain independent
+  // causal windows. SampledAtomicScratchLayout::kBank is 8.
+  const uint16_t atomic_bank = static_cast<uint16_t>(*atomic->scratch_vgpr + 8u);
+  const auto owner_bank_mix = instrumentation::build_v_xor_b32(
+      atomic_bank, vector_source_vgpr(*result.resolved_moi_owner_vgpr), atomic_bank,
+      ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(owner_bank_mix);
+  EXPECT_NE(std::ranges::find(atomic_body, *owner_bank_mix), atomic_body.end());
   EXPECT_TRUE(std::ranges::any_of(result.site_dispositions, [](const auto &site) {
     return site.site_kind == ConSanResourceSiteKind::Atomic &&
            site.lowering_outcome == ConSanSiteLoweringOutcome::Patched;
@@ -2372,7 +2387,7 @@ TEST(ConSanMoi, Gfx1250SampledSpillsExecVccStateWithSeparateDeadDenseRouter) {
   }
 }
 
-TEST(ConSanMoi, Gfx1250SampledDenseBarrierUsesRelocatableCallerAddresses) {
+TEST(ConSanMoi, Gfx1250SampledDenseBarrierUsesCloneInvariantEntryKeys) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
   constexpr uint32_t kBarrierCount = 2u;
   constexpr uint16_t kExecSaveSgpr = 80u;
@@ -2422,6 +2437,27 @@ TEST(ConSanMoi, Gfx1250SampledDenseBarrierUsesRelocatableCallerAddresses) {
     EXPECT_EQ(anchor.front() & 0xffff0000u, *call_opcode & 0xffff0000u);
   }
 
+  constexpr uint32_t kCloneLocalEntryWords = 2u * (kBarrierCount + 1u) + 7u;
+  const auto entry_host = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+           patch.original_size == (kCloneLocalEntryWords + 1u) * sizeof(uint32_t);
+  });
+  ASSERT_NE(entry_host, result.patches.end());
+  const uint64_t island_offset = entry_host->anchor_offset + sizeof(uint32_t);
+  const uint64_t common_entry_offset = island_offset + 2u * (kBarrierCount + 1u) * sizeof(uint32_t);
+  const std::vector<uint32_t> entry_words =
+      text_words_at_offset(patched, island_offset, kCloneLocalEntryWords * sizeof(uint32_t));
+  ASSERT_EQ(entry_words.size(), kCloneLocalEntryWords);
+  for (uint16_t route_id = 0u; route_id <= kBarrierCount; ++route_id) {
+    const size_t mov_index = 2u * route_id;
+    EXPECT_EQ(entry_words[mov_index],
+              build_s_mov_b32(kDispatchKeySgpr, scalar_positive_inline_u32(route_id), kArch));
+    const uint64_t branch_offset = island_offset + (mov_index + 1u) * sizeof(uint32_t);
+    const auto branch_delta = compute_sopp_branch_simm16(branch_offset, common_entry_offset);
+    ASSERT_TRUE(branch_delta);
+    EXPECT_EQ(entry_words[mov_index + 1u], build_s_branch(*branch_delta, kArch));
+  }
+
   const auto dispatcher = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
            patch.original_size == 0u;
@@ -2429,18 +2465,12 @@ TEST(ConSanMoi, Gfx1250SampledDenseBarrierUsesRelocatableCallerAddresses) {
   ASSERT_NE(dispatcher, result.patches.end());
   const std::vector<uint32_t> dispatcher_words =
       text_words_at_offset(patched, dispatcher->trampoline_offset, dispatcher->trampoline_size);
-  const auto compare_return =
-      instrumentation::build_s_cmp_eq_u32(kCallReturnSgpr, kExecSaveSgpr, kArch);
-  const auto compare_layout_key =
-      instrumentation::build_s_cmp_eq_u32(kDispatchKeySgpr, /*literal=*/255u, kArch);
-  ASSERT_TRUE(compare_return);
-  ASSERT_TRUE(compare_layout_key);
-  EXPECT_EQ(std::ranges::count(dispatcher_words, *compare_return), kBarrierCount + 1u);
-  EXPECT_EQ(std::ranges::find(dispatcher_words, *compare_layout_key), dispatcher_words.end())
-      << "gfx1250 dispatch must not compare a source-layout caller-to-island delta";
-  EXPECT_GE(std::ranges::count(dispatcher_words, build_s_getpc_b64(kExecSaveSgpr, kArch)),
-            kBarrierCount + 1u)
-      << "each expected caller must use a DBT-relocatable PC materializer";
+  for (uint16_t route_id = 0u; route_id <= kBarrierCount; ++route_id) {
+    const auto compare_key = instrumentation::build_s_cmp_eq_u32(
+        kDispatchKeySgpr, scalar_positive_inline_u32(route_id), kArch);
+    ASSERT_TRUE(compare_key);
+    EXPECT_EQ(std::ranges::count(dispatcher_words, *compare_key), 1u);
+  }
   EXPECT_TRUE(result.final_validation_passed);
 }
 
@@ -2450,7 +2480,8 @@ void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj
   constexpr uint32_t kBarrierCount = 10u;
   constexpr uint32_t kCallReturnPairWidth = 2u;
   constexpr uint32_t kExecSaveWindowWidth = 8u;
-  constexpr uint32_t kDenseEntryIslandWords = 12u;
+  const uint32_t dense_entry_island_words =
+      arch == ROCJITSU_CODE_ARCH_GFX1250 ? 2u * (kBarrierCount + 1u) + 7u : 12u;
   constexpr uint32_t kKernelWordsForDenseHost = 1200u;
   const std::array<uint16_t, 4> dead = {0u, 1u, 4u, 6u};
   std::vector<uint32_t> words;
@@ -2514,15 +2545,29 @@ void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
-  const auto dense_host = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+  const auto dense_host = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
-           patch.original_size == (kDenseEntryIslandWords + 1u) * sizeof(uint32_t);
+           patch.original_size == (dense_entry_island_words + 1u) * sizeof(uint32_t);
   });
   ASSERT_NE(dense_host, result.patches.end());
   const uint64_t island_offset = dense_host->anchor_offset + sizeof(uint32_t);
   const std::vector<uint32_t> entry_island =
-      text_words_at_offset(patched, island_offset, kDenseEntryIslandWords * sizeof(uint32_t));
-  ASSERT_EQ(entry_island.size(), kDenseEntryIslandWords);
+      text_words_at_offset(patched, island_offset, dense_entry_island_words * sizeof(uint32_t));
+  ASSERT_EQ(entry_island.size(), dense_entry_island_words);
+  if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+    const uint64_t common_entry_offset =
+        island_offset + 2u * (kBarrierCount + 1u) * sizeof(uint32_t);
+    for (uint16_t route_id = 0u; route_id <= kBarrierCount; ++route_id) {
+      const size_t mov_index = 2u * route_id;
+      EXPECT_EQ(entry_island[mov_index],
+                build_s_mov_b32(*assignment.dispatch_key_sgpr, scalar_positive_inline_u32(route_id),
+                                arch));
+      const uint64_t branch_offset = island_offset + (mov_index + 1u) * sizeof(uint32_t);
+      const auto branch_delta = compute_sopp_branch_simm16(branch_offset, common_entry_offset);
+      ASSERT_TRUE(branch_delta);
+      EXPECT_EQ(entry_island[mov_index + 1u], build_s_branch(*branch_delta, arch));
+    }
+  }
   const auto save_scc = instrumentation::build_s_cselect_b32(*assignment.indirect_scc_sgpr,
                                                              scalar_positive_inline_u32(1),
                                                              scalar_positive_inline_u32(0), arch);
@@ -2534,18 +2579,20 @@ void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj
   ASSERT_TRUE(save_scc);
   ASSERT_TRUE(subtract_pc);
   ASSERT_TRUE(restore_scc);
-  EXPECT_EQ(entry_island[0], *save_scc);
-  EXPECT_EQ(entry_island[1],
-            build_s_mov_b32(*assignment.dispatch_key_sgpr, *assignment.call_return_sgpr, arch));
-  EXPECT_EQ(entry_island[2], build_s_getpc_b64(*assignment.indirect_pc_sgpr, arch));
-  EXPECT_EQ(entry_island[3], *subtract_pc);
-  EXPECT_EQ(entry_island[4],
-            build_s_add_u32(*assignment.dispatch_key_sgpr, *assignment.dispatch_key_sgpr,
-                            /*literal=*/255u, arch));
-  EXPECT_EQ(entry_island[5], 3u * sizeof(uint32_t))
-      << "the entry key must correct from PC-after-getpc back to the island base";
-  EXPECT_EQ(entry_island[10], *restore_scc);
-  EXPECT_EQ(entry_island[11], build_s_setpc_b64(*assignment.indirect_pc_sgpr, arch));
+  if (arch != ROCJITSU_CODE_ARCH_GFX1250) {
+    EXPECT_EQ(entry_island[0], *save_scc);
+    EXPECT_EQ(entry_island[1],
+              build_s_mov_b32(*assignment.dispatch_key_sgpr, *assignment.call_return_sgpr, arch));
+    EXPECT_EQ(entry_island[2], build_s_getpc_b64(*assignment.indirect_pc_sgpr, arch));
+    EXPECT_EQ(entry_island[3], *subtract_pc);
+    EXPECT_EQ(entry_island[4],
+              build_s_add_u32(*assignment.dispatch_key_sgpr, *assignment.dispatch_key_sgpr,
+                              /*literal=*/255u, arch));
+    EXPECT_EQ(entry_island[5], 3u * sizeof(uint32_t))
+        << "the entry key must correct from PC-after-getpc back to the island base";
+    EXPECT_EQ(entry_island[10], *restore_scc);
+    EXPECT_EQ(entry_island[11], build_s_setpc_b64(*assignment.indirect_pc_sgpr, arch));
+  }
 
   uint32_t patched_barriers = 0u;
   std::vector<uint32_t> expected_dispatch_keys = {0u};
@@ -2558,7 +2605,9 @@ void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj
     ASSERT_EQ(anchor.size(), 1u);
     EXPECT_EQ(anchor.front() & 0xffff0000u, *call_opcode & 0xffff0000u);
     expected_dispatch_keys.push_back(
-        static_cast<uint32_t>(patch.anchor_offset + sizeof(uint32_t) - island_offset));
+        arch == ROCJITSU_CODE_ARCH_GFX1250
+            ? patched_barriers + 1u
+            : static_cast<uint32_t>(patch.anchor_offset + sizeof(uint32_t) - island_offset));
     if (!first_barrier_anchor)
       first_barrier_anchor = patch.anchor_offset;
     ++patched_barriers;
@@ -2576,14 +2625,12 @@ void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj
       instrumentation::build_s_cmp_eq_u32(*assignment.dispatch_key_sgpr, /*literal=*/255u, arch);
   ASSERT_TRUE(compare_key);
   if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
-    const auto compare_return = instrumentation::build_s_cmp_eq_u32(
-        *assignment.call_return_sgpr, *assignment.indirect_pc_sgpr, arch);
-    ASSERT_TRUE(compare_return);
-    EXPECT_EQ(std::ranges::count(dispatcher_words, *compare_return), kBarrierCount + 1u);
-    EXPECT_EQ(std::ranges::find(dispatcher_words, *compare_key), dispatcher_words.end());
-    EXPECT_GE(
-        std::ranges::count(dispatcher_words, build_s_getpc_b64(*assignment.indirect_pc_sgpr, arch)),
-        kBarrierCount + 1u);
+    for (uint16_t route_id = 0u; route_id <= kBarrierCount; ++route_id) {
+      const auto explicit_compare = instrumentation::build_s_cmp_eq_u32(
+          *assignment.dispatch_key_sgpr, scalar_positive_inline_u32(route_id), arch);
+      ASSERT_TRUE(explicit_compare);
+      EXPECT_EQ(std::ranges::count(dispatcher_words, *explicit_compare), 1u);
+    }
     EXPECT_TRUE(result.final_validation_passed);
     return;
   }
@@ -2598,7 +2645,7 @@ void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj
   EXPECT_TRUE(result.final_validation_passed);
 }
 
-TEST(ConSanMoi, Gfx1250SampledDenseBarrierUsesRelocatableCallerAddressesUnderScalarSpill) {
+TEST(ConSanMoi, Gfx1250SampledDenseBarrierUsesCloneInvariantEntryKeysUnderScalarSpill) {
   expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(
       ROCJITSU_CODE_ARCH_GFX1250);
 }
@@ -5195,6 +5242,38 @@ TEST(ConSanMoi, SampledQualifiedBarrierPersistsOwnerAcrossAccessAndSync) {
   EXPECT_NE(std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
                               &ConSanPatchInfo::kind),
             result.patches.end());
+
+  const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
+           patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
+  });
+  const auto barrier = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
+  ASSERT_NE(access, result.patches.end());
+  ASSERT_NE(barrier, result.patches.end());
+  ASSERT_TRUE(access->scratch_vgpr);
+  ASSERT_TRUE(barrier->scratch_vgpr);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  std::vector<uint32_t> patched_words(patched.text_sections().front()->size() / sizeof(uint32_t));
+  std::memcpy(patched_words.data(), patched.text_sections().front()->data(),
+              patched.text_sections().front()->size());
+  // The access publisher and the barrier consumer must select the same bank
+  // from the persistent wave owner. The default unchecked access layout uses
+  // scratch+5; the barrier layout uses scratch+6.
+  const auto access_owner_mix = instrumentation::build_v_xor_b32(
+      static_cast<uint16_t>(*access->scratch_vgpr + 5u),
+      vector_source_vgpr(*result.resolved_moi_owner_vgpr),
+      static_cast<uint16_t>(*access->scratch_vgpr + 5u), ROCJITSU_CODE_ARCH_RDNA4);
+  const auto barrier_owner_mix = instrumentation::build_v_xor_b32(
+      static_cast<uint16_t>(*barrier->scratch_vgpr + 6u),
+      vector_source_vgpr(*result.resolved_moi_owner_vgpr),
+      static_cast<uint16_t>(*barrier->scratch_vgpr + 6u), ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(access_owner_mix);
+  ASSERT_TRUE(barrier_owner_mix);
+  EXPECT_NE(std::ranges::find(patched_words, *access_owner_mix), patched_words.end());
+  EXPECT_NE(std::ranges::find(patched_words, *barrier_owner_mix), patched_words.end());
 }
 
 TEST(ConSanMoi, SampledFarBarrierUsesReachableLocalIndirectEntryIsland) {

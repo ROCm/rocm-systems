@@ -225,7 +225,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
     }
     words.push_back(*restore_scan_exec);
     if (!append_sampled_window_bank_index(words, options, *workgroup_sources, window.bank_count,
-                                          bank_vgpr, value, arch)) {
+                                          bank_vgpr, value, *options.moi_owner_vgpr, arch)) {
       errors.emplace_back("ConSan MOI sampled barrier failed at causal-window bank selection");
       return std::nullopt;
     }
@@ -1102,6 +1102,11 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         static_cast<uint64_t>(static_cast<int64_t>(std::numeric_limits<int16_t>::max()) -
                               static_cast<int64_t>(std::numeric_limits<int16_t>::min())) *
         sizeof(uint32_t);
+    // GFX1250 helpers can be cloned independently during B0-to-A0 translation.
+    // Keep every caller identity in the non-negative scalar inline-constant
+    // range so a clone-local two-word entry stub can carry it to the common
+    // appended dispatcher without embedding a clone address.
+    constexpr size_t kMaxGfx1250CloneLocalRoutes = 63u;
     std::vector<std::pair<ContainerKey, std::vector<size_t>>> groups;
     for (auto &[key, owner_indices] : owner_groups) {
       std::ranges::sort(owner_indices, [&](size_t lhs, size_t rhs) {
@@ -1111,6 +1116,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       for (size_t index : owner_indices) {
         const uint64_t anchor = selected[index].candidate.barrier.site.text_offset;
         if (groups.empty() || groups.back().first != key ||
+            (arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+             groups.back().second.size() >= kMaxGfx1250CloneLocalRoutes) ||
             anchor - selected[groups.back().second.front()].candidate.barrier.site.text_offset >
                 kMaxCommonRelayAnchorSpan) {
           groups.push_back({key, {}});
@@ -1212,7 +1219,11 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       const uint16_t call_return_sgpr =
           spill_backed_router ? *group_options.moi_record_replay_call_return_sgpr
                               : static_cast<uint16_t>(*group_options.moi_exec_save_sgpr + 6u);
-      const bool derive_key_at_entry = spill_backed_router;
+      // GFX1250 uses an explicit key in a clone-local entry stub. Other
+      // architectures retain the call-return-derived entry key when their
+      // scalar assignment is spill backed.
+      const bool use_gfx1250_clone_local_routes = arch == ROCJITSU_CODE_ARCH_GFX1250;
+      const bool derive_key_at_entry = spill_backed_router && !use_gfx1250_clone_local_routes;
       const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
         if (arch == ROCJITSU_CODE_ARCH_GFX1250)
           return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
@@ -1220,7 +1231,10 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
           return build_s_call_b64(call_return_sgpr, simm16, arch);
         return std::nullopt;
       };
-      const uint64_t island_words_count = moi_dense_entry_island_words(derive_key_at_entry);
+      const uint64_t island_words_count =
+          use_gfx1250_clone_local_routes
+              ? 2u * (indices.size() + 1u) + kMoiRecordReplayIndirectIslandWords
+              : moi_dense_entry_island_words(derive_key_at_entry);
       const uint64_t host_words_count = island_words_count + 1u;
       const uint64_t host_bytes = host_words_count * sizeof(uint32_t);
       const std::vector<MoiSgprRange> host_bootstrap_ranges = moi_relocatable_host_scalar_ranges(
@@ -1315,13 +1329,41 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       append_words_bytes(new_text, host_words);
 
       const uint64_t island_offset = host_offset + sizeof(uint32_t);
-      const auto island_words =
-          build_moi_dense_barrier_entry_island(island_offset, dispatcher_offset,
-                                               {.jump_pc_sgpr = jump_pc_sgpr,
-                                                .saved_scc_sgpr = saved_scc_sgpr,
-                                                .key_sgpr = key_sgpr,
-                                                .call_return_sgpr = call_return_sgpr},
-                                               derive_key_at_entry, arch);
+      std::optional<std::vector<uint32_t>> island_words;
+      if (use_gfx1250_clone_local_routes) {
+        std::vector<uint32_t> clone_local_words;
+        clone_local_words.reserve(island_words_count);
+        const uint64_t common_entry_offset =
+            island_offset + 2u * (indices.size() + 1u) * sizeof(uint32_t);
+        for (size_t route_id = 0u; route_id <= indices.size(); ++route_id) {
+          clone_local_words.push_back(build_s_mov_b32(
+              key_sgpr, scalar_positive_inline_u32(static_cast<uint16_t>(route_id)), arch));
+          const uint64_t branch_offset =
+              island_offset + clone_local_words.size() * sizeof(uint32_t);
+          const auto branch_delta = compute_sopp_branch_simm16(branch_offset, common_entry_offset);
+          if (!branch_delta) {
+            result.errors.emplace_back(
+                "ConSan MOI sampled dense barrier relay could not encode a clone-local route");
+            return;
+          }
+          clone_local_words.push_back(build_s_branch(*branch_delta, arch));
+        }
+        if (!append_moi_scc_preserving_indirect_jump(
+                clone_local_words, island_offset, dispatcher_offset, jump_pc_sgpr, saved_scc_sgpr,
+                /*capture_scc=*/true, arch)) {
+          result.errors.emplace_back(
+              "ConSan MOI sampled dense barrier relay could not encode its common entry");
+          return;
+        }
+        island_words = std::move(clone_local_words);
+      } else {
+        island_words = build_moi_dense_barrier_entry_island(island_offset, dispatcher_offset,
+                                                            {.jump_pc_sgpr = jump_pc_sgpr,
+                                                             .saved_scc_sgpr = saved_scc_sgpr,
+                                                             .key_sgpr = key_sgpr,
+                                                             .call_return_sgpr = call_return_sgpr},
+                                                            derive_key_at_entry, arch);
+      }
       if (!island_words || island_words->size() != island_words_count) {
         result.errors.emplace_back(
             "ConSan MOI sampled dense barrier relay could not encode its island");
@@ -1350,16 +1392,14 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         dispatcher_words.push_back(build_s_add_u32(key_sgpr, key_sgpr, /*literal=*/255u, arch));
         dispatcher_words.push_back(static_cast<uint32_t>(dispatcher_offset - island_offset));
       }
-      const auto append_target = [&](uint64_t caller_return, uint64_t target) -> bool {
-        if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
-          // B0-to-A0 translation can move each caller and the in-kernel entry
-          // island by different amounts. Rebuild the expected caller address
-          // with a canonical PC-relative sequence so DBT relocates it along
-          // with the direct call, rather than comparing a source-layout
-          // caller-to-island delta.
-          if (!append_moi_call_return_match(dispatcher_words, dispatcher_offset, caller_return,
-                                            jump_pc_sgpr, call_return_sgpr, arch))
+      const auto append_target = [&](size_t route_id, uint64_t caller_return,
+                                     uint64_t target) -> bool {
+        if (use_gfx1250_clone_local_routes) {
+          const auto compare = instrumentation::build_s_cmp_eq_u32(
+              key_sgpr, scalar_positive_inline_u32(static_cast<uint16_t>(route_id)), arch);
+          if (!compare)
             return false;
+          dispatcher_words.push_back(*compare);
         } else {
           const auto compare =
               instrumentation::build_s_cmp_eq_u32(key_sgpr, /*literal=*/255u, arch);
@@ -1383,11 +1423,12 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         dispatcher_words.insert(dispatcher_words.end(), matched_words.begin(), matched_words.end());
         return true;
       };
-      if (!append_target(/*caller_return=*/island_offset, host_body_offset))
+      if (!append_target(/*route_id=*/0u, /*caller_return=*/island_offset, host_body_offset))
         return;
-      for (const DenseBody &body : bodies) {
+      for (size_t body_index = 0u; body_index < bodies.size(); ++body_index) {
+        const DenseBody &body = bodies[body_index];
         const ConSanBarrierSite &site = selected[body.selected_index].candidate.barrier.site;
-        if (!append_target(site.text_offset + sizeof(uint32_t), body.offset))
+        if (!append_target(body_index + 1u, site.text_offset + sizeof(uint32_t), body.offset))
           return;
       }
       dispatcher_words.push_back(build_s_endpgm(arch));
@@ -1415,10 +1456,14 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
           static_cast<uint32_t>(dispatcher_words.size() * sizeof(uint32_t));
       dispatcher_info.owner_descriptor_file_offsets = group_owners;
       patches.push_back(std::move(dispatcher_info));
-      for (const DenseBody &body : bodies) {
+      for (size_t body_index = 0u; body_index < bodies.size(); ++body_index) {
+        const DenseBody &body = bodies[body_index];
         const Planned &planned = selected[body.selected_index];
         const ConSanBarrierSite &site = planned.candidate.barrier.site;
-        const auto call_delta = compute_sopp_branch_simm16(site.text_offset, island_offset);
+        const uint64_t call_target = use_gfx1250_clone_local_routes
+                                         ? island_offset + 2u * (body_index + 1u) * sizeof(uint32_t)
+                                         : island_offset;
+        const auto call_delta = compute_sopp_branch_simm16(site.text_offset, call_target);
         const auto call = call_delta ? build_direct_call(*call_delta) : std::nullopt;
         if (!call) {
           result.errors.emplace_back(
