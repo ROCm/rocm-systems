@@ -90,6 +90,9 @@ device:
   Unit_hipGetDeviceAttribute_hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported:
     <<: *level_2
     tags: [query]
+  Unit_hipGetDeviceAttribute_hipDeviceAttributeHostAllocDmaBufSupported:
+    <<: *level_2
+    tags: [query]
   Unit_hipGetDeviceCount_NegTst:
     <<: *level_2
     tags: [query]
@@ -159,6 +162,15 @@ device:
     disabled: [asan]
     tags: [query]
   Unit_hipDeviceGetUuid_VerifyUuidFrm_hipGetDeviceProperties:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceGetLuid_Positive:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceGetLuid_Negative:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceGetLuid_VerifyLuidFrm_hipGetDeviceProperties:
     <<: *level_2
     tags: [query]
   Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES:

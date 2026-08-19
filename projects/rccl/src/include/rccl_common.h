@@ -62,6 +62,7 @@ typedef enum {
 typedef enum {
   RCCL_DIRECT_ALLGATHER = NCCL_NUM_ALGORITHMS, // Direct AllGather
   RCCL_HIERARCHICAL_ALLGATHER, // Hierarchical AllGather
+  RCCL_HIERARCHICAL_REDUCESCATTER, // Hierarchical ReduceScatter
 #ifdef ENABLE_WARP_SPEED
   RCCL_WARP_SPEED,
 #endif
@@ -130,7 +131,27 @@ NCCL_API(ncclResult_t, rcclGetProtocolName, int protocol, const char** algoName)
 bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize);
 bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize);
 bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize);
+bool rcclUseHierarchicalReduceScatter(struct ncclComm* comm, size_t msgSize);
+size_t rcclHierarchicalTempBufferSize(int nNodes, bool allGather, bool reduceScatter);
+// Fills in algo/protocol/channels for a hierarchical AllGather or ReduceScatter.
+ncclResult_t rcclHierarchicalAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
+                                      int* algo, int* protocol, int* maxChannels);
 bool rcclUseAlltoAllGda(struct ncclComm* comm);
+// Returns true when the CE AllReduce path should be used instead of the standard ring/tree kernels.
+// Does NOT check ceARTmpBuf initialization; the caller is responsible.
+bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op);
+// Updates the CE AllReduce graph latch from this call's capture state.
+// Invoke once per collective (any type) at each CE AR decision point.
+void rcclCeAllReduceGraphLatchTick(struct ncclComm* comm, bool ceCapturing);
+// Pure query: is CE AllReduce currently allowed on this comm?
+bool rcclCeAllReduceAllowed(struct ncclComm* comm);
+// Decides whether ncclAllReduce_impl takes the DDA path for this call. Mirrors the guard in
+// collectives.cc exactly: DDA runs when the buffers are not symmetric-kernel eligible, CE AllReduce
+// will not service the call per the caller-computed `ceAllReduceAllowed` (non-gfx1250 only; gfx1250
+// always keeps the DDA fabric path), and DDA is enabled for this arch/size. Host-side and GPU-free so
+// the dispatch decision can be unit tested.
+bool rcclAllReduceShouldTakeDdaPath(const struct ncclComm* comm, size_t count, ncclDataType_t datatype,
+                                    bool symEligible, bool ceAllReduceAllowed);
 void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable);
 void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize);
 ncclResult_t rcclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count, size_t& maxCount);
@@ -143,13 +164,55 @@ bool validHsaScratchEnvSetting(const char* hsaScratchEnv, int hipRuntimeVersion,
 RCCL_PARAM_DECLARE(DirectReduceScatterThreshold);
 // Hierarchical AllGather enabled
 RCCL_PARAM_DECLARE(HierarchicalAllGather);
-// DDA threashold
+// Hierarchical ReduceScatter enabled
+RCCL_PARAM_DECLARE(HierarchicalReduceScatter);
+#define HIERARCHICAL_TEMP_BUFFER_SIZE (128 * 1024 * 1024) // 128MB
+
+// DDA threshold
 RCCL_PARAM_DECLARE(DdaThreshold);
+RCCL_PARAM_DECLARE(DdaLL);
+RCCL_PARAM_DECLARE(DdaLLThreshold);
+RCCL_PARAM_DECLARE(DdaLL128);
+RCCL_PARAM_DECLARE(DdaLL128Threshold);
 RCCL_PARAM_DECLARE(DdaEnable);
 
-#define HIERARCHICAL_AG_TEMP_BUFFER_SIZE (128 * 1024 * 1024) // 128MB
+// Per-collective DDA AlltoAll thresholds (4 MiB for all supported archs).
+constexpr size_t kDdaAlltoAllGfx942ThresholdBytes = 4194304;
+constexpr size_t kDdaAlltoAllGfx950ThresholdBytes = 4194304;
+constexpr size_t kDdaAlltoAllGfx1250ThresholdBytes = 4194304;
+
+// Returns true when the DDA fast path should be attempted for a collective.
+// Per-arch defaults cap the threshold; when 0, gfx950/gfx1250 fall back to
+// the user-configurable RCCL_DDA_THRESHOLD env var.
+bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default,
+                    size_t gfx950Default = 0, size_t gfx1250Default = 0);
+
 int getFirmwareVersion();
 bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, char const* archName);
+
+// Decide the host-side value of comm->cheapPostSendFenceOff.
+// Returns 1 if the cheap post-send fence must be OFF (kernel uses the full
+// __threadfence_system()), or 0 if the cheap post-send fence can be ON.
+//   cudaArch             : numeric device arch (comm->cudaArch = 100*major +
+//                          10*minor, i.e. gfx942 = 940, gfx950 = 950,
+//                          gfx1250 = 1250).
+//   param                : RCCL_CHEAP_POST_SEND_FENCE_OFF value
+//                          (0 = arch-tuned auto, 1 = force off, 2 = force on).
+//   uncachedMemSupported : whether cache-bypassing load/store builtins are
+//                          available (HIP_UNCACHED_MEMORY); cheap fence is only
+//                          safe when true.
+inline int rcclComputeCheapPostSendFenceOff(int cudaArch, int64_t param, bool uncachedMemSupported) {
+  // Cheap fence is only safe when cache-bypassing load/store builtins are available.
+  if (!uncachedMemSupported) return 1;
+  // Force cheap fence on regardless of arch (override auto, e.g. re-enable on gfx950).
+  if (param == 2) return 0;
+  // Any other non-zero value forces the full __threadfence_system().
+  if (param != 0) return 1;
+  // Arch-tuned auto: cheap fence on for gfx942 (940) and gfx1250 (1250);
+  // off for gfx950 (950) and everything else.
+  if (cudaArch == 940 || cudaArch == 1250) return 0;
+  return 1;
+}
 #ifdef ENABLE_WARP_SPEED
 RCCL_PARAM_DECLARE(WarpSpeedARThreshold);
 RCCL_PARAM_DECLARE(WarpSpeedAutoMode);

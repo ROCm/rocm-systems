@@ -106,8 +106,13 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
         }
         return _use_mpi;
     };
-    rocprofsys_external_register_pause_callbacks(&pyrocprofsys_pause_callback,
-                                                 &pyrocprofsys_resume_callback);
+    // Deferred out of module init: this is the first call into the dl layer and it
+    // dlopens librocprof-sys.so, so registering here would load the whole runtime on
+    // `import rocprofsys`.
+    static auto _register_pause_callbacks = []() {
+        rocprofsys_external_register_pause_callbacks(&pyrocprofsys_pause_callback,
+                                                     &pyrocprofsys_resume_callback);
+    };
 
     omni.def("is_initialized", []() { return _is_initialized; }, "Initialization state");
 
@@ -119,6 +124,7 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
             if(_is_initialized)
                 throw std::runtime_error("Error! rocprofsys is already initialized");
             _is_initialized = true;
+            _register_pause_callbacks();
             rocprofsys_set_mpi(_get_use_mpi());
             rocprofsys_init("trace", false, _v.c_str());
         },
@@ -130,6 +136,7 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
             if(_is_initialized)
                 throw std::runtime_error("Error! rocprofsys is already initialized");
             _is_initialized = true;
+            _register_pause_callbacks();
             rocprofsys_set_instrumented(
                 static_cast<int>(rocprofsys::dl::InstrumentMode::PythonProfile));
             rocprofsys_set_mpi(_get_use_mpi());
@@ -312,7 +319,7 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
     if(_disable) return;
 
     _disable = true;
-    tim::scope::destructor _dtor{ []() { _disable = false; } };
+    const tim::scope::destructor _dtor{ []() { _disable = false; } };
     (void) _dtor;
 
     if(pframe.is_none() || pframe.ptr() == nullptr) return;
@@ -321,11 +328,11 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
 
     auto* frame = reinterpret_cast<PyFrameObject*>(pframe.ptr());
 
-    int what = (strcmp(swhat, "call") == 0)       ? PyTrace_CALL
-               : (strcmp(swhat, "c_call") == 0)   ? PyTrace_C_CALL
-               : (strcmp(swhat, "return") == 0)   ? PyTrace_RETURN
-               : (strcmp(swhat, "c_return") == 0) ? PyTrace_C_RETURN
-                                                  : -1;
+    const int what = (strcmp(swhat, "call") == 0)       ? PyTrace_CALL
+                     : (strcmp(swhat, "c_call") == 0)   ? PyTrace_C_CALL
+                     : (strcmp(swhat, "return") == 0)   ? PyTrace_RETURN
+                     : (strcmp(swhat, "c_return") == 0) ? PyTrace_C_RETURN
+                                                        : -1;
     // only support PyTrace_{CALL,C_CALL,RETURN,C_RETURN}
     if(what < 0)
     {

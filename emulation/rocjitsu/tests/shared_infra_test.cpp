@@ -4,60 +4,75 @@
 /// @file shared_infra_test.cpp
 /// @brief Phase B unit tests: addr_calc, MMA execution, wavefront context, CU factory.
 
+#include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna1/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna1/vop1.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna1/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna2/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna2/vop1.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna2/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/vop1.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/vop1.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/vopc.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/addr_calc.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/execution_backend.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/operand.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/operand_types.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/vop1.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/vopc.h"
-#include "rocjitsu/isa/arch/amdgpu/isa_properties.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/vopc.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/vopc.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/vopc.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vopc.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vopc.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/vopc.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/vopc.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/operand_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/sopk.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vopc.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/vopc.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3p.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vopc.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna1/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna1/vop1.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna1/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna2/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna2/vop1.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna2/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/operand_types.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/sopk.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/vop1.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3_5/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3_5/vop1.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3_5/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/operand_types.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/vop1.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/vop3.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/vop3p.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_flat.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
@@ -65,6 +80,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
+#include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
@@ -105,15 +121,15 @@ using namespace rocjitsu;
  * static_asserts (HasAccVgpr, HasMonolithicWaitcnt, ...) for it here.
  */
 static_assert(GpuIsa<cdna3::Isa>);
-static_assert(GpuIsa<gfx1250::Isa>);
+static_assert(GpuIsa<cdna5::Isa>);
 static_assert(GpuIsa<rdna4::Isa>);
 static_assert(HasAccVgpr<cdna2::Isa>);
 static_assert(HasAccVgpr<cdna3::Isa>);
 static_assert(HasAccVgpr<cdna4::Isa>);
-static_assert(!HasAccVgpr<gfx1250::Isa>);
+static_assert(!HasAccVgpr<cdna5::Isa>);
 static_assert(!HasAccVgpr<rdna4::Isa>);
 static_assert(HasMonolithicWaitcnt<cdna3::Isa>);
-static_assert(!HasMonolithicWaitcnt<gfx1250::Isa>);
+static_assert(!HasMonolithicWaitcnt<cdna5::Isa>);
 static_assert(!HasMonolithicWaitcnt<rdna4::Isa>);
 static_assert(!isa_properties(ROCJITSU_CODE_ARCH_CDNA3).supports_wgp_mode);
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).supports_wgp_mode);
@@ -123,13 +139,22 @@ static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).uses_ttmp_workgroup_ids);
 static_assert(!isa_properties(ROCJITSU_CODE_ARCH_RDNA4).uses_cluster_ttmp_workgroup_ids);
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_GFX1250).uses_ttmp_workgroup_ids);
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_GFX1250).uses_cluster_ttmp_workgroup_ids);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA2).descriptor_vgpr_count_granule_wave32 == 0);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA2).descriptor_vgpr_count_granule_wave64 == 8);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA3).descriptor_vgpr_count_granule_wave32 == 0);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA3).descriptor_vgpr_count_granule_wave64 == 8);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).descriptor_vgpr_count_granule_wave32 == 8);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).descriptor_vgpr_count_granule_wave64 == 4);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_GFX1250).descriptor_vgpr_count_granule_wave32 ==
+              16);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_GFX1250).descriptor_vgpr_count_granule_wave64 == 0);
 
 // RDNA3/3.5 retain monolithic S_WAITCNT (GFX11 layout).
 static_assert(HasMonolithicWaitcnt<rdna3::Isa>);
 
 // RDNA2 supports Wave64 (WF_SIZE_MAX inherited as 64).
 static_assert(rdna2::Isa::WF_SIZE_MAX == 64);
-static_assert(gfx1250::Isa::WF_SIZE_MAX == 32);
+static_assert(cdna5::Isa::WF_SIZE_MAX == 32);
 
 // CDNA1 and GFX1250 have no AccVGPRs; CDNA2/3/4 have 256.
 constexpr uint32_t kCdnaAccVgprsPerWf = cdna2::Isa::MAX_ACC_VGPRS_PER_WF;
@@ -137,7 +162,58 @@ static_assert(cdna1::Isa::MAX_ACC_VGPRS_PER_WF == 0);
 static_assert(kCdnaAccVgprsPerWf == 256);
 static_assert(cdna3::Isa::MAX_ACC_VGPRS_PER_WF == kCdnaAccVgprsPerWf);
 static_assert(cdna4::Isa::MAX_ACC_VGPRS_PER_WF == kCdnaAccVgprsPerWf);
-static_assert(gfx1250::Isa::MAX_ACC_VGPRS_PER_WF == 0);
+static_assert(cdna5::Isa::MAX_ACC_VGPRS_PER_WF == 0);
+
+TEST(IsaPropertiesTest, DescriptorVgprGranuleSupportsEveryAmdgpuWavefrontMode) {
+  struct ExpectedGranule {
+    rj_code_arch_t arch;
+    uint32_t wavefront_size;
+    uint32_t granule;
+  };
+  constexpr std::array cases = {
+      ExpectedGranule{ROCJITSU_CODE_ARCH_CDNA1, 64, 4},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_CDNA2, 64, 8},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_CDNA3, 64, 8},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_CDNA4, 64, 8},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA1, 32, 8},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA1, 64, 4},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA2, 32, 8},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA2, 64, 4},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA3, 32, 8},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA3, 64, 4},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA3_5, 32, 8},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA3_5, 64, 4},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA4, 32, 8},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_RDNA4, 64, 4},
+      ExpectedGranule{ROCJITSU_CODE_ARCH_GFX1250, 32, 16},
+  };
+
+  for (const auto &[arch, wavefront_size, granule] : cases) {
+    const auto actual = descriptor_vgpr_count_granule_for_wavefront(arch, wavefront_size);
+    ASSERT_TRUE(actual.has_value());
+    EXPECT_EQ(*actual, granule);
+  }
+}
+
+TEST(IsaPropertiesTest, DescriptorVgprGranuleRejectsUnsupportedInputs) {
+  EXPECT_FALSE(
+      descriptor_vgpr_count_granule_for_wavefront(ROCJITSU_CODE_ARCH_RV32I, 32).has_value());
+  EXPECT_FALSE(
+      descriptor_vgpr_count_granule_for_wavefront(ROCJITSU_CODE_ARCH_RV64I, 64).has_value());
+  EXPECT_FALSE(
+      descriptor_vgpr_count_granule_for_wavefront(ROCJITSU_CODE_ARCH_CDNA2, 32).has_value());
+  EXPECT_FALSE(
+      descriptor_vgpr_count_granule_for_wavefront(ROCJITSU_CODE_ARCH_GFX1250, 64).has_value());
+}
+
+TEST(CommandProcessorTest, ConfigureForCdna2UsesEightVgprDescriptorGranule) {
+  amdgpu::CommandProcessor command_processor("cdna2_command_processor");
+  command_processor.set_vgpr_granularity(4);
+
+  command_processor.configure_for_arch(ROCJITSU_CODE_ARCH_CDNA2);
+
+  EXPECT_EQ(command_processor.vgpr_granularity(), 8u);
+}
 
 class Rdna3MemoryTestCu
     : public amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, rdna3::Isa> {
@@ -426,6 +502,7 @@ TEST(MfmaExecTest, Gfx12Wave64SwmmacK32LocUsesSparseHardwareLayout) {
 }
 
 TEST(MfmaExecTest, Cdna3CvtFp8Bf8UsesSameFnuzDecodeAsMfma) {
+  ScopedIsaExecutionBackend execution_backend_scope{&cdna3::execution_backend()};
   amdgpu::GpuMemory mem("cdna3_cvt_fnuz_mem");
   amdgpu::L2Cache l2("cdna3_cvt_fnuz_l2");
 
@@ -642,20 +719,20 @@ TEST(MfmaExecTest, WmmaF8f6f4K128InputLocUsesPairAwareSubbyteLayouts) {
             3u);
 }
 
-TEST(MfmaExecTest, WmmaF4_32x16x128UsesSiliconGroundedALayoutAndScaleLane) {
+TEST(MfmaExecTest, WmmaF4_32x16x128UsesConsecutiveM16ALayoutAndScaleLane) {
   auto row0 = amdgpu::wmma_a_input_loc(32, 128, /*row=*/0, /*k=*/0, 4, 4);
   EXPECT_EQ(row0.lane, 0u);
   EXPECT_EQ(row0.vgpr_offset, 0u);
   EXPECT_EQ(row0.bit_offset, 0u);
 
   auto row8 = amdgpu::wmma_a_input_loc(32, 128, /*row=*/8, /*k=*/0, 4, 4);
-  EXPECT_EQ(row8.lane, 0u);
-  EXPECT_EQ(row8.vgpr_offset, 8u);
+  EXPECT_EQ(row8.lane, 8u);
+  EXPECT_EQ(row8.vgpr_offset, 0u);
   EXPECT_EQ(row8.bit_offset, 0u);
 
   auto row16 = amdgpu::wmma_a_input_loc(32, 128, /*row=*/16, /*k=*/4, 4, 4);
-  EXPECT_EQ(row16.lane, 24u);
-  EXPECT_EQ(row16.vgpr_offset, 0u);
+  EXPECT_EQ(row16.lane, 16u);
+  EXPECT_EQ(row16.vgpr_offset, 8u);
   EXPECT_EQ(row16.bit_offset, 0u);
 
   auto row24 = amdgpu::wmma_a_input_loc(32, 128, /*row=*/24, /*k=*/7, 4, 4);
@@ -664,9 +741,59 @@ TEST(MfmaExecTest, WmmaF4_32x16x128UsesSiliconGroundedALayoutAndScaleLane) {
   EXPECT_EQ(row24.bit_offset, 12u);
 
   EXPECT_EQ(amdgpu::wmma_a_scale_lane(32, 128, /*row=*/0, 0, 4, 4), 0u);
-  EXPECT_EQ(amdgpu::wmma_a_scale_lane(32, 128, /*row=*/8, 0, 4, 4), 16u);
-  EXPECT_EQ(amdgpu::wmma_a_scale_lane(32, 128, /*row=*/16, 0, 4, 4), 8u);
+  EXPECT_EQ(amdgpu::wmma_a_scale_lane(32, 128, /*row=*/8, 0, 4, 4), 8u);
+  EXPECT_EQ(amdgpu::wmma_a_scale_lane(32, 128, /*row=*/16, 0, 4, 4), 16u);
   EXPECT_EQ(amdgpu::wmma_a_scale_lane(32, 128, /*row=*/24, 0, 4, 4), 24u);
+}
+
+// The M=32 A layout is represented by two consecutive M=16 slices.
+TEST(MfmaExecTest, WmmaF4_32x16x128ALayoutMatchesConsecutiveM16Slices) {
+  const auto split_a_loc = [](uint32_t row, uint32_t k) {
+    auto loc = amdgpu::wmma_f8f6f4_input_loc(16, 128, row % 16, k, 4,
+                                             /*mixed_subbyte=*/false);
+    loc.vgpr_offset += 8 * (row / 16);
+    return loc;
+  };
+
+  for (uint32_t row = 0; row < 32; ++row) {
+    for (uint32_t k = 0; k < 128; ++k) {
+      SCOPED_TRACE(::testing::Message() << "row=" << row << " k=" << k);
+      const auto actual = amdgpu::wmma_a_input_loc(32, 128, row, k, 4, 4);
+      const auto expected = split_a_loc(row, k);
+      ASSERT_EQ(actual.lane, expected.lane);
+      ASSERT_EQ(actual.vgpr_offset, expected.vgpr_offset);
+      ASSERT_EQ(actual.bit_offset, expected.bit_offset);
+      ASSERT_EQ(actual.data_bits, expected.data_bits);
+    }
+  }
+}
+
+// C and D use the same consecutive row slices as A.
+TEST(MfmaExecTest, WmmaF4_32x16x128CDLayoutMatchesConsecutiveM16Slices) {
+  const auto split_output_loc = [](uint32_t row, uint32_t col) {
+    auto loc = amdgpu::wmma_output_loc_32(16, 16, row % 16, col);
+    loc.reg += 8 * (row / 16);
+    return loc;
+  };
+
+  for (uint32_t row = 0; row < 32; ++row) {
+    for (uint32_t col = 0; col < 16; ++col) {
+      SCOPED_TRACE(::testing::Message() << "row=" << row << " col=" << col);
+      const auto actual = amdgpu::wmma_output_loc_32(32, 16, row, col);
+      const auto expected = split_output_loc(row, col);
+      ASSERT_EQ(actual.reg, expected.reg);
+      ASSERT_EQ(actual.lane, expected.lane);
+    }
+  }
+}
+
+// A-scale lane selection follows the row index directly.
+TEST(MfmaExecTest, WmmaF4_32x16x128AScaleLaneMatchesRow) {
+  for (uint32_t row = 0; row < 32; ++row) {
+    SCOPED_TRACE(::testing::Message() << "row=" << row);
+    const uint32_t actual = amdgpu::wmma_a_scale_lane(32, 128, row, /*scale_select=*/0, 4, 4);
+    ASSERT_EQ(actual, row);
+  }
 }
 
 TEST(MfmaExecTest, OutputLoc32_4x4) {
@@ -674,6 +801,26 @@ TEST(MfmaExecTest, OutputLoc32_4x4) {
   auto loc = amdgpu::output_loc_32(4, 4, /*col=*/2, /*row=*/1, /*b=*/0);
   EXPECT_EQ(loc.reg, 2u);
   EXPECT_EQ(loc.lane, 1u);
+}
+
+TEST(MfmaExecTest, DstBaseMapsCdna1OprAccvgprRange) {
+  // CDNA1 types MFMA/accvgpr destinations as OPR_ACCVGPR, canonicalized into
+  // [768, 1023] (OPR_ACCVGPR_ACC_MIN = 768). acc0 -> vb + ACC_VGPR_OFFSET, not
+  // vb + ACC_VGPR_OFFSET + 256 (the pre-fix bug from the shared -512 fold).
+  EXPECT_EQ(amdgpu::dst_base(/*vb=*/100, /*ev=*/768, /*acc_cd=*/1),
+            100u + amdgpu::ACC_VGPR_OFFSET + 0u);
+  EXPECT_EQ(amdgpu::dst_base(/*vb=*/100, /*ev=*/770, /*acc_cd=*/1),
+            100u + amdgpu::ACC_VGPR_OFFSET + 2u);
+}
+
+TEST(MfmaExecTest, DstBaseMapsCdna2To4AccAndVgprRanges) {
+  // CDNA2-4: acc destination via OpSel sits at [512, 767] (acc0 = 512); an
+  // ordinary VGPR destination (acc_cd=0, ev 0-255) stays in the arch bank.
+  EXPECT_EQ(amdgpu::dst_base(/*vb=*/100, /*ev=*/512, /*acc_cd=*/1),
+            100u + amdgpu::ACC_VGPR_OFFSET + 0u);
+  EXPECT_EQ(amdgpu::dst_base(/*vb=*/100, /*ev=*/5, /*acc_cd=*/1),
+            100u + amdgpu::ACC_VGPR_OFFSET + 5u);
+  EXPECT_EQ(amdgpu::dst_base(/*vb=*/100, /*ev=*/5, /*acc_cd=*/0), 100u + 5u);
 }
 
 TEST(MfmaExecTest, ResolveAccConstant) {
@@ -2168,6 +2315,8 @@ TEST(DppPermuteTest, WriteMaskHonorsBoundCtrlAndBroadcastValidity) {
 struct Cdna1DppTraits {
   static constexpr const char *name = "cdna1";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA1;
+  static constexpr uint16_t vopc_opcode = cdna1::kVCmpEqU32Vopc;
+  static const IsaExecutionBackend &backend() { return cdna1::execution_backend(); }
   using MachineInst = cdna1::MachineInst;
   using Vop1VopDppMachineInst = cdna1::Vop1VopDppMachineInst;
   using VMovB32Vop1 = cdna1::VMovB32Vop1;
@@ -2178,6 +2327,8 @@ struct Cdna1DppTraits {
 struct Cdna2DppTraits {
   static constexpr const char *name = "cdna2";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA2;
+  static constexpr uint16_t vopc_opcode = cdna2::kVCmpEqU32Vopc;
+  static const IsaExecutionBackend &backend() { return cdna2::execution_backend(); }
   static constexpr uint32_t wf_size = 64;
   using MachineInst = cdna2::MachineInst;
   using Vop1VopDppMachineInst = cdna2::Vop1VopDppMachineInst;
@@ -2191,6 +2342,8 @@ struct Cdna2DppTraits {
 struct Cdna3DppTraits {
   static constexpr const char *name = "cdna3";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA3;
+  static constexpr uint16_t vopc_opcode = cdna3::kVCmpEqU32Vopc;
+  static const IsaExecutionBackend &backend() { return cdna3::execution_backend(); }
   static constexpr uint32_t wf_size = 64;
   using MachineInst = cdna3::MachineInst;
   using Vop1VopDppMachineInst = cdna3::Vop1VopDppMachineInst;
@@ -2204,6 +2357,8 @@ struct Cdna3DppTraits {
 struct Cdna4DppTraits {
   static constexpr const char *name = "cdna4";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4;
+  static constexpr uint16_t vopc_opcode = cdna4::kVCmpEqU32Vopc;
+  static const IsaExecutionBackend &backend() { return cdna4::execution_backend(); }
   static constexpr uint32_t wf_size = 64;
   using MachineInst = cdna4::MachineInst;
   using Vop1VopDppMachineInst = cdna4::Vop1VopDppMachineInst;
@@ -2217,6 +2372,8 @@ struct Cdna4DppTraits {
 struct Rdna1DppTraits {
   static constexpr const char *name = "rdna1";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA1;
+  static constexpr uint16_t vopc_opcode = rdna1::kVCmpEqU32Vopc;
+  static const IsaExecutionBackend &backend() { return rdna1::execution_backend(); }
   using MachineInst = rdna1::MachineInst;
   using VopcMachineInst = rdna1::VopcMachineInst;
   using Vop1VopDpp16MachineInst = rdna1::Vop1VopDpp16MachineInst;
@@ -2229,6 +2386,8 @@ struct Rdna1DppTraits {
 struct Rdna2DppTraits {
   static constexpr const char *name = "rdna2";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA2;
+  static constexpr uint16_t vopc_opcode = rdna2::kVCmpEqU32Vopc;
+  static const IsaExecutionBackend &backend() { return rdna2::execution_backend(); }
   using MachineInst = rdna2::MachineInst;
   using VopcMachineInst = rdna2::VopcMachineInst;
   using Vop1VopDpp16MachineInst = rdna2::Vop1VopDpp16MachineInst;
@@ -2241,6 +2400,7 @@ struct Rdna2DppTraits {
 struct Rdna4DppTraits {
   static constexpr const char *name = "rdna4";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4;
+  static const IsaExecutionBackend &backend() { return rdna4::execution_backend(); }
   using MachineInst = rdna4::MachineInst;
   using VopcMachineInst = rdna4::VopcMachineInst;
   using Vop1VopDpp16MachineInst = rdna4::Vop1VopDpp16MachineInst;
@@ -2256,6 +2416,7 @@ struct Rdna4DppTraits {
 struct Rdna3DppTraits {
   static constexpr const char *name = "rdna3";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA3;
+  static const IsaExecutionBackend &backend() { return rdna3::execution_backend(); }
   using MachineInst = rdna3::MachineInst;
   using VopcMachineInst = rdna3::VopcMachineInst;
   using Vop1VopDpp16MachineInst = rdna3::Vop1VopDpp16MachineInst;
@@ -2269,6 +2430,7 @@ struct Rdna3DppTraits {
 struct Rdna3_5DppTraits {
   static constexpr const char *name = "rdna3_5";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA3_5;
+  static const IsaExecutionBackend &backend() { return rdna3_5::execution_backend(); }
   using MachineInst = rdna3_5::MachineInst;
   using VopcMachineInst = rdna3_5::VopcMachineInst;
   using Vop1VopDpp16MachineInst = rdna3_5::Vop1VopDpp16MachineInst;
@@ -2282,16 +2444,17 @@ struct Rdna3_5DppTraits {
 struct Gfx1250DppTraits {
   static constexpr const char *name = "gfx1250";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_GFX1250;
-  using MachineInst = gfx1250::MachineInst;
-  using VopcMachineInst = gfx1250::VopcMachineInst;
-  using Vop1VopDpp16MachineInst = gfx1250::Vop1VopDpp16MachineInst;
-  using Vop1VopDpp8MachineInst = gfx1250::Vop1VopDpp8MachineInst;
-  using Vop1F64DppMachineInst = gfx1250::Vop1VopDpp16MachineInst;
-  using VopcVopDpp16MachineInst = gfx1250::VopcVopDpp16MachineInst;
-  using VMovB32Vop1 = gfx1250::VMovB32Vop1;
-  using VCvtF64I32Vop1 = gfx1250::VCvtF64I32Vop1;
-  using VCmpEqU32Vopc = gfx1250::VCmpEqU32Vopc;
-  using VCmpxEqU32Vopc = gfx1250::VCmpxEqU32Vopc;
+  static const IsaExecutionBackend &backend() { return cdna5::execution_backend(); }
+  using MachineInst = cdna5::MachineInst;
+  using VopcMachineInst = cdna5::VopcMachineInst;
+  using Vop1VopDpp16MachineInst = cdna5::Vop1VopDpp16MachineInst;
+  using Vop1VopDpp8MachineInst = cdna5::Vop1VopDpp8MachineInst;
+  using Vop1F64DppMachineInst = cdna5::Vop1VopDpp16MachineInst;
+  using VopcVopDpp16MachineInst = cdna5::VopcVopDpp16MachineInst;
+  using VMovB32Vop1 = cdna5::VMovB32Vop1;
+  using VCvtF64I32Vop1 = cdna5::VCvtF64I32Vop1;
+  using VCmpEqU32Vopc = cdna5::VCmpEqU32Vopc;
+  using VCmpxEqU32Vopc = cdna5::VCmpxEqU32Vopc;
 };
 
 // Test-only RDNA4 trait for exercising 64-bit EXEC handling. The production
@@ -2305,6 +2468,7 @@ static_assert(GpuIsa<Rdna4Wave64DppTestIsa>);
 
 template <typename Traits> void cdna_generated_vop1_uses_shared_row_broadcast() {
   SCOPED_TRACE(Traits::name);
+  ScopedIsaExecutionBackend execution_backend_scope{&Traits::backend()};
   amdgpu::GpuMemory mem(std::string(Traits::name) + "_dpp_broadcast_mem");
   amdgpu::L2Cache l2(std::string(Traits::name) + "_dpp_broadcast_l2");
 
@@ -2356,6 +2520,7 @@ template <typename Traits> void cdna_generated_vop1_uses_shared_row_broadcast() 
 
 template <typename Traits> void cdna_generated_vop1_dpp_write_mask_honors_bound_ctrl() {
   SCOPED_TRACE(Traits::name);
+  ScopedIsaExecutionBackend execution_backend_scope{&Traits::backend()};
   amdgpu::GpuMemory mem(std::string(Traits::name) + "_dpp_write_mask_mem");
   amdgpu::L2Cache l2(std::string(Traits::name) + "_dpp_write_mask_l2");
 
@@ -2407,6 +2572,7 @@ template <typename Traits> void cdna_generated_vop1_dpp_write_mask_honors_bound_
 
 template <typename Traits> void wave32_generated_vop1_dpp_write_mask_honors_bound_ctrl() {
   SCOPED_TRACE(Traits::name);
+  ScopedIsaExecutionBackend execution_backend_scope{&Traits::backend()};
   amdgpu::GpuMemory mem(std::string(Traits::name) + "_dpp_vop1_wave32_write_mask_mem");
   amdgpu::L2Cache l2(std::string(Traits::name) + "_dpp_vop1_wave32_write_mask_l2");
 
@@ -2454,6 +2620,7 @@ template <typename Traits> void wave32_generated_vop1_dpp_write_mask_honors_boun
 
 template <typename Traits> void generated_vop1_dpp64_preserves_masked_destination() {
   SCOPED_TRACE(Traits::name);
+  ScopedIsaExecutionBackend execution_backend_scope{&Traits::backend()};
   amdgpu::GpuMemory mem(std::string(Traits::name) + "_dpp_vop1_f64_mask_mem");
   amdgpu::L2Cache l2(std::string(Traits::name) + "_dpp_vop1_f64_mask_l2");
 
@@ -2507,6 +2674,7 @@ template <typename Traits> void generated_vop1_dpp64_preserves_masked_destinatio
 }
 
 void rdna4_generated_vop1_64_preserves_inactive_destination() {
+  ScopedIsaExecutionBackend execution_backend_scope{&rdna4::execution_backend()};
   amdgpu::GpuMemory mem("rdna4_vop1_f64_exec_mask_mem");
   amdgpu::L2Cache l2("rdna4_vop1_f64_exec_mask_l2");
 
@@ -2557,6 +2725,7 @@ void rdna4_generated_vop1_64_preserves_inactive_destination() {
 
 template <typename Traits> void wave32_generated_vop1_dpp16_fetch_inactive_uses_fi() {
   SCOPED_TRACE(Traits::name);
+  ScopedIsaExecutionBackend execution_backend_scope{&Traits::backend()};
   amdgpu::GpuMemory mem(std::string(Traits::name) + "_dpp16_fi_mem");
   amdgpu::L2Cache l2(std::string(Traits::name) + "_dpp16_fi_l2");
 
@@ -2608,6 +2777,7 @@ template <typename Traits> void wave32_generated_vop1_dpp16_fetch_inactive_uses_
 
 template <typename Traits> void wave32_generated_vop1_dpp16_fi_zero_precedes_bound_ctrl() {
   SCOPED_TRACE(Traits::name);
+  ScopedIsaExecutionBackend execution_backend_scope{&Traits::backend()};
   amdgpu::GpuMemory mem(std::string(Traits::name) + "_dpp16_fi_bound_mem");
   amdgpu::L2Cache l2(std::string(Traits::name) + "_dpp16_fi_bound_l2");
 
@@ -2654,6 +2824,7 @@ template <typename Traits> void wave32_generated_vop1_dpp16_fi_zero_precedes_bou
 }
 
 void rdna4_wave64_generated_vop1_dpp16_fetch_inactive_uses_upper_exec_bit() {
+  ScopedIsaExecutionBackend execution_backend_scope{&rdna4::execution_backend()};
   amdgpu::GpuMemory mem("rdna4_wave64_dpp16_fi_mem");
   amdgpu::L2Cache l2("rdna4_wave64_dpp16_fi_l2");
 
@@ -2704,6 +2875,7 @@ void rdna4_wave64_generated_vop1_dpp16_fetch_inactive_uses_upper_exec_bit() {
 }
 
 void rdna4_wave64_generated_vop1_dpp8_fetch_inactive_uses_upper_exec_bit() {
+  ScopedIsaExecutionBackend execution_backend_scope{&rdna4::execution_backend()};
   amdgpu::GpuMemory mem("rdna4_wave64_dpp8_fi_mem");
   amdgpu::L2Cache l2("rdna4_wave64_dpp8_fi_l2");
 
@@ -2793,6 +2965,7 @@ void rdna4_wave64_generated_vop1_dpp8_fetch_inactive_uses_upper_exec_bit() {
 
 template <typename Traits> void wave32_generated_vop1_dpp8_fetch_inactive_uses_fi() {
   SCOPED_TRACE(Traits::name);
+  ScopedIsaExecutionBackend execution_backend_scope{&Traits::backend()};
   amdgpu::GpuMemory mem(std::string(Traits::name) + "_dpp8_fi_mem");
   amdgpu::L2Cache l2(std::string(Traits::name) + "_dpp8_fi_l2");
 
@@ -2839,6 +3012,7 @@ template <typename Traits> void wave32_generated_vop1_dpp8_fetch_inactive_uses_f
 
 template <typename Traits> void wave32_generated_vopc_dpp_write_mask_honors_bound_ctrl() {
   SCOPED_TRACE(Traits::name);
+  ScopedIsaExecutionBackend execution_backend_scope{&Traits::backend()};
   amdgpu::GpuMemory mem(std::string(Traits::name) + "_dpp_vopc_wave32_write_mask_mem");
   amdgpu::L2Cache l2(std::string(Traits::name) + "_dpp_vopc_wave32_write_mask_l2");
 
@@ -2889,6 +3063,7 @@ template <typename Traits> void wave32_generated_vopc_dpp_write_mask_honors_boun
 
 template <typename Traits> void wave32_generated_vcmpx_dpp_write_mask_preserves_exec() {
   SCOPED_TRACE(Traits::name);
+  ScopedIsaExecutionBackend execution_backend_scope{&Traits::backend()};
   amdgpu::GpuMemory mem(std::string(Traits::name) + "_dpp_vcmpx_wave32_exec_mask_mem");
   amdgpu::L2Cache l2(std::string(Traits::name) + "_dpp_vcmpx_wave32_exec_mask_l2");
 
@@ -2945,6 +3120,7 @@ template <typename Traits> void wave32_generated_vcmpx_dpp_write_mask_preserves_
 
 template <typename Traits> void wave32_generated_vcmpx_preserves_exec_hi() {
   SCOPED_TRACE(Traits::name);
+  ScopedIsaExecutionBackend execution_backend_scope{&Traits::backend()};
   amdgpu::GpuMemory mem(std::string(Traits::name) + "_vcmpx_wave32_exec_hi_mem");
   amdgpu::L2Cache l2(std::string(Traits::name) + "_vcmpx_wave32_exec_hi_l2");
 
@@ -2985,32 +3161,34 @@ template <typename Traits> void wave32_generated_vcmpx_preserves_exec_hi() {
   EXPECT_EQ(wf->exec_raw(), 0xA5A55A5A0F0F0F0FULL);
 }
 
-template <typename Traits> void unsupported_rdna_vopc_dpp_throws() {
+template <typename Traits> void unsupported_rdna_vopc_dpp_rejects() {
   SCOPED_TRACE(Traits::name);
 
-  auto expect_throws = [](uint32_t src0) {
+  auto decoder = Decoder::create(Traits::arch);
+  ASSERT_NE(decoder, nullptr);
+  auto expect_rejection = [&](uint32_t src0) {
     typename Traits::Vop1VopDpp16MachineInst raw{};
     raw.src0 = src0;
-
-    EXPECT_THROW(typename Traits::VCmpEqU32Vopc(
-                     reinterpret_cast<const typename Traits::MachineInst *>(&raw)),
-                 util::InvalidInst);
+    raw.op = Traits::vopc_opcode;
+    raw.encoding = 62;
+    EXPECT_TRUE(decode_fails(*decoder, reinterpret_cast<const uint32_t *>(&raw)));
   };
 
-  expect_throws(amdgpu::SRC_DPP);
-  expect_throws(amdgpu::SRC_DPP8_FI_0);
-  expect_throws(amdgpu::SRC_DPP8_FI_1);
+  expect_rejection(amdgpu::SRC_DPP);
+  expect_rejection(amdgpu::SRC_DPP8_FI_0);
+  expect_rejection(amdgpu::SRC_DPP8_FI_1);
 }
 
-template <typename Traits> void unsupported_cdna_vopc_dpp_throws() {
+template <typename Traits> void unsupported_cdna_vopc_dpp_rejects() {
   SCOPED_TRACE(Traits::name);
 
   typename Traits::Vop1VopDppMachineInst raw{};
   raw.src0 = amdgpu::SRC_DPP;
-
-  EXPECT_THROW(
-      typename Traits::VCmpEqU32Vopc(reinterpret_cast<const typename Traits::MachineInst *>(&raw)),
-      util::InvalidInst);
+  raw.op = Traits::vopc_opcode;
+  raw.encoding = 62;
+  auto decoder = Decoder::create(Traits::arch);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_TRUE(decode_fails(*decoder, reinterpret_cast<const uint32_t *>(&raw)));
 }
 
 void cdna4_vop1_sdwa_availability_is_instruction_specific() {
@@ -3022,9 +3200,165 @@ void cdna4_vop1_sdwa_availability_is_instruction_specific() {
   raw.dst_sel = amdgpu::sdwa::DWORD;
   raw.dst_unused = amdgpu::sdwa::UNUSED_PAD;
 
-  EXPECT_NO_THROW(cdna4::VMovB32Vop1(reinterpret_cast<const cdna4::MachineInst *>(&raw)));
-  EXPECT_THROW(cdna4::VCvtF64I32Vop1(reinterpret_cast<const cdna4::MachineInst *>(&raw)),
-               util::InvalidInst);
+  raw.encoding = cdna4::encoding::kVop1 >> 2;
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  raw.op = cdna4::kVMovB32Vop1;
+  EXPECT_FALSE(decode_fails(*decoder, reinterpret_cast<const uint32_t *>(&raw)));
+  raw.op = cdna4::kVCvtF64I32Vop1;
+  EXPECT_TRUE(decode_fails(*decoder, reinterpret_cast<const uint32_t *>(&raw)));
+}
+
+TEST(SdwaTest, Cdna4DisassemblesDestinationAndSourceAttributes) {
+  cdna4::Vop1VopSdwaMachineInst raw{};
+  raw.src0 = amdgpu::SRC_SDWA;
+  raw.op = cdna4::kVFloorF32Vop1;
+  raw.vdst = 0;
+  raw.encoding = cdna4::encoding::kVop1 >> 2;
+  raw.vsrc0 = 92;
+  raw.dst_sel = amdgpu::sdwa::BYTE_0;
+  raw.dst_unused = amdgpu::sdwa::UNUSED_PAD;
+  raw.clamp = 1;
+  raw.omod = 3;
+  raw.src0_sel = amdgpu::sdwa::BYTE_0;
+
+  const auto words = std::bit_cast<std::array<uint32_t, 2>>(raw);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->disassemble(), "v_floor_f32_sdwa v0, v92 clamp div:2 dst_sel:BYTE_0 "
+                                 "dst_unused:UNUSED_PAD src0_sel:BYTE_0");
+}
+
+TEST(SdwaTest, Cdna4DisassemblesCompareDestinationAndSourceModifiers) {
+  cdna4::VopcVopSdwaSdstEncMachineInst raw{};
+  raw.src0 = amdgpu::SRC_SDWA;
+  raw.vsrc1 = 1;
+  raw.op = cdna4::kVCmpEqF32Vopc;
+  raw.encoding = cdna4::encoding::kVopc >> 2;
+  raw.vsrc0 = 0;
+  raw.sdst = 4;
+  raw.sd = 1;
+  raw.src0_sel = amdgpu::sdwa::BYTE_0;
+  raw.src0_neg = 1;
+  raw.src0_abs = 1;
+  raw.src1_sel = amdgpu::sdwa::DWORD;
+  raw.src1_neg = 1;
+
+  const auto words = std::bit_cast<std::array<uint32_t, 2>>(raw);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->disassemble(),
+            "v_cmp_eq_f32_sdwa s[4:5], -|v0|, -v1 src0_sel:BYTE_0 src1_sel:DWORD");
+  ASSERT_EQ(inst->num_dst_operands(), 1);
+  EXPECT_EQ(inst->dst_operand(0)->to_register_ref(), (RegisterRef{RegClass::SGPR, 4, 2}));
+}
+
+TEST(SdwaTest, Cdna4DisassemblesImplicitCompareDestination) {
+  cdna4::VopcVopSdwaSdstEncMachineInst raw{};
+  raw.src0 = amdgpu::SRC_SDWA;
+  raw.vsrc1 = 1;
+  raw.op = cdna4::kVCmpEqF32Vopc;
+  raw.encoding = cdna4::encoding::kVopc >> 2;
+  raw.vsrc0 = 0;
+  raw.sd = 0;
+  raw.src0_sel = amdgpu::sdwa::DWORD;
+  raw.src1_sel = amdgpu::sdwa::DWORD;
+
+  const auto words = std::bit_cast<std::array<uint32_t, 2>>(raw);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->disassemble(), "v_cmp_eq_f32_sdwa vcc, v0, v1 src0_sel:DWORD src1_sel:DWORD");
+}
+
+TEST(SdwaTest, Cdna4DisassemblesBothVop2Sources) {
+  cdna4::Vop2VopSdwaMachineInst raw{};
+  raw.src0 = amdgpu::SRC_SDWA;
+  raw.vsrc1 = 3;
+  raw.vdst = 5;
+  raw.op = cdna4::kVAddF32Vop2;
+  raw.encoding = cdna4::encoding::kVop2;
+  raw.vsrc0 = 2;
+  raw.dst_sel = amdgpu::sdwa::DWORD;
+  raw.dst_unused = amdgpu::sdwa::UNUSED_PAD;
+  raw.src0_sel = amdgpu::sdwa::DWORD;
+  raw.src0_neg = 1;
+  raw.src0_abs = 1;
+  raw.src1_sel = amdgpu::sdwa::BYTE_2;
+  raw.src1_neg = 1;
+
+  const auto words = std::bit_cast<std::array<uint32_t, 2>>(raw);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->disassemble(),
+            "v_add_f32_sdwa v5, -|v2|, -v3 dst_sel:DWORD dst_unused:UNUSED_PAD "
+            "src0_sel:DWORD src1_sel:BYTE_2");
+}
+
+TEST(SdwaTest, InvalidAttributeValuesAreExplicit) {
+  EXPECT_EQ(amdgpu::sdwa::selection_name(7), "invalid(7)");
+  EXPECT_EQ(amdgpu::sdwa::destination_unused_name(3), "invalid(3)");
+}
+
+TEST(DecodeSizeTest, Cdna4UsesOpcodeOperandCapabilitiesForLiteralSelectors) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  cdna4::SopcMachineInst set_gpr_idx{};
+  set_gpr_idx.ssrc0 = 0;
+  set_gpr_idx.ssrc1 = 255;
+  set_gpr_idx.op = cdna4::kSSetGprIdxOnSopc;
+  set_gpr_idx.encoding = cdna4::encoding::kSopc;
+  const auto set_gpr_idx_words = std::bit_cast<std::array<uint32_t, 1>>(set_gpr_idx);
+  std::unique_ptr<Instruction> set_gpr_idx_inst(decode_valid(*decoder, set_gpr_idx_words.data()));
+  ASSERT_NE(set_gpr_idx_inst, nullptr);
+  EXPECT_EQ(set_gpr_idx_inst->size(), sizeof(uint32_t));
+
+  cdna4::Sop1MachineInst get_pc{};
+  get_pc.ssrc0 = 255;
+  get_pc.op = cdna4::kSGetPcB64Sop1;
+  get_pc.sdst = 0;
+  get_pc.encoding = cdna4::encoding::kSop1;
+  const auto get_pc_words = std::bit_cast<std::array<uint32_t, 1>>(get_pc);
+  std::unique_ptr<Instruction> get_pc_inst(decode_valid(*decoder, get_pc_words.data()));
+  ASSERT_NE(get_pc_inst, nullptr);
+  EXPECT_EQ(get_pc_inst->size(), sizeof(uint32_t));
+
+  cdna4::Sop2MachineInst fork{};
+  fork.ssrc0 = 255;
+  fork.ssrc1 = 255;
+  fork.op = cdna4::kSCbranchGForkSop2;
+  fork.encoding = cdna4::encoding::kSop2 >> 7;
+  const auto fork_words = std::bit_cast<std::array<uint32_t, 1>>(fork);
+  EXPECT_TRUE(decode_fails(*decoder, fork_words.data()));
+
+  cdna4::Vop1MachineInst v_nop{};
+  v_nop.src0 = 255;
+  v_nop.op = cdna4::kVNopVop1;
+  v_nop.encoding = cdna4::encoding::kVop1 >> 2;
+  const auto v_nop_words = std::bit_cast<std::array<uint32_t, 1>>(v_nop);
+  std::unique_ptr<Instruction> v_nop_inst(decode_valid(*decoder, v_nop_words.data()));
+  ASSERT_NE(v_nop_inst, nullptr);
+  EXPECT_EQ(v_nop_inst->size(), sizeof(uint32_t));
+
+  cdna4::Sop1MachineInst scalar_literal{};
+  scalar_literal.ssrc0 = 255;
+  scalar_literal.op = cdna4::kSNotB32Sop1;
+  scalar_literal.sdst = 0;
+  scalar_literal.encoding = cdna4::encoding::kSop1;
+  const std::array<uint32_t, 2> scalar_literal_words = {std::bit_cast<uint32_t>(scalar_literal),
+                                                        0x12345678u};
+  std::unique_ptr<Instruction> scalar_literal_inst(
+      decode_valid(*decoder, scalar_literal_words.data()));
+  ASSERT_NE(scalar_literal_inst, nullptr);
+  EXPECT_EQ(scalar_literal_inst->size(), sizeof(scalar_literal_words));
 }
 
 void cdna4_unsupported_sdwa_decode_halts_wave() {
@@ -3044,8 +3378,7 @@ void cdna4_unsupported_sdwa_decode_halts_wave() {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
-  EXPECT_THROW(
-      { std::unique_ptr<Instruction> inst(decoder->decode(words.data())); }, util::InvalidInst);
+  EXPECT_TRUE(decode_fails(*decoder, words.data()));
 
   amdgpu::GpuMemory mem("cdna4_unsupported_sdwa_mem");
   amdgpu::L2Cache l2("cdna4_unsupported_sdwa_l2");
@@ -3076,10 +3409,11 @@ template <typename Raw> void rdna4_vop3_dpp_marker_is_instruction_specific(uint3
   raw.src1 = 5;
   raw.vdst = 8;
 
-  EXPECT_NO_THROW(rdna4::VAddF32Vop3(reinterpret_cast<const rdna4::MachineInst *>(&raw)));
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_FALSE(decode_fails(*decoder, reinterpret_cast<const uint32_t *>(&raw)));
   raw.op = rdna4::kVAddF64Vop3;
-  EXPECT_THROW(rdna4::VAddF64Vop3(reinterpret_cast<const rdna4::MachineInst *>(&raw)),
-               util::InvalidInst);
+  EXPECT_TRUE(decode_fails(*decoder, reinterpret_cast<const uint32_t *>(&raw)));
 }
 
 template <typename Raw> void rdna4_vop3p_dpp_marker_is_unsupported(uint32_t marker) {
@@ -3090,8 +3424,9 @@ template <typename Raw> void rdna4_vop3p_dpp_marker_is_unsupported(uint32_t mark
   raw.vsrc0 = 4;
   raw.src1 = 5;
   raw.vdst = 8;
-  EXPECT_THROW(rdna4::VPkAddF16Vop3p(reinterpret_cast<const rdna4::MachineInst *>(&raw)),
-               util::InvalidInst);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_TRUE(decode_fails(*decoder, reinterpret_cast<const uint32_t *>(&raw)));
 }
 
 void rdna4_vop3_dpp_availability_is_instruction_specific() {
@@ -3116,11 +3451,11 @@ TEST(DppPermuteTest, CdnaGeneratedVop1DppWriteMaskHonorsBoundCtrl) {
   cdna_generated_vop1_dpp_write_mask_honors_bound_ctrl<Cdna4DppTraits>();
 }
 
-TEST(DppPermuteTest, CdnaVopcDppThrowsUnsupported) {
-  unsupported_cdna_vopc_dpp_throws<Cdna1DppTraits>();
-  unsupported_cdna_vopc_dpp_throws<Cdna2DppTraits>();
-  unsupported_cdna_vopc_dpp_throws<Cdna3DppTraits>();
-  unsupported_cdna_vopc_dpp_throws<Cdna4DppTraits>();
+TEST(DppPermuteTest, CdnaVopcDppRejectsUnsupported) {
+  unsupported_cdna_vopc_dpp_rejects<Cdna1DppTraits>();
+  unsupported_cdna_vopc_dpp_rejects<Cdna2DppTraits>();
+  unsupported_cdna_vopc_dpp_rejects<Cdna3DppTraits>();
+  unsupported_cdna_vopc_dpp_rejects<Cdna4DppTraits>();
 }
 
 TEST(DppPermuteTest, Cdna4Vop1SdwaAvailabilityIsInstructionSpecific) {
@@ -3154,7 +3489,7 @@ TEST(DppPermuteTest, Rdna4GeneratedVop1F64PreservesInactiveDestination) {
 }
 
 TEST(DppPermuteTest, Gfx1250GeneratedVop1DppWriteMaskHonorsBoundCtrl) {
-  ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
+  ScopedIsaExecutionBackend execution_backend_scope{&cdna5::execution_backend()};
   wave32_generated_vop1_dpp_write_mask_honors_bound_ctrl<Gfx1250DppTraits>();
 }
 
@@ -3167,7 +3502,7 @@ TEST(DppPermuteTest, RdnaGeneratedVop1Dpp16FetchInactiveUsesFi) {
 }
 
 TEST(DppPermuteTest, Gfx1250GeneratedVop1Dpp16FetchInactiveUsesFi) {
-  ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
+  ScopedIsaExecutionBackend execution_backend_scope{&cdna5::execution_backend()};
   wave32_generated_vop1_dpp16_fetch_inactive_uses_fi<Gfx1250DppTraits>();
 }
 
@@ -3180,7 +3515,7 @@ TEST(DppPermuteTest, RdnaGeneratedVop1Dpp16FiZeroPrecedesBoundCtrl) {
 }
 
 TEST(DppPermuteTest, Gfx1250GeneratedVop1Dpp16FiZeroPrecedesBoundCtrl) {
-  ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
+  ScopedIsaExecutionBackend execution_backend_scope{&cdna5::execution_backend()};
   wave32_generated_vop1_dpp16_fi_zero_precedes_bound_ctrl<Gfx1250DppTraits>();
 }
 
@@ -3201,7 +3536,7 @@ TEST(DppPermuteTest, RdnaGeneratedVop1Dpp8FetchInactiveUsesFi) {
 }
 
 TEST(DppPermuteTest, Gfx1250GeneratedVop1Dpp8FetchInactiveUsesFi) {
-  ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
+  ScopedIsaExecutionBackend execution_backend_scope{&cdna5::execution_backend()};
   wave32_generated_vop1_dpp8_fetch_inactive_uses_fi<Gfx1250DppTraits>();
 }
 
@@ -3212,7 +3547,7 @@ TEST(DppPermuteTest, RdnaGeneratedVopcDppWriteMaskHonorsBoundCtrl) {
 }
 
 TEST(DppPermuteTest, Gfx1250GeneratedVopcDppWriteMaskHonorsBoundCtrl) {
-  ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
+  ScopedIsaExecutionBackend execution_backend_scope{&cdna5::execution_backend()};
   wave32_generated_vopc_dpp_write_mask_honors_bound_ctrl<Gfx1250DppTraits>();
 }
 
@@ -3223,12 +3558,12 @@ TEST(DppPermuteTest, RdnaGeneratedVcmpxDppWave32WriteMaskPreservesExec) {
 }
 
 TEST(DppPermuteTest, Gfx1250GeneratedVcmpxDppWave32WriteMaskPreservesExec) {
-  ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
+  ScopedIsaExecutionBackend execution_backend_scope{&cdna5::execution_backend()};
   wave32_generated_vcmpx_dpp_write_mask_preserves_exec<Gfx1250DppTraits>();
 }
 
 TEST(ExecMaskTest, RdnaGeneratedVcmpxWave32PreservesExecHi) {
-  ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
+  ScopedIsaExecutionBackend execution_backend_scope{&cdna5::execution_backend()};
   wave32_generated_vcmpx_preserves_exec_hi<Rdna1DppTraits>();
   wave32_generated_vcmpx_preserves_exec_hi<Rdna2DppTraits>();
   wave32_generated_vcmpx_preserves_exec_hi<Rdna3DppTraits>();
@@ -3237,12 +3572,12 @@ TEST(ExecMaskTest, RdnaGeneratedVcmpxWave32PreservesExecHi) {
   wave32_generated_vcmpx_preserves_exec_hi<Gfx1250DppTraits>();
 }
 
-TEST(DppPermuteTest, Rdna1VopcDppThrowsUnsupported) {
-  unsupported_rdna_vopc_dpp_throws<Rdna1DppTraits>();
+TEST(DppPermuteTest, Rdna1VopcDppRejectsUnsupported) {
+  unsupported_rdna_vopc_dpp_rejects<Rdna1DppTraits>();
 }
 
-TEST(DppPermuteTest, Rdna2VopcDppThrowsUnsupported) {
-  unsupported_rdna_vopc_dpp_throws<Rdna2DppTraits>();
+TEST(DppPermuteTest, Rdna2VopcDppRejectsUnsupported) {
+  unsupported_rdna_vopc_dpp_rejects<Rdna2DppTraits>();
 }
 
 // ---------------------------------------------------------------------------
@@ -3520,7 +3855,7 @@ TEST(RdnaScratchExecutionTest, Rdna3B128StoreFeedsB32LoadsWithVectorOffsets) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3);
   ASSERT_NE(decoder, nullptr);
   auto execute_mem = [&](std::array<uint32_t, 2> words) {
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     cu->execute_and_route(inst.release(), *wf);
   };
@@ -3700,7 +4035,7 @@ TEST(RdnaAddrCalcTest, Rdna4Saddr7cCoversGlobalFlatAndScratch) {
 }
 
 TEST(Gfx1250AddrCalcTest, FlatPrivateScratchDecodesLaneBits) {
-  ScopedIsaExecutionBackend execution_backend_scope{&gfx1250::execution_backend()};
+  ScopedIsaExecutionBackend execution_backend_scope{&cdna5::execution_backend()};
   amdgpu::GpuMemory mem("gfx1250_flat_private_mem");
   amdgpu::L2Cache l2("gfx1250_flat_private_l2");
   amdgpu::ComputeUnitCore::Config cfg{};
@@ -3725,9 +4060,9 @@ TEST(Gfx1250AddrCalcTest, FlatPrivateScratchDecodesLaneBits) {
   wf->set_apertures(0x0001'0000'0000'0000ULL, 0x0001'0000'ffff'ffffULL, kPrivateBase,
                     kPrivateBase + 0xffff'ffffULL);
 
-  gfx1250::Operand flat_scratch_base(
-      64, gfx1250::OperandType::OPR_SRC,
-      static_cast<int>(gfx1250::OpSelSrc::OPR_SRC_SRC_FLAT_SCRATCH_BASE_LO));
+  cdna5::Operand flat_scratch_base(
+      64, cdna5::OperandType::OPR_SRC,
+      static_cast<int>(cdna5::OpSelSrc::OPR_SRC_SRC_FLAT_SCRATCH_BASE_LO));
   ASSERT_EQ(amdgpu::RegisterAccess(*wf).read_scalar64(flat_scratch_base), kScratchBase);
 
   const uint64_t private_offsets[] = {0x10, 0x14, kPrivateSegmentSize + 0x20};
@@ -3740,13 +4075,13 @@ TEST(Gfx1250AddrCalcTest, FlatPrivateScratchDecodesLaneBits) {
     cu->write_vgpr(vbase + 1, lane, static_cast<uint32_t>(flat_private_addr >> 32));
   }
 
-  gfx1250::VflatMachineInst inst{};
-  inst.saddr = gfx1250::OPR_SREG_NULL;
+  cdna5::VflatMachineInst inst{};
+  inst.saddr = cdna5::OPR_SREG_NULL;
   inst.vaddr = 0;
   inst.ioffset = 4;
 
   amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
-  gfx1250::flat_calculate_addresses(inst, *wf, d);
+  cdna5::flat_calculate_addresses(inst, *wf, d);
 
   for (uint32_t lane = 0; lane < 3; ++lane) {
     uint64_t private_offset = private_offsets[lane] + inst.ioffset;
@@ -3916,16 +4251,16 @@ TEST(RdnaAddrCalcTest, Gfx1250VbufferWrapsOffsetPartBeforeBoundsCheck) {
   cu->write_sgpr(sbase + 7, 0);
   cu->write_vgpr(vbase + 4, 0, 0xFFFF'8200u);
 
-  gfx1250::VbufferMachineInst inst{};
+  cdna5::VbufferMachineInst inst{};
   inst.rsrc = 4;
-  inst.soffset = gfx1250::OPR_SREG_NULL;
+  inst.soffset = cdna5::OPR_SREG_NULL;
   inst.offen = 1;
   inst.idxen = 0;
   inst.vaddr = 4;
   inst.ioffset = 0x7E00;
 
   amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
-  gfx1250::mubuf_calculate_addresses(inst, *wf, d);
+  cdna5::mubuf_calculate_addresses(inst, *wf, d);
   EXPECT_EQ(d.lane_mask, 1ULL);
   EXPECT_EQ(d.per_lane_addr[0], kBase);
 }
@@ -3953,15 +4288,15 @@ TEST(Gfx1250AddrCalcTest, VbufferZeroNumRecordsMasksAllLanes) {
   cu->write_vgpr(vbase + 4, 0, 0);
   cu->write_vgpr(vbase + 4, 1, 0x1000);
 
-  gfx1250::VbufferMachineInst inst{};
+  cdna5::VbufferMachineInst inst{};
   inst.rsrc = 40;
-  inst.soffset = gfx1250::OPR_SREG_NULL;
+  inst.soffset = cdna5::OPR_SREG_NULL;
   inst.offen = 1;
   inst.idxen = 0;
   inst.vaddr = 4;
 
   amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
-  gfx1250::mubuf_calculate_addresses(inst, *wf, d);
+  cdna5::mubuf_calculate_addresses(inst, *wf, d);
   EXPECT_EQ(d.exec_mask, 0x3ULL);
   EXPECT_EQ(d.lane_mask, 0ULL);
   EXPECT_EQ(d.per_lane_addr[0], 0ULL);
@@ -3996,15 +4331,15 @@ TEST(Gfx1250AddrCalcTest, VbufferStructuredStrideChecksIndexBounds) {
   cu->write_vgpr(vbase + 4, 0, kNumRecords - 1);
   cu->write_vgpr(vbase + 4, 1, kNumRecords);
 
-  gfx1250::VbufferMachineInst inst{};
+  cdna5::VbufferMachineInst inst{};
   inst.rsrc = 40;
-  inst.soffset = gfx1250::OPR_SREG_NULL;
+  inst.soffset = cdna5::OPR_SREG_NULL;
   inst.offen = 0;
   inst.idxen = 1;
   inst.vaddr = 4;
 
   amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
-  gfx1250::mubuf_calculate_addresses(inst, *wf, d);
+  cdna5::mubuf_calculate_addresses(inst, *wf, d);
   EXPECT_EQ(d.exec_mask, 0x3ULL);
   EXPECT_EQ(d.lane_mask, 0x1ULL);
   EXPECT_EQ(d.per_lane_addr[0], kBase + (kNumRecords - 1) * kStride);
@@ -4063,7 +4398,7 @@ void expect_vector_lane_reads_use_own_wave_vgprs(rj_code_arch_t arch) {
 
   for (uint32_t i = 0; i < wfs.size(); ++i) {
     const uint32_t sbase = wfs[i]->sgpr_alloc().base;
-    std::unique_ptr<Instruction> inst(decoder->decode(kReadfirstlaneS24V1.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, kReadfirstlaneS24V1.data()));
     ASSERT_NE(inst, nullptr);
     cu->write_sgpr(sbase + 24, 0);
     cu->execute_instruction(inst.get(), *wfs[i]);
@@ -4072,7 +4407,7 @@ void expect_vector_lane_reads_use_own_wave_vgprs(rj_code_arch_t arch) {
 
   for (uint32_t i = 0; i < wfs.size(); ++i) {
     const uint32_t sbase = wfs[i]->sgpr_alloc().base;
-    std::unique_ptr<Instruction> inst(decoder->decode(kReadlaneS4V141Lane2.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, kReadlaneS4V141Lane2.data()));
     ASSERT_NE(inst, nullptr);
     cu->write_sgpr(sbase + 2, 0);
     cu->write_sgpr(sbase + 4, 0);
@@ -4082,7 +4417,7 @@ void expect_vector_lane_reads_use_own_wave_vgprs(rj_code_arch_t arch) {
 
   for (uint32_t i = 0; i < wfs.size(); ++i) {
     const uint32_t sbase = wfs[i]->sgpr_alloc().base;
-    std::unique_ptr<Instruction> inst(decoder->decode(kReadlaneS4V4Lane31.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, kReadlaneS4V4Lane31.data()));
     ASSERT_NE(inst, nullptr);
     cu->write_sgpr(sbase + 4, 0);
     cu->write_sgpr(sbase + 31, 0);
@@ -4092,7 +4427,7 @@ void expect_vector_lane_reads_use_own_wave_vgprs(rj_code_arch_t arch) {
 
   for (uint32_t i = 0; i < wfs.size(); ++i) {
     const uint32_t sbase = wfs[i]->sgpr_alloc().base;
-    std::unique_ptr<Instruction> inst(decoder->decode(kReadlaneS4V141S2.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, kReadlaneS4V141S2.data()));
     ASSERT_NE(inst, nullptr);
     cu->write_sgpr(sbase + 2, 31);
     cu->write_sgpr(sbase + 4, 0);
@@ -4103,7 +4438,7 @@ void expect_vector_lane_reads_use_own_wave_vgprs(rj_code_arch_t arch) {
   for (uint32_t i = 0; i < wfs.size(); ++i) {
     const uint32_t sbase = wfs[i]->sgpr_alloc().base;
     const uint32_t vbase = wfs[i]->vgpr_alloc().base;
-    std::unique_ptr<Instruction> inst(decoder->decode(kWritelaneV141S4S2.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, kWritelaneV141S4S2.data()));
     ASSERT_NE(inst, nullptr);
     cu->write_sgpr(sbase + 2, 31);
     cu->write_sgpr(sbase + 4, 0x500u + i);

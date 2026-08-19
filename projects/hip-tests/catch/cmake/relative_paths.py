@@ -86,7 +86,7 @@ def make_test_files_portable(filenames):
                 modified_content = re.sub(
                     exe_pattern, replace_exe_pattern, modified_content
                 )
-                # 6 include _ctest.cmake file with path
+                # 6 include _ctest.cmake file with path.
                 ctest_test_pattern = r'include\("(.*?_tests\.cmake)"\)'
                 replace_ctest_pattern = r'include("${CTEST_CURRENT_DIR}/\1")'
                 modified_content = re.sub(

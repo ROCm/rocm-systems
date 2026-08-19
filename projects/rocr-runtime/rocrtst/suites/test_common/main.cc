@@ -90,11 +90,13 @@
 #include "suites/functional/filter_devices.h"
 #include "suites/functional/fp_exception_shutdown.h"
 #include "suites/functional/gpu_coredump.h"
+#include "suites/functional/gpu_discovery_deprecated.h"
 #include "amd_smi/amdsmi.h"
 #include "common/common.h"
 #include "suites/functional/counted_queues.h"
 #include "suites/functional/queue_create.h"
 #include "suites/functional/cuid.h"
+#include "suites/functional/trap_handler_test.h"
 #include "common/os.h"
 #include "common/platform_filter.h"
 #include "common/base_rocr_utils.h"
@@ -490,6 +492,75 @@ TEST(rocrtstFunc, DISABLED_DebugBasicTests) {
     RunCustomTestEpilog(&mt);
 }
 
+// Trap Handler Tests (SWDEV-209233)
+// Tests s_trap instruction handling and queue error callbacks.
+
+TEST(rocrtstFunc, DISABLED_TrapHandler_NoTrap) {
+    TrapHandlerTest th;
+    if (!RunCustomTestProlog(&th)) return;
+    th.TestNoTrap();
+    RunCustomTestEpilog(&th);
+}
+
+TEST(rocrtstFunc, DISABLED_TrapHandler_Abort) {
+    TrapHandlerTest th;
+    if (!RunCustomTestProlog(&th)) return;
+    th.TestTrapAbort();
+    RunCustomTestEpilog(&th);
+}
+
+TEST(rocrtstFunc, DISABLED_TrapHandler_Generic) {
+    TrapHandlerTest th;
+    if (!RunCustomTestProlog(&th)) return;
+    th.TestTrapGeneric();
+    RunCustomTestEpilog(&th);
+}
+
+// DISABLED: Requires debugger to be attached. s_trap 3 waits for debugger
+// and the trap handler skips reporting when TTMP11_DEBUG_ENABLED is not set.
+TEST(rocrtstFunc, DISABLED_TrapHandler_Debugger) {
+    TrapHandlerTest th;
+    if (!RunCustomTestProlog(&th)) return;
+    th.TestTrapDebugger();
+    RunCustomTestEpilog(&th);
+}
+
+// DISABLED: Memory fault triggers trap but causes queue state corruption
+// during cleanup in Debug builds. Needs runtime fixes for clean error recovery.
+TEST(rocrtstFunc, DISABLED_TrapHandler_MemoryViolation) {
+    TrapHandlerTest th;
+    if (!RunCustomTestProlog(&th)) return;
+    th.TestTrapMemoryViolation();
+    RunCustomTestEpilog(&th);
+}
+
+// DISABLED: The instruction encoding 0xB0FF0000 may not trigger illegal
+// instruction exception on all GFX generations. Needs ISA-specific encodings.
+TEST(rocrtstFunc, DISABLED_TrapHandler_IllegalInstruction) {
+    TrapHandlerTest th;
+    if (!RunCustomTestProlog(&th)) return;
+    th.TestTrapIllegalInstruction();
+    RunCustomTestEpilog(&th);
+}
+
+// DISABLED: GPU integer divide-by-zero does NOT trap per AMD ISA.
+// Returns 0 for quotient/remainder. Would need FP exception instead.
+TEST(rocrtstFunc, DISABLED_TrapHandler_MathException) {
+    TrapHandlerTest th;
+    if (!RunCustomTestProlog(&th)) return;
+    th.TestTrapMathException();
+    RunCustomTestEpilog(&th);
+}
+
+// DISABLED: Wild pointer access triggers trap but causes queue state corruption
+// during cleanup in Debug builds. Needs runtime fixes for clean error recovery.
+TEST(rocrtstFunc, DISABLED_TrapHandler_ApertureViolation) {
+    TrapHandlerTest th;
+    if (!RunCustomTestProlog(&th)) return;
+    th.TestTrapApertureViolation();
+    RunCustomTestEpilog(&th);
+}
+
 TEST(rocrtstFunc, Memory_Alignment_Test) {
     MemoryAlignmentTest ma;
     if (!RunCustomTestProlog(&ma)) return;
@@ -508,6 +579,16 @@ TEST(rocrtstFunc, AgentPropertiesTests) {
     propTest.QueryAgentUUID();
     propTest.QueryAgentClockCounters();
     RunCustomTestEpilog(&propTest);
+}
+
+TEST(rocrtstFunc, GpuDiscoveryDeprecatedDoorbellTest) {
+  // Verifies hsa_init() succeeds when deprecated GPUs (DoorbellType != 2) are
+  // present. Regression test for: a single pre-Vega GPU (e.g. Polaris/gfx803)
+  // would abort HSA initialization for ALL devices in the system.
+  GpuDiscoveryDeprecatedTest gdt;
+  RunCustomTestProlog(&gdt);
+  gdt.Run();
+  RunCustomTestEpilog(&gdt);
 }
 
 TEST(rocrtstFunc, SvmMemory_Basic_Test) {

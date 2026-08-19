@@ -390,6 +390,39 @@ class SystemCapabilities:
         except (subprocess.SubprocessError, OSError, subprocess.TimeoutExpired):
             return False
 
+    @persistent_cached_property
+    def max_threads(self) -> int:
+        """Compile-time limit on the total number of threads profiled per process.
+
+        The limit is cumulative over the lifetime of the process rather than a
+        cap on concurrency: every thread that is created consumes a slot, and
+        that slot is not reused when the thread exits.
+
+        This is the ``ROCPROFSYS_MAX_THREADS`` CMake constant baked into the
+        binaries at build time. It is queried from
+        ``rocprof-sys-avail --max-threads``
+
+        Returns 0 when the value cannot be determined, so callers degrade
+        gracefully instead of aborting the whole configuration step.
+        """
+        try:
+            result = subprocess.run(
+                [str(self.rocprofsys_avail), "--max-threads"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode != 0:
+                return 0
+        except (subprocess.SubprocessError, OSError):
+            return 0
+        # Must stay in sync with the exact line printed by rocprof-sys-avail's
+        # `--max-threads` action (source/bin/rocprof-sys-avail/avail.cpp).
+        match = re.search(
+            r"total number of threads \(ROCPROFSYS_MAX_THREADS\):\s*(\d+)", result.stdout
+        )
+        return int(match.group(1)) if match else 0
+
     # ---------------------------------------------------------------------------
     # Do NOT make this a persistent_cached_property: the result depends on the
     # per-process --python-versions / --python-root-dirs hints, so it must not be

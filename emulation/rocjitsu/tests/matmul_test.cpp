@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "decode_test_util.h"
 #include "test_paths.h"
 
 #include "embedded_schema.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/executable.h"
-#include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -74,7 +75,7 @@ std::vector<std::unique_ptr<Instruction>> decode_all(const CodeObject &co) {
     size_t words = sec->size() / sizeof(uint32_t);
     size_t pc = 0;
     while (pc < words) {
-      std::unique_ptr<Instruction> inst(decoder->decode(&data[pc]));
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, &data[pc]));
       EXPECT_NE(inst, nullptr);
       ++pc;
       if (inst && inst->size() == 8)

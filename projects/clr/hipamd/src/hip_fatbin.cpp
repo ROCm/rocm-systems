@@ -8,6 +8,7 @@
 #include "hip_fatbin.hpp"
 #include "hip_global.hpp"
 #include <algorithm>
+#include <cstddef>
 #include <unordered_map>
 #include <mutex>
 #include "hip_code_object.hpp"
@@ -231,16 +232,19 @@ static bool UncompressAndPopulateCodeObject(
     bundle_ids.push_back(bis.c_str());
   }
 
-  if (image_bound < sizeof(symbols::ClangOffloadBundleCompressedHeader)) {
+  constexpr size_t kCompressedHeaderSize =
+      offsetof(symbols::ClangOffloadBundleCompressedHeader, compressedBinarydesc);
+  if (image_bound < kCompressedHeaderSize) {
     LogError("Compressed fat binary header is truncated");
     return false;
   }
 
   const auto obheader = reinterpret_cast<const symbols::ClangOffloadBundleCompressedHeader*>(image);
   const size_t size = obheader->totalSize;
-  if (size > image_bound) {
-    LogPrintfError("Rejecting compressed fat binary: totalSize=%llu exceeds image bound=%llu",
+  if (size < kCompressedHeaderSize || size > image_bound) {
+    LogPrintfError("Rejecting compressed fat binary: totalSize=%llu is outside [%llu, %llu]",
                    static_cast<unsigned long long>(size),
+                   static_cast<unsigned long long>(kCompressedHeaderSize),
                    static_cast<unsigned long long>(image_bound));
     return false;
   }
@@ -440,17 +444,13 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     if (fdesc != amd::Os::FDescInit()) amd::Os::CloseFileHandle(fdesc);
   });
 
-  // hipModuleLoadData has no length parameter. For pointer inputs, the remaining
-  // readable mapping is a safety ceiling; file loads have an exact size.
-  size_t image_bound = 0;
+  // Pointer inputs (hipModuleLoadData) carry no length, so no bound is known.
+  // File loads below set the exact size.
+  size_t image_bound = amd::Elf::kUnknownSize;
   if (image_ != nullptr) {
-    if (!amd::Os::FindFileNameFromAddress(image_, &fname_, &foffset_, &image_bound)) {
+    if (!amd::Os::FindFileNameFromAddress(image_, &fname_, &foffset_)) {
       fname_ = std::string("");
       foffset_ = 0;
-    }
-    if (image_bound == 0) {
-      LogError("Cannot determine a readable bound for fat binary input");
-      return hipErrorInvalidImage;
     }
   } else {
     size_t fsize = 0;
@@ -480,9 +480,12 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
       auto elf_size = amd::Elf::getElfSize(image_, image_bound);
       // If we got 0, validation has failed.
       if (elf_size == 0) {
-        LogPrintfError(
-            "Invalid ELF code object: failed size/bounds validation, image bound is: %zu",
-            image_bound);
+        if (image_bound == amd::Elf::kUnknownSize) {
+          LogError("Invalid ELF code object: failed self-consistency validation");
+        } else {
+          LogPrintfError("Invalid ELF code object: failed size/bounds validation, image size: %zu",
+                         image_bound);
+        }
         return hipErrorInvalidImage;
       }
       for (auto* device : devices) {
