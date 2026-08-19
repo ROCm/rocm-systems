@@ -360,7 +360,7 @@ jobs:
           ROCM_PATH="$(rocm-sdk path --root)"
           export ROCM_PATH
           LAUNCHER="${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu"
-          CONFIG="${ROCJITSU_SOURCE_DIR}/configs/gfx1250_cdna5.json"
+          CONFIG="${ROCJITSU_SOURCE_DIR}/configs/gfx1250_mi455x.json"
           HOTSWAP="${ROCJITSU_BUILD_DIR}/lib/rocjitsu/src/rocjitsu/hooks/libhsa_hotswap_rocjitsu.so"
           test -f "${HOTSWAP}"
           # Disable ROCr's built-in mechanism in both legs. Load the branch-built
