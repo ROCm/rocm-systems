@@ -75,10 +75,12 @@ inline constexpr uint8_t kClusterTrapBarrierBit = 4;
 struct FunctionalQuantumResult {
   bool ran = false;
   bool yielded = false;
+  uint64_t iterations = 0;
 
   void merge(const FunctionalQuantumResult &other) {
     ran |= other.ran;
     yielded |= other.yielded;
+    iterations = std::max(iterations, other.iterations);
   }
 };
 
@@ -206,12 +208,14 @@ public:
     // A request left by direct step() execution must not shorten this quantum.
     functional_yield_requested_ = false;
     FunctionalQuantumResult result;
-    for (uint32_t i = 0, quantum = functional_quantum(); i < quantum; ++i) {
+    const uint32_t quantum = debug_active() ? kDebugFunctionalQuantum : functional_quantum();
+    for (uint32_t i = 0; i < quantum; ++i) {
       if (!has_active_wfs())
         break;
       result.ran = true;
       if (!step())
         break;
+      ++result.iterations;
       if (std::exchange(functional_yield_requested_, false)) {
         result.yielded = true;
         break;
@@ -224,6 +228,13 @@ public:
   /// Called from dispatch_wf(), the cpl_ port handler, and single-threaded VM
   /// initialization after engine creation but before simulation workers start.
   virtual void schedule_work() = 0;
+
+  /// @brief Schedule the serial CU driver at an absolute simulation tick.
+  virtual void schedule_work_at(simdojo::Tick tick) = 0;
+
+  /// @brief Retire the serial CU driver and return its next due tick.
+  /// @returns TICK_MAX when no serial driver was scheduled.
+  virtual simdojo::Tick suspend_scheduled_work() = 0;
 
   /// @brief Thread-safe scheduling for debugger resume from an ioctl thread.
   virtual void schedule_work_async() = 0;
@@ -1154,16 +1165,7 @@ public:
       return false;
     }
     if constexpr (Mode == simdojo::ExecMode::FUNCTIONAL) {
-      // A request left by direct step() execution must not shorten this quantum.
-      functional_yield_requested_ = false;
-      last_quantum_executed_ = 0;
-      const uint32_t quantum =
-          debug_active() ? kDebugFunctionalQuantum : this->functional_quantum();
-      for (uint32_t i = 0; i < quantum && step(); ++i) {
-        ++last_quantum_executed_;
-        if (std::exchange(functional_yield_requested_, false))
-          break;
-      }
+      last_quantum_executed_ = this->run_quantum().iterations;
     } else {
       /// @todo: Support CLOCKED pipeline cycle.
     }
@@ -1195,11 +1197,25 @@ public:
     // resident on this CU, so scheduling work for it would spin the engine
     // against a wave that cannot retire an instruction until the debugger
     // resumes it.
+    if (!this->engine())
+      return;
+    auto now = this->engine()->context(this->partition_id()).current_tick();
+    schedule_work_at(now + 1);
+  }
+
+  void schedule_work_at(simdojo::Tick tick) override {
     if (this->pool_driven() || executing_ || !this->engine() || !this->has_runnable_wfs())
       return;
     executing_ = true;
-    auto now = this->engine()->context(this->partition_id()).current_tick();
-    this->schedule_event(&tick_event_, now + 1);
+    schedule_next_tick(tick);
+  }
+
+  simdojo::Tick suspend_scheduled_work() override {
+    const simdojo::Tick tick = scheduled_tick_;
+    scheduled_tick_ = simdojo::TICK_MAX;
+    ++driver_generation_;
+    executing_ = false;
+    return tick;
   }
 
   void schedule_work_async() override {
@@ -1208,6 +1224,13 @@ public:
   }
 
 private:
+  void schedule_next_tick(simdojo::Tick tick) {
+    scheduled_tick_ = tick;
+    const uintptr_t generation = ++driver_generation_;
+    this->schedule_event(&tick_event_, tick,
+                         std::make_unique<simdojo::Message>(simdojo::MessageHeader{}, generation));
+  }
+
   // Reschedule by the number of quantum loop iterations taken, not a fixed
   // kFunctionalQuantum: a wavefront that requests a yield after k<kFunctionalQuantum
   // iterations (e.g. s_sleep, vendor-dep retry) resumes at now+k so a peer
@@ -1216,16 +1239,22 @@ private:
   // step() advances even when every wave is WAITCNT/BARRIER-stalled — so a fully
   // stalled CU still advances by the full quantum. max(1,...) keeps the event
   // strictly in the future so re-entries never collapse onto one tick.
-  simdojo::Event tick_event_{
-      this, simdojo::EventType::TIMER_CALLBACK, [this](simdojo::Tick now, simdojo::Message *) {
-        if (execute_quantum())
-          this->schedule_event(&tick_event_, now + std::max<uint64_t>(1, last_quantum_executed_));
-      }};
+  simdojo::Event tick_event_{this, simdojo::EventType::TIMER_CALLBACK,
+                             [this](simdojo::Tick now, simdojo::Message *message) {
+                               if (!message || message->payload() != driver_generation_)
+                                 return;
+                               scheduled_tick_ = simdojo::TICK_MAX;
+                               if (execute_quantum())
+                                 schedule_next_tick(now +
+                                                    std::max<uint64_t>(1, last_quantum_executed_));
+                             }};
   // Cross-thread debugger resumes first enter this event. Its handler runs on
   // the CU partition and can safely update executing_ through schedule_work().
   simdojo::Event resume_event_{this, simdojo::EventType::TIMER_CALLBACK,
                                [this](simdojo::Tick, simdojo::Message *) { schedule_work(); }};
   uint64_t last_quantum_executed_ = 0;
+  simdojo::Tick scheduled_tick_ = simdojo::TICK_MAX;
+  uintptr_t driver_generation_ = 0;
   bool executing_ = false;
 };
 

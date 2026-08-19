@@ -541,7 +541,11 @@ private:
   void process_queues();
 
   bool has_active_cus() const;
-  FunctionalQuantumResult run_active_cus_once();
+  FunctionalQuantumResult run_active_cus_once(simdojo::Tick now);
+  void refresh_pooled_due_ticks(simdojo::Tick now);
+  simdojo::Tick next_pooled_due_tick(simdojo::Tick now);
+  void arm_dispatch_continuation(simdojo::Tick tick);
+  void cancel_dispatch_continuation();
 
   /// @brief Called from CU on_idle callback. In functional mode with quantum>0,
   /// checks for stalled dispatches that can resume.
@@ -646,6 +650,8 @@ private:
   CpuDispatchPool *shared_dispatch_pool_ = nullptr;
   std::unique_ptr<CpuDispatchPool> local_dispatch_pool_;
   std::vector<ComputeUnitCore *> active_cu_scratch_;
+  std::vector<FunctionalQuantumResult> quantum_result_scratch_;
+  std::unordered_map<ComputeUnitCore *, simdojo::Tick> pooled_due_ticks_;
 
   struct PendingWorkgroupCompletion {
     uint32_t dispatch_id = 0;
@@ -684,6 +690,8 @@ private:
   simdojo::Event doorbell_event_{this, simdojo::EventType::TIMER_CALLBACK};
   simdojo::Event dispatch_continuation_event_{this, simdojo::EventType::TIMER_CALLBACK};
   bool dispatch_continuation_pending_ = false;
+  simdojo::Tick dispatch_continuation_tick_ = simdojo::TICK_MAX;
+  uintptr_t dispatch_continuation_generation_ = 0;
   // Guards changes to the shape of hw_queues_ and new_queue_states_. The
   // dispatch handler holds a shared lock while worker execution temporarily
   // releases hw_queue_mutex_, keeping its vector references stable.

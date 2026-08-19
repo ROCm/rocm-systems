@@ -31,7 +31,8 @@ class CpuDispatchPoolTestAccess;
 /// @details run() distributes one ComputeUnitCore::run_quantum() call per CU
 /// across the calling thread plus up to N-1 workers. Each CU is executed by
 /// exactly one thread per run() (no intra-CU parallelism). run() returns when
-/// all CUs have completed their quantum.
+/// all CUs have completed their quantum. The output-span overload preserves
+/// each CU's result so its owner can schedule the next quantum independently.
 ///
 /// Task hand-out is lock-free: workers and the calling thread claim CUs with a
 /// single atomic fetch_add on @ref next_task_, and signal completion by
@@ -58,10 +59,19 @@ public:
   uint32_t thread_count() const { return static_cast<uint32_t>(workers_.size() + 1); }
 
   FunctionalQuantumResult run(std::span<ComputeUnitCore *> tasks, uint32_t threads) {
+    std::vector<FunctionalQuantumResult> results(tasks.size());
+    return run(tasks, threads, results);
+  }
+
+  FunctionalQuantumResult run(std::span<ComputeUnitCore *> tasks, uint32_t threads,
+                              std::span<FunctionalQuantumResult> results) {
     if (tasks.empty())
       return {};
+    if (results.size() != tasks.size())
+      throw std::invalid_argument("dispatch result count must match task count");
 
     std::lock_guard<std::mutex> run_lock(run_mutex_);
+    std::fill(results.begin(), results.end(), FunctionalQuantumResult{});
 
     threads = std::clamp<uint32_t>(threads, 1, static_cast<uint32_t>(tasks.size()));
     uint32_t worker_goal =
@@ -69,8 +79,10 @@ public:
 
     if (worker_goal == 0) {
       FunctionalQuantumResult result;
-      for (auto *cu : tasks)
-        result.merge(cu->run_quantum());
+      for (size_t i = 0; i < tasks.size(); ++i) {
+        results[i] = tasks[i]->run_quantum();
+        result.merge(results[i]);
+      }
       return result;
     }
 
@@ -78,13 +90,12 @@ public:
       std::lock_guard<std::mutex> lock(mutex_);
       tasks_.assign(tasks.begin(), tasks.end());
       task_data_.store(tasks_.data(), std::memory_order_release);
+      result_data_.store(results.data(), std::memory_order_release);
       task_count_.store(tasks_.size(), std::memory_order_release);
       next_task_.store(0, std::memory_order_relaxed);
       remaining_.store(tasks_.size(), std::memory_order_relaxed);
       worker_tickets_ = worker_goal;
       first_exception_ = nullptr;
-      batch_ran_.store(false, std::memory_order_relaxed);
-      batch_yielded_.store(false, std::memory_order_relaxed);
     }
     for (uint32_t i = 0; i < worker_goal; ++i)
       work_cv_.notify_one();
@@ -97,14 +108,17 @@ public:
     done_cv_.wait(lock, [this]() { return worker_tickets_ == 0 && active_workers_ == 0; });
     task_count_.store(0, std::memory_order_release);
     task_data_.store(nullptr, std::memory_order_release);
+    result_data_.store(nullptr, std::memory_order_release);
     tasks_.clear();
     std::exception_ptr first_exception = first_exception_;
     first_exception_ = nullptr;
     lock.unlock();
     if (first_exception)
       std::rethrow_exception(first_exception);
-    return {batch_ran_.load(std::memory_order_relaxed),
-            batch_yielded_.load(std::memory_order_relaxed)};
+    FunctionalQuantumResult result;
+    for (const auto &task_result : results)
+      result.merge(task_result);
+    return result;
   }
 
 private:
@@ -126,17 +140,14 @@ private:
   /// the thread blocked in run() via done_cv_.
   void drain_tasks() {
     ComputeUnitCore **tasks = task_data_.load(std::memory_order_acquire);
+    FunctionalQuantumResult *results = result_data_.load(std::memory_order_acquire);
     size_t task_count = task_count_.load(std::memory_order_acquire);
     while (true) {
       size_t i = next_task_.fetch_add(1, std::memory_order_relaxed);
       if (i >= task_count)
         return;
       try {
-        auto result = tasks[i]->run_quantum();
-        if (result.ran)
-          batch_ran_.store(true, std::memory_order_relaxed);
-        if (result.yielded)
-          batch_yielded_.store(true, std::memory_order_relaxed);
+        results[i] = tasks[i]->run_quantum();
       } catch (...) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!first_exception_)
@@ -177,11 +188,10 @@ private:
   std::vector<std::jthread> workers_;
   std::vector<ComputeUnitCore *> tasks_;
   std::atomic<ComputeUnitCore **> task_data_ = nullptr;
+  std::atomic<FunctionalQuantumResult *> result_data_ = nullptr;
   std::atomic<size_t> task_count_ = 0;
   std::atomic<size_t> next_task_ = 0;
   std::atomic<size_t> remaining_ = 0;
-  std::atomic<bool> batch_ran_ = false;
-  std::atomic<bool> batch_yielded_ = false;
   // Protected by mutex_; keeps the task vector alive until ticketed workers leave drain_tasks().
   size_t worker_tickets_ = 0;
   size_t active_workers_ = 0;
