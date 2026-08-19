@@ -50,6 +50,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdlib>
+#include <ctime>
 #include <future>
 #include <iomanip>
 #include <iostream>
@@ -880,6 +881,84 @@ print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
   return code_objects_reported;
 }
 
+/* Expand `%' format tokens in a user-specified output path (the --output
+   file name or the --save-code-objects directory).
+
+   Supported tokens:
+     %p   process ID of the application being debugged
+     %h   host name
+     %t   timestamp (seconds since the Epoch) of when the path is expanded
+     %e   short name of the application being debugged
+     %u   real user ID (UID) of the process
+     %g   real group ID (GID) of the process
+     %%   a literal `%' character
+
+   An unrecognized token is left unchanged, including the leading `%'.  */
+std::string
+expand_format_tokens (const std::string &format)
+{
+  std::string result;
+  result.reserve (format.size ());
+
+  for (size_t i = 0; i < format.size (); ++i)
+    {
+      if (format[i] != '%' || i + 1 == format.size ())
+        {
+          result += format[i];
+          continue;
+        }
+
+      switch (format[++i])
+        {
+        case 'p':
+          result += std::to_string (::getpid ());
+          break;
+
+        case 'h':
+          {
+            char hostname[256] = {};
+            if (::gethostname (hostname, sizeof (hostname) - 1) == 0)
+              result += hostname;
+          }
+          break;
+
+        case 't':
+          result
+              += std::to_string (static_cast<long long> (std::time (nullptr)));
+          break;
+
+        case 'e':
+          {
+            std::ifstream comm ("/proc/self/comm");
+            std::string name;
+            if (comm && std::getline (comm, name))
+              result += name;
+          }
+          break;
+
+        case 'u':
+          result += std::to_string (::getuid ());
+          break;
+
+        case 'g':
+          result += std::to_string (::getgid ());
+          break;
+
+        case '%':
+          result += '%';
+          break;
+
+        default:
+          /* Leave unrecognized tokens unchanged.  */
+          result += '%';
+          result += format[i];
+          break;
+        }
+    }
+
+  return result;
+}
+
 void
 print_usage ()
 {
@@ -894,13 +973,16 @@ print_usage ()
                "is not specified, the code objects are saved in"
             << std::endl
             << "                              "
-               "the current directory."
+               "the current directory. DIR may contain the same"
+            << std::endl
+            << "                              "
+               "format tokens as --output (see below)."
             << std::endl;
   std::cerr << "  -c, --load-all-code-objects "
                "Load all code objects as soon as they are loaded"
             << std::endl
-            << "                              "
-            << "by the runtime.";
+            << "                              " << "by the runtime."
+            << std::endl;
   std::cerr << "  -z, --lazy                  "
                "Delay inspecting the content of all loaded code "
             << std::endl
@@ -932,6 +1014,33 @@ print_usage ()
             << std::endl
             << "                              "
                "is redirected to stderr."
+            << std::endl
+            << "                              "
+               "FILE may contain the following format tokens,"
+            << std::endl
+            << "                              "
+               "which are expanded when the file is created:"
+            << std::endl
+            << "                              "
+               "  %p  process ID of the application"
+            << std::endl
+            << "                              "
+               "  %h  host name"
+            << std::endl
+            << "                              "
+               "  %t  timestamp (seconds since the Epoch)"
+            << std::endl
+            << "                              "
+               "  %e  short name of the application"
+            << std::endl
+            << "                              "
+               "  %u  real user ID (UID) of the process"
+            << std::endl
+            << "                              "
+               "  %g  real group ID (GID) of the process"
+            << std::endl
+            << "                              "
+               "  %%  a literal '%' character"
             << std::endl;
   std::cerr << "  -d, --disable-linux-signals "
                "Disable installing a SIGQUIT signal handler, so"
@@ -1755,17 +1864,19 @@ OnLoad (void *table, uint64_t runtime_version, uint64_t failed_tool_count,
         case 's': /* -s or --save-code-objects  */
           if (argument)
             {
+              std::string dir = expand_format_tokens (*argument);
+
               struct stat path_stat;
-              if (stat (argument->c_str (), &path_stat) == -1
+              if (stat (dir.c_str (), &path_stat) == -1
                   || !S_ISDIR (path_stat.st_mode))
                 {
                   std::cerr
                       << "error: Cannot access code object save directory `"
-                      << *argument << "'" << std::endl;
+                      << dir << "'" << std::endl;
                   print_usage ();
                 }
 
-              g_code_objects_dir = *argument;
+              g_code_objects_dir = std::move (dir);
             }
           else
             {
@@ -1777,12 +1888,16 @@ OnLoad (void *table, uint64_t runtime_version, uint64_t failed_tool_count,
           if (!argument)
             print_usage ();
 
-          agent_out.open (*argument);
-          if (!agent_out.is_open ())
-            {
-              std::cerr << "could not open `" << *argument << "'" << std::endl;
-              abort ();
-            }
+          {
+            std::string file_name = expand_format_tokens (*argument);
+            agent_out.open (file_name);
+            if (!agent_out.is_open ())
+              {
+                std::cerr << "could not open `" << file_name << "'"
+                          << std::endl;
+                abort ();
+              }
+          }
           break;
 
         case '?': /* Unrecognized option  */

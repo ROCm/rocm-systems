@@ -26,6 +26,7 @@ test_categories:
       - "ShmMPITest.*"
       - "NetTransportMPITest.*"
       - "NetIbMPITest.*"
+      - "InspectorPromP2pMPITest.*"
       - "ImplicitLaunchOrderMPITest.MultiCommunicatorChain"
       - "UBR_AllReduce.OutOfPlace_MultiNode"
       - "UBR_AllGather.OutOfPlace_MultiNode"

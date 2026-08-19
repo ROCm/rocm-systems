@@ -7,6 +7,7 @@
 
 #ifndef _NCCL_DEVICE_CORE_H_
 #define _NCCL_DEVICE_CORE_H_
+#include <cstddef>
 #include <nccl.h>
 #include "coop.h"
 #include "utility.h"
@@ -192,6 +193,26 @@ struct ncclCommProperties {
   bool hostRmaSupport;
   ncclGinType_t railedGinType;
 };
+
+// Pin ncclCommProperties_t's ABI-sensitive layout at compile time.
+// ncclGinType_t is a plain C enum, so it must stay a full 4-byte `int` --
+// not a fixed-width `uint8_t` -- or the nccl4py Cython binding (which
+// re-declares this struct independently in cynccl.pxd, without including
+// this header) silently misreads every field from ginType onward.
+// See AICOMRCCL-1530 and bindings/nccl4py/tests/test_comm_properties_abi.py,
+// which guards the same layout on the Python/Cython side.
+static_assert(sizeof(ncclGinType_t) == sizeof(int),
+              "ncclGinType_t must remain a plain 4-byte C enum; nccl4py's cynccl.pxd "
+              "binding assumes this size (AICOMRCCL-1530)");
+static_assert(offsetof(ncclCommProperties_t, ginType) == 36,
+              "ncclCommProperties_t.ginType offset changed; update nccl4py's cynccl.pxd "
+              "and bindings/nccl4py/tests/test_comm_properties_abi.py to match");
+static_assert(offsetof(ncclCommProperties_t, railedGinType) == 48,
+              "ncclCommProperties_t.railedGinType offset changed; update nccl4py's "
+              "cynccl.pxd and bindings/nccl4py/tests/test_comm_properties_abi.py to match");
+static_assert(sizeof(ncclCommProperties_t) == 56,
+              "ncclCommProperties_t size changed; update nccl4py's cynccl.pxd and "
+              "bindings/nccl4py/tests/test_comm_properties_abi.py to match");
 
 NCCL_EXTERN_C __host__ ncclResult_t ncclCommQueryProperties(ncclComm_t comm, ncclCommProperties_t* props);
 NCCL_EXTERN_C __host__ ncclResult_t ncclDevCommCreate(ncclComm_t comm, ncclDevCommRequirements_t const* reqs,

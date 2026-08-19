@@ -13,6 +13,7 @@
 /// with EXPECT_EQ (util::set_force_scalar_for_testing flips the gate in-process).
 /// In-process inactive lanes must stay preserved under full and partial EXEC.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -258,7 +259,7 @@ void check(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32_t cl
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_encode(c.opcode, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/257, abs, neg, omod, clamp,
                 words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
     auto out = fx.run(inst, c.kind, exec);
     delete inst;
@@ -346,7 +347,7 @@ void check_f16(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32_
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_encode(c.opcode, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/257, abs, neg, omod, clamp,
                 words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
     auto out = fx.run(inst, c.kind, exec);
     delete inst;

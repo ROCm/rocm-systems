@@ -63,7 +63,9 @@ TEST(ProbeFixture, NopProbeResolvesAndReturns) {
   std::string last_mnemonic;
   size_t w = 0;
   while (w < num_words) {
-    std::unique_ptr<Instruction> inst(decoder->decode(&body[w]));
+    auto decoded = decoder->decode(&body[w]);
+    ASSERT_TRUE(decoded.succeeded());
+    std::unique_ptr<Instruction> inst = std::move(decoded).value();
     ASSERT_NE(inst, nullptr);
     const int size = inst->size();
     ASSERT_TRUE(size == 4 || size == 8) << "unexpected instruction size in probe body";
