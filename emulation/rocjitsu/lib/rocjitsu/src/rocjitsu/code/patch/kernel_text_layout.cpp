@@ -1063,8 +1063,14 @@ TextRelocationResult patch_recovered_builder_fixups(std::vector<uint8_t> &text,
     // direct transfer -- so predicting who needs to stay visible gets it wrong. Widening
     // unconditionally and falling back when it does not fit is both simpler and measurably
     // better: on RCCL it takes the unaccounted-builder count on re-translation from 32 to 0.
+    //
+    // The pair named is the one the builder's own getpc wrote, not the one its consumer reads.
+    // The replacement covers only the delta half and leaves that getpc in place, so any other
+    // pair would be added to whatever it happened to hold. The two coincide for a direct
+    // getpc/add/swappc chain and diverge for a lane-banked dispatcher, which restores the address
+    // into a different pair between the two.
     const size_t replacement_begin = replacement_words.size();
-    if (!append_pc_delta_builder(replacement_words, arch, fixup.source_call_sreg, delta,
+    if (!append_pc_delta_builder(replacement_words, arch, fixup.source_builder_sreg, delta,
                                  /*prefer_literal64=*/true)) {
       return relocation_error(
           fixup.source_call_offset,
@@ -1078,7 +1084,7 @@ TextRelocationResult patch_recovered_builder_fixups(std::vector<uint8_t> &text,
     // something wrong. Widening the range is not available here: the patcher writes in place.
     if ((replacement_words.size() * sizeof(uint32_t)) > recovery_size) {
       replacement_words.resize(replacement_begin);
-      if (!append_pc_delta_builder(replacement_words, arch, fixup.source_call_sreg, delta)) {
+      if (!append_pc_delta_builder(replacement_words, arch, fixup.source_builder_sreg, delta)) {
         return relocation_error(
             fixup.source_call_offset,
             "target ISA cannot encode canonical recovered indirect branch builder",

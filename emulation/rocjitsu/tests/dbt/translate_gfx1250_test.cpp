@@ -13075,6 +13075,7 @@ TEST(BinaryTranslatorE2E, Gfx1250RecoveredBuilderRewriteKeepsTheXcntDrain) {
                            .target_end = 8 * kWord});
   layout.recovered_builder_fixups.push_back({.source_target_offset = 4 * kWord,
                                              .source_call_sreg = kPcSreg,
+                                             .source_builder_sreg = kPcSreg,
                                              .source_requires_xcnt_drain = true,
                                              .target_getpc_offset = 0,
                                              .target_recovery_begin_offset = kWord,
@@ -13110,6 +13111,7 @@ TEST(BinaryTranslatorE2E, Gfx1250RecoveredBuilderRewriteOmitsAnUnneededXcntDrain
                            .target_end = 8 * kWord});
   layout.recovered_builder_fixups.push_back({.source_target_offset = 4 * kWord,
                                              .source_call_sreg = kPcSreg,
+                                             .source_builder_sreg = kPcSreg,
                                              .target_getpc_offset = 0,
                                              .target_recovery_begin_offset = kWord,
                                              .target_recovery_end_offset = 4 * kWord});
@@ -13128,6 +13130,45 @@ TEST(BinaryTranslatorE2E, Gfx1250RecoveredBuilderRewriteOmitsAnUnneededXcntDrain
                                                  kPcSreg, kPcSreg, kLiteral64Operand));
 }
 
+TEST(BinaryTranslatorE2E, Gfx1250RecoveredBuilderRewriteNamesTheBuilderPairNotTheConsumerPair) {
+  // A lane-banked dispatcher builds the callee address in a scratch pair, stashes it through
+  // v_writelane_b32, and restores it into a different pair before the transfer. The rewrite
+  // regenerates only the delta half and leaves the original s_get_pc_i64 in place, so it has to
+  // add into the pair that getpc wrote. Naming the consumer's pair instead would add the delta to
+  // whatever that register happened to hold, leave the stash carrying a bare PC, and pair the
+  // fresh add with an unrelated earlier getpc that the next pass reads as a code address.
+  constexpr uint64_t kWord = sizeof(uint32_t);
+  constexpr uint16_t kBuilderSreg = 4;
+  constexpr uint16_t kConsumerSreg = 56;
+  constexpr uint16_t kLiteral64Operand = 254;
+  std::vector<uint8_t> text(8 * kWord, 0);
+  rocjitsu::KernelTextLayout layout;
+  layout.body_end = text.size();
+  layout.blocks.push_back(
+      {.source_start = 0, .source_end = 4 * kWord, .target_start = 0, .target_end = 4 * kWord});
+  layout.blocks.push_back({.source_start = 4 * kWord,
+                           .source_end = 8 * kWord,
+                           .target_start = 4 * kWord,
+                           .target_end = 8 * kWord});
+  layout.recovered_builder_fixups.push_back({.source_target_offset = 4 * kWord,
+                                             .source_call_sreg = kConsumerSreg,
+                                             .source_builder_sreg = kBuilderSreg,
+                                             .target_getpc_offset = 0,
+                                             .target_recovery_begin_offset = kWord,
+                                             .target_recovery_end_offset = 4 * kWord});
+
+  const auto patched =
+      rocjitsu::patch_recovered_builder_fixups(text, layout, ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_TRUE(patched.ok) << patched.message;
+
+  uint32_t first = 0;
+  std::memcpy(&first, text.data() + kWord, sizeof(first));
+  EXPECT_EQ(first, rocjitsu::build_sop2_encoding(ROCJITSU_CODE_ARCH_CDNA5, cdna5::kSAddNcU64Sop2,
+                                                 kBuilderSreg, kBuilderSreg, kLiteral64Operand));
+  EXPECT_NE(first, rocjitsu::build_sop2_encoding(ROCJITSU_CODE_ARCH_CDNA5, cdna5::kSAddNcU64Sop2,
+                                                 kConsumerSreg, kConsumerSreg, kLiteral64Operand));
+}
+
 TEST(BinaryTranslatorE2E, RecoveredBuilderReuseRejectsDisagreeingXcntDrain) {
   // Only the first consumer of a shared range writes the replacement, so a
   // second consumer that wants different words must not be silently dropped.
@@ -13144,11 +13185,13 @@ TEST(BinaryTranslatorE2E, RecoveredBuilderReuseRejectsDisagreeingXcntDrain) {
                            .target_end = 8 * kWord});
   layout.recovered_builder_fixups.push_back({.source_target_offset = 4 * kWord,
                                              .source_call_sreg = kPcSreg,
+                                             .source_builder_sreg = kPcSreg,
                                              .target_getpc_offset = 0,
                                              .target_recovery_begin_offset = kWord,
                                              .target_recovery_end_offset = 4 * kWord});
   layout.recovered_builder_fixups.push_back({.source_target_offset = 4 * kWord,
                                              .source_call_sreg = kPcSreg,
+                                             .source_builder_sreg = kPcSreg,
                                              .source_requires_xcnt_drain = true,
                                              .target_getpc_offset = 0,
                                              .target_recovery_begin_offset = kWord,

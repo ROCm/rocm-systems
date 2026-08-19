@@ -180,6 +180,16 @@ enum class ScalarSop2Op {
 struct PcValue {
   int64_t offset = 0;
   uint64_t source_getpc_offset = 0;
+  /// @brief Low SGPR of the pair the producing `s_getpc_b64` wrote.
+  ///
+  /// @details Not always the pair the eventual consumer reads. A lane-banked dispatcher builds
+  /// the address in a scratch pair, stashes it through `v_writelane_b32`, and restores it into a
+  /// different pair before the transfer. patch_recovered_builder_fixups regenerates only the add
+  /// half and leaves the original getpc in place, so its replacement has to name this pair:
+  /// naming the consumer's would pair a fresh add against a getpc that writes something else and
+  /// materialize an address derived from an unrelated register. Fully determined by
+  /// source_getpc_offset, so carrying it splits no lattice value that was previously merged.
+  uint16_t source_sreg = 0;
   uint64_t source_recovery_begin_offset = 0;
   uint64_t source_recovery_end_offset = 0;
   /// @brief False once a non-chain instruction was observed inside the recovery
@@ -1197,6 +1207,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
       .source_call_offset = ctx.insts[inst_index]->src_loc(),
       .source_target_offset = static_cast<uint64_t>(value.offset),
       .source_call_sreg = pair_lo,
+      .source_builder_sreg = value.source_sreg,
       .source_is_call = ctx.facts[inst_index].swappc_sdst.has_value(),
       .source_return_sreg = ctx.facts[inst_index].swappc_sdst.value_or(0),
   };
@@ -1800,6 +1811,7 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
       seed_pc_builder(pc_builders, inst.src_loc(), pair_lo);
       state.set_builder(pair_lo, PcValue{.offset = static_cast<int64_t>(next_offset),
                                          .source_getpc_offset = inst.src_loc(),
+                                         .source_sreg = pair_lo,
                                          .source_recovery_begin_offset = next_offset,
                                          .source_recovery_end_offset = next_offset});
       continue;
@@ -2221,7 +2233,22 @@ private:
 // state even when their backing storage is shared, so the bound is
 // conservative. Recovery is optional and fails closed on exhaustion.
 constexpr size_t kRetainedAnalysisUnitBytes = 64;
-constexpr size_t kMaxRetainedAnalysisUnits = size_t{1} << 20;
+// The retained charge scales with block count, not with how many lane stashes an object actually
+// uses: hipTensor's contraction kernels reach ~2.9M units across ~55k blocks and exhausted a 1<<20
+// bound partway through, which abandons lane recovery for the WHOLE object and leaves every
+// s_swap_pc_i64 unrecovered for the by-construction gate to refuse. The charge is deliberately
+// conservative -- states share copy-on-write backing and are billed once per entry/exit/call even
+// when identical -- so the nominal figure overstates real memory several times over. Measured peak
+// RSS across the hipTensor objects this admits is 243 MB, 273 MB, 288 MB and 653 MB for a 3.4 MB
+// input, against the corpus per-object budget of 4096 MiB, and the slowest takes 4.4 s of a 30 s
+// budget. Exhaustion remains fail-closed, so a still larger object loses recovery rather than
+// memory.
+//
+// 1<<24 is a ceiling, not a headroom guess. At 1<<26 the largest hipTensor object in the corpus
+// (8.3 MB) does finish -- but in 552 s and 2.6 GB, against a 30 s per-object budget, and this runs
+// at code-object load time. Refusing that object costs one unrecovered transfer; admitting it would
+// stall the loader for nine minutes. The bound is set where recovery still pays for itself.
+constexpr size_t kMaxRetainedAnalysisUnits = size_t{1} << 24;
 constexpr size_t kMaxCalleeSummaryVariantsPerTarget = 8;
 constexpr size_t kCalleeSummaryCacheEntryUnits =
     1 + (sizeof(CalleeSummaryCacheKey) + sizeof(std::optional<CalleeSummary>) + 3 * sizeof(void *) -
@@ -2805,6 +2832,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         const uint64_t next_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
         builders.set_builder(*facts.getpc_sdst, PcValue{.offset = static_cast<int64_t>(next_offset),
                                                         .source_getpc_offset = inst.src_loc(),
+                                                        .source_sreg = *facts.getpc_sdst,
                                                         .source_recovery_begin_offset = next_offset,
                                                         .source_recovery_end_offset = next_offset});
         continue;
@@ -3365,6 +3393,7 @@ void recover_signed_delta_templates(const AnalysisContext &ctx,
         .offset = static_cast<int64_t>(getpc_next) +
                   static_cast<int64_t>(static_cast<int32_t>(literal)) + 4,
         .source_getpc_offset = getpc_inst.src_loc(),
+        .source_sreg = *pair_lo,
         .source_recovery_begin_offset = getpc_next,
         .source_recovery_end_offset = sub_consumer->recovery_end,
     };
