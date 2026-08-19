@@ -563,16 +563,21 @@ def generate_manifest(
     docker_mounts = dict(workload_config.get("docker_mounts", {}))
     docker_run_opts = workload_config.get("docker_run_options", "")
 
-    # Bind-mount host IB verbs libraries into the container so the userspace
-    # providers match the running kernel's RDMA drivers (e.g. bnxt_re on Ruby).
-    # docker_mounts convention: {container_path: host_path}
+    # Replace the container's rdma-core verbs stack with the host's.
+    # Container ships rdma-core 50 (rdmav34 ABI); Ruby hosts run
+    # rdma-core 61 (rdmav59 ABI).  The ABIs are incompatible so the
+    # entire libibverbs + provider directory must come from the host.
+    # Mount the host's real .so files over the container's symlink
+    # targets so the existing symlinks resolve to the host binaries.
     if cluster_config.get("mount_host_ib_libs"):
-        docker_mounts["/host_ib_libs/libibverbs"] = "/usr/lib64/libibverbs"
-        docker_mounts["/host_ib_libs/libibverbs.so.1"] = "/usr/lib64/libibverbs.so.1"
-        docker_mounts["/host_ib_libs/librdmacm.so.1"] = "/usr/lib64/librdmacm.so.1"
-        docker_mounts["/host_ib_libs/libibumad.so.3"] = "/usr/lib64/libibumad.so.3"
-        docker_run_opts += " -e LD_LIBRARY_PATH=/host_ib_libs:$LD_LIBRARY_PATH"
-        docker_run_opts += " -e LIBIBVERBS_DRIVER_PATH=/host_ib_libs/libibverbs"
+        docker_run_opts += (
+            " -v /usr/lib64/libibverbs.so.1.15.61.0"
+            ":/usr/lib/x86_64-linux-gnu/libibverbs.so.1.14.50.0:ro"
+            " -v /usr/lib64/libibverbs"
+            ":/usr/lib/x86_64-linux-gnu/libibverbs:ro"
+            " -v /usr/lib64/libibumad.so.3.4.61.0"
+            ":/usr/lib/x86_64-linux-gnu/libibumad.so.3.2.50.0:ro"
+        )
 
     slurm_config = {
         "partition": cluster_config.get("slurm_partition", workload_config["slurm_partition"]),
