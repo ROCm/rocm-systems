@@ -70,7 +70,7 @@ inline bool should_skip(std::string_view mn) {
       "s_icache_inv", "s_sendmsghalt", "v_readlane", "v_writelane", "v_readfirstlane", "v_mfma_",
       "v_permlane",   "v_smfma_",      "v_wmma_",    "v_swmmac_",
   };
-  return test_encodings::mnemonic_has_any_prefix(mn, SKIP);
+  return mnemonic_has_any_prefix(mn, SKIP);
 }
 
 /// @brief Build a corpus of decodable instructions from test data.

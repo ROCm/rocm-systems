@@ -1,27 +1,20 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_TESTS_TEST_ENCODINGS_UTIL_H_
-#define ROCJITSU_TESTS_TEST_ENCODINGS_UTIL_H_
+#pragma once
 
 #include <cstddef>
 #include <string_view>
 
-namespace rocjitsu::test_encodings {
+namespace rocjitsu {
 
-inline bool mnemonic_has_prefix(std::string_view mnemonic, std::string_view prefix) {
-  return mnemonic.size() >= prefix.size() && mnemonic.substr(0, prefix.size()) == prefix;
-}
-
-template <size_t N>
+template <std::size_t EncodingCount>
 inline bool mnemonic_has_any_prefix(std::string_view mnemonic,
-                                    const std::string_view (&prefixes)[N]) {
-  for (auto prefix : prefixes)
-    if (mnemonic_has_prefix(mnemonic, prefix))
+                                    const std::string_view (&prefixes)[EncodingCount]) {
+  for (std::string_view prefix : prefixes)
+    if (mnemonic.starts_with(prefix))
       return true;
   return false;
 }
 
-} // namespace rocjitsu::test_encodings
-
-#endif // ROCJITSU_TESTS_TEST_ENCODINGS_UTIL_H_
+} // namespace rocjitsu

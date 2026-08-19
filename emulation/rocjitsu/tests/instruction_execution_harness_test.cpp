@@ -232,7 +232,7 @@ inline bool should_skip_inst(std::string_view mn) {
       "s_setreg",
       "s_rfe",
   };
-  return test_encodings::mnemonic_has_any_prefix(mn, SKIP_PREFIXES);
+  return mnemonic_has_any_prefix(mn, SKIP_PREFIXES);
 }
 
 constexpr std::array<std::string_view, 1> EXPECTED_CDNA_UNIMPLEMENTED = {"s_setvskip"};
