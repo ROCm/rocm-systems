@@ -1,0 +1,106 @@
+# RCCL-specific pre-commit configuration.
+#
+# projects/rccl/ is excluded from the rocm-systems root .pre-commit-config.yaml,
+# so this file (re)declares the shared formatting hooks in addition to the
+# RCCL filename-naming hooks. It is invoked from the repo root, so all paths
+# below are relative to the repo root (projects/rccl/...).
+#
+# - How to use (install as git hook — only runs on staged files):
+#     python3 -m pip install pre-commit
+#     cd <repo-root>
+#     pre-commit install -c projects/rccl/.pre-commit-config.yaml
+#
+# - How to run manually on branch changes only (vs develop):
+#     pre-commit run --config projects/rccl/.pre-commit-config.yaml \
+#       --from-ref develop --to-ref HEAD
+#
+# - How to run on all files (CAUTION: reformats everything):
+#     pre-commit run --all-files --config projects/rccl/.pre-commit-config.yaml
+#
+# How to skip:
+#   git commit --no-verify
+# or
+#   SKIP=clang-format git commit
+
+exclude: |
+  (?x)
+    build/
+    | build-.*/
+    | _build/
+    # vendored NVIDIA third-party headers
+    | projects/rccl/src/include/(nvtx3|nvtxDetail)/
+fail_fast: false
+
+repos:
+  # Generic hygiene hooks are scoped to projects/rccl/ so that even a
+  # --all-files run does not touch other projects in the monorepo.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        files: '^projects/rccl/'
+      - id: end-of-file-fixer
+        files: '^projects/rccl/'
+      - id: check-yaml
+        files: '^projects/rccl/'
+      - id: check-added-large-files
+        files: '^projects/rccl/'
+      # prevent names that break case-insensitive filesystems / Windows
+      - id: check-case-conflict
+        files: '^projects/rccl/'
+      # NOTE: this hook's built-in `files:` regex IS the illegal-name detector,
+      # so we must not override `files:`; scope it with an exclude instead.
+      - id: check-illegal-windows-names
+        exclude: '^(?!projects/rccl/).*'
+
+  # RCCL filename-naming conventions. These are linters (they fail the commit
+  # with a list of offenders) -- they never rename files. pre-commit only
+  # passes staged/changed files, so legacy files are grandfathered until
+  # someone edits them. See projects/rccl/maint/check_filename_style.py.
+  - repo: local
+    hooks:
+      - id: rccl-src-snake-case
+        name: rccl src/ filenames must be snake_case
+        language: python
+        entry: projects/rccl/maint/check_filename_style.py --style snake
+        files: '^projects/rccl/src/.*\.(c|cc|cpp|h|hpp|py|cmake)$'
+      - id: rccl-test-py-snake-case
+        name: rccl test/ python filenames must be snake_case
+        language: python
+        entry: projects/rccl/maint/check_filename_style.py --style snake
+        files: '^projects/rccl/test/.*\.py$'
+      # The test tree is bimodal: the GoogleTest C++ suites use PascalCase,
+      # while python/plugin/tooling subdirs use snake_case. Enforce each on the
+      # directories where it is already the established convention.
+      - id: rccl-test-cpp-pascal-case
+        name: rccl test/ GoogleTest C++ filenames must be PascalCase
+        language: python
+        entry: projects/rccl/maint/check_filename_style.py --style pascal
+        files: '^projects/rccl/test/(ce|common|graph|mem_manager|proxy_trace|transport|latency_profiler)/.*\.(c|cc|cpp|h|hpp)$'
+      - id: rccl-test-cpp-snake-case
+        name: rccl test/ (snake dirs) C++ filenames must be snake_case
+        language: python
+        entry: projects/rccl/maint/check_filename_style.py --style snake
+        files: '^projects/rccl/test/(amdsmi_wrap_test|ext-plugins|gin|host|ir-device|kernel-count|plugin)/.*\.(c|cc|cpp|h|hpp)$'
+
+  # - repo: https://github.com/psf/black
+  #   rev: 26.5.1
+  #   hooks:
+  #     - id: black
+
+  # clang-format: mirrors maint/run-clang-format.sh -- only src/, extensions
+  # cc/cu/cuh/h, and clang-format >= 22. Vendored/generated files within src/
+  # are further excluded by the top-level .clang-format-ignore.
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v22.1.8
+    hooks:
+      - id: clang-format
+        name: clang-format (rccl src/)
+        entry: clang-format -i -style=file
+        files: '^projects/rccl/src/.*\.(cc|cu|cuh|h)$'
+
+  # gersemi: CMake formatter (replaces cmake-format and cmake-lint)
+  # - repo: https://github.com/BlankSpruce/gersemi
+  #   rev: 0.25.1
+  #   hooks:
+  #     - id: gersemi
