@@ -1831,6 +1831,7 @@ class ConSanValidationTest(unittest.TestCase):
                 "hip_moi_reference_cdna4_jakub_matmul"
             ),
         )
+        self.assertEqual(workloads["jakub-attention"]["run_timeout_seconds"], 30)
         self.assertEqual(
             workloads["streamk-arrival"]["fault_families"],
             ("atomic-weaken-order",),
@@ -1959,6 +1960,7 @@ class ConSanValidationTest(unittest.TestCase):
                 "hip_moi_reference_gfx1250_jakub_matmul"
             ),
         )
+        self.assertEqual(workloads["jakub-attention"]["run_timeout_seconds"], 60)
         self.assertEqual(
             workloads["tp1-prefill"]["fault_families"],
             ("barrier-move",),

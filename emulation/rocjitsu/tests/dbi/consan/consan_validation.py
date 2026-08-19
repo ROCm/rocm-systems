@@ -1321,7 +1321,7 @@ def _single_oracle_override(
     }
 
 
-def _jakub_override(target: _NativeGtestTarget) -> dict[str, str]:
+def _jakub_override(target: _NativeGtestTarget) -> dict[str, object]:
     relative_path = _native_gtest_path(
         target,
         "jakub-matmul",
@@ -1345,6 +1345,10 @@ def _jakub_override(target: _NativeGtestTarget) -> dict[str, str]:
             f"{oracle_prefix}/DoubleBufferedLdsK128"
         ),
         "fault_filter": f"{oracle_prefix}/ProducerSkewLdsK128",
+        # Current full-coverage Record/Replay runs all three exact oracles in
+        # roughly 37 seconds under emulation. Keep a bounded deadline without
+        # rejecting the expanded 62-access inventory as a timeout regression.
+        "run_timeout_seconds": 60,
     }
 
 
@@ -1403,7 +1407,7 @@ def _streamk_overrides(
 
 def _native_gtest_overrides(
     target: _NativeGtestTarget,
-) -> dict[str, dict[str, str]]:
+) -> dict[str, dict[str, object]]:
     base = target.executable_family
     matrix = target.matrix_executable_family
     suite = target.suite_family
