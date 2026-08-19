@@ -1,0 +1,68 @@
+# ---------------------------------------------------------------------------
+# Guards amd-smi's vendored copy of the librocdxg ABI against upstream drift.
+#
+# amd-smi mirrors a subset of rocr-runtime's hsakmt headers in
+# include/amd_smi/impl/wsl/rocdxg_abi.h so the normal build needs no path into
+# another project's source tree. librocdxg is dlopen'd and writes into structs
+# amd-smi allocates, so a layout change upstream would corrupt memory rather
+# than fail to compile.
+#
+# This runs on changes to either side, which is the point: drift is introduced
+# by editing the upstream header, and the amd-smi workflows only trigger on
+# projects/amdsmi/**.
+# ---------------------------------------------------------------------------
+
+name: AMDSMI rocdxg ABI
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'projects/amdsmi/include/amd_smi/impl/wsl/rocdxg_abi.h'
+      - 'projects/amdsmi/tests/rocdxg_abi_check/**'
+      - 'projects/rocr-runtime/libhsakmt/include/hsakmt/rocdxg_smi.h'
+      - 'projects/rocr-runtime/libhsakmt/include/hsakmt/hsakmttypes.h'
+      - '.github/workflows/amdsmi-rocdxg-abi.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'projects/amdsmi/include/amd_smi/impl/wsl/rocdxg_abi.h'
+      - 'projects/amdsmi/tests/rocdxg_abi_check/**'
+      - 'projects/rocr-runtime/libhsakmt/include/hsakmt/rocdxg_smi.h'
+      - 'projects/rocr-runtime/libhsakmt/include/hsakmt/hsakmttypes.h'
+      - '.github/workflows/amdsmi-rocdxg-abi.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  rocdxg-abi-check:
+    name: rocdxg ABI drift
+    runs-on: ubuntu-24.04
+
+    steps:
+      # Only the two include trees and the check source are needed; the checks
+      # are static_asserts, so nothing is linked and no dependency is required.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            projects/amdsmi/include
+            projects/amdsmi/tests/rocdxg_abi_check
+            projects/rocr-runtime/libhsakmt/include
+            .github/workflows
+
+      - name: Compare the vendored ABI against upstream
+        run: |
+          g++ -std=c++17 -fsyntax-only \
+            -Iprojects/amdsmi/include \
+            -Iprojects/rocr-runtime/libhsakmt/include \
+            projects/amdsmi/tests/rocdxg_abi_check/rocdxg_abi_check.cc
