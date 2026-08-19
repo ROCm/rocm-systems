@@ -327,7 +327,7 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
         << "hive_id " << gpu.hive_id << "\n"
         << "num_sdma_engines " << gpu.num_sdma_engines << "\n"
         << "num_sdma_xgmi_engines " << gpu.num_sdma_xgmi_engines << "\n"
-        << "num_sdma_queues_per_engine 2\n"
+        << "num_sdma_queues_per_engine " << gpu.num_sdma_queues_per_engine << "\n"
         << "num_cp_queues " << gpu.num_cp_queues << "\n"
         << "max_engine_clk_fcompute " << gpu.max_engine_clk_fcompute << "\n"
         << "max_engine_clk_ccompute 0\n"
@@ -572,6 +572,7 @@ Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t
   gpu.l2_assoc = dev.l2_assoc;
   gpu.num_sdma_engines = dev.num_sdma_engines;
   gpu.num_sdma_xgmi_engines = dev.num_sdma_xgmi_engines;
+  gpu.num_sdma_queues_per_engine = dev.num_sdma_queues_per_engine;
   gpu.num_cp_queues = dev.num_cp_queues;
   gpu.max_engine_clk_fcompute = dev.max_engine_clk_fcompute;
   gpu.num_xcc = num_xcc;
