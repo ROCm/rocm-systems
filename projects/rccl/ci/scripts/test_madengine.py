@@ -563,20 +563,18 @@ def generate_manifest(
     docker_mounts = dict(workload_config.get("docker_mounts", {}))
     docker_run_opts = workload_config.get("docker_run_options", "")
 
-    # Replace the container's rdma-core verbs stack with the host's.
-    # Container ships rdma-core 50 (rdmav34 ABI); Ruby hosts run
-    # rdma-core 61 (rdmav59 ABI).  The ABIs are incompatible so the
-    # entire libibverbs + provider directory must come from the host.
-    # Mount the host's real .so files over the container's symlink
-    # targets so the existing symlinks resolve to the host binaries.
+    # Mount the host's rdma-core stack into the container.
+    # The host's libibverbs has a compiled-in provider search path of
+    # /usr/lib64/libibverbs/ so the providers must appear there.
+    # The library itself replaces the container's copy so the linker
+    # picks it up from the standard search path.
     if cluster_config.get("mount_host_ib_libs"):
         docker_run_opts += (
-            " -v /usr/lib64/libibverbs.so.1.15.61.0"
-            ":/usr/lib/x86_64-linux-gnu/libibverbs.so.1.14.50.0:ro"
-            " -v /usr/lib64/libibverbs"
-            ":/usr/lib/x86_64-linux-gnu/libibverbs:ro"
-            " -v /usr/lib64/libibumad.so.3.4.61.0"
-            ":/usr/lib/x86_64-linux-gnu/libibumad.so.3.2.50.0:ro"
+            " -v /usr/lib64/libibverbs.so.1"
+            ":/usr/lib/x86_64-linux-gnu/libibverbs.so.1:ro"
+            " -v /usr/lib64/libibverbs:/usr/lib64/libibverbs:ro"
+            " -v /usr/lib64/libibumad.so.3"
+            ":/usr/lib/x86_64-linux-gnu/libibumad.so.3:ro"
         )
 
     slurm_config = {
