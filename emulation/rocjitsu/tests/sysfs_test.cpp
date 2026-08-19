@@ -341,6 +341,7 @@ TEST(SysfsTopologyGeometryTest, ArrayCountIsScaledByNumXcc) {
     // so a pair that disagrees reports one part two ways.
     EXPECT_EQ(props["simd_count"], 1216u);
     EXPECT_EQ(props["simd_per_cu"], 4u);
+    EXPECT_EQ(props["num_sdma_queues_per_engine"], 8u);
 
     // What libhsakmt derives from those: NumShaderBanks = array_count /
     // simd_arrays_per_engine, i.e. the node's total shader engines.

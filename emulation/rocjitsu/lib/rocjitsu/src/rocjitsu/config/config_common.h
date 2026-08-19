@@ -98,6 +98,9 @@ inline KfdDeviceConfig kfd_device_from_fb(const fb::KfdDeviceInfo *device) {
   config.num_sdma_engines = device->num_sdma_engines();
   config.num_sdma_xgmi_engines = device->num_sdma_xgmi_engines();
   config.num_sdma_queues_per_engine = device->num_sdma_queues_per_engine();
+  if (config.num_sdma_engines != 0 && config.num_sdma_queues_per_engine == 0)
+    throw std::runtime_error(
+        "KFD device with regular SDMA engines requires nonzero num_sdma_queues_per_engine");
   config.num_cp_queues = device->num_cp_queues();
   config.max_engine_clk_fcompute = device->max_engine_clk_fcompute();
   config.location_id = device->location_id();

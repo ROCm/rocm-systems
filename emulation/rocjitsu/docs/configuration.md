@@ -123,7 +123,9 @@ component ports using pattern expressions with loop variables.
 KFD-mode configs include a `vm.gpu.device` section that defines the
 properties reported through the simulated sysfs topology (GPU ID,
 vendor/device IDs, CU counts, memory sizes, etc.). These must match
-the component hierarchy defined in `topology`.
+the component hierarchy defined in `topology`. A device with one or more
+regular SDMA engines must explicitly set a nonzero
+`num_sdma_queues_per_engine` value.
 
 ## FlatBuffers schema
 

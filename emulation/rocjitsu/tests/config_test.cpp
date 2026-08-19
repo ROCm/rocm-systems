@@ -99,6 +99,7 @@ TEST(ConfigLoaderTest, LoadCdna4Config) {
   // The part exposes 256 active CUs through simd_count but has capacity for 288.
   EXPECT_EQ(soc->num_xcds(), 8u);
   EXPECT_EQ(soc->num_iods(), 2u);
+  EXPECT_EQ(loaded.device.num_sdma_queues_per_engine, 8u);
   auto *xcd = soc->xcd(0);
   EXPECT_EQ(xcd->num_shader_engines(), 4u);
   EXPECT_EQ(xcd->shader_engine(0)->num_compute_units(), 9u);
@@ -160,6 +161,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna4.device.num_shader_arrays_per_engine, 2u);
   EXPECT_EQ(rdna4.device.num_cu_per_sh, 8u);
   EXPECT_EQ(rdna4.device.simd_per_cu, 2u);
+  EXPECT_EQ(rdna4.device.num_sdma_queues_per_engine, 6u);
   EXPECT_EQ(rdna4.device.vram_type, kmd::kAmdgpuVramTypeGddr6);
   EXPECT_EQ(rdna4.device.simd_count, rdna4.device.num_shader_engines *
                                          rdna4.device.num_shader_arrays_per_engine *
@@ -206,6 +208,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna3.device.num_shader_arrays_per_engine, 2u);
   EXPECT_EQ(rdna3.device.num_cu_per_sh, 8u);
   EXPECT_EQ(rdna3.device.simd_per_cu, 2u);
+  EXPECT_EQ(rdna3.device.num_sdma_queues_per_engine, 6u);
   EXPECT_EQ(rdna3.device.vram_type, kmd::kAmdgpuVramTypeGddr6);
   EXPECT_EQ(rdna3.device.simd_count, rdna3.device.num_shader_engines *
                                          rdna3.device.num_shader_arrays_per_engine *
@@ -240,6 +243,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna35.device.num_shader_arrays_per_engine, 2u);
   EXPECT_EQ(rdna35.device.num_cu_per_sh, 8u);
   EXPECT_EQ(rdna35.device.simd_per_cu, 2u);
+  EXPECT_EQ(rdna35.device.num_sdma_queues_per_engine, 2u);
   EXPECT_EQ(rdna35.device.vram_type, kmd::kAmdgpuVramTypeGddr6);
   EXPECT_EQ(rdna35.device.simd_count, rdna35.device.num_shader_engines *
                                           rdna35.device.num_shader_arrays_per_engine *
@@ -338,7 +342,10 @@ TEST(ConfigLoaderTest, DeviceCapabilityFieldsDefaultToAutoCompute) {
     "num_threads": 1,
     "vm": {
       "arch": "cdna3",
-      "gpu": { "device": { "gfx_target_version": 90500 } }
+      "gpu": { "device": {
+        "gfx_target_version": 90500,
+        "num_sdma_queues_per_engine": 8
+      } }
     },
     "topology": {
       "root": {
@@ -377,6 +384,7 @@ TEST(ConfigLoaderTest, DeviceCapabilityFieldsRoundTripFromJson) {
       "arch": "cdna3",
       "gpu": { "device": {
         "gfx_target_version": 90500,
+        "num_sdma_queues_per_engine": 8,
         "capability": 268468354,
         "capability2": 3,
         "debug_prop": 3119
@@ -431,7 +439,8 @@ TEST(ConfigLoaderTest, LoadsDbtOnlyConfigWithoutVmOrTopology) {
           "num_shader_engines": 2,
           "num_shader_arrays_per_engine": 2,
           "num_cu_per_sh": 4,
-          "local_mem_size": 309237645312
+          "local_mem_size": 309237645312,
+          "num_sdma_queues_per_engine": 8
         }
       }
     })");
@@ -455,9 +464,94 @@ TEST(ConfigLoaderTest, LoadsDbtOnlyConfigWithoutVmOrTopology) {
                 dbt.guest_device.num_cu_per_sh * dbt.guest_device.simd_per_cu);
   EXPECT_EQ(dbt.guest_device.num_shader_arrays_per_engine, 2u);
   EXPECT_EQ(dbt.guest_device.local_mem_size, 309237645312ULL);
+  EXPECT_EQ(dbt.guest_device.num_sdma_queues_per_engine, 8u);
   // Revisions default to Unspecified when the config omits them.
   EXPECT_EQ(dbt.guest_revision, config::DbtSiliconRevision::Unspecified);
   EXPECT_EQ(dbt.host_revision, config::DbtSiliconRevision::Unspecified);
+}
+
+TEST(ConfigLoaderTest, RejectsMissingOrZeroSdmaQueuesWhenRegularEnginesArePresent) {
+  const auto missing = write_temp_config(R"({
+      "dbt_guest": {
+        "guest_device": {
+          "num_sdma_engines": 1
+        }
+      }
+    })");
+  const auto zero = write_temp_config(R"({
+      "dbt_guest": {
+        "guest_device": {
+          "num_sdma_engines": 1,
+          "num_sdma_queues_per_engine": 0
+        }
+      }
+    })");
+
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(missing.path()), std::runtime_error);
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(zero.path()), std::runtime_error);
+}
+
+TEST(ConfigLoaderTest, AllowsZeroSdmaQueuesWithoutRegularEngines) {
+  const auto file = write_temp_config(R"({
+      "dbt_guest": {
+        "guest_device": {
+          "num_sdma_engines": 0,
+          "num_sdma_queues_per_engine": 0
+        }
+      }
+    })");
+
+  auto dbt = config::load_dbt_guest_config_from_file(file.path());
+
+  ASSERT_TRUE(dbt.guest_device.present);
+  EXPECT_EQ(dbt.guest_device.num_sdma_engines, 0u);
+  EXPECT_EQ(dbt.guest_device.num_sdma_queues_per_engine, 0u);
+}
+
+TEST(ConfigLoaderTest, ShippedDevicesDeclareSdmaQueues) {
+  unsigned checked = 0;
+  for (const auto &entry : std::filesystem::directory_iterator(CONFIG_DIR_PATH)) {
+    if (entry.path().extension() != ".json")
+      continue;
+
+    const std::string name = entry.path().filename().string();
+    SCOPED_TRACE(name);
+    if (name.rfind("guest_", 0) == 0) {
+      auto dbt = config::load_dbt_guest_config_from_file(entry.path().string());
+      ASSERT_TRUE(dbt.guest_device.present);
+      ASSERT_NE(dbt.guest_device.num_sdma_engines, 0u);
+      EXPECT_NE(dbt.guest_device.num_sdma_queues_per_engine, 0u);
+    } else {
+      auto loaded = config::load_config(entry.path().string(), rocjitsu::kEmbeddedSchema);
+      ASSERT_TRUE(loaded.device.present);
+      ASSERT_NE(loaded.device.num_sdma_engines, 0u);
+      EXPECT_NE(loaded.device.num_sdma_queues_per_engine, 0u);
+    }
+    ++checked;
+  }
+
+  EXPECT_GE(checked, 12u) << "expected every shipped device config to be discovered";
+}
+
+TEST(ConfigLoaderTest, ShippedGfx950GuestsUseCapturedSdmaQueueCount) {
+  unsigned checked = 0;
+  for (const auto &entry : std::filesystem::directory_iterator(CONFIG_DIR_PATH)) {
+    if (entry.path().extension() != ".json" ||
+        entry.path().filename().string().rfind("guest_", 0) != 0)
+      continue;
+
+    auto dbt = config::load_dbt_guest_config_from_file(entry.path().string());
+    if (dbt.guest_isa != "gfx950")
+      continue;
+
+    SCOPED_TRACE(entry.path().filename().string());
+    ASSERT_TRUE(dbt.guest_device.present);
+    EXPECT_EQ(dbt.guest_device.device_id, 30112u);
+    EXPECT_EQ(dbt.guest_device.num_sdma_queues_per_engine, 8u);
+    ++checked;
+  }
+
+  EXPECT_GE(checked, 3u) << "expected every shipped gfx950 guest config to be discovered";
 }
 
 TEST(ConfigLoaderTest, LoadsDbtGuestSiliconRevisions) {
@@ -496,7 +590,8 @@ TEST(ConfigLoaderTest, RejectsDbtGuestDeviceWithInconsistentSimdCount) {
           "simd_count": 1024,
           "num_shader_engines": 4,
           "num_cu_per_sh": 4,
-          "simd_per_cu": 4
+          "simd_per_cu": 4,
+          "num_sdma_queues_per_engine": 8
         }
       }
     })");
@@ -531,7 +626,8 @@ TEST(ConfigLoaderTest, LoadsDbtGuestThroughFullConfigLoader) {
         "num_shader_engines": 2,
         "num_shader_arrays_per_engine": 2,
         "num_cu_per_sh": 4,
-        "local_mem_size": 309237645312
+        "local_mem_size": 309237645312,
+        "num_sdma_queues_per_engine": 8
       }
     },
   )");
