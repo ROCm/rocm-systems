@@ -5,24 +5,31 @@
  ************************************************************************/
 
 #include "EnvVars.hpp"
-#include "CollectiveArgs.hpp"
-#include "ProcessIsolatedTestRunner.hpp"
+
+#include <sys/wait.h>
+#include <unistd.h>
+
+#include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cstdio>
-#include <unistd.h>
-#include <sys/wait.h>
-#include <algorithm>
-#include <iostream>
 #include <sstream>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "CollectiveArgs.hpp"
+#include "ProcessIsolatedTestRunner.hpp"
+
 namespace RcclUnitTesting
 {
   int const UT_SINGLE_PROCESS = (1<<0);
   int const UT_MULTI_PROCESS  = (1<<1);
+
+  // Upper bound on GPUs the unit tests enumerate/sweep over.
+  static constexpr int kMaxDetectedGpus = 16;
+  // A device reports one of these CU counts only when running in CPX (compute-partition) mode.
+  static constexpr int kCpxDeviceCuCounts[] = {20, 38};
 
   // Forward declaration; defined below. Used by the GPU-probe child.
   ncclResult_t busIdToInt64(const char* busId, int64_t* id);
@@ -49,9 +56,9 @@ namespace RcclUnitTesting
     {
       numGpus = 0;
     }
-    if (numGpus > 16)
+    if (numGpus > kMaxDetectedGpus)
     {
-      numGpus = 16;  // matches the cap the caller applies to numDetectedGpus
+      numGpus = kMaxDetectedGpus;  // matches the cap the caller applies to numDetectedGpus
     }
 
     // Arch flags: true only if EVERY visible device matches the 5-char prefix.
@@ -81,9 +88,13 @@ namespace RcclUnitTesting
     int numDeviceCUs = 0;
     if (hipDeviceGetAttribute(&numDeviceCUs, hipDeviceAttributeMultiprocessorCount, 0) == hipSuccess)
     {
-      if (numDeviceCUs == 20 || numDeviceCUs == 38)
+      for (int cuCount : kCpxDeviceCuCounts)
       {
-        isCpx = 1;
+        if (numDeviceCUs == cuCount)
+        {
+          isCpx = 1;
+          break;
+        }
       }
     }
 
@@ -298,7 +309,15 @@ namespace RcclUnitTesting
     {
       DetectGpuInfo(&isCpxMode, &detectedPriority);
     }
-    numDetectedGpus = min(numDetectedGpus, 16);
+    numDetectedGpus = min(numDetectedGpus, kMaxDetectedGpus);
+    // A non-isolated test process detecting zero GPUs means the probe failed (e.g. execv
+    // or HIP error). Proceeding would silently run zero sweep cases and still exit 0, so
+    // fail loudly instead of masking a broken run as green.
+    if (!isIsolatedChild && numDetectedGpus == 0)
+    {
+      TEST_ERROR("GPU detection found 0 devices; aborting to avoid a silently-empty test run");
+      exit(EXIT_FAILURE);
+    }
     // CPX only applies on gfx94 (matches the original getDeviceMode() gating).
     isCpxMode = isCpxMode && isGfx94;
 

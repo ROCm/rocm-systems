@@ -9,6 +9,11 @@
 #include "DeviceDataOps.hpp"
 namespace RcclUnitTesting
 {
+  // Threads per block for the device data-op kernels.
+  static constexpr size_t kDeviceKernelBlockSize = 256;
+  // Default Ut device-data element-count threshold (1Mi) when UT_DEVICE_DATA_MIN_ELEMS is unset.
+  static constexpr long long kDefaultDeviceDataMinElems = (1LL << 20);
+
   // Dispatch a device data-op over the concrete element type for a dtype.
   // ACTION is a statement using template type `T`.
   #define RCCL_UT_DTYPE_DISPATCH(dt, ACTION)                                   \
@@ -51,7 +56,7 @@ namespace RcclUnitTesting
     }
     if (numElements == 0) return TEST_SUCCESS;
     bool const fp8 = (dataType == ncclFloat8e4m3 || dataType == ncclFloat8e5m2);
-    size_t const threads = 256, blocks = (numElements + threads - 1) / threads;
+    size_t const threads = kDeviceKernelBlockSize, blocks = (numElements + threads - 1) / threads;
     if (fp8)
     {
       hipLaunchKernelGGL(FillKernelFp8, dim3(blocks), dim3(threads), 0, 0,
@@ -111,7 +116,7 @@ namespace RcclUnitTesting
 
     bool const fp8    = (dataType == ncclFloat8e4m3 || dataType == ncclFloat8e5m2);
     bool const isE5m2 = (dataType == ncclFloat8e5m2);
-    size_t const threads = 256, blocks = (numElements + threads - 1) / threads;
+    size_t const threads = kDeviceKernelBlockSize, blocks = (numElements + threads - 1) / threads;
     if (fp8)
     {
       hipLaunchKernelGGL(MismatchReduceFp8, dim3(blocks), dim3(threads), 0, 0,
@@ -201,7 +206,7 @@ namespace RcclUnitTesting
     bool const fp8    = (dataType == ncclFloat8e4m3 || dataType == ncclFloat8e5m2);
     bool const isAvg  = (op == ncclAvg);
     int  const tempOp = (op >= ncclAvg ? (int)ncclSum : (int)op);  // avg/custom reduce as sum
-    size_t const threads = 256, blocks = (numElements + threads - 1) / threads;
+    size_t const threads = kDeviceKernelBlockSize, blocks = (numElements + threads - 1) / threads;
     if (fp8)
     {
       hipLaunchKernelGGL(ExpectedReduceFp8, dim3(blocks), dim3(threads), 0, 0,
@@ -360,7 +365,7 @@ namespace RcclUnitTesting
     {
       char const* e = getenv("UT_DEVICE_DATA_MIN_ELEMS");
       long long v = e ? atoll(e) : 0;
-      cached = (v > 0) ? v : (1LL << 20);  // default 1Mi elements
+      cached = (v > 0) ? v : kDefaultDeviceDataMinElems;
     }
     return (size_t)cached;
   }

@@ -7,10 +7,31 @@
 #include "CollectiveArgs.hpp"
 #include "PrepDataFuncs.hpp"
 #include <cstdio>
+#include <cstdlib>
 #include <hip/hip_runtime.h>
 
 namespace RcclUnitTesting
 {
+  // Byte written into expectedGpu[0] by the UT_DEVICE_DATA_FAULT negative control.
+  static constexpr int kDeviceDataFaultByte = 0xFF;
+
+  // Negative control: when UT_DEVICE_DATA_FAULT is set to a non-zero value, corrupt one
+  // expected element so a correct collective output must mismatch (proves device validate
+  // is not a no-op). No-op when the var is unset or "0".
+  static ErrCode MaybeInjectDeviceDataFault(CollectiveArgs& collArgs)
+  {
+    char const* faultEnv = getenv("UT_DEVICE_DATA_FAULT");
+    if (faultEnv != nullptr && atoi(faultEnv) != 0)
+    {
+      CHECK_HIP(hipMemset(collArgs.expectedGpu.ptr, kDeviceDataFaultByte,
+                          DataTypeToBytes(collArgs.dataType)));
+      fprintf(stdout, "[UT][device-data] FAULT injected into expectedGpu[0] (rank %d)\n",
+              collArgs.globalRank);
+      fflush(stdout);
+    }
+    return TEST_SUCCESS;
+  }
+
   ErrCode DefaultPrepareDataFunc(CollectiveArgs &collArgs)
   {
     switch (collArgs.funcType)
@@ -119,6 +140,7 @@ namespace RcclUnitTesting
                                                      collArgs.globalRank, 0));
       CHECK_CALL(collArgs.expectedGpu.FillReducedPatternDevice(collArgs.dataType, collArgs.numInputElements,
                                                                collArgs.totalRanks, collArgs.options.redOp));
+      CHECK_CALL(MaybeInjectDeviceDataFault(collArgs));
       collArgs.expectedOnDevice = true;
       return TEST_SUCCESS;
     }
@@ -296,6 +318,7 @@ namespace RcclUnitTesting
       CHECK_CALL(collArgs.expectedGpu.FillReducedPatternDevice(collArgs.dataType, collArgs.numOutputElements,
                                                                collArgs.totalRanks, collArgs.options.redOp,
                                                                (size_t)collArgs.globalRank * collArgs.numOutputElements));
+      CHECK_CALL(MaybeInjectDeviceDataFault(collArgs));
       collArgs.expectedOnDevice = true;
       return TEST_SUCCESS;
     }
@@ -443,15 +466,7 @@ namespace RcclUnitTesting
         CHECK_CALL(blockDst.FillPatternDevice(collArgs.dataType, elemsPerBlock, rank,
                                               (size_t)collArgs.globalRank * elemsPerBlock));
       }
-      // Negative control (UT_DEVICE_DATA_FAULT=1): corrupt one expected element so a
-      // correct collective output MUST mismatch. Proves device validate is not a no-op.
-      if (getenv("UT_DEVICE_DATA_FAULT"))
-      {
-        CHECK_HIP(hipMemset(collArgs.expectedGpu.ptr, 0xFF, DataTypeToBytes(collArgs.dataType)));
-        fprintf(stdout, "[UT][device-data] FAULT injected into expectedGpu[0] (rank %d)\n",
-                collArgs.globalRank);
-        fflush(stdout);
-      }
+      CHECK_CALL(MaybeInjectDeviceDataFault(collArgs));
       collArgs.expectedOnDevice = true;
       return TEST_SUCCESS;
     }
