@@ -29,11 +29,23 @@ import tempfile
 import types
 import unittest
 
+from common.common import amdsmi_path
+
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-# tests/python/unit/gpu -> repo root is four levels up.
-_REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", "..", ".."))
-_CLI_DIR = os.path.join(_REPO_ROOT, "amdsmi_cli")
+# Source tree: tests/python/unit/gpu -> repo root is four levels up.
+_SRC_CLI_DIR = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", "..", "..", "amdsmi_cli"))
+# Installed tree: <rocm>/share/amd_smi/amdsmi -> <rocm>/libexec/amdsmi_cli.
+_INSTALLED_CLI_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(amdsmi_path)), "libexec", "amdsmi_cli"
+)
+# Prefer the source copy when present so a source-tree run tests local edits;
+# otherwise fall back to the installed CLI (how the suite runs in CI).
+_CLI_DIR = (
+    _SRC_CLI_DIR
+    if os.path.isfile(os.path.join(_SRC_CLI_DIR, "subcommands", "ras.py"))
+    else _INSTALLED_CLI_DIR
+)
 _RAS_SRC = os.path.join(_CLI_DIR, "subcommands", "ras.py")
 
 # Modules imported (directly or transitively) when the source CLI loads against
@@ -317,7 +329,3 @@ class TestCliRasCperJson(unittest.TestCase):
 
         self.assertEqual(captured.strip(), "[]")
         self.assertEqual(json.loads(captured), [])
-
-
-if __name__ == "__main__":
-    unittest.main()
