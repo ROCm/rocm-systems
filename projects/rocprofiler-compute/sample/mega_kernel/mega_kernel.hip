@@ -1739,14 +1739,14 @@ __device__ void test_vmem_operations([[maybe_unused]] float* global_ptr,
     bool tex_store_passed = true;
     if (tex_obj != 0 && buffer_size > 0) {
         int idx = tid % buffer_size;
-        float fetched = tex1Dfetch<float>(tex_obj, idx);
+        float fetched = tex1D<float>(tex_obj, static_cast<float>(idx));
         tex_load_passed = (fabsf(fetched - (float)idx) < 0.001f);
     }
 
     if (surf_obj != 0 && buffer_size > 0) {
         int idx = tid % buffer_size;
         float store_val = (float)tid + 1000.0f;
-        surf1Dwrite(store_val, surf_obj, idx);
+        surf1Dwrite(store_val, surf_obj, idx * sizeof(float));
         tex_store_passed = true;
     }
 #endif

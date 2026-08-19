@@ -492,20 +492,26 @@ main(int argc, char** argv)
     HIP_CHECK(hipMemset(d_tdm_dst, 0, TDM_SIZE * sizeof(int)));
 
     // Create texture and surface objects for gfx115x to exercise
-    // INSTS_TEX_LOAD (tex1Dfetch) and INSTS_TEX_STORE (surf1Dwrite).
+    // INSTS_TEX_LOAD (tex1D) and INSTS_TEX_STORE (surf1Dwrite).
     hipTextureObject_t tex_obj       = 0;
     hipSurfaceObject_t surf_obj      = 0;
-    float*             d_surf_buffer = nullptr;
+    hipArray_t         tex_array     = nullptr;
+    hipArray_t         surf_array    = nullptr;
     if(g_arch_type == 6)
     {
-        hipResourceDesc resDesc;
-        memset(&resDesc, 0, sizeof(resDesc));
-        resDesc.resType                = hipResourceTypeLinear;
-        resDesc.res.linear.sizeInBytes = BUFFER_SIZE * sizeof(float);
-        resDesc.res.linear.desc =
+        const hipChannelFormatDesc channel_desc =
             hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
+        HIP_CHECK(hipMallocArray(&tex_array, &channel_desc, BUFFER_SIZE));
+        HIP_CHECK(hipMemcpyToArray(tex_array,
+                                   0,
+                                   0,
+                                   h_input,
+                                   BUFFER_SIZE * sizeof(float),
+                                   hipMemcpyHostToDevice));
 
-        resDesc.res.linear.devPtr = d_input;
+        hipResourceDesc resDesc{};
+        resDesc.resType         = hipResourceTypeArray;
+        resDesc.res.array.array = tex_array;
         hipTextureDesc texDesc;
         memset(&texDesc, 0, sizeof(texDesc));
         texDesc.normalizedCoords = 0;
@@ -513,9 +519,12 @@ main(int argc, char** argv)
         texDesc.addressMode[0]   = hipAddressModeClamp;
         HIP_CHECK(hipCreateTextureObject(&tex_obj, &resDesc, &texDesc, nullptr));
 
-        HIP_CHECK(hipMalloc(&d_surf_buffer, BUFFER_SIZE * sizeof(float)));
-        HIP_CHECK(hipMemset(d_surf_buffer, 0, BUFFER_SIZE * sizeof(float)));
-        resDesc.res.linear.devPtr = d_surf_buffer;
+        HIP_CHECK(hipMallocArray(&surf_array,
+                                 &channel_desc,
+                                 BUFFER_SIZE,
+                                 0,
+                                 hipArraySurfaceLoadStore));
+        resDesc.res.array.array = surf_array;
         HIP_CHECK(hipCreateSurfaceObject(&surf_obj, &resDesc));
     }
 
@@ -608,9 +617,13 @@ main(int argc, char** argv)
     {
         HIP_CHECK(hipDestroySurfaceObject(surf_obj));
     }
-    if(d_surf_buffer != nullptr)
+    if(tex_array != nullptr)
     {
-        HIP_CHECK(hipFree(d_surf_buffer));
+        HIP_CHECK(hipFreeArray(tex_array));
+    }
+    if(surf_array != nullptr)
+    {
+        HIP_CHECK(hipFreeArray(surf_array));
     }
 
     // Copy results back
@@ -755,7 +768,7 @@ main(int argc, char** argv)
                       h_results.vmem_scratch_passed);
     print_test_result("LDS Operations (ds_read_b32/ds_write_b32)",
                       h_results.vmem_lds_passed);
-    print_test_result("Texture Load (tex1Dfetch / INSTS_TEX_LOAD)",
+    print_test_result("Texture Load (tex1D / INSTS_TEX_LOAD)",
                       h_results.vmem_tex_load_passed);
     print_test_result("Texture Store (surf1Dwrite / INSTS_TEX_STORE)",
                       h_results.vmem_tex_store_passed);
