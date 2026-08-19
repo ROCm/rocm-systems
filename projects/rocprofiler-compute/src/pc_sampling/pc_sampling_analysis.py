@@ -7,7 +7,9 @@ Helpers for building a normalized PC sampling dataframe from a parsed
 ``rocprofiler-sdk-tool[0]`` dict.
 """
 
-from typing import Any, NamedTuple, Optional
+from decimal import Decimal, InvalidOperation
+from functools import partial
+from typing import Any, Mapping, NamedTuple, Optional
 
 import pandas as pd
 
@@ -37,6 +39,8 @@ NORMALIZED_RECORD_COLUMNS = [
     "dispatch_id",
     "kernel_id",
     "wave_issued",
+    "exec_mask",
+    "wave_cnt",
     "stall_reason",
     "inst_type",
 ]
@@ -56,6 +60,8 @@ class InstructionLineRecord(NamedTuple):
     stall_count: Optional[int]
     stall_reasons: dict[str, int]
     inst_types: dict[str, int]
+    active_thread_percent: Optional[float] = None
+    wave_occupancy_percent: Optional[float] = None
 
 
 class CodeObjectRecord(NamedTuple):
@@ -111,16 +117,25 @@ def load_pc_sample_records(tool_data: dict[str, Any]) -> pd.DataFrame:
             "dispatch_id": dispatch_id,
             "kernel_id": dispatch_to_kernel_id.get(dispatch_id),
             "wave_issued": record.get("wave_issued"),
+            "exec_mask": record.get("exec_mask"),
+            "wave_cnt": record.get("wave_cnt"),
             "stall_reason": record.get("snapshot", {}).get("stall_reason"),
             "inst_type": record.get("inst_type"),
         })
 
-    return pd.DataFrame(rows, columns=NORMALIZED_RECORD_COLUMNS)
+    records_df = pd.DataFrame(rows, columns=NORMALIZED_RECORD_COLUMNS)
+    if not records_df.empty:
+        records_df["exec_mask"] = pd.Series(
+            [row["exec_mask"] for row in rows], dtype=object
+        )
+    return records_df
 
 
 def aggregate_pc_sample_records(
     records_df: pd.DataFrame,
     group_by: list[str],
+    *,
+    sys_info: Optional[Mapping[str, Any]] = None,
 ) -> pd.DataFrame:
     """Group normalized records into per-group counts, stall reasons, inst types."""
     # inst_index and kernel_id are constant within a group; carry the first when
@@ -137,16 +152,31 @@ def aggregate_pc_sample_records(
                 "count_stalled",
                 "stall_reason",
                 "inst_type",
+                "active_thread_percent",
+                "wave_occupancy_percent",
                 *carried,
             ]
         )
 
+    wave_size = _coerce_machine_spec_int(sys_info, "wave_size")
+    max_waves_per_cu = _coerce_machine_spec_int(sys_info, "max_waves_per_cu")
     aggregations = {
         "count": ("inst_index", "size"),
         "count_issued": ("wave_issued", _aggregate_count_issued),
         "count_stalled": ("wave_issued", _aggregate_count_stalled),
         "stall_reason": ("stall_reason", _aggregate_stall_reason),
         "inst_type": ("inst_type", _aggregate_inst_type),
+        "active_thread_percent": (
+            "exec_mask",
+            partial(_aggregate_active_thread_percent, wave_size=wave_size),
+        ),
+        "wave_occupancy_percent": (
+            "wave_cnt",
+            partial(
+                _aggregate_wave_occupancy_percent,
+                max_waves_per_cu=max_waves_per_cu,
+            ),
+        ),
     }
     for column in carried:
         aggregations[column] = (column, "first")
@@ -194,7 +224,11 @@ def enrich_with_metadata(
     return df
 
 
-def load_aggregated_pc_sampling(tool_data: dict[str, Any]) -> list[CodeObjectRecord]:
+def load_aggregated_pc_sampling(
+    tool_data: dict[str, Any],
+    *,
+    sys_info: Optional[Mapping[str, Any]] = None,
+) -> list[CodeObjectRecord]:
     """Build the normalized code-object tree the analysis DB inserts.
 
     Runs load -> aggregate -> enrich, grouping samples by
@@ -205,6 +239,7 @@ def load_aggregated_pc_sampling(tool_data: dict[str, Any]) -> list[CodeObjectRec
     aggregated_df = aggregate_pc_sample_records(
         records_df,
         group_by=["code_object_id", "code_object_offset", "kernel_id"],
+        sys_info=sys_info,
     )
     aggregated_df = enrich_with_metadata(
         aggregated_df,
@@ -244,7 +279,61 @@ def _to_instruction_line_record(row: Any) -> InstructionLineRecord:  # noqa: ANN
         stall_count=None if pd.isna(row.count_stalled) else int(row.count_stalled),
         stall_reasons={} if pd.isna(row.stall_reason) else row.stall_reason,
         inst_types={} if pd.isna(row.inst_type) else row.inst_type,
+        active_thread_percent=(
+            None
+            if pd.isna(row.active_thread_percent)
+            else float(row.active_thread_percent)
+        ),
+        wave_occupancy_percent=(
+            None
+            if pd.isna(row.wave_occupancy_percent)
+            else float(row.wave_occupancy_percent)
+        ),
     )
+
+
+def _coerce_machine_spec_int(
+    sys_info: Optional[Mapping[str, Any]],
+    key: str,
+) -> Optional[int]:
+    """Return a positive integer machine specification when usable."""
+    if sys_info is None:
+        return None
+
+    try:
+        value = Decimal(str(sys_info.get(key)))
+    except (InvalidOperation, ValueError):
+        return None
+    if not value.is_finite() or value != value.to_integral_value() or value <= 0:
+        return None
+    return int(value)
+
+
+def _aggregate_active_thread_percent(
+    exec_masks: pd.Series,
+    *,
+    wave_size: Optional[int],
+) -> Optional[float]:
+    """Return the mean active-lane percentage for present execution masks."""
+    present = exec_masks.dropna()
+    if present.empty or wave_size is None:
+        return None
+
+    population_count = sum(bin(exec_mask).count("1") for exec_mask in present)
+    return float(population_count / len(present) / wave_size * 100)
+
+
+def _aggregate_wave_occupancy_percent(
+    wave_counts: pd.Series,
+    *,
+    max_waves_per_cu: Optional[int],
+) -> Optional[float]:
+    """Return mean resident-wave occupancy for present wave counts."""
+    present = wave_counts.dropna()
+    if present.empty or max_waves_per_cu is None:
+        return None
+
+    return float(sum(present) / len(present) / max_waves_per_cu * 100)
 
 
 def _aggregate_count_issued(wave_issued: pd.Series) -> Optional[int]:
