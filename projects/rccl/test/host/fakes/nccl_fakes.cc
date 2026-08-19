@@ -413,6 +413,16 @@ ncclResult_t ncclCommWindowDeregister(ncclComm_t, ncclWindow_t) { return ncclSuc
 ncclResult_t ncclGroupStartInternal() { return ncclSuccess; }
 ncclResult_t ncclGroupEndInternal(ncclSimInfo_t*) { return ncclSuccess; }
 
+// Thread-local group globals. These pair with ncclGroupStart/EndInternal above
+// and are referenced by production TUs (e.g. dev_runtime.cc) that any host-only
+// micro-test #includes whole. Definitions live here so individual targets need
+// not re-declare them. Not p2p-specific, but harmless to any binary that links
+// nccl_fakes.cc without referencing them (unused symbols).
+thread_local int              ncclGroupDepth = 0;
+thread_local ncclResult_t     ncclGroupError = ncclSuccess;
+thread_local struct ncclComm* ncclGroupCommHead[ncclGroupTaskTypeNum] = {};
+thread_local int              ncclGroupBlocking = 0;
+
 // ---------------------------------------------------------------------------
 // Reset
 // ---------------------------------------------------------------------------

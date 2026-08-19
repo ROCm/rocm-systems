@@ -5,9 +5,11 @@
  *
  * This translation unit #includes the (hipified) dev_runtime.cc source
  * directly so it can reach the file-static symMemory* helpers. It links no
- * librccl.so; every dependency the source references is satisfied by no-op
- * stubs in DevRuntimeTestsStubs.cc (including host-memory fakes for the HIP
- * VMM driver API).
+ * librccl.so; every dependency the source references is satisfied by the
+ * shared test/host/fakes/ layer. The HIP VMM driver API is driven through the
+ * controllable seams in hip_fakes.cc; each fixture opts into the
+ * host-memory-backed profile via InstallHostBackedVmm() so symMemoryObtain /
+ * ncclDevrFinalize run to completion on a plain CPU.
  *************************************************************************/
 
 #include DEV_RUNTIME_CC_PATH
@@ -15,6 +17,8 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+
+#include "hip_fakes.h"  // InstallHostBackedVmm / ResetHipFakes
 
 // Build the smallest ncclComm/ncclDevrState that symMemoryObtain will accept:
 // a single-rank, single-LSA-team comm with GIN and RMA proxy disabled.
@@ -27,6 +31,9 @@ protected:
   void SetUp() override {
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
+
+    ResetHipFakes();
+    InstallHostBackedVmm();
 
     comm->nRanks = 1;
     comm->rank = 0;
@@ -85,6 +92,9 @@ protected:
   void SetUp() override {
     commStorage = std::make_unique<ncclComm>();
     comm = commStorage.get();
+
+    ResetHipFakes();
+    InstallHostBackedVmm();
 
     comm->nRanks = 1;
     comm->rank = 0;
