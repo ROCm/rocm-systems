@@ -5,12 +5,10 @@
  ************************************************************************/
 
 // Host-side tests for the per-architecture P2P channel defaults resolved by
-// ncclTopoComputeP2pChannels (src/graph/paths.cc). These assert the same values the
-// "P2P channel defaults" INFO line prints at init, so the log and the expectations
-// cannot drift:
+// ncclTopoComputeP2pChannels (src/graph/paths.cc):
 //
 //   gfx942 / gfx950 -> 4 * CHANNEL_LIMIT (64)
-//   gfx1250         -> MAXCHANNELS (256)
+//   gfx1250         -> MAXCHANNELS
 //
 // and that setting NCCL_MAX_P2P_NCHANNELS is what moves the bound off that default.
 //

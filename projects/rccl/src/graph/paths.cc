@@ -1320,12 +1320,6 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
             IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950"))
           comm->p2pnChannels = std::min(comm->p2pnChannels, 16);
       }
-      // Trace which bound decided the P2P pool. Note p2pnChannels is rounded up to a
-      // power of two, so a non-pow2 NCCL_MAX_P2P_NCHANNELS lands on the next pow2.
-      INFO(NCCL_INIT | NCCL_TUNING,
-           "P2P channel defaults %s: defaultMax %d, NCCL_MAX_P2P_NCHANNELS %s (%d) -> upper %d, p2pnChannels %d",
-           comm->topo->nodes[GPU].nodes[0].gpu.gcn, defaultMax, userSetMaxP2p ? "set" : "unset", userMaxP2p, upper,
-           comm->p2pnChannels);
     }
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, MAXCHANNELS);
   }
@@ -1342,9 +1336,6 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
          "RCCL_SATURATE_P2P_NCHANNELS: p2pnChannelsPerPeer %d -> %d (p2pnChannels=%d, nRanks=%d)",
          comm->p2pnChannelsPerPeer, newPpp, comm->p2pnChannels, comm->nRanks);
     comm->p2pnChannelsPerPeer = newPpp;
-  } else {
-    INFO(NCCL_INIT | NCCL_TUNING, "RCCL_SATURATE_P2P_NCHANNELS off: p2pnChannelsPerPeer stays %d",
-         comm->p2pnChannelsPerPeer);
   }
   if (comm->nNodes > 1 && comm->config.nChannelsPerNetPeer == NCCL_CONFIG_UNDEF_INT) {
     // In the case of >1 NVLD (and the user didn't set nChannelsPerNetPeer), the network is the bottleneck.

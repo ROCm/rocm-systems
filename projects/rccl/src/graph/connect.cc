@@ -1057,7 +1057,6 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   int minNchannels, maxNchannels;
   int duplicateCount = 1;
   int channelMultiplier = 1;
-  int ncRequested = 0;
 #ifdef ENABLE_WARP_SPEED
   int adjustedMaxNchannels = (int)ncclMaxNchannels(); // has to add it here to avoid GOTO fail label error
   bool userUpdatedMaxChannels = adjustedMaxNchannels != MAXCHANNELS;
@@ -1203,7 +1202,6 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
     }
   }
   // Get number of channels after duplication
-  ncRequested = nc;
 #ifdef ENABLE_WARP_SPEED
   channelMultiplier = comm->warpSpeedChannelMultiplier = wsEnabled ? rcclGetMaxWarpsPerBlock(comm) : 1;
   if (wsEnabled) {
@@ -1223,13 +1221,6 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   nc = std::min(maxNchannels / comm->nChannels, nc);
   nc *= comm->nChannels;
 #endif
-  // Trace which bound actually decided the channel count: the per-arch request, the CU
-  // count, NCCL_MAX_NCHANNELS or maxCTAs. Expected default on gfx1250 is the full pool.
-  INFO(NCCL_INIT | NCCL_TUNING,
-       "Channel defaults %s: requested %d x %d graph channels, cu %d, MAXCHANNELS %d, NCCL_MAX_NCHANNELS %d, maxCTAs "
-       "%d -> maxChannels %d, nc %d",
-       comm->topo->nodes[GPU].nodes[0].gpu.gcn, ncRequested, comm->nChannels, comm->topo->nodes[GPU].nodes[0].gpu.cu,
-       (int)MAXCHANNELS, (int)ncclMaxNchannels(), comm->config.maxCTAs, maxChannels, nc);
   // Set ring prev/next for my rank
   for (int c = 0; c < nChannels; c++) {
     struct ncclChannel* channel0 = comm->channels + c;
