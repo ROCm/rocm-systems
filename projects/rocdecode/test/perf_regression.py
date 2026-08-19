@@ -106,7 +106,16 @@ def check_rocm():
 
 
 def _run(cmd, **kw):
-    return subprocess.run(cmd, capture_output=True, text=True, **kw)
+    """Run a command, capturing output. Surface non-zero exits (with stderr) so
+    silent tool/decoder failures are visible; callers that treat failure as fatal
+    can still inspect the returned CompletedProcess.returncode."""
+    result = subprocess.run(cmd, capture_output=True, text=True, **kw)
+    if result.returncode != 0:
+        print(f"    WARNING: command failed (exit {result.returncode}): {cmd[0]}",
+              file=sys.stderr)
+        if result.stderr:
+            print(result.stderr.strip(), file=sys.stderr)
+    return result
 
 
 def detect_gpu():
