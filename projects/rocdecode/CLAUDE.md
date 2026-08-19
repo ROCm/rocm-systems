@@ -110,3 +110,21 @@ rules:
 - **Don't repeat.** If `/validate` has already been run, or the developer has declined the
   offer this session, don't ask again unless further source changes are made afterward.
 - **Let the developer decide.** If they decline, proceed without running it.
+
+## Performance regression checking
+
+The `/perf-check` skill measures decode FPS with the `videoDecodePerf` sample and compares
+it against a GPU-specific baseline to catch performance regressions. Unlike `/validate`,
+this is **on-demand** (run it when a change could affect decode throughput) — not a soft
+prompt after every change — because it needs perf streams and an internal baseline that not
+every environment has.
+
+- It detects the local GPU (`amd-smi`/`rocm-smi`/KFD) and maps it to the matching baseline
+  column (`MI250X`, `MI300X`, `MI300A`, `MI350`, `MI355`, `Navi31`, `Navi48`).
+- Streams and the baseline (`rocDecode_perf_baseline.html`, downloaded from the internal
+  SharePoint site) are located via `ROCDECODE_PERF_DIR` (default `$HOME/rocDecodePerformance`).
+  A stream is a regression if its Avg FPS is >5% below baseline (`ROCDECODE_PERF_TOLERANCE`).
+- `/perf-check` runs the full sweep; `/perf-check quick` measures one stream per leaf
+  subfolder capped at ≤4K for a faster sanity check. Each run reports its own elapsed time.
+
+See `test/README.md` for details.
