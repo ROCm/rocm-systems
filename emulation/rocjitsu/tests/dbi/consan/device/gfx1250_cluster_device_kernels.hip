@@ -38,15 +38,25 @@ __device__ __forceinline__ uint32_t load_lds_word(volatile uint32_t *address) {
 
 template <bool Synchronize> __device__ __forceinline__ void cluster_barrier() {
   if constexpr (Synchronize) {
+    // A cluster barrier records one arrival per workgroup. Synchronize the
+    // waves locally so that the wave which arrives for the workgroup cannot
+    // publish that arrival ahead of another wave's LDS accesses.
+    __syncthreads();
     // Cluster barrier id -3. Keep the architectural instructions visible
     // rather than relying on a compiler builtin or host-side mnemonic check.
     asm volatile(".long 0xbe804ec3\n\t" // s_barrier_signal -3
                  ".long 0xbf94fffd\n\t" // s_barrier_wait -3
                  RJ_CONSAN_GFX1250_CLUSTER_CAVE ::
                      : "memory");
+    __syncthreads();
   } else {
     asm volatile(RJ_CONSAN_GFX1250_CLUSTER_CAVE ::: "memory");
   }
+}
+
+template <bool Synchronize> __device__ __forceinline__ void publish_lds_writes() {
+  if constexpr (Synchronize)
+    asm volatile("s_wait_dscnt 0" ::: "memory");
 }
 
 template <bool Synchronize>
@@ -57,6 +67,7 @@ __device__ void local_cluster_publication(uint32_t *observed, uint32_t *control,
   const uint32_t group = blockIdx.x;
   if (tid == 0)
     store_lds_word(&payload, marker_base | group);
+  publish_lds_writes<Synchronize>();
   cluster_barrier<Synchronize>();
   if (tid == 32)
     observed[group] = load_lds_word(&payload);
@@ -74,6 +85,8 @@ __device__ __forceinline__ void cluster_load_async_b32(uint32_t lds_address, uin
 }
 
 __device__ __forceinline__ void wait_async_loads() {
+  // Direct-to-LDS cluster loads retire on ASYNCCNT. Drain it before consuming
+  // the newly populated LDS words.
   asm volatile("s_wait_asynccnt 0\n\t" RJ_CONSAN_GFX1250_CLUSTER_CAVE ::: "memory");
 }
 
@@ -98,6 +111,7 @@ __device__ void tdm_publication(const uint32_t *input, uint32_t *observed, uint3
   }
   if (tid == 0u)
     store_lds_word(&publication, 0x7d000000u | group);
+  publish_lds_writes<Synchronize>();
   cluster_barrier<Synchronize>();
   uint32_t control_value = (multicast ? 0x5c000000u : 0x5d000000u) | (group << 8u) | tid;
   if (tid == 32u) {
