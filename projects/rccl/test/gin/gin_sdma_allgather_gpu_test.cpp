@@ -19,9 +19,13 @@
 //
 // The addressing kernel below is the pointer-arithmetic core of AllGatherLsaDirect
 // with the GIN window peer pointers replaced by plain device buffers, so it needs
-// neither librccl nor a GIN communicator and runs on any single GPU. The full
-// GIN put/signal path and end-to-end datacheck are covered separately by
-// all_gather_perf -D 3 in gin-sdma-ag-test.bash.
+// neither librccl nor a GIN communicator and runs on any single GPU. Crucially it
+// derives the per-rank recv-slice offset from the SAME shared helper the production
+// kernel uses (gin_sdma_allgather::allGatherRecvSliceOffset), so a wrong slice
+// formula now breaks this test rather than only being self-consistent. What it does
+// NOT cover is the GIN window resolution itself (ncclGetLsaPointer / recvoffset),
+// which needs a live communicator; the full GIN put/signal path and end-to-end
+// datacheck are covered separately by all_gather_perf -D 3 in gin-sdma-ag-test.bash.
 //
 // Requires a visible GPU at run time; skips cleanly (GTEST_SKIP) otherwise, so it
 // carries a "gpu" label alongside "unit".
@@ -118,8 +122,9 @@ __global__ void agLsaDirectSimKernel(const T* send, T* recv, int nRanks, size_t 
   for (size_t w = tid; w < total; w += nthreads) {
     const int r = (int)(w / count);
     const size_t i = w % count;
-    const size_t dstOff = (size_t)r * count;
-    const T value = send[r * count + i];
+    // Shared with production AllGatherLsaDirect: rank r's slice within each peer.
+    const size_t dstOff = gin_sdma_allgather::allGatherRecvSliceOffset(r, count);
+    const T value = send[dstOff + i];
     for (int lp = 0; lp < nRanks; ++lp) {
       T* dst = recv + (size_t)lp * total + dstOff;
       dst[i] = value;

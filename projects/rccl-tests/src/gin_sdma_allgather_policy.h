@@ -96,17 +96,44 @@ static constexpr size_t kAllGatherCtasUnset = (size_t)-1;
 //     puts (the copy engines move the bytes), so extra CTAs are pure barrier/signal
 //     overhead -- FEW CTAs win (V=32 costs ~13% at 8 MiB, ~18% at 2 MiB vs V=4),
 //     and 4 is a stable near-peak across 1 MiB-128 MiB.
-// NCCL_GIN_ANVIL_AG_CTAS pins a fixed count for all sizes (diagnostic; must be <=
-// the launched -V/deviceCtaCount-sized barrier pool -- see allGatherMaxCtas).
+// NCCL_GIN_ANVIL_AG_CTAS pins a fixed count for all sizes (diagnostic). The pin is
+// clamped to the launched barrier/lsaBarrier/signal pool (allGatherPoolCtas): the
+// kernel indexes those pools by blockIdx.x, so a pin above the pool would launch
+// more CTAs than slots and read/write past the arrays. See allGatherCtas().
 static constexpr int kAllGatherCtasLsa  = 16;   // chunk <= threshold (direct store)
 static constexpr int kAllGatherCtasSdma = 4;    // chunk >  threshold (GIN puts)
-GIN_SDMA_AG_HD inline int allGatherCtas(size_t chunkBytes_, size_t sdmaThreshold, size_t envCtas) {
-  if (envCtas != kAllGatherCtasUnset && envCtas > 0)
-    return (envCtas > 128) ? 128 : (int)envCtas;
-  return chunkUsesLsaTier(chunkBytes_, sdmaThreshold) ? kAllGatherCtasLsa : kAllGatherCtasSdma;
-}
 GIN_SDMA_AG_HD inline int allGatherMaxCtas() {
   return (kAllGatherCtasLsa > kAllGatherCtasSdma) ? kAllGatherCtasLsa : kAllGatherCtasSdma;
+}
+
+// Size of the barrier/lsaBarrier/signal pools the AllGather kernel launches with:
+// max(-V/deviceCtaCount, the size-adaptive ladder's peak). This is BOTH the pool
+// allocated in AllGatherGetDevCommRequirements AND the ceiling that allGatherCtas()
+// clamps any launched grid to, so the "grid <= pool" invariant lives in one place.
+GIN_SDMA_AG_HD inline int allGatherPoolCtas(int deviceCtaCount) {
+  const int maxTier = allGatherMaxCtas();
+  return (deviceCtaCount > maxTier) ? deviceCtaCount : maxTier;
+}
+
+// Launched grid CTA count. With no env pin, the size-adaptive ladder (kAllGatherCtasLsa
+// / kAllGatherCtasSdma, both <= poolCtas) is used. An NCCL_GIN_ANVIL_AG_CTAS pin is
+// honored but clamped to poolCtas so the grid never exceeds the barrier/signal pool
+// (avoids the OOB the pin used to allow when it exceeded max(-V, 16)).
+GIN_SDMA_AG_HD inline int allGatherCtas(size_t chunkBytes_, size_t sdmaThreshold,
+                                        size_t envCtas, int poolCtas) {
+  if (poolCtas < 1) poolCtas = 1;
+  if (envCtas != kAllGatherCtasUnset && envCtas > 0)
+    return (envCtas > (size_t)poolCtas) ? poolCtas : (int)envCtas;
+  const int adaptive = chunkUsesLsaTier(chunkBytes_, sdmaThreshold) ? kAllGatherCtasLsa : kAllGatherCtasSdma;
+  return (adaptive > poolCtas) ? poolCtas : adaptive;
+}
+
+// Element offset of rank r's contribution within EVERY peer's AllGather recv
+// buffer: rank r's send chunk lands at [r*count, r*count + count). Shared by the
+// production LSA-direct kernel (AllGatherLsaDirect) and the addressing tests so a
+// wrong slice offset is caught in both places rather than only self-consistently.
+GIN_SDMA_AG_HD inline size_t allGatherRecvSliceOffset(int rank, size_t count) {
+  return (size_t)rank * count;
 }
 
 // AllGather algorithm / bus bandwidth (GB/s) given the per-rank element count,
