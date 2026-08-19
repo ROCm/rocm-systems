@@ -25,9 +25,22 @@ import sys
 import types
 import unittest
 
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", "..", ".."))
-STATIC_PATH = os.path.join(_REPO_ROOT, "amdsmi_cli", "subcommands", "static.py")
+from common.common import amdsmi_path, find_cli_dir
+
+# Locate the CLI dir (amdsmi_path first so an AMDSMI_PATH override selects the
+# matching install; see common.find_cli_dir). None -> setUpClass skips.
+_CLI_DIR = find_cli_dir(amdsmi_path, os.path.dirname(os.path.abspath(__file__)))
+STATIC_PATH = os.path.join(_CLI_DIR, "subcommands", "static.py") if _CLI_DIR else None
+
+# Modules the fakes below replace. Snapshotted around the suite so a real copy
+# loaded by a sibling test is never left shadowed by a stub.
+_CLI_MODULES = (
+    "amdsmi",
+    "amdsmi.amdsmi_interface",
+    "amdsmi.amdsmi_exception",
+    "amdsmi_helpers",
+    "amdsmi_cli_exceptions",
+)
 
 # gfx950 (MI350) cache layout captured live: four L1 variants plus L2 and L3.
 # Mirrors the per-entry dict shape returned by ``amdsmi_get_gpu_cache_info``.
@@ -210,10 +223,21 @@ def _build_args():
 class TestCliCacheLabels(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if not os.path.isfile(STATIC_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI static.py not found at {STATIC_PATH}")
+        if not STATIC_PATH or not os.path.isfile(STATIC_PATH):
+            raise unittest.SkipTest(
+                f"amd-smi CLI not found ({STATIC_PATH or _CLI_DIR}): static.py not present"
+            )
+        cls._saved_modules = {name: sys.modules.get(name) for name in _CLI_MODULES}
         cls.interface = _install_fake_modules()
         cls.static_module = _load_static_module()
+
+    @classmethod
+    def tearDownClass(cls):
+        for name, mod in getattr(cls, "_saved_modules", {}).items():
+            if mod is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = mod
 
     def _run_cache(self, fmt):
         commands = object.__new__(self.static_module.StaticCommands)
@@ -270,7 +294,3 @@ class TestCliCacheLabels(unittest.TestCase):
 
         # Existing per-instance size wrapping is unchanged.
         self.assertEqual(cache_info[0]["cache_size"], {"value": 32, "unit": "KB"})
-
-
-if __name__ == "__main__":
-    unittest.main()

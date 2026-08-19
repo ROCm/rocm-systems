@@ -172,7 +172,3 @@ class TestOutputFileStdinGuard(unittest.TestCase):
             self.assertEqual(os.path.getsize(tmp), 0)
         finally:
             os.unlink(tmp)
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -896,14 +896,14 @@ def _build_set_specs(set_value):
         if mode == "fail":
             return arg, {
                 "amdsmi_get_gpu_memory_partition_config": _raise_not_supported,
-                "amdsmi_set_gpu_memory_partition": _raise_not_supported,
+                "amdsmi_set_gpu_memory_partition_mode": _raise_not_supported,
             }
         return arg, {
             "amdsmi_get_gpu_memory_partition_config": lambda *a, **k: {
                 "partition_caps": [arg],
                 "mp_mode": arg,
             },
-            "amdsmi_set_gpu_memory_partition": _noop,
+            "amdsmi_set_gpu_memory_partition_mode": _noop,
         }
 
     def soc_pstate(cmd, mode):
@@ -988,8 +988,8 @@ def _build_set_specs(set_value):
 
     def compute_partition_mem_alloc_mode(cmd, mode):
         setfn = _raise_not_supported if mode == "fail" else _noop
-        return first_member(ai.AmdSmiComputePartitionMemAllocModeType), {
-            "amdsmi_set_gpu_compute_partition_mem_alloc_mode": setfn
+        return first_member(ai.AmdSmiAcceleratorPartitionMemAllocModeType), {
+            "amdsmi_set_gpu_accelerator_partition_mem_alloc_mode": setfn
         }
 
     return {
@@ -1105,7 +1105,7 @@ class TestSetGpuGAllFailureGuards(unittest.TestCase):
             set_value,
             amdsmi_get_gpu_device_bdf=_fake_bdf,
             amdsmi_get_gpu_memory_partition_config=_raise_not_supported,
-            amdsmi_set_gpu_memory_partition=_raise_not_supported,
+            amdsmi_set_gpu_memory_partition_mode=_raise_not_supported,
         ):
             cmd.set_gpu(args)  # must NOT raise
 
