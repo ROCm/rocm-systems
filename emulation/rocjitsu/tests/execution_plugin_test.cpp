@@ -854,7 +854,7 @@ struct Wave32PluginFixture {
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   std::shared_ptr<ExecutionPluginGroup> plugin_group;
 
-  explicit Wave32PluginFixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_GFX1250)
+  explicit Wave32PluginFixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA5)
       : gpu_mem(std::make_unique<amdgpu::GpuMemory>("wave32_plugin_mem")),
         l2(std::make_unique<amdgpu::L2Cache>("wave32_plugin_l2")) {
     amdgpu::ComputeUnitCore::Config cfg{};
@@ -1274,7 +1274,7 @@ TEST(ExecutionPluginTest, Dpp8FetchInactiveControlsSourceObservation) {
   const uint32_t vb = wf->vgpr_alloc().base;
   const uint32_t lane_sel = (0u << 0u) | (0u << 3u) | (2u << 6u) | (3u << 9u) | (4u << 12u) |
                             (5u << 15u) | (6u << 18u) | (7u << 21u);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto run = [&](uint32_t src_marker) {
@@ -1335,7 +1335,7 @@ TEST(ExecutionPluginTest, True16InstructionsReportSelectedSourceAndDestinationHa
   };
 
   const uint32_t vb = wf->vgpr_alloc().base;
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
   for (const Case &test_case : cases) {
     SCOPED_TRACE(std::format("instruction word 0x{:08x}", test_case.word));
@@ -1386,7 +1386,7 @@ TEST(ExecutionPluginTest, Gfx1250Simd64BitWriteReportsBothDestinationRegisters) 
 
     const uint32_t word =
         vop1_encode(/*v_mov_b64 opcode=*/29, kDst, /*generic VGPR source=*/256 + kSrc);
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
     ASSERT_NE(decoder, nullptr);
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, &word));
     ASSERT_NE(inst, nullptr);
@@ -2080,7 +2080,7 @@ TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotObserveInstructionWrite
 }
 
 TEST(ExecutionPluginTest, D16MemoryCompletionPreservesHalfWithoutObservation) {
-  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"gfx1250", /*wavefront_size=*/32);
+  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"cdna5", /*wavefront_size=*/32);
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -2854,7 +2854,7 @@ TEST(RaceDetectorPluginOutputTest, DispatchLineUsesReadableNameAndExactSymbol) {
 }
 
 TEST(RaceDetectorPluginTest, DroppedAsyncLdsLaneDoesNotCreateLowAddressRace) {
-  PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"gfx1250", /*wavefront_size=*/32);
+  PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"cdna5", /*wavefront_size=*/32);
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));

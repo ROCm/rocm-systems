@@ -79,6 +79,7 @@ namespace {
 // SOPP encoding: bits[31:23] = 0x17F (SOPP prefix), bits[22:16] = op.
 constexpr uint32_t SOPP_S_NOP = 0xBF800000;
 constexpr uint32_t SOPP_S_ENDPGM = 0xBF810000;
+constexpr uint32_t SOPP_S_TRAP_1 = 0xBF920001;
 
 using namespace rocjitsu;
 
@@ -419,7 +420,7 @@ TEST(AqlDispatchTest, InitializesModeFromComputePgmRsrc1) {
       {"rdna3", kGfx11Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
       {"rdna3_5", kGfx11Endpgm, common_mode | (1u << 8) | (1u << 9) | (1u << 11)},
       {"rdna4", kGfx11Endpgm, common_mode},
-      {"gfx1250", kGfx11Endpgm, common_mode},
+      {"cdna5", kGfx11Endpgm, common_mode},
   };
 
   for (const ModeInitCase &mode_case : cases) {
@@ -442,7 +443,7 @@ TEST(AqlDispatchTest, InitializesModeFromComputePgmRsrc1) {
 
 TEST(RdnaDispatchTest, Gfx1250DoesNotEnableWgpMode) {
   const uint32_t code[] = {SOPP_S_ENDPGM};
-  VmFixture f("gfx1250", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+  VmFixture f("cdna5", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
   uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, 128 * 1024,
                                /*wgp_mode=*/true);
   test::AqlQueue queue(f.mem(), f.cp());
@@ -1612,6 +1613,59 @@ TEST_P(IsaTest, DispatchAndCapacity) {
   EXPECT_EQ(f.cp()->dispatched_count(), 1u);
 }
 
+TEST(CommandProcessorTest, DebugSuspendedEmptyQueueDefersNewDispatchUntilResume) {
+  VmFixture f("cdna4", 1, 2);
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+  uint64_t kernel_object = f.write_kernel(0x1000, code, sizeof(code));
+  test::AqlQueue queue(f.mem(), f.cp());
+
+  // Queue suspension is persistent HQD state. It must block packets submitted
+  // after an empty queue was suspended, not just pause waves already resident.
+  f.cp()->set_queue_debug_suspended(/*queue_id=*/1, /*process_id=*/0, true);
+  queue.dispatch(kernel_object, 64);
+  (void)f.engine->step();
+  EXPECT_EQ(f.cp()->dispatched_count(), 0u);
+  EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
+
+  f.cp()->set_queue_debug_suspended(/*queue_id=*/1, /*process_id=*/0, false);
+  f.engine->run();
+  EXPECT_EQ(f.cp()->dispatched_count(), 1u);
+  EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 1u);
+}
+
+TEST(CommandProcessorTest, DebugResumeWithOnlyResidentWorkDoesNotRescanQueue) {
+  VmFixture f("cdna4", 1, 2);
+  std::vector<uint32_t> code(amdgpu::ComputeUnitCore::kFunctionalQuantum * 2, SOPP_S_NOP);
+  code.push_back(SOPP_S_ENDPGM);
+  uint64_t kernel_object = f.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t));
+  test::AqlQueue queue(f.mem(), f.cp());
+
+  queue.dispatch(kernel_object, 64);
+  ASSERT_TRUE(f.engine->step());
+  ASSERT_EQ(f.cp()->dispatched_count(), 1u);
+  ASSERT_TRUE(f.cu()->has_active_wfs());
+  auto *wave = f.cu()->wf(0);
+  ASSERT_NE(wave, nullptr);
+
+  // Model a command-processor event that was already queued when KFD froze the
+  // resident wave. Consuming that event while no packet is unread must not
+  // manufacture deferred work and create a resume/event chain.
+  f.cp()->set_queue_debug_suspended(/*queue_id=*/1, /*process_id=*/0, true);
+  wave->set_debug_suspended(true);
+  f.engine->schedule_event_now(f.cp()->doorbell_event());
+  ASSERT_TRUE(f.engine->step());
+  const uint64_t passes_before_resume = f.cp()->doorbell_handle_count_for_test();
+
+  wave->set_debug_suspended(false);
+  f.cu()->schedule_work_async();
+  f.cp()->set_queue_debug_suspended(/*queue_id=*/1, /*process_id=*/0, false);
+  ASSERT_TRUE(f.engine->step());
+
+  EXPECT_EQ(f.cp()->doorbell_handle_count_for_test(), passes_before_resume);
+  f.engine->run();
+  EXPECT_FALSE(f.cu()->has_active_wfs());
+}
+
 TEST_P(IsaTest, DispatchWfReturnsNullWhenSlotsExhausted) {
   // dispatch_wf() promises nullptr (not an out-of-bounds slot) when the CU is full.
   // The CP relies on can_accept_workgroup() gating, but the API contract must hold
@@ -1624,6 +1678,84 @@ TEST_P(IsaTest, DispatchWfReturnsNullWhenSlotsExhausted) {
   EXPECT_EQ(cu->num_wfs(), kSlots);
   // All slots are occupied by resident (non-halted) waves — the next dispatch fails.
   EXPECT_EQ(cu->dispatch_wf(0, 0x1040, 104, 256), nullptr);
+}
+
+TEST(CommandProcessorTest, DispatchToQuiescedDebugHaltedCuReactivatesEventLoop) {
+  VmFixture f("cdna4", 2, 2);
+  test::AqlQueue queue(f.mem(), f.cp());
+
+  const uint32_t warmup[] = {SOPP_S_ENDPGM};
+  uint64_t warmup_ko = f.write_kernel(0x1000, warmup, sizeof(warmup));
+  queue.dispatch(warmup_ko, 64);
+  for (uint32_t i = 0; i < 100 && f.cp()->dispatched_count() != 1; ++i)
+    ASSERT_TRUE(f.engine->step());
+  ASSERT_EQ(f.cp()->dispatched_count(), 1u);
+
+  constexpr uint64_t kTrapPc = 0x8000;
+  constexpr uint64_t kTrapHandlerPc = 0x9000;
+  f.mem()->write32(kTrapPc, SOPP_S_TRAP_1);
+  const uint32_t trap_handler[] = {
+      0x806C846Cu,              // s_add_u32 ttmp0, ttmp0, 4
+      0x826D806Du,              // s_addc_u32 ttmp1, ttmp1, 0
+      0xBEF800FFu, 0x00002000u, // s_mov_b32 ttmp12, STATUS.HALT
+      0xBF900001u,              // s_sendmsg sendmsg(MSG_INTERRUPT)
+      0xB978F802u,              // s_setreg_b32 hwreg(HW_REG_STATUS), ttmp12
+      0xBE801F6Cu,              // s_rfe_b64 ttmp[0:1]
+  };
+  for (uint32_t i = 0; i < std::size(trap_handler); ++i)
+    f.mem()->write32(kTrapHandlerPc + i * 4, trap_handler[i]);
+  f.cu(0)->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
+    return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerPc, 0, true};
+  });
+  f.cu(0)->set_sendmsg_handler([](amdgpu::Wavefront &, uint32_t message) { return message == 1; });
+  auto *stopped = f.cu(0)->dispatch_wf(0, kTrapPc, 104, 256);
+  ASSERT_NE(stopped, nullptr);
+  f.cu(0)->schedule_work();
+  for (uint32_t i = 0; i < 100 && !stopped->debug_halted(); ++i)
+    ASSERT_TRUE(f.engine->step());
+  ASSERT_TRUE(stopped->debug_halted());
+  ASSERT_TRUE(f.cu(0)->is_idle());
+
+  std::vector<uint32_t> long_running(amdgpu::ComputeUnitCore::kFunctionalQuantum + 1, SOPP_S_NOP);
+  long_running.push_back(SOPP_S_ENDPGM);
+  uint64_t long_ko =
+      f.write_kernel(0x10000, long_running.data(), long_running.size() * sizeof(uint32_t));
+  uint64_t followup_ko = f.write_kernel(0x20000, warmup, sizeof(warmup));
+
+  hsa_kernel_dispatch_packet_t first{};
+  first.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  first.setup = 1;
+  first.workgroup_size_x = 64;
+  first.workgroup_size_y = 1;
+  first.workgroup_size_z = 1;
+  first.grid_size_x = 64;
+  first.grid_size_y = 1;
+  first.grid_size_z = 1;
+  first.kernel_object = long_ko;
+  queue.submit(first);
+
+  hsa_kernel_dispatch_packet_t followup = first;
+  followup.header |= 1 << HSA_PACKET_HEADER_BARRIER;
+  followup.kernel_object = followup_ko;
+  queue.submit(followup);
+
+  amdgpu::Wavefront *followup_wf = nullptr;
+  for (uint32_t i = 0; i < 100 && f.engine->step(); ++i) {
+    for (uint32_t slot = 0; slot < f.cu(0)->num_wf_slots(); ++slot) {
+      auto *wf = f.cu(0)->wf(slot);
+      if (wf != stopped && wf->dispatch_id() == 3) {
+        followup_wf = wf;
+        break;
+      }
+    }
+    if (followup_wf && followup_wf->is_halted())
+      break;
+  }
+
+  ASSERT_NE(followup_wf, nullptr);
+  EXPECT_TRUE(followup_wf->is_halted());
+  EXPECT_TRUE(stopped->debug_halted());
+  EXPECT_EQ(f.cp()->dispatched_count(), 3u);
 }
 
 TEST_P(IsaTest, VendorSpecificExtKernelDispatch) {
@@ -1909,7 +2041,7 @@ TEST_P(IsaTest, VendorSpecificRejectsUnsupportedFormats) {
 }
 
 TEST(ClusterDispatchTest, RejectsClusterThatCannotFitWithoutSpinning) {
-  VmFixture f("gfx1250", 1, 1);
+  VmFixture f("cdna5", 1, 1);
 
   const uint32_t code[] = {0xBFB00000u}; // s_endpgm
   uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
@@ -1926,7 +2058,7 @@ TEST(ClusterDispatchTest, RejectsClusterThatCannotFitWithoutSpinning) {
 }
 
 TEST(ClusterDispatchTest, AccountsForPerWorkgroupLdsAlignmentWhenPlanningCluster) {
-  VmFixture f("gfx1250", 1, 3, /*lds_size_kb=*/1);
+  VmFixture f("cdna5", 1, 3, /*lds_size_kb=*/1);
 
   const uint32_t code[] = {0xBFB00000u}; // s_endpgm
   uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
@@ -2010,9 +2142,9 @@ TEST(ClusterDispatchTest, Rdna4ExtendedDispatchKeepsOrdinaryTtmpWorkgroupIds) {
     const uint32_t workgroup_x = workgroup_id % 2;
     const uint32_t workgroup_y = (workgroup_id / 2) % 2;
     const uint32_t workgroup_z = workgroup_id / 4;
-    EXPECT_EQ(wf.sgpr(114), 0u);
-    EXPECT_EQ(wf.sgpr(115), (workgroup_z << 16) | workgroup_y);
-    EXPECT_EQ(wf.sgpr(117), workgroup_x);
+    EXPECT_EQ(wf.ttmp(6), 0u);
+    EXPECT_EQ(wf.ttmp(7), (workgroup_z << 16) | workgroup_y);
+    EXPECT_EQ(wf.ttmp(9), workgroup_x);
   }
   for (bool was_seen : seen)
     EXPECT_TRUE(was_seen);

@@ -759,7 +759,7 @@ TEST(BinaryTranslatorE2E, EmptyTextSameArchIsSuccessfulNoOp) {
   options.input_revision = ProcessorRevision::Gfx1250B0;
   options.output_revision = ProcessorRevision::Gfx1250A0;
   options.verify_rewrite_discharge = true;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
   const auto result = translator.translate(source);
 
   EXPECT_TRUE(result.ok());
@@ -797,7 +797,7 @@ TEST(BinaryTranslatorE2E, EmptyTextCrossArchStillFails) {
   AmdGpuCodeObject source(image.data(), image.size());
   ASSERT_TRUE(source.is_valid());
 
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_RDNA4);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4);
   const auto result = translator.translate(source);
 
   EXPECT_FALSE(result.ok());
@@ -829,7 +829,7 @@ TEST(BinaryTranslatorE2E, EmptyTextGfx1250StillRequiresRevisions) {
   AmdGpuCodeObject source(image.data(), image.size());
   ASSERT_TRUE(source.is_valid());
 
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5);
   const auto result = translator.translate(source);
 
   EXPECT_FALSE(result.ok());
@@ -846,7 +846,7 @@ TEST(BinaryTranslatorE2E, EmptyTextGfx1250StillRejectsA0ToB0) {
   BinaryTranslatorOptions options;
   options.input_revision = ProcessorRevision::Gfx1250A0;
   options.output_revision = ProcessorRevision::Gfx1250B0;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
   const auto result = translator.translate(source);
 
   EXPECT_FALSE(result.ok());
@@ -866,7 +866,7 @@ TEST(BinaryTranslatorE2E, Gfx1250InvalidInstructionIsDiagnosedAndLeavesObjectUnc
   BinaryTranslatorOptions options;
   options.input_revision = ProcessorRevision::Gfx1250B0;
   options.output_revision = ProcessorRevision::Gfx1250A0;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
   const auto result = translator.translate(source);
 
   EXPECT_FALSE(result.ok());
@@ -888,7 +888,7 @@ TEST(BinaryTranslatorE2E, DescriptorlessExecutableTextIsSuccessfulNoOp) {
   BinaryTranslatorOptions options;
   options.input_revision = ProcessorRevision::Gfx1250B0;
   options.output_revision = ProcessorRevision::Gfx1250A0;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
   const auto result = translator.translate(source);
 
   EXPECT_TRUE(result.ok());
@@ -912,7 +912,7 @@ TEST(BinaryTranslatorE2E, RewriteDischargeCannotVerifySkippedKernelStubs) {
   options.output_revision = ProcessorRevision::Gfx1250A0;
   options.verify_rewrite_discharge = true;
   options.skip_failed_kernels = true;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
   const auto result = translator.translate(source);
 
   EXPECT_FALSE(result.ok());
@@ -1136,7 +1136,7 @@ TEST(BinaryTranslatorE2E, RewriteDischargeRejectsIdentityOutputWithResidualTrigg
   options.input_revision = ProcessorRevision::Gfx1250B0;
   options.output_revision = ProcessorRevision::Gfx1250A0;
   options.verify_rewrite_discharge = true;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
   const auto result = translator.translate(source);
 
   EXPECT_FALSE(result.ok());
@@ -1167,7 +1167,7 @@ TEST(BinaryTranslatorE2E, RewriteDischargeRejectsNonDwordTextTail) {
     options.input_revision = ProcessorRevision::Gfx1250B0;
     options.output_revision = ProcessorRevision::Gfx1250A0;
     options.verify_rewrite_discharge = true;
-    BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+    BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
     const auto result = translator.translate(source);
 
     EXPECT_FALSE(result.ok());
@@ -1194,7 +1194,7 @@ TEST(BinaryTranslatorE2E, RewriteDischargeRejectsTruncatedMultiwordInstruction) 
     options.input_revision = ProcessorRevision::Gfx1250B0;
     options.output_revision = ProcessorRevision::Gfx1250A0;
     options.verify_rewrite_discharge = true;
-    BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+    BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
     const auto result = translator.translate(source);
 
     EXPECT_FALSE(result.ok());
@@ -1219,7 +1219,7 @@ TEST(BinaryTranslatorE2E, RewriteDischargeRejectsResidualFlatScratchBaseSelector
   options.input_revision = ProcessorRevision::Gfx1250B0;
   options.output_revision = ProcessorRevision::Gfx1250A0;
   options.verify_rewrite_discharge = true;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
   const auto result = translator.translate(code_object);
 
   EXPECT_FALSE(result.ok());
@@ -1272,7 +1272,7 @@ TEST(BinaryTranslatorE2E, Gfx1250TranslationIgnoresUnreferencedVisibleTextSymbol
     BinaryTranslatorOptions options;
     options.input_revision = ProcessorRevision::Gfx1250B0;
     options.output_revision = ProcessorRevision::Gfx1250A0;
-    BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+    BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
     const auto result = translator.translate(source);
 
     ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
@@ -1330,7 +1330,7 @@ TEST(BinaryTranslatorE2E, Gfx1250TranslationIgnoresUnreferencedSymbolInsideInstr
   BinaryTranslatorOptions options;
   options.input_revision = ProcessorRevision::Gfx1250B0;
   options.output_revision = ProcessorRevision::Gfx1250A0;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
   const auto result = translator.translate(source);
 
   ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
@@ -1387,7 +1387,7 @@ TEST(BinaryTranslatorE2E, RewriteDischargeIgnoresUnreferencedLocalTextLabel) {
   options.input_revision = ProcessorRevision::Gfx1250B0;
   options.output_revision = ProcessorRevision::Gfx1250A0;
   options.verify_rewrite_discharge = true;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
   const auto result = translator.translate(source);
 
   ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
@@ -1441,7 +1441,7 @@ TEST(BinaryTranslatorE2E, RewriteDischargeHonorsRelocationBackedLocalTextEntry) 
     options.input_revision = ProcessorRevision::Gfx1250B0;
     options.output_revision = ProcessorRevision::Gfx1250A0;
     options.verify_rewrite_discharge = true;
-    BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+    BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
     const auto result = translator.translate(source);
 
     EXPECT_FALSE(result.ok());
@@ -1504,7 +1504,7 @@ TEST(BinaryTranslatorE2E, PreservesEtRelNotypeAbs64EntryPolicy) {
   options.input_revision = ProcessorRevision::Gfx1250B0;
   options.output_revision = ProcessorRevision::Gfx1250A0;
   options.verify_rewrite_discharge = true;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
   const auto result = translator.translate(source);
 
   EXPECT_FALSE(has_error_containing(result, DiagnosticKind::Legalization,
@@ -1544,7 +1544,7 @@ TEST(BinaryTranslatorE2E, PreservesExplicitTargetStaticRelocationPolicy) {
   options.input_revision = ProcessorRevision::Gfx1250B0;
   options.output_revision = ProcessorRevision::Gfx1250A0;
   options.verify_rewrite_discharge = true;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
   const auto result = translator.translate(source);
 
   ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
@@ -1597,7 +1597,7 @@ TEST(BinaryTranslatorE2E, ExplicitTargetNonAbs64FunctionReferenceCreatesTextEntr
   options.input_revision = ProcessorRevision::Gfx1250B0;
   options.output_revision = ProcessorRevision::Gfx1250A0;
   options.verify_rewrite_discharge = true;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
   const auto result = translator.translate(source);
 
   EXPECT_FALSE(result.ok());
@@ -1662,7 +1662,7 @@ TEST(BinaryTranslatorE2E, RejectsDynamicNoneBeforeResolvingSymbolMetadata) {
   options.input_revision = ProcessorRevision::Gfx1250B0;
   options.output_revision = ProcessorRevision::Gfx1250A0;
   options.verify_rewrite_discharge = true;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
   const auto result = translator.translate(source);
 
   EXPECT_FALSE(result.ok());
@@ -1698,7 +1698,7 @@ TEST(BinaryTranslatorE2E, RejectsDynamicNoneBeforeInspectingInvalidPlace) {
   BinaryTranslatorOptions options;
   options.input_revision = ProcessorRevision::Gfx1250B0;
   options.output_revision = ProcessorRevision::Gfx1250A0;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
   const auto result = translator.translate(source);
 
   EXPECT_FALSE(result.ok());
@@ -1739,7 +1739,7 @@ TEST(BinaryTranslatorE2E, IgnoresTargetlessShtRelNoneLikeRocr) {
   options.input_revision = ProcessorRevision::Gfx1250B0;
   options.output_revision = ProcessorRevision::Gfx1250A0;
   options.verify_rewrite_discharge = true;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
   const auto result = translator.translate(source);
 
   ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
@@ -1802,7 +1802,7 @@ TEST(BinaryTranslatorE2E, IgnoresExplicitTargetNoneRelocationToTextSymbol) {
   options.input_revision = ProcessorRevision::Gfx1250B0;
   options.output_revision = ProcessorRevision::Gfx1250A0;
   options.verify_rewrite_discharge = true;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
   const auto result = translator.translate(source);
 
   ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
@@ -1823,7 +1823,7 @@ TEST(BinaryTranslatorE2E, RejectsUnsupportedSymbolRelocationsToText) {
     options.input_revision = ProcessorRevision::Gfx1250B0;
     options.output_revision = ProcessorRevision::Gfx1250A0;
     options.verify_rewrite_discharge = true;
-    BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+    BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
     const auto result = translator.translate(source);
 
     EXPECT_FALSE(result.ok());
@@ -1844,7 +1844,7 @@ TEST(BinaryTranslatorE2E, RejectsUnsupportedRelocationBackedTextSymbolTypes) {
     options.input_revision = ProcessorRevision::Gfx1250B0;
     options.output_revision = ProcessorRevision::Gfx1250A0;
     options.verify_rewrite_discharge = true;
-    BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+    BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
     const auto result = translator.translate(source);
 
     EXPECT_FALSE(result.ok());
@@ -1889,7 +1889,7 @@ TEST(BinaryTranslatorE2E, RewriteDischargeDoesNotPromoteRelocationBackedNonEntry
     options.input_revision = ProcessorRevision::Gfx1250B0;
     options.output_revision = ProcessorRevision::Gfx1250A0;
     options.verify_rewrite_discharge = true;
-    BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+    BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
     const auto result = translator.translate(source);
 
     EXPECT_TRUE(result.ok());
@@ -1928,7 +1928,7 @@ TEST(BinaryTranslatorE2E, RewriteDischargeIgnoresExplicitNonAllocatedRelocation)
   options.input_revision = ProcessorRevision::Gfx1250B0;
   options.output_revision = ProcessorRevision::Gfx1250A0;
   options.verify_rewrite_discharge = true;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
   const auto result = translator.translate(source);
 
   ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
@@ -1969,7 +1969,7 @@ TEST(BinaryTranslatorE2E, RewriteDischargeIgnoresMalformedUnreferencedSymbolTabl
     options.input_revision = ProcessorRevision::Gfx1250B0;
     options.output_revision = ProcessorRevision::Gfx1250A0;
     options.verify_rewrite_discharge = true;
-    BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+    BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
     const auto result = translator.translate(source);
 
     ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
@@ -2003,7 +2003,7 @@ TEST(BinaryTranslatorE2E, RejectsAllocatedExecutableNobitsSections) {
     options.input_revision = ProcessorRevision::Gfx1250B0;
     options.output_revision = ProcessorRevision::Gfx1250A0;
     options.verify_rewrite_discharge = true;
-    BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+    BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
     const auto result = translator.translate(source);
 
     EXPECT_FALSE(result.ok());
@@ -2047,7 +2047,7 @@ TEST(BinaryTranslatorE2E, UsesActualTextSectionIndexForRelocationBackedEntries) 
   BinaryTranslatorOptions options;
   options.input_revision = ProcessorRevision::Gfx1250B0;
   options.output_revision = ProcessorRevision::Gfx1250A0;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
   const auto result = translator.translate(source);
 
   EXPECT_FALSE(result.ok());
@@ -2079,7 +2079,7 @@ TEST(BinaryTranslatorE2E, TranslationFailsClosedOnMalformedAllocatedRelocation) 
   BinaryTranslatorOptions options;
   options.input_revision = ProcessorRevision::Gfx1250B0;
   options.output_revision = ProcessorRevision::Gfx1250A0;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
   const auto result = translator.translate(source);
 
   EXPECT_FALSE(result.ok());
@@ -2139,7 +2139,7 @@ TEST(BinaryTranslatorE2E, RewriteDischargeIgnoresUnreferencedVisibleSymbolMetada
     options.input_revision = ProcessorRevision::Gfx1250B0;
     options.output_revision = ProcessorRevision::Gfx1250A0;
     options.verify_rewrite_discharge = true;
-    BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+    BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
     const auto result = translator.translate(source);
 
     ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
@@ -2167,7 +2167,7 @@ TEST(BinaryTranslatorE2E, TranslationFailsClosedOnMultipleExecutableSections) {
   options.input_revision = ProcessorRevision::Gfx1250B0;
   options.output_revision = ProcessorRevision::Gfx1250A0;
   options.verify_rewrite_discharge = true;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
   const auto result = translator.translate(source);
 
   EXPECT_FALSE(result.ok());
@@ -2204,7 +2204,7 @@ TEST(BinaryTranslatorE2E, TranslationRejectsSoleExecutableSectionNotNamedText) {
   options.input_revision = ProcessorRevision::Gfx1250B0;
   options.output_revision = ProcessorRevision::Gfx1250A0;
   options.verify_rewrite_discharge = true;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
   const auto result = translator.translate(source);
 
   EXPECT_FALSE(result.ok());
@@ -2233,7 +2233,7 @@ TEST(BinaryTranslatorE2E, TranslationRejectsMalformedNameOnAdditionalExecutableS
   options.input_revision = ProcessorRevision::Gfx1250B0;
   options.output_revision = ProcessorRevision::Gfx1250A0;
   options.verify_rewrite_discharge = true;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
   const auto result = translator.translate(source);
 
   EXPECT_FALSE(result.ok());
@@ -2260,7 +2260,7 @@ TEST(BinaryTranslatorE2E, TranslationRejectsMalformedNameOnSoleExecutableSection
   options.input_revision = ProcessorRevision::Gfx1250B0;
   options.output_revision = ProcessorRevision::Gfx1250A0;
   options.verify_rewrite_discharge = true;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
   const auto result = translator.translate(source);
 
   EXPECT_FALSE(result.ok());
@@ -2310,7 +2310,7 @@ TEST(BinaryTranslatorE2E, RewriteDischargeIgnoresUnreferencedVisibleTextSymbolEn
     options.input_revision = ProcessorRevision::Gfx1250B0;
     options.output_revision = ProcessorRevision::Gfx1250A0;
     options.verify_rewrite_discharge = true;
-    BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+    BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
     const auto result = translator.translate(source);
 
     ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
@@ -2377,7 +2377,7 @@ TEST(BinaryTranslatorE2E, RewriteDischargeDoesNotCreditPredecessorAcrossRelative
   options.input_revision = ProcessorRevision::Gfx1250B0;
   options.output_revision = ProcessorRevision::Gfx1250A0;
   options.verify_rewrite_discharge = true;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
   const auto result = translator.translate(source);
 
   EXPECT_FALSE(result.ok());
@@ -2429,7 +2429,7 @@ TEST(BinaryTranslatorE2E, RejectsRelocationBackedEntryOutsideKernelTranslationSc
   BinaryTranslatorOptions options;
   options.input_revision = ProcessorRevision::Gfx1250B0;
   options.output_revision = ProcessorRevision::Gfx1250A0;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
   const auto result = translator.translate(source);
 
   EXPECT_FALSE(result.ok());
@@ -2533,7 +2533,7 @@ TEST(CodeObjectPatcher, Rsrc3IsCarriedOnlyBetweenMatchingLayouts) {
   };
 
   // Matching layout: carried verbatim, both the wide INST_PREF_SIZE and NAMED_BAR_CNT.
-  const auto same_layout = patched_rsrc3(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250);
+  const auto same_layout = patched_rsrc3(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(same_layout.has_value());
   EXPECT_EQ(*same_layout, source_rsrc3);
   EXPECT_EQ(AMDHSA_BITS_GET(*same_layout, COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE), 107u);
@@ -2541,7 +2541,7 @@ TEST(CodeObjectPatcher, Rsrc3IsCarriedOnlyBetweenMatchingLayouts) {
 
   // GFX10 targets have no INST_PREF_SIZE and no IMAGE_OP; the GFX12 word must not be inherited.
   for (const rj_code_arch_t gfx10 : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
-    const auto rebuilt = patched_rsrc3(ROCJITSU_CODE_ARCH_GFX1250, gfx10);
+    const auto rebuilt = patched_rsrc3(ROCJITSU_CODE_ARCH_CDNA5, gfx10);
     ASSERT_TRUE(rebuilt.has_value());
     EXPECT_NE(*rebuilt, source_rsrc3);
     EXPECT_EQ(AMDHSA_BITS_GET(*rebuilt, COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE), 0u)
@@ -2549,7 +2549,7 @@ TEST(CodeObjectPatcher, Rsrc3IsCarriedOnlyBetweenMatchingLayouts) {
   }
 
   // A GFX9/CDNA source encodes ACCUM_OFFSET here, so it is rebuilt for a GFX12 target.
-  const auto from_cdna = patched_rsrc3(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_GFX1250);
+  const auto from_cdna = patched_rsrc3(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(from_cdna.has_value());
   EXPECT_NE(*from_cdna, source_rsrc3);
   EXPECT_EQ(AMDHSA_BITS_GET(*from_cdna, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT), 0u);
@@ -2585,7 +2585,7 @@ TEST(CodeObjectPatcher, Rsrc3IsCarriedOnlyBetweenMatchingLayouts) {
   AMDHSA_BITS_SET(gfx125_rsrc3, COMPUTE_PGM_RSRC3_GFX125_TCP_SPLIT, 5u);
   AMDHSA_BITS_SET(gfx125_rsrc3, COMPUTE_PGM_RSRC3_GFX125_ENABLE_DYNAMIC_VGPR, 1u);
   source_rsrc3 = gfx125_rsrc3;
-  const auto to_gfx120 = patched_rsrc3(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto to_gfx120 = patched_rsrc3(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(to_gfx120.has_value());
   EXPECT_EQ(AMDHSA_BITS_GET(*to_gfx120, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT), 0u)
       << "bits 21:14 are reserved on GFX120 and must not inherit GFX125 state";
@@ -2593,7 +2593,7 @@ TEST(CodeObjectPatcher, Rsrc3IsCarriedOnlyBetweenMatchingLayouts) {
   EXPECT_EQ(AMDHSA_BITS_GET(*to_gfx120, COMPUTE_PGM_RSRC3_GFX125_ENABLE_DYNAMIC_VGPR), 0u);
 
   // GFX125 -> GFX125 keeps all of it.
-  const auto gfx125_same = patched_rsrc3(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250);
+  const auto gfx125_same = patched_rsrc3(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(gfx125_same.has_value());
   EXPECT_EQ(*gfx125_same, gfx125_rsrc3);
 }
@@ -2758,7 +2758,7 @@ TEST(CodeObjectPatcher, AppliesArchSpecificWgpModeBit) {
   EXPECT_EQ(AMDHSA_BITS_GET(*rdna4_rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED), 1u);
   EXPECT_EQ(AMDHSA_BITS_GET(*rdna4_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 1u);
 
-  const auto gfx1250_rsrc1 = patched_rsrc1(ROCJITSU_CODE_ARCH_GFX1250);
+  const auto gfx1250_rsrc1 = patched_rsrc1(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(gfx1250_rsrc1.has_value());
   EXPECT_EQ(AMDHSA_BITS_GET(*gfx1250_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE), 0u);
   EXPECT_EQ(AMDHSA_BITS_GET(*gfx1250_rsrc1, COMPUTE_PGM_RSRC1_MEM_ORDERED), 1u);
@@ -3383,7 +3383,7 @@ TEST(BinaryTranslatorE2E, RejectsMalformedRelocationWithNonzeroNullTarget) {
   options.input_revision = ProcessorRevision::Gfx1250B0;
   options.output_revision = ProcessorRevision::Gfx1250A0;
   options.verify_rewrite_discharge = true;
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_GFX1250, 0, options);
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0, options);
   const auto result = translator.translate(source);
 
   EXPECT_FALSE(result.ok());

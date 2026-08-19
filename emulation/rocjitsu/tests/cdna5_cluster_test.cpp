@@ -44,7 +44,7 @@ std::string make_single_se_gfx1250_config(uint32_t num_cus) {
              std::to_string(i) + R"(","latency":1,"weight":10})";
   }
 
-  return R"({"max_ticks":10000,"num_threads":1,"vm":{"arch":"gfx1250"},)"
+  return R"({"max_ticks":10000,"num_threads":1,"vm":{"arch":"cdna5"},)"
          R"("topology":{"root":{"name":"soc","type":"soc","children":[)"
          R"({"name":"vram","type":"gpu_memory"},)"
          R"({"name":"xcd0","type":"xcd","children":[)"
@@ -1534,7 +1534,7 @@ TEST(Gfx1250SimulationTest, DynamicClusterLaunchStateMatchesCompilerAbiWithAlign
   };
   std::vector<LaunchState> states;
   for (const auto &wf : sim.snapshot->snapshots())
-    states.push_back({wf.wg_id, wf.sgpr(114), wf.sgpr(115), wf.sgpr(117), wf.sgpr(2), wf.sgpr(3),
+    states.push_back({wf.wg_id, wf.ttmp(6), wf.ttmp(7), wf.ttmp(9), wf.sgpr(2), wf.sgpr(3),
                       wf.sgpr(6), wf.sgpr(10), wf.sgpr(13)});
   std::sort(states.begin(), states.end(), [](const LaunchState &lhs, const LaunchState &rhs) {
     return lhs.workgroup_id < rhs.workgroup_id;

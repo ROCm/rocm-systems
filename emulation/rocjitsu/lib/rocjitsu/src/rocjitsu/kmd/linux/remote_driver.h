@@ -155,7 +155,9 @@ private:
   /// is set the connection is terminal and further ioctl/mmap/munmap calls fail
   /// with -EPROTO rather than returning bogus results from a poisoned stream.
   std::atomic<bool> protocol_failed_{false};
-  int shutdown_efd_ = -1; ///< eventfd written by close() to wake WAIT_EVENTS pollers.
+  int shutdown_efd_ = -1;      ///< eventfd written by close() to wake WAIT_EVENTS pollers.
+  void *kfd_marker_ = nullptr; ///< Non-readable mapping identifying /dev/kfd in proc maps.
+  size_t kfd_marker_size_ = 0;
 
   /// @brief Serializes all RPC send+recv pairs on sock_.
   /// @details ROCR is multithreaded — concurrent ioctl/mmap calls interleave

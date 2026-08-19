@@ -655,8 +655,10 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
   const bool force = rcclParamForceCeAllReduce() != 0;
   const bool symReg = ncclCeAvailable(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, winRegType);
-  bool ceAllReduceAllowed =
-    ncclGroupDepth == 0 && ceArGraphAllowed && rcclUseCeAllReduce(comm, count, datatype, op) && (force || symReg);
+  // This call site never carries a bias buffer (ncclAllReduceWithBias_impl bypasses it entirely
+  // and goes straight to taskAppend), so /*acc=*/nullptr here is always correct.
+  bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed &&
+                            rcclUseCeAllReduce(comm, count, datatype, op, /*acc=*/nullptr) && (force || symReg);
   if (!symEligible && ceAllReduceAllowed && comm->ceColl.ceARTmpBuf != NULL) {
     if (count == 0) return ncclSuccess;
     INFO(NCCL_COLL, "CE 2-shot AllReduce: count=%zu datatype=%d op=%d rank=%d/%d", count, (int)datatype, (int)op,
