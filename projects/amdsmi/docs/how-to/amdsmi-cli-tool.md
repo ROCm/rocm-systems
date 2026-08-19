@@ -1605,38 +1605,28 @@ interfaces (sysfs / modprobe.d) and do **not** require libdrm.
 | Feature | Hardware | Status |
 |---|---|---|
 | `--mem-carveout` (UMA carveout) | Strix and later APUs (gfx1150, gfx1151, gfx1152) whose VBIOS exposes ATCS 0xA | Supported (amdgpu sysfs node) |
-| `--mem-carveout` (UMA carveout) | HP UEFI-HII platforms (e.g. ZBook Ultra G1a, Z2 Mini G1a) that expose "Dedicated Graphics Memory" through fwupd | Supported (fwupd fallback) |
-| `--mem-carveout` (UMA carveout) | Radeon dGPUs, Instinct MI-series (MI100, MI200, MI300, MI300A) | Not supported — reported as `MEM_CARVEOUT: N/A (no UMA carveout interface: neither the amdgpu sysfs node nor a fwupd BIOS setting is present)` |
+| `--mem-carveout` (UMA carveout) | UEFI-HII APU platforms (e.g. HP ZBook Ultra G1a, Z2 Mini G1a) that expose the carveout through fwupd | Supported (fwupd, when built with `-DAMDSMI_ENABLE_FWUPD=ON`) |
+| `--mem-carveout` (UMA carveout) | Radeon dGPUs, Instinct MI-series (MI100, MI200, MI300, MI300A) | Not supported — reported as `MEM_CARVEOUT: N/A (UMA carveout is not supported on this ASIC/VBIOS)` |
 | `--gtt` (TTM `pages_limit`) | Any amdgpu system, including Instinct MI300A (`amdttm` / `amd-ttm`) and Ryzen APUs (`ttm`) | Supported |
 
 ### Prerequisites
 
 - **UMA carveout:** Linux kernel >= 7.0 (upstream commit [`685b711`](https://github.com/torvalds/linux/commit/685b711); some distros backport it to earlier kernels), an APU VBIOS that advertises ATCS 0xA + IGP info table v2.3, root, and a reboot after changing the index.
-- **UMA carveout (HP / UEFI-HII platforms, via fwupd):** when the amdgpu sysfs node is absent, amd-smi falls back to fwupd's BIOS-settings interface. Reading the current setting needs fwupd >= 1.8.4; changing it needs fwupd >= 2.1.1 (Ubuntu 26.04+). PolicyKit handles authorization, so run the command without `sudo` and answer the polkit prompt; a reboot applies the new size.
+- **UMA carveout (UEFI-HII platforms, via fwupd):** on integrated GPUs whose amdgpu `.../device/uma/carveout` sysfs node is absent, the AMD SMI library reads and writes the carveout through fwupd's BIOS-settings interface when built with libfwupd support (`-DAMDSMI_ENABLE_FWUPD=ON`). Reading needs fwupd >= 1.8.4; writing needs fwupd >= 2.1.1 (Ubuntu 26.04+). PolicyKit brokers authorization (no explicit `sudo`), and a reboot applies the new size.
 - **GTT (TTM `pages_limit`):** root (to write `/etc/modprobe.d/<module>.conf`), optionally `dracut` (the tool will rebuild the initramfs automatically when `dracut` is present), and a reboot to apply the new limit. amd-smi auto-detects the TTM kernel module name (`ttm`, `amdttm`, or `amd-ttm`) and writes the matching `.conf`.
-
-### HP / UEFI-HII platforms (via fwupd)
-
-On some platforms (e.g. HP ZBook Ultra G1a and Z2 Mini G1a) the amdgpu
-`/sys/class/drm/<card>/device/uma/carveout` node is absent, but the BIOS still
-exposes the "Dedicated Graphics Memory" knob through fwupd's BIOS-settings
-interface. When the sysfs node is missing, `amd-smi static --mem-carveout` and
-`amd-smi set --mem-carveout INDEX` fall back to fwupd automatically and present
-the BIOS-provided options in the usual format.
-
-Reading the current value needs fwupd >= 1.8.4; writing a new value needs
-fwupd >= 2.1.1 (Ubuntu 26.04+). PolicyKit handles authorization, so run the
-command without `sudo` and answer the polkit prompt. A reboot applies the new
-carveout size.
 
 ### Troubleshooting: `MEM_CARVEOUT: N/A`
 
-On MI300A (and every platform where neither the amdgpu sysfs node nor a fwupd
-BIOS setting exposes the knob) `amd-smi static --mem-carveout` prints
+On MI300A (and every non-APU / pre-ATCS-0xA platform) the kernel does not
+create `/sys/class/drm/<card>/device/uma/`, so `amd-smi static --mem-carveout`
+prints
 
 ```text
-MEM_CARVEOUT: N/A (no UMA carveout interface: neither the amdgpu sysfs node nor a fwupd BIOS setting is present)
+MEM_CARVEOUT: N/A (UMA carveout is not supported on this ASIC/VBIOS)
 ```
 
-This is expected. Use `amd-smi node --gtt` / `amd-smi set --gtt` to tune
-shared GPU memory on those platforms instead.
+On UEFI-HII APU platforms the same knob may still be reachable through fwupd; see
+the fwupd prerequisite above (requires an amd-smi built with `-DAMDSMI_ENABLE_FWUPD=ON`).
+
+This is expected on platforms with no carveout interface. Use `amd-smi node --gtt` /
+`amd-smi set --gtt` to tune shared GPU memory on those platforms instead.

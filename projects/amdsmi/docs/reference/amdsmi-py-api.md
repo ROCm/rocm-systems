@@ -5923,7 +5923,7 @@ Refer to [amd_smi_partition_example.py](https://github.com/ROCm/rocm-systems/blo
 - **Not available** on dedicated GPUs or Instinct MI-series accelerators
   (including MI300A); the call returns `AMDSMI_STATUS_NOT_SUPPORTED` and
   `amd-smi static --mem-carveout` prints
-  `MEM_CARVEOUT: N/A (no UMA carveout interface: neither the amdgpu sysfs node nor a fwupd BIOS setting is present)`.
+  `MEM_CARVEOUT: N/A (UMA carveout is not supported on this ASIC/VBIOS)`.
 - Requires Linux kernel >= 7.0 (upstream commit
   [`685b711`](https://github.com/torvalds/linux/commit/685b711); some
   distros backport it to earlier kernels) and read access to

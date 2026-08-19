@@ -134,3 +134,20 @@ install(
     COMPONENT ${TESTS_COMPONENT}
     PATTERN "__pycache__" EXCLUDE
 )
+
+# Hardware-free unit test for the fwupd UMA carveout adapter. It compiles
+# fwupd_carveout.cc directly WITHOUT AMDSMI_ENABLE_FWUPD, so the no-op stub path
+# is exercised regardless of how the main library was configured, and asserts
+# the default-build contract (NOT_SUPPORTED). Kept in its own target/subdir so
+# the aux_source_directory() sweep above does not pull it into ${TEST}.
+add_executable(
+    fwupd_carveout_stub_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/fwupd_carveout_stub_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/amd_smi/fwupd_carveout.cc
+)
+target_include_directories(
+    fwupd_carveout_stub_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../include ${CMAKE_CURRENT_SOURCE_DIR}/../../src/amd_smi
+)
+target_link_libraries(fwupd_carveout_stub_test GTest::gtest GTest::gtest_main)
+add_test(NAME fwupd_carveout_stub_test COMMAND fwupd_carveout_stub_test)

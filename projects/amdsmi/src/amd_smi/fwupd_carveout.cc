@@ -143,6 +143,15 @@ amdsmi_status_t fwupd_set_carveout(uint32_t option_index) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
 
+  // Setting the carveout to the value it already holds is a successful no-op.
+  // Short-circuit before calling the daemon so the result stays stable across
+  // fwupd versions, which otherwise surface the "nothing to change" case as an
+  // error rather than success.
+  const char* current = fwupd_bios_setting_get_current_value(setting);
+  if (current != nullptr && g_strcmp0(current, value) == 0) {
+    return AMDSMI_STATUS_SUCCESS;
+  }
+
   if (DryRun()) {
     return AMDSMI_STATUS_SUCCESS;
   }
@@ -153,9 +162,11 @@ amdsmi_status_t fwupd_set_carveout(uint32_t option_index) {
   g_autoptr(GError) set_error = nullptr;
   if (!fwupd_client_modify_bios_setting(client, request, nullptr, &set_error)) {
     if (set_error != nullptr) {
-      // fwupd reports "nothing to do" when the value already matches.
+      // Different fwupd versions word the "value already matches" case as
+      // "nothing to do" or "no BIOS settings needed to be changed".
       if (set_error->message != nullptr &&
-          std::strstr(set_error->message, "nothing to do") != nullptr) {
+          (std::strstr(set_error->message, "nothing to do") != nullptr ||
+           std::strstr(set_error->message, "needed to be changed") != nullptr)) {
         return AMDSMI_STATUS_SUCCESS;
       }
       if (g_error_matches(set_error, FWUPD_ERROR, FWUPD_ERROR_PERMISSION_DENIED)) {
