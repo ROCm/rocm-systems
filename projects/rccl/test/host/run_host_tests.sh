@@ -274,8 +274,8 @@ do_coverage() {
   local lcov_major
   lcov_major="$(lcov --version 2>/dev/null | grep -oE '[0-9]+' | head -1)"
   if [ "${lcov_major:-0}" -ge 2 ]; then
-    lcov_args+=("--rc check_data_consistency=0"
-                "--ignore-errors inconsistent,unsupported,corrupt,format")
+    lcov_args+=(--rc check_data_consistency=0
+                --ignore-errors "inconsistent,unsupported,corrupt,format")
   fi
 
   # lcov merges tracefiles by taking the union per line/branch: a line/branch is
@@ -292,7 +292,7 @@ do_coverage() {
     2>&1 | tee "$odir/summary.txt"
   if command -v genhtml >/dev/null 2>&1; then
     local genhtml_args=(--branch-coverage)
-    [ "${lcov_major:-0}" -ge 2 ] && genhtml_args+=("--ignore-errors inconsistent,unsupported,corrupt,format")
+    [ "${lcov_major:-0}" -ge 2 ] && genhtml_args+=(--ignore-errors "inconsistent,unsupported,corrupt,format")
     genhtml "${genhtml_args[@]}" "$odir/combined.lcov" -o "$odir/html" \
       >/dev/null 2>&1 || true
     echo "    overall html report: $odir/html/index.html"
