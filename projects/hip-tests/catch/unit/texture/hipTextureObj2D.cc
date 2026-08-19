@@ -79,7 +79,7 @@ HIP_TEST_CASE(Unit_hipTextureObj2D_Check) {
   texDesc.normalizedCoords = 0;
 
   // Create texture object
-  hipTextureObject_t textureObject = reinterpret_cast<hipDeviceptr_t>(nullptr);
+  hipTextureObject_t textureObject = hipTextureObject_t{};
   HIP_CHECK(hipCreateTextureObject(&textureObject, &resDesc, &texDesc, nullptr))
 
   dim3 dimBlock(16, 16, 1);

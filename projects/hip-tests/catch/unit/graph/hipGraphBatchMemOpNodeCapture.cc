@@ -49,7 +49,7 @@ HIP_TEST_CASE(Unit_hipGraphBatchMemOpNode_WriteAndWait) {
   HIP_CHECK(hipCtxCreate(&ctx, 0, device))
 
   // Allocate signal memory required for wait-value operations on AMD
-  hipDeviceptr_t devPtr = reinterpret_cast<hipDeviceptr_t>(nullptr);
+  hipDeviceptr_t devPtr = hipDeviceptr_t{};
 #if HT_AMD
   HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&devPtr), sizeof(uint64_t),
                                   hipMallocSignalMemory));

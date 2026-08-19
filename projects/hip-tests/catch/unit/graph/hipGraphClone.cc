@@ -267,8 +267,8 @@ HIP_TEST_CASE(Unit_hipGraphClone_MultiThreaded) {
     HIP_CHECK_THREAD(hipGraphClone(&clonedgraph, graph));
     // Instantiate and launch the cloned graph
     HIP_CHECK_THREAD(hipGraphInstantiate(&graphExec, clonedgraph, nullptr, nullptr, 0))
-    HIP_CHECK_THREAD(hipGraphLaunch(graphExec, 0))
-    HIP_CHECK_THREAD(hipStreamSynchronize(0))
+    HIP_CHECK_THREAD(hipGraphLaunch(graphExec, nullptr))
+    HIP_CHECK_THREAD(hipStreamSynchronize(nullptr))
 
     for (size_t i = 0; i < N; i++) {
       REQUIRE_THREAD(A_h[i] == B_h[i]);

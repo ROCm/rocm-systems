@@ -140,7 +140,7 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_KernelUpdation) {
   Nbytes = N * sizeof(int);
   int *A_d, *A_h;
   HIP_CHECK(hipMalloc(&A_d, Nbytes))
-  hipDeviceptr_t data = reinterpret_cast<hipDeviceptr_t>(nullptr);
+  hipDeviceptr_t data = hipDeviceptr_t{};
   A_h = reinterpret_cast<int*>(malloc(Nbytes));
   for (unsigned int i = 0; i < N; i++) {
     A_h[i] = INT_VAL;
@@ -277,7 +277,7 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_Negative) {
   Nbytes = N * sizeof(char);
   char* A_d;
   HIP_CHECK(hipMalloc(&A_d, Nbytes))
-  hipDeviceptr_t data = reinterpret_cast<hipDeviceptr_t>(nullptr);
+  hipDeviceptr_t data = hipDeviceptr_t{};
   char* A_h;
   A_h = reinterpret_cast<char*>(malloc(Nbytes));
   SECTION("Pass nullptr to data") {
@@ -290,7 +290,7 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_Negative) {
             hipErrorInvalidValue);
 #else
     REQUIRE(hipPointerGetAttribute(&data, HIP_POINTER_ATTRIBUTE_DEVICE_POINTER,
-                                   reinterpret_cast<hipDeviceptr_t>(nullptr)) ==
+                                   hipDeviceptr_t{}) ==
             hipErrorInvalidValue);
 #endif
   }

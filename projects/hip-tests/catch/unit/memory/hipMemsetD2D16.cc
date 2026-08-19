@@ -114,7 +114,7 @@ HIP_TEST_CASE(Unit_hipMemsetD2D16_NegTsts) {
   HIP_CHECK(hipMemAllocPitch(&A_d, &devPitch, width, numH,
                              2 * sizeof(uint16_t)));
   SECTION("nullptr destination") {
-    HIP_CHECK_ERROR(hipMemsetD2D16(reinterpret_cast<hipDeviceptr_t>(nullptr), devPitch, memsetval, numW, numH), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemsetD2D16(hipDeviceptr_t{}, devPitch, memsetval, numW, numH), hipErrorInvalidValue);
   }
   SECTION("Dst pointer points to Source Memory") {
     hipDeviceptr_t B_d;

@@ -13,7 +13,7 @@ class TextureObjectTestWrapper {
   bool ommit_destroy_;
 
  public:
-  hipTextureObject_t texture_object = reinterpret_cast<hipDeviceptr_t>(nullptr);
+  hipTextureObject_t texture_object = hipTextureObject_t{};
   hipResourceDesc res_desc;
   hipTextureDesc tex_desc;
   hipChannelFormatDesc channel_desc;
@@ -144,7 +144,7 @@ HIP_TEST_CASE(Unit_hipGetTextureObjectResourceDesc_Negative_Parameters) {
 
   SECTION("texture is invalid") {
     HIP_CHECK_ERROR(
-        hipGetTextureObjectResourceDesc(&check_desc, reinterpret_cast<hipTextureObject_t>(nullptr)),
+        hipGetTextureObjectResourceDesc(&check_desc, hipTextureObject_t{}),
         hipErrorInvalidValue);
   }
 }

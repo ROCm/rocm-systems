@@ -1113,7 +1113,7 @@ class vmm_resize_class {
     vhandle.push_back(handle);
     vsize.push_back(size_rounded);
     // Allocate virtual address range
-    HIP_CHECK_OPT_THREAD(threadSafe, hipMemAddressReserve(&ptrVmm, size_rounded, 0, 0, 0));
+    HIP_CHECK_OPT_THREAD(threadSafe, hipMemAddressReserve(&ptrVmm, size_rounded, 0, nullptr, 0));
     HIP_CHECK_OPT_THREAD(threadSafe, hipMemMap(ptrVmm, size_rounded, 0, handle, 0));
     // Set access
     hipMemAccessDesc accessDesc = {};

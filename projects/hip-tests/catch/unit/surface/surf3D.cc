@@ -92,7 +92,7 @@ template <typename T> static void runTestR(const int width, const int height, co
   resDesc.res.array.array = hipArray;
 
   // Create surface object
-  hipSurfaceObject_t surfaceObject = reinterpret_cast<hipSurfaceObject_t>(nullptr);
+  hipSurfaceObject_t surfaceObject = hipSurfaceObject_t{};
   HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc))
 
   T* hOutputData = nullptr;
@@ -156,7 +156,7 @@ template <typename T> static void runTestW(const int width, const int height, co
   resDesc.res.array.array = hipArray;
 
   // Create surface object
-  hipSurfaceObject_t surfaceObject = reinterpret_cast<hipSurfaceObject_t>(nullptr);
+  hipSurfaceObject_t surfaceObject = hipSurfaceObject_t{};
   HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc))
 
   for (int i = 0; i < depth; i++) {
@@ -243,7 +243,7 @@ template <typename T> static void runTestRW(const int width, const int height, c
   resDesc.res.array.array = hipArray;
 
   // Create surface object
-  hipSurfaceObject_t surfaceObject = reinterpret_cast<hipSurfaceObject_t>(nullptr);
+  hipSurfaceObject_t surfaceObject = hipSurfaceObject_t{};
   HIP_CHECK(hipCreateSurfaceObject(&surfaceObject, &resDesc))
 
   HIP_CHECK(hipMalloc3DArray(&hipOutArray, &channelDesc, make_hipExtent(width, height, depth),
@@ -254,7 +254,7 @@ template <typename T> static void runTestRW(const int width, const int height, c
   resOutDesc.resType = hipResourceTypeArray;
   resOutDesc.res.array.array = hipOutArray;
 
-  hipSurfaceObject_t outSurfaceObject = reinterpret_cast<hipSurfaceObject_t>(nullptr);
+  hipSurfaceObject_t outSurfaceObject = hipSurfaceObject_t{};
   HIP_CHECK(hipCreateSurfaceObject(&outSurfaceObject, &resOutDesc))
 
   dim3 dimBlock(8, 8, 8);  // 512 threads
