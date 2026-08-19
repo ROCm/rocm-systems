@@ -704,11 +704,20 @@ struct ProgramCodeObject {
   size_t           size;
   hrr_cap::Hash128 hash;
 };
+// g_prog_hash_mu guards g_prog_hash *and* every call HRR makes into
+// amd::Program::binary(). The latter is `return binary_[&device];` — a
+// non-const, inserting std::unordered_map::operator[] that the runtime does
+// not lock. Reading a span is therefore a write as far as binary_ is
+// concerned: the first read for a device the program was not built for
+// inserts an empty entry and can rehash the bucket array. Two capture threads
+// launching kernels from the same program would otherwise do that
+// concurrently. Serializing HRR's reads here keeps us off that path.
 static std::mutex g_prog_hash_mu;
 static std::unordered_map<const amd::Program*, ProgramCodeObject> g_prog_hash;
 
 // Fetch a program's device binary as (pointer, length) without touching it.
-static void program_binary_span(amd::Program* prog, const uint8_t*& data, size_t& size) {
+// Caller must hold g_prog_hash_mu.
+static void program_binary_span_locked(amd::Program* prog, const uint8_t*& data, size_t& size) {
   data = nullptr;
   size = 0;
   if (!prog) return;
@@ -719,6 +728,11 @@ static void program_binary_span(amd::Program* prog, const uint8_t*& data, size_t
   size = std::get<1>(bin).first;
 }
 
+static void program_binary_span(amd::Program* prog, const uint8_t*& data, size_t& size) {
+  std::lock_guard<std::mutex> lk(g_prog_hash_mu);
+  program_binary_span_locked(prog, data, size);
+}
+
 static void remember_program_hash(const amd::Program* prog, const void* image, size_t size,
                                   hrr_cap::Hash128 h) {
   if (!prog) return;
@@ -726,13 +740,13 @@ static void remember_program_hash(const amd::Program* prog, const void* image, s
   g_prog_hash[prog] = ProgramCodeObject{image, size, h};
 }
 
-// Hash the program's current device binary, refusing anything that does not
+// Hash an already-read device binary span, refusing anything that does not
 // look like a loadable image. Returns {0,0} when there is nothing safe to
-// record.
-static hrr_cap::Hash128 hash_program_binary(amd::Program* prog) {
-  const uint8_t* data = nullptr;
-  size_t size = 0;
-  program_binary_span(prog, data, size);
+// record. Takes the span rather than re-reading it so callers that already
+// have one do not go back through amd::Program::binary(); must not be called
+// with g_prog_hash_mu held (write_code_object takes the writer locks).
+static hrr_cap::Hash128 hash_program_image(const amd::Program* prog, const uint8_t* data,
+                                           size_t size) {
   if (!data || !size) return {0, 0};
   if (!image_looks_loadable(data, size)) {
     LogPrintfWarning("[HRR capture] program %p: %llu bytes at %p are not a loadable image"
@@ -755,7 +769,7 @@ static hrr_cap::Hash128 write_module_code_object(hipModule_t module) {
   const uint8_t* image = nullptr;
   size_t size = 0;
   program_binary_span(prog, image, size);
-  hrr_cap::Hash128 h = hash_program_binary(prog);
+  hrr_cap::Hash128 h = hash_program_image(prog, image, size);
   remember_program_hash(prog, image, size, h);
   return h;
 }
@@ -766,14 +780,19 @@ static hrr_cap::Hash128 kernel_code_object_hash(amd::Kernel* kernel) {
   if (!prog) return {0, 0};
   const uint8_t* image = nullptr;
   size_t size = 0;
-  program_binary_span(prog, image, size);
+  // One critical section for the span read and the lookup: the span read is
+  // the part that must not race (see g_prog_hash_mu above), and folding the
+  // lookup in costs nothing since we hold the lock anyway.
   {
     std::lock_guard<std::mutex> lk(g_prog_hash_mu);
+    program_binary_span_locked(prog, image, size);
     auto it = g_prog_hash.find(prog);
     if (it != g_prog_hash.end() && it->second.image == image && it->second.size == size)
       return it->second.hash;
   }
-  hrr_cap::Hash128 h = hash_program_binary(prog);
+  // Miss. Hash outside the lock — write_code_object takes the writer's own
+  // locks, and hashing the same image twice is harmless (content-addressed).
+  hrr_cap::Hash128 h = hash_program_image(prog, image, size);
   remember_program_hash(prog, image, size, h);
   return h;
 }
