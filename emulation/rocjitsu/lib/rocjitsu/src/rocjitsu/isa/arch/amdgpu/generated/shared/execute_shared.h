@@ -10143,6 +10143,10 @@ inline void execute_v_dot2_f32_bf16_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst.inst_.src0, inst.src0.size_bits()))
+      raw0 = util::f32_to_bf16(std::bit_cast<float>(raw0));
+    if (amdgpu::pk16_src_needs_narrowing(inst.inst_.src1, inst.src1.size_bits()))
+      raw1 = util::f32_to_bf16(std::bit_cast<float>(raw1));
     bool sel0_lo = (inst.inst_.op_sel >> 0) & 1;
     bool sel1_lo = (inst.inst_.op_sel >> 1) & 1;
     bool sel0_hi = (inst.inst_.op_sel_hi >> 0) & 1;
@@ -10179,6 +10183,10 @@ inline void execute_v_dot2_f32_f16_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst.inst_.src0, inst.src0.size_bits()))
+      raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));
+    if (amdgpu::pk16_src_needs_narrowing(inst.inst_.src1, inst.src1.size_bits()))
+      raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));
     bool sel0_lo = (inst.inst_.op_sel >> 0) & 1;
     bool sel1_lo = (inst.inst_.op_sel >> 1) & 1;
     bool sel0_hi = (inst.inst_.op_sel_hi >> 0) & 1;
@@ -11220,7 +11228,7 @@ inline void execute_v_fma_mix_f32_vop3p([[maybe_unused]] Inst &inst,
                            bool high_half) -> float {
       if (!src_is_f16)
         return std::bit_cast<float>(raw);
-      uint16_t bits = (src_selector >= 240u && src_selector <= 248u)
+      uint16_t bits = amdgpu::is_inline_float_src(src_selector)
                           ? util::f32_to_f16(std::bit_cast<float>(raw))
                           : static_cast<uint16_t>(high_half ? (raw >> 16) : raw);
       return util::f16_to_f32(bits);
@@ -11262,7 +11270,7 @@ inline void execute_v_fma_mixhi_f16_vop3p([[maybe_unused]] Inst &inst,
                            bool high_half) -> float {
       if (!src_is_f16)
         return std::bit_cast<float>(raw);
-      uint16_t bits = (src_selector >= 240u && src_selector <= 248u)
+      uint16_t bits = amdgpu::is_inline_float_src(src_selector)
                           ? util::f32_to_f16(std::bit_cast<float>(raw))
                           : static_cast<uint16_t>(high_half ? (raw >> 16) : raw);
       return util::f16_to_f32(bits);
@@ -11305,7 +11313,7 @@ inline void execute_v_fma_mixlo_f16_vop3p([[maybe_unused]] Inst &inst,
                            bool high_half) -> float {
       if (!src_is_f16)
         return std::bit_cast<float>(raw);
-      uint16_t bits = (src_selector >= 240u && src_selector <= 248u)
+      uint16_t bits = amdgpu::is_inline_float_src(src_selector)
                           ? util::f32_to_f16(std::bit_cast<float>(raw))
                           : static_cast<uint16_t>(high_half ? (raw >> 16) : raw);
       return util::f16_to_f32(bits);
@@ -13133,7 +13141,7 @@ inline void execute_v_mad_mix_f32_vop3p([[maybe_unused]] Inst &inst,
                            bool high_half) -> float {
       if (!src_is_f16)
         return std::bit_cast<float>(raw);
-      uint16_t bits = (src_selector >= 240u && src_selector <= 248u)
+      uint16_t bits = amdgpu::is_inline_float_src(src_selector)
                           ? util::f32_to_f16(std::bit_cast<float>(raw))
                           : static_cast<uint16_t>(high_half ? (raw >> 16) : raw);
       return util::f16_to_f32(bits);
@@ -13175,7 +13183,7 @@ inline void execute_v_mad_mixhi_f16_vop3p([[maybe_unused]] Inst &inst,
                            bool high_half) -> float {
       if (!src_is_f16)
         return std::bit_cast<float>(raw);
-      uint16_t bits = (src_selector >= 240u && src_selector <= 248u)
+      uint16_t bits = amdgpu::is_inline_float_src(src_selector)
                           ? util::f32_to_f16(std::bit_cast<float>(raw))
                           : static_cast<uint16_t>(high_half ? (raw >> 16) : raw);
       return util::f16_to_f32(bits);
@@ -13218,7 +13226,7 @@ inline void execute_v_mad_mixlo_f16_vop3p([[maybe_unused]] Inst &inst,
                            bool high_half) -> float {
       if (!src_is_f16)
         return std::bit_cast<float>(raw);
-      uint16_t bits = (src_selector >= 240u && src_selector <= 248u)
+      uint16_t bits = amdgpu::is_inline_float_src(src_selector)
                           ? util::f32_to_f16(std::bit_cast<float>(raw))
                           : static_cast<uint16_t>(high_half ? (raw >> 16) : raw);
       return util::f16_to_f32(bits);
@@ -16567,6 +16575,10 @@ inline void execute_v_pk_add_f16_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst.inst_.src0, inst.src0.size_bits()))
+      raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));
+    if (amdgpu::pk16_src_needs_narrowing(inst.inst_.src1, inst.src1.size_bits()))
+      raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));
     bool sel0_lo = (inst.inst_.op_sel >> 0) & 1;
     bool sel1_lo = (inst.inst_.op_sel >> 1) & 1;
     bool sel0_hi = (inst.inst_.op_sel_hi >> 0) & 1;
@@ -16745,6 +16757,12 @@ inline void execute_v_pk_fma_f16_vop3p([[maybe_unused]] Inst &inst,
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
     uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst.inst_.src0, inst.src0.size_bits()))
+      raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));
+    if (amdgpu::pk16_src_needs_narrowing(inst.inst_.src1, inst.src1.size_bits()))
+      raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));
+    if (amdgpu::pk16_src_needs_narrowing(inst.inst_.src2, inst.src2.size_bits()))
+      raw2 = util::f32_to_f16(std::bit_cast<float>(raw2));
     bool sel0_lo = (inst.inst_.op_sel >> 0) & 1;
     bool sel1_lo = (inst.inst_.op_sel >> 1) & 1;
     bool sel2_lo = (inst.inst_.op_sel >> 2) & 1;
@@ -16994,6 +17012,10 @@ inline void execute_v_pk_max_f16_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst.inst_.src0, inst.src0.size_bits()))
+      raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));
+    if (amdgpu::pk16_src_needs_narrowing(inst.inst_.src1, inst.src1.size_bits()))
+      raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));
     bool sel0_lo = (inst.inst_.op_sel >> 0) & 1;
     bool sel1_lo = (inst.inst_.op_sel >> 1) & 1;
     bool sel0_hi = (inst.inst_.op_sel_hi >> 0) & 1;
@@ -17098,6 +17120,10 @@ inline void execute_v_pk_min_f16_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst.inst_.src0, inst.src0.size_bits()))
+      raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));
+    if (amdgpu::pk16_src_needs_narrowing(inst.inst_.src1, inst.src1.size_bits()))
+      raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));
     bool sel0_lo = (inst.inst_.op_sel >> 0) & 1;
     bool sel1_lo = (inst.inst_.op_sel >> 1) & 1;
     bool sel0_hi = (inst.inst_.op_sel_hi >> 0) & 1;
@@ -17223,6 +17249,10 @@ inline void execute_v_pk_mul_f16_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst.inst_.src0, inst.src0.size_bits()))
+      raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));
+    if (amdgpu::pk16_src_needs_narrowing(inst.inst_.src1, inst.src1.size_bits()))
+      raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));
     bool sel0_lo = (inst.inst_.op_sel >> 0) & 1;
     bool sel1_lo = (inst.inst_.op_sel >> 1) & 1;
     bool sel0_hi = (inst.inst_.op_sel_hi >> 0) & 1;
