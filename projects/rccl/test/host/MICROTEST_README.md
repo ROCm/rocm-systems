@@ -440,4 +440,4 @@ cmake --build build -j"$(nproc)"
 ```
 
 Disable coverage instrumentation for the standalone micro-test with
-`-DMICRO_COVERAGE=OFF`.
+`-DHOST_UT_COVERAGE=OFF`.

@@ -551,12 +551,14 @@ target_compile_definitions(rccl-HostUnitTests PRIVATE
 # binary through that static library, so instrumenting only the executable
 # silently drops it from the report -- the profile still looks healthy, it just
 # has no record of that file at all.
-option(HOST_UT_COVERAGE "Build rccl-HostUnitTests with llvm source-based coverage" ON)
+# The single switch for host-only coverage across every binary this file
+# builds (rccl-HostUnitTests, rccl-source-wrappers, rccl-UnitTestsMicro,
+# rccl-UnitTestsDevRuntime). The compile/link flags are applied in one place
+# at the end of the file, once all those targets exist; only the
+# host-specific RCCL_TEST_CODE_COVERAGE define is set here.
+option(HOST_UT_COVERAGE "Build the host-only test binaries with llvm source-based coverage" ON)
 if(HOST_UT_COVERAGE)
-  target_compile_options(rccl-HostUnitTests PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-  target_link_options(rccl-HostUnitTests PRIVATE -fprofile-instr-generate -fcoverage-mapping)
   target_compile_definitions(rccl-HostUnitTests PRIVATE RCCL_TEST_CODE_COVERAGE=1)
-  target_compile_options(rccl-source-wrappers PRIVATE -fprofile-instr-generate -fcoverage-mapping)
 endif()
 
 target_link_options(rccl-HostUnitTests PRIVATE -no-hip-rt -no-pie)
@@ -668,10 +670,12 @@ target_link_libraries(rccl-UnitTestsDevRuntime PRIVATE
 
 # llvm source-based coverage (host-only build: no -Xarch_device split needed
 # because --offload-host-only never runs the amdgcn device pass).
-# On by default; disable with -DMICRO_COVERAGE=OFF.
-option(MICRO_COVERAGE "Build rccl-UnitTestsMicro with llvm source-based coverage" ON)
-if(MICRO_COVERAGE)
-  foreach(_cov_tgt rccl-UnitTestsMicro rccl-UnitTestsDevRuntime)
+# On by default; disable with -DHOST_UT_COVERAGE=OFF. The option is declared
+# earlier (next to rccl-HostUnitTests, where the RCCL_TEST_CODE_COVERAGE define
+# is also set); the instrumentation flags are applied here, after every target
+# exists, so a single switch covers all host-only binaries.
+if(HOST_UT_COVERAGE)
+  foreach(_cov_tgt rccl-UnitTestsMicro rccl-UnitTestsDevRuntime rccl-HostUnitTests rccl-source-wrappers)
     target_compile_options(${_cov_tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
     target_link_options(${_cov_tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
   endforeach()
