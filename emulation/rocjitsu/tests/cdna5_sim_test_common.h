@@ -156,7 +156,8 @@ struct Gfx1250Sim {
                         bool enable_wg_id_x = false, bool enable_wg_id_y = false,
                         bool enable_wg_id_z = false, uint32_t kernel_code_properties = 0,
                         uint32_t kernarg_size = 0, uint32_t kernarg_preload_length = 0,
-                        uint32_t kernarg_preload_offset = 0, uint32_t enable_vgpr_workitem_id = 0) {
+                        uint32_t kernarg_preload_offset = 0, uint32_t enable_vgpr_workitem_id = 0,
+                        uint32_t named_barrier_blocks = 0) {
     using namespace rocr::llvm::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
@@ -174,6 +175,8 @@ struct Gfx1250Sim {
                     enable_wg_id_z);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID,
                     enable_vgpr_workitem_id);
+    AMDHSA_BITS_SET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT,
+                    named_barrier_blocks);
     kd.kernel_code_properties = kernel_code_properties;
     AMDHSA_BITS_SET(kd.kernarg_preload, KERNARG_PRELOAD_SPEC_LENGTH, kernarg_preload_length);
     AMDHSA_BITS_SET(kd.kernarg_preload, KERNARG_PRELOAD_SPEC_OFFSET, kernarg_preload_offset);

@@ -4946,6 +4946,16 @@ class CodeGenerator:
             L.append('  wf.set_state(amdgpu::WfState::BARRIER);')
             return '\n'.join(L)
 
+        if cls == 'scalar_barrier_wait':
+            L.append(
+                f'  int32_t barrier_id = static_cast<int16_t>({src_ops[0]}.encoding_value_);'
+            )
+            L.append('  wf.barrier_wait(barrier_id);')
+            return '\n'.join(L)
+
+        if cls == 'scalar_barrier_leave':
+            return '  wf.write_scc(wf.barrier_leave());'
+
         if cls == 'branch':
             L.append(
                 f'  int16_t offset = static_cast<int16_t>({src_ops[0]}.encoding_value_);'
@@ -5094,7 +5104,69 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'scalar_barrier_state':
-            L.append(f'  amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, 0);')
+            L.append(
+                f'  uint32_t source = amdgpu::RegisterAccess(wf).read_scalar({src_ops[0]});'
+            )
+            L.append(
+                f'  bool source_is_m0 = '
+                f'{src_ops[0]}.encoding_value() == '
+                f'OpSelSsrcBarrierId::OPR_SSRC_BARRIER_ID_M0;'
+            )
+            L.append(
+                '  int32_t barrier_id = source_is_m0 ? static_cast<int32_t>(source & 0x1fu) '
+                ': static_cast<int32_t>(source);'
+            )
+            L.append(
+                f'  amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, wf.barrier_state(barrier_id));'
+            )
+            return '\n'.join(L)
+
+        if cls in (
+            'scalar_barrier_signal',
+            'scalar_barrier_init',
+            'scalar_barrier_join',
+        ):
+            L.append(
+                f'  uint32_t source = amdgpu::RegisterAccess(wf).read_scalar({src_ops[0]});'
+            )
+            L.append(
+                f'  bool source_is_m0 = '
+                f'{src_ops[0]}.encoding_value() == '
+                f'OpSelSsrcBarrierId::OPR_SSRC_BARRIER_ID_M0;'
+            )
+            L.append(
+                '  int32_t barrier_id = source_is_m0 ? static_cast<int32_t>(source & 0x1fu) '
+                ': static_cast<int32_t>(source);'
+            )
+            if cls == 'scalar_barrier_signal':
+                L.append(
+                    '  uint32_t member_count = source_is_m0 ? ((source >> 16) & 0x7fu) : 0;'
+                )
+                if op == 'signal_isfirst':
+                    L.append(
+                        '  bool barrier_valid = (wf.barrier_state(barrier_id) & 1u) != 0;'
+                    )
+                    L.append(
+                        '  bool is_first = wf.barrier_signal(barrier_id, member_count);'
+                    )
+                    L.append('  if (barrier_valid) wf.write_scc(is_first);')
+                else:
+                    L.append('  wf.barrier_signal(barrier_id, member_count);')
+            elif cls == 'scalar_barrier_init':
+                has_implicit_m0 = any(
+                    operand.name == 'm0' and operand.is_input
+                    for operand in inst.operands
+                )
+                member_source = (
+                    'wf.m0()'
+                    if has_implicit_m0
+                    else f'amdgpu::RegisterAccess(wf).read_scalar({src_ops[0]})'
+                )
+                L.append(f'  uint32_t member_source = {member_source};')
+                L.append('  uint32_t member_count = (member_source >> 16) & 0x7fu;')
+                L.append('  wf.barrier_init(barrier_id, member_count);')
+            else:
+                L.append('  wf.barrier_join(barrier_id);')
             return '\n'.join(L)
 
         if cls == 'scalar_movrel':
@@ -12057,7 +12129,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         resolve_code = cgen.Line(
             'namespace {\n'
             '\n'
-            f'constexpr int kM0EncodingValue = {125 if scalar_null_precedes_m0 else 124};\n'
+            f'constexpr int kM0EncodingValue = '
+            f'{125 if scalar_null_precedes_m0 else 124};\n'
             '\n'
             + _is_vgpr_only_body
             + '\n\n'
