@@ -2269,11 +2269,11 @@ collect_moi_dense_relay_host_candidates(const MoiResourcePlanningState &resource
   return candidates;
 }
 
-[[nodiscard]] std::optional<MoiDenseRelayHost>
-select_moi_dense_relay_host(const MoiResourcePlanningState &resource_state,
-                            std::span<const uint8_t> text, size_t host_word_count,
-                            std::span<const uint64_t> anchors,
-                            std::span<const uint64_t> candidate_offsets) {
+[[nodiscard]] std::optional<MoiDenseRelayHost> select_moi_dense_relay_host(
+    const MoiResourcePlanningState &resource_state, std::span<const uint8_t> text,
+    size_t host_word_count, std::span<const uint64_t> anchors,
+    std::span<const uint64_t> candidate_offsets,
+    std::span<const std::pair<uint64_t, uint64_t>> claimed_host_ranges = {}) {
   if (host_word_count == 0u || anchors.empty() || candidate_offsets.empty())
     return std::nullopt;
 
@@ -2290,6 +2290,12 @@ select_moi_dense_relay_host(const MoiResourcePlanningState &resource_state,
                     maximum_anchor - std::min(relay_offset, maximum_anchor));
   };
   const auto decode_host = [&](uint64_t host_offset) -> std::optional<MoiDenseRelayHost> {
+    const uint64_t host_end = host_offset + host_word_count * sizeof(uint32_t);
+    if (std::ranges::any_of(claimed_host_ranges, [&](const auto &range) {
+          return host_offset < range.second && range.first < host_end;
+        })) {
+      return std::nullopt;
+    }
     const uint64_t relay_offset = host_offset + sizeof(uint32_t);
     if (!std::ranges::all_of(anchors, [&](uint64_t anchor) {
           return compute_sopp_branch_simm16(anchor, relay_offset).has_value();

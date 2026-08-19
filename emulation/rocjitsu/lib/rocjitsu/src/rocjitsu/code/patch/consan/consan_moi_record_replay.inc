@@ -266,6 +266,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         std::tuple<bool, std::string, uint64_t, std::vector<uint64_t>,
                    std::vector<std::pair<uint16_t, uint16_t>>>;
     std::map<DenseHostCandidateCacheKey, std::vector<uint64_t>> dense_host_candidate_cache;
+    std::vector<std::pair<uint64_t, uint64_t>> claimed_dense_host_ranges;
     for (const auto &[key, group] : groups) {
       const ConSanCandidateResourcePlan *group_resource =
           group.candidates.empty() ? nullptr
@@ -389,10 +390,13 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                 dense_host_candidate_cache.emplace(std::move(cache_key), std::move(host_candidates))
                     .first;
           }
-          auto best_host = select_moi_dense_relay_host(resource_state, original_text,
-                                                       static_cast<size_t>(host_words_count),
-                                                       anchors, cached_candidates->second);
+          auto best_host = select_moi_dense_relay_host(
+              resource_state, original_text, static_cast<size_t>(host_words_count), anchors,
+              cached_candidates->second, claimed_dense_host_ranges);
           if (best_host) {
+            claimed_dense_host_ranges.emplace_back(best_host->host_offset,
+                                                   best_host->host_offset +
+                                                       host_words_count * sizeof(uint32_t));
             island = best_host->host_offset + sizeof(uint32_t);
             dense_entry_hosts.emplace(dispatcher,
                                       MoiDenseEntryHost{

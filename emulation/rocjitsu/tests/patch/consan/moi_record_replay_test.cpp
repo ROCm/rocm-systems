@@ -8122,9 +8122,11 @@ TEST(ConSanMoi, Cdna4PartitionedDenseHostsAvoidEveryAccessCandidate) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
+  std::vector<const ConSanPatchInfo *> relocated_hosts;
   for (const ConSanPatchInfo &host : result.patches) {
     if (host.kind != ConSanPatchKind::TrampolineMoiIndirectBranchIsland || host.original_size == 0u)
       continue;
+    relocated_hosts.push_back(&host);
     for (const ConSanPatchInfo &access : result.patches) {
       if (access.kind != ConSanPatchKind::TrampolineMoiAccessRecordStore)
         continue;
@@ -8132,6 +8134,17 @@ TEST(ConSanMoi, Cdna4PartitionedDenseHostsAvoidEveryAccessCandidate) {
                    access.anchor_offset < host.anchor_offset + host.original_size)
           << "host=" << host.anchor_offset << "+" << host.original_size
           << " access=" << access.anchor_offset << "+" << access.original_size;
+    }
+  }
+  ASSERT_GE(relocated_hosts.size(), 2u);
+  for (size_t lhs = 0; lhs < relocated_hosts.size(); ++lhs) {
+    for (size_t rhs = lhs + 1u; rhs < relocated_hosts.size(); ++rhs) {
+      const ConSanPatchInfo &left = *relocated_hosts[lhs];
+      const ConSanPatchInfo &right = *relocated_hosts[rhs];
+      EXPECT_FALSE(left.anchor_offset < right.anchor_offset + right.original_size &&
+                   right.anchor_offset < left.anchor_offset + left.original_size)
+          << "left=" << left.anchor_offset << "+" << left.original_size
+          << " right=" << right.anchor_offset << "+" << right.original_size;
     }
   }
 }
