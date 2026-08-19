@@ -7,7 +7,7 @@
 #ifdef ENABLE_ROCSHMEM_GIN
 
 /**
- * GIN plugin: SDMA Anvil device path (NCCL_GIN_TYPE=5).
+ * GIN plugin: SDMA Anvil device path (NCCL_GIN_TYPE=6).
  * Small messages use inlined IPC flat stores via GIN-owned device-memory peer table in GPU context.
  * Large messages use standalone Anvil SDMA (gin_anvil_sdma_factory).
  */
@@ -68,7 +68,6 @@ struct GinAnvilPendingEntry {
 };
 
 static std::map<struct ncclComm*, GinAnvilPendingEntry*> g_pendingByComm;
-static std::map<struct ncclComm*, int> g_nextSignalSlot;
 
 static void ginAnvilPendingAdd(struct ncclComm* comm, ginAnvilGinCtx* ctx) {
   std::lock_guard<std::mutex> lock(pluginMutex);
@@ -97,7 +96,6 @@ static void ginAnvilPendingClear(struct ncclComm* comm) {
     e = next;
   }
   g_pendingByComm.erase(comm);
-  g_nextSignalSlot.erase(comm);
 }
 
 struct ginAnvilMemHandle {
@@ -130,7 +128,6 @@ void ncclGinAnvilPluginTestResetHostState(void) {
       e = next;
     }
     g_pendingByComm.erase(comm);
-    g_nextSignalSlot.erase(comm);
   }
   bufferRegRefcount.clear();
 }
@@ -464,10 +461,12 @@ ncclResult_t ncclGinAnvilBindResourceWindowSignals(struct ncclComm* comm, void* 
   if (!comm || !resourceUserPtr || nContexts < 1 || nSignalsPerContext < 1) return ncclInvalidArgument;
 
   ncclResult_t ret = ncclSuccess;
+  int slot = 0;
   for (GinAnvilPendingEntry* e = g_pendingByComm[comm]; e != nullptr; e = e->next) {
     ginAnvilGinCtx* ctx = e->ctx;
     if (ctx->nSignals <= 0) continue;
-    if (ctx->signalSlot < 0 || ctx->signalSlot >= nContexts) {
+    ctx->signalSlot = slot++;
+    if (ctx->signalSlot >= nContexts) {
       WARN("GIN anvil-sdma: signal slot %d out of range (nContexts=%d)", ctx->signalSlot, nContexts);
       ginAnvilPendingClear(comm);
       return ncclInvalidArgument;
@@ -502,10 +501,7 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* confi
   ctx->nSignals = config->nSignals;
   ctx->nCounters = config->nCounters;
   ctx->comm = cctx->comm;
-  {
-    std::lock_guard<std::mutex> lock(pluginMutex);
-    ctx->signalSlot = g_nextSignalSlot[cctx->comm]++;
-  }
+  ctx->signalSlot = -1;  // assigned during ncclGinAnvilBindResourceWindowSignals
   ctx->hasError = false;
   ctx->signalsBound = false;
   ctx->gpu_queue_handles = cctx->gpu_queue_handles;

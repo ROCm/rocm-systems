@@ -7,7 +7,6 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/vop2.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
-#include "util/except.h"
 #include <memory>
 
 namespace rocjitsu {
@@ -67,7 +66,16 @@ VCndmaskB32Vop2::VCndmaskB32Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCndmaskB32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVCndmaskB32Vop2(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_cndmask_b32_sdwa"
+          : "v_cndmask_b32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCndmaskB32Vop2>(opcode);
 }
 } // namespace detail
@@ -122,7 +130,14 @@ VAddF32Vop2::VAddF32Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVAddF32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVAddF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_add_f32_sdwa"
+                                                                                 : "v_add_f32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VAddF32Vop2>(opcode);
 }
 } // namespace detail
@@ -177,7 +192,14 @@ VSubF32Vop2::VSubF32Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVSubF32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVSubF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_sub_f32_sdwa"
+                                                                                 : "v_sub_f32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VSubF32Vop2>(opcode);
 }
 } // namespace detail
@@ -233,7 +255,15 @@ VSubrevF32Vop2::VSubrevF32Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVSubrevF32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVSubrevF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_subrev_f32_sdwa"
+          : "v_subrev_f32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VSubrevF32Vop2>(opcode);
 }
 } // namespace detail
@@ -263,12 +293,17 @@ VFmacF64Vop2::VFmacF64Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
-    throw util::InvalidInst("V_FMAC_F64 does not support SDWA", "");
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVFmacF64Vop2(const MachineInst *opcode) {
+DecodeResult decodeVFmacF64Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      "v_fmac_f64_e32", reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
+    return emit_error.emit() << "V_FMAC_F64 does not support SDWA";
   return std::make_unique<VFmacF64Vop2>(opcode);
 }
 } // namespace detail
@@ -323,7 +358,14 @@ VMulF32Vop2::VMulF32Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMulF32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVMulF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_mul_f32_sdwa"
+                                                                                 : "v_mul_f32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMulF32Vop2>(opcode);
 }
 } // namespace detail
@@ -379,7 +421,15 @@ VMulI32I24Vop2::VMulI32I24Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMulI32I24Vop2(const MachineInst *opcode) {
+DecodeResult decodeVMulI32I24Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_mul_i32_i24_sdwa"
+          : "v_mul_i32_i24_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMulI32I24Vop2>(opcode);
 }
 } // namespace detail
@@ -435,7 +485,16 @@ VMulHiI32I24Vop2::VMulHiI32I24Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMulHiI32I24Vop2(const MachineInst *opcode) {
+DecodeResult decodeVMulHiI32I24Vop2(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_mul_hi_i32_i24_sdwa"
+          : "v_mul_hi_i32_i24_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMulHiI32I24Vop2>(opcode);
 }
 } // namespace detail
@@ -491,7 +550,15 @@ VMulU32U24Vop2::VMulU32U24Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMulU32U24Vop2(const MachineInst *opcode) {
+DecodeResult decodeVMulU32U24Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_mul_u32_u24_sdwa"
+          : "v_mul_u32_u24_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMulU32U24Vop2>(opcode);
 }
 } // namespace detail
@@ -547,7 +614,16 @@ VMulHiU32U24Vop2::VMulHiU32U24Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMulHiU32U24Vop2(const MachineInst *opcode) {
+DecodeResult decodeVMulHiU32U24Vop2(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_mul_hi_u32_u24_sdwa"
+          : "v_mul_hi_u32_u24_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMulHiU32U24Vop2>(opcode);
 }
 } // namespace detail
@@ -602,7 +678,14 @@ VMinF32Vop2::VMinF32Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMinF32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVMinF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_min_f32_sdwa"
+                                                                                 : "v_min_f32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMinF32Vop2>(opcode);
 }
 } // namespace detail
@@ -657,7 +740,14 @@ VMaxF32Vop2::VMaxF32Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMaxF32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVMaxF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_max_f32_sdwa"
+                                                                                 : "v_max_f32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMaxF32Vop2>(opcode);
 }
 } // namespace detail
@@ -712,7 +802,14 @@ VMinI32Vop2::VMinI32Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMinI32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVMinI32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_min_i32_sdwa"
+                                                                                 : "v_min_i32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMinI32Vop2>(opcode);
 }
 } // namespace detail
@@ -767,7 +864,14 @@ VMaxI32Vop2::VMaxI32Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMaxI32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVMaxI32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_max_i32_sdwa"
+                                                                                 : "v_max_i32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMaxI32Vop2>(opcode);
 }
 } // namespace detail
@@ -822,7 +926,14 @@ VMinU32Vop2::VMinU32Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMinU32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVMinU32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_min_u32_sdwa"
+                                                                                 : "v_min_u32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMinU32Vop2>(opcode);
 }
 } // namespace detail
@@ -877,7 +988,14 @@ VMaxU32Vop2::VMaxU32Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMaxU32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVMaxU32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_max_u32_sdwa"
+                                                                                 : "v_max_u32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMaxU32Vop2>(opcode);
 }
 } // namespace detail
@@ -933,7 +1051,16 @@ VLshrrevB32Vop2::VLshrrevB32Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVLshrrevB32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVLshrrevB32Vop2(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_lshrrev_b32_sdwa"
+          : "v_lshrrev_b32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VLshrrevB32Vop2>(opcode);
 }
 } // namespace detail
@@ -989,7 +1116,16 @@ VAshrrevI32Vop2::VAshrrevI32Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVAshrrevI32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVAshrrevI32Vop2(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_ashrrev_i32_sdwa"
+          : "v_ashrrev_i32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VAshrrevI32Vop2>(opcode);
 }
 } // namespace detail
@@ -1045,7 +1181,16 @@ VLshlrevB32Vop2::VLshlrevB32Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVLshlrevB32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVLshlrevB32Vop2(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_lshlrev_b32_sdwa"
+          : "v_lshlrev_b32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VLshlrevB32Vop2>(opcode);
 }
 } // namespace detail
@@ -1100,7 +1245,14 @@ VAndB32Vop2::VAndB32Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVAndB32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVAndB32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_and_b32_sdwa"
+                                                                                 : "v_and_b32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VAndB32Vop2>(opcode);
 }
 } // namespace detail
@@ -1155,7 +1307,14 @@ VOrB32Vop2::VOrB32Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVOrB32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVOrB32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_or_b32_sdwa"
+                                                                                 : "v_or_b32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VOrB32Vop2>(opcode);
 }
 } // namespace detail
@@ -1210,7 +1369,14 @@ VXorB32Vop2::VXorB32Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVXorB32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVXorB32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_xor_b32_sdwa"
+                                                                                 : "v_xor_b32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VXorB32Vop2>(opcode);
 }
 } // namespace detail
@@ -1235,14 +1401,19 @@ VFmamkF32Vop2::VFmamkF32Vop2(const MachineInst *inst)
   simm32 =
       Operand(32, OperandType::OPR_SIMM32,
               static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
-    throw util::InvalidInst("V_FMAMK_F32 does not support DPP", "");
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
-    throw util::InvalidInst("V_FMAMK_F32 does not support SDWA", "");
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVFmamkF32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVFmamkF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      "v_fmamk_f32_e32", reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+    return emit_error.emit() << "V_FMAMK_F32 does not support DPP";
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
+    return emit_error.emit() << "V_FMAMK_F32 does not support SDWA";
   return std::make_unique<VFmamkF32Vop2>(opcode);
 }
 } // namespace detail
@@ -1267,14 +1438,19 @@ VFmaakF32Vop2::VFmaakF32Vop2(const MachineInst *inst)
   simm32 =
       Operand(32, OperandType::OPR_SIMM32,
               static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
-    throw util::InvalidInst("V_FMAAK_F32 does not support DPP", "");
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
-    throw util::InvalidInst("V_FMAAK_F32 does not support SDWA", "");
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVFmaakF32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVFmaakF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      "v_fmaak_f32_e32", reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+    return emit_error.emit() << "V_FMAAK_F32 does not support DPP";
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
+    return emit_error.emit() << "V_FMAAK_F32 does not support SDWA";
   return std::make_unique<VFmaakF32Vop2>(opcode);
 }
 } // namespace detail
@@ -1333,7 +1509,15 @@ VAddCoU32Vop2::VAddCoU32Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVAddCoU32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVAddCoU32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_add_co_u32_sdwa"
+          : "v_add_co_u32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VAddCoU32Vop2>(opcode);
 }
 } // namespace detail
@@ -1392,7 +1576,15 @@ VSubCoU32Vop2::VSubCoU32Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVSubCoU32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVSubCoU32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_sub_co_u32_sdwa"
+          : "v_sub_co_u32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VSubCoU32Vop2>(opcode);
 }
 } // namespace detail
@@ -1451,7 +1643,16 @@ VSubrevCoU32Vop2::VSubrevCoU32Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVSubrevCoU32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVSubrevCoU32Vop2(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_subrev_co_u32_sdwa"
+          : "v_subrev_co_u32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VSubrevCoU32Vop2>(opcode);
 }
 } // namespace detail
@@ -1513,7 +1714,15 @@ VAddcCoU32Vop2::VAddcCoU32Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVAddcCoU32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVAddcCoU32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_addc_co_u32_sdwa"
+          : "v_addc_co_u32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VAddcCoU32Vop2>(opcode);
 }
 } // namespace detail
@@ -1575,7 +1784,15 @@ VSubbCoU32Vop2::VSubbCoU32Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVSubbCoU32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVSubbCoU32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_subb_co_u32_sdwa"
+          : "v_subb_co_u32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VSubbCoU32Vop2>(opcode);
 }
 } // namespace detail
@@ -1637,7 +1854,16 @@ VSubbrevCoU32Vop2::VSubbrevCoU32Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVSubbrevCoU32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVSubbrevCoU32Vop2(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_subbrev_co_u32_sdwa"
+          : "v_subbrev_co_u32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VSubbrevCoU32Vop2>(opcode);
 }
 } // namespace detail
@@ -1693,7 +1919,14 @@ VAddF16Vop2::VAddF16Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVAddF16Vop2(const MachineInst *opcode) {
+DecodeResult decodeVAddF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_add_f16_sdwa"
+                                                                                 : "v_add_f16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VAddF16Vop2>(opcode);
 }
 } // namespace detail
@@ -1755,7 +1988,14 @@ VSubF16Vop2::VSubF16Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVSubF16Vop2(const MachineInst *opcode) {
+DecodeResult decodeVSubF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_sub_f16_sdwa"
+                                                                                 : "v_sub_f16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VSubF16Vop2>(opcode);
 }
 } // namespace detail
@@ -1818,7 +2058,15 @@ VSubrevF16Vop2::VSubrevF16Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVSubrevF16Vop2(const MachineInst *opcode) {
+DecodeResult decodeVSubrevF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_subrev_f16_sdwa"
+          : "v_subrev_f16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VSubrevF16Vop2>(opcode);
 }
 } // namespace detail
@@ -1880,7 +2128,14 @@ VMulF16Vop2::VMulF16Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMulF16Vop2(const MachineInst *opcode) {
+DecodeResult decodeVMulF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_mul_f16_sdwa"
+                                                                                 : "v_mul_f16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMulF16Vop2>(opcode);
 }
 } // namespace detail
@@ -1916,12 +2171,17 @@ VMacF16Vop2::VMacF16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
-    throw util::InvalidInst("V_MAC_F16 does not support SDWA", "");
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMacF16Vop2(const MachineInst *opcode) {
+DecodeResult decodeVMacF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      "v_mac_f16_e32", reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
+    return emit_error.emit() << "V_MAC_F16 does not support SDWA";
   return std::make_unique<VMacF16Vop2>(opcode);
 }
 } // namespace detail
@@ -1954,14 +2214,19 @@ VMadmkF16Vop2::VMadmkF16Vop2(const MachineInst *inst)
       Operand(16, OperandType::OPR_SIMM32,
               static_cast<int>(
                   (reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
-    throw util::InvalidInst("V_MADMK_F16 does not support DPP", "");
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
-    throw util::InvalidInst("V_MADMK_F16 does not support SDWA", "");
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMadmkF16Vop2(const MachineInst *opcode) {
+DecodeResult decodeVMadmkF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      "v_madmk_f16_e32", reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+    return emit_error.emit() << "V_MADMK_F16 does not support DPP";
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
+    return emit_error.emit() << "V_MADMK_F16 does not support SDWA";
   return std::make_unique<VMadmkF16Vop2>(opcode);
 }
 } // namespace detail
@@ -1994,14 +2259,19 @@ VMadakF16Vop2::VMadakF16Vop2(const MachineInst *inst)
       Operand(16, OperandType::OPR_SIMM32,
               static_cast<int>(
                   (reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP)
-    throw util::InvalidInst("V_MADAK_F16 does not support DPP", "");
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
-    throw util::InvalidInst("V_MADAK_F16 does not support SDWA", "");
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMadakF16Vop2(const MachineInst *opcode) {
+DecodeResult decodeVMadakF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      "v_madak_f16_e32", reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+    return emit_error.emit() << "V_MADAK_F16 does not support DPP";
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
+    return emit_error.emit() << "V_MADAK_F16 does not support SDWA";
   return std::make_unique<VMadakF16Vop2>(opcode);
 }
 } // namespace detail
@@ -2063,7 +2333,14 @@ VAddU16Vop2::VAddU16Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVAddU16Vop2(const MachineInst *opcode) {
+DecodeResult decodeVAddU16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_add_u16_sdwa"
+                                                                                 : "v_add_u16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VAddU16Vop2>(opcode);
 }
 } // namespace detail
@@ -2125,7 +2402,14 @@ VSubU16Vop2::VSubU16Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVSubU16Vop2(const MachineInst *opcode) {
+DecodeResult decodeVSubU16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_sub_u16_sdwa"
+                                                                                 : "v_sub_u16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VSubU16Vop2>(opcode);
 }
 } // namespace detail
@@ -2188,7 +2472,15 @@ VSubrevU16Vop2::VSubrevU16Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVSubrevU16Vop2(const MachineInst *opcode) {
+DecodeResult decodeVSubrevU16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_subrev_u16_sdwa"
+          : "v_subrev_u16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VSubrevU16Vop2>(opcode);
 }
 } // namespace detail
@@ -2251,7 +2543,15 @@ VMulLoU16Vop2::VMulLoU16Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMulLoU16Vop2(const MachineInst *opcode) {
+DecodeResult decodeVMulLoU16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_mul_lo_u16_sdwa"
+          : "v_mul_lo_u16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMulLoU16Vop2>(opcode);
 }
 } // namespace detail
@@ -2314,7 +2614,16 @@ VLshlrevB16Vop2::VLshlrevB16Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVLshlrevB16Vop2(const MachineInst *opcode) {
+DecodeResult decodeVLshlrevB16Vop2(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_lshlrev_b16_sdwa"
+          : "v_lshlrev_b16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VLshlrevB16Vop2>(opcode);
 }
 } // namespace detail
@@ -2377,7 +2686,16 @@ VLshrrevB16Vop2::VLshrrevB16Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVLshrrevB16Vop2(const MachineInst *opcode) {
+DecodeResult decodeVLshrrevB16Vop2(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_lshrrev_b16_sdwa"
+          : "v_lshrrev_b16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VLshrrevB16Vop2>(opcode);
 }
 } // namespace detail
@@ -2440,7 +2758,16 @@ VAshrrevI16Vop2::VAshrrevI16Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVAshrrevI16Vop2(const MachineInst *opcode) {
+DecodeResult decodeVAshrrevI16Vop2(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_ashrrev_i16_sdwa"
+          : "v_ashrrev_i16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VAshrrevI16Vop2>(opcode);
 }
 } // namespace detail
@@ -2502,7 +2829,14 @@ VMaxF16Vop2::VMaxF16Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMaxF16Vop2(const MachineInst *opcode) {
+DecodeResult decodeVMaxF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_max_f16_sdwa"
+                                                                                 : "v_max_f16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMaxF16Vop2>(opcode);
 }
 } // namespace detail
@@ -2564,7 +2898,14 @@ VMinF16Vop2::VMinF16Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMinF16Vop2(const MachineInst *opcode) {
+DecodeResult decodeVMinF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_min_f16_sdwa"
+                                                                                 : "v_min_f16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMinF16Vop2>(opcode);
 }
 } // namespace detail
@@ -2626,7 +2967,14 @@ VMaxU16Vop2::VMaxU16Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMaxU16Vop2(const MachineInst *opcode) {
+DecodeResult decodeVMaxU16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_max_u16_sdwa"
+                                                                                 : "v_max_u16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMaxU16Vop2>(opcode);
 }
 } // namespace detail
@@ -2688,7 +3036,14 @@ VMaxI16Vop2::VMaxI16Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMaxI16Vop2(const MachineInst *opcode) {
+DecodeResult decodeVMaxI16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_max_i16_sdwa"
+                                                                                 : "v_max_i16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMaxI16Vop2>(opcode);
 }
 } // namespace detail
@@ -2750,7 +3105,14 @@ VMinU16Vop2::VMinU16Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMinU16Vop2(const MachineInst *opcode) {
+DecodeResult decodeVMinU16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_min_u16_sdwa"
+                                                                                 : "v_min_u16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMinU16Vop2>(opcode);
 }
 } // namespace detail
@@ -2812,7 +3174,14 @@ VMinI16Vop2::VMinI16Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVMinI16Vop2(const MachineInst *opcode) {
+DecodeResult decodeVMinI16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_min_i16_sdwa"
+                                                                                 : "v_min_i16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VMinI16Vop2>(opcode);
 }
 } // namespace detail
@@ -2874,7 +3243,15 @@ VLdexpF16Vop2::VLdexpF16Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVLdexpF16Vop2(const MachineInst *opcode) {
+DecodeResult decodeVLdexpF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_ldexp_f16_sdwa"
+          : "v_ldexp_f16_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VLdexpF16Vop2>(opcode);
 }
 } // namespace detail
@@ -2935,7 +3312,14 @@ VAddU32Vop2::VAddU32Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVAddU32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVAddU32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_add_u32_sdwa"
+                                                                                 : "v_add_u32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VAddU32Vop2>(opcode);
 }
 } // namespace detail
@@ -2990,7 +3374,14 @@ VSubU32Vop2::VSubU32Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVSubU32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVSubU32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_sub_u32_sdwa"
+                                                                                 : "v_sub_u32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VSubU32Vop2>(opcode);
 }
 } // namespace detail
@@ -3046,7 +3437,15 @@ VSubrevU32Vop2::VSubrevU32Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVSubrevU32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVSubrevU32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
+          ? "v_subrev_u32_sdwa"
+          : "v_subrev_u32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VSubrevU32Vop2>(opcode);
 }
 } // namespace detail
@@ -3075,12 +3474,18 @@ VDot2cF32F16Vop2::VDot2cF32F16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
-    throw util::InvalidInst("V_DOT2C_F32_F16 does not support SDWA", "");
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVDot2cF32F16Vop2(const MachineInst *opcode) {
+DecodeResult decodeVDot2cF32F16Vop2(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      "v_dot2c_f32_f16_e32", reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
+    return emit_error.emit() << "V_DOT2C_F32_F16 does not support SDWA";
   return std::make_unique<VDot2cF32F16Vop2>(opcode);
 }
 } // namespace detail
@@ -3109,12 +3514,18 @@ VDot2cI32I16Vop2::VDot2cI32I16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
-    throw util::InvalidInst("V_DOT2C_I32_I16 does not support SDWA", "");
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVDot2cI32I16Vop2(const MachineInst *opcode) {
+DecodeResult decodeVDot2cI32I16Vop2(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      "v_dot2c_i32_i16_e32", reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
+    return emit_error.emit() << "V_DOT2C_I32_I16 does not support SDWA";
   return std::make_unique<VDot2cI32I16Vop2>(opcode);
 }
 } // namespace detail
@@ -3143,12 +3554,18 @@ VDot4cI32I8Vop2::VDot4cI32I8Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
-    throw util::InvalidInst("V_DOT4C_I32_I8 does not support SDWA", "");
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVDot4cI32I8Vop2(const MachineInst *opcode) {
+DecodeResult decodeVDot4cI32I8Vop2(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      "v_dot4c_i32_i8_e32", reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
+    return emit_error.emit() << "V_DOT4C_I32_I8 does not support SDWA";
   return std::make_unique<VDot4cI32I8Vop2>(opcode);
 }
 } // namespace detail
@@ -3177,12 +3594,18 @@ VDot8cI32I4Vop2::VDot8cI32I4Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
-    throw util::InvalidInst("V_DOT8C_I32_I4 does not support SDWA", "");
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVDot8cI32I4Vop2(const MachineInst *opcode) {
+DecodeResult decodeVDot8cI32I4Vop2(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      "v_dot8c_i32_i4_e32", reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
+    return emit_error.emit() << "V_DOT8C_I32_I4 does not support SDWA";
   return std::make_unique<VDot8cI32I4Vop2>(opcode);
 }
 } // namespace detail
@@ -3211,12 +3634,17 @@ VFmacF32Vop2::VFmacF32Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
-    throw util::InvalidInst("V_FMAC_F32 does not support SDWA", "");
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVFmacF32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVFmacF32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      "v_fmac_f32_e32", reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
+    return emit_error.emit() << "V_FMAC_F32 does not support SDWA";
   return std::make_unique<VFmacF32Vop2>(opcode);
 }
 } // namespace detail
@@ -3245,12 +3673,17 @@ VPkFmacF16Vop2::VPkFmacF16Vop2(const MachineInst *inst)
     dpp_bank_mask_ = dp->bank_mask;
     dpp_bound_ctrl_ = dp->bound_ctrl;
   }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA)
-    throw util::InvalidInst("V_PK_FMAC_F16 does not support SDWA", "");
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVPkFmacF16Vop2(const MachineInst *opcode) {
+DecodeResult decodeVPkFmacF16Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      "v_pk_fmac_f16_e32", reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
+    return emit_error.emit() << "V_PK_FMAC_F16 does not support SDWA";
   return std::make_unique<VPkFmacF16Vop2>(opcode);
 }
 } // namespace detail
@@ -3305,7 +3738,14 @@ VXnorB32Vop2::VXnorB32Vop2(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVXnorB32Vop2(const MachineInst *opcode) {
+DecodeResult decodeVXnorB32Vop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop2::validate_encoding(
+      reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_xnor_b32_sdwa"
+                                                                                 : "v_xnor_b32_e32",
+      reinterpret_cast<const Vop2::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VXnorB32Vop2>(opcode);
 }
 } // namespace detail

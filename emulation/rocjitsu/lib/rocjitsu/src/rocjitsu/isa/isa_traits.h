@@ -99,6 +99,29 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
          arch == ROCJITSU_CODE_ARCH_RDNA4;
 }
 
+/// @brief Return true when scalar selectors 102 and 103 name FLAT_SCRATCH.
+///
+/// @details GFX10+ makes those selectors ordinary SGPRs. Keep both the legacy
+/// and modern architecture sets explicit so an unclassified future target does
+/// not silently inherit the legacy register alias.
+[[nodiscard]] inline constexpr bool arch_uses_legacy_flat_scratch_sgprs(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return true;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
+  default:
+    return false;
+  }
+}
+
 /// @brief Maximum SGPR allocation encodable in an AMDHSA descriptor for @p arch.
 ///
 /// @details CDNA descriptors account for reserved architectural SGPRs such as
