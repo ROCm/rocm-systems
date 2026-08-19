@@ -38,6 +38,15 @@ ncclResult_t ncclAllReduceDdaFabric(const void* sendbuff, void* recvbuff, size_t
 bool ncclAllReduceDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                       ncclDataType_t datatype, ncclRedOp_t op);
 
+// The per-variant predicates the gate above is the disjunction of. Declared here
+// so unit tests can exercise one tier without the other masking it; hidden in
+// Release by -fvisibility=hidden, as the rest of the internal surface is.
+bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                            ncclDataType_t datatype, ncclRedOp_t op);
+
+bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                            ncclDataType_t datatype, ncclRedOp_t op);
+
 ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                       ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 

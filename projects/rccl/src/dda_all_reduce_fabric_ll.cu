@@ -178,10 +178,12 @@ static ncclResult_t ncclAllReduceDdaFabricLLTwoShotTyped(const void* sendbuff, v
   return ncclSuccess;
 }
 
+} // namespace
+
 // Shape/resource eligibility for the one-shot variant, independent of whether
 // the tier is switched on for this size.
-static bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                                   ncclDataType_t datatype, ncclRedOp_t op) {
+bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                            ncclDataType_t datatype, ncclRedOp_t op) {
   (void)sendbuff;
   (void)recvbuff;
   if (rcclParamDdaLL() == 0) {
@@ -229,8 +231,8 @@ static bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* r
 }
 
 // Shape/resource eligibility for the two-shot variant.
-static bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                                   ncclDataType_t datatype, ncclRedOp_t op) {
+bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                            ncclDataType_t datatype, ncclRedOp_t op) {
   (void)sendbuff;
   (void)recvbuff;
   if (rcclParamDdaLL() == 0) {
@@ -284,8 +286,6 @@ static bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* r
 
   return true;
 }
-
-} // namespace
 
 // Tier selection: enabled, within this tier's threshold, and shape-eligible.
 // One-shot is tested first, so a message that qualifies for both takes it; a run

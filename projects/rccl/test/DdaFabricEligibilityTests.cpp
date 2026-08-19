@@ -520,6 +520,46 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL_PastBothThresholds)
         mockComm_.get(), sendbuff_, recvbuff_, 4194336, ncclFloat32, ncclSum));
 }
 
+// The gate above only reports the disjunction of the two tiers. These call each
+// per-variant predicate directly, so a tier can be pinned without the other
+// masking it, and assert the complementary tier to show which one owns the size.
+
+// 16 bytes is inside the one-shot threshold and a whole line, so one-shot takes
+// it; a quarter of it is a 4-byte shard, which is not, so two-shot cannot.
+TEST_F(DdaFabricEligibilityTest, AllReduceLL_OneShotEligible)
+{
+    mockComm_.comm.nRanks = 4;
+    EXPECT_TRUE(ddaLLArOneShotEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
+    EXPECT_FALSE(ddaLLArTwoShotEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
+}
+
+// 262160 floats is 1 MiB + 64 bytes: past the one-shot threshold, so that tier
+// declines, while the 262160-byte shard is a whole number of lines and within the
+// slot's payload capacity, so two-shot takes it.
+TEST_F(DdaFabricEligibilityTest, AllReduceLL_TwoShotEligible)
+{
+    mockComm_.comm.nRanks = 4;
+    EXPECT_TRUE(ddaLLArTwoShotEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 262160, ncclFloat32, ncclSum));
+    EXPECT_FALSE(ddaLLArOneShotEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 262160, ncclFloat32, ncclSum));
+}
+
+// The shard is carved out of the byte count, so 32 halves (64 bytes) divide evenly
+// across 4 ranks but 33 (66 bytes) do not. The pair differs only in that, which is
+// what makes the rejection attributable to the divisibility guard rather than to
+// the 16-byte rule that follows it.
+TEST_F(DdaFabricEligibilityTest, AllReduceLL_TwoShotRejectsUnevenShard)
+{
+    mockComm_.comm.nRanks = 4;
+    EXPECT_TRUE(ddaLLArTwoShotEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 32, ncclFloat16, ncclSum));
+    EXPECT_FALSE(ddaLLArTwoShotEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 33, ncclFloat16, ncclSum));
+}
+
 // ---------------------------------------------------------------------------
 // AllToAll
 // ---------------------------------------------------------------------------
