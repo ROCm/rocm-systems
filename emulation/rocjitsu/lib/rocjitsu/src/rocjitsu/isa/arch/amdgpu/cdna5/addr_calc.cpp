@@ -262,6 +262,13 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   }
   assert(d.elem_size != 0 && d.num_elems != 0);
   d.element_lane_masks.clear();
+  if (ioff < 0) {
+    // CDNA5 requires VBUFFER IOFFSET to be non-negative. Suppress illegal
+    // encodings defensively so their wrapped 45-bit address cannot reach L1.
+    d.element_lane_masks.assign(d.num_elems, 0);
+    d.lane_mask = 0;
+    return;
+  }
   if (!resource.swizzle_enabled)
     d.element_lane_masks.assign(d.num_elems, exec);
   d.lane_mask = 0;

@@ -4418,7 +4418,7 @@ TEST(Gfx1250AddrCalcTest, VbufferRangeCheckDoesNotWrapAt45Bits) {
   amdgpu::GpuMemory mem("gfx1250_vbuffer_range_wrap_mem");
   amdgpu::L2Cache l2("gfx1250_vbuffer_range_wrap_l2");
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 128;
   cfg.vgprs_per_wf = 16;
@@ -4472,7 +4472,7 @@ TEST(Gfx1250AddrCalcTest, VbufferRangeCheckAcceptsExactEndOnly) {
   amdgpu::GpuMemory mem("gfx1250_vbuffer_exact_end_mem");
   amdgpu::L2Cache l2("gfx1250_vbuffer_exact_end_l2");
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 128;
   cfg.vgprs_per_wf = 16;
@@ -4593,7 +4593,7 @@ TEST(Gfx1250AddrCalcTest, VbufferChecksB64B96AndB128DwordsIndependently) {
   amdgpu::GpuMemory mem("gfx1250_vbuffer_partial_mem");
   amdgpu::L2Cache l2("gfx1250_vbuffer_partial_l2");
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 128;
   cfg.vgprs_per_wf = 16;
@@ -4636,11 +4636,46 @@ TEST(Gfx1250AddrCalcTest, VbufferChecksB64B96AndB128DwordsIndependently) {
   EXPECT_EQ(b128.element_lane_masks, (std::vector<uint64_t>{1ULL, 1ULL, 0ULL, 0ULL}));
 }
 
+TEST(Gfx1250AddrCalcTest, VbufferNegativeIoffsetCannotReachL1) {
+  amdgpu::GpuMemory mem("gfx1250_vbuffer_negative_ioffset_mem");
+  amdgpu::L2Cache l2("gfx1250_vbuffer_negative_ioffset_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gfx1250_vbuffer_negative_ioffset_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, 128, 16);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1ULL);
+
+  constexpr uint64_t kBase = 0x2'0000'2400ULL;
+  write_gfx1250_buffer_resource(*cu, *wf, 40,
+                                encode_gfx1250_buffer_resource(kBase, /*num_records=*/4));
+  cdna5::VbufferMachineInst inst{};
+  inst.rsrc = 40;
+  inst.soffset = cdna5::OPR_SREG_NULL;
+  inst.ioffset = 0x00FF'FFFCu; // -4 as a signed 24-bit VBUFFER IOFFSET.
+
+  amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
+  d.elem_size = 4;
+  d.num_elems = 2;
+  cdna5::mubuf_calculate_addresses(inst, *wf, d);
+
+  EXPECT_EQ(d.exec_mask, 1ULL);
+  EXPECT_EQ(d.lane_mask, 0ULL);
+  EXPECT_EQ(d.element_lane_masks, (std::vector<uint64_t>{0ULL, 0ULL}));
+  EXPECT_EQ(d.per_lane_addr[0], 0ULL);
+}
+
 TEST(Gfx1250AddrCalcTest, VbufferSoffsetParticipatesInNumRecordsAndStrideBounds) {
   amdgpu::GpuMemory mem("gfx1250_vbuffer_soffset_bounds_mem");
   amdgpu::L2Cache l2("gfx1250_vbuffer_soffset_bounds_l2");
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 128;
   cfg.vgprs_per_wf = 16;
@@ -4687,7 +4722,7 @@ TEST(Gfx1250AddrCalcTest, VbufferOobSelectAlsoChecksRecordStride) {
   amdgpu::GpuMemory mem("gfx1250_vbuffer_oob_select_mem");
   amdgpu::L2Cache l2("gfx1250_vbuffer_oob_select_l2");
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 128;
   cfg.vgprs_per_wf = 16;
@@ -4725,7 +4760,7 @@ TEST(Gfx1250AddrCalcTest, VbufferSwizzleDefersBoundsWithNoElementMasks) {
   amdgpu::GpuMemory mem("gfx1250_vbuffer_swizzle_mem");
   amdgpu::L2Cache l2("gfx1250_vbuffer_swizzle_l2");
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 128;
   cfg.vgprs_per_wf = 16;
@@ -4757,7 +4792,7 @@ TEST(Gfx1250AddrCalcTest, VbufferAtomicChecksWholePayload) {
   amdgpu::GpuMemory mem("gfx1250_vbuffer_atomic_oob_mem");
   amdgpu::L2Cache l2("gfx1250_vbuffer_atomic_oob_l2");
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 128;
   cfg.vgprs_per_wf = 16;
