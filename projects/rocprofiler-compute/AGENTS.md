@@ -1,8 +1,8 @@
 # AI Agent Guidelines — rocprofiler-compute
 
-## README
-
-**[`README.md`](README.md)** is the project's user-facing overview.
+## Project Overview
+- See rocprof-compute documentation in [README.md -> General](README.md#general)
+See **[`README.md`](README.md)** for the project's user-facing overview.
 
 ## Contributing
 

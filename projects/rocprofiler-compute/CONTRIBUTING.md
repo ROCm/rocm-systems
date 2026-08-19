@@ -162,7 +162,7 @@ ROCm Compute Profiler uses [Ruff](https://docs.astral.sh/ruff/) for linting and 
 
 | Topic | Source of Truth |
 |-------|-----------------|
-| Function design, naming, code organization | [Python Coding Style Guidelines](PYTHON_CODING_STYLE.md) |
+| Function design, naming, code organization | [Python Coding Style Guidelines](docs/dev-guidelines/python-coding-style.md) |
 | Ruff configuration (enforced rules, ignores, formatting) | [`pyproject.toml`](pyproject.toml) |
 | YAML metric equation formatting | [YAML Metric Equation Formatting](#yaml-metric-equation-formatting) |
 
