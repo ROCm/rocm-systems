@@ -41,8 +41,25 @@ device_linker=true
 warp_speed_enabled=true # note that this flag will be overridden to false for non MI350/MI300 platforms
 kernarg_preload=true
 quiet_warnings=false
+# rocSHMEM integration modes (mutually exclusive — mixing causes duplicate
+# rocshmem state between librccl.so and the executable):
+#   --rocshmem      Alltoall_wg offload: builds rocshmem from source and links
+#                   librocshmem.a into librccl.so with -fgpu-rdc --hip-link.
+#                   All rocshmem device+host symbols are resolved inside
+#                   librccl.so.  The executable must NOT link librocshmem.a.
+#                   Does NOT enable GIN plugins.
+#   --rocshmem-gin  GIN plugins (GDA, SDMA): builds rocshmem from source for
+#                   its headers, device bitcode, and host libraries, but does
+#                   NOT link librocshmem.a into librccl.so.  GIN device
+#                   templates (GDA QueuePair, SDMA) are resolved via per-arch
+#                   bitcode injection in the device linker pipeline.  GIN host
+#                   plugin symbols are left unresolved in librccl.so
+#                   (--allow-shlib-undefined) and resolved at runtime from the
+#                   executable, which owns the single librocshmem.a instance.
+#                   Does NOT enable alltoall_wg offload.
 build_rocshmem_support=false
-rocshmem_mono_hash="0e2998b11f99e8302c72f1ac2ce9f2b8c1816587"
+build_rocshmem_gin=false
+rocshmem_mono_hash="33d980d7ca1f0bf90cfe4ff9106310abcf47b550"
 custom_cmake_options=""
 
 # #################################################
@@ -81,7 +98,9 @@ function display_help()
     echo "    -p|--package_build         Build RCCL package"
     echo "       --prefix                Specify custom directory to install RCCL to (default: \`/opt/rocm\`)"
     echo "    -q|--quiet-warnings        Suppress majority of compiler warnings (not recommended)"
-    echo "       --rocshmem              Build with rocSHMEM support"
+    echo "       --rocshmem              Full rocSHMEM: link librocshmem.a into librccl.so (alltoall_wg offload)"
+    echo "       --rocshmem-gin          GIN plugins only: device bitcode injected at build, host symbols"
+    echo "                                resolved at runtime from the executable (no librocshmem in librccl)"
     echo "       --run_tests_all         Run all rccl unit tests (must be built already)"
     echo "    -r|--run_tests_quick       Run small subset of rccl unit tests (must be built already)"
     echo "       --static                Build RCCL as a static library instead of shared library"
@@ -118,7 +137,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-kernarg-preload,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,ninja,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,rocshmem-gin,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -164,6 +183,7 @@ while true; do
          --prefix)                   install_library=true; install_prefix=${2};                                                        shift 2 ;;
     -q | --quiet-warnings)           quiet_warnings=true;                                                                              shift ;;
          --rocshmem)                 build_rocshmem_support=true;                                                                      shift ;;
+         --rocshmem-gin)             build_rocshmem_gin=true;                                                                          shift ;;
          --run_tests_all)            run_tests=true; run_tests_all=true;                                                               shift ;;
     -r | --run_tests_quick)          run_tests=true;                                                                                   shift ;;
          --static)                   build_static=true;                                                                                shift ;;
@@ -176,6 +196,11 @@ while true; do
         ;;
     esac
 done
+
+if [[ "${build_rocshmem_support}" == true && "${build_rocshmem_gin}" == true ]]; then
+    echo "Error: --rocshmem and --rocshmem-gin are mutually exclusive"
+    exit 1
+fi
 
 # /etc/*-release files describe the system
 if [[ -e "/etc/os-release" ]]; then
@@ -278,8 +303,15 @@ fi
 # rocSHMEM worktree setup (must run before cd-ing into the build directory)
 # #################################################
 rocshmem_source_dir=""
-if [[ "${build_rocshmem_support}" == true ]] && [[ -z "${ROCSHMEM_INSTALL_DIR}" ]]; then
-    setup_rocshmem_worktree
+if [[ "${build_rocshmem_support}" == true || "${build_rocshmem_gin}" == true ]] && [[ -z "${ROCSHMEM_INSTALL_DIR}" ]]; then
+    # Prefer mono-repo layout (projects/rocshmem alongside projects/rccl)
+    mono_root=$(git rev-parse --show-toplevel 2>/dev/null)
+    if [[ -n "$mono_root" ]] && [[ -f "$mono_root/projects/rocshmem/CMakeLists.txt" ]]; then
+        rocshmem_source_dir="$mono_root/projects/rocshmem"
+        echo "=== Using rocSHMEM from mono-repo: ${rocshmem_source_dir} ==="
+    else
+        setup_rocshmem_worktree
+    fi
 fi
 
 # #################################################
@@ -428,8 +460,15 @@ if [[ "${build_rocshmem_support}" == true ]]; then
     elif [[ -n "${rocshmem_source_dir}" ]]; then
         cmake_common_options="${cmake_common_options} -DROCSHMEM_SOURCE_DIR=${rocshmem_source_dir}"
     fi
+elif [[ "${build_rocshmem_gin}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DENABLE_ROCSHMEM=OFF -DENABLE_ROCSHMEM_GIN=ON"
+    if [[ -n "${ROCSHMEM_INSTALL_DIR}" ]]; then
+        cmake_common_options="${cmake_common_options} -DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR}"
+    elif [[ -n "${rocshmem_source_dir}" ]]; then
+        cmake_common_options="${cmake_common_options} -DROCSHMEM_SOURCE_DIR=${rocshmem_source_dir}"
+    fi
 else
-    cmake_common_options="${cmake_common_options} -DENABLE_ROCSHMEM=OFF"
+    cmake_common_options="${cmake_common_options} -DENABLE_ROCSHMEM=OFF -DENABLE_ROCSHMEM_GIN=OFF"
 fi
 
 check_exit_code "$?"

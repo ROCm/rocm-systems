@@ -606,7 +606,7 @@ def gen_vector_div_scale(
     if len(dst) > 1:
         L.append(f'  amdgpu::write_wave_mask_scalar({dst[1]}, wf, vcc);')
     else:
-        L.append('  wf.set_vcc(vcc);')
+        L.append('  wf.set_vcc_mask(vcc);')
     return '\n'.join(L)
 
 
@@ -1675,9 +1675,7 @@ def gen_cvt_fp8(ctx) -> str:
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
     opsel = _opsel_field(ctx) if is_vop3 else '0u'
-    fp8_format_select = (
-        'inst_.clamp' if is_vop3 and ctx.arch_name == 'gfx1250' else None
-    )
+    fp8_format_select = 'inst_.clamp' if is_vop3 and ctx.arch_name == 'cdna5' else None
 
     L = []
     L.append('  uint64_t exec = wf.exec();')

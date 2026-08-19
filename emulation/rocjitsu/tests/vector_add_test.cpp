@@ -9,6 +9,7 @@
 /// CPU golden reference.
 
 #include "aql_queue.h"
+#include "decode_test_util.h"
 #include "test_paths.h"
 
 #include "embedded_schema.h"
@@ -216,7 +217,7 @@ TEST(VectorAddCodeObjectTest, LoadsAndDecodes) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   const auto *text = co->text_sections()[0];
   const auto *data = reinterpret_cast<const uint32_t *>(text->data());
-  std::unique_ptr<Instruction> inst(decoder->decode(data));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, data));
   EXPECT_NE(inst, nullptr) << "Failed to decode first instruction";
 }
 

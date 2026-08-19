@@ -872,7 +872,7 @@ class CodeGenerator:
         self, inst_sem: InstructionSemantics | None, opnd: Operand
     ) -> bool:
         return (
-            getattr(self.isa_spec, 'arch_name', None) == 'gfx1250'
+            getattr(self.isa_spec, 'arch_name', None) == 'cdna5'
             and inst_sem is not None
             and inst_sem.name in self._GENERIC_WMMA_ACCUMULATOR_INSTRUCTIONS
             and opnd.name == 'src2'
@@ -1942,6 +1942,7 @@ class CodeGenerator:
         vopd3_execute_slot_cases = ''
         vopd3_constructor_branch = ''
         vopd3_constructor_close = ''
+        vopd3_validation_branch = ''
         vopd3_init_operands_prefix = ''
         vopd3_init_operands_suffix = ''
         vopdxy_bits_decl = cpp_block('''
@@ -2038,14 +2039,8 @@ class CodeGenerator:
                 word2_ = words[2];
                 opx_ = static_cast<uint16_t>((word0_ >> 18) & 0x3F);
                 opy_ = static_cast<uint16_t>((word0_ >> 12) & 0x3F);
-                if (!is_valid_opcode(opx_, kVopd3XOpcodeMask))
-                  throw util::InvalidInst("invalid VOPD3 X opcode", "");
-                if (!is_valid_opcode(opy_, kVopd3YOpcodeMask))
-                  throw util::InvalidInst("invalid VOPD3 Y opcode", "");
                 uint16_t srcx0 = static_cast<uint16_t>(word0_ & 0x1FF);
                 uint16_t srcy0 = static_cast<uint16_t>(word1_ & 0x1FF);
-                if (srcx0 == 254 || srcx0 == 255 || srcy0 == 254 || srcy0 == 255)
-                  throw util::InvalidInst("VOPD3 does not support literal selectors", "");
                 negx_ = static_cast<uint8_t>((word1_ >> 9) & 0x7);
                 negy_ = static_cast<uint8_t>((word1_ >> 12) & 0x7);
                 uint16_t vsrcx1 = static_cast<uint16_t>((word1_ >> 16) & 0xFF);
@@ -2057,10 +2052,6 @@ class CodeGenerator:
 
                 uint32_t x_bits = is_float64_op(opx_) ? 64 : 32;
                 uint32_t y_bits = is_float64_op(opy_) ? 64 : 32;
-                const uint32_t x_end = vdstx + x_bits / 32;
-                const uint32_t y_end = vdsty + y_bits / 32;
-                if (vdstx < y_end && vdsty < x_end)
-                  throw util::InvalidInst("VOPD3 destination ranges overlap", "");
                 dstx_ = Operand(x_bits, OperandType::OPR_VGPR, vdstx);
                 dsty_ = Operand(y_bits, OperandType::OPR_VGPR, vdsty);
                 srcx0_ = make_src0(x_bits, true, false, 0, srcx0);
@@ -2074,6 +2065,31 @@ class CodeGenerator:
               } else {
             ''')
             vopd3_constructor_branch = vopd3_constructor_branch.replace(
+                '@VOPD3_PREFIX_SHIFT@', str(32 - vopd3_prefix.prefix_bits)
+            ).replace('@VOPD3_PREFIX@', f'0x{vopd3_prefix.prefix:X}')
+            vopd3_validation_branch = cpp_block('''
+              if ((word0 >> @VOPD3_PREFIX_SHIFT@) == @VOPD3_PREFIX@) {
+                const uint16_t opx = static_cast<uint16_t>((word0 >> 18) & 0x3F);
+                const uint16_t opy = static_cast<uint16_t>((word0 >> 12) & 0x3F);
+                if (!is_valid_opcode(opx, kVopd3XOpcodeMask)) [[unlikely]]
+                  return emit_error.emit() << "invalid VOPD3 X opcode";
+                if (!is_valid_opcode(opy, kVopd3YOpcodeMask)) [[unlikely]]
+                  return emit_error.emit() << "invalid VOPD3 Y opcode";
+                const uint16_t srcx0 = static_cast<uint16_t>(word0 & 0x1FF);
+                const uint16_t srcy0 = static_cast<uint16_t>(word1 & 0x1FF);
+                if (srcx0 == 254 || srcx0 == 255 || srcy0 == 254 || srcy0 == 255) [[unlikely]]
+                  return emit_error.emit() << "VOPD3 does not support literal selectors";
+                const uint32_t word2 = words[2];
+                const uint16_t vdstx = static_cast<uint16_t>(word2 & 0xFF);
+                const uint16_t vdsty = static_cast<uint16_t>((word2 >> 24) & 0xFF);
+                const uint32_t x_end = vdstx + (is_float64_op(opx) ? 2 : 1);
+                const uint32_t y_end = vdsty + (is_float64_op(opy) ? 2 : 1);
+                if (vdstx < y_end && vdsty < x_end) [[unlikely]]
+                  return emit_error.emit() << "VOPD3 destination ranges overlap";
+                return Result::success();
+              }
+            ''')
+            vopd3_validation_branch = vopd3_validation_branch.replace(
                 '@VOPD3_PREFIX_SHIFT@', str(32 - vopd3_prefix.prefix_bits)
             ).replace('@VOPD3_PREFIX@', f'0x{vopd3_prefix.prefix:X}')
             vopd3_constructor_close = '              }'
@@ -2165,6 +2181,7 @@ class CodeGenerator:
 
             #include "@GENERATED_ARCH@/encodings.h"
             #include "@GENERATED_ARCH@/operand.h"
+            #include "rocjitsu/isa/decode_result.h"
             #include <cstdint>
             #include <string>
 
@@ -2175,6 +2192,8 @@ class CodeGenerator:
             {
               public:
               explicit Vopd(const MachineInst *inst);
+              static Result validate_encoding(const MachineInst *inst,
+                                              const util::DiagnosticEmitter &emit_error);
               void execute_impl(amdgpu::Wavefront &wf);
 
               private:
@@ -2345,6 +2364,26 @@ class CodeGenerator:
 
             @INLINE_EXECUTION_HELPERS@
 
+            Result
+            Vopd::validate_encoding(const MachineInst *inst,
+                                    const util::DiagnosticEmitter &emit_error) {
+              const auto *words = reinterpret_cast<const uint32_t *>(inst);
+              const uint32_t word0 = words[0];
+              const uint32_t word1 = words[1];
+            @VOPD3_VALIDATION_BRANCH@
+              const uint16_t opx = static_cast<uint16_t>((word0 >> 22) & 0xF);
+              const uint16_t opy = static_cast<uint16_t>((word0 >> 17) & 0x1F);
+              if (!is_valid_opcode(opx, kVopdXOpcodeMask)) [[unlikely]]
+                return emit_error.emit() << "invalid VOPD X opcode";
+              if (!is_valid_opcode(opy, kVopdYOpcodeMask)) [[unlikely]]
+                return emit_error.emit() << "invalid VOPD Y opcode";
+              const uint16_t srcx0 = static_cast<uint16_t>(word0 & 0x1FF);
+              const uint16_t srcy0 = static_cast<uint16_t>(word1 & 0x1FF);
+              if (srcx0 == 254 || srcy0 == 254) [[unlikely]]
+                return emit_error.emit() << "VOPD does not support 64-bit literals";
+              return Result::success();
+            }
+
             Vopd::Vopd(const MachineInst *inst)
                 : IsaInstruction<Isa>("vopd", @VOPD_EXEC_FN@),
                   dstx_(32, OperandType::OPR_VGPR, 0),
@@ -2365,16 +2404,10 @@ class CodeGenerator:
                 encoding_id_ = @VOPD_PREFIX@;
                 opx_ = static_cast<uint16_t>((word0_ >> 22) & 0xF);
                 opy_ = static_cast<uint16_t>((word0_ >> 17) & 0x1F);
-                if (!is_valid_opcode(opx_, kVopdXOpcodeMask))
-                  throw util::InvalidInst("invalid VOPD X opcode", "");
-                if (!is_valid_opcode(opy_, kVopdYOpcodeMask))
-                  throw util::InvalidInst("invalid VOPD Y opcode", "");
                 uint16_t srcx0 = static_cast<uint16_t>(word0_ & 0x1FF);
                 uint16_t vsrcx1 = static_cast<uint16_t>((word0_ >> 9) & 0xFF);
                 uint16_t srcy0 = static_cast<uint16_t>(word1_ & 0x1FF);
                 uint16_t vsrcy1 = static_cast<uint16_t>((word1_ >> 9) & 0xFF);
-                if (srcx0 == 254 || srcy0 == 254)
-                  throw util::InvalidInst("VOPD does not support 64-bit literals", "");
                 uint16_t vdstx = static_cast<uint16_t>((word1_ >> 24) & 0xFF);
                 uint16_t vdsty_hi = static_cast<uint16_t>((word1_ >> 17) & 0x7F);
                 uint16_t vdsty = static_cast<uint16_t>((vdsty_hi << 1) | ((~vdstx) & 1u));
@@ -2503,6 +2536,7 @@ class CodeGenerator:
             .replace('@VOPD3_UNUSED_ATTR@', vopd3_unused_attr)
             .replace('@VOPD_OP_NAME_CASES@', vopd_op_name_cases)
             .replace('@VOPD3_MODEL_HELPERS@', vopd3_model_helpers)
+            .replace('@VOPD3_VALIDATION_BRANCH@', vopd3_validation_branch)
             .replace('@VOPD3_CONSTRUCTOR_BRANCH@', vopd3_constructor_branch)
             .replace('@VOPD3_CONSTRUCTOR_CLOSE@', vopd3_constructor_close)
             .replace('@VOPD_PREFIX@', f'0x{vopd_prefix.prefix:X}')
@@ -2669,7 +2703,7 @@ class CodeGenerator:
         if self._supports_generated_vopd():
             maximum = max(maximum, 3)
         if (
-            self._supports_gfx1250_scaled_wmma_vop3px2()
+            self._supports_cdna5_scaled_wmma_vop3px2()
             or self._supports_cdna_mfma_f8f6f4_vop3px2()
         ):
             maximum = max(maximum, 4)
@@ -2680,7 +2714,6 @@ class CodeGenerator:
         enc_classes = []
         class_func_impls = []
         cond_emitted: set[str] = set()
-        needs_invalid_inst_include = False
         for inst_enc in self.isa_spec.inst_encodings:
             if not inst_enc.insts:
                 continue
@@ -2696,8 +2729,6 @@ class CodeGenerator:
                 self._supports_simm64_literal_operands()
                 and bool(encoded_literal_fields)
             )
-            if uses_instruction_literal_policy:
-                needs_invalid_inst_include = True
             unsupported_literal64_fields = self._unsupported_literal64_selector_fields(
                 inst_enc
             )
@@ -2705,7 +2736,7 @@ class CodeGenerator:
                 inst_enc.enc_name
             )
             supports_fixed_size_embedding = (
-                self._supports_gfx1250_scaled_wmma_vop3px2()
+                self._supports_cdna5_scaled_wmma_vop3px2()
                 and inst_enc.fmt_enc_name == 'Vop3p'
             )
             dpp_struct, dpp8_struct = self._vop_dpp_struct_names(inst_enc.enc_name)
@@ -2730,21 +2761,6 @@ class CodeGenerator:
                 ),
                 cgen.Value('ExecuteFn', 'exec_fn'),
             ]
-            if uses_instruction_literal_policy:
-                constructor_args.extend(
-                    [
-                        cgen.Value(
-                            'LiteralSupport',
-                            'literal_support = LiteralSupport::Both',
-                        ),
-                        cgen.Value(
-                            'int',
-                            'num_encoded_sources = ' f'{len(encoded_literal_fields)}',
-                        ),
-                    ]
-                )
-            elif unsupported_literal64_fields:
-                constructor_args.append(cgen.Value('int', 'num_encoded_sources = 3'))
             if supports_fixed_size_embedding:
                 constructor_args.append(
                     cgen.Value(
@@ -2763,6 +2779,25 @@ class CodeGenerator:
                     constructor_args,
                 )
             )
+            validation_args = [
+                '[[maybe_unused]] std::string_view mnemonic',
+                f'const {inst_enc.fmt_enc_name}MachineInst *inst',
+                'const util::DiagnosticEmitter &emit_error',
+            ]
+            if uses_instruction_literal_policy:
+                validation_args.extend(
+                    [
+                        'LiteralSupport literal_support = LiteralSupport::Both',
+                        f'int num_encoded_sources = {len(encoded_literal_fields)}',
+                    ]
+                )
+            elif unsupported_literal64_fields:
+                validation_args.append('int num_encoded_sources = 3')
+            if supports_fixed_size_embedding:
+                validation_args.append(
+                    'ExtensionDecodePolicy extension_policy = '
+                    'ExtensionDecodePolicy::Decode'
+                )
             # Determine whether the constructor needs a runtime size
             # check for an extension DWORD beyond the base encoding.
             #
@@ -2836,6 +2871,8 @@ class CodeGenerator:
                 '  raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);\n'
                 '  encoding_id_ = raw_encoding_[0] >> 23;'
             )
+            validation_body = ' const auto &inst_ = *inst;'
+            has_encoding_validation = False
             if has_op:
                 size_line += '\n  opcode_ = inst_.op;'
             literal64_conds = self._literal64_condition_names(inst_enc)
@@ -2882,6 +2919,9 @@ class CodeGenerator:
             literal32_condition = ' || '.join(f'{name}()' for name in literal32_conds)
             if supports_fixed_size_embedding:
                 size_line += ' if (extension_policy == ExtensionDecodePolicy::Decode) {'
+                validation_body += (
+                    ' if (extension_policy == ExtensionDecodePolicy::Decode) {'
+                )
             # Some profiles expose SRC_LITERAL64 in their global operand
             # selector table even when a particular encoding has no 64-bit
             # literal extension form.  Derive the affected source fields from
@@ -2891,38 +2931,41 @@ class CodeGenerator:
             # constructor reads two extension DWORDs that the encoding does
             # not own.
             if unsupported_literal64_fields:
+                has_encoding_validation = True
                 reject_condition = ' || '.join(
                     f'(num_encoded_sources > {source_idx} && inst_.{field} == 254)'
                     for source_idx, field in enumerate(unsupported_literal64_fields)
                 )
-                size_line += (
+                validation_body += (
                     f'\n  if ({reject_condition})'
-                    f' throw util::InvalidInst("{inst_enc.fmt_enc_name} does not support '
-                    'Literal64", "");'
+                    f' [[unlikely]] return emit_error.emit() << "{inst_enc.fmt_enc_name} does not support '
+                    'Literal64";'
                 )
             if uses_instruction_literal_policy:
+                has_encoding_validation = True
                 for width, selector in ((32, 255), (64, 254)):
                     reject_condition = ' || '.join(
                         f'(num_encoded_sources > {source_idx} && '
                         f'inst_.{field} == {selector})'
                         for source_idx, field in enumerate(encoded_literal_fields)
                     )
-                    size_line += (
+                    validation_body += (
                         f'\n  if (!supports_literal(literal_support, '
                         f'LiteralSupport::Literal{width}) && ({reject_condition}))'
-                        ' throw util::InvalidInst('
-                        f'std::string(mnemonic) + " does not support {width}-bit literals", "");'
+                        f' [[unlikely]] return emit_error.emit() << mnemonic << " does not support {width}-bit literals";'
                     )
             if needs_explicit_dpp_size and encoded_literal_fields:
+                has_encoding_validation = True
                 dpp_extension_condition = ' || '.join(dpp_extension_conditions)
-                literal_selector_condition = literal32_condition or 'false'
-                size_line += (
+                literal_selector_condition = ' || '.join(
+                    f'inst_.{field} == 255' for field in encoded_literal_fields
+                )
+                validation_body += (
                     f' if (({dpp_extension_condition}) && '
                     f'({literal_selector_condition}))'
-                    ' throw util::InvalidInst('
-                    '"DPP and literal operands cannot be combined", "");'
+                    ' [[unlikely]] return emit_error.emit() << '
+                    '"DPP and literal operands cannot be combined";'
                 )
-                needs_invalid_inst_include = True
             # Size owned storage from this encoding's declared extension forms,
             # not the architecture-wide operand selector table. For example,
             # gfx1250 defines selector 254 for 64-bit literals, but the 64-bit
@@ -3026,13 +3069,17 @@ class CodeGenerator:
                 )
             if supports_fixed_size_embedding:
                 size_line += ' }'
-            constructor_extra_params = ''
-            if uses_instruction_literal_policy:
-                constructor_extra_params += (
-                    ', LiteralSupport literal_support, int num_encoded_sources'
+                validation_body += ' }'
+            validation_body += ' return Result::success();'
+            if has_encoding_validation:
+                public_members.append(
+                    cgen.Line(
+                        'static Result validate_encoding('
+                        + ', '.join(validation_args)
+                        + f') {{{validation_body}}}'
+                    )
                 )
-            elif unsupported_literal64_fields:
-                constructor_extra_params += ', int num_encoded_sources'
+            constructor_extra_params = ''
             if supports_fixed_size_embedding:
                 constructor_extra_params += ', ExtensionDecodePolicy extension_policy'
             if rule.use_flat_mnemonic:
@@ -3056,7 +3103,6 @@ class CodeGenerator:
                     f'{{{size_line}}}'
                 )
             class_func_impls.append(cgen.Line(class_ctor_impl))
-
             # Generate build_modifiers() override for encoding bases
             # that have modifier flags (memory instructions). This is
             # called lazily by disassemble() instead of eagerly in the
@@ -3402,6 +3448,7 @@ class CodeGenerator:
                     False,
                 ),
                 ('rocjitsu/isa/instruction.h', False),
+                ('rocjitsu/isa/decode_result.h', False),
                 (encoding_helper_header, False),
                 ('array', True),
                 ('cstdint', True),
@@ -3448,14 +3495,6 @@ class CodeGenerator:
             _enc_cpp_includes.insert(
                 1, ('rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h', False)
             )
-        if needs_invalid_inst_include or (
-            self._supports_simm64_literal_operands()
-            and any(
-                self._rejects_unencoded_vop3p_literal64(enc)
-                for enc in self.isa_spec.inst_encodings
-            )
-        ):
-            _enc_cpp_includes.insert(1, ('util/except.h', False))
         class_impl_file = CppFile(
             'encodings',
             self.out_path,
@@ -3893,9 +3932,9 @@ class CodeGenerator:
 
         return None
 
-    def _supports_gfx1250_scaled_wmma_vop3px2(self) -> bool:
+    def _supports_cdna5_scaled_wmma_vop3px2(self) -> bool:
         return (
-            self.isa_spec.arch_name.lower() == 'gfx1250'
+            self.isa_spec.arch_name.lower() == 'cdna5'
             and self.isa_spec.profile.generate_scaled_wmma_vop3px2
         )
 
@@ -3908,10 +3947,10 @@ class CodeGenerator:
             and inst.name in self.isa_spec.profile.inst_size_overrides
         )
 
-    def _gfx1250_f8f6f4_wmma_shape(
+    def _cdna5_f8f6f4_wmma_shape(
         self, inst: Instruction
     ) -> tuple[int, int, int] | None:
-        if self.isa_spec.arch_name != 'gfx1250' or not inst.name.startswith('V_WMMA_'):
+        if self.isa_spec.arch_name != 'cdna5' or not inst.name.startswith('V_WMMA_'):
             return None
         m = re.match(
             r'V_WMMA_(?:F32|F16|BF16|I32)_(\d+)X(\d+)X(\d+)_?F8F6F4$',
@@ -3931,12 +3970,10 @@ class CodeGenerator:
             return None
         return tuple(int(x) for x in m.groups())
 
-    def _gfx1250_swmmac_has_modifiers(self, inst: Instruction) -> bool:
-        return self.isa_spec.arch_name == 'gfx1250' and inst.name.startswith(
-            'V_SWMMAC_'
-        )
+    def _cdna5_swmmac_has_modifiers(self, inst: Instruction) -> bool:
+        return self.isa_spec.arch_name == 'cdna5' and inst.name.startswith('V_SWMMAC_')
 
-    def _gfx1250_matrix_fmt_operand_size_expr(
+    def _cdna5_matrix_fmt_operand_size_expr(
         self, shape: tuple[int, int, int] | None, opnd_name: str
     ) -> str | None:
         if shape is None or opnd_name not in ('src0', 'src1'):
@@ -3950,7 +3987,7 @@ class CodeGenerator:
                 '((reinterpret_cast<const OpEncoding *>(inst)->pad_14 << 2) | '
                 'reinterpret_cast<const OpEncoding *>(inst)->opsel_hi)'
             )
-        return f'gfx1250_matrix_fmt_operand_size_bits({fmt_expr}, {dim}, {k})'
+        return f'cdna5_matrix_fmt_operand_size_bits({fmt_expr}, {dim}, {k})'
 
     @staticmethod
     def _cdna4_matrix_fmt_operand_size_expr(
@@ -4057,7 +4094,7 @@ class CodeGenerator:
             } // namespace''')
 
     @staticmethod
-    def _emit_gfx1250_matrix_fmt_helpers() -> _ImplOutputs:
+    def _emit_cdna5_matrix_fmt_helpers() -> _ImplOutputs:
         """Emit C++ helpers for gfx1250 VOP3P packed and matrix quirks."""
         execution = textwrap.dedent('''\
             namespace {
@@ -4079,7 +4116,7 @@ class CodeGenerator:
         model = (
             'namespace {\n\n'
             + (
-                'const char *gfx1250_matrix_fmt_name(uint32_t fmt) {\n'
+                'const char *cdna5_matrix_fmt_name(uint32_t fmt) {\n'
                 '  switch (fmt) {\n'
                 '  case 0:\n'
                 '    return "MATRIX_FMT_FP8";\n'
@@ -4096,7 +4133,7 @@ class CodeGenerator:
                 '  }\n'
                 '}\n'
                 '\n'
-                'const char *gfx1250_matrix_scale_fmt_name(uint32_t fmt) {\n'
+                'const char *cdna5_matrix_scale_fmt_name(uint32_t fmt) {\n'
                 '  switch (fmt) {\n'
                 '  case 0:\n'
                 '    return "MATRIX_SCALE_FMT_E8";\n'
@@ -4109,7 +4146,7 @@ class CodeGenerator:
                 '  }\n'
                 '}\n'
                 '\n'
-                'uint32_t gfx1250_matrix_fmt_element_bits(uint32_t fmt) {\n'
+                'uint32_t cdna5_matrix_fmt_element_bits(uint32_t fmt) {\n'
                 '  switch (fmt) {\n'
                 '  case 2:\n'
                 '  case 3:\n'
@@ -4121,46 +4158,46 @@ class CodeGenerator:
                 '  }\n'
                 '}\n'
                 '\n'
-                'int gfx1250_matrix_fmt_operand_size_bits(uint32_t fmt, uint32_t dim, uint32_t k) {\n'
-                '  return static_cast<int>((dim * k * gfx1250_matrix_fmt_element_bits(fmt)) / 32);\n'
+                'int cdna5_matrix_fmt_operand_size_bits(uint32_t fmt, uint32_t dim, uint32_t k) {\n'
+                '  return static_cast<int>((dim * k * cdna5_matrix_fmt_element_bits(fmt)) / 32);\n'
                 '}\n'
                 '\n'
-                'bool gfx1250_scaled_wmma_is_scale16(const MachineInst *inst) {\n'
+                'bool cdna5_scaled_wmma_is_scale16(const MachineInst *inst) {\n'
                 '  return reinterpret_cast<const Vop3pMachineInst *>(inst)->op == 0x3a;\n'
                 '}\n'
                 '\n'
-                'bool gfx1250_scaled_wmma_is_f4_32x16x128(const MachineInst *inst) {\n'
+                'bool cdna5_scaled_wmma_is_f4_32x16x128(const MachineInst *inst) {\n'
                 '  return reinterpret_cast<const Vop3pMachineInst *>(inst + 2)->op == 0x88;\n'
                 '}\n'
                 '\n'
-                'const char *gfx1250_scaled_wmma_mnemonic(const MachineInst *inst) {\n'
-                '  if (gfx1250_scaled_wmma_is_f4_32x16x128(inst))\n'
-                '    return gfx1250_scaled_wmma_is_scale16(inst) ? "v_wmma_scale16_f32_32x16x128_f4"\n'
+                'const char *cdna5_scaled_wmma_mnemonic(const MachineInst *inst) {\n'
+                '  if (cdna5_scaled_wmma_is_f4_32x16x128(inst))\n'
+                '    return cdna5_scaled_wmma_is_scale16(inst) ? "v_wmma_scale16_f32_32x16x128_f4"\n'
                 '                                               : "v_wmma_scale_f32_32x16x128_f4";\n'
-                '  return gfx1250_scaled_wmma_is_scale16(inst) ? "v_wmma_scale16_f32_16x16x128_f8f6f4"\n'
+                '  return cdna5_scaled_wmma_is_scale16(inst) ? "v_wmma_scale16_f32_16x16x128_f8f6f4"\n'
                 '                                             : "v_wmma_scale_f32_16x16x128_f8f6f4";\n'
                 '}\n'
                 '\n'
-                'int gfx1250_scale_operand_size_bits(const MachineInst *inst) {\n'
-                '  return gfx1250_scaled_wmma_is_scale16(inst) ? 64 : 32;\n'
+                'int cdna5_scale_operand_size_bits(const MachineInst *inst) {\n'
+                '  return cdna5_scaled_wmma_is_scale16(inst) ? 64 : 32;\n'
                 '}\n'
                 '\n'
-                'int gfx1250_scaled_wmma_dst_size_bits(const MachineInst *inst) {\n'
-                '  return gfx1250_scaled_wmma_is_f4_32x16x128(inst) ? 512 : 256;\n'
+                'int cdna5_scaled_wmma_dst_size_bits(const MachineInst *inst) {\n'
+                '  return cdna5_scaled_wmma_is_f4_32x16x128(inst) ? 512 : 256;\n'
                 '}\n'
                 '\n'
-                'int gfx1250_scaled_wmma_src0_size_bits(const MachineInst *inst) {\n'
+                'int cdna5_scaled_wmma_src0_size_bits(const MachineInst *inst) {\n'
                 '  const auto *high = reinterpret_cast<const Vop3pMachineInst *>(inst + 2);\n'
-                '  if (gfx1250_scaled_wmma_is_f4_32x16x128(inst))\n'
+                '  if (cdna5_scaled_wmma_is_f4_32x16x128(inst))\n'
                 '    return 512;\n'
-                '  return gfx1250_matrix_fmt_operand_size_bits(high->opsel, 16, 128);\n'
+                '  return cdna5_matrix_fmt_operand_size_bits(high->opsel, 16, 128);\n'
                 '}\n'
                 '\n'
-                'int gfx1250_scaled_wmma_src1_size_bits(const MachineInst *inst) {\n'
+                'int cdna5_scaled_wmma_src1_size_bits(const MachineInst *inst) {\n'
                 '  const auto *high = reinterpret_cast<const Vop3pMachineInst *>(inst + 2);\n'
-                '  if (gfx1250_scaled_wmma_is_f4_32x16x128(inst))\n'
+                '  if (cdna5_scaled_wmma_is_f4_32x16x128(inst))\n'
                 '    return 256;\n'
-                '  return gfx1250_matrix_fmt_operand_size_bits((high->pad_14 << 2) | high->opsel_hi, 16, 128);\n'
+                '  return cdna5_matrix_fmt_operand_size_bits((high->pad_14 << 2) | high->opsel_hi, 16, 128);\n'
                 '}\n'
             )
             + '\n} // namespace'
@@ -4226,7 +4263,7 @@ class CodeGenerator:
         return _ImplOutputs(model=[model], execution=[execution])
 
     @staticmethod
-    def _emit_gfx1250_scaled_wmma_vop3px2_class() -> str:
+    def _emit_cdna5_scaled_wmma_vop3px2_class() -> str:
         return textwrap.dedent('''\
             class VWmmaScaleF32Vop3px2 : public Vop3p {
             public:
@@ -4245,24 +4282,23 @@ class CodeGenerator:
             };
             ''')
 
-    def _emit_gfx1250_scaled_wmma_vop3px2_impls(self) -> _ImplOutputs:
+    def _emit_cdna5_scaled_wmma_vop3px2_impls(self) -> _ImplOutputs:
         exec_fn = self._split_execute_expr('VWmmaScaleF32Vop3px2')
         model = textwrap.dedent('''\
             VWmmaScaleF32Vop3px2::VWmmaScaleF32Vop3px2(const MachineInst *inst)
-                : Vop3p(gfx1250_scaled_wmma_mnemonic(inst), reinterpret_cast<const OpEncoding *>(inst + 2),
-                        @EXEC_FN@, LiteralSupport::Both, 3,
-                        Vop3p::ExtensionDecodePolicy::Skip),
-                  vdst(gfx1250_scaled_wmma_dst_size_bits(inst), OperandType::OPR_VGPR,
+                : Vop3p(cdna5_scaled_wmma_mnemonic(inst), reinterpret_cast<const OpEncoding *>(inst + 2),
+                        @EXEC_FN@, Vop3p::ExtensionDecodePolicy::Skip),
+                  vdst(cdna5_scaled_wmma_dst_size_bits(inst), OperandType::OPR_VGPR,
                        reinterpret_cast<const OpEncoding *>(inst + 2)->vdst),
-                  src0(gfx1250_scaled_wmma_src0_size_bits(inst), OperandType::OPR_SRC_VGPR,
+                  src0(cdna5_scaled_wmma_src0_size_bits(inst), OperandType::OPR_SRC_VGPR,
                        reinterpret_cast<const OpEncoding *>(inst + 2)->src0),
-                  src1(gfx1250_scaled_wmma_src1_size_bits(inst), OperandType::OPR_SRC_VGPR,
+                  src1(cdna5_scaled_wmma_src1_size_bits(inst), OperandType::OPR_SRC_VGPR,
                        reinterpret_cast<const OpEncoding *>(inst + 2)->src1),
-                  src2(gfx1250_scaled_wmma_dst_size_bits(inst), OperandType::OPR_SRC_VGPR_OR_INLINE,
+                  src2(cdna5_scaled_wmma_dst_size_bits(inst), OperandType::OPR_SRC_VGPR_OR_INLINE,
                        reinterpret_cast<const OpEncoding *>(inst + 2)->src2),
-                  scale_src0(gfx1250_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
+                  scale_src0(cdna5_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
                              reinterpret_cast<const OpEncoding *>(inst)->src0),
-                  scale_src1(gfx1250_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
+                  scale_src1(cdna5_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
                              reinterpret_cast<const OpEncoding *>(inst)->src1),
                   scale_inst_(*reinterpret_cast<const OpEncoding *>(inst)) {
               raw_words_ = {inst[0], inst[1], inst[2], inst[3]};
@@ -4291,11 +4327,11 @@ class CodeGenerator:
                 const uint32_t matrix_b_fmt = (inst_.pad_14 << 2) | inst_.opsel_hi;
                 if (matrix_a_fmt != 0) {
                   out += " matrix_a_fmt:";
-                  out += gfx1250_matrix_fmt_name(matrix_a_fmt);
+                  out += cdna5_matrix_fmt_name(matrix_a_fmt);
                 }
                 if (matrix_b_fmt != 0) {
                   out += " matrix_b_fmt:";
-                  out += gfx1250_matrix_fmt_name(matrix_b_fmt);
+                  out += cdna5_matrix_fmt_name(matrix_b_fmt);
                 }
               }
               if (scale_inst_.opsel & 0x1u)
@@ -4306,11 +4342,11 @@ class CodeGenerator:
               const uint32_t matrix_b_scale_fmt = scale_inst_.neg_hi & 0x3u;
               if (matrix_a_scale_fmt != 0) {
                 out += " matrix_a_scale_fmt:";
-                out += gfx1250_matrix_scale_fmt_name(matrix_a_scale_fmt);
+                out += cdna5_matrix_scale_fmt_name(matrix_a_scale_fmt);
               }
               if (matrix_b_scale_fmt != 0) {
                 out += " matrix_b_scale_fmt:";
-                out += gfx1250_matrix_scale_fmt_name(matrix_b_scale_fmt);
+                out += cdna5_matrix_scale_fmt_name(matrix_b_scale_fmt);
               }
               if ((scale_inst_.opsel >> 2) & 0x1u)
                 out += " matrix_a_reuse";
@@ -4393,7 +4429,7 @@ class CodeGenerator:
         return _ImplOutputs(model=[model], execution=[execution])
 
     @staticmethod
-    def _emit_gfx1250_scaled_wmma_vop3px2_decoder_helpers() -> str:
+    def _emit_cdna5_scaled_wmma_vop3px2_decoder_helpers() -> str:
         return textwrap.dedent('''\
             namespace {
 
@@ -5071,6 +5107,16 @@ class CodeGenerator:
             L.append('  wf.set_state(amdgpu::WfState::BARRIER);')
             return '\n'.join(L)
 
+        if cls == 'scalar_barrier_wait':
+            L.append(
+                f'  int32_t barrier_id = static_cast<int16_t>({src_ops[0]}.encoding_value_);'
+            )
+            L.append('  wf.barrier_wait(barrier_id);')
+            return '\n'.join(L)
+
+        if cls == 'scalar_barrier_leave':
+            return '  wf.write_scc(wf.barrier_leave());'
+
         if cls == 'branch':
             L.append(
                 f'  int16_t offset = static_cast<int16_t>({src_ops[0]}.encoding_value_);'
@@ -5241,7 +5287,69 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'scalar_barrier_state':
-            L.append(f'  amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, 0);')
+            L.append(
+                f'  uint32_t source = amdgpu::RegisterAccess(wf).read_scalar({src_ops[0]});'
+            )
+            L.append(
+                f'  bool source_is_m0 = '
+                f'{src_ops[0]}.encoding_value() == '
+                f'OpSelSsrcBarrierId::OPR_SSRC_BARRIER_ID_M0;'
+            )
+            L.append(
+                '  int32_t barrier_id = source_is_m0 ? static_cast<int32_t>(source & 0x1fu) '
+                ': static_cast<int32_t>(source);'
+            )
+            L.append(
+                f'  amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, wf.barrier_state(barrier_id));'
+            )
+            return '\n'.join(L)
+
+        if cls in (
+            'scalar_barrier_signal',
+            'scalar_barrier_init',
+            'scalar_barrier_join',
+        ):
+            L.append(
+                f'  uint32_t source = amdgpu::RegisterAccess(wf).read_scalar({src_ops[0]});'
+            )
+            L.append(
+                f'  bool source_is_m0 = '
+                f'{src_ops[0]}.encoding_value() == '
+                f'OpSelSsrcBarrierId::OPR_SSRC_BARRIER_ID_M0;'
+            )
+            L.append(
+                '  int32_t barrier_id = source_is_m0 ? static_cast<int32_t>(source & 0x1fu) '
+                ': static_cast<int32_t>(source);'
+            )
+            if cls == 'scalar_barrier_signal':
+                L.append(
+                    '  uint32_t member_count = source_is_m0 ? ((source >> 16) & 0x7fu) : 0;'
+                )
+                if op == 'signal_isfirst':
+                    L.append(
+                        '  bool barrier_valid = (wf.barrier_state(barrier_id) & 1u) != 0;'
+                    )
+                    L.append(
+                        '  bool is_first = wf.barrier_signal(barrier_id, member_count);'
+                    )
+                    L.append('  if (barrier_valid) wf.write_scc(is_first);')
+                else:
+                    L.append('  wf.barrier_signal(barrier_id, member_count);')
+            elif cls == 'scalar_barrier_init':
+                has_implicit_m0 = any(
+                    operand.name == 'm0' and operand.is_input
+                    for operand in inst.operands
+                )
+                member_source = (
+                    'wf.m0()'
+                    if has_implicit_m0
+                    else f'amdgpu::RegisterAccess(wf).read_scalar({src_ops[0]})'
+                )
+                L.append(f'  uint32_t member_source = {member_source};')
+                L.append('  uint32_t member_count = (member_source >> 16) & 0x7fu;')
+                L.append('  wf.barrier_init(barrier_id, member_count);')
+            else:
+                L.append('  wf.barrier_join(barrier_id);')
             return '\n'.join(L)
 
         if cls == 'scalar_movrel':
@@ -5520,7 +5628,7 @@ class CodeGenerator:
                     or cls == 'vector_cvt_sr_fp8_f16'
                 )
                 and is_vop3
-                and self.isa_spec.arch_name.lower() == 'gfx1250'
+                and self.isa_spec.arch_name.lower() == 'cdna5'
                 else None
             )
             return gen_vector_cvt_pk(
@@ -6361,7 +6469,7 @@ class CodeGenerator:
         L.append('    uint64_t base = amdgpu::RegisterAccess(wf).read_scalar64(saddr);')
         offset_expr = (
             'signed_ioffset(inst_.ioffset)'
-            if self.isa_spec.arch_name == 'gfx1250'
+            if self.isa_spec.arch_name == 'cdna5'
             else 'static_cast<int32_t>(inst_.ioffset << 8) >> 8'
         )
         L.append(f'    int64_t offset = static_cast<int64_t>({offset_expr});')
@@ -7894,19 +8002,17 @@ class CodeGenerator:
                         d16_partial_reg_offset = d16_vgpr_count - 1
                     # These gfx1250-only WMMA source-format fields derive the
                     # src0/src1 operand sizes from the instruction shape.
-                    gfx1250_f8f6f4_shape = self._gfx1250_f8f6f4_wmma_shape(inst)
+                    cdna5_f8f6f4_shape = self._cdna5_f8f6f4_wmma_shape(inst)
                     cdna4_f8f6f4_shape = self._cdna4_f8f6f4_mfma_shape(inst)
-                    gfx1250_swmmac_has_modifiers = self._gfx1250_swmmac_has_modifiers(
-                        inst
-                    )
+                    cdna5_swmmac_has_modifiers = self._cdna5_swmmac_has_modifiers(inst)
                     operand_size_exprs: dict[str, str] = {}
                     for opnd in inst.operands:
                         opnd_size_expr = self._operand_size_override(
                             enc.enc_name, opnd, inst_sem
                         )
                         if opnd_size_expr is None:
-                            opnd_size_expr = self._gfx1250_matrix_fmt_operand_size_expr(
-                                gfx1250_f8f6f4_shape, opnd.name
+                            opnd_size_expr = self._cdna5_matrix_fmt_operand_size_expr(
+                                cdna5_f8f6f4_shape, opnd.name
                             )
                         if opnd_size_expr is None:
                             opnd_size_expr = self._cdna4_matrix_fmt_operand_size_expr(
@@ -7929,7 +8035,7 @@ class CodeGenerator:
                         # here makes def/use and liveness falsely clobber the
                         # following SGPR.
                         if (
-                            self.isa_spec.arch_name == 'gfx1250'
+                            self.isa_spec.arch_name == 'cdna5'
                             and inst_sem is not None
                             and inst_sem.semantic_class
                             in ('vector_cmp', 'vector_cmp_class')
@@ -8233,7 +8339,7 @@ class CodeGenerator:
                                 'void implicit_uses(RegisterSet &uses) const override'
                             )
                         )
-                    if gfx1250_f8f6f4_shape is not None or gfx1250_swmmac_has_modifiers:
+                    if cdna5_f8f6f4_shape is not None or cdna5_swmmac_has_modifiers:
                         public_members.append(
                             cgen.Statement(
                                 'void build_modifiers(std::string &out) const override'
@@ -8341,7 +8447,7 @@ class CodeGenerator:
                     init_list_parts = [
                         f'{inst.fmt_true_enc_name}({mnemonic_expr}, '
                         f'reinterpret_cast<const OpEncoding*>(inst), '
-                        f'{exec_fn_expr}{literal_policy_args})'
+                        f'{exec_fn_expr})'
                     ] + opnd_ctor_init
                     init_list = ', '.join(init_list_parts)
                     # Check if this is a memory instruction to set MEMORY_OP flag
@@ -8383,6 +8489,8 @@ class CodeGenerator:
                     )
                     ctor_body_parts = list(opnd_body)
                     fieldless_caps_guards: dict[str, str] = {}
+                    factory_validation_parts: list[str] = []
+                    factory_op_encoding = f'{inst.fmt_true_enc_name}::OpEncoding'
                     # Guard fieldless def/use operands (pushed positionally) from
                     # silently writing past the fixed-size operand arrays. The
                     # capacities mirror instruction.h (see the class constants).
@@ -8410,16 +8518,17 @@ class CodeGenerator:
                             opnd.operand_type
                         )
                         raw_value = (
-                            f'reinterpret_cast<const OpEncoding*>(inst)->{opnd.name}'
+                            f'reinterpret_cast<const {factory_op_encoding}*>(inst)'
+                            f'->{opnd.name}'
                         )
                         valid_expr = ' || '.join(
                             f'({raw_value} >= {lo} && {raw_value} <= {hi})'
                             for lo, hi in intervals
                         )
-                        ctor_body_parts.append(
+                        factory_validation_parts.append(
                             f'if (!({valid_expr})) '
-                            f'throw util::InvalidInst("{inst.name} has an invalid '
-                            'accumulator selector", "");'
+                            f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
+                            'accumulator selector";'
                         )
 
                     # LLVM models pseudo-scalar V_S_* destinations as
@@ -8433,11 +8542,11 @@ class CodeGenerator:
                         inst_sem is not None
                         and inst_sem.semantic_class == 'pseudo_scalar_unary'
                     ):
-                        ctor_body_parts.append(
-                            'if (reinterpret_cast<const OpEncoding*>(inst)->vdst >= '
+                        factory_validation_parts.append(
+                            f'if (reinterpret_cast<const {factory_op_encoding}*>(inst)->vdst >= '
                             'OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO) '
-                            f'throw util::InvalidInst("{inst.name} has an invalid '
-                            'SReg_32_XEXEC destination", "");'
+                            f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
+                            'SReg_32_XEXEC destination";'
                         )
 
                     # Flat segment-aware operands: adjust addr width and add
@@ -8512,20 +8621,20 @@ class CodeGenerator:
                             and len(_encoded_literal_fields) > 1
                         ):
                             literal32_selector = ' || '.join(
-                                'reinterpret_cast<const OpEncoding*>(inst)->'
+                                f'reinterpret_cast<const {factory_op_encoding}*>(inst)->'
                                 f'{field} == 255'
                                 for field in _encoded_literal_fields
                             )
                             literal64_selector = ' || '.join(
-                                'reinterpret_cast<const OpEncoding*>(inst)->'
+                                f'reinterpret_cast<const {factory_op_encoding}*>(inst)->'
                                 f'{field} == 254'
                                 for field in _encoded_literal_fields
                             )
-                            ctor_body_parts.append(
+                            factory_validation_parts.append(
                                 f'if (({literal32_selector}) && '
                                 f'({literal64_selector})) '
-                                f'throw util::InvalidInst("{inst.name} may not mix '
-                                '32-bit and 64-bit literals", "");'
+                                f'[[unlikely]] return emit_error.emit() << "{inst.name} may not mix '
+                                '32-bit and 64-bit literals";'
                             )
                         for opnd in inst.operands:
                             # The only fieldless operand that needs a fixup
@@ -8751,10 +8860,16 @@ class CodeGenerator:
                                         if len(unsupported_dpp_markers) == 1
                                         else 'DPP'
                                     )
-                                    ctor_body_parts.append(
-                                        f'if ({" || ".join(marker for marker, _ in unsupported_dpp_markers)}) '
-                                        f'throw util::InvalidInst("{inst.name} does not support '
-                                        f'{unsupported_dpp_label}", "");'
+                                    qualified_dpp_markers = [
+                                        marker.replace(
+                                            'OpEncoding', factory_op_encoding
+                                        )
+                                        for marker, _ in unsupported_dpp_markers
+                                    ]
+                                    factory_validation_parts.append(
+                                        f'if ({" || ".join(qualified_dpp_markers)}) '
+                                        f'[[unlikely]] return emit_error.emit() << "{inst.name} does not support '
+                                        f'{unsupported_dpp_label}";'
                                     )
                                 # SDWA (src0 == amdgpu::SRC_SDWA): CDNA and RDNA1/2 only.
                                 _has_sdwa = any(
@@ -8873,10 +8988,10 @@ class CodeGenerator:
                                     'ENC_VOP2',
                                     'ENC_VOPC',
                                 ):
-                                    ctor_body_parts.append(
-                                        'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == '
+                                    factory_validation_parts.append(
+                                        f'if (reinterpret_cast<const {factory_op_encoding}*>(inst)->src0 == '
                                         'amdgpu::SRC_SDWA) '
-                                        f'throw util::InvalidInst("{inst.name} does not support SDWA", "");'
+                                        f'[[unlikely]] return emit_error.emit() << "{inst.name} does not support SDWA";'
                                     )
 
                     # Apply the fieldless-operand capability policy once, after
@@ -9499,28 +9614,48 @@ class CodeGenerator:
                     inst_impls = [class_ctor_impl]
                     decoder_factory = decoder_factories.get(inst.fmt_name)
                     if decoder_factory is not None:
+                        factory_mnemonic_expr = mnemonic_expr.replace(
+                            'OpEncoding', factory_op_encoding
+                        )
+                        factory_validation_body = ''.join(
+                            f'  {line}\n' for line in factory_validation_parts
+                        )
+                        factory_inst_decl = (
+                            '  const auto *inst = opcode;\n'
+                            if factory_validation_parts
+                            or '(inst)' in factory_mnemonic_expr
+                            else ''
+                        )
                         inst_impls.append(
                             cgen.Line(
                                 'namespace detail {\n'
-                                f'std::unique_ptr<Instruction> {decoder_factory}'
-                                '(const MachineInst *opcode) {\n'
+                                f'DecodeResult {decoder_factory}'
+                                '(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {\n'
+                                f'{factory_inst_decl}'
+                                f'  Result validation = {inst.fmt_true_enc_name}::validate_encoding('
+                                f'{factory_mnemonic_expr}, '
+                                f'reinterpret_cast<const {factory_op_encoding}*>(opcode), '
+                                f'emit_error{literal_policy_args});\n'
+                                '  if (validation.failed()) [[unlikely]]\n'
+                                '    return Result::failure();\n'
+                                f'{factory_validation_body}'
                                 f'  return std::make_unique<{inst.fmt_name}>(opcode);\n'
                                 '}\n'
                                 '} // namespace detail'
                             )
                         )
-                    if gfx1250_f8f6f4_shape is not None:
+                    if cdna5_f8f6f4_shape is not None:
                         inst_impls.append(
                             cgen.Line(
                                 f'void {inst.fmt_name}::build_modifiers(std::string &out) const {{\n'
                                 f'  out += " matrix_a_fmt:";\n'
-                                f'  out += gfx1250_matrix_fmt_name(inst_.opsel);\n'
+                                f'  out += cdna5_matrix_fmt_name(inst_.opsel);\n'
                                 f'  out += " matrix_b_fmt:";\n'
-                                f'  out += gfx1250_matrix_fmt_name((inst_.pad_14 << 2) | inst_.opsel_hi);\n'
+                                f'  out += cdna5_matrix_fmt_name((inst_.pad_14 << 2) | inst_.opsel_hi);\n'
                                 f'}}'
                             )
                         )
-                    elif gfx1250_swmmac_has_modifiers:
+                    elif cdna5_swmmac_has_modifiers:
                         inst_impls.append(
                             cgen.Line(
                                 f'void {inst.fmt_name}::build_modifiers(std::string &out) const {{\n'
@@ -9879,16 +10014,16 @@ class CodeGenerator:
                 if _has_size_overrides:
                     h_includes.append(('array', True))
                 if (
-                    self._supports_gfx1250_scaled_wmma_vop3px2()
+                    self._supports_cdna5_scaled_wmma_vop3px2()
                     and enc.enc_name.upper() == 'ENC_VOP3P'
                 ):
                     if not _has_size_overrides:
                         h_includes.append(('array', True))
                     cpp_includes.append(('array', True))
                     inst_classes.append(
-                        cgen.Line(self._emit_gfx1250_scaled_wmma_vop3px2_class())
+                        cgen.Line(self._emit_cdna5_scaled_wmma_vop3px2_class())
                     )
-                    scaled_outputs = self._emit_gfx1250_scaled_wmma_vop3px2_impls()
+                    scaled_outputs = self._emit_cdna5_scaled_wmma_vop3px2_impls()
                     class_func_impls.model.extend(
                         cgen.Line(impl) for impl in scaled_outputs.model
                     )
@@ -9911,10 +10046,10 @@ class CodeGenerator:
                 # from data_types.h (included via cpp_includes when has_sem).
 
                 if (
-                    self.isa_spec.arch_name.lower() == 'gfx1250'
+                    self.isa_spec.arch_name.lower() == 'cdna5'
                     and enc.enc_name.upper() == 'ENC_VOP3P'
                 ):
-                    matrix_outputs = self._emit_gfx1250_matrix_fmt_helpers()
+                    matrix_outputs = self._emit_cdna5_matrix_fmt_helpers()
                     class_func_impls.model[0:0] = [
                         cgen.Line(impl) for impl in matrix_outputs.model
                     ]
@@ -10010,7 +10145,6 @@ class CodeGenerator:
                             ),
                             False,
                         ),
-                        ('util/except.h', False),
                     ]
                     if is_mem_enc:
                         model_cpp_includes.extend(
@@ -11439,7 +11573,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             if uses_packed_16bit_sources
             else ''
         )
-        selector_validation = ''
+        selector_validation_cases = []
         for selector in sorted(
             self.isa_spec.opnd_selectors, key=lambda item: item.operand_type
         ):
@@ -11467,11 +11601,19 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 f'(encoding_value >= {lo} && encoding_value <= {hi})'
                 for lo, hi in intervals
             )
-            selector_validation += (
-                f'  if (opr_type == OperandType::{operand_type} && '
-                f'!({valid_expr}))\n'
-                f'    defer_encoding_error(EncodingError::{error});\n'
+            selector_validation_cases.append(
+                f'  case OperandType::{operand_type}:\n'
+                f'    if (!({valid_expr}))\n'
+                f'      defer_encoding_error(EncodingError::{error});\n'
+                f'    break;\n'
             )
+        selector_validation = (
+            '  switch (opr_type) {\n'
+            + ''.join(selector_validation_cases)
+            + '  default:\n'
+            + '    break;\n'
+            + '  }\n'
+        )
         packed_16bit_ctor_impl = []
         if uses_packed_16bit_sources:
             packed_16bit_ctor_impl.append(
@@ -11521,12 +11663,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 cgen.Line(
                     'Operand::Operand(int size_bits, OperandType opr_type, int encoding_value,\n'
                     '                 uint16_t literal16_display_value, bool has_literal16_display)\n'
-                    f'    : {operand_base_init}(size_bits, opr_type, encoding_value)'
-                    f'{execution_backend_ctor_init},\n'
-                    '      literal16_display_value_(literal16_display_value),\n'
-                    '      has_literal16_display_(has_literal16_display) {\n'
-                    f'{selector_validation}'
-                    '  is_vgpr_ = is_vgpr_operand_type(opr_type);\n'
+                    '    : Operand(size_bits, opr_type, encoding_value) {\n'
+                    '  literal16_display_value_ = literal16_display_value;\n'
+                    '  has_literal16_display_ = has_literal16_display;\n'
                     '}'
                 ),
                 cgen.Line(
@@ -12224,7 +12363,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         resolve_code = cgen.Line(
             'namespace {\n'
             '\n'
-            f'constexpr int kM0EncodingValue = {125 if scalar_null_precedes_m0 else 124};\n'
+            f'constexpr int kM0EncodingValue = '
+            f'{125 if scalar_null_precedes_m0 else 124};\n'
             '\n'
             + _is_vgpr_only_body
             + '\n\n'
@@ -12565,7 +12705,6 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                         False,
                     ),
                     ('rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h', False),
-                    ('util/except.h', False),
                     ('format', True),
                     ('optional', True),
                     ('stdexcept', True),
@@ -12670,8 +12809,11 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                         f'static constexpr std::size_t kMaxInstructionWords = {self._max_instruction_word_count()}'
                     ),
                     cgen.FunctionDeclaration(
-                        cgen.Value('static std::unique_ptr<Instruction>', 'decode'),
-                        [cgen.Value('const MachineInst *', 'opcode')],
+                        cgen.Value('static DecodeResult', 'decode'),
+                        [
+                            cgen.Value('const MachineInst *', 'opcode'),
+                            cgen.Value('const DecodeErrorEmitter &', 'emit_error'),
+                        ],
                     ),
                 ],
             )
@@ -12680,53 +12822,68 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         class_members = [
             cgen.Line('public:'),
             cgen.FunctionDeclaration(
-                cgen.Value('static std::unique_ptr<Instruction>', 'decode'),
-                [cgen.Value('const MachineInst *', 'opcode')],
+                cgen.Value('static DecodeResult', 'decode'),
+                [
+                    cgen.Value('const MachineInst *', 'opcode'),
+                    cgen.Value('const DecodeErrorEmitter &', 'emit_error'),
+                ],
             ),
             cgen.Line('private:'),
             cgen.Statement(
-                'using DecodeFunc = std::unique_ptr<Instruction>(*)(const MachineInst *)'
+                'using DecodeFunc = DecodeResult(*)(const MachineInst *, '
+                'const DecodeErrorEmitter &)'
             ),
             cgen.FunctionDeclaration(
-                cgen.Value('static std::unique_ptr<Instruction>', 'decodeInvalid'),
-                [cgen.Value('const MachineInst *', 'opcode')],
+                cgen.Value('static DecodeResult', 'decodeInvalid'),
+                [
+                    cgen.Value('const MachineInst *', 'opcode'),
+                    cgen.Value('const DecodeErrorEmitter &', 'emit_error'),
+                ],
             ),
         ]
         decode_body = []
-        if self._supports_gfx1250_scaled_wmma_vop3px2():
+        if self._supports_cdna5_scaled_wmma_vop3px2():
             class_impl.append(
-                cgen.Line(self._emit_gfx1250_scaled_wmma_vop3px2_decoder_helpers())
+                cgen.Line(self._emit_cdna5_scaled_wmma_vop3px2_decoder_helpers())
             )
         decode_body.extend(
             [
                 cgen.Statement(
                     'Sop1MachineInst op = std::bit_cast<decltype(op)>(*opcode)'
                 ),
-                cgen.Statement('return primary_decode_table[op.encoding](opcode)'),
+                cgen.Statement(
+                    'return primary_decode_table[op.encoding](opcode, emit_error)'
+                ),
             ]
         )
         decode_table_funcs = [
             cgen.FunctionBody(
                 cgen.FunctionDeclaration(
-                    cgen.Value('std::unique_ptr<Instruction>', 'DecoderImpl::decode'),
-                    [cgen.Value('const MachineInst *', 'opcode')],
+                    cgen.Value('DecodeResult', 'DecoderImpl::decode'),
+                    [
+                        cgen.Value('const MachineInst *', 'opcode'),
+                        cgen.Value('const DecodeErrorEmitter &', 'emit_error'),
+                    ],
                 ),
                 cgen.Block(decode_body),
             ),
             cgen.FunctionBody(
                 cgen.FunctionDeclaration(
                     cgen.Value(
-                        'std::unique_ptr<Instruction>',
+                        'DecodeResult',
                         'DecoderImpl::decodeInvalid',
                     ),
-                    [cgen.Value('const MachineInst *', 'opcode')],
+                    [
+                        cgen.Value('const MachineInst *', 'opcode'),
+                        cgen.Value('const DecodeErrorEmitter &', 'emit_error'),
+                    ],
                 ),
                 cgen.Block(
                     [
                         cgen.Statement(
-                            'throw util::InvalidInst(std::format("{:X}", *opcode))'
+                            'return emit_error.emit() << "Invalid instruction opcode: " '
+                            '<< std::format("{:X}", *opcode)'
                         ),
-                        cgen.Statement('return nullptr'),
                     ]
                 ),
             ),
@@ -12769,10 +12926,17 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             for _prefix in self.isa_spec.profile.vopd_encoding_prefixes:
                 _reserve_primary_prefix(_prefix.prefix, _prefix.prefix_bits, _vopd_fn)
             _custom_primary_decode_bodies[_vopd_fn] = cgen.Block(
-                [cgen.Statement('return std::make_unique<Vopd>(opcode)')]
+                [
+                    cgen.Line(
+                        '  Result validation = Vopd::validate_encoding(opcode, emit_error);\n'
+                        '  if (validation.failed()) [[unlikely]]\n'
+                        '    return Result::failure();\n'
+                    ),
+                    cgen.Statement('return std::make_unique<Vopd>(opcode)'),
+                ]
             )
 
-        if self._supports_gfx1250_scaled_wmma_vop3px2():
+        if self._supports_cdna5_scaled_wmma_vop3px2():
             for _dte in self.isa_spec.primary_decode_table:
                 if (
                     _dte is not None
@@ -12796,7 +12960,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                             cgen.Line(
                                 '  if (!isVop3pOp(opcode[2], 0x33) && '
                                 '!isVop3pOp(opcode[2], 0x88))\n'
-                                '    return decodeInvalid(opcode);\n'
+                                '    return decodeInvalid(opcode, emit_error);\n'
                             ),
                             cgen.Statement(
                                 'return std::make_unique<VWmmaScaleF32Vop3px2>(opcode)'
@@ -12849,7 +13013,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                         'kVMfmaF3216x16x128F8f6f4Vop3pMfma &&\n'
                                         '       suffix_opcode != '
                                         'kVMfmaF3232x32x64F8f6f4Vop3pMfma))\n'
-                                        '    return decodeInvalid(opcode);\n'
+                                        '    return decodeInvalid(opcode, emit_error);\n'
                                         '  if (suffix_opcode == '
                                         'kVMfmaF3216x16x128F8f6f4Vop3pMfma)\n'
                                         '    return std::make_unique<VMfmaF3216x16x128F8f6f4Vop3pMfma>(opcode + 2, true);\n'
@@ -12864,24 +13028,28 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                         f'auto op = *reinterpret_cast<const {_dte.enc.fmt_enc_name}::OpEncoding *>(opcode + 2)'
                                     ),
                                     cgen.Statement(
-                                        f'return {_dte.sub_decode_table}[op.op](opcode + 2)'
+                                        f'return {_dte.sub_decode_table}[op.op](opcode + 2, emit_error)'
                                     ),
                                 ]
                             )
                         break
         for _fn, _body in _custom_primary_decode_bodies.items():
             _decl = cgen.FunctionDeclaration(
-                cgen.Value('static std::unique_ptr<Instruction>', _fn),
-                [cgen.Value('const MachineInst *', 'opcode')],
+                cgen.Value('static DecodeResult', _fn),
+                [
+                    cgen.Value('const MachineInst *', 'opcode'),
+                    cgen.Value('const DecodeErrorEmitter &', 'emit_error'),
+                ],
             )
             class_members.append(_decl)
             decode_table_funcs.append(
                 cgen.FunctionBody(
                     cgen.FunctionDeclaration(
-                        cgen.Value(
-                            'std::unique_ptr<Instruction>', f'DecoderImpl::{_fn}'
-                        ),
-                        [cgen.Value('const MachineInst *', 'opcode')],
+                        cgen.Value('DecodeResult', f'DecoderImpl::{_fn}'),
+                        [
+                            cgen.Value('const MachineInst *', 'opcode'),
+                            cgen.Value('const DecodeErrorEmitter &', 'emit_error'),
+                        ],
                     ),
                     _body,
                 )
@@ -12905,10 +13073,13 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     decode_funcs_found.add(dte.decode_func)
                     func_decl = cgen.FunctionDeclaration(
                         cgen.Value(
-                            'std::unique_ptr<Instruction>',
+                            'DecodeResult',
                             f'DecoderImpl::{dte.decode_func}',
                         ),
-                        [cgen.Value('const MachineInst *', 'opcode')],
+                        [
+                            cgen.Value('const MachineInst *', 'opcode'),
+                            cgen.Value('const DecodeErrorEmitter &', 'emit_error'),
+                        ],
                     )
                     sub_decode_func_decls = []
                     if primary_factory_is_distributed:
@@ -12937,7 +13108,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                             'op = *reinterpret_cast<const decltype(op) *>(opcode)',
                                         ),
                                         cgen.Statement(
-                                            f'return {dte.sub_decode_table}[op.op](opcode)'
+                                            f'return {dte.sub_decode_table}[op.op](opcode, emit_error)'
                                         ),
                                     ]
                                 ),
@@ -12970,14 +13141,18 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                     sub_decode_func_decls.append(
                                         cgen.FunctionDeclaration(
                                             cgen.Value(
-                                                'static std::unique_ptr<Instruction>',
+                                                'static DecodeResult',
                                                 fn,
                                             ),
                                             [
                                                 cgen.Value(
                                                     'const MachineInst *',
                                                     'opcode',
-                                                )
+                                                ),
+                                                cgen.Value(
+                                                    'const DecodeErrorEmitter &',
+                                                    'emit_error',
+                                                ),
                                             ],
                                         )
                                     )
@@ -12996,14 +13171,18 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                         cgen.FunctionBody(
                                             cgen.FunctionDeclaration(
                                                 cgen.Value(
-                                                    'std::unique_ptr<Instruction>',
+                                                    'DecodeResult',
                                                     f'DecoderImpl::{fn}',
                                                 ),
                                                 [
                                                     cgen.Value(
                                                         'const MachineInst *',
                                                         'opcode',
-                                                    )
+                                                    ),
+                                                    cgen.Value(
+                                                        'const DecodeErrorEmitter &',
+                                                        'emit_error',
+                                                    ),
                                                 ],
                                             ),
                                             _fn_body,
@@ -13023,10 +13202,15 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                         class_members.append(
                             cgen.FunctionDeclaration(
                                 cgen.Value(
-                                    'static std::unique_ptr<Instruction>',
+                                    'static DecodeResult',
                                     f'{dte.decode_func}',
                                 ),
-                                [cgen.Value('const MachineInst *', 'opcode')],
+                                [
+                                    cgen.Value('const MachineInst *', 'opcode'),
+                                    cgen.Value(
+                                        'const DecodeErrorEmitter &', 'emit_error'
+                                    ),
+                                ],
                             )
                         )
                     class_members.extend(sub_decode_func_decls)
@@ -13035,8 +13219,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         decode_table_entries = ''.join(decode_table_entries)
         class_members.extend(decode_tables)
         detail_decls = '\n'.join(
-            f'std::unique_ptr<Instruction> {factory_name}'
-            '(const MachineInst *opcode);'
+            f'DecodeResult {factory_name}'
+            '(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);'
             for factory_name in sorted(distributed_factory_names)
         )
         class_impl[0:0] = [
@@ -13049,10 +13233,15 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             0,
             cgen.FunctionBody(
                 cgen.FunctionDeclaration(
-                    cgen.Value('std::unique_ptr<Instruction>', 'Decoder::decode'),
-                    [cgen.Value('const MachineInst *', 'opcode')],
+                    cgen.Value('DecodeResult', 'Decoder::decode'),
+                    [
+                        cgen.Value('const MachineInst *', 'opcode'),
+                        cgen.Value('const DecodeErrorEmitter &', 'emit_error'),
+                    ],
                 ),
-                cgen.Block([cgen.Statement('return DecoderImpl::decode(opcode)')]),
+                cgen.Block(
+                    [cgen.Statement('return DecoderImpl::decode(opcode, emit_error)')]
+                ),
             ),
         )
         class_impl.extend(decode_table_funcs)
@@ -13075,6 +13264,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     ),
                     False,
                 ),
+                ('rocjitsu/isa/decode_result.h', False),
                 ('array', True),
                 ('cstddef', True),
                 ('memory', True),
@@ -13090,7 +13280,6 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 self.config.generated_include(self.generated_dir_name, 'decoder.h'),
                 False,
             ),
-            ('util/except.h', False),
             (
                 self.config.generated_include(
                     self.generated_dir_name,

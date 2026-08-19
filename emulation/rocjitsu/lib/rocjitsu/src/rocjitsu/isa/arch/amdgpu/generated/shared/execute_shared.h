@@ -714,20 +714,6 @@ inline void execute_s_barrier_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]]
 }
 
 template <typename Inst>
-inline void execute_s_barrier_signal_sop1([[maybe_unused]] Inst &inst,
-                                          [[maybe_unused]] Wavefront &wf) {}
-
-template <typename Inst>
-inline void execute_s_barrier_signal_isfirst_sop1([[maybe_unused]] Inst &inst,
-                                                  [[maybe_unused]] Wavefront &wf) {}
-
-template <typename Inst>
-inline void execute_s_barrier_wait_sopp([[maybe_unused]] Inst &inst,
-                                        [[maybe_unused]] Wavefront &wf) {
-  wf.set_state(amdgpu::WfState::BARRIER);
-}
-
-template <typename Inst>
 inline void execute_s_bcnt0_i32_b32_sop1([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
   uint32_t result =
@@ -2894,7 +2880,7 @@ inline void execute_v_add_co_ci_u32_vop2([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(w);
     }());
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -2948,7 +2934,7 @@ inline void execute_v_add_co_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unuse
       return static_cast<uint32_t>(w);
     }());
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -3333,7 +3319,7 @@ inline void execute_v_addc_co_u32_vop2([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(w);
     }());
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -4079,7 +4065,7 @@ inline void execute_v_cmp_class_f16_vopc([[maybe_unused]] Inst &inst,
     if (match)
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -4209,7 +4195,7 @@ inline void execute_v_cmp_class_f32_vopc([[maybe_unused]] Inst &inst,
     if (match)
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -4347,7 +4333,7 @@ inline void execute_v_cmp_class_f64_vopc([[maybe_unused]] Inst &inst,
     if (match)
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -4397,7 +4383,7 @@ inline void execute_v_cmp_eq_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
              static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -4441,7 +4427,7 @@ inline void execute_v_cmp_eq_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -4487,7 +4473,7 @@ inline void execute_v_cmp_eq_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -4519,7 +4505,7 @@ inline void execute_v_cmp_eq_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -4549,7 +4535,7 @@ inline void execute_v_cmp_eq_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -4579,7 +4565,7 @@ inline void execute_v_cmp_eq_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -4608,7 +4594,7 @@ inline void execute_v_cmp_eq_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -4638,7 +4624,7 @@ inline void execute_v_cmp_eq_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -4668,7 +4654,7 @@ inline void execute_v_cmp_eq_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -4698,7 +4684,7 @@ inline void execute_v_cmp_f_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
     if (0)
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -4726,7 +4712,7 @@ inline void execute_v_cmp_f_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
     if (0)
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -4754,7 +4740,7 @@ inline void execute_v_cmp_f_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
     if (0)
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -4771,7 +4757,7 @@ inline void execute_v_cmp_f_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
     if (0)
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -4799,7 +4785,7 @@ inline void execute_v_cmp_f_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
     if (0)
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -4828,7 +4814,7 @@ inline void execute_v_cmp_f_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
     if (0)
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -4843,7 +4829,7 @@ inline void execute_v_cmp_f_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
     if (0)
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -4871,7 +4857,7 @@ inline void execute_v_cmp_f_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
     if (0)
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -4900,7 +4886,7 @@ inline void execute_v_cmp_f_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
     if (0)
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -4950,7 +4936,7 @@ inline void execute_v_cmp_ge_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
              static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -4994,7 +4980,7 @@ inline void execute_v_cmp_ge_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -5040,7 +5026,7 @@ inline void execute_v_cmp_ge_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -5072,7 +5058,7 @@ inline void execute_v_cmp_ge_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -5102,7 +5088,7 @@ inline void execute_v_cmp_ge_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -5132,7 +5118,7 @@ inline void execute_v_cmp_ge_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -5161,7 +5147,7 @@ inline void execute_v_cmp_ge_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -5191,7 +5177,7 @@ inline void execute_v_cmp_ge_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -5221,7 +5207,7 @@ inline void execute_v_cmp_ge_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -5270,7 +5256,7 @@ inline void execute_v_cmp_gt_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
              static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -5314,7 +5300,7 @@ inline void execute_v_cmp_gt_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -5360,7 +5346,7 @@ inline void execute_v_cmp_gt_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -5392,7 +5378,7 @@ inline void execute_v_cmp_gt_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -5422,7 +5408,7 @@ inline void execute_v_cmp_gt_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -5452,7 +5438,7 @@ inline void execute_v_cmp_gt_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -5481,7 +5467,7 @@ inline void execute_v_cmp_gt_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -5511,7 +5497,7 @@ inline void execute_v_cmp_gt_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -5541,7 +5527,7 @@ inline void execute_v_cmp_gt_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -5591,7 +5577,7 @@ inline void execute_v_cmp_le_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
              static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -5635,7 +5621,7 @@ inline void execute_v_cmp_le_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -5681,7 +5667,7 @@ inline void execute_v_cmp_le_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -5713,7 +5699,7 @@ inline void execute_v_cmp_le_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -5743,7 +5729,7 @@ inline void execute_v_cmp_le_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -5773,7 +5759,7 @@ inline void execute_v_cmp_le_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -5802,7 +5788,7 @@ inline void execute_v_cmp_le_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -5832,7 +5818,7 @@ inline void execute_v_cmp_le_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -5862,7 +5848,7 @@ inline void execute_v_cmp_le_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -5919,7 +5905,7 @@ inline void execute_v_cmp_lg_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
         }()))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -5969,7 +5955,7 @@ inline void execute_v_cmp_lg_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
         }()))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -6021,7 +6007,7 @@ inline void execute_v_cmp_lg_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
         }()))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -6070,7 +6056,7 @@ inline void execute_v_cmp_lt_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
              static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -6114,7 +6100,7 @@ inline void execute_v_cmp_lt_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -6160,7 +6146,7 @@ inline void execute_v_cmp_lt_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -6192,7 +6178,7 @@ inline void execute_v_cmp_lt_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -6222,7 +6208,7 @@ inline void execute_v_cmp_lt_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -6252,7 +6238,7 @@ inline void execute_v_cmp_lt_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -6281,7 +6267,7 @@ inline void execute_v_cmp_lt_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -6311,7 +6297,7 @@ inline void execute_v_cmp_lt_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -6341,7 +6327,7 @@ inline void execute_v_cmp_lt_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -6373,7 +6359,7 @@ inline void execute_v_cmp_ne_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -6403,7 +6389,7 @@ inline void execute_v_cmp_ne_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -6433,7 +6419,7 @@ inline void execute_v_cmp_ne_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -6462,7 +6448,7 @@ inline void execute_v_cmp_ne_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -6492,7 +6478,7 @@ inline void execute_v_cmp_ne_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -6522,7 +6508,7 @@ inline void execute_v_cmp_ne_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unuse
          static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane64(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -6574,7 +6560,7 @@ inline void execute_v_cmp_neq_f16_vopc([[maybe_unused]] Inst &inst,
              static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -6620,7 +6606,7 @@ inline void execute_v_cmp_neq_f32_vopc([[maybe_unused]] Inst &inst,
          std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -6668,7 +6654,7 @@ inline void execute_v_cmp_neq_f64_vopc([[maybe_unused]] Inst &inst,
          std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.vsrc1, lane))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -6720,7 +6706,7 @@ inline void execute_v_cmp_nge_f16_vopc([[maybe_unused]] Inst &inst,
                static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -6766,7 +6752,7 @@ inline void execute_v_cmp_nge_f32_vopc([[maybe_unused]] Inst &inst,
            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -6814,7 +6800,7 @@ inline void execute_v_cmp_nge_f64_vopc([[maybe_unused]] Inst &inst,
            std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.vsrc1, lane)))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -6866,7 +6852,7 @@ inline void execute_v_cmp_ngt_f16_vopc([[maybe_unused]] Inst &inst,
                static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -6912,7 +6898,7 @@ inline void execute_v_cmp_ngt_f32_vopc([[maybe_unused]] Inst &inst,
            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -6960,7 +6946,7 @@ inline void execute_v_cmp_ngt_f64_vopc([[maybe_unused]] Inst &inst,
            std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.vsrc1, lane)))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -7012,7 +6998,7 @@ inline void execute_v_cmp_nle_f16_vopc([[maybe_unused]] Inst &inst,
                static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -7058,7 +7044,7 @@ inline void execute_v_cmp_nle_f32_vopc([[maybe_unused]] Inst &inst,
            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -7106,7 +7092,7 @@ inline void execute_v_cmp_nle_f64_vopc([[maybe_unused]] Inst &inst,
            std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.vsrc1, lane)))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -7165,7 +7151,7 @@ inline void execute_v_cmp_nlg_f16_vopc([[maybe_unused]] Inst &inst,
         }())))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -7217,7 +7203,7 @@ inline void execute_v_cmp_nlg_f32_vopc([[maybe_unused]] Inst &inst,
         }())))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -7271,7 +7257,7 @@ inline void execute_v_cmp_nlg_f64_vopc([[maybe_unused]] Inst &inst,
         }())))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -7323,7 +7309,7 @@ inline void execute_v_cmp_nlt_f16_vopc([[maybe_unused]] Inst &inst,
                static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -7369,7 +7355,7 @@ inline void execute_v_cmp_nlt_f32_vopc([[maybe_unused]] Inst &inst,
            std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -7417,7 +7403,7 @@ inline void execute_v_cmp_nlt_f64_vopc([[maybe_unused]] Inst &inst,
            std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.vsrc1, lane)))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -7469,7 +7455,7 @@ inline void execute_v_cmp_o_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
              static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -7515,7 +7501,7 @@ inline void execute_v_cmp_o_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
          !std::isnan(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -7565,7 +7551,7 @@ inline void execute_v_cmp_o_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
              std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.vsrc1, lane)))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -7578,7 +7564,7 @@ inline void execute_v_cmp_t_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
     if (1)
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -7605,7 +7591,7 @@ inline void execute_v_cmp_t_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
     if (1)
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -7632,7 +7618,7 @@ inline void execute_v_cmp_t_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
     if (1)
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -7649,7 +7635,7 @@ inline void execute_v_cmp_t_i16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
     if (1)
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -7677,7 +7663,7 @@ inline void execute_v_cmp_t_i32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
     if (1)
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -7705,7 +7691,7 @@ inline void execute_v_cmp_t_i64_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
     if (1)
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -7720,7 +7706,7 @@ inline void execute_v_cmp_t_u16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
     if (1)
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -7748,7 +7734,7 @@ inline void execute_v_cmp_t_u32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
     if (1)
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -7777,7 +7763,7 @@ inline void execute_v_cmp_t_u64_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
     if (1)
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -7809,7 +7795,7 @@ inline void execute_v_cmp_tru_f16_vopc([[maybe_unused]] Inst &inst,
     if (1)
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -7839,7 +7825,7 @@ inline void execute_v_cmp_tru_f32_vopc([[maybe_unused]] Inst &inst,
     if (1)
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -7869,7 +7855,7 @@ inline void execute_v_cmp_tru_f64_vopc([[maybe_unused]] Inst &inst,
     if (1)
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -7921,7 +7907,7 @@ inline void execute_v_cmp_u_f16_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
              static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane))))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -7967,7 +7953,7 @@ inline void execute_v_cmp_u_f32_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
          std::isnan(std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -8017,7 +8003,7 @@ inline void execute_v_cmp_u_f64_vopc([[maybe_unused]] Inst &inst, [[maybe_unused
              std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(inst.vsrc1, lane)))))
       vcc |= (1ULL << lane);
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -18419,7 +18405,7 @@ inline void execute_v_sub_co_ci_u32_vop2([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(a - b - c);
     }());
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -18470,7 +18456,7 @@ inline void execute_v_sub_co_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unuse
       return a - b;
     }());
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -18777,7 +18763,7 @@ inline void execute_v_subb_co_u32_vop2([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(a - b - c);
     }());
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -18836,7 +18822,7 @@ inline void execute_v_subbrev_co_u32_vop2([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(a - b - c);
     }());
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -18888,7 +18874,7 @@ inline void execute_v_subrev_co_ci_u32_vop2([[maybe_unused]] Inst &inst,
       return static_cast<uint32_t>(a - b - c);
     }());
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>
@@ -18940,7 +18926,7 @@ inline void execute_v_subrev_co_u32_vop2([[maybe_unused]] Inst &inst,
       return a - b;
     }());
   }
-  wf.set_vcc(vcc);
+  wf.set_vcc_mask(vcc);
 }
 
 template <typename Inst>

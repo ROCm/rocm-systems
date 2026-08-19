@@ -865,7 +865,7 @@ TEST(ConfigLoaderTest, RejectsSimulatorConfigForHardwareDbtBackend) {
 
 TEST(ConfigLoaderTest, Gfx1250ComputeUnitDefaultsCoverTtmpAndHighVgprs) {
   const char *json = R"({"max_ticks":1000,"num_threads":1,
-    "vm":{"arch":"gfx1250"},
+    "vm":{"arch":"cdna5"},
     "topology":{"root":{"name":"soc","type":"soc","children":[
       {"name":"vram","type":"gpu_memory"},
       {"name":"xcd0","type":"xcd","children":[
@@ -1169,7 +1169,7 @@ TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
 
 TEST(CheckpointTest, SaveAndRestoreHwregState) {
   const char *json = R"({"max_ticks":10000,"num_threads":1,
-    "vm":{"arch":"gfx1250"},
+    "vm":{"arch":"cdna5"},
     "topology":{
       "root":{
         "name":"soc","type":"soc",
@@ -1231,7 +1231,7 @@ TEST(CheckpointTest, SaveAndRestoreHwregState) {
 // the trap handler's state installed.
 TEST(CheckpointTest, RefusesToSaveTrappedOrDebuggerStoppedWaves) {
   const char *json = R"({"max_ticks":10000,"num_threads":1,
-    "vm":{"arch":"gfx1250"},
+    "vm":{"arch":"cdna5"},
     "topology":{
       "root":{
         "name":"soc","type":"soc",

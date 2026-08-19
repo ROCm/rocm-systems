@@ -32,6 +32,7 @@
 #include "simdojo/sim/component.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <functional>
@@ -40,6 +41,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -243,6 +245,9 @@ public:
   }
 
 private:
+  struct ClusterWorkgroupPlacement;
+  struct ClusterBarrierState;
+
   /// @brief Initialize a wavefront's registers per the AMDHSA ABI.
   void init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf, const DispatchEntry &entry,
                            uint32_t global_wg_id, uint32_t wf_index_in_wg);
@@ -290,7 +295,8 @@ private:
   /// @brief Parse an AQL dispatch packet, read its kernel descriptor, and create a DispatchEntry.
   /// @param aql_packet_id AQL ring packet id (queue read index) for debugger correlation.
   void process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt, const HwQueue &queue,
-                          uint64_t pkt_addr, HwQueueState &qs, uint64_t aql_packet_id = 0,
+                          uint64_t pkt_addr, uint32_t queue_packet_id, HwQueueState &qs,
+                          uint64_t aql_packet_id = 0,
                           ClusterDispatchShape cluster_shape = {});
 
   rocr::llvm::amdhsa::kernel_descriptor_t
@@ -300,6 +306,16 @@ private:
 
   void register_cluster_workgroup(const DispatchEntry &entry, uint32_t local_wg_id,
                                   uint32_t global_wg_id, ComputeUnitCore *cu, uint32_t lds_base);
+  bool cluster_barrier_signal(Wavefront &wf, int32_t barrier_id);
+  uint32_t cluster_barrier_state(const Wavefront &wf, int32_t barrier_id,
+                                 uint32_t allocation_blocks) const;
+  bool cluster_barrier_valid(const Wavefront &wf, int32_t barrier_id) const;
+  bool find_valid_cluster_barrier_locked(const Wavefront &wf, int32_t barrier_id,
+                                         ClusterWorkgroupPlacement *&placement,
+                                         ClusterBarrierState *&barriers);
+  bool find_valid_cluster_barrier_locked(const Wavefront &wf, int32_t barrier_id,
+                                         const ClusterWorkgroupPlacement *&placement,
+                                         const ClusterBarrierState *&barriers) const;
   void mark_cluster_workgroup_complete(uint32_t dispatch_id, uint32_t wg_id);
   void erase_cluster_workgroup(uint32_t dispatch_id, uint32_t wg_id);
   void erase_cluster_workgroups(uint32_t dispatch_id);
@@ -385,7 +401,8 @@ private:
     std::vector<uint32_t> peer_wg_ids;
   };
   std::unordered_map<uint64_t, ClusterWorkgroupPlacement> cluster_wg_placements_;
-  /// @brief Guards @ref cluster_wg_placements_ alone, not the queue state.
+  /// @brief Guards @ref cluster_wg_placements_ and @ref cluster_barriers_, not the
+  /// queue state.
   /// @details A multicast LDS write resolves its peers from the CU's execute
   /// path, which already holds that CU's wave-state lock, while a dispatch takes
   /// hw_queue_mutex_ and then the wave-state lock. Sharing hw_queue_mutex_ here
@@ -394,11 +411,20 @@ private:
   /// erase_cluster_workgroup(), which collects its LDS cleanup and runs it after
   /// the unlock.
   mutable std::recursive_mutex cluster_placements_mutex_;
+  struct ClusterBarrierState {
+    uint32_t expected_member_count = 0;
+    uint32_t member_count = 0;
+    std::unordered_set<uint32_t> registered_workgroups;
+    std::array<std::unordered_set<uint32_t>, 2> signaled_workgroups;
+  };
+  std::unordered_map<uint64_t, ClusterBarrierState> cluster_barriers_;
 
   simdojo::Event doorbell_event_{this, simdojo::EventType::TIMER_CALLBACK};
   std::recursive_mutex hw_queue_mutex_;
 
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
+
+  friend class ComputeUnitCore;
 
   /// @brief Read a uint64 from GPU virtual address space via GpuMemory translation.
   uint64_t read_gpu_u64(uint64_t va, uint32_t vmid) const;

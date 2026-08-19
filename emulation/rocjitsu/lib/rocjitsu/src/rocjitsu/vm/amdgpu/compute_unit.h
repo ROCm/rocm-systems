@@ -55,6 +55,17 @@ namespace amdgpu {
 
 class CommandProcessor;
 
+inline constexpr int32_t kWorkgroupBarrierId = -1;
+inline constexpr int32_t kWorkgroupTrapBarrierId = -2;
+inline constexpr int32_t kClusterBarrierId = -3;
+inline constexpr int32_t kClusterTrapBarrierId = -4;
+
+inline constexpr uint8_t kNamedBarrierBit = 0;
+inline constexpr uint8_t kWorkgroupBarrierBit = 1;
+inline constexpr uint8_t kWorkgroupTrapBarrierBit = 2;
+inline constexpr uint8_t kClusterBarrierBit = 3;
+inline constexpr uint8_t kClusterTrapBarrierBit = 4;
+
 /// @brief Base AMDGPU compute unit that owns wavefront slots and register files.
 ///
 /// @details Owns the physical SGPR and VGPR register files and a fixed array of
@@ -79,6 +90,7 @@ class ComputeUnitCore : public simdojo::CompositeComponent {
 public:
   static constexpr uint32_t kFunctionalQuantum = 1024;
   static constexpr uint32_t kDebugFunctionalQuantum = 64;
+  static constexpr uint32_t kMaxNamedBarriers = 16;
 
   /// @brief Configuration for a compute unit.
   struct Config {
@@ -255,9 +267,26 @@ public:
   /// @brief Register a new workgroup with its expected WF count.
   /// @details Called by the DispatchController when assigning a WG to this CU.
   /// Initializes the refcount so release_wf() can detect WG completion.
-  void begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint32_t wf_count) {
-    active_wgs_[wg_key(dispatch_id, wg_id)] = wf_count;
-  }
+  void begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint32_t wf_count,
+                       uint32_t num_named_barriers = 0);
+
+  /// @brief Initialize a named barrier's member count and clear its signals.
+  void named_barrier_init(Wavefront &wf, int32_t barrier_id, uint32_t member_count);
+
+  /// @brief Associate a wave with one named barrier.
+  void named_barrier_join(Wavefront &wf, int32_t barrier_id);
+
+  /// @brief Signal a split-barrier domain and return whether this was its first signal.
+  bool barrier_signal(Wavefront &wf, int32_t barrier_id, uint32_t member_count);
+
+  /// @brief Return the packed architectural state of a split-barrier domain.
+  uint32_t barrier_state(const Wavefront &wf, int32_t barrier_id) const;
+
+  /// @brief Wait on the completion bit selected by a split-barrier ID.
+  void barrier_wait(Wavefront &wf, int32_t barrier_id);
+
+  /// @brief Leave the wave's currently joined named barrier.
+  bool named_barrier_leave(Wavefront &wf);
 
   /// @brief Called by Wavefront::halt() to decrement the WG refcount.
   /// @details When the refcount reaches zero, all WFs in the WG have halted
@@ -789,6 +818,20 @@ protected:
 
   std::unordered_map<uint64_t, uint32_t> active_wgs_;
 
+  struct BarrierCounter {
+    uint32_t member_count = 0;
+    uint32_t signal_count = 0;
+  };
+  struct WorkgroupBarriers {
+    uint32_t allocated_count = 0;
+    std::array<BarrierCounter, kMaxNamedBarriers + 1> named{};
+    std::array<BarrierCounter, 2> workgroup{};
+  };
+  std::vector<Wavefront *> complete_barrier(uint32_t dispatch_id, uint32_t wg_id,
+                                            uint8_t completion_bit, uint32_t named_barrier_id = 0);
+  void notify_barrier_complete(std::span<Wavefront *> members);
+  std::unordered_map<uint64_t, WorkgroupBarriers> barrier_wgs_;
+
   uint64_t shared_aperture_base_ = 0;
   uint64_t shared_aperture_limit_ = 0;
   uint64_t private_aperture_base_ = 0;
@@ -805,6 +848,8 @@ protected:
   simdojo::Port *req_ = nullptr; ///< Requester port: L2 cache request (structural).
   uint64_t step_count_ = 0;
   bool functional_yield_requested_ = false;
+
+  friend class CommandProcessor;
 };
 
 inline L1ScalarCache &InstructionComputeUnitView::l1_scalar() { return raw_cu().l1_scalar(); }

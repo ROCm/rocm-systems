@@ -586,7 +586,7 @@ TEST(WaveDebugTest, CwsrLayoutIsModelledOnlyForTheGfx94Parts) {
   // the wave size behind the VGPR stride, and where dispatch identity lives.
   for (rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
-        ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_GFX1250})
+        ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5})
     EXPECT_FALSE(kmd::cwsr_layout_modelled(arch)) << "arch " << static_cast<int>(arch);
 }
 
@@ -891,7 +891,7 @@ TEST(WaveDebugTest, STrapWithoutConfiguredHandlerAdvancesPcWithoutChangingWaveSt
 }
 
 TEST(WaveDebugTest, Gfx1250TrapWithoutConfiguredHandlerAdvancesPc) {
-  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_GFX1250);
+  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_CDNA5);
   fx.gpu_mem.write32(kKernelAddr, kGfx1250STrap);
 
   auto *wf = fx.dispatch(kKernelAddr);

@@ -181,7 +181,7 @@ def _register_handlers() -> None:
         c.dtype,
         (
             c.opsel_exprs[0]
-            if c.arch_name == 'gfx1250' and c.is_vop3 and c.dtype == 'b16'
+            if c.arch_name == 'cdna5' and c.is_vop3 and c.dtype == 'b16'
             else None
         ),
     )
@@ -223,7 +223,7 @@ def _register_handlers() -> None:
             if c.cls == 'vector_cvt_pk'
             and c.op in ('fp8_f32', 'fp8_f16')
             and c.is_vop3
-            and c.arch_name == 'gfx1250'
+            and c.arch_name == 'cdna5'
             else None
         ),
         arch_name=c.arch_name,
@@ -251,7 +251,7 @@ def _register_handlers() -> None:
         c.src_ops,
         c.op,
         opsel_exprs=c.opsel_exprs,
-        use_gfx1250_helpers=c.arch_name == 'gfx1250',
+        use_cdna5_helpers=c.arch_name == 'cdna5',
     )
     DISPATCH['pk_ternary_f32'] = lambda c: gen_pk_ternary_f32(
         c.dst_ops,
@@ -259,7 +259,7 @@ def _register_handlers() -> None:
         c.op,
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
-        use_gfx1250_helpers=c.arch_name == 'gfx1250',
+        use_cdna5_helpers=c.arch_name == 'cdna5',
     )
     DISPATCH['pk_mov_b32'] = lambda c: gen_pk_mov_b32(
         c.dst_ops,
@@ -271,7 +271,7 @@ def _register_handlers() -> None:
         c.src_ops,
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
-        use_gfx1250_helpers=c.arch_name == 'gfx1250',
+        use_cdna5_helpers=c.arch_name == 'cdna5',
     )
     DISPATCH['mad_mixlo_f16'] = lambda c: gen_mad_mix_lo_hi(
         c.dst_ops,
@@ -279,7 +279,7 @@ def _register_handlers() -> None:
         is_lo=True,
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
-        use_gfx1250_helpers=c.arch_name == 'gfx1250',
+        use_cdna5_helpers=c.arch_name == 'cdna5',
     )
     DISPATCH['mad_mixhi_f16'] = lambda c: gen_mad_mix_lo_hi(
         c.dst_ops,
@@ -287,7 +287,7 @@ def _register_handlers() -> None:
         is_lo=False,
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
-        use_gfx1250_helpers=c.arch_name == 'gfx1250',
+        use_cdna5_helpers=c.arch_name == 'cdna5',
     )
     DISPATCH['mad_mix_f32_bf16'] = lambda c: gen_mad_mix_bf16(
         c.dst_ops,
@@ -295,7 +295,7 @@ def _register_handlers() -> None:
         result='f32',
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
-        use_gfx1250_helpers=c.arch_name == 'gfx1250',
+        use_cdna5_helpers=c.arch_name == 'cdna5',
     )
     DISPATCH['mad_mixlo_bf16'] = lambda c: gen_mad_mix_bf16(
         c.dst_ops,
@@ -303,7 +303,7 @@ def _register_handlers() -> None:
         result='lo',
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
-        use_gfx1250_helpers=c.arch_name == 'gfx1250',
+        use_cdna5_helpers=c.arch_name == 'cdna5',
     )
     DISPATCH['mad_mixhi_bf16'] = lambda c: gen_mad_mix_bf16(
         c.dst_ops,
@@ -311,7 +311,7 @@ def _register_handlers() -> None:
         result='hi',
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
-        use_gfx1250_helpers=c.arch_name == 'gfx1250',
+        use_cdna5_helpers=c.arch_name == 'cdna5',
     )
     DISPATCH['dot2'] = lambda c: gen_dot2(
         c.dst_ops, c.src_ops, c.cls, opsel_exprs=c.opsel_exprs

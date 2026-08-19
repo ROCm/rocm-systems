@@ -44,6 +44,7 @@ struct ClusterDispatchShape {
 struct DispatchEntry {
   uint32_t dispatch_id = 0;
   uint32_t queue_id = 0;
+  uint32_t queue_packet_id = 0;
   uint32_t process_id = 0;
 
   /// AQL ring packet id (queue read index at which this dispatch's packet was
@@ -59,6 +60,7 @@ struct DispatchEntry {
   uint32_t kernarg_size = 0;
   uint32_t num_user_sgprs = 2;
   uint32_t kernel_code_properties = 0;
+  uint32_t num_named_barriers = 0;
   uint16_t kernarg_preload = 0;
   uint32_t initial_mode_raw = 0;
   uint64_t dispatch_ptr = 0;
@@ -71,6 +73,7 @@ struct DispatchEntry {
   uint32_t grid_wgs_x = 0;
   uint32_t grid_wgs_y = 1;
   uint32_t grid_wgs_z = 1;
+  bool grid_yz_valid = false;
   uint32_t cluster_count_x = 0;
   uint32_t cluster_count_y = 0;
   uint32_t cluster_count_z = 0;
