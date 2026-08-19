@@ -193,6 +193,18 @@ module:
   Unit_hipModuleGetFunctionCount_NegativeTsts:
     <<: *level_2
     tags: [function]
+  Unit_hipModuleEnumerateFunctions_ZeroMax:
+    <<: *level_2
+    tags: [function]
+  Unit_hipModuleEnumerateFunctions_PartialFill:
+    <<: *level_2
+    tags: [function]
+  Unit_hipModuleEnumerateFunctions_HandlesUsable:
+    <<: *level_2
+    tags: [function]
+  Unit_hipModuleEnumerateFunctions_Negative:
+    <<: *level_2
+    tags: [function]
   Unit_hipModuleGetGlobal_Functional:
     <<: *level_2
     tags: [function]

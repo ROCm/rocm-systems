@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 608 | 608 | 0 |
-| **total** | **608** | **608** | **0** |
+| `contract` | 612 | 612 | 0 |
+| **total** | **612** | **612** | **0** |
 
 ## Tier: `contract`
 
@@ -896,10 +896,14 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Module_HipModuleLoadData_FromRtc_Succeeds` | hipModuleLoadData | a HIPRTC-produced code object loads into a non-null module handle and unloads without error |
 | `Contract_Module_HipModuleLoadData_NullImage_IsRejected` | hipModuleLoadData | loading from a null image is rejected with a non-success status |
 
-### `module_exec` (8 cases)
+### `module_exec` (12 cases)
 
 | Case | API | Asserts |
 |---|---|---|
+| `Contract_ModuleExec_HipModuleEnumerateFunctions_Default_IncludesKnownSymbol` | hipModuleEnumerateFunctions | every enumerated function handle is non-null and includes the known module symbol |
+| `Contract_ModuleExec_HipModuleEnumerateFunctions_NullFunctions_IsRejected` | hipModuleEnumerateFunctions | a null functions out-pointer is rejected with a non-success status |
+| `Contract_ModuleExec_HipModuleEnumerateFunctions_NullModule_IsRejected` | hipModuleEnumerateFunctions | a null module handle is rejected with a non-success status |
+| `Contract_ModuleExec_HipModuleEnumerateFunctions_ZeroMax_LeavesBufferUntouched` | hipModuleEnumerateFunctions | enumerating with a max of zero writes nothing into the caller buffer |
 | `Contract_ModuleExec_HipModuleGetFunctionCount_Default_ReturnsPositiveCount` | hipModuleGetFunctionCount | a module defining at least one kernel reports a function count of at least one |
 | `Contract_ModuleExec_HipModuleGetFunctionCount_NullCount_IsRejected` | hipModuleGetFunctionCount | a null count out-pointer is rejected with a non-success status |
 | `Contract_ModuleExec_HipModuleLaunchCooperativeKernel_Default_WritesExpectedValue` | hipModuleLaunchCooperativeKernel | a cooperative launch of a module function executes and deterministically publishes the expected value |
