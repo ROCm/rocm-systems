@@ -4,6 +4,7 @@
 /// @file model_only_isa_test.cpp
 /// @brief Link and decode smoke test for the narrow model-only ISA boundary.
 
+#include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -30,12 +31,12 @@ TEST(ModelOnlyIsaTest, DecodesWithoutExecutionCallback) {
   ASSERT_NE(decoder, nullptr);
   EXPECT_EQ(Decoder::create(registry, ROCJITSU_CODE_ARCH_RDNA4), nullptr);
 
-  std::unique_ptr<Instruction> inst(decoder->decode(&kSNop));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, &kSNop));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "s_nop");
   EXPECT_EQ(inst->execute, nullptr);
 
-  inst.reset(decoder->decode(&kVMovB32V0V1));
+  inst.reset(decode_valid(*decoder, &kVMovB32V0V1));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "v_mov_b32_e32");
   ASSERT_EQ(inst->num_src_operands(), 1);

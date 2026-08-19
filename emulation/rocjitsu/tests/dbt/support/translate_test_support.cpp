@@ -5,6 +5,7 @@
 /// @brief Shared fixture implementations for CPU-only DBT translation tests.
 
 #include "translate_test_support.h"
+#include "decode_test_util.h"
 
 #include "elf_test_support.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -22,6 +23,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -46,6 +49,29 @@ static void write_bytes_for_test(std::vector<uint8_t> &image, uint64_t offset, c
   assert(offset <= image.size());
   assert(size <= image.size() - offset);
   std::memcpy(image.data() + offset, src, size);
+}
+
+uint16_t append_elf_section_for_test(std::vector<uint8_t> &image, Elf64_Shdr section,
+                                     std::span<const uint8_t> contents) {
+  auto header = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  auto sections = read_elf_array_for_test<Elf64_Shdr>(image, header.e_shoff, header.e_shnum);
+  assert(header.e_shnum < std::numeric_limits<uint16_t>::max());
+  assert(header.e_shoff <= image.size());
+
+  const uint64_t contents_offset = header.e_shoff;
+  image.insert(image.begin() + static_cast<std::ptrdiff_t>(contents_offset), contents.begin(),
+               contents.end());
+  section.sh_offset = contents_offset;
+  section.sh_size = contents.size();
+  sections.push_back(section);
+
+  header.e_shoff += contents.size();
+  header.e_shnum = static_cast<uint16_t>(sections.size());
+  image.resize(header.e_shoff + sections.size() * sizeof(Elf64_Shdr));
+  write_elf_struct_for_test(image, 0, header);
+  write_bytes_for_test(image, header.e_shoff, sections.data(),
+                       sections.size() * sizeof(Elf64_Shdr));
+  return static_cast<uint16_t>(sections.size() - 1);
 }
 constexpr size_t kKernelDescriptorEntryOffset =
     offsetof(TestKernelDescriptor, kernel_code_entry_byte_offset);
@@ -296,7 +322,7 @@ std::unique_ptr<Instruction> decode_one(uint32_t word, rj_code_arch_t arch) {
   auto decoder = Decoder::create(arch);
   if (!decoder)
     return nullptr;
-  return std::unique_ptr<Instruction>(decoder->decode(&word));
+  return std::unique_ptr<Instruction>(decode_valid(*decoder, &word));
 }
 
 bool has_error_containing(const TranslatedCodeObject &result, DiagnosticKind kind,
@@ -308,7 +334,6 @@ bool has_error_containing(const TranslatedCodeObject &result, DiagnosticKind kin
                               diagnostic.message.find(message) != std::string::npos;
                      });
 }
-
 bool has_warning_at(const TranslatedCodeObject &result, DiagnosticKind kind,
                     std::string_view message, uint64_t guest_offset) {
   return std::any_of(result.diagnostics.begin(), result.diagnostics.end(),
@@ -519,13 +544,15 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_two_kernels_and_function_point
   return image;
 }
 
-std::vector<uint8_t>
-make_minimal_amdgpu_elf_with_two_kernel_descriptors(const std::vector<uint32_t> &text_words) {
+std::vector<uint8_t> make_minimal_amdgpu_elf_with_two_kernel_descriptors(
+    const std::vector<uint32_t> &text_words,
+    std::optional<TestRuntimeTextReference> runtime_text_reference) {
   constexpr uint64_t text_offset = 0x100;
   constexpr uint64_t text_vaddr = 0x1100;
   const uint64_t text_size = text_words.size() * sizeof(uint32_t);
   constexpr uint64_t load_align = 0x1000;
-  constexpr uint64_t rodata_size = 2 * kKernelDescriptorSize;
+  const uint64_t rodata_size =
+      2 * kKernelDescriptorSize + (runtime_text_reference ? sizeof(uint64_t) : 0);
 
   std::vector<uint8_t> shstrtab{'\0'};
   const uint32_t text_name = add_elf_name(shstrtab, ".text");
@@ -533,10 +560,15 @@ make_minimal_amdgpu_elf_with_two_kernel_descriptors(const std::vector<uint32_t> 
   const uint32_t symtab_name = add_elf_name(shstrtab, ".symtab");
   const uint32_t strtab_name = add_elf_name(shstrtab, ".strtab");
   const uint32_t shstrtab_name = add_elf_name(shstrtab, ".shstrtab");
+  const uint32_t rela_name = runtime_text_reference ? add_elf_name(shstrtab, ".rela.dyn") : 0;
 
   std::vector<uint8_t> strtab{'\0'};
   const uint32_t kernel0_name = add_elf_name(strtab, "kernel0.kd");
   const uint32_t kernel1_name = add_elf_name(strtab, "kernel1.kd");
+  const uint32_t target_name = runtime_text_reference && runtime_text_reference->relocation ==
+                                                             TestRuntimeTextRelocation::Abs64
+                                   ? add_elf_name(strtab, "runtime_text_target")
+                                   : 0;
 
   // The kernel descriptors require 8-byte alignment (tests reinterpret_cast the
   // .rodata bytes to TestKernelDescriptor). An odd text_words count leaves
@@ -547,10 +579,14 @@ make_minimal_amdgpu_elf_with_two_kernel_descriptors(const std::vector<uint32_t> 
   const uint64_t rodata_vaddr = align_up_for_test(text_vaddr + text_size, 8) + load_align;
   const uint64_t strtab_offset = rodata_offset + rodata_size;
   const uint64_t symtab_offset = align_up_for_test(strtab_offset + strtab.size(), 8);
-  constexpr size_t sym_count = 3;
-  const uint64_t shstrtab_offset = symtab_offset + sym_count * sizeof(Elf64_Sym);
+  const size_t sym_count = runtime_text_reference && runtime_text_reference->relocation ==
+                                                         TestRuntimeTextRelocation::Abs64
+                               ? 4
+                               : 3;
+  const uint64_t rela_offset = symtab_offset + sym_count * sizeof(Elf64_Sym);
+  const uint64_t shstrtab_offset = rela_offset + (runtime_text_reference ? sizeof(Elf64_Rela) : 0);
   const uint64_t shoff = align_up_for_test(shstrtab_offset + shstrtab.size(), 8);
-  constexpr uint16_t section_count = 6;
+  const uint16_t section_count = runtime_text_reference ? 7 : 6;
   constexpr uint16_t phdr_count = 2;
 
   std::vector<uint8_t> image(shoff + section_count * sizeof(Elf64_Shdr), 0);
@@ -605,7 +641,7 @@ make_minimal_amdgpu_elf_with_two_kernel_descriptors(const std::vector<uint32_t> 
   std::memcpy(image.data() + rodata_offset, descriptors.data(), descriptors.size());
   std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
 
-  std::array<Elf64_Sym, sym_count> syms{};
+  std::vector<Elf64_Sym> syms(sym_count);
   syms[1].st_name = kernel0_name;
   syms[1].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);
   syms[1].st_shndx = 2;
@@ -616,11 +652,33 @@ make_minimal_amdgpu_elf_with_two_kernel_descriptors(const std::vector<uint32_t> 
   syms[2].st_shndx = 2;
   syms[2].st_value = rodata_vaddr + kKernelDescriptorSize;
   syms[2].st_size = kKernelDescriptorSize;
+  if (runtime_text_reference &&
+      runtime_text_reference->relocation == TestRuntimeTextRelocation::Abs64) {
+    syms[3].st_name = target_name;
+    syms[3].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeFunc);
+    syms[3].st_shndx = 1;
+    syms[3].st_value = text_vaddr + runtime_text_reference->target_text_offset;
+    syms[3].st_size = sizeof(uint32_t);
+  }
   std::memcpy(image.data() + symtab_offset, syms.data(), syms.size() * sizeof(Elf64_Sym));
+
+  if (runtime_text_reference) {
+    Elf64_Rela relocation{};
+    relocation.r_offset = rodata_vaddr + 2 * kKernelDescriptorSize;
+    if (runtime_text_reference->relocation == TestRuntimeTextRelocation::Abs64) {
+      relocation.r_info = (static_cast<uint64_t>(3) << 32) |
+                          static_cast<uint64_t>(runtime_text_reference->relocation_type);
+    } else {
+      relocation.r_info = R_AMDGPU_RELATIVE64;
+      relocation.r_addend =
+          static_cast<int64_t>(text_vaddr + runtime_text_reference->target_text_offset);
+    }
+    std::memcpy(image.data() + rela_offset, &relocation, sizeof(relocation));
+  }
 
   std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
 
-  std::array<Elf64_Shdr, section_count> shdrs{};
+  std::vector<Elf64_Shdr> shdrs(section_count);
   shdrs[1].sh_name = text_name;
   shdrs[1].sh_type = SHT_PROGBITS;
   shdrs[1].sh_flags = SHF_ALLOC | SHF_EXECINSTR;
@@ -657,6 +715,17 @@ make_minimal_amdgpu_elf_with_two_kernel_descriptors(const std::vector<uint32_t> 
   shdrs[5].sh_offset = shstrtab_offset;
   shdrs[5].sh_size = shstrtab.size();
   shdrs[5].sh_addralign = 1;
+
+  if (runtime_text_reference) {
+    shdrs[6].sh_name = rela_name;
+    shdrs[6].sh_type = SHT_RELA;
+    shdrs[6].sh_offset = rela_offset;
+    shdrs[6].sh_size = sizeof(Elf64_Rela);
+    shdrs[6].sh_link = 3;
+    shdrs[6].sh_info = SHN_UNDEF;
+    shdrs[6].sh_addralign = alignof(Elf64_Rela);
+    shdrs[6].sh_entsize = sizeof(Elf64_Rela);
+  }
 
   std::memcpy(image.data() + shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
   return image;

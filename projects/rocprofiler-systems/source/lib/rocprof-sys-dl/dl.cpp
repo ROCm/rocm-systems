@@ -108,7 +108,7 @@ get_rocprofsys_is_preloaded()
 inline bool
 get_rocprofsys_preload()
 {
-    static bool _v = []() {
+    static const bool _v = []() {
         auto&& _preload      = get_env(env_vars::PRELOAD, true);
         auto&& _preload_libs = get_env("LD_PRELOAD", std::string{});
         return (_preload &&
@@ -280,8 +280,8 @@ struct ROCPROFSYS_INTERNAL_API indirect
     {
         if(!m_omnihandle) m_omnihandle = open(m_omnilib);
 
-        int _warn_verbose = 0;
-        int _info_verbose = 2;
+        int       _warn_verbose = 0;
+        const int _info_verbose = 2;
         // Initialize all pointers
         ROCPROFSYS_DLSYM(rocprofsys_init_library_f, m_omnihandle,
                          "rocprofsys_init_library");
@@ -1249,7 +1249,7 @@ rocprofsys_preinit()
 void
 rocprofsys_postinit(std::string _exe)
 {
-    InstrumentMode instrumentMode = get_instrumented();
+    const InstrumentMode instrumentMode = get_instrumented();
 
     switch(instrumentMode)
     {
@@ -1572,7 +1572,7 @@ extern "C"
                         dl::get_instrumented() == dl::InstrumentMode::BinaryRewrite,
                         argv[0]);
 
-        int ret = (*::rocprofsys::dl::main_real)(argc, argv, envp);
+        const int ret = (*::rocprofsys::dl::main_real)(argc, argv, envp);
 
         rocprofsys_pop_trace(rocprofsys::path::filename(argv[0]).c_str());
         rocprofsys_finalize();

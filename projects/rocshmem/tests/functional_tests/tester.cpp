@@ -78,6 +78,7 @@
 #include "tile_rma_tester.hpp"
 #include "tile_broadcast_tester.hpp"
 #include "tile_allgather_tester.hpp"
+#include "tile_reduce_tester.hpp"
 #include "reduce_on_stream_tester.hpp"
 #include "host_ctx_create_tester.hpp"
 #include "team_split_2d_tester.hpp"
@@ -966,6 +967,18 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Tile Allgather Workgroup-Collective";
       testers.push_back(new TileAllgatherTester(args));
       break;
+    case TileReduceTestType:
+      test_name = "Tile Reduce";
+      testers.push_back(new TileReduceTester(args));
+      break;
+    case TileReduceWaveTestType:
+      test_name = "Tile Reduce Wave-Collective";
+      testers.push_back(new TileReduceTester(args));
+      break;
+    case TileReduceWGTestType:
+      test_name = "Tile Reduce Workgroup-Collective";
+      testers.push_back(new TileReduceTester(args));
+      break;
 #if defined(USE_GDA)
     case QpPingPongTestType:
       test_name = (args.num_wgs > 1) ? "QP-Direct PingPong (W>1: bidir BW)"
@@ -1155,6 +1168,9 @@ bool Tester::peLaunchesKernel() {
     case TileAllgatherWGTestType:
     case BroadcastWaveTestType:
     case AllToAllWaveTestType:
+    case TileReduceTestType:
+    case TileReduceWaveTestType:
+    case TileReduceWGTestType:
     case QpPingPongTestType:
     case SdmaPingPongTestType:
       is_launcher = true;
