@@ -4522,15 +4522,15 @@ void recover_lane_saved_call_targets(AnalysisContext &ctx, const std::vector<Ana
 
   const AnalysisDominators dominators =
       compute_analysis_dominators(ctx, blocks, block_by_offset, known_recovered);
+  // Revisit consumers already present in known_recovered. Each fixed-point
+  // round may add call edges and therefore change dominance or preservation;
+  // a still-valid proof must be re-emitted in this round, while a proof made
+  // stale by the larger CFG must disappear and be downgraded by the caller.
   for (size_t consumer_index = 0; consumer_index < ctx.insts.size(); ++consumer_index) {
     const InstructionFacts &consumer_facts = ctx.facts[consumer_index];
     if (!consumer_facts.swappc_ssrc || !consumer_facts.swappc_sdst)
       continue;
     const uint64_t consumer_offset = ctx.insts[consumer_index]->src_loc();
-    if (std::ranges::any_of(known_recovered, [&](const IndirectCallFixup &fixup) {
-          return fixup.source_call_offset == consumer_offset;
-        }))
-      continue;
 
     std::array<size_t, 2> restore_indices{};
     std::array<VgprLane, 2> saved_lanes{};

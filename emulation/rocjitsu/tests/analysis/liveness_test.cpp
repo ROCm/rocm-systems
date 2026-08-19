@@ -1310,7 +1310,10 @@ TEST(CfgAnalysis, RecoversLaneSavedTargetAcrossPreservingCalls) {
   ASSERT_NE(consumer, nullptr);
   ASSERT_NE(callee, nullptr);
   ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
-  EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, 0u);
+  const IndirectCallFixup &fixup = consumer->static_indirect_call_fixups()[0];
+  EXPECT_EQ(fixup.source_target_offset, 0u);
+  EXPECT_FALSE(fixup.source_incomplete);
+  EXPECT_TRUE(fixup.source_targets_exhaustive);
   ASSERT_EQ(consumer->call_edges().size(), 1u);
   EXPECT_EQ(consumer->call_edges()[0].callee, callee);
 }
@@ -1330,7 +1333,10 @@ TEST(CfgAnalysis, RecoversGfx1250LaneSavedTargetOperandLayout) {
   ASSERT_NE(consumer, nullptr);
   ASSERT_NE(callee, nullptr);
   ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
-  EXPECT_EQ(consumer->static_indirect_call_fixups()[0].source_target_offset, 0u);
+  const IndirectCallFixup &fixup = consumer->static_indirect_call_fixups()[0];
+  EXPECT_EQ(fixup.source_target_offset, 0u);
+  EXPECT_FALSE(fixup.source_incomplete);
+  EXPECT_TRUE(fixup.source_targets_exhaustive);
   ASSERT_EQ(consumer->call_edges().size(), 1u);
   EXPECT_EQ(consumer->call_edges()[0].callee, callee);
 }
@@ -3888,7 +3894,8 @@ TEST(CfgAnalysis, Gfx1250DirectCallKillsCarriedLaneStash) {
   constexpr auto clobber = cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = 48});
   std::vector<uint32_t> words = {
       0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
-      0xA980FE00u, 56u,
+      0xA980FE00u,
+      56u,
       0u, // 0x04: s_add_nc_u64 ..., lit64(56) -> stale target 0x3c.
       0xD7610030u,
       0x02010000u, // 0x10: v_writelane_b32 v48, s0, 0.
@@ -3926,7 +3933,8 @@ TEST(CfgAnalysis, Gfx1250ExactCalleeSummaryPreservesUnwrittenCallerSavedLaneStas
     SCOPED_TRACE(stash_vgpr);
     std::vector<uint32_t> words = {
         0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
-        0xA980FE00u, 56u,
+        0xA980FE00u,
+        56u,
         0u, // 0x04: s_add_nc_u64 ..., lit64(56) -> target 0x3c.
         0xD7610000u | stash_vgpr,
         0x02010000u, // 0x10: v_writelane_b32 stash_vgpr, s0, 0.
@@ -3969,7 +3977,8 @@ TEST(CfgAnalysis, Gfx1250RelativeVgprDestinationDisablesExactCalleeSummary) {
       cdna5::build_vop1(cdna5::kVMovreldB32Vop1, {.src0 = 0, .vdst = 2});
   std::vector<uint32_t> words = {
       0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
-      0xA980FE00u, 56u,
+      0xA980FE00u,
+      56u,
       0u, // 0x04: s_add_nc_u64 ..., lit64(56) -> target 0x3c.
       0xD7610030u,
       0x02010000u, // 0x10: v_writelane_b32 v48, s0, 0.
@@ -4015,7 +4024,8 @@ TEST(CfgAnalysis, Gfx1250GprIndexedVgprDestinationDisablesExactCalleeSummary) {
         std::vector<uint32_t>{enable_dynamically[0], ordinary_write[0]}}) {
     std::vector<uint32_t> words = {
         0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
-        0xA980FE00u, 56u,
+        0xA980FE00u,
+        56u,
         0u, // 0x04: s_add_nc_u64 ..., lit64(56) -> target 0x3c.
         0xD7610030u,
         0x02010000u, // 0x10: v_writelane_b32 v48, s0, 0.
@@ -4054,7 +4064,8 @@ TEST(CfgAnalysis, Gfx1250RelativeSgprDestinationDisablesExactCalleeSummary) {
       cdna5::build_sop1(cdna5::kSMovreldB32Sop1, {.ssrc0 = 2, .sdst = 8});
   std::vector<uint32_t> words = {
       0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
-      0xA980FE00u, 64u,
+      0xA980FE00u,
+      64u,
       0u, // 0x04: s_add_nc_u64 ..., lit64(64) -> target 0x44.
       0xD761002Cu,
       0x02010000u, // 0x10: v_writelane_b32 v44, s0, 0.
@@ -4097,7 +4108,8 @@ TEST(CfgAnalysis, Gfx1250CalleeSavedLaneStashSurvivesDirectCall) {
   constexpr auto clobber = cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = 48});
   std::vector<uint32_t> words = {
       0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
-      0xA980FE00u, 56u,
+      0xA980FE00u,
+      56u,
       0u, // 0x04: s_add_nc_u64 ..., lit64(56) -> stashed target 0x3c.
       0xD761002Cu,
       0x02010000u, // 0x10: v_writelane_b32 v44, s0, 0.
@@ -4150,7 +4162,8 @@ TEST(CfgAnalysis, Gfx1250ExactCalleeSummaryPreservesBankedLaneStash) {
       cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = 44});
   std::vector<uint32_t> words = {
       0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
-      0xA980FE00u, 60u,
+      0xA980FE00u,
+      60u,
       0u,                       // 0x04: s_add_nc_u64 ..., lit64(60) -> stale target 0x40.
       set_dst_src0_bank_one[0], // 0x10: v44 DST/SRC0 operands resolve to physical v300.
       0xD761002Cu,
@@ -4196,7 +4209,8 @@ TEST(CfgAnalysis, Gfx1250CalleeModeChangeInvalidatesContinuationBankSelection) {
   constexpr auto set_all_banks_zero = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 0});
   std::vector<uint32_t> words = {
       0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
-      0xA980FE00u, 56u,
+      0xA980FE00u,
+      56u,
       0u,                       // 0x04: target 0x3c.
       set_dst_src0_bank_one[0], // 0x10: v44 resolves to physical v300.
       0xD761002Cu,
@@ -4559,7 +4573,8 @@ TEST(CfgAnalysis, Gfx1250PcPairCopyReachesConsumer) {
       cdna5::kSMovB64Sop1, {.ssrc0 = static_cast<uint8_t>(kSourceSreg), .sdst = kCopiedSreg});
   std::vector<uint32_t> words = {
       getpc[0], // 0x00: s_get_pc_i64 s[20:21].
-      add[0], 24u,
+      add[0],
+      24u,
       0u,      // 0x04: s_add_nc_u64 ..., lit64(24) -> target 0x1c.
       copy[0], // 0x10: s_mov_b64 s[54:55], s[20:21].
       rocjitsu::build_s_swappc_b64(kReturnSreg, kCopiedSreg, ROCJITSU_CODE_ARCH_GFX1250),
@@ -4850,7 +4865,8 @@ TEST(CfgAnalysis, Gfx1250DirectCallOverwritesPcBuilderInReturnPair) {
                                          {.ssrc0 = kReturnSreg, .ssrc1 = 254, .sdst = kReturnSreg});
   std::vector<uint32_t> words = {
       getpc[0], // 0x00: s_get_pc_i64 s[30:31].
-      add[0], 32u,
+      add[0],
+      32u,
       0u, // 0x04: s_add_nc_u64 ..., lit64(32) -> stale target 0x24.
       rocjitsu::build_s_call_b64(kReturnSreg, 2, ROCJITSU_CODE_ARCH_GFX1250),
       // 0x10: direct call overwrites s[30:31] and enters 0x1c.
@@ -4882,7 +4898,8 @@ TEST(CfgAnalysis, Gfx1250SwapPcOverwritesPcBuilderInReturnPair) {
                                          {.ssrc0 = kTargetSreg, .ssrc1 = 254, .sdst = kTargetSreg});
   std::vector<uint32_t> words = {
       getpc[0], // 0x00: s_get_pc_i64 s[0:1].
-      add[0], 24u,
+      add[0],
+      24u,
       0u, // 0x04: s_add_nc_u64 ..., lit64(24) -> callee at 0x1c.
       rocjitsu::build_s_swappc_b64(kTargetSreg, kTargetSreg, ROCJITSU_CODE_ARCH_GFX1250),
       // 0x10: call through s[0:1], then overwrite it with return PC 0x14.
@@ -4928,7 +4945,8 @@ TEST(CfgAnalysis, Gfx1250CalleeSummaryRejectsRepurposedReturnPair) {
   std::vector<uint32_t> words = {
       set_mode_zero[0],      // 0x00: use bank zero.
       get_stashed_target[0], // 0x04: s_get_pc_i64 s[0:1].
-      add_stashed_target[0], 56u,
+      add_stashed_target[0],
+      56u,
       0u, // 0x08: s_add_nc_u64 ..., lit64(56) -> target 0x40.
       0xD76100C0u,
       0x02010000u, // 0x14: v_writelane_b32 v192, s0, 0.
@@ -4946,7 +4964,8 @@ TEST(CfgAnalysis, Gfx1250CalleeSummaryRejectsRepurposedReturnPair) {
       build_s_endpgm(ROCJITSU_CODE_ARCH_GFX1250), // 0x40: stashed target.
       save_return[0],                             // 0x44: save caller return in s[32:33].
       get_tail_target[0],                         // 0x48: rebuild s[30:31].
-      add_tail_target[0], 16u,
+      add_tail_target[0],
+      16u,
       0u, // 0x4c: s_add_nc_u64 ..., lit64(16) -> tail target 0x5c.
       rocjitsu::build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_GFX1250),
       // 0x58: tail transfer through the repurposed pair.
@@ -4973,7 +4992,8 @@ TEST(CfgAnalysis, Gfx1250ExactCalleeSummaryPreservesUnwrittenRestoredSgprs) {
     SCOPED_TRACE(restored_pair);
     std::vector<uint32_t> words = {
         0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
-        0xA980FE00u, 60u,
+        0xA980FE00u,
+        60u,
         0u, // 0x04: s_add_nc_u64 ..., lit64(60) -> target 0x40.
         0xD761002Cu,
         0x02010000u, // 0x10: v_writelane_b32 v44, s0, 0.
@@ -5090,7 +5110,8 @@ TEST(CfgAnalysis, Gfx1250ExactCalleeSummaryDropsWrittenRestoredSgprs) {
     SCOPED_TRACE(restored_pair);
     std::vector<uint32_t> words = {
         0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
-        0xA980FE00u, 64u,
+        0xA980FE00u,
+        64u,
         0u, // 0x04: s_add_nc_u64 ..., lit64(64) -> target 0x44.
         0xD761002Cu,
         0x02010000u, // 0x10: v_writelane_b32 v44, s0, 0.
@@ -5139,7 +5160,8 @@ TEST(CfgAnalysis, Gfx1250UnsupportedCalleeSummaryFallsBackToCallPreservedSgprs) 
     SCOPED_TRACE(restored_pair);
     std::vector<uint32_t> words = {
         0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
-        0xA980FE00u, 64u,
+        0xA980FE00u,
+        64u,
         0u, // 0x04: s_add_nc_u64 ..., lit64(64) -> target 0x44.
         0xD761002Cu,
         0x02010000u, // 0x10: v_writelane_b32 v44, s0, 0.
@@ -5240,7 +5262,8 @@ TEST(CfgAnalysis, Gfx1250CalleeSavedPcBuilderCanBeStashedAfterCall) {
                                          {.ssrc0 = kTargetSreg, .ssrc1 = 254, .sdst = kTargetSreg});
   std::vector<uint32_t> words = {
       getpc[0], // 0x00: s_get_pc_i64 s[14:15].
-      add[0], 56u,
+      add[0],
+      56u,
       0u, // 0x04: s_add_nc_u64 ..., lit64(56) -> callee at 0x3c.
       rocjitsu::build_s_swappc_b64(kReturnSreg, kTargetSreg, ROCJITSU_CODE_ARCH_GFX1250),
       // 0x10: first call through s[14:15].
