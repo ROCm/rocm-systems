@@ -129,14 +129,17 @@ namespace RcclUnitTesting
       if (this->poolChildren.empty())
       {
         // Size the pool to the devices that actually exist. numDevicesAvailable comes from
-        // UT_MAX_GPUS, which is an unclamped override: if it exceeds the real device count we
-        // would fork workers for nonexistent devices that no valid config can ever map to.
+        // UT_MAX_GPUS, which is an unclamped override; clamp it to the detected device count.
+        //
+        // CRITICAL: the parent test process must NEVER make a HIP call before forking children.
+        // HIP/HSA runtime state does not survive fork(), so a HIP-initialized parent yields pool
+        // workers that SEGV in libhsa-runtime on their first GPU use. The codebase enforces this
+        // (EnvVars runs every hipGetDeviceCount inside a forked probe). Use the already-computed,
+        // HIP-clean ev.numDetectedGpus here -- do NOT call hipGetDeviceCount in the parent.
         int poolSize = this->numDevicesAvailable;
-        int hipDeviceCount = 0;
-        if (hipGetDeviceCount(&hipDeviceCount) == hipSuccess && hipDeviceCount > 0 &&
-            hipDeviceCount < poolSize)
+        if (ev.numDetectedGpus > 0 && ev.numDetectedGpus < poolSize)
         {
-          poolSize = hipDeviceCount;
+          poolSize = ev.numDetectedGpus;
         }
         this->poolChildren.assign(poolSize, nullptr);
         for (int d = 0; d < poolSize; ++d)
