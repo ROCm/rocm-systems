@@ -29,7 +29,6 @@ pc_sampling_interval: 65536
 pc_sampling_method: stochastic
 quiet: false
 remaining: tests/vcopy -n 16777216 -b 256 -i 3
-retain_rocpd_output: false
 rocprofiler_sdk_tool_path: /rocm-venv/lib/python3.12/site-packages/_rocm_sdk_devel/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so
 roof_only: false
 set_selected: null

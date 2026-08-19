@@ -20,11 +20,18 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * gfx908–gfx942: added HBM and remote traffic percentages.
   * gfx950: added LDS Read/Write/Atomic instruction counts and per-channel bandwidth for HBM, xGMI, and PCIe.
 
+* Profile mode retains per-process rocpd databases and native counter CSVs under ``out/{pass}/`` instead of converting them to ``results_*.csv.gz``.
+* Analyze mode merges profile artifacts from ``out/`` into ``pmc_perf.csv.gz``. Workloads that still carry ``results_*.csv.gz`` remain readable until golden workloads are regenerated.
+
 ### Removed
+
+* Removed the ``--retain-rocpd-output`` profile option. Per-process ``.db`` files are retained automatically under ``out/``.
+* Removed intermediate ``results_*.csv.gz`` generation during profiling and profile-side native counter injection into rocpd databases.
 
 ### Optimized
 
 * Analyze mode now gzip-compresses the merged counter intermediate, which is written as `pmc_perf.csv.gz` instead of `pmc_perf.csv`.
+* Profile mode no longer converts rocpd databases to CSV or merges counter lanes during collection.
 
 ### Resolved issues
 

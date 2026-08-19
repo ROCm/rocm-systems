@@ -1,7 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-import gzip
 import json
 import sqlite3
 from pathlib import Path
@@ -12,7 +11,8 @@ import pandas as pd
 from utils.rocpd_data import (
     COUNTERS_COLLECTION_QUERY,
     MARKER_API_TRACE_QUERY,
-    convert_dbs_to_csv,
+    convert_dbs_to_marker_csv,
+    iter_counter_rows,
 )
 from utils.utils_analysis import (
     build_call_trees_with_kernel_ids,
@@ -132,7 +132,7 @@ def test_marker_query_uses_stack_id():
     assert "\n    correlation_id" not in query_lower
 
 
-# ---- Test 2: convert_dbs_to_csv populates Correlation_Id from stack_id ----
+# ---- rocpd query output: Correlation_Id from stack_id ----
 
 
 def create_rocpd_test_db(workload_dir):
@@ -180,17 +180,14 @@ def test_counter_csv_has_correlation_id_from_stack_id():
     workload_dir = common.get_output_dir()
     Path(workload_dir).mkdir(parents=True, exist_ok=True)
 
-    counter_csv = str(Path(workload_dir) / "counter_collection.csv.gz")
-    marker_csv = str(Path(workload_dir) / "marker_api_trace.csv.gz")
-
     db_path = create_rocpd_test_db(workload_dir)
-    convert_dbs_to_csv([db_path], counter_csv, marker_csv)
+    rows = list(iter_counter_rows(db_path))
 
-    df = pd.read_csv(counter_csv)
-    assert "Correlation_Id" in df.columns
+    assert rows
+    assert "Correlation_Id" in rows[0]
 
     expected_ids = [row[2] for row in COUNTER_ROWS]
-    assert list(df["Correlation_Id"]) == expected_ids
+    assert [row["Correlation_Id"] for row in rows] == expected_ids
 
     common.clean_output_dir(True, workload_dir)
 
@@ -200,11 +197,10 @@ def test_marker_csv_has_correlation_id_from_stack_id():
     workload_dir = common.get_output_dir()
     Path(workload_dir).mkdir(parents=True, exist_ok=True)
 
-    counter_csv = str(Path(workload_dir) / "counter_collection.csv.gz")
     marker_csv = str(Path(workload_dir) / "marker_api_trace.csv.gz")
 
     db_path = create_rocpd_test_db(workload_dir)
-    convert_dbs_to_csv([db_path], counter_csv, marker_csv)
+    convert_dbs_to_marker_csv([db_path], marker_csv)
 
     df = pd.read_csv(marker_csv)
     assert "Correlation_Id" in df.columns
@@ -365,24 +361,23 @@ def build_kernel_top_df():
 
 
 def test_ml_api_trace_counter_copy_stays_compressed(tmp_path):
-    """Counter copy stays compressed when results_*.csv is .csv.gz."""
-    src_counter = tmp_path / "results_run0.csv.gz"
-    with gzip.open(src_counter, "wt", newline="") as f:
-        build_counter_df(include_guid=True).to_csv(f, index=False)
-    src_dir = tmp_path / "out" / "pmc_1"
-    src_dir.mkdir(parents=True)
-    build_marker_df(include_guid=True).to_csv(
-        src_dir / "run0_marker_api_trace.csv.gz", index=False
-    )
+    """ML API trace counter CSV is written compressed from pass artifacts."""
+    pass_path = tmp_path / "out" / "run0"
+    pid_dir = pass_path / "100"
+    pid_dir.mkdir(parents=True)
+    db_path = create_rocpd_test_db(str(pid_dir))
+    Path(db_path).rename(pid_dir / "100.db")
 
-    save_ml_api_trace_inputs(str(tmp_path), "run0", src_counter)
+    save_ml_api_trace_inputs(str(tmp_path), "run0", pass_path)
 
     dst = tmp_path / "ml_api_trace_run0_counter_collection.csv.gz"
-    assert dst.is_file(), "counter copy should keep the compressed name"
-    assert dst.read_bytes() == src_counter.read_bytes(), "should be a byte copy"
+    assert dst.is_file()
+    df = pd.read_csv(dst)
+    assert not df.empty
+    assert "Correlation_Id" in df.columns
 
     consolidated_df, _ = process_ml_api_trace_output(str(tmp_path))
-    assert not consolidated_df.empty, "analyze must resolve the compressed copy"
+    assert not consolidated_df.empty
 
 
 def test_ml_api_trace_output_same_for_rocpd_and_csv():
