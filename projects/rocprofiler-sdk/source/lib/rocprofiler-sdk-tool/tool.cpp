@@ -83,6 +83,7 @@
 #include <rocprofiler-sdk/version.h>
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
+#include <rocprofiler-sdk/cxx/pc_sampling.hpp>
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -1676,13 +1677,40 @@ pc_sampling_callback(rocprofiler_context_id_t /* context_id*/,
                 auto* pc_sample = static_cast<rocprofiler_pc_sampling_record_stochastic_v0_t*>(
                     cur_header->payload);
 
-                auto pc_sample_tool_record =
-                    rocprofiler::tool::rocprofiler_tool_pc_sampling_stochastic_record_t(
-                        *pc_sample, get_instruction_index(pc_sample->pc));
+                auto instruction_index = get_instruction_index(pc_sample->pc);
 
-                rocprofiler::tool::write_ring_buffer(pc_sample_tool_record,
-                                                     domain_type::PC_SAMPLING_STOCHASTIC);
-                valid_samples_cnt++;
+                // For unknown code objects/agents, we simply provide samples as is.
+                // In other cases, we try to verify them first.
+                auto verification_status = ROCPROFILER_STATUS_SUCCESS;
+                if(pc_sample->pc.code_object_id != ROCPROFILER_CODE_OBJECT_ID_NONE)
+                {
+                    if(auto agent_id = CHECK_NOTNULL(tool_metadata)->get_code_object_agent(
+                           pc_sample->pc.code_object_id))
+                    {
+                        if(const auto* agent = tool_metadata->get_agent(*agent_id))
+                        {
+                            verification_status = rocprofiler::sdk::pc_sampling::verify_sample(
+                                *pc_sample,
+                                tool_metadata->get_instruction(instruction_index),
+                                agent->gfx_target_version);
+                        }
+                    }
+                }
+
+                if(verification_status == ROCPROFILER_STATUS_ERROR)
+                {
+                    invalid_samples_cnt++;
+                }
+                else
+                {
+                    auto pc_sample_tool_record =
+                        rocprofiler::tool::rocprofiler_tool_pc_sampling_stochastic_record_t(
+                            *pc_sample, instruction_index);
+
+                    rocprofiler::tool::write_ring_buffer(pc_sample_tool_record,
+                                                         domain_type::PC_SAMPLING_STOCHASTIC);
+                    valid_samples_cnt++;
+                }
             }
             else if(cur_header->kind == ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE)
             {

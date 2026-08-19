@@ -49,6 +49,7 @@
 
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -192,6 +193,7 @@ struct metadata
 
     const agent_info*                   get_agent(rocprofiler_agent_id_t _val) const;
     const code_object_info*             get_code_object(uint64_t code_obj_id) const;
+    std::optional<rocprofiler_agent_id_t> get_code_object_agent(uint64_t code_obj_id) const;
     const kernel_symbol_info*           get_kernel_symbol(uint64_t kernel_id) const;
     const host_function_info*           get_host_function(uint64_t host_function_id) const;
     const tool_counter_info*            get_counter_info(uint64_t instance_id) const;
