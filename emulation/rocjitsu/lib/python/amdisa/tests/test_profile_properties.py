@@ -594,7 +594,7 @@ class TestRdna4Profile:
         assert self.p.has_vopd3 is False
 
 
-class TestGfx1250Profile:
+class TestCdna5Profile:
     def setup_method(self):
         self.p = Cdna5Profile()
 

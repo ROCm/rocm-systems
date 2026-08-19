@@ -3,30 +3,30 @@
 
 #include "rocjitsu/isa/operand.h"
 #include "simdojo/components/vector_reg.h"
-#include "util/except.h"
 
 #include <memory>
 #include <stdexcept>
 
 namespace rocjitsu {
 
-void Operand::validate_encoding() const {
+Result Operand::emit_encoding_error(const util::DiagnosticEmitter &emit_error) const {
   switch (encoding_error_) {
-  case EncodingError::None:
-    return;
   case EncodingError::InvalidSelector:
-    throw util::InvalidInst("invalid operand selector", "");
+    return emit_error.emit() << "invalid operand selector";
   case EncodingError::InvalidScalarRegisterSelector:
-    throw util::InvalidInst("invalid scalar register selector", "");
+    return emit_error.emit() << "invalid scalar register selector";
   case EncodingError::InvalidLaneSelector:
-    throw util::InvalidInst("invalid lane selector", "");
+    return emit_error.emit() << "invalid lane selector";
   case EncodingError::InvalidExecSelector:
-    throw util::InvalidInst("invalid EXEC selector", "");
+    return emit_error.emit() << "invalid EXEC selector";
   case EncodingError::InvalidVgprSourceSelector:
-    throw util::InvalidInst("invalid VGPR source selector", "");
+    return emit_error.emit() << "invalid VGPR source selector";
   case EncodingError::InvalidScalarSourceSelector:
-    throw util::InvalidInst("invalid scalar source selector", "");
+    return emit_error.emit() << "invalid scalar source selector";
+  case EncodingError::None:
+    break;
   }
+  return emit_error.emit() << "unknown operand encoding failure";
 }
 
 std::optional<RegisterRef> Operand::to_register_ref() const { return std::nullopt; }

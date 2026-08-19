@@ -26,6 +26,7 @@
 ///   - s_store_dwordx2: store family, where sdata is also a source so SBASE is
 ///     not the first source operand.
 
+#include "decode_test_util.h"
 #include "rocjitsu/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
@@ -94,7 +95,7 @@ TEST_P(SmemSbaseOperandTest, SbaseResolvesToScaledSgpr) {
   auto decoder = Decoder::create(tc.arch);
   ASSERT_NE(decoder, nullptr) << "Decoder::create() failed for " << tc.label;
 
-  std::unique_ptr<Instruction> inst(decoder->decode(tc.word.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, tc.word.data()));
   ASSERT_NE(inst, nullptr) << "decode() returned nullptr for " << tc.label;
   ASSERT_EQ(inst->mnemonic(), tc.mnemonic) << "unexpected mnemonic for " << tc.label;
 

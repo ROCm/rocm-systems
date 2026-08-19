@@ -49,8 +49,11 @@ Before writing new infrastructure, check these existing libraries:
 - **Intrusive list** — `util/intrusive_list.h` for linked data structures
   that need O(1) insert/erase without heap allocation per node.
 - **Arena allocator** — `util/arena_alloc.h` for fixed-size block pools.
-- **Exceptions** — `util/except.h` for `InvalidInst`, `UnimplementedInst`,
-  `ConfigError`.
+- **Expected failures** — Return `Result` or `FailureOr<T>` and accept a
+  `DiagnosticEmitter` when the caller needs a reason. Its sink is non-owning
+  and must not outlive its callable.
+- **Exceptions** — `util/except.h` for unrecoverable initialization,
+  configuration, and execution failures.
 - **Register sets** — `isa/register_set.h` for ISA-independent register
   file modeling (SGPR/VGPR/AccVGPR bitsets).
 - **Spill manager** — `code/patch/spill_manager.h` for scratch layout
@@ -88,16 +91,13 @@ Before writing new infrastructure, check these existing libraries:
   `stderr` — it runs inside another runtime's `OnLoad`, its messages must
   survive a log-groups-OFF build, and its signal-backtrace path must stay
   async-signal-safe (`rj_hsa_dbt_hooks.cpp` uses raw `::write`).
-- **Exceptions.** Exceptions are used only for unrecoverable errors
-  during initialization and configuration (`ConfigError`) or when
-  encountering invalid/unimplemented instructions during code object
-  parsing (`InvalidInst`, `UnimplementedInst`). All exception types
-  live in `util/except.h`. Do not throw exceptions in simulation hot
-  paths (event handlers, instruction execution, cache lookups). Do not
-  add `try`/`catch` blocks unless you are at a boundary that must
-  translate an error (e.g., the C API layer). There is no general
-  exception safety guarantee — assume code is not exception-safe
-  unless explicitly documented.
+- **Errors.** Expected failures such as a rejected instruction encoding return
+  `Result` or `FailureOr<T>` and optionally emit a diagnostic. Exceptions are
+  reserved for unrecoverable initialization, configuration, or execution
+  failures. Do not throw exceptions in simulation hot paths (event handlers,
+  instruction execution, cache lookups). Do not add `try`/`catch` blocks unless
+  you are at a boundary that must translate an error (e.g., the C API layer).
+  There is no general exception safety guarantee unless explicitly documented.
 
 ## ISA codegen workflow
 

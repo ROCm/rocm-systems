@@ -311,7 +311,7 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
 }
 
 [[nodiscard]] bool uses_gfx10_plus_rsrc3(rj_code_arch_t arch) {
-  return arch_is_rdna(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5;
+  return !arch_descriptor_encodes_sgpr_allocation(arch);
 }
 
 [[nodiscard]] std::optional<uint32_t>
@@ -437,6 +437,7 @@ void append_descriptor_error(KdTranslation &result, std::string message) {
   result.diagnostics.push_back({.severity = DiagnosticSeverity::Error,
                                 .kind = DiagnosticKind::KernelDescriptor,
                                 .guest_offset = std::nullopt,
+                                .output_offset = std::nullopt,
                                 .mnemonic = {},
                                 .message = std::move(message),
                                 .required_work = {}});
@@ -884,12 +885,15 @@ void KdTranslation::configure_skipped_stub() {
   prologue_words.clear();
 }
 
-std::vector<KdTranslation> KernelDescriptorTranslator::translate_image(
-    std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size,
-    const KernelDescriptorTranslationOptions &options) const {
+std::vector<KdTranslation>
+KernelDescriptorTranslator::translate_image(std::span<const uint8_t> image, uint64_t text_offset,
+                                            uint64_t text_size,
+                                            const KernelDescriptorTranslationOptions &options,
+                                            std::optional<size_t> text_section_index) const {
   std::vector<KdTranslation> translations;
 
-  for (KernelDescriptorInfo &kd : scan_kernel_descriptors(image, text_offset, text_size)) {
+  for (KernelDescriptorInfo &kd :
+       scan_kernel_descriptors(image, text_offset, text_size, text_section_index)) {
     translations.push_back(translate_one_descriptor(
         guest_arch_, host_arch_, kd.descriptor_file_offset, std::move(kd.kernel_name),
         kd.entry_text_offset, kd.descriptor, options));

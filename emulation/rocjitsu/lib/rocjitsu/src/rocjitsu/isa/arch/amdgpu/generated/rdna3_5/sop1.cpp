@@ -6,7 +6,6 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/sop1.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
-#include "util/except.h"
 #include <memory>
 
 namespace rocjitsu {
@@ -29,7 +28,11 @@ SMovB32Sop1::SMovB32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSMovB32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSMovB32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_mov_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SMovB32Sop1>(opcode);
 }
 } // namespace detail
@@ -52,7 +55,11 @@ SMovB64Sop1::SMovB64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSMovB64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSMovB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_mov_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SMovB64Sop1>(opcode);
 }
 } // namespace detail
@@ -78,7 +85,11 @@ SCmovB32Sop1::SCmovB32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCmovB32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSCmovB32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_cmov_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCmovB32Sop1>(opcode);
 }
 } // namespace detail
@@ -105,7 +116,11 @@ SCmovB64Sop1::SCmovB64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCmovB64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSCmovB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_cmov_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCmovB64Sop1>(opcode);
 }
 } // namespace detail
@@ -126,7 +141,11 @@ SBrevB32Sop1::SBrevB32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSBrevB32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSBrevB32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_brev_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SBrevB32Sop1>(opcode);
 }
 } // namespace detail
@@ -148,7 +167,11 @@ SBrevB64Sop1::SBrevB64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSBrevB64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSBrevB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_brev_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SBrevB64Sop1>(opcode);
 }
 } // namespace detail
@@ -169,7 +192,11 @@ SCtzI32B32Sop1::SCtzI32B32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCtzI32B32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSCtzI32B32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_ctz_i32_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCtzI32B32Sop1>(opcode);
 }
 } // namespace detail
@@ -191,7 +218,11 @@ SCtzI32B64Sop1::SCtzI32B64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCtzI32B64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSCtzI32B64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_ctz_i32_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCtzI32B64Sop1>(opcode);
 }
 } // namespace detail
@@ -212,7 +243,11 @@ SClzI32U32Sop1::SClzI32U32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSClzI32U32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSClzI32U32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_clz_i32_u32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SClzI32U32Sop1>(opcode);
 }
 } // namespace detail
@@ -234,7 +269,11 @@ SClzI32U64Sop1::SClzI32U64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSClzI32U64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSClzI32U64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_clz_i32_u64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SClzI32U64Sop1>(opcode);
 }
 } // namespace detail
@@ -255,7 +294,11 @@ SClsI32Sop1::SClsI32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSClsI32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSClsI32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_cls_i32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SClsI32Sop1>(opcode);
 }
 } // namespace detail
@@ -277,7 +320,11 @@ SClsI32I64Sop1::SClsI32I64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSClsI32I64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSClsI32I64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_cls_i32_i64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SClsI32I64Sop1>(opcode);
 }
 } // namespace detail
@@ -299,7 +346,11 @@ SSextI32I8Sop1::SSextI32I8Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSSextI32I8Sop1(const MachineInst *opcode) {
+DecodeResult decodeSSextI32I8Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_sext_i32_i8", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SSextI32I8Sop1>(opcode);
 }
 } // namespace detail
@@ -321,7 +372,12 @@ SSextI32I16Sop1::SSextI32I16Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSSextI32I16Sop1(const MachineInst *opcode) {
+DecodeResult decodeSSextI32I16Sop1(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_sext_i32_i16", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SSextI32I16Sop1>(opcode);
 }
 } // namespace detail
@@ -343,7 +399,12 @@ SBitset0B32Sop1::SBitset0B32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSBitset0B32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSBitset0B32Sop1(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_bitset0_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SBitset0B32Sop1>(opcode);
 }
 } // namespace detail
@@ -365,7 +426,12 @@ SBitset0B64Sop1::SBitset0B64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSBitset0B64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSBitset0B64Sop1(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_bitset0_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SBitset0B64Sop1>(opcode);
 }
 } // namespace detail
@@ -387,7 +453,12 @@ SBitset1B32Sop1::SBitset1B32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSBitset1B32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSBitset1B32Sop1(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_bitset1_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SBitset1B32Sop1>(opcode);
 }
 } // namespace detail
@@ -409,7 +480,12 @@ SBitset1B64Sop1::SBitset1B64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSBitset1B64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSBitset1B64Sop1(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_bitset1_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SBitset1B64Sop1>(opcode);
 }
 } // namespace detail
@@ -430,7 +506,12 @@ SBitreplicateB64B32Sop1::SBitreplicateB64B32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSBitreplicateB64B32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSBitreplicateB64B32Sop1(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_bitreplicate_b64_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SBitreplicateB64B32Sop1>(opcode);
 }
 } // namespace detail
@@ -454,7 +535,11 @@ SAbsI32Sop1::SAbsI32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSAbsI32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSAbsI32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_abs_i32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SAbsI32Sop1>(opcode);
 }
 } // namespace detail
@@ -478,7 +563,12 @@ SBcnt0I32B32Sop1::SBcnt0I32B32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSBcnt0I32B32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSBcnt0I32B32Sop1(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_bcnt0_i32_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SBcnt0I32B32Sop1>(opcode);
 }
 } // namespace detail
@@ -503,7 +593,12 @@ SBcnt0I32B64Sop1::SBcnt0I32B64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSBcnt0I32B64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSBcnt0I32B64Sop1(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_bcnt0_i32_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SBcnt0I32B64Sop1>(opcode);
 }
 } // namespace detail
@@ -527,7 +622,12 @@ SBcnt1I32B32Sop1::SBcnt1I32B32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSBcnt1I32B32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSBcnt1I32B32Sop1(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_bcnt1_i32_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SBcnt1I32B32Sop1>(opcode);
 }
 } // namespace detail
@@ -552,7 +652,12 @@ SBcnt1I32B64Sop1::SBcnt1I32B64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSBcnt1I32B64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSBcnt1I32B64Sop1(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_bcnt1_i32_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SBcnt1I32B64Sop1>(opcode);
 }
 } // namespace detail
@@ -576,7 +681,12 @@ SQuadmaskB32Sop1::SQuadmaskB32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSQuadmaskB32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSQuadmaskB32Sop1(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_quadmask_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SQuadmaskB32Sop1>(opcode);
 }
 } // namespace detail
@@ -601,7 +711,12 @@ SQuadmaskB64Sop1::SQuadmaskB64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSQuadmaskB64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSQuadmaskB64Sop1(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_quadmask_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SQuadmaskB64Sop1>(opcode);
 }
 } // namespace detail
@@ -625,7 +740,11 @@ SWqmB32Sop1::SWqmB32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSWqmB32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSWqmB32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_wqm_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SWqmB32Sop1>(opcode);
 }
 } // namespace detail
@@ -650,7 +769,11 @@ SWqmB64Sop1::SWqmB64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSWqmB64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSWqmB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_wqm_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SWqmB64Sop1>(opcode);
 }
 } // namespace detail
@@ -674,7 +797,11 @@ SNotB32Sop1::SNotB32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSNotB32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSNotB32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_not_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SNotB32Sop1>(opcode);
 }
 } // namespace detail
@@ -699,7 +826,11 @@ SNotB64Sop1::SNotB64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSNotB64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSNotB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_not_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SNotB64Sop1>(opcode);
 }
 } // namespace detail
@@ -730,7 +861,12 @@ SAndSaveexecB32Sop1::SAndSaveexecB32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSAndSaveexecB32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSAndSaveexecB32Sop1(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_and_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SAndSaveexecB32Sop1>(opcode);
 }
 } // namespace detail
@@ -762,7 +898,12 @@ SAndSaveexecB64Sop1::SAndSaveexecB64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSAndSaveexecB64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSAndSaveexecB64Sop1(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_and_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SAndSaveexecB64Sop1>(opcode);
 }
 } // namespace detail
@@ -794,7 +935,12 @@ SOrSaveexecB32Sop1::SOrSaveexecB32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSOrSaveexecB32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSOrSaveexecB32Sop1(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_or_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SOrSaveexecB32Sop1>(opcode);
 }
 } // namespace detail
@@ -827,7 +973,12 @@ SOrSaveexecB64Sop1::SOrSaveexecB64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSOrSaveexecB64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSOrSaveexecB64Sop1(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_or_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SOrSaveexecB64Sop1>(opcode);
 }
 } // namespace detail
@@ -858,7 +1009,12 @@ SXorSaveexecB32Sop1::SXorSaveexecB32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSXorSaveexecB32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSXorSaveexecB32Sop1(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_xor_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SXorSaveexecB32Sop1>(opcode);
 }
 } // namespace detail
@@ -890,7 +1046,12 @@ SXorSaveexecB64Sop1::SXorSaveexecB64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSXorSaveexecB64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSXorSaveexecB64Sop1(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_xor_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SXorSaveexecB64Sop1>(opcode);
 }
 } // namespace detail
@@ -921,7 +1082,12 @@ SNandSaveexecB32Sop1::SNandSaveexecB32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSNandSaveexecB32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSNandSaveexecB32Sop1(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_nand_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SNandSaveexecB32Sop1>(opcode);
 }
 } // namespace detail
@@ -953,7 +1119,12 @@ SNandSaveexecB64Sop1::SNandSaveexecB64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSNandSaveexecB64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSNandSaveexecB64Sop1(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_nand_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SNandSaveexecB64Sop1>(opcode);
 }
 } // namespace detail
@@ -984,7 +1155,12 @@ SNorSaveexecB32Sop1::SNorSaveexecB32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSNorSaveexecB32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSNorSaveexecB32Sop1(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_nor_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SNorSaveexecB32Sop1>(opcode);
 }
 } // namespace detail
@@ -1016,7 +1192,12 @@ SNorSaveexecB64Sop1::SNorSaveexecB64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSNorSaveexecB64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSNorSaveexecB64Sop1(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_nor_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SNorSaveexecB64Sop1>(opcode);
 }
 } // namespace detail
@@ -1047,7 +1228,12 @@ SXnorSaveexecB32Sop1::SXnorSaveexecB32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSXnorSaveexecB32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSXnorSaveexecB32Sop1(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_xnor_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SXnorSaveexecB32Sop1>(opcode);
 }
 } // namespace detail
@@ -1079,7 +1265,12 @@ SXnorSaveexecB64Sop1::SXnorSaveexecB64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSXnorSaveexecB64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSXnorSaveexecB64Sop1(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_xnor_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SXnorSaveexecB64Sop1>(opcode);
 }
 } // namespace detail
@@ -1110,7 +1301,12 @@ SAndNot0SaveexecB32Sop1::SAndNot0SaveexecB32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSAndNot0SaveexecB32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSAndNot0SaveexecB32Sop1(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_and_not0_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SAndNot0SaveexecB32Sop1>(opcode);
 }
 } // namespace detail
@@ -1142,7 +1338,12 @@ SAndNot0SaveexecB64Sop1::SAndNot0SaveexecB64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSAndNot0SaveexecB64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSAndNot0SaveexecB64Sop1(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_and_not0_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SAndNot0SaveexecB64Sop1>(opcode);
 }
 } // namespace detail
@@ -1173,7 +1374,12 @@ SOrNot0SaveexecB32Sop1::SOrNot0SaveexecB32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSOrNot0SaveexecB32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSOrNot0SaveexecB32Sop1(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_or_not0_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SOrNot0SaveexecB32Sop1>(opcode);
 }
 } // namespace detail
@@ -1205,7 +1411,12 @@ SOrNot0SaveexecB64Sop1::SOrNot0SaveexecB64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSOrNot0SaveexecB64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSOrNot0SaveexecB64Sop1(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_or_not0_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SOrNot0SaveexecB64Sop1>(opcode);
 }
 } // namespace detail
@@ -1236,7 +1447,12 @@ SAndNot1SaveexecB32Sop1::SAndNot1SaveexecB32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSAndNot1SaveexecB32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSAndNot1SaveexecB32Sop1(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_and_not1_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SAndNot1SaveexecB32Sop1>(opcode);
 }
 } // namespace detail
@@ -1268,7 +1484,12 @@ SAndNot1SaveexecB64Sop1::SAndNot1SaveexecB64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSAndNot1SaveexecB64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSAndNot1SaveexecB64Sop1(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_and_not1_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SAndNot1SaveexecB64Sop1>(opcode);
 }
 } // namespace detail
@@ -1299,7 +1520,12 @@ SOrNot1SaveexecB32Sop1::SOrNot1SaveexecB32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSOrNot1SaveexecB32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSOrNot1SaveexecB32Sop1(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_or_not1_saveexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SOrNot1SaveexecB32Sop1>(opcode);
 }
 } // namespace detail
@@ -1331,7 +1557,12 @@ SOrNot1SaveexecB64Sop1::SOrNot1SaveexecB64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSOrNot1SaveexecB64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSOrNot1SaveexecB64Sop1(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_or_not1_saveexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SOrNot1SaveexecB64Sop1>(opcode);
 }
 } // namespace detail
@@ -1362,7 +1593,12 @@ SAndNot0WrexecB32Sop1::SAndNot0WrexecB32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSAndNot0WrexecB32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSAndNot0WrexecB32Sop1(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_and_not0_wrexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SAndNot0WrexecB32Sop1>(opcode);
 }
 } // namespace detail
@@ -1394,7 +1630,12 @@ SAndNot0WrexecB64Sop1::SAndNot0WrexecB64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSAndNot0WrexecB64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSAndNot0WrexecB64Sop1(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_and_not0_wrexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SAndNot0WrexecB64Sop1>(opcode);
 }
 } // namespace detail
@@ -1425,7 +1666,12 @@ SAndNot1WrexecB32Sop1::SAndNot1WrexecB32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSAndNot1WrexecB32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSAndNot1WrexecB32Sop1(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_and_not1_wrexec_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SAndNot1WrexecB32Sop1>(opcode);
 }
 } // namespace detail
@@ -1457,7 +1703,12 @@ SAndNot1WrexecB64Sop1::SAndNot1WrexecB64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSAndNot1WrexecB64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSAndNot1WrexecB64Sop1(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_and_not1_wrexec_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SAndNot1WrexecB64Sop1>(opcode);
 }
 } // namespace detail
@@ -1477,7 +1728,12 @@ SMovrelsB32Sop1::SMovrelsB32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSMovrelsB32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSMovrelsB32Sop1(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_movrels_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SMovrelsB32Sop1>(opcode);
 }
 } // namespace detail
@@ -1497,7 +1753,12 @@ SMovrelsB64Sop1::SMovrelsB64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSMovrelsB64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSMovrelsB64Sop1(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_movrels_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SMovrelsB64Sop1>(opcode);
 }
 } // namespace detail
@@ -1521,7 +1782,12 @@ SMovreldB32Sop1::SMovreldB32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSMovreldB32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSMovreldB32Sop1(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_movreld_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SMovreldB32Sop1>(opcode);
 }
 } // namespace detail
@@ -1546,7 +1812,12 @@ SMovreldB64Sop1::SMovreldB64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSMovreldB64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSMovreldB64Sop1(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_movreld_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SMovreldB64Sop1>(opcode);
 }
 } // namespace detail
@@ -1566,7 +1837,12 @@ SMovrelsd2B32Sop1::SMovrelsd2B32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSMovrelsd2B32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSMovrelsd2B32Sop1(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_movrelsd_2_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SMovrelsd2B32Sop1>(opcode);
 }
 } // namespace detail
@@ -1584,7 +1860,11 @@ SGetpcB64Sop1::SGetpcB64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSGetpcB64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSGetpcB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_getpc_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SGetpcB64Sop1>(opcode);
 }
 } // namespace detail
@@ -1603,7 +1883,11 @@ SSetpcB64Sop1::SSetpcB64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSSetpcB64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSSetpcB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_setpc_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SSetpcB64Sop1>(opcode);
 }
 } // namespace detail
@@ -1626,7 +1910,11 @@ SSwappcB64Sop1::SSwappcB64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSSwappcB64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSSwappcB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_swappc_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SSwappcB64Sop1>(opcode);
 }
 } // namespace detail
@@ -1644,7 +1932,11 @@ SRfeB64Sop1::SRfeB64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSRfeB64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSRfeB64Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_rfe_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SRfeB64Sop1>(opcode);
 }
 } // namespace detail
@@ -1661,7 +1953,12 @@ SSendmsgRtnB32Sop1::SSendmsgRtnB32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSSendmsgRtnB32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSSendmsgRtnB32Sop1(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_sendmsg_rtn_b32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SSendmsgRtnB32Sop1>(opcode);
 }
 } // namespace detail
@@ -1678,7 +1975,12 @@ SSendmsgRtnB64Sop1::SSendmsgRtnB64Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSSendmsgRtnB64Sop1(const MachineInst *opcode) {
+DecodeResult decodeSSendmsgRtnB64Sop1(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_sendmsg_rtn_b64", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SSendmsgRtnB64Sop1>(opcode);
 }
 } // namespace detail
@@ -1699,7 +2001,11 @@ SCeilF32Sop1::SCeilF32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCeilF32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSCeilF32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_ceil_f32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCeilF32Sop1>(opcode);
 }
 } // namespace detail
@@ -1720,7 +2026,11 @@ SFloorF32Sop1::SFloorF32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSFloorF32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSFloorF32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_floor_f32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SFloorF32Sop1>(opcode);
 }
 } // namespace detail
@@ -1741,7 +2051,11 @@ STruncF32Sop1::STruncF32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSTruncF32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSTruncF32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_trunc_f32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<STruncF32Sop1>(opcode);
 }
 } // namespace detail
@@ -1762,7 +2076,11 @@ SRndneF32Sop1::SRndneF32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSRndneF32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSRndneF32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_rndne_f32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SRndneF32Sop1>(opcode);
 }
 } // namespace detail
@@ -1783,7 +2101,11 @@ SCvtF32I32Sop1::SCvtF32I32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCvtF32I32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSCvtF32I32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_cvt_f32_i32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCvtF32I32Sop1>(opcode);
 }
 } // namespace detail
@@ -1804,7 +2126,11 @@ SCvtF32U32Sop1::SCvtF32U32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCvtF32U32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSCvtF32U32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_cvt_f32_u32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCvtF32U32Sop1>(opcode);
 }
 } // namespace detail
@@ -1825,7 +2151,11 @@ SCvtI32F32Sop1::SCvtI32F32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCvtI32F32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSCvtI32F32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_cvt_i32_f32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCvtI32F32Sop1>(opcode);
 }
 } // namespace detail
@@ -1846,7 +2176,11 @@ SCvtU32F32Sop1::SCvtU32F32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCvtU32F32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSCvtU32F32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_cvt_u32_f32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCvtU32F32Sop1>(opcode);
 }
 } // namespace detail
@@ -1867,7 +2201,11 @@ SCvtF16F32Sop1::SCvtF16F32Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCvtF16F32Sop1(const MachineInst *opcode) {
+DecodeResult decodeSCvtF16F32Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_cvt_f16_f32", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCvtF16F32Sop1>(opcode);
 }
 } // namespace detail
@@ -1895,7 +2233,11 @@ SCvtF32F16Sop1::SCvtF32F16Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCvtF32F16Sop1(const MachineInst *opcode) {
+DecodeResult decodeSCvtF32F16Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_cvt_f32_f16", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCvtF32F16Sop1>(opcode);
 }
 } // namespace detail
@@ -1917,7 +2259,12 @@ SCvtHiF32F16Sop1::SCvtHiF32F16Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCvtHiF32F16Sop1(const MachineInst *opcode) {
+DecodeResult decodeSCvtHiF32F16Sop1(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_cvt_hi_f32_f16", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCvtHiF32F16Sop1>(opcode);
 }
 } // namespace detail
@@ -1939,7 +2286,11 @@ SCeilF16Sop1::SCeilF16Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSCeilF16Sop1(const MachineInst *opcode) {
+DecodeResult decodeSCeilF16Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_ceil_f16", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SCeilF16Sop1>(opcode);
 }
 } // namespace detail
@@ -1967,7 +2318,11 @@ SFloorF16Sop1::SFloorF16Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSFloorF16Sop1(const MachineInst *opcode) {
+DecodeResult decodeSFloorF16Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_floor_f16", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SFloorF16Sop1>(opcode);
 }
 } // namespace detail
@@ -1995,7 +2350,11 @@ STruncF16Sop1::STruncF16Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSTruncF16Sop1(const MachineInst *opcode) {
+DecodeResult decodeSTruncF16Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_trunc_f16", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<STruncF16Sop1>(opcode);
 }
 } // namespace detail
@@ -2023,7 +2382,11 @@ SRndneF16Sop1::SRndneF16Sop1(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeSRndneF16Sop1(const MachineInst *opcode) {
+DecodeResult decodeSRndneF16Sop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_rndne_f16", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<SRndneF16Sop1>(opcode);
 }
 } // namespace detail

@@ -585,7 +585,13 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
     return false;
   }
   decoder_ = std::move(decoder);
-  blocks_ = BasicBlock::build(obj_, *decoder_, arch_);
+  util::StringDiagnostic decode_error;
+  auto blocks = BasicBlock::build(obj_, *decoder_, arch_, decode_error.emitter());
+  if (blocks.failed()) {
+    report(error_out, decode_error.message().c_str());
+    return false;
+  }
+  blocks_ = std::move(blocks).value();
   // BasicBlock::build returns blocks in .text order. Keep clause state across
   // block boundaries because a branch target may split the linear instruction
   // stream in the middle of a clause.

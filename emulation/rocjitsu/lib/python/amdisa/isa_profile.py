@@ -1657,6 +1657,14 @@ class Rdna4Profile(_AmdgpuProfileBase):
     def uses_true16_vop3_opsel(self) -> bool:
         return True
 
+    @property
+    def semantic_overrides(self) -> dict[str, tuple[str, ...]]:
+        return {
+            'S_BARRIER_SIGNAL': ('true_nop', '', ''),
+            'S_BARRIER_SIGNAL_ISFIRST': ('true_nop', '', ''),
+            'S_BARRIER_WAIT': ('barrier', '', ''),
+        }
+
     def mnemonic_rule(self, enc_name: str) -> MnemonicRule:
         """RDNA4 mnemonic rules.
 
@@ -1727,6 +1735,17 @@ class Cdna5Profile(Rdna4Profile):
     @property
     def cpp_namespace(self) -> str | None:
         return 'cdna5'
+
+    @property
+    def semantic_overrides(self) -> dict[str, tuple[str, ...]]:
+        overrides = dict(super().semantic_overrides)
+        for mnemonic in (
+            'S_BARRIER_SIGNAL',
+            'S_BARRIER_SIGNAL_ISFIRST',
+            'S_BARRIER_WAIT',
+        ):
+            overrides.pop(mnemonic, None)
+        return overrides
 
     @property
     def semantic_class_overrides(self) -> dict[str, str]:

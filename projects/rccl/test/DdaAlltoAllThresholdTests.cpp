@@ -127,6 +127,32 @@ TEST_F(DdaAlltoAllThresholdTest, FewerThanEightRanks_Disabled)
         mockComm_.get(), kAlltoAllFloat32CountAt4MbThreshold, ncclFloat32));
 }
 
+TEST_F(DdaAlltoAllThresholdTest, SymmetricSupport_Disabled)
+{
+    mockComm_.reset("gfx950:sramecc+:xnack-");
+    mockComm_.comm.symmetricSupport = 1;
+    EXPECT_FALSE(testRcclDdaAlltoAllThresholdEnabled(
+        mockComm_.get(), kAlltoAllFloat32CountAt4MbThreshold, ncclFloat32));
+}
+
+TEST_F(DdaAlltoAllThresholdTest, Gfx950_4KbPerRank_UsesInKernelStagingCopy)
+{
+    mockComm_.reset("gfx950:sramecc+:xnack-");
+    EXPECT_TRUE(testRcclDdaAlltoAllThresholdEnabled(
+        mockComm_.get(), kAlltoAllFloat32CountAt4KbPerRank, ncclFloat32));
+    EXPECT_TRUE(testAlltoAllUsesInKernelStagingCopy(
+        kAlltoAllFloat32CountAt4KbPerRank, ncclFloat32));
+}
+
+TEST_F(DdaAlltoAllThresholdTest, Gfx950_8KbPerRank_UsesPreKernelMemcpy)
+{
+    mockComm_.reset("gfx950:sramecc+:xnack-");
+    EXPECT_TRUE(testRcclDdaAlltoAllThresholdEnabled(
+        mockComm_.get(), kAlltoAllFloat32CountAt8KbPerRank, ncclFloat32));
+    EXPECT_FALSE(testAlltoAllUsesInKernelStagingCopy(
+        kAlltoAllFloat32CountAt8KbPerRank, ncclFloat32));
+}
+
 TEST_F(DdaAlltoAllThresholdTest, StagingBytesAtThresholdMatches4Mb)
 {
     const size_t stagingBytes = testAlltoAllDdaIpcStagingBytes(

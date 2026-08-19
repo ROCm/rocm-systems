@@ -586,7 +586,7 @@ def gen_vector_div_scale(
     if len(dst) > 1:
         L.append(f'  amdgpu::write_wave_mask_scalar({dst[1]}, wf, vcc);')
     else:
-        L.append('  wf.set_vcc(vcc);')
+        L.append('  wf.set_vcc_mask(vcc);')
     return '\n'.join(L)
 
 

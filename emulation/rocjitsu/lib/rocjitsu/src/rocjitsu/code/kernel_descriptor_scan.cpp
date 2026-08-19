@@ -58,10 +58,17 @@ kernel_descriptor_symbol_name(const Elf64_Sym &sym, const char *strtab, size_t s
   return std::string(name, len - 3);
 }
 
-[[nodiscard]] std::optional<uint64_t> text_vaddr_for_section(uint64_t text_offset,
-                                                             uint64_t text_size,
-                                                             const Elf64_Ehdr &ehdr,
-                                                             const Elf64_Shdr *shdr) {
+[[nodiscard]] std::optional<uint64_t>
+text_vaddr_for_section(uint64_t text_offset, uint64_t text_size, const Elf64_Ehdr &ehdr,
+                       const Elf64_Shdr *shdr, std::optional<size_t> text_section_index) {
+  if (text_section_index) {
+    if (*text_section_index >= ehdr.e_shnum)
+      return std::nullopt;
+    const Elf64_Shdr &text = shdr[*text_section_index];
+    if (text.sh_type == SHT_NOBITS || text.sh_offset != text_offset || text.sh_size != text_size)
+      return std::nullopt;
+    return text.sh_addr;
+  }
   for (int i = 0; i < ehdr.e_shnum; ++i) {
     if (shdr[i].sh_offset == text_offset && shdr[i].sh_size == text_size)
       return shdr[i].sh_addr;
@@ -72,7 +79,8 @@ kernel_descriptor_symbol_name(const Elf64_Sym &sym, const char *strtab, size_t s
 } // namespace
 
 std::vector<KernelDescriptorInfo>
-scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size) {
+scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size,
+                        std::optional<size_t> text_section_index) {
   std::vector<KernelDescriptorInfo> out;
   if (image.size() < sizeof(Elf64_Ehdr))
     return out;
@@ -83,7 +91,7 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
     return out;
 
   const auto *shdr = reinterpret_cast<const Elf64_Shdr *>(image.data() + ehdr->e_shoff);
-  auto text_vaddr = text_vaddr_for_section(text_offset, text_size, *ehdr, shdr);
+  auto text_vaddr = text_vaddr_for_section(text_offset, text_size, *ehdr, shdr, text_section_index);
   if (!text_vaddr)
     return out;
   constexpr uint64_t max_u64 = std::numeric_limits<uint64_t>::max();

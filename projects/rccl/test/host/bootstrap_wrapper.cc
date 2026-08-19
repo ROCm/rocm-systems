@@ -13,6 +13,10 @@
 #include "socket.h"
 #include "proxy.h"
 
+// Needed even though bootstrap.cc never names it: it is the default argument for
+// ncclSocketInit()'s `magic`, so every call that omits it emits a reference here.
+uint64_t ncclSocketDefaultMagic(void) { return 0; }
+
 ncclResult_t ncclSocketInit(ncclSocket*, ncclSocketAddress const*, unsigned long,
                             ncclSocketType, unsigned int volatile*, int, int) { return ncclSuccess; }
 ncclResult_t ncclSocketListen(ncclSocket*) { return ncclSuccess; }
@@ -31,7 +35,7 @@ ncclResult_t ncclSocketMultiOp(ncclSocketOp*, int) { return ncclSuccess; }
 ncclResult_t ncclFindInterfaces(char*, ncclSocketAddress*, int, int, int*) { return ncclSuccess; }
 ncclResult_t ncclFindInterfaceMatchSubnet(char*, ncclSocketAddress*, ncclSocketAddress*, int, int*) { return ncclSuccess; }
 int parseStringList(char const*, netIf*, int) { return 0; }
-bool matchIfList(char const*, int, netIf*, int, bool) { return false; }
+bool matchIfList(char const*, int, netIf*, int, bool, int*) { return false; }
 
 ncclResult_t ncclProxyInit(ncclComm*, ncclSocket*, ncclSocketAddress*, unsigned long*) { return ncclSuccess; }
 ncclResult_t ncclRasAddRanks(rasRankInit*, int) { return ncclSuccess; }

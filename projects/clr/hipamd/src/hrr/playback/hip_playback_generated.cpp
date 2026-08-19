@@ -3507,47 +3507,27 @@ static hipError_t playback_hipMemcpy2DFromArray_spt(PlaybackContext& ctx, const 
 extern hipError_t playback_hipMemcpy3D_spt(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipMemset_spt(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipMemset_spt — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
+  const auto* a = reinterpret_cast<const hrr_args_hipMemset_spt*>(payload);
+  hipError_t _r = (hipError_t)hipMemset_spt(ctx.translate_ptr(a->dst), (int)a->value, (size_t)a->sizeBytes);
+  return _r;
 }
 
 static hipError_t playback_hipMemsetAsync_spt(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipMemsetAsync_spt — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
+  const auto* a = reinterpret_cast<const hrr_args_hipMemsetAsync_spt*>(payload);
+  hipError_t _r = (hipError_t)hipMemsetAsync_spt(ctx.translate_ptr(a->dst), (int)a->value, (size_t)a->sizeBytes, (hipStream_t)ctx.translate_stream(a->stream));
+  return _r;
 }
 
 static hipError_t playback_hipMemset2D_spt(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipMemset2D_spt — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
+  const auto* a = reinterpret_cast<const hrr_args_hipMemset2D_spt*>(payload);
+  hipError_t _r = (hipError_t)hipMemset2D_spt(ctx.translate_ptr(a->dst), (size_t)a->pitch, (int)a->value, (size_t)a->width, (size_t)a->height);
+  return _r;
 }
 
 static hipError_t playback_hipMemset2DAsync_spt(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipMemset2DAsync_spt — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
+  const auto* a = reinterpret_cast<const hrr_args_hipMemset2DAsync_spt*>(payload);
+  hipError_t _r = (hipError_t)hipMemset2DAsync_spt(ctx.translate_ptr(a->dst), (size_t)a->pitch, (int)a->value, (size_t)a->width, (size_t)a->height, (hipStream_t)ctx.translate_stream(a->stream));
+  return _r;
 }
 
 static hipError_t playback_hipMemset3DAsync_spt(PlaybackContext& ctx, const uint8_t* payload) {
@@ -4244,69 +4224,111 @@ static hipError_t playback_hipMemGetHandleForAddressRange(PlaybackContext& ctx, 
 }
 
 static hipError_t playback_hipMemsetD2D8(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipMemsetD2D8 — "
-            "this API is not replayed; results may differ from capture.\n");
+  const auto* a = reinterpret_cast<const hrr_args_hipMemsetD2D8*>(payload);
+  void* _live_dst = ctx.translate_ptr(a->dst);
+  if (!_live_dst) {
+    static bool warned = false;
+    if (!warned) {
+      warned = true;
+      fprintf(stderr, "[HRR] hipMemsetD2D8: dst 0x%llx has no alloc_map entry "
+              "(its allocation was not replayed), so this call is skipped; the "
+              "destination buffer will differ from capture.\n",
+              (unsigned long long)a->dst);
+    }
+    return hipSuccess;
   }
-  return hipSuccess;
+  hipError_t _r = (hipError_t)hipMemsetD2D8((hipDeviceptr_t)_live_dst, (size_t)a->dstPitch, (unsigned char)a->value, (size_t)a->width, (size_t)a->height);
+  return _r;
 }
 
 static hipError_t playback_hipMemsetD2D8Async(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipMemsetD2D8Async — "
-            "this API is not replayed; results may differ from capture.\n");
+  const auto* a = reinterpret_cast<const hrr_args_hipMemsetD2D8Async*>(payload);
+  void* _live_dst = ctx.translate_ptr(a->dst);
+  if (!_live_dst) {
+    static bool warned = false;
+    if (!warned) {
+      warned = true;
+      fprintf(stderr, "[HRR] hipMemsetD2D8Async: dst 0x%llx has no alloc_map entry "
+              "(its allocation was not replayed), so this call is skipped; the "
+              "destination buffer will differ from capture.\n",
+              (unsigned long long)a->dst);
+    }
+    return hipSuccess;
   }
-  return hipSuccess;
+  hipError_t _r = (hipError_t)hipMemsetD2D8Async((hipDeviceptr_t)_live_dst, (size_t)a->dstPitch, (unsigned char)a->value, (size_t)a->width, (size_t)a->height, (hipStream_t)ctx.translate_stream(a->stream));
+  return _r;
 }
 
 static hipError_t playback_hipMemsetD2D16(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipMemsetD2D16 — "
-            "this API is not replayed; results may differ from capture.\n");
+  const auto* a = reinterpret_cast<const hrr_args_hipMemsetD2D16*>(payload);
+  void* _live_dst = ctx.translate_ptr(a->dst);
+  if (!_live_dst) {
+    static bool warned = false;
+    if (!warned) {
+      warned = true;
+      fprintf(stderr, "[HRR] hipMemsetD2D16: dst 0x%llx has no alloc_map entry "
+              "(its allocation was not replayed), so this call is skipped; the "
+              "destination buffer will differ from capture.\n",
+              (unsigned long long)a->dst);
+    }
+    return hipSuccess;
   }
-  return hipSuccess;
+  hipError_t _r = (hipError_t)hipMemsetD2D16((hipDeviceptr_t)_live_dst, (size_t)a->dstPitch, (unsigned short)a->value, (size_t)a->width, (size_t)a->height);
+  return _r;
 }
 
 static hipError_t playback_hipMemsetD2D16Async(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipMemsetD2D16Async — "
-            "this API is not replayed; results may differ from capture.\n");
+  const auto* a = reinterpret_cast<const hrr_args_hipMemsetD2D16Async*>(payload);
+  void* _live_dst = ctx.translate_ptr(a->dst);
+  if (!_live_dst) {
+    static bool warned = false;
+    if (!warned) {
+      warned = true;
+      fprintf(stderr, "[HRR] hipMemsetD2D16Async: dst 0x%llx has no alloc_map entry "
+              "(its allocation was not replayed), so this call is skipped; the "
+              "destination buffer will differ from capture.\n",
+              (unsigned long long)a->dst);
+    }
+    return hipSuccess;
   }
-  return hipSuccess;
+  hipError_t _r = (hipError_t)hipMemsetD2D16Async((hipDeviceptr_t)_live_dst, (size_t)a->dstPitch, (unsigned short)a->value, (size_t)a->width, (size_t)a->height, (hipStream_t)ctx.translate_stream(a->stream));
+  return _r;
 }
 
 static hipError_t playback_hipMemsetD2D32(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipMemsetD2D32 — "
-            "this API is not replayed; results may differ from capture.\n");
+  const auto* a = reinterpret_cast<const hrr_args_hipMemsetD2D32*>(payload);
+  void* _live_dst = ctx.translate_ptr(a->dst);
+  if (!_live_dst) {
+    static bool warned = false;
+    if (!warned) {
+      warned = true;
+      fprintf(stderr, "[HRR] hipMemsetD2D32: dst 0x%llx has no alloc_map entry "
+              "(its allocation was not replayed), so this call is skipped; the "
+              "destination buffer will differ from capture.\n",
+              (unsigned long long)a->dst);
+    }
+    return hipSuccess;
   }
-  return hipSuccess;
+  hipError_t _r = (hipError_t)hipMemsetD2D32((hipDeviceptr_t)_live_dst, (size_t)a->dstPitch, (unsigned int)a->value, (size_t)a->width, (size_t)a->height);
+  return _r;
 }
 
 static hipError_t playback_hipMemsetD2D32Async(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipMemsetD2D32Async — "
-            "this API is not replayed; results may differ from capture.\n");
+  const auto* a = reinterpret_cast<const hrr_args_hipMemsetD2D32Async*>(payload);
+  void* _live_dst = ctx.translate_ptr(a->dst);
+  if (!_live_dst) {
+    static bool warned = false;
+    if (!warned) {
+      warned = true;
+      fprintf(stderr, "[HRR] hipMemsetD2D32Async: dst 0x%llx has no alloc_map entry "
+              "(its allocation was not replayed), so this call is skipped; the "
+              "destination buffer will differ from capture.\n",
+              (unsigned long long)a->dst);
+    }
+    return hipSuccess;
   }
-  return hipSuccess;
+  hipError_t _r = (hipError_t)hipMemsetD2D32Async((hipDeviceptr_t)_live_dst, (size_t)a->dstPitch, (unsigned int)a->value, (size_t)a->width, (size_t)a->height, (hipStream_t)ctx.translate_stream(a->stream));
+  return _r;
 }
 
 extern hipError_t playback_hipStreamSetAttribute(PlaybackContext& ctx, const uint8_t* payload);

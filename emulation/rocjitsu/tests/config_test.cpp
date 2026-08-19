@@ -1052,8 +1052,13 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
   lower_wf->halt();
   const uint32_t acc0 = wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET;
   const uint32_t acc_last = acc0 + cdna3::Isa::MAX_ACC_VGPRS_PER_WF - 1;
+  const uint32_t acc_quarter = acc0 + cdna3::Isa::MAX_ACC_VGPRS_PER_WF / 4;
+  const uint32_t acc_midpoint = acc0 + cdna3::Isa::MAX_ACC_VGPRS_PER_WF / 2;
   cu->write_vgpr(acc0, 0, 0xA55A0001u);
+  cu->write_vgpr(acc_quarter, 63, 0xA55A003Fu);
+  cu->write_vgpr(acc_midpoint, 63, 0xA55A103Fu);
   cu->write_vgpr(acc_last, 0, 0xDEADBEEFu);
+  cu->write_vgpr(acc_last, 63, 0xFEEDFACEu);
 
   test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
   config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config);
@@ -1074,9 +1079,21 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
   EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET, 0),
             0xA55A0001u);
   EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET +
+                                       cdna3::Isa::MAX_ACC_VGPRS_PER_WF / 4,
+                                   63),
+            0xA55A003Fu);
+  EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET +
+                                       cdna3::Isa::MAX_ACC_VGPRS_PER_WF / 2,
+                                   63),
+            0xA55A103Fu);
+  EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET +
                                        cdna3::Isa::MAX_ACC_VGPRS_PER_WF - 1,
                                    0),
             0xDEADBEEFu);
+  EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET +
+                                       cdna3::Isa::MAX_ACC_VGPRS_PER_WF - 1,
+                                   63),
+            0xFEEDFACEu);
 }
 
 TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
@@ -1116,6 +1133,11 @@ TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
   ASSERT_NE(wf, nullptr);
   ASSERT_EQ(wf->wf_size(), 32u);
   wf->set_exec_raw(0xDEADBEEF0000000FULL);
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  const uint32_t vgpr_last = vgpr_base + cu->vgpr_allocation_block_size() - 1;
+  cu->write_vgpr(vgpr_base + 1, 31, 0x1234001Fu);
+  cu->write_vgpr(vgpr_base + cu->vgpr_allocation_block_size() / 2, 31, 0x5678001Fu);
+  cu->write_vgpr(vgpr_last, 31, 0x9ABC001Fu);
 
   test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
   config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config);
@@ -1127,10 +1149,19 @@ TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
   auto *restored_cp = restored_soc->xcd(0)->command_processor();
   ASSERT_NE(restored_cp, nullptr);
   EXPECT_EQ(restored_cp->sdma_packet_dialect(), amdgpu::SdmaPacketDialect::Gfx11Plus);
-  auto *restored_wf = restored_soc->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
+  auto *restored_cu = restored_soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(restored_cu, nullptr);
+  auto *restored_wf = restored_cu->wf(0);
   ASSERT_NE(restored_wf, nullptr);
   EXPECT_EQ(restored_wf->exec(), 0xFULL);
   EXPECT_EQ(restored_wf->exec_raw(), 0xDEADBEEF0000000FULL);
+  EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + 1, 31), 0x1234001Fu);
+  EXPECT_EQ(restored_cu->read_vgpr(
+                restored_wf->vgpr_alloc().base + restored_cu->vgpr_allocation_block_size() / 2, 31),
+            0x5678001Fu);
+  EXPECT_EQ(restored_cu->read_vgpr(
+                restored_wf->vgpr_alloc().base + restored_cu->vgpr_allocation_block_size() - 1, 31),
+            0x9ABC001Fu);
 }
 
 TEST(CheckpointTest, SaveAndRestoreHwregState) {
