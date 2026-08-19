@@ -15,7 +15,7 @@ Pre-built simulator configs are in `configs/`:
 | `gfx950_cdna4.json` | Single CDNA4 GPU (standalone simulation) |
 | `gfx950_cdna4_kmd.json` | Single CDNA4 GPU (daemon/KFD mode) |
 | `gfx950_cdna4_kmd_2gpu.json` | Two CDNA4 GPUs (multi-GPU daemon mode) |
-| `gfx1250.json` | Single gfx1250 GPU (standalone simulation, no KMD) |
+| `gfx1250_mi455x.json` | Single CDNA5 GPU (standalone simulation, no KMD) |
 | `gfx1100_w7900.json` | Single RDNA3 GPU (standalone simulation) |
 | `gfx1151.json` | Single RDNA3.5 GPU (standalone simulation) |
 | `gfx1201_r9700.json` | Single RDNA4 GPU (standalone simulation) |

@@ -872,7 +872,7 @@ class CodeGenerator:
         self, inst_sem: InstructionSemantics | None, opnd: Operand
     ) -> bool:
         return (
-            getattr(self.isa_spec, 'arch_name', None) == 'gfx1250'
+            getattr(self.isa_spec, 'arch_name', None) == 'cdna5'
             and inst_sem is not None
             and inst_sem.name in self._GENERIC_WMMA_ACCUMULATOR_INSTRUCTIONS
             and opnd.name == 'src2'
@@ -2703,7 +2703,7 @@ class CodeGenerator:
         if self._supports_generated_vopd():
             maximum = max(maximum, 3)
         if (
-            self._supports_gfx1250_scaled_wmma_vop3px2()
+            self._supports_cdna5_scaled_wmma_vop3px2()
             or self._supports_cdna_mfma_f8f6f4_vop3px2()
         ):
             maximum = max(maximum, 4)
@@ -2736,7 +2736,7 @@ class CodeGenerator:
                 inst_enc.enc_name
             )
             supports_fixed_size_embedding = (
-                self._supports_gfx1250_scaled_wmma_vop3px2()
+                self._supports_cdna5_scaled_wmma_vop3px2()
                 and inst_enc.fmt_enc_name == 'Vop3p'
             )
             dpp_struct, dpp8_struct = self._vop_dpp_struct_names(inst_enc.enc_name)
@@ -3932,9 +3932,9 @@ class CodeGenerator:
 
         return None
 
-    def _supports_gfx1250_scaled_wmma_vop3px2(self) -> bool:
+    def _supports_cdna5_scaled_wmma_vop3px2(self) -> bool:
         return (
-            self.isa_spec.arch_name.lower() == 'gfx1250'
+            self.isa_spec.arch_name.lower() == 'cdna5'
             and self.isa_spec.profile.generate_scaled_wmma_vop3px2
         )
 
@@ -3947,10 +3947,10 @@ class CodeGenerator:
             and inst.name in self.isa_spec.profile.inst_size_overrides
         )
 
-    def _gfx1250_f8f6f4_wmma_shape(
+    def _cdna5_f8f6f4_wmma_shape(
         self, inst: Instruction
     ) -> tuple[int, int, int] | None:
-        if self.isa_spec.arch_name != 'gfx1250' or not inst.name.startswith('V_WMMA_'):
+        if self.isa_spec.arch_name != 'cdna5' or not inst.name.startswith('V_WMMA_'):
             return None
         m = re.match(
             r'V_WMMA_(?:F32|F16|BF16|I32)_(\d+)X(\d+)X(\d+)_?F8F6F4$',
@@ -3970,12 +3970,10 @@ class CodeGenerator:
             return None
         return tuple(int(x) for x in m.groups())
 
-    def _gfx1250_swmmac_has_modifiers(self, inst: Instruction) -> bool:
-        return self.isa_spec.arch_name == 'gfx1250' and inst.name.startswith(
-            'V_SWMMAC_'
-        )
+    def _cdna5_swmmac_has_modifiers(self, inst: Instruction) -> bool:
+        return self.isa_spec.arch_name == 'cdna5' and inst.name.startswith('V_SWMMAC_')
 
-    def _gfx1250_matrix_fmt_operand_size_expr(
+    def _cdna5_matrix_fmt_operand_size_expr(
         self, shape: tuple[int, int, int] | None, opnd_name: str
     ) -> str | None:
         if shape is None or opnd_name not in ('src0', 'src1'):
@@ -3989,7 +3987,7 @@ class CodeGenerator:
                 '((reinterpret_cast<const OpEncoding *>(inst)->pad_14 << 2) | '
                 'reinterpret_cast<const OpEncoding *>(inst)->opsel_hi)'
             )
-        return f'gfx1250_matrix_fmt_operand_size_bits({fmt_expr}, {dim}, {k})'
+        return f'cdna5_matrix_fmt_operand_size_bits({fmt_expr}, {dim}, {k})'
 
     @staticmethod
     def _cdna4_matrix_fmt_operand_size_expr(
@@ -4096,7 +4094,7 @@ class CodeGenerator:
             } // namespace''')
 
     @staticmethod
-    def _emit_gfx1250_matrix_fmt_helpers() -> _ImplOutputs:
+    def _emit_cdna5_matrix_fmt_helpers() -> _ImplOutputs:
         """Emit C++ helpers for gfx1250 VOP3P packed and matrix quirks."""
         execution = textwrap.dedent('''\
             namespace {
@@ -4118,7 +4116,7 @@ class CodeGenerator:
         model = (
             'namespace {\n\n'
             + (
-                'const char *gfx1250_matrix_fmt_name(uint32_t fmt) {\n'
+                'const char *cdna5_matrix_fmt_name(uint32_t fmt) {\n'
                 '  switch (fmt) {\n'
                 '  case 0:\n'
                 '    return "MATRIX_FMT_FP8";\n'
@@ -4135,7 +4133,7 @@ class CodeGenerator:
                 '  }\n'
                 '}\n'
                 '\n'
-                'const char *gfx1250_matrix_scale_fmt_name(uint32_t fmt) {\n'
+                'const char *cdna5_matrix_scale_fmt_name(uint32_t fmt) {\n'
                 '  switch (fmt) {\n'
                 '  case 0:\n'
                 '    return "MATRIX_SCALE_FMT_E8";\n'
@@ -4148,7 +4146,7 @@ class CodeGenerator:
                 '  }\n'
                 '}\n'
                 '\n'
-                'uint32_t gfx1250_matrix_fmt_element_bits(uint32_t fmt) {\n'
+                'uint32_t cdna5_matrix_fmt_element_bits(uint32_t fmt) {\n'
                 '  switch (fmt) {\n'
                 '  case 2:\n'
                 '  case 3:\n'
@@ -4160,46 +4158,46 @@ class CodeGenerator:
                 '  }\n'
                 '}\n'
                 '\n'
-                'int gfx1250_matrix_fmt_operand_size_bits(uint32_t fmt, uint32_t dim, uint32_t k) {\n'
-                '  return static_cast<int>((dim * k * gfx1250_matrix_fmt_element_bits(fmt)) / 32);\n'
+                'int cdna5_matrix_fmt_operand_size_bits(uint32_t fmt, uint32_t dim, uint32_t k) {\n'
+                '  return static_cast<int>((dim * k * cdna5_matrix_fmt_element_bits(fmt)) / 32);\n'
                 '}\n'
                 '\n'
-                'bool gfx1250_scaled_wmma_is_scale16(const MachineInst *inst) {\n'
+                'bool cdna5_scaled_wmma_is_scale16(const MachineInst *inst) {\n'
                 '  return reinterpret_cast<const Vop3pMachineInst *>(inst)->op == 0x3a;\n'
                 '}\n'
                 '\n'
-                'bool gfx1250_scaled_wmma_is_f4_32x16x128(const MachineInst *inst) {\n'
+                'bool cdna5_scaled_wmma_is_f4_32x16x128(const MachineInst *inst) {\n'
                 '  return reinterpret_cast<const Vop3pMachineInst *>(inst + 2)->op == 0x88;\n'
                 '}\n'
                 '\n'
-                'const char *gfx1250_scaled_wmma_mnemonic(const MachineInst *inst) {\n'
-                '  if (gfx1250_scaled_wmma_is_f4_32x16x128(inst))\n'
-                '    return gfx1250_scaled_wmma_is_scale16(inst) ? "v_wmma_scale16_f32_32x16x128_f4"\n'
+                'const char *cdna5_scaled_wmma_mnemonic(const MachineInst *inst) {\n'
+                '  if (cdna5_scaled_wmma_is_f4_32x16x128(inst))\n'
+                '    return cdna5_scaled_wmma_is_scale16(inst) ? "v_wmma_scale16_f32_32x16x128_f4"\n'
                 '                                               : "v_wmma_scale_f32_32x16x128_f4";\n'
-                '  return gfx1250_scaled_wmma_is_scale16(inst) ? "v_wmma_scale16_f32_16x16x128_f8f6f4"\n'
+                '  return cdna5_scaled_wmma_is_scale16(inst) ? "v_wmma_scale16_f32_16x16x128_f8f6f4"\n'
                 '                                             : "v_wmma_scale_f32_16x16x128_f8f6f4";\n'
                 '}\n'
                 '\n'
-                'int gfx1250_scale_operand_size_bits(const MachineInst *inst) {\n'
-                '  return gfx1250_scaled_wmma_is_scale16(inst) ? 64 : 32;\n'
+                'int cdna5_scale_operand_size_bits(const MachineInst *inst) {\n'
+                '  return cdna5_scaled_wmma_is_scale16(inst) ? 64 : 32;\n'
                 '}\n'
                 '\n'
-                'int gfx1250_scaled_wmma_dst_size_bits(const MachineInst *inst) {\n'
-                '  return gfx1250_scaled_wmma_is_f4_32x16x128(inst) ? 512 : 256;\n'
+                'int cdna5_scaled_wmma_dst_size_bits(const MachineInst *inst) {\n'
+                '  return cdna5_scaled_wmma_is_f4_32x16x128(inst) ? 512 : 256;\n'
                 '}\n'
                 '\n'
-                'int gfx1250_scaled_wmma_src0_size_bits(const MachineInst *inst) {\n'
+                'int cdna5_scaled_wmma_src0_size_bits(const MachineInst *inst) {\n'
                 '  const auto *high = reinterpret_cast<const Vop3pMachineInst *>(inst + 2);\n'
-                '  if (gfx1250_scaled_wmma_is_f4_32x16x128(inst))\n'
+                '  if (cdna5_scaled_wmma_is_f4_32x16x128(inst))\n'
                 '    return 512;\n'
-                '  return gfx1250_matrix_fmt_operand_size_bits(high->opsel, 16, 128);\n'
+                '  return cdna5_matrix_fmt_operand_size_bits(high->opsel, 16, 128);\n'
                 '}\n'
                 '\n'
-                'int gfx1250_scaled_wmma_src1_size_bits(const MachineInst *inst) {\n'
+                'int cdna5_scaled_wmma_src1_size_bits(const MachineInst *inst) {\n'
                 '  const auto *high = reinterpret_cast<const Vop3pMachineInst *>(inst + 2);\n'
-                '  if (gfx1250_scaled_wmma_is_f4_32x16x128(inst))\n'
+                '  if (cdna5_scaled_wmma_is_f4_32x16x128(inst))\n'
                 '    return 256;\n'
-                '  return gfx1250_matrix_fmt_operand_size_bits((high->pad_14 << 2) | high->opsel_hi, 16, 128);\n'
+                '  return cdna5_matrix_fmt_operand_size_bits((high->pad_14 << 2) | high->opsel_hi, 16, 128);\n'
                 '}\n'
             )
             + '\n} // namespace'
@@ -4265,7 +4263,7 @@ class CodeGenerator:
         return _ImplOutputs(model=[model], execution=[execution])
 
     @staticmethod
-    def _emit_gfx1250_scaled_wmma_vop3px2_class() -> str:
+    def _emit_cdna5_scaled_wmma_vop3px2_class() -> str:
         return textwrap.dedent('''\
             class VWmmaScaleF32Vop3px2 : public Vop3p {
             public:
@@ -4284,23 +4282,23 @@ class CodeGenerator:
             };
             ''')
 
-    def _emit_gfx1250_scaled_wmma_vop3px2_impls(self) -> _ImplOutputs:
+    def _emit_cdna5_scaled_wmma_vop3px2_impls(self) -> _ImplOutputs:
         exec_fn = self._split_execute_expr('VWmmaScaleF32Vop3px2')
         model = textwrap.dedent('''\
             VWmmaScaleF32Vop3px2::VWmmaScaleF32Vop3px2(const MachineInst *inst)
-                : Vop3p(gfx1250_scaled_wmma_mnemonic(inst), reinterpret_cast<const OpEncoding *>(inst + 2),
+                : Vop3p(cdna5_scaled_wmma_mnemonic(inst), reinterpret_cast<const OpEncoding *>(inst + 2),
                         @EXEC_FN@, Vop3p::ExtensionDecodePolicy::Skip),
-                  vdst(gfx1250_scaled_wmma_dst_size_bits(inst), OperandType::OPR_VGPR,
+                  vdst(cdna5_scaled_wmma_dst_size_bits(inst), OperandType::OPR_VGPR,
                        reinterpret_cast<const OpEncoding *>(inst + 2)->vdst),
-                  src0(gfx1250_scaled_wmma_src0_size_bits(inst), OperandType::OPR_SRC_VGPR,
+                  src0(cdna5_scaled_wmma_src0_size_bits(inst), OperandType::OPR_SRC_VGPR,
                        reinterpret_cast<const OpEncoding *>(inst + 2)->src0),
-                  src1(gfx1250_scaled_wmma_src1_size_bits(inst), OperandType::OPR_SRC_VGPR,
+                  src1(cdna5_scaled_wmma_src1_size_bits(inst), OperandType::OPR_SRC_VGPR,
                        reinterpret_cast<const OpEncoding *>(inst + 2)->src1),
-                  src2(gfx1250_scaled_wmma_dst_size_bits(inst), OperandType::OPR_SRC_VGPR_OR_INLINE,
+                  src2(cdna5_scaled_wmma_dst_size_bits(inst), OperandType::OPR_SRC_VGPR_OR_INLINE,
                        reinterpret_cast<const OpEncoding *>(inst + 2)->src2),
-                  scale_src0(gfx1250_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
+                  scale_src0(cdna5_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
                              reinterpret_cast<const OpEncoding *>(inst)->src0),
-                  scale_src1(gfx1250_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
+                  scale_src1(cdna5_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
                              reinterpret_cast<const OpEncoding *>(inst)->src1),
                   scale_inst_(*reinterpret_cast<const OpEncoding *>(inst)) {
               raw_words_ = {inst[0], inst[1], inst[2], inst[3]};
@@ -4329,11 +4327,11 @@ class CodeGenerator:
                 const uint32_t matrix_b_fmt = (inst_.pad_14 << 2) | inst_.opsel_hi;
                 if (matrix_a_fmt != 0) {
                   out += " matrix_a_fmt:";
-                  out += gfx1250_matrix_fmt_name(matrix_a_fmt);
+                  out += cdna5_matrix_fmt_name(matrix_a_fmt);
                 }
                 if (matrix_b_fmt != 0) {
                   out += " matrix_b_fmt:";
-                  out += gfx1250_matrix_fmt_name(matrix_b_fmt);
+                  out += cdna5_matrix_fmt_name(matrix_b_fmt);
                 }
               }
               if (scale_inst_.opsel & 0x1u)
@@ -4344,11 +4342,11 @@ class CodeGenerator:
               const uint32_t matrix_b_scale_fmt = scale_inst_.neg_hi & 0x3u;
               if (matrix_a_scale_fmt != 0) {
                 out += " matrix_a_scale_fmt:";
-                out += gfx1250_matrix_scale_fmt_name(matrix_a_scale_fmt);
+                out += cdna5_matrix_scale_fmt_name(matrix_a_scale_fmt);
               }
               if (matrix_b_scale_fmt != 0) {
                 out += " matrix_b_scale_fmt:";
-                out += gfx1250_matrix_scale_fmt_name(matrix_b_scale_fmt);
+                out += cdna5_matrix_scale_fmt_name(matrix_b_scale_fmt);
               }
               if ((scale_inst_.opsel >> 2) & 0x1u)
                 out += " matrix_a_reuse";
@@ -4431,7 +4429,7 @@ class CodeGenerator:
         return _ImplOutputs(model=[model], execution=[execution])
 
     @staticmethod
-    def _emit_gfx1250_scaled_wmma_vop3px2_decoder_helpers() -> str:
+    def _emit_cdna5_scaled_wmma_vop3px2_decoder_helpers() -> str:
         return textwrap.dedent('''\
             namespace {
 
@@ -5483,7 +5481,7 @@ class CodeGenerator:
                     or cls == 'vector_cvt_sr_fp8_f16'
                 )
                 and is_vop3
-                and self.isa_spec.arch_name.lower() == 'gfx1250'
+                and self.isa_spec.arch_name.lower() == 'cdna5'
                 else None
             )
             return gen_vector_cvt_pk(
@@ -6324,7 +6322,7 @@ class CodeGenerator:
         L.append('    uint64_t base = amdgpu::RegisterAccess(wf).read_scalar64(saddr);')
         offset_expr = (
             'signed_ioffset(inst_.ioffset)'
-            if self.isa_spec.arch_name == 'gfx1250'
+            if self.isa_spec.arch_name == 'cdna5'
             else 'static_cast<int32_t>(inst_.ioffset << 8) >> 8'
         )
         L.append(f'    int64_t offset = static_cast<int64_t>({offset_expr});')
@@ -7857,19 +7855,17 @@ class CodeGenerator:
                         d16_partial_reg_offset = d16_vgpr_count - 1
                     # These gfx1250-only WMMA source-format fields derive the
                     # src0/src1 operand sizes from the instruction shape.
-                    gfx1250_f8f6f4_shape = self._gfx1250_f8f6f4_wmma_shape(inst)
+                    cdna5_f8f6f4_shape = self._cdna5_f8f6f4_wmma_shape(inst)
                     cdna4_f8f6f4_shape = self._cdna4_f8f6f4_mfma_shape(inst)
-                    gfx1250_swmmac_has_modifiers = self._gfx1250_swmmac_has_modifiers(
-                        inst
-                    )
+                    cdna5_swmmac_has_modifiers = self._cdna5_swmmac_has_modifiers(inst)
                     operand_size_exprs: dict[str, str] = {}
                     for opnd in inst.operands:
                         opnd_size_expr = self._operand_size_override(
                             enc.enc_name, opnd, inst_sem
                         )
                         if opnd_size_expr is None:
-                            opnd_size_expr = self._gfx1250_matrix_fmt_operand_size_expr(
-                                gfx1250_f8f6f4_shape, opnd.name
+                            opnd_size_expr = self._cdna5_matrix_fmt_operand_size_expr(
+                                cdna5_f8f6f4_shape, opnd.name
                             )
                         if opnd_size_expr is None:
                             opnd_size_expr = self._cdna4_matrix_fmt_operand_size_expr(
@@ -7892,7 +7888,7 @@ class CodeGenerator:
                         # here makes def/use and liveness falsely clobber the
                         # following SGPR.
                         if (
-                            self.isa_spec.arch_name == 'gfx1250'
+                            self.isa_spec.arch_name == 'cdna5'
                             and inst_sem is not None
                             and inst_sem.semantic_class
                             in ('vector_cmp', 'vector_cmp_class')
@@ -8196,7 +8192,7 @@ class CodeGenerator:
                                 'void implicit_uses(RegisterSet &uses) const override'
                             )
                         )
-                    if gfx1250_f8f6f4_shape is not None or gfx1250_swmmac_has_modifiers:
+                    if cdna5_f8f6f4_shape is not None or cdna5_swmmac_has_modifiers:
                         public_members.append(
                             cgen.Statement(
                                 'void build_modifiers(std::string &out) const override'
@@ -9501,18 +9497,18 @@ class CodeGenerator:
                                 '} // namespace detail'
                             )
                         )
-                    if gfx1250_f8f6f4_shape is not None:
+                    if cdna5_f8f6f4_shape is not None:
                         inst_impls.append(
                             cgen.Line(
                                 f'void {inst.fmt_name}::build_modifiers(std::string &out) const {{\n'
                                 f'  out += " matrix_a_fmt:";\n'
-                                f'  out += gfx1250_matrix_fmt_name(inst_.opsel);\n'
+                                f'  out += cdna5_matrix_fmt_name(inst_.opsel);\n'
                                 f'  out += " matrix_b_fmt:";\n'
-                                f'  out += gfx1250_matrix_fmt_name((inst_.pad_14 << 2) | inst_.opsel_hi);\n'
+                                f'  out += cdna5_matrix_fmt_name((inst_.pad_14 << 2) | inst_.opsel_hi);\n'
                                 f'}}'
                             )
                         )
-                    elif gfx1250_swmmac_has_modifiers:
+                    elif cdna5_swmmac_has_modifiers:
                         inst_impls.append(
                             cgen.Line(
                                 f'void {inst.fmt_name}::build_modifiers(std::string &out) const {{\n'
@@ -9871,16 +9867,16 @@ class CodeGenerator:
                 if _has_size_overrides:
                     h_includes.append(('array', True))
                 if (
-                    self._supports_gfx1250_scaled_wmma_vop3px2()
+                    self._supports_cdna5_scaled_wmma_vop3px2()
                     and enc.enc_name.upper() == 'ENC_VOP3P'
                 ):
                     if not _has_size_overrides:
                         h_includes.append(('array', True))
                     cpp_includes.append(('array', True))
                     inst_classes.append(
-                        cgen.Line(self._emit_gfx1250_scaled_wmma_vop3px2_class())
+                        cgen.Line(self._emit_cdna5_scaled_wmma_vop3px2_class())
                     )
-                    scaled_outputs = self._emit_gfx1250_scaled_wmma_vop3px2_impls()
+                    scaled_outputs = self._emit_cdna5_scaled_wmma_vop3px2_impls()
                     class_func_impls.model.extend(
                         cgen.Line(impl) for impl in scaled_outputs.model
                     )
@@ -9903,10 +9899,10 @@ class CodeGenerator:
                 # from data_types.h (included via cpp_includes when has_sem).
 
                 if (
-                    self.isa_spec.arch_name.lower() == 'gfx1250'
+                    self.isa_spec.arch_name.lower() == 'cdna5'
                     and enc.enc_name.upper() == 'ENC_VOP3P'
                 ):
-                    matrix_outputs = self._emit_gfx1250_matrix_fmt_helpers()
+                    matrix_outputs = self._emit_cdna5_matrix_fmt_helpers()
                     class_func_impls.model[0:0] = [
                         cgen.Line(impl) for impl in matrix_outputs.model
                     ]
@@ -12679,9 +12675,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             ),
         ]
         decode_body = []
-        if self._supports_gfx1250_scaled_wmma_vop3px2():
+        if self._supports_cdna5_scaled_wmma_vop3px2():
             class_impl.append(
-                cgen.Line(self._emit_gfx1250_scaled_wmma_vop3px2_decoder_helpers())
+                cgen.Line(self._emit_cdna5_scaled_wmma_vop3px2_decoder_helpers())
             )
         decode_body.extend(
             [
@@ -12773,7 +12769,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 ]
             )
 
-        if self._supports_gfx1250_scaled_wmma_vop3px2():
+        if self._supports_cdna5_scaled_wmma_vop3px2():
             for _dte in self.isa_spec.primary_decode_table:
                 if (
                     _dte is not None

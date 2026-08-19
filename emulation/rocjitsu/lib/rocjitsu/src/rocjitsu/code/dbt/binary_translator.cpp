@@ -455,7 +455,7 @@ translation_refusal(const CodeObjectPatcher &patcher, rj_code_arch_t guest_arch,
 
   // A same-architecture gfx1250 translation is direction-specific: A0 and B0 share an ELF machine
   // ID, so both revisions must be given. Enforce this here as well as in the C API.
-  if (guest_arch == ROCJITSU_CODE_ARCH_GFX1250 && host_arch == ROCJITSU_CODE_ARCH_GFX1250) {
+  if (guest_arch == ROCJITSU_CODE_ARCH_CDNA5 && host_arch == ROCJITSU_CODE_ARCH_CDNA5) {
     if (options.input_revision == ProcessorRevision::Unspecified ||
         options.output_revision == ProcessorRevision::Unspecified) {
       return error(DiagnosticKind::Legalization,
@@ -2051,7 +2051,7 @@ BinaryTranslator::BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t hos
           guest_arch, host_arch, options.input_revision, options.output_revision)) {}
 
 bool BinaryTranslator::is_gfx1250_b0_to_a0() const {
-  return guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_GFX1250 &&
+  return guest_arch_ == ROCJITSU_CODE_ARCH_CDNA5 && host_arch_ == ROCJITSU_CODE_ARCH_CDNA5 &&
          options_.input_revision == ProcessorRevision::Gfx1250B0 &&
          options_.output_revision == ProcessorRevision::Gfx1250A0;
 }
@@ -2178,7 +2178,7 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
 
       uint32_t first_word = 0;
       std::memcpy(&first_word, text_bytes.data() + instruction_offset, sizeof(first_word));
-      if (host_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && first_word == 0) {
+      if (host_arch_ == ROCJITSU_CODE_ARCH_CDNA5 && first_word == 0) {
         ++instruction_word_index;
         instruction_offset += sizeof(uint32_t);
         continue;
@@ -2333,7 +2333,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   // A same-architecture gfx1250 translation is direction-specific: A0 and B0
   // share an ELF machine ID, so both revisions must be given. Enforce this here
   // as well as in the C API.
-  if (guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_GFX1250) {
+  if (guest_arch_ == ROCJITSU_CODE_ARCH_CDNA5 && host_arch_ == ROCJITSU_CODE_ARCH_CDNA5) {
     if (options_.input_revision == ProcessorRevision::Unspecified ||
         options_.output_revision == ProcessorRevision::Unspecified) {
       append_error(result.diagnostics, DiagnosticKind::Legalization,
@@ -2430,7 +2430,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
 
   if (descriptor_translations.empty()) {
     const bool descriptorless_gfx1250_b0_to_a0 =
-        guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_GFX1250 &&
+        guest_arch_ == ROCJITSU_CODE_ARCH_CDNA5 && host_arch_ == ROCJITSU_CODE_ARCH_CDNA5 &&
         options_.input_revision == ProcessorRevision::Gfx1250B0 &&
         options_.output_revision == ProcessorRevision::Gfx1250A0;
     if (!descriptorless_gfx1250_b0_to_a0) {

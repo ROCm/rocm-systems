@@ -44,7 +44,7 @@ std::string make_single_se_gfx1250_config(uint32_t num_cus) {
              std::to_string(i) + R"(","latency":1,"weight":10})";
   }
 
-  return R"({"max_ticks":10000,"num_threads":1,"vm":{"arch":"gfx1250"},)"
+  return R"({"max_ticks":10000,"num_threads":1,"vm":{"arch":"cdna5"},)"
          R"("topology":{"root":{"name":"soc","type":"soc","children":[)"
          R"({"name":"vram","type":"gpu_memory"},)"
          R"({"name":"xcd0","type":"xcd","children":[)"

@@ -660,7 +660,7 @@ private:
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return add_base(0x47);
   case ROCJITSU_CODE_ARCH_RV32I:
   case ROCJITSU_CODE_ARCH_RV64I:
@@ -697,7 +697,7 @@ private:
       return std::nullopt;
     }
     return std::nullopt;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     switch (op) {
     case ScalarSop2Op::AddU32:
       return 0;
@@ -1145,7 +1145,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   //
   // Match only the self-update literal forms. Register addends would require a
   // separate constant-propagation proof and must continue to fail closed.
-  if (arch != ROCJITSU_CODE_ARCH_GFX1250 || inst.mnemonic() != "s_add_nc_u64" ||
+  if (arch != ROCJITSU_CODE_ARCH_CDNA5 || inst.mnemonic() != "s_add_nc_u64" ||
       inst.num_dst_operands() != 1 || inst.num_src_operands() != 2)
     return false;
 
@@ -1558,7 +1558,7 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
     return std::nullopt;
 
   const auto is_gfx1250_padding = [&](size_t index) {
-    if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
+    if (ctx.arch != ROCJITSU_CODE_ARCH_CDNA5)
       return false;
     const Instruction &inst = *ctx.insts[index];
     // The gfx1250 sequence drains XCNT before an instruction prefetch. The
@@ -1643,7 +1643,7 @@ match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock 
     return std::nullopt;
 
   const auto is_gfx1250_padding = [&](size_t index) {
-    if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
+    if (ctx.arch != ROCJITSU_CODE_ARCH_CDNA5)
       return false;
     const Instruction &inst = *ctx.insts[index];
     if (inst.mnemonic() == "s_wait_xcnt" || inst.mnemonic() == "s_prefetch_inst_pc_rel")
@@ -2536,7 +2536,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
   // This pass only observes MODE; it never inserts or reorders
   // S_SETREG/S_SET_VGPR_MSB and therefore cannot violate the required co-issue
   // spacing.
-  if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
+  if (ctx.arch != ROCJITSU_CODE_ARCH_CDNA5)
     return;
 
   if (blocks.empty())

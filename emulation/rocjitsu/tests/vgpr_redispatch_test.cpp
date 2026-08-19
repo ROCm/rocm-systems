@@ -81,7 +81,7 @@ INSTANTIATE_TEST_SUITE_P(
     WaveSizes, VgprRedispatchTest,
     ::testing::Values(RedispatchCase{ROCJITSU_CODE_ARCH_RDNA4, 32, 256, "Wave32"},
                       RedispatchCase{ROCJITSU_CODE_ARCH_CDNA4, 64, 256, "Wave64"},
-                      RedispatchCase{ROCJITSU_CODE_ARCH_GFX1250, 32, 1024, "Gfx1250"}),
+                      RedispatchCase{ROCJITSU_CODE_ARCH_CDNA5, 32, 1024, "Gfx1250"}),
     [](const ::testing::TestParamInfo<RedispatchCase> &info) { return info.param.name; });
 
 } // namespace
