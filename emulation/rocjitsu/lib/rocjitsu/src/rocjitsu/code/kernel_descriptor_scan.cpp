@@ -165,7 +165,7 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
 
 uint8_t kernel_wavefront_size(rj_code_arch_t arch, const KD &desc) {
   // CDNA kernels are Wave64 in the code objects currently handled here.
-  if (arch_is_cdna(arch))
+  if (arch_is_cdna_4_or_lower(arch))
     return 64;
 
   // gfx1250 is Wave32-only. Do not interpret a missing legacy descriptor bit
@@ -199,7 +199,7 @@ uint32_t descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch, uint32_t
   // occupancy would mix two different hardware contracts.
   if (arch == ROCJITSU_CODE_ARCH_CDNA1)
     return 4;
-  if (arch_is_cdna(arch))
+  if (arch_is_cdna_4_or_lower(arch))
     return 8;
   // gfx1250 exposes four 256-VGPR banks selected by WAVE_MODE.VGPR_MSB. Its
   // AMDHSA descriptor allocates that combined Wave32 namespace in blocks of

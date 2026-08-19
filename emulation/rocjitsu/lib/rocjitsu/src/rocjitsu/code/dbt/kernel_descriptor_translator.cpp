@@ -423,7 +423,7 @@ build_kernel_entry_prologue(const KD &src, rj_code_arch_t guest_arch, rj_code_ar
   // - Scratch/private-segment initialization is descriptor-driven today. If a
   //   future target needs SGPR-based scratch setup, it should be appended here
   //   and represented in KdTranslation::prologue_words, not hidden in the patcher.
-  if (arch_is_cdna(guest_arch) && host_arch == ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch_is_cdna_4_or_lower(guest_arch) && host_arch == ROCJITSU_CODE_ARCH_RDNA4)
     append_rdna4_workgroup_grid_prologue(words, src, host_arch);
 
   return words;

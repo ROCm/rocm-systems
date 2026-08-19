@@ -83,7 +83,11 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
 ///
 /// @details Keep architecture-family policy near the ISA trait declarations so
 /// DBT call sites do not grow their own partial CDNA/RDNA switch statements.
-[[nodiscard]] inline constexpr bool arch_is_cdna(rj_code_arch_t arch) {
+///
+/// Currently CDNA5 is missing from this check. This is because CDNA5
+/// support in rocjitsu started as gfx1250 and modeled as inheriting
+/// properties from an RDNA4 profile.
+[[nodiscard]] inline constexpr bool arch_is_cdna_4_or_lower(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
          arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
 }
@@ -110,7 +114,7 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
   // scratch range in CdnaIsaBase), so they are named here rather than derived.
   constexpr uint32_t kCdnaDescriptorSgprLimit = 112;
   constexpr uint32_t kRdnaDescriptorSgprLimit = 106;
-  if (arch_is_cdna(arch))
+  if (arch_is_cdna_4_or_lower(arch))
     return kCdnaDescriptorSgprLimit;
   if (arch_is_rdna(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5)
     return kRdnaDescriptorSgprLimit;
