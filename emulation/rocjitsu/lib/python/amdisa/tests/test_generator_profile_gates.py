@@ -1392,6 +1392,7 @@ def test_gfx1250_profile_enables_generator_backed_quirks():
     assert profile.uses_packed_16bit_e32_source_selectors
     assert profile.uses_true16_vop3_opsel
     assert profile.vbuffer_store_data_uses_dst_vgpr_msb_role
+    assert profile.buffer_payload_reads_use_effective_exec_mask
     assert profile.generate_scaled_wmma_vop3px2
     assert profile.smem_address_uses_access_size
     assert profile.vop3_cmp_sdst_size_bits == 32
@@ -1430,6 +1431,7 @@ def test_rdna3_profile_enables_gfx11_vop3_true16_only():
     assert profile.uses_packed_16bit_e32_source_selectors
     assert profile.uses_true16_vop3_opsel
     assert not profile.vbuffer_store_data_uses_dst_vgpr_msb_role
+    assert not profile.buffer_payload_reads_use_effective_exec_mask
 
 
 def test_rdna4_profile_enables_gfx12_true16_and_mode_hwregs_only():
@@ -1438,6 +1440,7 @@ def test_rdna4_profile_enables_gfx12_true16_and_mode_hwregs_only():
     assert profile.uses_packed_16bit_e32_source_selectors
     assert profile.uses_true16_vop3_opsel
     assert not profile.vbuffer_store_data_uses_dst_vgpr_msb_role
+    assert not profile.buffer_payload_reads_use_effective_exec_mask
     assert not profile.generate_scaled_wmma_vop3px2
     assert not profile.smem_address_uses_access_size
     assert profile.vop3_cmp_sdst_size_bits is None
@@ -4242,6 +4245,42 @@ def test_gfx1250_buffer_cmpswap_payload_width_is_independent_of_element_width():
     assert 'd->elem_size = 8;' in body
     assert 'd->store_data.resize(wf.wf_size() * 16);' in body
     assert 'data_base + 3' in body
+
+
+@pytest.mark.parametrize(
+    'arch_name,profile,expected_exec,unexpected_exec',
+    [
+        ('cdna5', Cdna5Profile(), 'd->exec_mask', 'wf.exec()'),
+        ('rdna4', Rdna4Profile(), 'wf.exec()', 'd->exec_mask'),
+    ],
+)
+def test_buffer_payload_read_exec_policy_is_profile_owned(
+    arch_name, profile, expected_exec, unexpected_exec
+):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name=arch_name,
+        profile=profile,
+    )
+
+    store = SimpleNamespace(
+        name='BUFFER_STORE_B32',
+        elem_size=4,
+        num_elems=1,
+    )
+    atomic = SimpleNamespace(
+        name='BUFFER_ATOMIC_ADD_U32',
+        operation='add',
+        elem_size=4,
+        num_elems=1,
+    )
+
+    for body in (
+        codegen._gen_buffer_store([], [], store),
+        codegen._gen_buffer_atomic([], [], atomic),
+    ):
+        assert f'uint64_t exec = {expected_exec};' in body
+        assert f'uint64_t exec = {unexpected_exec};' not in body
 
 
 def test_gfx1250_buffer_u64_atomic_payload_width_uses_two_dwords():

@@ -329,6 +329,11 @@ class IsaProfile(ABC):
         return False
 
     @property
+    def buffer_payload_reads_use_effective_exec_mask(self) -> bool:
+        """True when buffer store/atomic payload reads use post-address-calc EXEC."""
+        return False
+
+    @property
     def generate_scaled_wmma_vop3px2(self) -> bool:
         """True when generator should synthesize scaled-WMMA VOP3PX2 support."""
         return False
@@ -1871,6 +1876,10 @@ class Cdna5Profile(Rdna4Profile):
 
     @property
     def vbuffer_store_data_uses_dst_vgpr_msb_role(self) -> bool:
+        return True
+
+    @property
+    def buffer_payload_reads_use_effective_exec_mask(self) -> bool:
         return True
 
     @property

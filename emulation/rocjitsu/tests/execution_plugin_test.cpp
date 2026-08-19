@@ -156,6 +156,11 @@ public:
   }
 };
 
+class TestWaitcntInstruction : public Instruction {
+public:
+  TestWaitcntInstruction() : Instruction("s_waitcnt", nullptr) {}
+};
+
 struct ForceScalarOverride {
   explicit ForceScalarOverride(bool value) : old(util::force_scalar()) {
     util::set_force_scalar_for_testing(value);
@@ -3161,6 +3166,7 @@ TEST(RaceDetectorPluginTest, DroppedAsyncLdsLaneDoesNotCreateLowAddressRace) {
   dropped->lds_dst = true;
   dropped->lds_per_lane_addr = true;
   dropped->wf_size = writer->wf_size();
+  dropped->exec_mask = 0x1u;
   dropped->lane_mask = 0x1u;
   dropped->per_lane_lds_addr[0] = amdgpu::kInvalidLdsAddress;
   TestMemoryInstruction dropped_inst(std::move(dropped));
@@ -3179,6 +3185,95 @@ TEST(RaceDetectorPluginTest, DroppedAsyncLdsLaneDoesNotCreateLowAddressRace) {
 
   EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
 }
+
+class IgnoredGlobalMemoryRaceTest : public ::testing::TestWithParam<AtomicOp> {};
+
+TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotCreateDestinationRace) {
+  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"cdna5", /*wavefront_size=*/32);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *wf = f.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x1u);
+  std::array<amdgpu::Wavefront *, 1> waves{wf};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/0,
+                                               /*physical_vgpr_count=*/256, /*sgpr_count=*/104,
+                                               waves);
+
+  constexpr uint32_t kDestinationVgpr = 7;
+  auto ignored = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  ignored->elem_size = 4;
+  ignored->num_elems = 1;
+  ignored->is_load = true;
+  ignored->atomic_op = GetParam();
+  ignored->exec_mask = 0;
+  ignored->lane_mask = 0;
+  ignored->wf_size = wf->wf_size();
+  ignored->dst_reg_base = wf->vgpr_alloc().base + kDestinationVgpr;
+  TestMemoryInstruction ignored_inst(std::move(ignored));
+  f.plugin_group_->onAmdgpuRouteMemoryInstruction(ignored_inst, *wf);
+
+  f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base + kDestinationVgpr,
+                                         /*lane_mask=*/0x1u, /*byte_mask=*/0xFu);
+  EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
+}
+
+TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotConsumeVmcntOrderingSlot) {
+  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"cdna5", /*wavefront_size=*/32);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *wf = f.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x1u);
+  std::array<amdgpu::Wavefront *, 1> waves{wf};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/0,
+                                               /*physical_vgpr_count=*/256, /*sgpr_count=*/104,
+                                               waves);
+
+  constexpr uint32_t kDestinationVgpr = 7;
+  auto load = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  load->elem_size = 4;
+  load->num_elems = 1;
+  load->is_load = true;
+  load->exec_mask = 0x1u;
+  load->lane_mask = 0x1u;
+  load->wf_size = wf->wf_size();
+  load->dst_reg_base = wf->vgpr_alloc().base + kDestinationVgpr;
+  TestMemoryInstruction load_inst(std::move(load));
+  f.plugin_group_->onAmdgpuRouteMemoryInstruction(load_inst, *wf);
+
+  auto ignored = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  ignored->elem_size = 4;
+  ignored->num_elems = 1;
+  ignored->is_load = false;
+  ignored->atomic_op = GetParam();
+  ignored->exec_mask = 0;
+  ignored->lane_mask = 0;
+  ignored->wf_size = wf->wf_size();
+  TestMemoryInstruction ignored_inst(std::move(ignored));
+  f.plugin_group_->onAmdgpuRouteMemoryInstruction(ignored_inst, *wf);
+
+  wf->set_wait_target(/*vmcnt=*/1, /*lgkmcnt=*/0, /*expcnt=*/0);
+  TestWaitcntInstruction waitcnt;
+  f.plugin_group_->onAmdgpuAfterExecuteInstruction(wf->pc, waitcnt, *wf);
+
+  f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base + kDestinationVgpr,
+                                         /*lane_mask=*/0x1u, /*byte_mask=*/0xFu);
+  EXPECT_NE(sink.str().find("RACE "), std::string::npos);
+}
+
+INSTANTIATE_TEST_SUITE_P(LoadAndReturningAtomic, IgnoredGlobalMemoryRaceTest,
+                         ::testing::Values(AtomicOp::NONE, AtomicOp::SWAP));
 
 TEST(ExecutionPluginGroupTest, OwnsConfiguredSinkForRetainedGroupLifetime) {
   std::vector<std::string> events;

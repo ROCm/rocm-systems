@@ -144,7 +144,8 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
   uint32_t vgpr_count = is_atomic ? (d.elem_size / 4) : std::max(1u, total_bytes / 4);
 
   // Zero destination VGPRs for OOB lanes. Per AMD ISA spec, out-of-bounds
-  // buffer loads return 0. exec_mask is the original EXEC at issue time;
+  // buffer loads return 0. exec_mask is the effective EXEC at issue time;
+  // ordinary OOB accesses retain it while ignored resource types clear it.
   // lane_mask has OOB lanes removed. The difference gives exec-active OOB lanes.
   uint64_t exec = d.exec_mask;
   uint64_t oob_mask = exec & ~d.lane_mask; // exec-active but OOB
@@ -508,19 +509,20 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
     if (scratch_lanes)
       l1_->load(d.per_lane_addr.data(), scratch_lanes, d.elem_size, d.num_elems,
                 d.response_data.data(), d.mtype, d.non_temporal, d.request_force_l1_bypass,
-                d.wf_size, wf.process_id(), stride, d.element_lane_masks);
+                d.wf_size, wf.process_id(), stride, d.element_lane_masks.view());
     if (plain_lanes)
       l1_->load(d.per_lane_addr.data(), plain_lanes, d.elem_size, d.num_elems,
                 d.response_data.data(), d.mtype, d.non_temporal, d.request_force_l1_bypass,
-                d.wf_size, wf.process_id(), 0, d.element_lane_masks);
+                d.wf_size, wf.process_id(), 0, d.element_lane_masks.view());
   } else {
     if (scratch_lanes)
       l1_->store(d.per_lane_addr.data(), scratch_lanes, d.elem_size, d.num_elems,
                  d.store_data.data(), d.mtype, d.non_temporal, d.wf_size, wf.process_id(), stride,
-                 d.element_lane_masks);
+                 d.element_lane_masks.view());
     if (plain_lanes)
       l1_->store(d.per_lane_addr.data(), plain_lanes, d.elem_size, d.num_elems, d.store_data.data(),
-                 d.mtype, d.non_temporal, d.wf_size, wf.process_id(), 0, d.element_lane_masks);
+                 d.mtype, d.non_temporal, d.wf_size, wf.process_id(), 0,
+                 d.element_lane_masks.view());
   }
 }
 
