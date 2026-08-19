@@ -3422,6 +3422,17 @@ def test_gfx1250_helper_blocks_emit_scaled_wmma_table_decoder(
         'selected_exec_fn(InstructionExecutionId::VWmmaScaleF32Vop3px2), '
         'Vop3p::ExtensionDecodePolicy::Skip),'
     ) in model_impl
+    assert model_impl.count('cdna5_scale_operand_size_bits( inst,') == 2
+
+    helper_model = ' '.join(codegen._emit_cdna5_matrix_fmt_helpers().model[0].split())
+    assert (
+        'int cdna5_scale_operand_size_bits(const MachineInst *inst, uint32_t selector)'
+        in helper_model
+    )
+    assert (
+        'return cdna5_scaled_wmma_is_scale16(inst) && is_vgpr ? 64 : 32;'
+        in helper_model
+    )
 
     helpers = codegen._emit_cdna5_scaled_wmma_vop3px2_decoder_helpers()
     assert 'isVop3pOp' in helpers

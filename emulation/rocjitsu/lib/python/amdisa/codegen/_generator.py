@@ -4344,8 +4344,10 @@ class CodeGenerator:
                 '                                             : "v_wmma_scale_f32_16x16x128_f8f6f4";\n'
                 '}\n'
                 '\n'
-                'int cdna5_scale_operand_size_bits(const MachineInst *inst) {\n'
-                '  return cdna5_scaled_wmma_is_scale16(inst) ? 64 : 32;\n'
+                'int cdna5_scale_operand_size_bits(const MachineInst *inst, uint32_t selector) {\n'
+                '  const bool is_vgpr = selector >= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MIN &&\n'
+                '                       selector <= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MAX;\n'
+                '  return cdna5_scaled_wmma_is_scale16(inst) && is_vgpr ? 64 : 32;\n'
                 '}\n'
                 '\n'
                 'int cdna5_scaled_wmma_dst_size_bits(const MachineInst *inst) {\n'
@@ -4462,9 +4464,13 @@ class CodeGenerator:
                        reinterpret_cast<const OpEncoding *>(inst + 2)->src1),
                   src2(cdna5_scaled_wmma_dst_size_bits(inst), OperandType::OPR_SRC_VGPR_OR_INLINE,
                        reinterpret_cast<const OpEncoding *>(inst + 2)->src2),
-                  scale_src0(cdna5_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
+                  scale_src0(cdna5_scale_operand_size_bits(
+                                 inst, reinterpret_cast<const OpEncoding *>(inst)->src0),
+                             OperandType::OPR_SRC_SIMPLE,
                              reinterpret_cast<const OpEncoding *>(inst)->src0),
-                  scale_src1(cdna5_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
+                  scale_src1(cdna5_scale_operand_size_bits(
+                                 inst, reinterpret_cast<const OpEncoding *>(inst)->src1),
+                             OperandType::OPR_SRC_SIMPLE,
                              reinterpret_cast<const OpEncoding *>(inst)->src1),
                   scale_inst_(*reinterpret_cast<const OpEncoding *>(inst)) {
               raw_words_ = {inst[0], inst[1], inst[2], inst[3]};

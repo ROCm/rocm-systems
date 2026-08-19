@@ -643,6 +643,30 @@ TEST(Gfx1250DecodeTest, WmmaScale16F8f6f4ConsumesVop3px2Pair) {
             "v[26:27], v[28:29] matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP4");
 }
 
+TEST(Gfx1250DecodeTest, WmmaScale16ScalarSourcesUseSingleSgprs) {
+  const auto words = build_scaled_wmma_words(0x3a, 0, 0, 0, 0, 0, 2);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->disassemble(),
+            "v_wmma_scale16_f32_16x16x128_f8f6f4 v[64:71], v[0:15], v[32:47], v[64:71], "
+            "s0, s2");
+}
+
+TEST(Gfx1250DecodeTest, WmmaScale16InlineScaleSourcesRemainInline) {
+  const auto words = build_scaled_wmma_words(0x3a, 0, 0, 0, 0, 128, 128);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->disassemble(),
+            "v_wmma_scale16_f32_16x16x128_f8f6f4 v[64:71], v[0:15], v[32:47], v[64:71], "
+            "0, 0");
+}
+
 TEST(Gfx1250DecodeTest, WmmaScaleF4_32x16x128ConsumesVop3px2Pair) {
   const uint32_t words[] = {
       0xCC350000u,
