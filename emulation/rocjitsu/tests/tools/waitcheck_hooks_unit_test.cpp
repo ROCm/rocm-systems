@@ -45,6 +45,14 @@ int64_t g_load_delta = 0x100000;
 hsa_amd_queue_intercept_handler_t g_intercept_handler = nullptr;
 void *g_intercept_data = nullptr;
 hsa_queue_t g_intercept_queue{};
+hsa_queue_t g_descriptor_queue{};
+int g_amd_queue_create_calls = 0;
+hsa_queue_t *g_last_destroyed_queue = nullptr;
+hsa_queue_t *g_priority_queue = nullptr;
+hsa_amd_queue_priority_t g_priority = HSA_AMD_QUEUE_PRIORITY_NORMAL;
+hsa_queue_t *g_cu_mask_queue = nullptr;
+uint32_t g_cu_mask_count = 0;
+uint32_t g_cu_mask_first_word = 0;
 
 decltype(hsa_code_object_reader_create_from_memory) *g_inner_create = nullptr;
 decltype(hsa_code_object_reader_destroy) *g_inner_destroy = nullptr;
@@ -119,7 +127,10 @@ hsa_status_t HSA_API fake_executable_freeze(hsa_executable_t, const char *) {
 
 hsa_status_t HSA_API fake_executable_destroy(hsa_executable_t) { return HSA_STATUS_SUCCESS; }
 
-hsa_status_t HSA_API fake_queue_destroy(hsa_queue_t *) { return HSA_STATUS_SUCCESS; }
+hsa_status_t HSA_API fake_queue_destroy(hsa_queue_t *queue) {
+  g_last_destroyed_queue = queue;
+  return HSA_STATUS_SUCCESS;
+}
 
 hsa_status_t HSA_API fake_queue_intercept_create(hsa_agent_t, uint32_t, hsa_queue_type32_t,
                                                  void (*)(hsa_status_t, hsa_queue_t *, void *),
@@ -135,6 +146,33 @@ hsa_status_t HSA_API fake_queue_intercept_register(hsa_queue_t *,
                                                    void *data) {
   g_intercept_handler = handler;
   g_intercept_data = data;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HSA_API fake_amd_queue_create(hsa_agent_t, hsa_amd_queue_create_desc_t *descs,
+                                           uint32_t num_descs) {
+  ++g_amd_queue_create_calls;
+  if (descs == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  for (uint32_t index = 0; index < num_descs; ++index) {
+    if (descs[index].engine_type == HSA_AMD_QUEUE_ENGINE_COMPUTE)
+      descs[index].queue = &g_descriptor_queue;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HSA_API fake_queue_set_priority(hsa_queue_t *queue,
+                                             hsa_amd_queue_priority_t priority) {
+  g_priority_queue = queue;
+  g_priority = priority;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HSA_API fake_queue_cu_set_mask(const hsa_queue_t *queue, uint32_t count,
+                                            const uint32_t *mask) {
+  g_cu_mask_queue = const_cast<hsa_queue_t *>(queue);
+  g_cu_mask_count = count;
+  g_cu_mask_first_word = mask == nullptr ? 0u : mask[0];
   return HSA_STATUS_SUCCESS;
 }
 
@@ -190,6 +228,9 @@ AmdExtTable make_amd_ext_table() {
   table.version.minor_id = sizeof(AmdExtTable);
   table.hsa_amd_queue_intercept_create_fn = fake_queue_intercept_create;
   table.hsa_amd_queue_intercept_register_fn = fake_queue_intercept_register;
+  table.hsa_amd_queue_set_priority_fn = fake_queue_set_priority;
+  table.hsa_amd_queue_cu_set_mask_fn = fake_queue_cu_set_mask;
+  table.hsa_amd_queue_create_fn = fake_amd_queue_create;
   return table;
 }
 
@@ -315,6 +356,13 @@ protected:
     g_writer_calls = 0;
     g_intercept_handler = nullptr;
     g_intercept_data = nullptr;
+    g_amd_queue_create_calls = 0;
+    g_last_destroyed_queue = nullptr;
+    g_priority_queue = nullptr;
+    g_priority = HSA_AMD_QUEUE_PRIORITY_NORMAL;
+    g_cu_mask_queue = nullptr;
+    g_cu_mask_count = 0;
+    g_cu_mask_first_word = 0;
     setenv("ROCJITSU_WAITCHECK", "1", 1);
     setenv("ROCJITSU_WAITCHECK_FAIL", "1", 1);
     setenv("ROCJITSU_WAITCHECK_MODE", "eager", 1);
@@ -587,6 +635,48 @@ TEST_F(WaitcheckHooksTest, DispatchModeWrapsDirectInterceptQueueCreationAndResto
   OnUnload();
   loaded_ = false;
   EXPECT_EQ(amd_ext_.hsa_amd_queue_intercept_create_fn, fake_queue_intercept_create);
+}
+
+TEST_F(WaitcheckHooksTest, DispatchModeReplacesDescriptorComputeQueueAndRestoresIt) {
+  OnUnload();
+  loaded_ = false;
+  setenv("ROCJITSU_WAITCHECK_MODE", "dispatch", 1);
+
+  core_ = make_core_table();
+  amd_ext_ = make_amd_ext_table();
+  table_ = make_api_table(&core_, &amd_ext_);
+  ASSERT_TRUE(OnLoad(&table_, 1, 0, nullptr));
+  loaded_ = true;
+
+  ASSERT_NE(amd_ext_.hsa_amd_queue_create_fn, fake_amd_queue_create);
+  constexpr uint32_t cu_mask = 0x5u;
+  hsa_amd_queue_create_desc_t desc{};
+  desc.version = HSA_AMD_QUEUE_CREATE_DESC_VERSION;
+  desc.engine_type = HSA_AMD_QUEUE_ENGINE_COMPUTE;
+  desc.queue_size_bytes = 64u * sizeof(hsa_kernel_dispatch_packet_t);
+  desc.priority = HSA_AMD_QUEUE_PRIORITY_HIGH;
+  desc.engine.compute = {
+      .cu_mask = &cu_mask,
+      .type = HSA_QUEUE_TYPE_MULTI,
+      .private_segment_size = HSA_AMD_PRIVATE_SEGMENT_SIZE_DEFAULT,
+      .cu_mask_count = 1,
+      .reserved = {},
+  };
+
+  ASSERT_EQ(amd_ext_.hsa_amd_queue_create_fn({}, &desc, 1), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_amd_queue_create_calls, 1);
+  EXPECT_EQ(desc.queue, &g_intercept_queue);
+  EXPECT_EQ(g_last_destroyed_queue, &g_descriptor_queue);
+  EXPECT_NE(g_intercept_handler, nullptr);
+  EXPECT_EQ(g_priority_queue, &g_intercept_queue);
+  EXPECT_EQ(g_priority, HSA_AMD_QUEUE_PRIORITY_HIGH);
+  EXPECT_EQ(g_cu_mask_queue, &g_intercept_queue);
+  EXPECT_EQ(g_cu_mask_count, 1u);
+  EXPECT_EQ(g_cu_mask_first_word, cu_mask);
+
+  OnUnload();
+  loaded_ = false;
+  EXPECT_EQ(amd_ext_.hsa_amd_queue_create_fn, fake_amd_queue_create);
 }
 
 TEST(WaitcheckHooksValidationTest, RejectsTruncatedCoreTable) {
