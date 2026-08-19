@@ -116,6 +116,7 @@ struct alignas(64) ncclIbDev {
   char* pciPath;
   int realPort;
   int maxQp;
+  int maxCqe;
   float latency;
   struct ncclIbMrCache mrCache;
   int ar; // ADAPTIVE_ROUTING
