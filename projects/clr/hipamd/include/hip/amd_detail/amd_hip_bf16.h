@@ -1457,7 +1457,7 @@ __BF16_HOST_DEVICE_STATIC__ bool __hbne2(const __hip_bfloat162 a, const __hip_bf
 
 /**
  * \ingroup HIP_INTRINSIC_BFLOAT162_COMP
- * \brief Check for a != b
+ * \brief Check for a != b - unordered
  */
 __BF16_HOST_DEVICE_STATIC__ bool __hbneu2(const __hip_bfloat162 a, const __hip_bfloat162 b) {
   return __hneu(a.x, b.x) && __hneu(a.y, b.y);
