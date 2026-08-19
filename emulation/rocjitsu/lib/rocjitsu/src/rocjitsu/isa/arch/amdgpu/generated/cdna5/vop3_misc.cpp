@@ -630,6 +630,65 @@ DecodeResult decodeVMqsadU32U8Vop3(const MachineInst *opcode,
 }
 } // namespace detail
 
+VBcntU32B32Vop3::VBcntU32B32Vop3(const MachineInst *inst)
+    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
+               ? "v_bcnt_u32_b32_e64_dpp"
+               : "v_bcnt_u32_b32",
+           reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VBcntU32B32Vop3)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  num_src_ = 2;
+  num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+    src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+    src1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
+    auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
+    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
+                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
+                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
+    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
+    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    dpp_ctrl_ = dp->dpp_ctrl;
+    dpp_row_mask_ = dp->row_mask;
+    dpp_bank_mask_ = dp->bank_mask;
+    dpp_bound_ctrl_ = dp->bound_ctrl;
+    dpp_fi_ = dp->fi;
+  }
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+}
+
+namespace detail {
+DecodeResult decodeVBcntU32B32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_bcnt_u32_b32_e64_dpp"
+          : "v_bcnt_u32_b32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VBcntU32B32Vop3>(opcode);
+}
+} // namespace detail
+
 VTrigPreopF64Vop3::VTrigPreopF64Vop3(const MachineInst *inst)
     : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
                ? "v_trig_preop_f64_e64_dpp"
