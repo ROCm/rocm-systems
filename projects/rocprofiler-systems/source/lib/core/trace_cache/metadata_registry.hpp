@@ -69,9 +69,9 @@ struct pmc_info_hash
 {
     std::size_t operator()(const pmc& _pmc) const noexcept
     {
-        std::size_t h1 = std::hash<size_t>{}(static_cast<size_t>(_pmc.type));
-        std::size_t h2 = std::hash<size_t>{}(_pmc.agent_type_index);
-        std::size_t h3 = std::hash<std::string>{}(_pmc.name);
+        const std::size_t h1 = std::hash<size_t>{}(static_cast<size_t>(_pmc.type));
+        const std::size_t h2 = std::hash<size_t>{}(_pmc.agent_type_index);
+        const std::size_t h3 = std::hash<std::string>{}(_pmc.name);
         return h1 ^ (h2 << 1) ^ (h3 << 1);
     }
 };

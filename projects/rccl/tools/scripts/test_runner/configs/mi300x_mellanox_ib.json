@@ -121,6 +121,29 @@
         }
       ]
     },
+    "sparse_send_recv":{
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 16,
+      "num_nodes": 2,
+      "num_gpus": 8,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_WORK_FIFO_BYTES" : "512",
+        "NCCL_WORK_ARGS_BYTES" : "512",
+        "NCCL_MIN_NCHANNELS" : "4",
+        "NCCL_MAX_NCHANNELS" : "4"
+      },
+      "tests": [
+        {
+          "name": "sparse_send_recv",
+          "description": "Test sparse send/recv functionality over multiple plans",
+          "test_filter": "SparseSendRecv.*"
+        }
+      ]
+    },
     "p2p_comprehensive": {
       "extends": "default",
       "is_gtest": true,
@@ -3498,6 +3521,38 @@
         }
       ]
     },
+    "gin_traffic_class": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none",
+        "NCCL_IB_MERGE_NICS": "0",
+        "NCCL_IB_FIFO_TC": "",
+        "NCCL_CROSS_NIC": "1",
+        "NCCL_DEBUG": "TRACE",
+        "NCCL_DEBUG_SUBSYS": "INIT,NET"
+      },
+      "tests": [
+        {
+          "name": "GIN_TrafficClass_DeviceHost",
+          "description": "GIN devComm traffic-class precedence at QP RTR attributes submitted to ibv_modify_qp: device request overrides host config",
+          "test_filter": "GinTrafficClassMPITest.DeviceHostPrecedence",
+          "env_variables": {
+            "NCCL_IB_SL": "",
+            "NCCL_IB_TC": ""
+          }
+        }
+      ]
+    },
     "gin_barrier_session": {
       "extends": "default",
       "is_gtest": true,
@@ -3529,6 +3584,24 @@
           "name": "GIN_Barrier_FourRanks",
           "description": "ncclGinBarrierSession over the 4-rank world team: 16 collective rounds with 3 peers per rank; completion proves the multi-peer arrival accounting keeps all ranks in lockstep",
           "test_filter": "GinMPIDeviceTests.Barrier_FourRanks",
+          "env_variables": {
+            "NCCL_GIN_TYPE": "2",
+            "NCCL_GIN_ENABLE": "1"
+          }
+        },
+        {
+          "name": "GIN_Barrier_WorldTeamUsesWorldPool",
+          "description": "Direct world-team GIN barrier selects the four-rank world team and world-specific signal pool",
+          "test_filter": "GinMPIDeviceTests.Barrier_WorldTeamUsesWorldPool",
+          "env_variables": {
+            "NCCL_GIN_TYPE": "2",
+            "NCCL_GIN_ENABLE": "1"
+          }
+        },
+        {
+          "name": "GIN_BarrierPools_AreIsolated",
+          "description": "Generic, dedicated LSA, rail-GIN, and world-GIN sessions select disjoint resource ranges and their intended handles",
+          "test_filter": "GinMPIDeviceTests.BarrierPools_AreIsolated",
           "env_variables": {
             "NCCL_GIN_TYPE": "2",
             "NCCL_GIN_ENABLE": "1"
@@ -4386,8 +4459,14 @@
       "enabled": true
     },
     {
-      "name": "GIN BarrierSession - LSA + Hybrid",
-      "description": "ncclBarrierSession LSA-only and hybrid LSA+GIN barrier with 2 ranks/node",
+      "name": "GIN Traffic Class - QP Precedence",
+      "description": "GIN devComm, host communicator, transport default, and explicit IB traffic-class precedence observed at QP RTR programming",
+      "config": "gin_traffic_class",
+      "enabled": true
+    },
+    {
+      "name": "GIN Barriers - LSA, Hybrid, World, and Pool Isolation",
+      "description": "LSA-only, hybrid LSA+GIN, direct world-team, and disjoint barrier-pool coverage with 2 ranks/node",
       "config": "gin_barrier_session",
       "enabled": true
     },
@@ -4419,6 +4498,12 @@
       "name": "Symmetric Window Tests - Single Node",
       "description": "Symmetric window registration tests for relaxed one-buffer path validation",
       "config": "symmetric_window_tests",
+      "enabled": true
+    },
+    {
+      "name": "SparseSendRecv",
+      "description": "Test sparse send/recv functionality over multiple plans",
+      "config": "sparse_send_recv",
       "enabled": true
     }
   ]

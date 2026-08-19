@@ -28,6 +28,14 @@ struct configuration
     [[nodiscard]] bool requested() const noexcept;
 };
 
+/// SPM events from ROCPROFSYS_ROCM_SPM_EVENTS.
+[[nodiscard]] std::vector<std::string>
+get_events();
+
+/// SPM sample interval from ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL.
+[[nodiscard]] std::uint64_t
+get_sample_interval();
+
 namespace detail
 {
 // Internal parser helpers are exposed here so user-input parsing stays testable

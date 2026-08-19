@@ -145,10 +145,10 @@ void BasicBlock::add_static_pc_address_builder(PcAddressBuilder builder) {
   static_pc_address_builders_.push_back(builder);
 }
 
-std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co, Decoder &decoder,
-                                                           rj_code_arch_t arch,
-                                                           std::span<const uint64_t> extra_leaders,
-                                                           ExternalEntryPolicy entry_policy) {
+FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
+BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
+                  DecodeErrorEmitter emit_error, std::span<const uint64_t> extra_leaders,
+                  ExternalEntryPolicy entry_policy, std::span<const uint64_t> extra_split_points) {
   std::vector<std::unique_ptr<BasicBlock>> blocks;
 
   for (const auto *sec : co.text_sections()) {
@@ -169,14 +169,15 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
         continue;
       }
 
-      Instruction *raw_inst = nullptr;
-      try {
-        raw_inst = decoder.decode(&inst_data[pc], byte_offset);
-      } catch (const util::InvalidInst &error) {
-        throw util::InvalidInst(
-            std::string(error.what()) + " at .text byte offset " + std::to_string(byte_offset), "");
-      }
-      std::unique_ptr<Instruction> inst(raw_inst);
+      auto emit_at_offset = [&](std::string_view message) {
+        emit_error.emit() << message << " at .text byte offset " << byte_offset;
+      };
+      const DecodeErrorEmitter decode_error =
+          emit_error.ignores_messages() ? DecodeErrorEmitter{} : DecodeErrorEmitter(emit_at_offset);
+      DecodeResult decode_result = decoder.decode(&inst_data[pc], byte_offset, decode_error);
+      if (decode_result.failed())
+        return Result::failure();
+      std::unique_ptr<Instruction> inst = std::move(decode_result).value();
       uint32_t inst_size_bytes = static_cast<uint32_t>(inst->size());
       uint32_t inst_words = inst_size_bytes / sizeof(uint32_t);
 
@@ -204,14 +205,22 @@ std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co,
     const auto decoded_span =
         std::span<const Instruction *const>(decoded_insts.data(), decoded_insts.size());
     std::vector<PcAddressBuilder> pc_address_builders;
-    std::vector<IndirectCallFixup> recovered_indirect_targets = discover_indirect_branch_edges(
-        decoded_span, text, arch, extra_leaders, entry_policy, &pc_address_builders);
+    std::vector<IndirectCallFixup> recovered_indirect_targets =
+        discover_indirect_branch_edges(decoded_span, text, arch, extra_leaders, entry_policy,
+                                       &pc_address_builders, extra_split_points);
 
     std::set<uint64_t> leaders;
     leaders.insert(decoded.front()->src_loc());
     for (uint64_t leader : extra_leaders) {
       if (leader < section_end)
         leaders.insert(leader);
+    }
+    // Split points shape the block graph only. They are deliberately absent from the external-entry
+    // set built below, so a helper named by a function symbol keeps the caller facts it is entered
+    // with.
+    for (uint64_t split : extra_split_points) {
+      if (split < section_end)
+        leaders.insert(split);
     }
     for (const IndirectCallFixup &fixup : recovered_indirect_targets) {
       if (fixup.source_call_offset < section_end)

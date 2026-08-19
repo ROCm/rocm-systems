@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "common/env_vars.hpp"
+#include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "core/config.hpp"
-#include "core/rocprofiler-sdk.hpp"
+#include "core/sdk-tracing-config-deps.hpp"
+#include "core/sdk-tracing-config.hpp"
 #include "rocprof-sys/library/rocprofiler-sdk/spm.hpp"
 
 #include <gtest/gtest.h>
@@ -16,9 +18,12 @@
 
 namespace
 {
+using rocprofsys::rocprofiler_sdk::default_sdk_externals;
+using rocprofsys::rocprofiler_sdk::sdk_tracing_config;
 using rocprofsys::rocprofiler_sdk::spm::configuration;
 using rocprofsys::rocprofiler_sdk::spm::configure_runtime;
 using rocprofsys::rocprofiler_sdk::spm::is_config_valid;
+using rocprofsys::rocprofiler_sdk::wrapper;
 namespace spm_detail = rocprofsys::rocprofiler_sdk::spm::detail;
 
 void
@@ -30,7 +35,7 @@ ensure_spm_settings_registered()
        settings->find(std::string{ rocprofsys::env_vars::ROCM_SPM_SAMPLE_INTERVAL }) ==
            settings->end())
     {
-        rocprofsys::rocprofiler_sdk::config_settings(settings);
+        sdk_tracing_config<wrapper, default_sdk_externals>::config_settings(settings);
     }
 }
 

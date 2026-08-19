@@ -706,3 +706,10 @@ global:
 local:
     *;
 } hip_7.14;
+
+hip_10.1 {
+global:
+    hipDeviceGetLuid;
+local:
+    *;
+} hip_7.15;

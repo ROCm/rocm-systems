@@ -6,8 +6,12 @@
 
 #include "library/rocprofiler-sdk/spm.hpp"
 
+#include "backends/rocprofiler_sdk/wrapper.hpp"
+#include "common/delimit.hpp"
+#include "common/env_vars.hpp"
 #include "core/config.hpp"
-#include "core/rocprofiler-sdk.hpp"
+#include "core/sdk-tracing-config-deps.hpp"
+#include "core/sdk-tracing-config.hpp"
 #include "core/utility.hpp"
 #include "logger/debug.hpp"
 
@@ -61,10 +65,34 @@ namespace rocprofiler_sdk
 {
 namespace spm
 {
+namespace
+{
+using rocprofiler_sdk::default_sdk_externals;
+using rocprofiler_sdk::sdk_tracing_config;
+using rocprofiler_sdk::wrapper;
+}  // namespace
+
 bool
 configuration::requested() const noexcept
 {
     return !counter_events.empty();
+}
+
+std::vector<std::string>
+get_events()
+{
+    return rocprofsys::delimit(
+        get_setting_value<std::string>(std::string{ env_vars::ROCM_SPM_EVENTS })
+            .value_or(std::string{}),
+        " ,;\t\n");
+}
+
+std::uint64_t
+get_sample_interval()
+{
+    return get_setting_value<std::uint64_t>(
+               std::string{ env_vars::ROCM_SPM_SAMPLE_INTERVAL })
+        .value_or(0);
 }
 
 bool
@@ -824,8 +852,10 @@ configure_runtime(client_data* data, const configuration& requested_config)
     if(!requested_config.requested())
         return configure_runtime(data, requested_config, {}, {}, false);
 
-    return configure_runtime(data, requested_config, rocprofiler_sdk::get_rocm_events(),
-                             config::get_gpu_perf_counters(), config::get_use_rocpd());
+    return configure_runtime(
+        data, requested_config,
+        sdk_tracing_config<wrapper, default_sdk_externals>::get_rocm_events(),
+        config::get_gpu_perf_counters(), config::get_use_rocpd());
 }
 }  // namespace spm
 }  // namespace rocprofiler_sdk
