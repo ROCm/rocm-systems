@@ -72,15 +72,36 @@ one-row functional smoke no longer inherits the 250 ms aggregate required by
 repeated empirical measurements.
 
 The preceding all-profile artifact
-`rebase-20260820-gfx1250-tensile-streamk-all-b946b9c` remains the current
-evidence for the other profiles.  Record/Replay and Sampled are statically
-complete at 320/320 accesses plus 22/22 and 20/20 barriers respectively, but
-neither reaches a numeric verdict within its 55-second execution budget.
-Inline Shadow is fully accepted: it passes the exact oracle in 27.86 seconds
-with complete 320/320 accesses and 11/11 barriers.  This supersedes the former
-claim that Inline Shadow rejects every placement, while retaining the
-Record/Replay and Sampled completion gaps until a bounded exact verdict is
-obtained.
+`rebase-20260820-gfx1250-tensile-streamk-all-b946b9c` first showed that
+Record/Replay and Sampled were statically complete but did not reach a numeric
+verdict within 55 seconds.  The current repair artifacts
+`fix-gfx1250-streamk-rr-prefix1-call-key` and
+`fix-gfx1250-streamk-sampled-call-key` supersede those two gaps.  Record/Replay
+passes the exact oracle in 14.15 seconds with complete 320/320 access, 22/22
+barrier, and 4/4 fence coverage, a complete dynamic verdict, and zero
+diagnostics.  Sampled passes in 7.87 seconds with complete 320/320 access and
+20/20 barrier coverage and a complete dynamic verdict.  Inline Shadow remains
+fully accepted from the preceding artifact: it passes in 27.86 seconds with
+complete 320/320 accesses and 11/11 barriers.
+
+Two narrower Record/Replay diagnostics established that the former gap was
+not only the ordinary 55-second budget.  Artifact
+`diagnostic-gfx1250-streamk-rr-180` remains compute-active after complete
+320/320 access, 22/22 barrier, and 4/4 fence instrumentation, but produces no
+numeric row within 180 seconds.  More importantly,
+`diagnostic-gfx1250-streamk-rr-prefix1-access` disables barrier and atomic
+tracking and instruments only the first access candidate, the
+`ds_store_b128` at code-object PC `0x40c4`; the client finishes in about seven
+seconds but fails its exact numeric oracle.  The selected workgroup emits no
+visible record, localizing the defect to the access relocation and its dense
+call/probe path rather than report analysis or cumulative runtime cost.  The
+repair makes collapsed spill routing compare the caller-PC snapshot retained
+in its key SGPR; the old dispatcher instead rebuilt an expected PC in its
+shared PC pair and compared that register with itself, making the first route
+arm tautologically win and skipping the relocated store.  Focused host
+regressions reject that self-comparison for Record/Replay access and barrier
+dispatchers and for Sampled access dispatchers; the two full E2E artifacts
+above prove the corrected Record/Replay and Sampled behavior.
 
 ### 2026-08-20 D128-block clean refresh
 
@@ -536,7 +557,7 @@ solution kernels while a numeric run selects only a subset.
 | P1 | `001_sk_mxf8f4gemm_tdm` | 🟩 768/768 accesses; current paired 1.12x | 🟩 Current exact clean run: 768/768 accesses, 102/102 barriers, 24/24 fences | 🟩 768/768 accesses; 180/180 barriers; current paired 1.22x | 🟩 768/768 accesses; 102/102 barriers; current paired 13.38x; reviewed exact-one fault and health accepted | Exact numeric oracle; all profiles accepted, including reviewed Inline Shadow fault evidence. |
 | P1 | `004_sk_mxf8gemm_tdm` | 🟩 992/992 accesses; current paired 1.20x | 🟩 Current exact clean run: 992/992 accesses, 102/102 barriers, 24/24 fences | 🟩 992/992 accesses; 180/180 barriers; current paired 1.23x | 🟧 Compute-active through 600, 1200, and 1800 seconds; no verdict | Only Inline Shadow remains: execution has no verdict at the stated bound. |
 | P1 | `007_sk_mxf4gemm_tdm` | 🟩 2448/2448 accesses; current paired 1.35x | 🟧 Current instrumentation is statically complete (2448 accesses, 272 barriers, 64 fences); PGR1 and PGR2 access/fence-only pass, but PGR2 access candidate 145 first corrupts results when barriers are enabled | 🟩 2448/2448 accesses; 480/480 barriers; current paired 1.38x | 🟧 Compute-active through 1800 seconds; no verdict | Record/Replay is localized to barrier/access composition around `ds_load_b128` at `0x257d8`, after barriers at `0x25790` and `0x2579c`; Inline Shadow remains bounded. |
-| P1 | Bounded `gfx1250_tensile_streamk_smoke` | 🟩 Current exact numeric row is accepted in 7.73 s with complete 320/320 access coverage and a complete dynamic verdict | 🟧 Current instrumentation is statically complete at 320/320 accesses, 22/22 barriers, and 4/4 fences, but execution has no numeric verdict within 55 s | 🟧 Current instrumentation is statically complete at 320/320 accesses and 20/20 barriers, but execution has no numeric verdict within 55 s | 🟩 Current exact numeric row is accepted in 27.86 s with complete 320/320 accesses and 11/11 barriers; the former strict-placement rejection is fixed | One Stream-K mode-3 solution requests four fixed workgroups across six output tiles and two K iterations. The current baseline passes its exact row in 7.22 s. The runner requires exactly one numeric row, a positive device-timing canary, rejects malformed rows and wrong hardware, verifies the fixed-grid runtime control still exists, and verifies every emitted object declares gfx1250. |
+| P1 | Bounded `gfx1250_tensile_streamk_smoke` | 🟩 Current exact numeric row is accepted in 7.73 s with complete 320/320 access coverage and a complete dynamic verdict | 🟩 Current exact numeric row is accepted in 14.15 s with complete 320/320 accesses, 22/22 barriers, and 4/4 fences; complete dynamic verdict and zero diagnostics | 🟩 Current exact numeric row is accepted in 7.87 s with complete 320/320 accesses and 20/20 barriers; complete dynamic verdict | 🟩 Current exact numeric row is accepted in 27.86 s with complete 320/320 accesses and 11/11 barriers; the former strict-placement rejection is fixed | One Stream-K mode-3 solution requests four fixed workgroups across six output tiles and two K iterations. The current baseline passes its exact row in 7.22 s. The runner requires exactly one numeric row, a positive device-timing canary, rejects malformed rows and wrong hardware, verifies the fixed-grid runtime control still exists, and verifies every emitted object declares gfx1250. |
 | P2 | `000_sk_sgemm_quick` | 🟨 First problem: 12/12 exact numeric rows; 640/640 accesses; static/dynamic complete | 🟨 First problem exact and fully covered; aggregate host analysis fixed; full client is intrinsically execution-bound | 🟨 First problem: 12/12 exact numeric rows; 640/640 accesses; 40/40 barrier members | 🟧 First problem: 12/12 exact rows and complete static coverage; interrupted second problem leaves dynamic analysis incomplete | The first problem is validated; the full multi-problem client remains execution-bound. |
 | P2 | `005_sk_f8gemm_quick` | 🟩 Exact oracle; 1772/1772 accesses; current paired 1.43x; reviewed fault and health accepted | 🟩 Exact oracle; 1772/1772 accesses; 44/44 barriers; 16/16 fences; current paired 8.00x | 🟧 Current clean execution remains compute-active through 900 seconds; no verdict or measured overhead | 🟧 Current tip executes 49 exact rows with zero failures before the fixed 180-second bound | SuperCollider and Record/Replay are accepted; Sampled and Inline Shadow lack a full-client verdict. |
 | P2 | `006_sk_hgemm_quick` | 🟧 136 exact numeric passes with zero failures; first 143-solution problem remains active at 300 seconds | 🟩 Exact oracle; 8162/8162 accesses; 292/292 barriers; 80/80 fences; current paired 2.02x | 🟩 Exact oracle; 8162/8162 accesses; 544/544 barriers; current paired 2.24x | 🟧 Current tip executes 189 exact rows with zero failures before the fixed 180-second bound | Record/Replay and Sampled are accepted; SuperCollider and Inline Shadow lack a full-client verdict. |

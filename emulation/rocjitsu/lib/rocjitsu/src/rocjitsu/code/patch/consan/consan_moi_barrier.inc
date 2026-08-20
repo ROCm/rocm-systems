@@ -1896,7 +1896,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       }
 
       const auto append_dispatch_target = [&](uint64_t caller_return, uint64_t target) -> bool {
-        if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+        if (arch == ROCJITSU_CODE_ARCH_GFX1250 && !derive_key_at_entry) {
           if (!append_moi_call_return_match(dispatcher_words, dispatcher_offset, caller_return,
                                             jump_pc_sgpr, call_return_sgpr, arch))
             return false;

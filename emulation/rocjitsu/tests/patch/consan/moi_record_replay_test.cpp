@@ -5760,7 +5760,7 @@ TEST(ConSanMoi, Rdna4ModerateSpillBackedDispatcherKeepsCompactRelaySpacing) {
   EXPECT_TRUE(result.final_validation_passed);
 }
 
-TEST(ConSanMoi, RecordReplaySpillBackedDenseHostDoesNotConsumeNearbyBarrier) {
+TEST(ConSanMoi, RecordReplaySpillBackedDenseHostPreservesBarrierAndCapturedCallKey) {
   constexpr uint32_t kAccessCount = 9u;
   const std::array<uint16_t, 6> dead = {0u, 1u, 4u, 6u, 8u, 9u};
   std::vector<uint32_t> words(
@@ -5795,7 +5795,13 @@ TEST(ConSanMoi, RecordReplaySpillBackedDenseHostDoesNotConsumeNearbyBarrier) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
-  EXPECT_TRUE(result.resolved_moi_transient_sgpr_assignments.front().spill_backed);
+  const ConSanMoiTransientSgprAssignment &assignment =
+      result.resolved_moi_transient_sgpr_assignments.front();
+  EXPECT_TRUE(assignment.spill_backed);
+  ASSERT_TRUE(assignment.indirect_pc_sgpr);
+  ASSERT_TRUE(assignment.dispatch_key_sgpr);
+  ASSERT_TRUE(assignment.call_return_sgpr);
+  ASSERT_EQ(assignment.call_return_sgpr, assignment.indirect_pc_sgpr);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
@@ -5806,10 +5812,95 @@ TEST(ConSanMoi, RecordReplaySpillBackedDenseHostDoesNotConsumeNearbyBarrier) {
     return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
            patch.original_size == 9u * sizeof(uint32_t);
   }));
+  const auto dispatcher = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+           patch.original_size == 0u &&
+           patch.anchor_offset == result.moi_candidates.front().text_offset &&
+           patch.trampoline_size != 0u;
+  });
+  ASSERT_NE(dispatcher, result.patches.end());
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> dispatcher_words =
+      text_words_at_offset(patched, dispatcher->trampoline_offset, dispatcher->trampoline_size);
+  const auto captured_key_compare = build_s_cmp_eq_u32(
+      *assignment.dispatch_key_sgpr, *assignment.indirect_pc_sgpr, ROCJITSU_CODE_ARCH_GFX1250);
+  const auto tautological_pc_compare = build_s_cmp_eq_u32(
+      *assignment.indirect_pc_sgpr, *assignment.indirect_pc_sgpr, ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_TRUE(captured_key_compare);
+  ASSERT_TRUE(tautological_pc_compare);
+  EXPECT_GT(std::ranges::count(dispatcher_words, *captured_key_compare), 0u);
+  EXPECT_EQ(std::ranges::count(dispatcher_words, *tautological_pc_compare), 0u);
   EXPECT_TRUE(std::ranges::all_of(result.site_dispositions, [](const auto &site) {
     return site.disposition != ConSanSiteDisposition::Supported ||
            site.lowering_outcome == ConSanSiteLoweringOutcome::Patched;
   }));
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
+TEST(ConSanMoi, Gfx1250RecordReplaySpillBackedDenseBarrierUsesCapturedEntryKey) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_GFX1250;
+  constexpr uint32_t kSiteCount = 17u;
+  const std::array<uint16_t, 6> dead = {0u, 1u, 4u, 6u, 8u, 9u};
+  std::vector<uint32_t> words(9u, build_s_mov_b32(/*sdst=*/20u, /*ssrc0=*/20u, kArch));
+  for (uint32_t index = 0u; index < kSiteCount; ++index) {
+    words.push_back(0xBE804EC1u); // s_barrier_signal -1
+    words.push_back(0xBF94FFFFu); // s_barrier_wait -1
+  }
+  for (uint16_t sgpr = 0u; sgpr < 106u; ++sgpr) {
+    if (std::ranges::find(dead, sgpr) == dead.end())
+      words.push_back(build_s_mov_b32(/*sdst=*/20u, sgpr, kArch));
+  }
+  words.resize(33'000u, build_s_mov_b32(/*sdst=*/20u, /*ssrc0=*/20u, kArch));
+  words.push_back(build_s_endpgm(kArch));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8u;
+  options.moi_owner_vgpr = 40u;
+  options.moi_epoch_vgpr = 41u;
+  options.moi_init_owner_epoch = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size =
+      consan_moi_report_buffer_min_bytes(0u, 0u, 0u, 0u, 2u * kSiteCount);
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = 4u * kSiteCount;
+
+  const ConSanResult result =
+      try_patch_consan(make_gfx1250_code_object(words, "gfx1250_spill_dense_barriers"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+  const ConSanMoiTransientSgprAssignment &assignment =
+      result.resolved_moi_transient_sgpr_assignments.front();
+  ASSERT_TRUE(assignment.spill_backed);
+  ASSERT_TRUE(assignment.indirect_pc_sgpr);
+  ASSERT_TRUE(assignment.dispatch_key_sgpr);
+  ASSERT_TRUE(assignment.call_return_sgpr);
+  ASSERT_EQ(assignment.call_return_sgpr, assignment.indirect_pc_sgpr);
+  const auto first_barrier = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
+  ASSERT_NE(first_barrier, result.patches.end()) << testing::PrintToString(result.warnings);
+  const auto dispatcher = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+           patch.original_size == 0u && patch.anchor_offset == first_barrier->anchor_offset &&
+           patch.trampoline_size != 0u;
+  });
+  ASSERT_NE(dispatcher, result.patches.end()) << testing::PrintToString(result.warnings);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> dispatcher_words =
+      text_words_at_offset(patched, dispatcher->trampoline_offset, dispatcher->trampoline_size);
+  const auto captured_key_compare =
+      build_s_cmp_eq_u32(*assignment.dispatch_key_sgpr, /*literal=*/255u, kArch);
+  const auto tautological_pc_compare =
+      build_s_cmp_eq_u32(*assignment.indirect_pc_sgpr, *assignment.indirect_pc_sgpr, kArch);
+  ASSERT_TRUE(captured_key_compare);
+  ASSERT_TRUE(tautological_pc_compare);
+  EXPECT_GT(std::ranges::count(dispatcher_words, *captured_key_compare), 0u);
+  EXPECT_EQ(std::ranges::count(dispatcher_words, *tautological_pc_compare), 0u);
   EXPECT_TRUE(result.final_validation_passed);
 }
 

@@ -836,6 +836,12 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       const bool collapsed_spill_router = !explicit_dense_key &&
                                           group_options.automatic_moi_record_replay_sgpr_spill &&
                                           call_return_sgpr == pc_sgpr;
+      // A collapsed entry copies the call return into the key before its
+      // shared PC pair is overwritten by the long jump.  Dispatcher matches
+      // must consume that snapshot; comparing the rebuilt expected PC with
+      // the now-reused PC pair is tautologically true and routes every caller
+      // through the first arm.
+      const uint16_t call_match_sgpr = collapsed_spill_router ? key_sgpr : call_return_sgpr;
       const uint32_t dense_entry_island_words = moi_record_replay_entry_island_words(
           group_options.automatic_moi_record_replay_sgpr_spill);
       const uint64_t island_offset = *group.front()->entry_island_offset;
@@ -908,7 +914,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
           if (!append_moi_call_return_match(dispatcher_words, dispatcher_offset,
                                             entry_host->second.host_offset + sizeof(uint32_t),
-                                            pc_sgpr, call_return_sgpr, arch)) {
+                                            pc_sgpr, call_match_sgpr, arch)) {
             result.errors.emplace_back(
                 "ConSan MOI first-light probe could not encode its relocatable entry-host match");
             return;
@@ -956,7 +962,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
           if (!append_moi_call_return_match(dispatcher_words, dispatcher_offset,
                                             candidate.text_offset + sizeof(uint32_t), pc_sgpr,
-                                            call_return_sgpr, arch)) {
+                                            call_match_sgpr, arch)) {
             result.errors.emplace_back(
                 "ConSan MOI first-light probe could not encode its relocatable caller match");
             return;

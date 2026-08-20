@@ -868,6 +868,11 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                                             : static_cast<uint16_t>(base + 6u);
       const bool collapsed_spill_router =
           group_options.automatic_moi_record_replay_sgpr_spill && call_return_sgpr == pc_sgpr;
+      // The collapsed entry snapshots the scalar-call return in the key
+      // before reusing the PC pair for the long jump. Match against that
+      // snapshot, rather than comparing the reconstructed expected PC with
+      // the same PC pair that just constructed it.
+      const uint16_t call_match_sgpr = collapsed_spill_router ? key_sgpr : call_return_sgpr;
       // Spill-backed dense hosts reserve the complete shared entry layout,
       // including the extra save arm used when the PC and call-return pair
       // collapse. Keeping that width stable lets either route shape share the
@@ -943,7 +948,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
           if (!append_moi_call_return_match(dispatcher_words, dispatcher_offset,
                                             entry_host->second.host_offset + sizeof(uint32_t),
-                                            pc_sgpr, call_return_sgpr, arch)) {
+                                            pc_sgpr, call_match_sgpr, arch)) {
             result.errors.emplace_back(
                 "ConSan MOI sampled probe could not encode its relocatable entry-host match");
             return;
@@ -990,7 +995,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
           if (!append_moi_call_return_match(dispatcher_words, dispatcher_offset,
                                             candidate.text_offset + sizeof(uint32_t), pc_sgpr,
-                                            call_return_sgpr, arch)) {
+                                            call_match_sgpr, arch)) {
             result.errors.emplace_back(
                 "ConSan MOI sampled probe could not encode its relocatable caller match");
             return;
