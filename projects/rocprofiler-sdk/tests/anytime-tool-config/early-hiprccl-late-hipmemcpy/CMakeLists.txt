@@ -44,8 +44,6 @@ find_package(Python3 REQUIRED)
 set(IS_DISABLED OFF)
 if(NOT TARGET python-rccl)
     set(IS_DISABLED ON)
-elseif(ROCPROFILER_BUILD_CODECOV)
-    set(IS_DISABLED ON)
 endif()
 
 set(early-hiprccl-late-hipmemcpy-env
@@ -66,6 +64,7 @@ rocprofiler_add_integration_execute_test(
             python-hip-kernels
     TIMEOUT 120
     LABELS "integration-tests;anytime-tool-config"
+    DISABLED_CODECOV # disable this test for code-coverage (needs to be investigated)
     DISABLED ${IS_DISABLED}
     PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>"
     ENVIRONMENT "${early-hiprccl-late-hipmemcpy-env}"
@@ -80,6 +79,7 @@ rocprofiler_add_integration_validate_test(
     CONFIG pytest.ini
     TIMEOUT 45
     LABELS "integration-tests;anytime-tool-config"
+    DISABLED_CODECOV # disable this test for code-coverage (needs to be investigated)
     DISABLED ${IS_DISABLED}
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_REQUIRED anytime-early-hiprccl-late-hipmemcpy
