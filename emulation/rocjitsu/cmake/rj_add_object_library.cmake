@@ -20,6 +20,12 @@ function(_rj_configure_object_library name)
             ${name}
             PRIVATE -Wall -Wextra -Wpedantic -Werror -fvisibility=hidden
         )
+        if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+            target_compile_options(
+                ${name}
+                PRIVATE -Wno-error=maybe-uninitialized
+            )
+        endif()
     endif()
 endfunction()
 
