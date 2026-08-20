@@ -1145,7 +1145,7 @@ def using_c_tier() -> bool:
     return _STATE.using_c_tier
 
 
-def dump_recordfn_stats() -> Optional[dict[str, object]]:
+def dump_torch_trace_stats() -> Optional[dict[str, object]]:
     """Return the .so counters, or None on the Python tier."""
     if _STATE.torch_trace_collector is None:
         return None
