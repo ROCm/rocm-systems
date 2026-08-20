@@ -224,11 +224,11 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
           const auto &wg_coord = w->wg_coord();
           auto wg_coord_vec = builder.CreateVector(wg_coord.data(), wg_coord.size());
 
-          auto wfs = fb::CreateWavefrontState(
-              builder, w->wf_id(), w->wg_id(), w->pc, w->exec_raw(), w->vcc(), w->m0(),
-              w->is_halted(), w->status_raw(), sgprs_vec, vgprs_vec, w->mode_raw(),
-              w->wave_sched_mode_raw(), ttmps_vec, wg_coord_vec, w->kernel_wave_size(),
-              w->wf_size());
+          auto wfs = fb::CreateWavefrontState(builder, w->wf_id(), w->wg_id(), w->pc, w->exec_raw(),
+                                              w->vcc(), w->m0(), w->is_halted(), w->status_raw(),
+                                              sgprs_vec, vgprs_vec, w->mode_raw(),
+                                              w->wave_sched_mode_raw(), ttmps_vec, wg_coord_vec,
+                                              w->kernel_wave_size(), w->wf_size());
           wf_offsets.push_back(wfs);
         }
 
@@ -346,7 +346,7 @@ LoadedConfig restore_checkpoint(const std::string &path) {
             throw std::runtime_error("Failed to restore wavefront into its recorded slot");
 
           wf->set_exec_raw(wf_state->exec());
-          wf->set_vcc(wf_state->vcc());
+          wf->set_vcc_raw(wf_state->vcc());
           wf->set_m0(wf_state->m0());
           // Halted wavefronts are never saved (see save_checkpoint skip above),
           // so halted() is always false here. Keep the branch for future-proofing.

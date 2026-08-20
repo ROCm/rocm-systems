@@ -151,7 +151,7 @@ def gen_vector_movrel(
     supports_dpp: bool = False,
     supports_dpp8: bool = False,
     supports_sdwa: bool = False,
-    modern_dpp_sources: bool = False,
+    inactive_uses_bound_ctrl: bool = False,
 ) -> str:
     """Generate M0-relative VGPR move bodies."""
     if op not in ('src', 'dst', 'srcdst', 'srcdst2'):
@@ -174,7 +174,7 @@ def gen_vector_movrel(
             f'static_cast<int>(rel_src_valid ? rel_src_index : 0u));'
         )
         _stage_movrel_source(
-            L, supports_dpp, supports_dpp8, supports_sdwa, modern_dpp_sources
+            L, supports_dpp, supports_dpp8, supports_sdwa, inactive_uses_bound_ctrl
         )
         L.append('  uint64_t exec = wf.exec();')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
@@ -221,7 +221,7 @@ def gen_vector_movrel(
             f'  Operand rel_dst({dst[0]}.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));'
         )
         _stage_movrel_source(
-            L, supports_dpp, supports_dpp8, supports_sdwa, modern_dpp_sources
+            L, supports_dpp, supports_dpp8, supports_sdwa, inactive_uses_bound_ctrl
         )
         L.append('  uint64_t exec = wf.exec();')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
@@ -262,19 +262,25 @@ def _stage_movrel_source(
     supports_dpp: bool,
     supports_dpp8: bool,
     supports_sdwa: bool,
-    modern_dpp_sources: bool,
+    inactive_uses_bound_ctrl: bool,
 ) -> None:
     """Stage modifiers from the M0-adjusted source VGPR, not its encoded base."""
     if not (supports_dpp or supports_dpp8 or supports_sdwa):
         return
     lines.append('  std::optional<StagedOperand> rel_staged_src;')
     if supports_dpp:
-        read_destinations = 'dpp_old_exec_' if modern_dpp_sources else 'wf.exec()'
+        inactive_policy = str(inactive_uses_bound_ctrl).lower()
         lines.extend(
             [
-                '  if (inst_.src0 == amdgpu::SRC_DPP)',
-                '    amdgpu::dpp::apply_dpp(rel_src, dpp_plan_,',
-                f'        {read_destinations}, rel_staged_src, wf);',
+                '  amdgpu::dpp::DppPlan rel_dpp_plan;',
+                '  if (inst_.src0 == amdgpu::SRC_DPP) {',
+                '    rel_dpp_plan = amdgpu::dpp::make_dpp_plan(',
+                '        wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,',
+                '        dpp_bound_ctrl_, dpp_fi_, wf.exec(),',
+                f'        {inactive_policy});',
+                '    amdgpu::dpp::apply_dpp(',
+                '        rel_src, rel_dpp_plan, wf.exec(), rel_staged_src, wf);',
+                '  }',
             ]
         )
     if supports_dpp8:

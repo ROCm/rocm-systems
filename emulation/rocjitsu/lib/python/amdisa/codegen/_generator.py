@@ -10396,7 +10396,7 @@ class CodeGenerator:
                                         '    uint64_t cmp_result = wf.vcc();\n'
                                         '    uint32_t sb = wf.sgpr_alloc().base;\n'
                                         '    amdgpu::write_explicit_lane_mask(sb + sdwa_sdst_, wf, cmp_result);\n'
-                                        '    wf.set_vcc(dpp_old_vcc_);\n'
+                                        '    wf.set_vcc_raw(dpp_old_vcc_);\n'
                                         '  }\n'
                                     )
                             elif _is_vopc:
@@ -10413,7 +10413,7 @@ class CodeGenerator:
                                         '  if (inst_.src0 == amdgpu::SRC_DPP && dpp_write_mask_ != ~0ULL) {\n'
                                         '    uint64_t new_vcc = wf.vcc();\n'
                                         '    uint64_t merged = (new_vcc & dpp_write_mask_) | (dpp_old_vcc_ & ~dpp_write_mask_);\n'
-                                        '    wf.set_vcc(merged);\n'
+                                        '    wf.set_vcc_raw(merged);\n'
                                         f'{_dpp_cmpx_exec_merge.replace("dpp_write_mask", "dpp_write_mask_")}'
                                         '  }\n'
                                     )
@@ -10423,7 +10423,7 @@ class CodeGenerator:
                                         '    uint64_t cmp_result = wf.vcc();\n'
                                         '    uint32_t sb = wf.sgpr_alloc().base;\n'
                                         '    amdgpu::write_explicit_lane_mask(sb + sdwa_sdst_, wf, cmp_result);\n'
-                                        '    wf.set_vcc(dpp_old_vcc_);\n'
+                                        '    wf.set_vcc_raw(dpp_old_vcc_);\n'
                                         '  }\n'
                                     )
                         _apply_float_sdwa_clamp = bool(

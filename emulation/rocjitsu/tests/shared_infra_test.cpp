@@ -3188,7 +3188,7 @@ template <typename Traits> void wave32_sdwa_explicit_compare_writes_only_destina
     SCOPED_TRACE(force_scalar ? "scalar" : "simd");
     ForceScalarGuard force_scalar_guard(force_scalar);
     wf->set_exec(0xFFFFFFFFULL);
-    wf->set_vcc(kOldVcc);
+    wf->set_vcc_raw(kOldVcc);
     cu->write_sgpr(sb + kSdst, 0);
     cu->write_sgpr(sb + kSdst + 1, kAdjacentSentinel);
     for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
@@ -3964,7 +3964,7 @@ template <typename Traits> void generated_vop2_dpp_carry_uses_source_write_mask_
     // ROW_SHR1 has no source for lane 0. BOUND_CTRL=0 suppresses both the
     // vector destination and the VCC side result for that active lane.
     wf->set_exec(full_exec);
-    wf->set_vcc(vcc_hi_sentinel | 1);
+    wf->set_vcc_raw(vcc_hi_sentinel | 1);
     auto bc0_raw = make_raw();
     execute(bc0_raw);
     EXPECT_EQ(cu->read_vgpr(vbase + kDst, 0), kSentinel);
@@ -3973,7 +3973,7 @@ template <typename Traits> void generated_vop2_dpp_carry_uses_source_write_mask_
     // BOUND_CTRL=1 supplies zero instead, so the lane executes normally and
     // consumes its incoming carry bit.
     wf->set_exec(full_exec);
-    wf->set_vcc(vcc_hi_sentinel | 1);
+    wf->set_vcc_raw(vcc_hi_sentinel | 1);
     cu->write_vgpr(vbase + kDst, 0, kSentinel);
     auto bc1_raw = make_raw();
     bc1_raw.bound_ctrl = 1;
@@ -3985,7 +3985,7 @@ template <typename Traits> void generated_vop2_dpp_carry_uses_source_write_mask_
     // carry bit is still fully written.
     fill_vgprs(0xFFFFFFFFu, 1);
     wf->set_exec(full_exec);
-    wf->set_vcc(0);
+    wf->set_vcc_raw(0);
     auto row_bank_raw = make_raw();
     row_bank_raw.dpp_ctrl = amdgpu::dpp::ROW_SELECT_BASE;
     row_bank_raw.bank_mask = 0xE;
@@ -3999,7 +3999,7 @@ template <typename Traits> void generated_vop2_dpp_carry_uses_source_write_mask_
     for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
       cu->write_vgpr(vbase + kDst, lane, kSentinel);
     wf->set_exec(full_exec);
-    wf->set_vcc(0);
+    wf->set_vcc_raw(0);
     auto row_mask_raw = make_raw();
     row_mask_raw.dpp_ctrl = amdgpu::dpp::ROW_SELECT_BASE;
     row_mask_raw.row_mask = 0xD;
@@ -4014,7 +4014,7 @@ template <typename Traits> void generated_vop2_dpp_carry_uses_source_write_mask_
     if constexpr (Traits::dpp_carry_has_fi) {
       fill_vgprs(0, 0);
       wf->set_exec(full_exec & ~1ULL);
-      wf->set_vcc(3);
+      wf->set_vcc_raw(3);
       auto inactive_source_raw = make_raw();
       inactive_source_raw.fi = 0;
       execute(inactive_source_raw);
@@ -4141,7 +4141,7 @@ template <typename Traits> void wave32_generated_vopc_dpp_invalid_source_bc0_zer
     ForceScalarGuard force_scalar_guard(force_scalar);
     for (uint64_t old_vcc : {0xA5A5A5A500000000ULL, 0x5A5A5A5AFFFFFFFFULL}) {
       wf->set_exec(0xFFFFFFFFULL);
-      wf->set_vcc(old_vcc);
+      wf->set_vcc_raw(old_vcc);
       typename Traits::VCmpEqU32Vopc inst(
           reinterpret_cast<const typename Traits::MachineInst *>(&raw));
       inst.execute_impl(*wf);
@@ -4201,7 +4201,7 @@ template <typename Traits> void wave32_generated_vopc_dpp_zeros_masked_compare_b
     ForceScalarGuard force_scalar_guard(force_scalar);
     for (uint64_t old_vcc : {0xA5A5A5A500000000ULL, 0x5A5A5A5AFFFFFFFFULL}) {
       wf->set_exec(kOldExec);
-      wf->set_vcc(old_vcc);
+      wf->set_vcc_raw(old_vcc);
       typename Traits::VCmpEqU32Vopc inst(
           reinterpret_cast<const typename Traits::MachineInst *>(&raw));
       inst.execute_impl(*wf);
@@ -4216,7 +4216,7 @@ template <typename Traits> void wave32_generated_vopc_dpp_zeros_masked_compare_b
     raw.bound_ctrl = 1;
     for (uint64_t old_vcc : {0xA5A5A5A500000000ULL, 0x5A5A5A5AFFFFFFFFULL}) {
       wf->set_exec(kOldExec);
-      wf->set_vcc(old_vcc);
+      wf->set_vcc_raw(old_vcc);
       typename Traits::VCmpEqU32Vopc zero_fill(
           reinterpret_cast<const typename Traits::MachineInst *>(&raw));
       zero_fill.execute_impl(*wf);
@@ -4542,7 +4542,7 @@ template <typename Traits> void wave32_generated_bc1_compare_families_clear_stal
 
   wf->set_exec(kActiveExec);
   constexpr uint64_t kVccHiSentinel = 0xA5A5A5A500000000ULL;
-  wf->set_vcc(kVccHiSentinel | 0xFFFFFFFFULL);
+  wf->set_vcc_raw(kVccHiSentinel | 0xFFFFFFFFULL);
   typename Traits::VCmpEqU32Vopc vopc(
       reinterpret_cast<const typename Traits::MachineInst *>(&vopc_raw));
   vopc.execute_impl(*wf);
@@ -4550,7 +4550,7 @@ template <typename Traits> void wave32_generated_bc1_compare_families_clear_stal
 
   constexpr uint64_t kOldVcc = 0xA5A5A5A5ULL;
   wf->set_exec(kActiveExec);
-  wf->set_vcc(kOldVcc);
+  wf->set_vcc_raw(kOldVcc);
   typename Traits::VCmpxEqU32Vopc vopcx(
       reinterpret_cast<const typename Traits::MachineInst *>(&vopc_raw));
   vopcx.execute_impl(*wf);

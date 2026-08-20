@@ -314,12 +314,15 @@ public:
   /// @returns VCC mask with non-lane bits cleared.
   uint64_t vcc_mask() const { return vcc_ & lane_mask(); }
 
-  /// @brief Set the raw architectural VCC register pair.
-  /// @param val New raw VCC value.
+  /// @brief Set the active-lane portion of the VCC register pair.
+  /// @param val New VCC mask value.
   ///
-  /// Scalar operand writes may update either half directly. Vector predicate
-  /// and carry producers must use set_vcc_mask() to preserve wave32 VCC_HI.
-  void set_vcc(uint64_t val) { vcc_ = val; }
+  /// Wave32 leaves VCC_HI available as scalar state. Mask-producing writes
+  /// must therefore preserve the non-lane bits, matching set_exec().
+  void set_vcc(uint64_t val) { vcc_ = (vcc_ & ~lane_mask()) | (val & lane_mask()); }
+
+  /// @brief Set the raw architectural VCC register pair.
+  void set_vcc_raw(uint64_t val) { vcc_ = val; }
 
   /// @brief Commit a wave-sized implicit VCC result.
   /// @details Vector mask-producing instructions write only the lanes present
@@ -327,7 +330,7 @@ public:
   /// scalar state and must not be clobbered by a low-half compare or carry
   /// result.
   /// @param val New per-lane VCC result.
-  void set_vcc_mask(uint64_t val) { vcc_ = (vcc_ & ~lane_mask()) | (val & lane_mask()); }
+  void set_vcc_mask(uint64_t val) { set_vcc(val); }
 
   /// @brief Return the M0 special register.
   /// @returns M0 register value.

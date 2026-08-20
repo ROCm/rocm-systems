@@ -1305,8 +1305,13 @@ void VMovrelsB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR,
                   static_cast<int>(rel_src_valid ? rel_src_index : 0u));
   std::optional<StagedOperand> rel_staged_src;
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(rel_src, dpp_plan_, wf.exec(), rel_staged_src, wf);
+  amdgpu::dpp::DppPlan rel_dpp_plan;
+  if (inst_.src0 == amdgpu::SRC_DPP) {
+    rel_dpp_plan =
+        amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                                   dpp_bound_ctrl_, dpp_fi_, wf.exec(), false);
+    amdgpu::dpp::apply_dpp(rel_src, rel_dpp_plan, wf.exec(), rel_staged_src, wf);
+  }
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(rel_src, dpp8_lane_sel_, dpp_fi_, rel_staged_src, wf);
   if (inst_.src0 == amdgpu::SRC_SDWA)
@@ -1343,8 +1348,13 @@ RJ_NOINLINE void VMovrelsB32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
   Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR,
                   static_cast<int>(rel_src_valid ? rel_src_index : 0u));
   std::optional<StagedOperand> rel_staged_src;
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(rel_src, dpp_plan_, wf.exec(), rel_staged_src, wf);
+  amdgpu::dpp::DppPlan rel_dpp_plan;
+  if (inst_.src0 == amdgpu::SRC_DPP) {
+    rel_dpp_plan =
+        amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                                   dpp_bound_ctrl_, dpp_fi_, wf.exec(), false);
+    amdgpu::dpp::apply_dpp(rel_src, rel_dpp_plan, wf.exec(), rel_staged_src, wf);
+  }
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(rel_src, dpp8_lane_sel_, dpp_fi_, rel_staged_src, wf);
   if (inst_.src0 == amdgpu::SRC_SDWA)
@@ -1389,8 +1399,13 @@ void VMovrelsdB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
                   static_cast<int>(rel_src_valid ? rel_src_index : 0u));
   Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
   std::optional<StagedOperand> rel_staged_src;
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(rel_src, dpp_plan_, wf.exec(), rel_staged_src, wf);
+  amdgpu::dpp::DppPlan rel_dpp_plan;
+  if (inst_.src0 == amdgpu::SRC_DPP) {
+    rel_dpp_plan =
+        amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                                   dpp_bound_ctrl_, dpp_fi_, wf.exec(), false);
+    amdgpu::dpp::apply_dpp(rel_src, rel_dpp_plan, wf.exec(), rel_staged_src, wf);
+  }
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(rel_src, dpp8_lane_sel_, dpp_fi_, rel_staged_src, wf);
   if (inst_.src0 == amdgpu::SRC_SDWA)
@@ -1438,8 +1453,13 @@ RJ_NOINLINE void VMovrelsdB32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) 
                   static_cast<int>(rel_src_valid ? rel_src_index : 0u));
   Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
   std::optional<StagedOperand> rel_staged_src;
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(rel_src, dpp_plan_, wf.exec(), rel_staged_src, wf);
+  amdgpu::dpp::DppPlan rel_dpp_plan;
+  if (inst_.src0 == amdgpu::SRC_DPP) {
+    rel_dpp_plan =
+        amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                                   dpp_bound_ctrl_, dpp_fi_, wf.exec(), false);
+    amdgpu::dpp::apply_dpp(rel_src, rel_dpp_plan, wf.exec(), rel_staged_src, wf);
+  }
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(rel_src, dpp8_lane_sel_, dpp_fi_, rel_staged_src, wf);
   if (inst_.src0 == amdgpu::SRC_SDWA)
@@ -1484,8 +1504,13 @@ void VMovrelsd2B32Vop1::execute_impl(amdgpu::Wavefront &wf) {
                   static_cast<int>(rel_src_valid ? rel_src_index : 0u));
   Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
   std::optional<StagedOperand> rel_staged_src;
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(rel_src, dpp_plan_, wf.exec(), rel_staged_src, wf);
+  amdgpu::dpp::DppPlan rel_dpp_plan;
+  if (inst_.src0 == amdgpu::SRC_DPP) {
+    rel_dpp_plan =
+        amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                                   dpp_bound_ctrl_, dpp_fi_, wf.exec(), false);
+    amdgpu::dpp::apply_dpp(rel_src, rel_dpp_plan, wf.exec(), rel_staged_src, wf);
+  }
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(rel_src, dpp8_lane_sel_, dpp_fi_, rel_staged_src, wf);
   if (inst_.src0 == amdgpu::SRC_SDWA)
@@ -1533,8 +1558,13 @@ RJ_NOINLINE void VMovrelsd2B32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf)
                   static_cast<int>(rel_src_valid ? rel_src_index : 0u));
   Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
   std::optional<StagedOperand> rel_staged_src;
-  if (inst_.src0 == amdgpu::SRC_DPP)
-    amdgpu::dpp::apply_dpp(rel_src, dpp_plan_, wf.exec(), rel_staged_src, wf);
+  amdgpu::dpp::DppPlan rel_dpp_plan;
+  if (inst_.src0 == amdgpu::SRC_DPP) {
+    rel_dpp_plan =
+        amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                                   dpp_bound_ctrl_, dpp_fi_, wf.exec(), false);
+    amdgpu::dpp::apply_dpp(rel_src, rel_dpp_plan, wf.exec(), rel_staged_src, wf);
+  }
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(rel_src, dpp8_lane_sel_, dpp_fi_, rel_staged_src, wf);
   if (inst_.src0 == amdgpu::SRC_SDWA)

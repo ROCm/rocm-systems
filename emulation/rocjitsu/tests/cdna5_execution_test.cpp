@@ -383,7 +383,7 @@ TEST(Gfx1250ExecutionTest, Wave32VectorComparePreservesVccHiScratch) {
     auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(0x3u);
-    wf->set_vcc(0x000001c0ffffffffull);
+    wf->set_vcc_raw(0x000001c0ffffffffull);
     write_wave_sgpr(*cu, *wf, 28, 7u);
     const uint32_t vgpr_base = wf->vgpr_alloc().base;
     cu->write_vgpr(vgpr_base + 18, 0, 6u);

@@ -1580,12 +1580,13 @@ def test_vop3_compare_simd_probe_can_commit_raw_result():
         'v_subrev_co_ci_u32_vop2',
     ),
 )
-def test_vop2_carry_simd_probe_requires_result_writer(template_name: str):
+def test_vop2_carry_simd_probe_can_commit_raw_result(template_name: str):
     default_probe = simd_probe_line(template_name)
     commit_probe = simd_probe_line(template_name, result_writer='commit_result')
 
-    assert default_probe is None
+    assert default_probe is not None
     assert commit_probe is not None
+    assert 'ROCJITSU_TRY_SIMD_VOP2_CARRY(' in default_probe
     assert 'ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(commit_result,' in commit_probe
 
 
@@ -4002,7 +4003,7 @@ def test_generated_rdna12_sdwa_explicit_compare_uses_wave_width_destination(
             'amdgpu::write_explicit_lane_mask(sb + sdwa_sdst_, wf, cmp_result);' in body
         )
         assert 'sb + sdwa_sdst_ + 1' not in body
-        assert 'wf.set_vcc(dpp_old_vcc_);' in body
+        assert 'wf.set_vcc_raw(dpp_old_vcc_);' in body
 
 
 @pytest.mark.parametrize(
