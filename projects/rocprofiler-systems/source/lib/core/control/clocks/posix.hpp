@@ -4,6 +4,7 @@
 #pragma once
 
 #include "core/control/clock.hpp"
+#include "core/state.hpp"
 
 #include "logger/debug.hpp"
 
@@ -13,7 +14,6 @@
 #include <ctime>
 #include <mutex>
 #include <system_error>
-#include <thread>
 
 namespace rocprofsys::control::clocks
 {
@@ -69,7 +69,6 @@ public:
 
             const auto this_chunk_ns = std::min(remaining_ns, chunk_ns);
 
-#ifdef __linux__
             const auto next_ns       = current.time_since_epoch().count() + this_chunk_ns;
             const struct timespec ts = to_timespec(next_ns);
             if(const auto rc = clock_nanosleep(m_clock_id, TIMER_ABSTIME, &ts, nullptr);
@@ -78,9 +77,6 @@ public:
                 LOG_WARNING("clock_nanosleep failed for clock id {}: {}", m_clock_id,
                             std::system_category().message(rc));
             }
-#else
-            std::this_thread::sleep_for(std::chrono::nanoseconds{ this_chunk_ns });
-#endif
         }
 
         const std::scoped_lock lk{ m_mutex };
@@ -89,12 +85,14 @@ public:
 
     void interrupt()
     {
+        auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
         const std::scoped_lock lk{ m_mutex };
         m_interrupted = true;
     }
 
     void reset()
     {
+        auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
         const std::scoped_lock lk{ m_mutex };
         m_interrupted = false;
     }
