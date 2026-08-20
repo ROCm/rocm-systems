@@ -68,6 +68,7 @@ typedef enum {
 typedef enum {
   RCCL_DIRECT_ALLGATHER = NCCL_NUM_ALGORITHMS, // Direct AllGather
   RCCL_HIERARCHICAL_ALLGATHER, // Hierarchical AllGather
+  RCCL_DIRECT_REDUCESCATTER, // Direct ReduceScatter (per-peer Send/Recv)
   RCCL_HIERARCHICAL_REDUCESCATTER, // Hierarchical ReduceScatter
 #ifdef ENABLE_WARP_SPEED
   RCCL_WARP_SPEED,
@@ -170,6 +171,11 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
 ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t sendcount,
                                  ncclDataType_t datatype, bool query, bool graphCapturingHint,
                                  struct rcclCollDecision* decision);
+// Single source of truth for ReduceScatter selection: symmetric -> DDA fabric
+// (LL/LL128/VMM) / DDA IPC -> hierarchical -> Direct -> native ring/pat kernel. RS has no CE.
+ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
+                                     ncclDataType_t datatype, ncclRedOp_t op, bool query,
+                                     struct rcclCollDecision* decision);
 // Selection helpers shared between collectives.cc and the wrapped decision logic.
 // (rcclDdaEnabled is declared below, next to the DDA param decls.)
 bool isSymmetricKernelRequested(struct ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype,
