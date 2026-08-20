@@ -18,11 +18,7 @@ from utils.utils_profile import pc_sampling_unit
 
 
 def _resolve_sdk_roctx_library(rocprofiler_sdk_tool_path: str) -> Optional[str]:
-    """Locate the rocprofiler-sdk ROCTX library for LD_PRELOAD.
-
-    src/lib/torch_trace_collector links it in CMake, but framework runtimes load
-    the legacy libroctx64 first and win the symbol lookup.
-    """
+    """Locate the rocprofiler-sdk ROCTX library for LD_PRELOAD."""
     return resolve_rocm_library_path(
         str(
             Path(rocprofiler_sdk_tool_path).parent.parent
@@ -54,8 +50,6 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             native_tool_path,  # Native tool (if provided)
         ]
         if getattr(self, "_selected_frameworks", set()):
-            # Without this the marker tier's ROCTX calls bind to legacy
-            # libroctx64, which rocprofiler-sdk does not trace.
             ld_preload_parts.append(
                 _resolve_sdk_roctx_library(args.rocprofiler_sdk_tool_path)
             )

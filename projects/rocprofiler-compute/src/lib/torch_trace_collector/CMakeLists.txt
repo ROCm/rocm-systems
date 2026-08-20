@@ -68,31 +68,52 @@ endif()
 message(STATUS "torch_trace_collector: find_package(Torch) ${TORCH_INSTALL_PREFIX}")
 set(_torch_version "${Torch_VERSION}")
 
+function(_ttc_source_fingerprint out_var)
+    set(_collector_dir "${CMAKE_CURRENT_FUNCTION_LIST_DIR}")
+    file(GLOB _cpp_files CONFIGURE_DEPENDS "${_collector_dir}/*.cpp")
+    file(GLOB _header_files CONFIGURE_DEPENDS "${_collector_dir}/*.h")
+    set(_inputs ${_cpp_files} ${_header_files})
+    list(
+        APPEND
+        _inputs
+        "${_collector_dir}/CMakeLists.txt"
+        "${_collector_dir}/../utils/synchronized/synchronized.hpp"
+        "${_collector_dir}/../utils/gsl_assert/gsl_assert.h"
+    )
+    set(_resolved_paths "")
+    foreach(_path IN LISTS _inputs)
+        if(EXISTS "${_path}")
+            file(REAL_PATH "${_path}" _resolved)
+            list(APPEND _resolved_paths "${_resolved}")
+        endif()
+    endforeach()
+    list(REMOVE_DUPLICATES _resolved_paths)
+    list(SORT _resolved_paths)
+    set(_digest_lines "")
+    foreach(_path IN LISTS _resolved_paths)
+        get_filename_component(_name "${_path}" NAME)
+        file(SHA256 "${_path}" _digest)
+        string(APPEND _digest_lines "${_name}:${_digest}\n")
+    endforeach()
+    if(_digest_lines STREQUAL "")
+        set("${out_var}" "missing" PARENT_SCOPE)
+        return()
+    endif()
+    string(SHA256 _catalog_hash "${_digest_lines}")
+    string(SUBSTRING "${_catalog_hash}" 0 12 _fingerprint)
+    set("${out_var}" "${_fingerprint}" PARENT_SCOPE)
+endfunction()
+
 if(NOT TORCH_TRACE_SOURCE_FINGERPRINT)
-    get_filename_component(
-        _ttc_pythonpath
-        "${CMAKE_CURRENT_SOURCE_DIR}/../.."
-        ABSOLUTE
+    _ttc_source_fingerprint(TORCH_TRACE_SOURCE_FINGERPRINT)
+    if(
+        NOT TORCH_TRACE_SOURCE_FINGERPRINT
+        OR TORCH_TRACE_SOURCE_FINGERPRINT STREQUAL "missing"
     )
-    execute_process(
-        COMMAND
-            "${CMAKE_COMMAND}"
-            -E
-            env
-            "PYTHONPATH=${_ttc_pythonpath}"
-            "${_ttc_python}"
-            -c
-            "from utils.inject_roctx._backends.torch_trace_fingerprint import source_fingerprint; print(source_fingerprint())"
-        RESULT_VARIABLE _ttc_fp_status
-        OUTPUT_VARIABLE TORCH_TRACE_SOURCE_FINGERPRINT
-        ERROR_VARIABLE _ttc_fp_err
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    if(_ttc_fp_status OR NOT TORCH_TRACE_SOURCE_FINGERPRINT)
         message(
             ${_ttc_unavailable_severity}
-            "torch_trace_collector: could not compute the source fingerprint with "
-            "${_ttc_python}; the extension is not built. ${_ttc_fp_err}"
+            "torch_trace_collector: could not hash the collector sources; the "
+            "extension is not built."
         )
         return()
     endif()

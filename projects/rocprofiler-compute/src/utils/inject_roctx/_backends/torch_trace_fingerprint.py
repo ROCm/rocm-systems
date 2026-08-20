@@ -37,7 +37,7 @@ _COLLECTOR_HEADER_NAMES = (
 
 
 def required_input_paths() -> tuple[Path, ...]:
-    """Collector sources and headers, CMakeLists.txt, and shared utility headers."""
+    """Named collector sources and headers, CMakeLists.txt, and shared headers."""
     return (
         *(_SO_SOURCE_DIR / name for name in _COLLECTOR_SOURCE_NAMES),
         *(_SO_SOURCE_DIR / name for name in _COLLECTOR_HEADER_NAMES),
@@ -47,7 +47,7 @@ def required_input_paths() -> tuple[Path, ...]:
 
 
 def fingerprint_input_paths() -> tuple[Path, ...]:
-    """C++ sources and headers, shared utility headers, and CMakeLists.txt."""
+    """Collector ``*.cpp`` and ``*.h`` files, CMakeLists.txt, and shared headers."""
     inputs = set(_SO_SOURCE_DIR.glob("*.cpp")) | set(_SO_SOURCE_DIR.glob("*.h"))
     inputs |= set(_SHARED_UTILS_HEADERS)
     inputs.add(_SO_BUILDFILE)
@@ -55,17 +55,18 @@ def fingerprint_input_paths() -> tuple[Path, ...]:
 
 
 def source_fingerprint() -> str:
-    """First 12 hex chars of a SHA-256 over the source inputs, or ``"missing"``."""
-    h = hashlib.sha256()
-    seen = 0
+    """First 12 hex digits of a SHA-256 of ``<basename>:<file-sha256>``
+    lines, or ``"missing"``."""
+    catalog_hash = hashlib.sha256()
+    n_files = 0
     for path in fingerprint_input_paths():
         try:
             data = path.read_bytes()
         except OSError:
             continue
-        h.update(f"{path.name}:{len(data)}\n".encode("ascii"))
-        h.update(data)
-        seen += 1
-    if seen == 0:
+        digest = hashlib.sha256(data).hexdigest()
+        catalog_hash.update(f"{path.name}:{digest}\n".encode("ascii"))
+        n_files += 1
+    if n_files == 0:
         return "missing"
-    return h.hexdigest()[:12]
+    return catalog_hash.hexdigest()[:12]

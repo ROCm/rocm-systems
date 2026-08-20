@@ -1146,7 +1146,7 @@ def using_c_tier() -> bool:
 
 
 def dump_torch_trace_stats() -> Optional[dict[str, object]]:
-    """Return the .so counters, or None on the Python tier."""
+    """Return the collector counters, or None when the C++ module is not loaded."""
     if _STATE.torch_trace_collector is None:
         return None
     try:

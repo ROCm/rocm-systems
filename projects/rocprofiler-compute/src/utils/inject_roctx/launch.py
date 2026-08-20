@@ -22,7 +22,7 @@ from utils.inject_roctx.core import install_global_wraps  # noqa: E402
 
 
 def _report_torch_trace_callback_errors() -> None:
-    """Warn if torch_trace_collector swallowed callback exceptions."""
+    """Warn when the collector reports callback errors."""
     torch_backend = sys.modules.get("utils.inject_roctx._backends.torch")
     if torch_backend is None:
         return
@@ -36,9 +36,8 @@ def _report_torch_trace_callback_errors() -> None:
 
     console_warning(
         "ml api trace",
-        f"torch_trace_collector observed {callback_errors} swallowed callback "
-        "exception(s) during the workload; some ROCTX markers may be missing "
-        f"or misattributed. Stats: {dict(stats)}",
+        f"torch_trace_collector reported {callback_errors} callback error(s). "
+        f"Some ROCTX markers may be missing or misattributed. Stats: {dict(stats)}",
     )
 
 
