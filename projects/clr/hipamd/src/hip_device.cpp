@@ -186,7 +186,10 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
       waitForStream(null_stream_);
     }
   } else {
-    // Wait on this device's active streams.
+    // Wait on the active streams of this device, not blocking_stream->device().
+    // blocking_stream is only where the barrier gets enqueued and it can be on a
+    // different device. (e.g. hipMemcpyPeer is the cross-device caller waiting on peer
+    // device while enqueuing the barrier on the current device's null stream).
     activeQueues = devices()[0]->getActiveQueues();
     for (const auto& queue : activeQueues) {
       auto* active_stream = static_cast<hip::Stream*>(queue);
