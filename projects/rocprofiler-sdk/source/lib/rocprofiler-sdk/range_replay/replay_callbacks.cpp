@@ -126,6 +126,12 @@ execute_config_callback(uint64_t                range_id,
     plan.external_correlation_ids = std::move(extern_corr_ids);
     plan.user_data                = plan.config_contexts.front().user_data;
 
+    // Resolve CLOSE's contexts now, while the range is being admitted. See range_plan_t.
+    tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY,
+                               ROCPROFILER_RANGE_REPLAY_CLOSE,
+                               plan.close_contexts,
+                               plan.close_correlation_ids);
+
     if(plan.pass_count_cb)
     {
         plan.total_passes = plan.pass_count_cb(range_id, plan.user_data);
@@ -228,12 +234,9 @@ execute_close_callback(const range_plan_t&               plan,
                        uint64_t                          internal_corr_id,
                        uint64_t                          ancestor_corr_id)
 {
-    auto contexts        = tracing::callback_context_data_vec_t{};
-    auto extern_corr_ids = tracing::external_correlation_id_map_t{};
-    tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY,
-                               ROCPROFILER_RANGE_REPLAY_CLOSE,
-                               contexts,
-                               extern_corr_ids);
+    // The contexts resolved when the range was admitted, not the ones active now.
+    auto contexts        = plan.close_contexts;
+    auto extern_corr_ids = plan.close_correlation_ids;
 
     if(contexts.empty()) return;
 

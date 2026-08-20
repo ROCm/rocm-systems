@@ -49,6 +49,14 @@ struct range_plan_t
     tracing::external_correlation_id_map_t external_correlation_ids = {};
     range_replay_data_t                    config_data              = {};
 
+    // CLOSE's contexts, resolved at CONFIG rather than at close. A range is admitted while its
+    // context is active, and CLOSE is that range's terminal notification, so it must be delivered
+    // even if the tool stopped the context while the range was open -- the same rule that lets an
+    // in-flight dispatch complete after its context stops. Re-resolving at close would silently
+    // drop it.
+    tracing::callback_context_data_vec_t   close_contexts        = {};
+    tracing::external_correlation_id_map_t close_correlation_ids = {};
+
     // Sequence-wide user_data, captured from the first CONFIG context so every PASS and the CLOSE
     // callback for this range see what the tool wrote at CONFIG.
     rocprofiler_user_data_t user_data = {.value = 0};
