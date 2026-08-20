@@ -4181,6 +4181,42 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesCdna4WriteInPlace) {
   EXPECT_EQ(rewritten_words[5], 0x06000002u);
 }
 
+TEST(ConSan, ProbeLdsCheckTrapModeReadsBackAndMasksCdna4B16Write) {
+  std::vector<uint32_t> text_words = {
+      0xD83E0004u,
+      0x00000302u, // ds_write_b16 v2, v3 offset:4
+  };
+  text_words.insert(text_words.end(), 14u, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+  const std::vector<uint8_t> bytes = make_cdna4_lds_code_object(text_words);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.scratch_vgpr = 6;
+  options.delay_nops = 2;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.kernels.size(), 1u);
+  ASSERT_EQ(result.kernels.front().lds_sites.size(), 1u);
+  EXPECT_TRUE(result.kernels.front().lds_sites.front().supported_mvp);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsStoreCheckTrap);
+  EXPECT_TRUE(result.final_validation_passed);
+  const auto rewritten_words = patched_words_at_file_offset<11>(result, 0x100);
+  EXPECT_EQ(rewritten_words[0], text_words[0]);
+  EXPECT_EQ(rewritten_words[1], text_words[1]);
+  EXPECT_EQ(rewritten_words[4], 0xD8780004u); // ds_read_u16, retained offset
+  EXPECT_EQ(rewritten_words[5], 0x06000002u); // readback v6, address v2
+  const auto mask =
+      instrumentation::build_v_and_b32_literal(7u, 0xffffu, 3u, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(mask);
+  EXPECT_EQ(rewritten_words[7], (*mask)[0]);
+  EXPECT_EQ(rewritten_words[8], (*mask)[1]);
+}
+
 TEST(ConSan, ProbeLdsCheckTrapModeHonorsExactKernelFilter) {
   const std::array<uint32_t, 13> text_words = {
       0xD8D80000u,

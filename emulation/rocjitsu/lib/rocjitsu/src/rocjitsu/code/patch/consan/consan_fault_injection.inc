@@ -2146,9 +2146,10 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
         site.mnemonic != "ds_store_2addr_b32" && site.mnemonic != "ds_store_2addr_b64" &&
         site.mnemonic != "ds_store_2addr_stride64_b32" &&
         site.mnemonic != "ds_store_2addr_stride64_b64" && site.mnemonic != "ds_write_b32" &&
-        site.mnemonic != "ds_write_b64" && site.mnemonic != "ds_write_b128" &&
-        site.mnemonic != "ds_write2_b32" && site.mnemonic != "ds_write2st64_b32" &&
-        site.mnemonic != "ds_write2_b64" && site.mnemonic != "ds_write2st64_b64")
+        site.mnemonic != "ds_write_b16" && site.mnemonic != "ds_write_b64" &&
+        site.mnemonic != "ds_write_b128" && site.mnemonic != "ds_write2_b32" &&
+        site.mnemonic != "ds_write2st64_b32" && site.mnemonic != "ds_write2_b64" &&
+        site.mnemonic != "ds_write2st64_b64")
       return false;
     const bool two_address = is_two_address_lds_store(site);
     if (two_address) {

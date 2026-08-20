@@ -448,6 +448,9 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
     case 8:
       base = 0xD8E80000u;
       break;
+    case 16:
+      base = 0xD8780000u;
+      break;
     case 32:
       base = 0xD86C0000u;
       break;
@@ -562,7 +565,8 @@ two_address_lds_byte_offsets(const ConSanLdsSite &site, uint32_t word0) {
       site.mnemonic == "ds_read_u16_d16" || site.mnemonic == "ds_read_u16_d16_hi" ||
       site.mnemonic == "ds_read_i16" || site.mnemonic == "ds_read_u16" ||
       site.mnemonic == "ds_store_b8" || site.mnemonic == "ds_store_b8_d16_hi" ||
-      site.mnemonic == "ds_store_b16" || site.mnemonic == "ds_store_b16_d16_hi")
+      site.mnemonic == "ds_store_b16" || site.mnemonic == "ds_store_b16_d16_hi" ||
+      site.mnemonic == "ds_write_b16")
     return 1;
   if (is_two_addr_load || is_two_addr_store) {
     const auto element_width = two_address_lds_element_width_bits(site);
