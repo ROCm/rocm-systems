@@ -124,11 +124,6 @@ def read_binary_file_tree(root: Path) -> dict[Path, bytes]:
     }
 
 
-def strip_ansi(s: str) -> str:
-    ansi_escape = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
-    return ansi_escape.sub("", s)
-
-
 def _tee(pipe, sink, out) -> None:
     """Echo each line from pipe to sink while accumulating it in out."""
     with pipe:
