@@ -891,7 +891,12 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   // transition rather than a per-ISA mnemonic list. See its use.
   const bool was_in_trap_handler = active->in_trap_handler();
 
-  execute_instruction(inst, *active);
+  try {
+    execute_instruction(inst, *active);
+  } catch (...) {
+    delete inst;
+    throw;
+  }
 
   if (active->instruction_execution_failed()) {
     const InstructionExecutionError error = active->instruction_execution_error();
