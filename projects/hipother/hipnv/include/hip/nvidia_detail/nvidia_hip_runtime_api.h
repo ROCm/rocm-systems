@@ -3815,6 +3815,24 @@ inline static hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMa
 }
 #endif
 
+inline static hipError_t hipDeviceGetExecAffinitySupport(int* pi, hipExecAffinityType type,
+                                                         hipDevice_t dev) {
+  if (pi == NULL) {
+    return hipErrorInvalidValue;
+  }
+  // hipExtExecAffinityTypeGranularityCU / hipExtExecAffinityTypeGranularityWGP are
+  // ROCm-specific masking-granularity queries with no CUDA equivalent; report them as
+  // unsupported on the NVIDIA backend. hipExecAffinityTypeCUCount maps directly to
+  // CU_EXEC_AFFINITY_TYPE_SM_COUNT and is forwarded to the CUDA driver.
+  if (type == hipExtExecAffinityTypeGranularityCU ||
+      type == hipExtExecAffinityTypeGranularityWGP) {
+    *pi = 0;
+    return hipSuccess;
+  }
+  return hipCUResultTohipError(
+      cuDeviceGetExecAffinitySupport(pi, (CUexecAffinityType)type, dev));
+}
+
 inline static hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr, int srcDevice,
                                                   int dstDevice) {
   return hipCUDAErrorTohipError(cudaDeviceGetP2PAttribute(value, attr, srcDevice, dstDevice));
