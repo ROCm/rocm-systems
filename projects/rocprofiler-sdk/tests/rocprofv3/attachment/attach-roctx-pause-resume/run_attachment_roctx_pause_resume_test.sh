@@ -52,7 +52,7 @@ wait_for_profiler_attached() {
             echo "rocprofv3 attach completed (${elapsed}s elapsed)"
             return 0
         fi
-        if ! kill -0 ${ROCPROF_PID} 2>/dev/null; then
+        if ! kill -0 "${ROCPROF_PID}" 2>/dev/null; then
             echo "rocprofv3 exited before reporting attach success"
             return 1
         fi
@@ -82,10 +82,12 @@ ROCPROF_PID=""
 cleanup() {
     if [ -n "${ROCPROF_PID}" ]; then
         kill "${ROCPROF_PID}" 2>/dev/null || true
+        wait "${ROCPROF_PID}" 2>/dev/null || true
     fi
 
     if [ -n "${APP_PID}" ]; then
         kill -2 "${APP_PID}" 2>/dev/null || true
+        wait "${APP_PID}" 2>/dev/null || true
     fi
 }
 
@@ -100,8 +102,8 @@ else
     exit 1
 fi
 
-rm -rf ${OUTPUT_DIR}/${OUTPUT_SUBDIR}
-mkdir -p ${OUTPUT_DIR}/${OUTPUT_SUBDIR}
+rm -rf "${OUTPUT_DIR}/${OUTPUT_SUBDIR}"
+mkdir -p "${OUTPUT_DIR}/${OUTPUT_SUBDIR}"
 
 if [ -e /proc/sys/kernel/yama/ptrace_scope ]                             \
 && [ $(cat /proc/sys/kernel/yama/ptrace_scope) -ne 0 ]                   \
@@ -110,18 +112,18 @@ if [ -e /proc/sys/kernel/yama/ptrace_scope ]                             \
 && [[ $(getcap $(readlink -f $(which python3))) != *"cap_sys_ptrace"* ]]
     then
     echo "ptrace_scope is not 0, user is not root, and CAP_SYS_PTRACE is not present, so test cannot be completed. This test is skipped."
-    touch ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/skipped
+    touch "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/skipped"
     exit 0
 fi
 
 echo "Launching ROCTx attach pause/resume target in ${MODE} mode"
-LD_PRELOAD=${ROCPROF_PRELOAD} ${TEST_APP} ${MODE} ${TRIGGER_FILE} &
+LD_PRELOAD="${ROCPROF_PRELOAD}" "${TEST_APP}" "${MODE}" "${TRIGGER_FILE}" &
 APP_PID=$!
 APP_OUTPUT_PID=$APP_PID
 
-wait_for_attach_ready $APP_PID
+wait_for_attach_ready "${APP_PID}"
 
-if ! kill -0 $APP_PID 2>/dev/null; then
+if ! kill -0 "${APP_PID}" 2>/dev/null; then
     echo "Test application failed to start or exited early"
     exit 1
 fi
@@ -132,25 +134,25 @@ if [ ! -f "${ROCPROFV3}" ]; then
 fi
 
 echo "Attaching profiler to PID $APP_PID in ${MODE} mode..."
-PYTHONUNBUFFERED=1 LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID \
+PYTHONUNBUFFERED=1 LD_PRELOAD="${ROCPROF_PRELOAD}" "${ROCPROFV3}" --attach "${APP_PID}" \
     --attach-duration-msec 8000 \
     "${ROCPROFV3_FLAGS[@]}" \
     -f json --attach-sync-output \
-    -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} \
-    --log-level ${LOG_LEVEL} >"${ROCPROF_LOG}" 2>&1 &
+    -d "${OUTPUT_DIR}/${OUTPUT_SUBDIR}" \
+    --log-level "${LOG_LEVEL}" >"${ROCPROF_LOG}" 2>&1 &
 ROCPROF_PID=$!
 
-if ! wait_for_profiler_attached $APP_PID "${ROCPROF_LOG}"; then
+if ! wait_for_profiler_attached "${APP_PID}" "${ROCPROF_LOG}"; then
     echo "rocprofv3 output:"
     cat "${ROCPROF_LOG}" 2>/dev/null || true
-    wait $ROCPROF_PID 2>/dev/null || true
+    wait "${ROCPROF_PID}" 2>/dev/null || true
     ROCPROF_PID=""
     exit 1
 fi
 
-touch ${TRIGGER_FILE}
+touch "${TRIGGER_FILE}"
 
-if wait $ROCPROF_PID; then
+if wait "${ROCPROF_PID}"; then
     ROCPROF_PID=""
 else
     ROCPROF_EXIT_CODE=$?
@@ -161,8 +163,8 @@ fi
 
 echo "Profiler detached successfully"
 
-kill -2 $APP_PID 2>/dev/null
-if wait $APP_PID; then
+kill -2 "${APP_PID}" 2>/dev/null
+if wait "${APP_PID}"; then
     APP_PID=""
 else
     APP_EXIT_CODE=$?
@@ -172,15 +174,15 @@ else
 fi
 
 echo "Checking for generated output files..."
-ls -laR ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/
+ls -laR "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/"
 
-JSON_COUNT=$(find ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/ -name "*.json" | wc -l)
-if [ $JSON_COUNT -eq 0 ]; then
+JSON_COUNT=$(find "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/" -name "*.json" | wc -l)
+if [ "${JSON_COUNT}" -eq 0 ]; then
     echo "Error: No JSON files were generated"
     exit 1
 fi
 
-APP_JSON=$(find ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/ -name "${APP_OUTPUT_PID}_results.json" | head -1)
+APP_JSON=$(find "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/" -name "${APP_OUTPUT_PID}_results.json" | head -1)
 if [ -z "$APP_JSON" ]; then
     echo "Error: Could not find app (PID ${APP_OUTPUT_PID}) JSON output in ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/"
     exit 1
@@ -193,7 +195,7 @@ for src in "${APP_OUTPUT_DIR}/${APP_OUTPUT_PID}"_*.json; do
     [ -f "$src" ] || continue
     dst_name=$(basename "$src" | sed "s/^${APP_OUTPUT_PID}_/${OUTPUT_FILENAME}_/")
     cp "$src" "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${dst_name}"
-    echo "Copied $(basename $src) -> ${dst_name}"
+    echo "Copied $(basename "$src") -> ${dst_name}"
 done
 
 if [ ! -f "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${OUTPUT_FILENAME}_results.json" ]; then
