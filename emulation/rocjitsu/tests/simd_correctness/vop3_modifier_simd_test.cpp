@@ -106,11 +106,19 @@ float ref_dst(float v, uint32_t omod, bool clamp, bool clamp_nan_to_zero) {
     v *= 0.5f;
   if (clamp) {
     if (std::isnan(v))
-      return clamp_nan_to_zero ? 0.0f : v;
-    if (v <= 0.0f)
-      return 0.0f;
-    if (v > 1.0f)
-      return 1.0f;
+      v = clamp_nan_to_zero ? 0.0f : v;
+    else if (v <= 0.0f)
+      v = 0.0f;
+    else if (v > 1.0f)
+      v = 1.0f;
+  }
+  if (omod != 0) {
+    uint32_t bits = std::bit_cast<uint32_t>(v);
+    if ((bits & 0x7f800000u) == 0 && (bits & 0x007fffffu) != 0)
+      bits &= 0x80000000u;
+    if ((bits & 0x7fffffffu) == 0)
+      bits = 0;
+    v = std::bit_cast<float>(bits);
   }
   return v;
 }
@@ -124,11 +132,19 @@ double ref_dst(double v, uint32_t omod, bool clamp, bool clamp_nan_to_zero) {
     v *= 0.5;
   if (clamp) {
     if (std::isnan(v))
-      return clamp_nan_to_zero ? 0.0 : v;
-    if (v <= 0.0)
-      return 0.0;
-    if (v > 1.0)
-      return 1.0;
+      v = clamp_nan_to_zero ? 0.0 : v;
+    else if (v <= 0.0)
+      v = 0.0;
+    else if (v > 1.0)
+      v = 1.0;
+  }
+  if (omod != 0) {
+    uint64_t bits = std::bit_cast<uint64_t>(v);
+    if ((bits & 0x7ff0000000000000ULL) == 0 && (bits & 0x000fffffffffffffULL) != 0)
+      bits &= 0x8000000000000000ULL;
+    if ((bits & 0x7fffffffffffffffULL) == 0)
+      bits = 0;
+    v = std::bit_cast<double>(bits);
   }
   return v;
 }
@@ -217,22 +233,25 @@ TEST(Vop3ModifierSimd, SrcModF64_AllAbsNegCombos_BitExact) {
 TEST(Vop3ModifierSimd, DstMod_AllOmodClampCombos_BitExact) {
   SKIP_IF_NO_SIMD();
   constexpr std::size_t W = util::native_width_v<float>;
-  alignas(util::native<float>) float in[W];
-  for (std::size_t i = 0; i < W; ++i)
-    in[i] = std::bit_cast<float>(kPatterns[i % kPatterns.size()]);
-  const util::native<float> v(in, util::stdx::element_aligned);
+  for (std::size_t base = 0; base < kPatterns.size(); base += W) {
+    alignas(util::native<float>) float in[W];
+    for (std::size_t i = 0; i < W; ++i)
+      in[i] = std::bit_cast<float>(kPatterns[std::min(base + i, kPatterns.size() - 1)]);
+    const util::native<float> v(in, util::stdx::element_aligned);
 
-  for (uint32_t omod = 0; omod < 4; ++omod) {
-    for (uint32_t clamp = 0; clamp < 2; ++clamp) {
-      for (uint32_t clamp_nan = 0; clamp_nan < 2; ++clamp_nan) {
-        auto out = apply_vop3_dst_mod_f32(v, omod, clamp, clamp_nan != 0);
-        alignas(util::native<float>) float o[W];
-        out.copy_to(o, util::stdx::element_aligned);
-        for (std::size_t i = 0; i < W; ++i) {
-          const float r = ref_dst(in[i], omod, clamp != 0, clamp_nan != 0);
-          EXPECT_EQ(std::bit_cast<uint32_t>(o[i]), std::bit_cast<uint32_t>(r))
-              << "omod=" << omod << " clamp=" << clamp << " clamp_nan=" << clamp_nan << " lane "
-              << i;
+    for (uint32_t omod = 0; omod < 4; ++omod) {
+      for (uint32_t clamp = 0; clamp < 2; ++clamp) {
+        for (uint32_t clamp_nan = 0; clamp_nan < 2; ++clamp_nan) {
+          auto out = apply_vop3_dst_mod_f32(v, omod, clamp, clamp_nan != 0);
+          alignas(util::native<float>) float o[W];
+          out.copy_to(o, util::stdx::element_aligned);
+          const std::size_t count = std::min(W, kPatterns.size() - base);
+          for (std::size_t i = 0; i < count; ++i) {
+            const float r = ref_dst(in[i], omod, clamp != 0, clamp_nan != 0);
+            EXPECT_EQ(std::bit_cast<uint32_t>(o[i]), std::bit_cast<uint32_t>(r))
+                << "omod=" << omod << " clamp=" << clamp << " clamp_nan=" << clamp_nan
+                << " pattern " << base + i;
+          }
         }
       }
     }
@@ -242,22 +261,26 @@ TEST(Vop3ModifierSimd, DstMod_AllOmodClampCombos_BitExact) {
 TEST(Vop3ModifierSimd, DstModF64_AllOmodClampCombos_BitExact) {
   SKIP_IF_NO_SIMD();
   constexpr std::size_t W = util::native_width64;
-  alignas(util::native<double>) double in[W];
-  for (std::size_t i = 0; i < W; ++i)
-    in[i] = std::bit_cast<double>(kF64DstPatterns[i % kF64DstPatterns.size()]);
-  const util::native<double> v(in, util::stdx::element_aligned);
+  for (std::size_t base = 0; base < kF64DstPatterns.size(); base += W) {
+    alignas(util::native<double>) double in[W];
+    for (std::size_t i = 0; i < W; ++i)
+      in[i] =
+          std::bit_cast<double>(kF64DstPatterns[std::min(base + i, kF64DstPatterns.size() - 1)]);
+    const util::native<double> v(in, util::stdx::element_aligned);
 
-  for (uint32_t omod = 0; omod < 4; ++omod) {
-    for (uint32_t clamp = 0; clamp < 2; ++clamp) {
-      for (uint32_t clamp_nan = 0; clamp_nan < 2; ++clamp_nan) {
-        auto out = apply_vop3_dst_mod_f64(v, omod, clamp, clamp_nan != 0);
-        alignas(util::native<double>) double o[W];
-        out.copy_to(o, util::stdx::element_aligned);
-        for (std::size_t i = 0; i < W; ++i) {
-          const double r = ref_dst(in[i], omod, clamp != 0, clamp_nan != 0);
-          EXPECT_EQ(std::bit_cast<uint64_t>(o[i]), std::bit_cast<uint64_t>(r))
-              << "omod=" << omod << " clamp=" << clamp << " clamp_nan=" << clamp_nan << " lane "
-              << i;
+    for (uint32_t omod = 0; omod < 4; ++omod) {
+      for (uint32_t clamp = 0; clamp < 2; ++clamp) {
+        for (uint32_t clamp_nan = 0; clamp_nan < 2; ++clamp_nan) {
+          auto out = apply_vop3_dst_mod_f64(v, omod, clamp, clamp_nan != 0);
+          alignas(util::native<double>) double o[W];
+          out.copy_to(o, util::stdx::element_aligned);
+          const std::size_t count = std::min(W, kF64DstPatterns.size() - base);
+          for (std::size_t i = 0; i < count; ++i) {
+            const double r = ref_dst(in[i], omod, clamp != 0, clamp_nan != 0);
+            EXPECT_EQ(std::bit_cast<uint64_t>(o[i]), std::bit_cast<uint64_t>(r))
+                << "omod=" << omod << " clamp=" << clamp << " clamp_nan=" << clamp_nan
+                << " pattern " << base + i;
+          }
         }
       }
     }

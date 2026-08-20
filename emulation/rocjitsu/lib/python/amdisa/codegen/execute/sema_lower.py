@@ -352,6 +352,12 @@ def _lower_stmt(node: SemaNode, ctx: LoweringContext) -> list[str]:
     return [f'{_indent(ctx)}{expr};']
 
 
+def _contains_call(node: SemaNode, call_name: str) -> bool:
+    return (node.kind == SemaNodeKind.CALL and node.call_name == call_name) or any(
+        _contains_call(child, call_name) for child in node.children
+    )
+
+
 def _lower_assign(node: SemaNode, ctx: LoweringContext) -> list[str]:
     """Lower an assignment statement."""
     lhs_node = node.children[0]
@@ -992,11 +998,23 @@ def _lower_dst_write(
             rhs = f'util::f32_to_f16_mode({rhs}, wf.fp16_ovfl())'
         else:
             rhs = f'util::f32_to_f16({rhs})'
+        if _contains_call(rhs_node, 'apply_omod'):
+            rhs = (
+                f'amdgpu::fp_mode::finalize_omod_f16({rhs}, '
+                'amdgpu::fp_mode::effective_f16_omod(wf.cu().arch(), '
+                'wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false, inst_.omod))'
+            )
     elif lhs_ty and lhs_ty.base == 'BF' and lhs_ty.size == 16:
         # Explicit data-conversion generators use the mode-aware BF16 helpers.
         # Generic BF16 semantic writes cover arithmetic forms where current ISA
         # prose does not define FP16_OVFL clamping.
         rhs = f'util::f32_to_bf16({rhs})'
+        if _contains_call(rhs_node, 'apply_omod'):
+            rhs = (
+                f'amdgpu::fp_mode::finalize_omod_bf16({rhs}, '
+                'amdgpu::fp_mode::effective_omod(wf.cu().arch(), '
+                'wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst_.omod))'
+            )
     elif lhs_ty and lhs_ty.size == 16 and lhs_ty.base in ('I', 'U'):
         cpp = lhs_ty.cpp_type
         rhs = (
@@ -1855,11 +1873,33 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
     is_f64 = node.ty and node.ty.size == 64
     fp_type = 'double' if is_f64 else 'float'
     suffix = '' if is_f64 else 'f'
+    if is_f64:
+        omod_expr = (
+            'amdgpu::fp_mode::effective_omod(wf.cu().arch(), '
+            'wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst_.omod)'
+        )
+    elif node.ty == SemaType.F16:
+        omod_expr = (
+            'amdgpu::fp_mode::effective_f16_omod(wf.cu().arch(), '
+            'wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false, inst_.omod)'
+        )
+    elif node.ty == SemaType.BF16:
+        omod_expr = (
+            'amdgpu::fp_mode::effective_omod(wf.cu().arch(), '
+            'wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst_.omod)'
+        )
+    else:
+        omod_expr = (
+            'amdgpu::fp_mode::effective_omod(wf.cu().arch(), '
+            'wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst_.omod)'
+        )
     return (
         f'[&]() {{ {fp_type} v = {rhs};'
-        f' if (inst_.omod == 1) v *= 2.0{suffix};'
-        f' else if (inst_.omod == 2) v *= 4.0{suffix};'
-        f' else if (inst_.omod == 3) v *= 0.5{suffix};'
+        f' const uint32_t effective_omod = {omod_expr};'
+        f' if (effective_omod == 1) v *= 2.0{suffix};'
+        f' else if (effective_omod == 2) v *= 4.0{suffix};'
+        f' else if (effective_omod == 3) v *= 0.5{suffix};'
+        f' v = amdgpu::fp_mode::finalize_omod_{"f64" if is_f64 else "f32"}(v, effective_omod);'
         f' return v; }}()'
     )
 

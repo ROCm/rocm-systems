@@ -99,6 +99,46 @@ inline uint32_t effective_f16_omod(rj_code_arch_t arch, uint32_t denorm_mode, bo
   return effective_omod(arch, denorm_mode, ieee_mode, omod);
 }
 
+/// @brief Apply the result-format rules required by an active OMOD.
+/// @details OMOD always flushes an output subnormal and maps either signed zero
+/// to positive zero. These helpers operate after the result has been rounded to
+/// its architectural destination format.
+inline uint16_t finalize_omod_f16(uint16_t value, uint32_t omod) {
+  if (omod == 0)
+    return value;
+  if ((value & 0x7c00u) == 0 && (value & 0x03ffu) != 0)
+    value &= 0x8000u;
+  return (value & 0x7fffu) == 0 ? 0 : value;
+}
+
+inline uint16_t finalize_omod_bf16(uint16_t value, uint32_t omod) {
+  if (omod == 0)
+    return value;
+  if ((value & 0x7f80u) == 0 && (value & 0x007fu) != 0)
+    value &= 0x8000u;
+  return (value & 0x7fffu) == 0 ? 0 : value;
+}
+
+inline float finalize_omod_f32(float value, uint32_t omod) {
+  if (omod == 0)
+    return value;
+  uint32_t bits = std::bit_cast<uint32_t>(value);
+  if ((bits & 0x7f800000u) == 0 && (bits & 0x007fffffu) != 0)
+    bits &= 0x80000000u;
+  if ((bits & 0x7fffffffu) == 0)
+    bits = 0;
+  return std::bit_cast<float>(bits);
+}
+
+inline double finalize_omod_f64(double value, uint32_t omod) {
+  if (omod == 0)
+    return value;
+  uint64_t bits = detail::flush_f64(std::bit_cast<uint64_t>(value));
+  if ((bits & 0x7fffffffffffffffULL) == 0)
+    bits = 0;
+  return std::bit_cast<double>(bits);
+}
+
 /// @brief Execute an F16 fused multiply-add and return its raw F16 encoding.
 inline uint16_t fma_f16(uint16_t src0, uint16_t src1, uint16_t src2, bool abs0, bool abs1,
                         bool abs2, bool neg0, bool neg1, bool neg2, uint32_t round_mode,
@@ -116,7 +156,7 @@ inline uint16_t fma_f16(uint16_t src0, uint16_t src1, uint16_t src2, bool abs0, 
                                       clamp, fp16_ovfl, clamp_nan_to_zero);
   if ((denorm_mode & 2u) == 0 && (result & 0x7c00u) == 0 && (result & 0x03ffu) != 0)
     result &= 0x8000u;
-  return result;
+  return finalize_omod_f16(result, omod);
 }
 
 /// @brief Execute an F64 fused multiply-add under MODE.FP_ROUND and MODE.FP_DENORM.
@@ -161,13 +201,7 @@ inline uint64_t finish_f64(uint64_t value, uint32_t round_mode, uint32_t omod, b
         result = 1.0;
     }
   }
-  uint64_t bits = std::bit_cast<uint64_t>(result);
-  if (omod != 0) {
-    bits = detail::flush_f64(bits);
-    if ((bits & 0x7fffffffffffffffULL) == 0)
-      bits = 0;
-  }
-  return bits;
+  return std::bit_cast<uint64_t>(finalize_omod_f64(result, omod));
 }
 
 /// @brief Scale an exact unsigned 53-bit significand using round-toward-zero.

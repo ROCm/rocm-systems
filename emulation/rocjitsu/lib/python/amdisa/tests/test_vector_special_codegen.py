@@ -6,6 +6,7 @@
 from types import SimpleNamespace
 
 import hashlib
+import re
 
 import pytest
 
@@ -144,7 +145,10 @@ def test_mullit_and_trig_preop_preserve_special_fp_rules():
     assert 'exponent > 1077u' in trig
     assert 'exponent >= 1968u' in trig
     assert 'scale_u53_f64_rtz(segment, scale)' in trig
+    assert 'amdgpu::fp_mode::effective_omod' in trig
     assert 'amdgpu::fp_mode::finish_f64' in trig
+    assert re.search(r'finish_f64\([^;]*effective_omod', trig, flags=re.DOTALL)
+    assert not re.search(r'finish_f64\([^;]*inst_\.omod', trig, flags=re.DOTALL)
 
 
 def test_trig_preop_two_over_pi_table_integrity():

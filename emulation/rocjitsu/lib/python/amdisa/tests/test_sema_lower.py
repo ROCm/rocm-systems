@@ -18,6 +18,7 @@ from amdisa.codegen.execute.sema_lower import (
     _INLINE_BINARY_OPS,
     _INLINE_TERNARY_OPS,
     _lower_apply_clamp,
+    _lower_apply_omod,
     InlineBinaryOp,
     LoweringContext,
     OperandBinding,
@@ -174,6 +175,41 @@ class TestLowerVectorAdd:
 
         assert 'amdgpu::clamp_floating_result(v, wf)' in result
         assert 'std::clamp' not in result
+
+    @pytest.mark.parametrize(
+        ('result_type', 'expected_helper', 'expected_denorm_mode'),
+        [
+            (SemaType.F32, 'effective_omod', 'fp_denorm_mode_f32'),
+            (SemaType.F16, 'effective_f16_omod', 'fp_denorm_mode_f16_f64'),
+            (SemaType.BF16, 'effective_omod', 'fp_denorm_mode_f16_f64'),
+            (SemaType.F64, 'effective_omod', 'fp_denorm_mode_f16_f64'),
+        ],
+    )
+    def test_apply_omod_uses_result_type_mode_policy(
+        self,
+        result_type: SemaType,
+        expected_helper: str,
+        expected_denorm_mode: str,
+    ) -> None:
+        node = SemaNode(
+            SemaNodeKind.CALL,
+            call_name='apply_omod',
+            ty=result_type,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name='apply_omod'),
+                SemaNode(SemaNodeKind.LIT, lit_value='0.5', ty=result_type),
+            ),
+        )
+
+        result = _lower_apply_omod(node, LoweringContext(exec_model=ExecModel.VECTOR))
+
+        assert f'amdgpu::fp_mode::{expected_helper}' in result
+        assert expected_denorm_mode in result
+        assert 'const uint32_t effective_omod' in result
+        assert 'finalize_omod_' in result
+        assert 'if (inst_.omod ==' not in result
+        if result_type == SemaType.F16:
+            assert 'false, inst_.omod' in result
 
     def test_vector_add_f32(self):
         body = SemaNode(

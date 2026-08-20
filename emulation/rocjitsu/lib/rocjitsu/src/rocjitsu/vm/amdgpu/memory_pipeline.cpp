@@ -145,9 +145,9 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
       is_atomic ? std::max(1u, (d.elem_size + 3u) / 4u) : std::max(1u, (total_bytes + 3u) / 4u);
 
   // Zero destination VGPRs for OOB lanes. Per AMD ISA spec, out-of-bounds
-  // buffer loads return 0. exec_mask is the effective EXEC at issue time;
-  // ordinary OOB accesses retain it while ignored resource types clear it.
-  // lane_mask has OOB lanes removed. The difference gives exec-active OOB lanes.
+  // buffer loads return 0. exec_mask is the effective issue mask; ordinary OOB
+  // accesses retain it while architecturally ignored resource types clear it.
+  // lane_mask has OOB lanes removed. The difference gives issue-active OOB lanes.
   uint64_t exec = d.exec_mask;
   uint64_t oob_mask = exec & ~d.lane_mask; // exec-active but OOB
   if (oob_mask) {
@@ -512,10 +512,10 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
     if (scratch_request_lanes)
       l1_->load(d.per_lane_addr.data(), scratch_request_lanes, d.elem_size, d.num_elems,
                 d.response_data.data(), d.mtype, d.non_temporal, d.request_force_l1_bypass,
-                 d.wf_size, wf.process_id(), stride, d.element_lane_masks.view());
+                d.wf_size, wf.process_id(), stride, d.element_lane_masks.view());
     if (plain_request_lanes)
       l1_->load(d.per_lane_addr.data(), plain_request_lanes, d.elem_size, d.num_elems,
-                 d.response_data.data(), d.mtype, d.non_temporal, d.request_force_l1_bypass,
+                d.response_data.data(), d.mtype, d.non_temporal, d.request_force_l1_bypass,
                 d.wf_size, wf.process_id(), 0, d.element_lane_masks.view());
   } else {
     if (scratch_lanes)

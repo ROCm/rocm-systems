@@ -397,7 +397,11 @@ class IsaProfile(ABC):
 
     @property
     def ds_transpose_ignores_exec(self) -> bool:
-        """True when DS transpose loads form addresses for every lane."""
+        """True when DS transpose loads replace EXEC with an all-lanes mask.
+
+        The effective mask applies to issue, address generation, and load
+        writeback, not only to address formation.
+        """
         return False
 
     @property

@@ -422,9 +422,12 @@ def gen_vector_unary(
         expr = math_map_f16.get(op, f's /* TODO: {op} */')
         if is_vop3:
             L.append(f'    float result = {expr};')
-            L.extend(vop3_dst_mod('result'))
+            L.extend(vop3_dst_mod('result', omod_result_type='f16'))
             L.append(
                 '    uint32_t result_bits = util::f32_to_f16_mode(result, wf.fp16_ovfl());'
+            )
+            L.append(
+                '    result_bits = amdgpu::fp_mode::finalize_omod_f16(result_bits, effective_omod);'
             )
             L.append(_write_vop3_true16_dst(dst[0], 'opsel', 'result_bits'))
         else:
@@ -618,9 +621,12 @@ def gen_vector_binop(
         expr = f_op_map.get(op, f'sv0 /* TODO: {op} */')
         if is_vop3:
             L.append(f'    float result = {expr};')
-            L.extend(vop3_dst_mod('result'))
+            L.extend(vop3_dst_mod('result', omod_result_type='f16'))
             L.append(
                 '    uint32_t result_bits = util::f32_to_f16_mode(result, wf.fp16_ovfl());'
+            )
+            L.append(
+                '    result_bits = amdgpu::fp_mode::finalize_omod_f16(result_bits, effective_omod);'
             )
             L.append(_write_vop3_true16_dst(d, 'opsel', 'result_bits'))
         else:
@@ -1086,9 +1092,12 @@ def gen_vector_ternary(
         expr = f_map.get(op, f'a /* unhandled: {op} */')
         if is_vop3:
             L.append(f'    float result = {expr};')
-            L.extend(vop3_dst_mod('result'))
+            L.extend(vop3_dst_mod('result', omod_result_type='f16'))
             L.append(
                 '    uint32_t result_bits = util::f32_to_f16_mode(result, wf.fp16_ovfl());'
+            )
+            L.append(
+                '    result_bits = amdgpu::fp_mode::finalize_omod_f16(result_bits, effective_omod);'
             )
             L.append(_write_vop3_true16_dst(d, 'opsel', 'result_bits'))
         else:

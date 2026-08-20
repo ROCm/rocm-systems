@@ -968,9 +968,6 @@ def gen_dot2(
         L.append('    if (inst_.neg & 4) acc = -acc;')
         L.append('    float result = a0 * b0 + a1 * b1 + acc;')
         L.append(
-            '    if (inst_.clamp) result = amdgpu::clamp_floating_result(result, wf);'
-        )
-        L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, std::bit_cast<uint32_t>(result));'
         )
     elif cls == 'dot2_i32_i16':
@@ -1074,7 +1071,6 @@ def gen_dot2_true16(dst: list[str], src: list[str], cls: str) -> str:
     L.extend(vop3_src_mod('b1', 1, True))
     L.extend(vop3_src_mod('acc', 2, True))
     L.append('    float result = a0 * b0 + a1 * b1 + acc;')
-    L.extend(vop3_dst_mod('result'))
     if cls == 'dot2_f16_f16':
         L.append(f'    uint32_t result_bits = {narrow}(result, wf.fp16_ovfl());')
     else:

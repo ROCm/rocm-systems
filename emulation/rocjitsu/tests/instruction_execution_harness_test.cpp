@@ -21,6 +21,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
@@ -29,6 +30,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/isa/decoder.h"
@@ -1378,7 +1380,7 @@ TEST(Rdna3Dot2ExecutionTest, Vop2Dot2accF32F16AccumulatesDst) {
     wf->halt();
 }
 
-TEST(Rdna4Dot2True16ExecutionTest, F16AppliesVop3ModifiersAndSelectedHalves) {
+TEST(Rdna4Dot2True16ExecutionTest, F16IgnoresOutputModifiersAndUsesSelectedHalves) {
   amdgpu::GpuMemory gpu_mem("rdna4_dot2_true16_f16_mem");
   amdgpu::L2Cache l2("rdna4_dot2_true16_f16_l2");
 
@@ -1413,7 +1415,7 @@ TEST(Rdna4Dot2True16ExecutionTest, F16AppliesVop3ModifiersAndSelectedHalves) {
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_dot2_f16_f16");
   cu->execute_instruction(inst.get(), *wf);
 
-  EXPECT_EQ(cu->read_vgpr(vb + 3, 0), pack16(0xBEEFu, util::f32_to_f16(1.0f)));
+  EXPECT_EQ(cu->read_vgpr(vb + 3, 0), pack16(0xBEEFu, util::f32_to_f16(23.5f)));
 
   if (!wf->is_halted())
     wf->halt();
@@ -1447,7 +1449,8 @@ TEST(Rdna4Dot2True16ExecutionTest, Bf16UsesSelectedAccumulatorAndDestinationHalf
   cu->write_vgpr(vb + 3, 0, 0xCAFEBEEFu);
 
   const auto words = encode_vop3(/*op=*/0x267, /*vdst=*/3, /*src0=*/256, /*src1=*/257,
-                                 /*src2=*/258, /*abs=*/0, /*opsel=*/0x4u);
+                                 /*src2=*/258, /*abs=*/0, /*opsel=*/0x4u, /*clamp=*/1,
+                                 /*omod=*/1);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_dot2_bf16_bf16");
@@ -1496,6 +1499,7 @@ void run_cdna4_dot2_f32_bf16(bool force_scalar) {
   const auto words =
       cdna4::build_vop3p(cdna4::kVDot2F32Bf16Vop3p, {.vdst = static_cast<uint8_t>(3),
                                                      .op_sel_hi_2 = 1,
+                                                     .clamp = 1,
                                                      .src0 = static_cast<uint16_t>(256),
                                                      .src1 = static_cast<uint16_t>(257),
                                                      .src2 = static_cast<uint16_t>(258),
@@ -1506,7 +1510,8 @@ void run_cdna4_dot2_f32_bf16(bool force_scalar) {
   cu->execute_instruction(inst.get(), *wf);
 
   // 1.0*3.0 + 2.0*4.0 + 0.5 = 11.5, computed in exact f32 (all inputs represent
-  // exactly in BF16). A wrong f16 widening would not produce this.
+  // exactly in BF16). Floating DOT ignores the encoded CLAMP field; a wrong
+  // widening or incorrect clamp implementation would not produce this.
   EXPECT_EQ(cu->read_vgpr(vb + 3, 0), std::bit_cast<uint32_t>(11.5f));
 
   if (!wf->is_halted())
@@ -2173,6 +2178,359 @@ TEST(Cdna4BlockScaleMfmaModifierTest, SignedZeroTruthTable) {
   EXPECT_EQ(std::bit_cast<uint32_t>(amdgpu::apply_wmma_c_modifier(
                 std::bit_cast<float>(negative_zero), /*abs-then-neg=*/3)),
             negative_zero);
+}
+
+TEST(Cdna4OmodExecutionTest, IeeeSuppressesTrigPreopOmod) {
+  amdgpu::GpuMemory gpu_mem("cdna4_trig_preop_omod_mem");
+  amdgpu::L2Cache l2("cdna4_trig_preop_omod_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("cdna4", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  constexpr uint64_t kOne = uint64_t{1023} << 52;
+  cu->write_vgpr(vb + 0, 0, static_cast<uint32_t>(kOne));
+  cu->write_vgpr(vb + 1, 0, static_cast<uint32_t>(kOne >> 32));
+  cu->write_vgpr(vb + 2, 0, 0u);
+
+  const auto plain_words =
+      cdna4::build_vop3(cdna4::kVTrigPreopF64Vop3, {.vdst = 4, .src0 = 256, .src1 = 258});
+  std::unique_ptr<Instruction> plain(decode_valid(*decoder, plain_words.data()));
+  ASSERT_NE(plain, nullptr);
+  const auto omod_words = cdna4::build_vop3(cdna4::kVTrigPreopF64Vop3,
+                                            {.vdst = 6, .src0 = 256, .src1 = 258, .omod = 1});
+  std::unique_ptr<Instruction> omod(decode_valid(*decoder, omod_words.data()));
+  ASSERT_NE(omod, nullptr);
+
+  wf->set_mode_raw(amdgpu::Wavefront::IEEE_BIT);
+  cu->execute_instruction(plain.get(), *wf);
+  cu->execute_instruction(omod.get(), *wf);
+  const auto read_f64 = [&](uint32_t reg) {
+    return static_cast<uint64_t>(cu->read_vgpr(vb + reg, 0)) |
+           (static_cast<uint64_t>(cu->read_vgpr(vb + reg + 1, 0)) << 32);
+  };
+  EXPECT_EQ(read_f64(4), 0x3FE45F306DC9C882ULL);
+  EXPECT_EQ(read_f64(6), read_f64(4));
+
+  wf->set_mode_raw(0u);
+  cu->execute_instruction(omod.get(), *wf);
+  EXPECT_EQ(read_f64(6), 0x3FF45F306DC9C882ULL);
+
+  if (!wf->is_halted())
+    wf->halt();
+}
+
+TEST(Cdna4OmodExecutionTest, MulExceptionClassifierUsesEffectiveOmod) {
+  amdgpu::GpuMemory gpu_mem("cdna4_mul_exception_omod_mem");
+  amdgpu::L2Cache l2("cdna4_mul_exception_omod_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("cdna4", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  cu->write_vgpr(vb + 0, 0, std::bit_cast<uint32_t>(std::numeric_limits<float>::max()));
+  cu->write_vgpr(vb + 1, 0, std::bit_cast<uint32_t>(0.75f));
+  const auto words =
+      cdna4::build_vop3(cdna4::kVMulF32Vop3, {.vdst = 2, .src0 = 256, .src1 = 257, .omod = 1});
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  auto *mul = dynamic_cast<cdna4::VMulF32Vop3 *>(inst.get());
+  ASSERT_NE(mul, nullptr);
+
+  constexpr uint32_t kOverflow = 1u << 3;
+  wf->set_mode_raw(amdgpu::Wavefront::IEEE_BIT);
+  EXPECT_EQ(amdgpu::classify_mul_f32_vop3(*mul, *wf) & kOverflow, 0u);
+
+  wf->set_mode_raw(0u);
+  EXPECT_EQ(amdgpu::classify_mul_f32_vop3(*mul, *wf) & kOverflow, kOverflow);
+
+  if (!wf->is_halted())
+    wf->halt();
+}
+
+TEST(NewerOmodExecutionTest, MulReportsOnlyPermittedExceptionClasses) {
+  struct ArchCase {
+    rj_code_arch_t arch;
+    uint16_t opcode;
+    const char *name;
+  };
+  constexpr std::array kCases{
+      ArchCase{ROCJITSU_CODE_ARCH_RDNA4, rdna4::kVMulF32Vop3, "rdna4"},
+      ArchCase{ROCJITSU_CODE_ARCH_CDNA5, cdna5::kVMulF32Vop3, "gfx1250"},
+  };
+  constexpr uint32_t kOverflow = 1u << 3;
+  constexpr uint32_t kUnderflow = 1u << 4;
+  constexpr uint32_t kInexact = 1u << 5;
+
+  for (const auto &test_case : kCases) {
+    for (bool force_scalar : {false, true}) {
+      SCOPED_TRACE(std::string(test_case.name) + (force_scalar ? " scalar" : " simd"));
+      ForceScalarGuard guard(force_scalar);
+      amdgpu::GpuMemory gpu_mem(std::string(test_case.name) + "_mul_omod_exceptions_mem");
+      amdgpu::L2Cache l2(std::string(test_case.name) + "_mul_omod_exceptions_l2");
+
+      amdgpu::ComputeUnitCore::Config cfg{};
+      cfg.arch = test_case.arch;
+      cfg.num_wf_slots = 1;
+      cfg.sgprs_per_wf = 106;
+      cfg.vgprs_per_wf = 256;
+      cfg.lds_size_kb = 64;
+
+      auto cu = amdgpu::ComputeUnitCore::create(test_case.name, cfg, &gpu_mem, &l2);
+      ASSERT_NE(cu, nullptr);
+      auto decoder = Decoder::create(test_case.arch);
+      ASSERT_NE(decoder, nullptr);
+      auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+      ASSERT_NE(wf, nullptr);
+      const uint32_t vb = wf->vgpr_alloc().base;
+
+      // OMOD /2 would ordinarily classify lane 0 as underflow and lane 1 as
+      // inexact. Newer profiles explicitly suppress both classes while OMOD is
+      // active, even with output denormals and IEEE mode enabled.
+      wf->set_exec(0x3u);
+      wf->set_mode_raw(amdgpu::Wavefront::IEEE_BIT | (3u << 4));
+      cu->write_vgpr(vb + 0, 0, std::bit_cast<uint32_t>(std::numeric_limits<float>::min()));
+      cu->write_vgpr(vb + 1, 0, std::bit_cast<uint32_t>(1.0f));
+      cu->write_vgpr(vb + 0, 1, std::bit_cast<uint32_t>(1.1f));
+      cu->write_vgpr(vb + 1, 1, std::bit_cast<uint32_t>(1.1f));
+      const auto suppressed_words = encode_vop3(test_case.opcode, 2, 256, 257, 0, 0, 0, 0, 3);
+      std::unique_ptr<Instruction> suppressed(decode_valid(*decoder, suppressed_words.data()));
+      ASSERT_NE(suppressed, nullptr);
+      wf->set_trapsts(0u);
+      wf->clear_pending_alu_causes();
+      cu->execute_instruction(suppressed.get(), *wf);
+      EXPECT_EQ(wf->pending_alu_causes() & (kUnderflow | kInexact), 0u);
+      EXPECT_EQ(wf->trapsts() & (kUnderflow | kInexact), 0u);
+
+      // Overflow remains a permitted exception class under active OMOD.
+      wf->set_exec(1u);
+      wf->set_mode_raw(amdgpu::Wavefront::IEEE_BIT | (3u << 4));
+      cu->write_vgpr(vb + 0, 0, std::bit_cast<uint32_t>(std::numeric_limits<float>::max()));
+      cu->write_vgpr(vb + 1, 0, std::bit_cast<uint32_t>(0.75f));
+      const auto overflow_words = encode_vop3(test_case.opcode, 2, 256, 257, 0, 0, 0, 0, 1);
+      std::unique_ptr<Instruction> overflow(decode_valid(*decoder, overflow_words.data()));
+      ASSERT_NE(overflow, nullptr);
+      ASSERT_EQ(overflow->mnemonic(), "v_mul_f32");
+      wf->set_trapsts(0u);
+      wf->clear_pending_alu_causes();
+      cu->execute_instruction(overflow.get(), *wf);
+      EXPECT_EQ(wf->pending_alu_causes() & kOverflow, kOverflow);
+      EXPECT_EQ(wf->trapsts() & kOverflow, kOverflow);
+
+      if (!wf->is_halted())
+        wf->halt();
+    }
+  }
+}
+
+TEST(NewerOmodExecutionTest, F32AndF64FinalizeExactResultsInScalarAndSimdPaths) {
+  struct ArchCase {
+    rj_code_arch_t arch;
+    uint16_t mul_f32_opcode;
+    uint16_t add_f64_opcode;
+    const char *name;
+  };
+  constexpr std::array kCases{
+      ArchCase{ROCJITSU_CODE_ARCH_RDNA4, rdna4::kVMulF32Vop3, rdna4::kVAddF64Vop3, "rdna4"},
+      ArchCase{ROCJITSU_CODE_ARCH_CDNA5, cdna5::kVMulF32Vop3, cdna5::kVAddF64Vop3, "gfx1250"},
+  };
+
+  for (const auto &test_case : kCases) {
+    for (bool force_scalar : {false, true}) {
+      SCOPED_TRACE(std::string(test_case.name) + (force_scalar ? " scalar" : " simd"));
+      ForceScalarGuard guard(force_scalar);
+      amdgpu::GpuMemory gpu_mem(std::string(test_case.name) + "_omod_result_mem");
+      amdgpu::L2Cache l2(std::string(test_case.name) + "_omod_result_l2");
+
+      amdgpu::ComputeUnitCore::Config cfg{};
+      cfg.arch = test_case.arch;
+      cfg.num_wf_slots = 1;
+      cfg.sgprs_per_wf = 106;
+      cfg.vgprs_per_wf = 256;
+      cfg.lds_size_kb = 64;
+
+      auto cu = amdgpu::ComputeUnitCore::create(test_case.name, cfg, &gpu_mem, &l2);
+      ASSERT_NE(cu, nullptr);
+      auto decoder = Decoder::create(test_case.arch);
+      ASSERT_NE(decoder, nullptr);
+      auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+      ASSERT_NE(wf, nullptr);
+      wf->set_exec(0x3u);
+      wf->set_mode_raw(amdgpu::Wavefront::IEEE_BIT | (3u << 4) | (3u << 6));
+      const uint32_t vb = wf->vgpr_alloc().base;
+
+      cu->write_vgpr(vb + 0, 0, std::bit_cast<uint32_t>(std::numeric_limits<float>::min()));
+      cu->write_vgpr(vb + 1, 0, std::bit_cast<uint32_t>(1.0f));
+      cu->write_vgpr(vb + 0, 1, 0x80000000u);
+      cu->write_vgpr(vb + 1, 1, std::bit_cast<uint32_t>(1.0f));
+      const auto f32_words = encode_vop3(test_case.mul_f32_opcode, 2, 256, 257, 0, 0, 0, 1, 3);
+      std::unique_ptr<Instruction> f32_inst(decode_valid(*decoder, f32_words.data()));
+      ASSERT_NE(f32_inst, nullptr);
+      cu->execute_instruction(f32_inst.get(), *wf);
+      EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0u);
+      EXPECT_EQ(cu->read_vgpr(vb + 2, 1), 0u);
+
+      constexpr uint64_t kMinNormalF64 = 0x0010000000000000ULL;
+      constexpr uint64_t kNegativeZeroF64 = 0x8000000000000000ULL;
+      for (uint32_t lane = 0; lane < 2; ++lane) {
+        const uint64_t lhs = lane == 0 ? kMinNormalF64 : kNegativeZeroF64;
+        cu->write_vgpr(vb + 4, lane, static_cast<uint32_t>(lhs));
+        cu->write_vgpr(vb + 5, lane, static_cast<uint32_t>(lhs >> 32));
+        cu->write_vgpr(vb + 6, lane, 0u);
+        cu->write_vgpr(vb + 7, lane, lane == 0 ? 0u : 0x80000000u);
+      }
+      const auto f64_words = encode_vop3(test_case.add_f64_opcode, 8, 260, 262, 0, 0, 0, 1, 3);
+      std::unique_ptr<Instruction> f64_inst(decode_valid(*decoder, f64_words.data()));
+      ASSERT_NE(f64_inst, nullptr);
+      cu->execute_instruction(f64_inst.get(), *wf);
+      for (uint32_t lane = 0; lane < 2; ++lane) {
+        EXPECT_EQ(cu->read_vgpr(vb + 8, lane), 0u);
+        EXPECT_EQ(cu->read_vgpr(vb + 9, lane), 0u);
+      }
+
+      // Pin OMOD finalization independently from CLAMP. Positive and negative
+      // minimum-normal values become subnormals under /2, and both those
+      // flushed results and an input -0 must be canonicalized to +0.
+      wf->set_exec(0x7u);
+      constexpr std::array<uint32_t, 3> kF32Inputs{
+          std::bit_cast<uint32_t>(std::numeric_limits<float>::min()),
+          std::bit_cast<uint32_t>(-std::numeric_limits<float>::min()),
+          0x80000000u,
+      };
+      for (std::size_t lane = 0; lane < kF32Inputs.size(); ++lane) {
+        cu->write_vgpr(vb + 0, lane, kF32Inputs[lane]);
+        cu->write_vgpr(vb + 1, lane, std::bit_cast<uint32_t>(1.0f));
+      }
+      const auto unclamped_f32_words =
+          encode_vop3(test_case.mul_f32_opcode, 2, 256, 257, 0, 0, 0, 0, 3);
+      std::unique_ptr<Instruction> unclamped_f32(
+          decode_valid(*decoder, unclamped_f32_words.data()));
+      ASSERT_NE(unclamped_f32, nullptr);
+      cu->execute_instruction(unclamped_f32.get(), *wf);
+      for (std::size_t lane = 0; lane < kF32Inputs.size(); ++lane)
+        EXPECT_EQ(cu->read_vgpr(vb + 2, lane), 0u);
+
+      constexpr std::array<uint64_t, 3> kF64Inputs{
+          kMinNormalF64,
+          kMinNormalF64 | 0x8000000000000000ULL,
+          kNegativeZeroF64,
+      };
+      for (std::size_t lane = 0; lane < kF64Inputs.size(); ++lane) {
+        const uint64_t lhs = kF64Inputs[lane];
+        const uint64_t rhs = lhs & 0x8000000000000000ULL;
+        cu->write_vgpr(vb + 4, lane, static_cast<uint32_t>(lhs));
+        cu->write_vgpr(vb + 5, lane, static_cast<uint32_t>(lhs >> 32));
+        cu->write_vgpr(vb + 6, lane, static_cast<uint32_t>(rhs));
+        cu->write_vgpr(vb + 7, lane, static_cast<uint32_t>(rhs >> 32));
+      }
+      const auto unclamped_f64_words =
+          encode_vop3(test_case.add_f64_opcode, 8, 260, 262, 0, 0, 0, 0, 3);
+      std::unique_ptr<Instruction> unclamped_f64(
+          decode_valid(*decoder, unclamped_f64_words.data()));
+      ASSERT_NE(unclamped_f64, nullptr);
+      cu->execute_instruction(unclamped_f64.get(), *wf);
+      for (std::size_t lane = 0; lane < kF64Inputs.size(); ++lane) {
+        EXPECT_EQ(cu->read_vgpr(vb + 8, lane), 0u);
+        EXPECT_EQ(cu->read_vgpr(vb + 9, lane), 0u);
+      }
+
+      if (!wf->is_halted())
+        wf->halt();
+    }
+  }
+}
+
+TEST(Cdna4PkFmacF16Vop3ExecutionTest, PackedAccumulatorModifiersModeAndPartialExec) {
+  amdgpu::GpuMemory gpu_mem("cdna4_pk_fmac_f16_vop3_mem");
+  amdgpu::L2Cache l2("cdna4_pk_fmac_f16_vop3_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("cdna4", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint64_t kExec = 0x5u;
+  constexpr uint32_t kInactiveSentinel = 0xDEADBEEFu;
+  constexpr uint32_t kSrc0 = 0;
+  constexpr uint32_t kSrc1 = 1;
+  constexpr uint32_t kDst = 2;
+  wf->set_exec(kExec);
+
+  const auto words =
+      cdna4::build_vop3(cdna4::kVPkFmacF16Vop3, {.vdst = kDst,
+                                                 .abs = 0x1u,
+                                                 .src0 = static_cast<uint16_t>(vgpr_src(kSrc0)),
+                                                 .src1 = static_cast<uint16_t>(vgpr_src(kSrc1)),
+                                                 .omod = 1,
+                                                 .neg = 0x2u});
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_pk_fmac_f16");
+
+  struct ModeCase {
+    uint32_t mode;
+    uint32_t expected;
+  };
+  constexpr std::array<ModeCase, 3> kCases = {{
+      {0u, pack16(0xCB00u, 0xCE80u)}, // (-7, -13) with OMOD *2 => (-14, -26)
+      {1u << 7, pack16(0xC700u, 0xCA80u)},
+      {amdgpu::Wavefront::IEEE_BIT, pack16(0xC700u, 0xCA80u)},
+  }};
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  for (const auto &test_case : kCases) {
+    wf->set_mode_raw(test_case.mode);
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      cu->write_vgpr(vb + kSrc0, lane, pack16(0xC000u, 0xC200u)); // (-2, -3)
+      cu->write_vgpr(vb + kSrc1, lane, pack16(0x4400u, 0x4500u)); // (4, 5)
+      const bool active = (kExec & (uint64_t{1} << lane)) != 0;
+      cu->write_vgpr(vb + kDst, lane,
+                     active ? pack16(0x3C00u, 0x4000u) : kInactiveSentinel); // (1, 2)
+    }
+
+    cu->execute_instruction(inst.get(), *wf);
+
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      const bool active = (kExec & (uint64_t{1} << lane)) != 0;
+      EXPECT_EQ(cu->read_vgpr(vb + kDst, lane), active ? test_case.expected : kInactiveSentinel)
+          << "mode=" << test_case.mode << " lane=" << lane;
+    }
+  }
+
+  if (!wf->is_halted())
+    wf->halt();
 }
 
 // v_permlane16_swap_b32 on a wave64 swaps ALL FOUR 16-lane groups: it exchanges

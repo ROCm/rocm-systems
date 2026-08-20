@@ -335,51 +335,61 @@ void VMin3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(util::f32_to_f16_mode(
-          [&]() {
-            float v = [&]() {
-              float v = std::fmin(
-                  std::fmin(
-                      [&]() {
-                        float sv = util::f16_to_f32(static_cast<uint16_t>(
-                            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-                        if (inst_.abs & (1u << 0))
-                          sv = std::fabs(sv);
-                        if (inst_.neg & (1u << 0))
-                          sv = -sv;
-                        return sv;
-                      }(),
-                      [&]() {
-                        float sv = util::f16_to_f32(static_cast<uint16_t>(
-                            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
-                        if (inst_.abs & (1u << 1))
-                          sv = std::fabs(sv);
-                        if (inst_.neg & (1u << 1))
-                          sv = -sv;
-                        return sv;
-                      }()),
+      uint32_t src_half =
+          static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::fp_mode::finalize_omod_f16(
+              util::f32_to_f16_mode(
                   [&]() {
-                    float sv = util::f16_to_f32(static_cast<uint16_t>(
-                        ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
-                    if (inst_.abs & (1u << 2))
-                      sv = std::fabs(sv);
-                    if (inst_.neg & (1u << 2))
-                      sv = -sv;
-                    return sv;
-                  }());
-              if (inst_.omod == 1)
-                v *= 2.0f;
-              else if (inst_.omod == 2)
-                v *= 4.0f;
-              else if (inst_.omod == 3)
-                v *= 0.5f;
-              return v;
-            }();
-            if (inst_.clamp)
-              v = amdgpu::clamp_floating_result(v, wf);
-            return v;
-          }(),
-          wf.fp16_ovfl())));
+                    float v = [&]() {
+                      float v = std::fmin(std::fmin(
+                                              [&]() {
+                                                float sv = util::f16_to_f32(static_cast<uint16_t>(
+                                                    ::rocjitsu::amdgpu::read_vop3_true16_src(
+                                                        src0, wf, lane, opsel, 0)));
+                                                if (inst_.abs & (1u << 0))
+                                                  sv = std::fabs(sv);
+                                                if (inst_.neg & (1u << 0))
+                                                  sv = -sv;
+                                                return sv;
+                                              }(),
+                                              [&]() {
+                                                float sv = util::f16_to_f32(static_cast<uint16_t>(
+                                                    ::rocjitsu::amdgpu::read_vop3_true16_src(
+                                                        src1, wf, lane, opsel, 1)));
+                                                if (inst_.abs & (1u << 1))
+                                                  sv = std::fabs(sv);
+                                                if (inst_.neg & (1u << 1))
+                                                  sv = -sv;
+                                                return sv;
+                                              }()),
+                                          [&]() {
+                                            float sv = util::f16_to_f32(static_cast<uint16_t>(
+                                                ::rocjitsu::amdgpu::read_vop3_true16_src(
+                                                    src2, wf, lane, opsel, 2)));
+                                            if (inst_.abs & (1u << 2))
+                                              sv = std::fabs(sv);
+                                            if (inst_.neg & (1u << 2))
+                                              sv = -sv;
+                                            return sv;
+                                          }());
+                      const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
+                          wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false,
+                          inst_.omod);
+                      if (effective_omod == 1)
+                        v *= 2.0f;
+                      else if (effective_omod == 2)
+                        v *= 4.0f;
+                      else if (effective_omod == 3)
+                        v *= 0.5f;
+                      v = amdgpu::fp_mode::finalize_omod_f32(v, effective_omod);
+                      return v;
+                    }();
+                    if (inst_.clamp)
+                      v = amdgpu::clamp_floating_result(v, wf);
+                    return v;
+                  }(),
+                  wf.fp16_ovfl()),
+              amdgpu::fp_mode::effective_f16_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(),
+                                                  wf.ieee_mode(), false, inst_.omod))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
@@ -404,51 +414,61 @@ void VMax3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(util::f32_to_f16_mode(
-          [&]() {
-            float v = [&]() {
-              float v = std::fmax(
-                  std::fmax(
-                      [&]() {
-                        float sv = util::f16_to_f32(static_cast<uint16_t>(
-                            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-                        if (inst_.abs & (1u << 0))
-                          sv = std::fabs(sv);
-                        if (inst_.neg & (1u << 0))
-                          sv = -sv;
-                        return sv;
-                      }(),
-                      [&]() {
-                        float sv = util::f16_to_f32(static_cast<uint16_t>(
-                            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
-                        if (inst_.abs & (1u << 1))
-                          sv = std::fabs(sv);
-                        if (inst_.neg & (1u << 1))
-                          sv = -sv;
-                        return sv;
-                      }()),
+      uint32_t src_half =
+          static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::fp_mode::finalize_omod_f16(
+              util::f32_to_f16_mode(
                   [&]() {
-                    float sv = util::f16_to_f32(static_cast<uint16_t>(
-                        ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
-                    if (inst_.abs & (1u << 2))
-                      sv = std::fabs(sv);
-                    if (inst_.neg & (1u << 2))
-                      sv = -sv;
-                    return sv;
-                  }());
-              if (inst_.omod == 1)
-                v *= 2.0f;
-              else if (inst_.omod == 2)
-                v *= 4.0f;
-              else if (inst_.omod == 3)
-                v *= 0.5f;
-              return v;
-            }();
-            if (inst_.clamp)
-              v = amdgpu::clamp_floating_result(v, wf);
-            return v;
-          }(),
-          wf.fp16_ovfl())));
+                    float v = [&]() {
+                      float v = std::fmax(std::fmax(
+                                              [&]() {
+                                                float sv = util::f16_to_f32(static_cast<uint16_t>(
+                                                    ::rocjitsu::amdgpu::read_vop3_true16_src(
+                                                        src0, wf, lane, opsel, 0)));
+                                                if (inst_.abs & (1u << 0))
+                                                  sv = std::fabs(sv);
+                                                if (inst_.neg & (1u << 0))
+                                                  sv = -sv;
+                                                return sv;
+                                              }(),
+                                              [&]() {
+                                                float sv = util::f16_to_f32(static_cast<uint16_t>(
+                                                    ::rocjitsu::amdgpu::read_vop3_true16_src(
+                                                        src1, wf, lane, opsel, 1)));
+                                                if (inst_.abs & (1u << 1))
+                                                  sv = std::fabs(sv);
+                                                if (inst_.neg & (1u << 1))
+                                                  sv = -sv;
+                                                return sv;
+                                              }()),
+                                          [&]() {
+                                            float sv = util::f16_to_f32(static_cast<uint16_t>(
+                                                ::rocjitsu::amdgpu::read_vop3_true16_src(
+                                                    src2, wf, lane, opsel, 2)));
+                                            if (inst_.abs & (1u << 2))
+                                              sv = std::fabs(sv);
+                                            if (inst_.neg & (1u << 2))
+                                              sv = -sv;
+                                            return sv;
+                                          }());
+                      const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
+                          wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false,
+                          inst_.omod);
+                      if (effective_omod == 1)
+                        v *= 2.0f;
+                      else if (effective_omod == 2)
+                        v *= 4.0f;
+                      else if (effective_omod == 3)
+                        v *= 0.5f;
+                      v = amdgpu::fp_mode::finalize_omod_f32(v, effective_omod);
+                      return v;
+                    }();
+                    if (inst_.clamp)
+                      v = amdgpu::clamp_floating_result(v, wf);
+                    return v;
+                  }(),
+                  wf.fp16_ovfl()),
+              amdgpu::fp_mode::effective_f16_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(),
+                                                  wf.ieee_mode(), false, inst_.omod))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
@@ -496,55 +516,63 @@ void VMinimum3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(util::f32_to_f16_mode(
-          [&]() {
-            float v = [&]() {
-              float v = [&]() {
-                auto a = [&]() {
-                  float sv = util::f16_to_f32(static_cast<uint16_t>(
-                      ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-                  if (inst_.abs & (1u << 0))
-                    sv = std::fabs(sv);
-                  if (inst_.neg & (1u << 0))
-                    sv = -sv;
-                  return sv;
-                }();
-                auto b = [&]() {
-                  float sv = util::f16_to_f32(static_cast<uint16_t>(
-                      ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
-                  if (inst_.abs & (1u << 1))
-                    sv = std::fabs(sv);
-                  if (inst_.neg & (1u << 1))
-                    sv = -sv;
-                  return sv;
-                }();
-                auto c = [&]() {
-                  float sv = util::f16_to_f32(static_cast<uint16_t>(
-                      ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
-                  if (inst_.abs & (1u << 2))
-                    sv = std::fabs(sv);
-                  if (inst_.neg & (1u << 2))
-                    sv = -sv;
-                  return sv;
-                }();
-                if (std::isnan(a) || std::isnan(b) || std::isnan(c))
-                  return std::numeric_limits<decltype(a)>::quiet_NaN();
-                auto ab = (a == b) ? (std::signbit(a) ? a : b) : (a < b ? a : b);
-                return (ab == c) ? (std::signbit(ab) ? ab : c) : (ab < c ? ab : c);
-              }();
-              if (inst_.omod == 1)
-                v *= 2.0f;
-              else if (inst_.omod == 2)
-                v *= 4.0f;
-              else if (inst_.omod == 3)
-                v *= 0.5f;
-              return v;
-            }();
-            if (inst_.clamp)
-              v = amdgpu::clamp_floating_result(v, wf);
-            return v;
-          }(),
-          wf.fp16_ovfl())));
+      uint32_t src_half =
+          static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::fp_mode::finalize_omod_f16(
+              util::f32_to_f16_mode(
+                  [&]() {
+                    float v = [&]() {
+                      float v = [&]() {
+                        auto a = [&]() {
+                          float sv = util::f16_to_f32(static_cast<uint16_t>(
+                              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+                          if (inst_.abs & (1u << 0))
+                            sv = std::fabs(sv);
+                          if (inst_.neg & (1u << 0))
+                            sv = -sv;
+                          return sv;
+                        }();
+                        auto b = [&]() {
+                          float sv = util::f16_to_f32(static_cast<uint16_t>(
+                              ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
+                          if (inst_.abs & (1u << 1))
+                            sv = std::fabs(sv);
+                          if (inst_.neg & (1u << 1))
+                            sv = -sv;
+                          return sv;
+                        }();
+                        auto c = [&]() {
+                          float sv = util::f16_to_f32(static_cast<uint16_t>(
+                              ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
+                          if (inst_.abs & (1u << 2))
+                            sv = std::fabs(sv);
+                          if (inst_.neg & (1u << 2))
+                            sv = -sv;
+                          return sv;
+                        }();
+                        if (std::isnan(a) || std::isnan(b) || std::isnan(c))
+                          return std::numeric_limits<decltype(a)>::quiet_NaN();
+                        auto ab = (a == b) ? (std::signbit(a) ? a : b) : (a < b ? a : b);
+                        return (ab == c) ? (std::signbit(ab) ? ab : c) : (ab < c ? ab : c);
+                      }();
+                      const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
+                          wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false,
+                          inst_.omod);
+                      if (effective_omod == 1)
+                        v *= 2.0f;
+                      else if (effective_omod == 2)
+                        v *= 4.0f;
+                      else if (effective_omod == 3)
+                        v *= 0.5f;
+                      v = amdgpu::fp_mode::finalize_omod_f32(v, effective_omod);
+                      return v;
+                    }();
+                    if (inst_.clamp)
+                      v = amdgpu::clamp_floating_result(v, wf);
+                    return v;
+                  }(),
+                  wf.fp16_ovfl()),
+              amdgpu::fp_mode::effective_f16_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(),
+                                                  wf.ieee_mode(), false, inst_.omod))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
@@ -570,55 +598,63 @@ void VMaximum3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(util::f32_to_f16_mode(
-          [&]() {
-            float v = [&]() {
-              float v = [&]() {
-                auto a = [&]() {
-                  float sv = util::f16_to_f32(static_cast<uint16_t>(
-                      ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-                  if (inst_.abs & (1u << 0))
-                    sv = std::fabs(sv);
-                  if (inst_.neg & (1u << 0))
-                    sv = -sv;
-                  return sv;
-                }();
-                auto b = [&]() {
-                  float sv = util::f16_to_f32(static_cast<uint16_t>(
-                      ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
-                  if (inst_.abs & (1u << 1))
-                    sv = std::fabs(sv);
-                  if (inst_.neg & (1u << 1))
-                    sv = -sv;
-                  return sv;
-                }();
-                auto c = [&]() {
-                  float sv = util::f16_to_f32(static_cast<uint16_t>(
-                      ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
-                  if (inst_.abs & (1u << 2))
-                    sv = std::fabs(sv);
-                  if (inst_.neg & (1u << 2))
-                    sv = -sv;
-                  return sv;
-                }();
-                if (std::isnan(a) || std::isnan(b) || std::isnan(c))
-                  return std::numeric_limits<decltype(a)>::quiet_NaN();
-                auto ab = (a == b) ? (std::signbit(a) ? b : a) : (a > b ? a : b);
-                return (ab == c) ? (std::signbit(ab) ? c : ab) : (ab > c ? ab : c);
-              }();
-              if (inst_.omod == 1)
-                v *= 2.0f;
-              else if (inst_.omod == 2)
-                v *= 4.0f;
-              else if (inst_.omod == 3)
-                v *= 0.5f;
-              return v;
-            }();
-            if (inst_.clamp)
-              v = amdgpu::clamp_floating_result(v, wf);
-            return v;
-          }(),
-          wf.fp16_ovfl())));
+      uint32_t src_half =
+          static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::fp_mode::finalize_omod_f16(
+              util::f32_to_f16_mode(
+                  [&]() {
+                    float v = [&]() {
+                      float v = [&]() {
+                        auto a = [&]() {
+                          float sv = util::f16_to_f32(static_cast<uint16_t>(
+                              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+                          if (inst_.abs & (1u << 0))
+                            sv = std::fabs(sv);
+                          if (inst_.neg & (1u << 0))
+                            sv = -sv;
+                          return sv;
+                        }();
+                        auto b = [&]() {
+                          float sv = util::f16_to_f32(static_cast<uint16_t>(
+                              ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
+                          if (inst_.abs & (1u << 1))
+                            sv = std::fabs(sv);
+                          if (inst_.neg & (1u << 1))
+                            sv = -sv;
+                          return sv;
+                        }();
+                        auto c = [&]() {
+                          float sv = util::f16_to_f32(static_cast<uint16_t>(
+                              ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
+                          if (inst_.abs & (1u << 2))
+                            sv = std::fabs(sv);
+                          if (inst_.neg & (1u << 2))
+                            sv = -sv;
+                          return sv;
+                        }();
+                        if (std::isnan(a) || std::isnan(b) || std::isnan(c))
+                          return std::numeric_limits<decltype(a)>::quiet_NaN();
+                        auto ab = (a == b) ? (std::signbit(a) ? b : a) : (a > b ? a : b);
+                        return (ab == c) ? (std::signbit(ab) ? c : ab) : (ab > c ? ab : c);
+                      }();
+                      const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
+                          wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false,
+                          inst_.omod);
+                      if (effective_omod == 1)
+                        v *= 2.0f;
+                      else if (effective_omod == 2)
+                        v *= 4.0f;
+                      else if (effective_omod == 3)
+                        v *= 0.5f;
+                      v = amdgpu::fp_mode::finalize_omod_f32(v, effective_omod);
+                      return v;
+                    }();
+                    if (inst_.clamp)
+                      v = amdgpu::clamp_floating_result(v, wf);
+                    return v;
+                  }(),
+                  wf.fp16_ovfl()),
+              amdgpu::fp_mode::effective_f16_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(),
+                                                  wf.ieee_mode(), false, inst_.omod))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
@@ -651,52 +687,60 @@ void VMed3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(util::f32_to_f16_mode(
-          [&]() {
-            float v = [&]() {
-              float v = [&]() {
-                auto a = [&]() {
-                  float sv = util::f16_to_f32(static_cast<uint16_t>(
-                      ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-                  if (inst_.abs & (1u << 0))
-                    sv = std::fabs(sv);
-                  if (inst_.neg & (1u << 0))
-                    sv = -sv;
-                  return sv;
-                }();
-                auto b = [&]() {
-                  float sv = util::f16_to_f32(static_cast<uint16_t>(
-                      ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
-                  if (inst_.abs & (1u << 1))
-                    sv = std::fabs(sv);
-                  if (inst_.neg & (1u << 1))
-                    sv = -sv;
-                  return sv;
-                }();
-                auto c = [&]() {
-                  float sv = util::f16_to_f32(static_cast<uint16_t>(
-                      ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
-                  if (inst_.abs & (1u << 2))
-                    sv = std::fabs(sv);
-                  if (inst_.neg & (1u << 2))
-                    sv = -sv;
-                  return sv;
-                }();
-                return std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b));
-              }();
-              if (inst_.omod == 1)
-                v *= 2.0f;
-              else if (inst_.omod == 2)
-                v *= 4.0f;
-              else if (inst_.omod == 3)
-                v *= 0.5f;
-              return v;
-            }();
-            if (inst_.clamp)
-              v = amdgpu::clamp_floating_result(v, wf);
-            return v;
-          }(),
-          wf.fp16_ovfl())));
+      uint32_t src_half =
+          static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::fp_mode::finalize_omod_f16(
+              util::f32_to_f16_mode(
+                  [&]() {
+                    float v = [&]() {
+                      float v = [&]() {
+                        auto a = [&]() {
+                          float sv = util::f16_to_f32(static_cast<uint16_t>(
+                              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+                          if (inst_.abs & (1u << 0))
+                            sv = std::fabs(sv);
+                          if (inst_.neg & (1u << 0))
+                            sv = -sv;
+                          return sv;
+                        }();
+                        auto b = [&]() {
+                          float sv = util::f16_to_f32(static_cast<uint16_t>(
+                              ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
+                          if (inst_.abs & (1u << 1))
+                            sv = std::fabs(sv);
+                          if (inst_.neg & (1u << 1))
+                            sv = -sv;
+                          return sv;
+                        }();
+                        auto c = [&]() {
+                          float sv = util::f16_to_f32(static_cast<uint16_t>(
+                              ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
+                          if (inst_.abs & (1u << 2))
+                            sv = std::fabs(sv);
+                          if (inst_.neg & (1u << 2))
+                            sv = -sv;
+                          return sv;
+                        }();
+                        return std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b));
+                      }();
+                      const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
+                          wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false,
+                          inst_.omod);
+                      if (effective_omod == 1)
+                        v *= 2.0f;
+                      else if (effective_omod == 2)
+                        v *= 4.0f;
+                      else if (effective_omod == 3)
+                        v *= 0.5f;
+                      v = amdgpu::fp_mode::finalize_omod_f32(v, effective_omod);
+                      return v;
+                    }();
+                    if (inst_.clamp)
+                      v = amdgpu::clamp_floating_result(v, wf);
+                    return v;
+                  }(),
+                  wf.fp16_ovfl()),
+              amdgpu::fp_mode::effective_f16_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(),
+                                                  wf.ieee_mode(), false, inst_.omod))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
@@ -1374,51 +1418,61 @@ void VMinmaxNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(util::f32_to_f16_mode(
-          [&]() {
-            float v = [&]() {
-              float v = std::fmax(
-                  std::fmin(
-                      [&]() {
-                        float sv = util::f16_to_f32(static_cast<uint16_t>(
-                            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-                        if (inst_.abs & (1u << 0))
-                          sv = std::fabs(sv);
-                        if (inst_.neg & (1u << 0))
-                          sv = -sv;
-                        return sv;
-                      }(),
-                      [&]() {
-                        float sv = util::f16_to_f32(static_cast<uint16_t>(
-                            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
-                        if (inst_.abs & (1u << 1))
-                          sv = std::fabs(sv);
-                        if (inst_.neg & (1u << 1))
-                          sv = -sv;
-                        return sv;
-                      }()),
+      uint32_t src_half =
+          static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::fp_mode::finalize_omod_f16(
+              util::f32_to_f16_mode(
                   [&]() {
-                    float sv = util::f16_to_f32(static_cast<uint16_t>(
-                        ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
-                    if (inst_.abs & (1u << 2))
-                      sv = std::fabs(sv);
-                    if (inst_.neg & (1u << 2))
-                      sv = -sv;
-                    return sv;
-                  }());
-              if (inst_.omod == 1)
-                v *= 2.0f;
-              else if (inst_.omod == 2)
-                v *= 4.0f;
-              else if (inst_.omod == 3)
-                v *= 0.5f;
-              return v;
-            }();
-            if (inst_.clamp)
-              v = amdgpu::clamp_floating_result(v, wf);
-            return v;
-          }(),
-          wf.fp16_ovfl())));
+                    float v = [&]() {
+                      float v = std::fmax(std::fmin(
+                                              [&]() {
+                                                float sv = util::f16_to_f32(static_cast<uint16_t>(
+                                                    ::rocjitsu::amdgpu::read_vop3_true16_src(
+                                                        src0, wf, lane, opsel, 0)));
+                                                if (inst_.abs & (1u << 0))
+                                                  sv = std::fabs(sv);
+                                                if (inst_.neg & (1u << 0))
+                                                  sv = -sv;
+                                                return sv;
+                                              }(),
+                                              [&]() {
+                                                float sv = util::f16_to_f32(static_cast<uint16_t>(
+                                                    ::rocjitsu::amdgpu::read_vop3_true16_src(
+                                                        src1, wf, lane, opsel, 1)));
+                                                if (inst_.abs & (1u << 1))
+                                                  sv = std::fabs(sv);
+                                                if (inst_.neg & (1u << 1))
+                                                  sv = -sv;
+                                                return sv;
+                                              }()),
+                                          [&]() {
+                                            float sv = util::f16_to_f32(static_cast<uint16_t>(
+                                                ::rocjitsu::amdgpu::read_vop3_true16_src(
+                                                    src2, wf, lane, opsel, 2)));
+                                            if (inst_.abs & (1u << 2))
+                                              sv = std::fabs(sv);
+                                            if (inst_.neg & (1u << 2))
+                                              sv = -sv;
+                                            return sv;
+                                          }());
+                      const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
+                          wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false,
+                          inst_.omod);
+                      if (effective_omod == 1)
+                        v *= 2.0f;
+                      else if (effective_omod == 2)
+                        v *= 4.0f;
+                      else if (effective_omod == 3)
+                        v *= 0.5f;
+                      v = amdgpu::fp_mode::finalize_omod_f32(v, effective_omod);
+                      return v;
+                    }();
+                    if (inst_.clamp)
+                      v = amdgpu::clamp_floating_result(v, wf);
+                    return v;
+                  }(),
+                  wf.fp16_ovfl()),
+              amdgpu::fp_mode::effective_f16_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(),
+                                                  wf.ieee_mode(), false, inst_.omod))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
@@ -1443,51 +1497,61 @@ void VMaxminNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(util::f32_to_f16_mode(
-          [&]() {
-            float v = [&]() {
-              float v = std::fmin(
-                  std::fmax(
-                      [&]() {
-                        float sv = util::f16_to_f32(static_cast<uint16_t>(
-                            ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-                        if (inst_.abs & (1u << 0))
-                          sv = std::fabs(sv);
-                        if (inst_.neg & (1u << 0))
-                          sv = -sv;
-                        return sv;
-                      }(),
-                      [&]() {
-                        float sv = util::f16_to_f32(static_cast<uint16_t>(
-                            ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
-                        if (inst_.abs & (1u << 1))
-                          sv = std::fabs(sv);
-                        if (inst_.neg & (1u << 1))
-                          sv = -sv;
-                        return sv;
-                      }()),
+      uint32_t src_half =
+          static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::fp_mode::finalize_omod_f16(
+              util::f32_to_f16_mode(
                   [&]() {
-                    float sv = util::f16_to_f32(static_cast<uint16_t>(
-                        ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
-                    if (inst_.abs & (1u << 2))
-                      sv = std::fabs(sv);
-                    if (inst_.neg & (1u << 2))
-                      sv = -sv;
-                    return sv;
-                  }());
-              if (inst_.omod == 1)
-                v *= 2.0f;
-              else if (inst_.omod == 2)
-                v *= 4.0f;
-              else if (inst_.omod == 3)
-                v *= 0.5f;
-              return v;
-            }();
-            if (inst_.clamp)
-              v = amdgpu::clamp_floating_result(v, wf);
-            return v;
-          }(),
-          wf.fp16_ovfl())));
+                    float v = [&]() {
+                      float v = std::fmin(std::fmax(
+                                              [&]() {
+                                                float sv = util::f16_to_f32(static_cast<uint16_t>(
+                                                    ::rocjitsu::amdgpu::read_vop3_true16_src(
+                                                        src0, wf, lane, opsel, 0)));
+                                                if (inst_.abs & (1u << 0))
+                                                  sv = std::fabs(sv);
+                                                if (inst_.neg & (1u << 0))
+                                                  sv = -sv;
+                                                return sv;
+                                              }(),
+                                              [&]() {
+                                                float sv = util::f16_to_f32(static_cast<uint16_t>(
+                                                    ::rocjitsu::amdgpu::read_vop3_true16_src(
+                                                        src1, wf, lane, opsel, 1)));
+                                                if (inst_.abs & (1u << 1))
+                                                  sv = std::fabs(sv);
+                                                if (inst_.neg & (1u << 1))
+                                                  sv = -sv;
+                                                return sv;
+                                              }()),
+                                          [&]() {
+                                            float sv = util::f16_to_f32(static_cast<uint16_t>(
+                                                ::rocjitsu::amdgpu::read_vop3_true16_src(
+                                                    src2, wf, lane, opsel, 2)));
+                                            if (inst_.abs & (1u << 2))
+                                              sv = std::fabs(sv);
+                                            if (inst_.neg & (1u << 2))
+                                              sv = -sv;
+                                            return sv;
+                                          }());
+                      const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
+                          wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false,
+                          inst_.omod);
+                      if (effective_omod == 1)
+                        v *= 2.0f;
+                      else if (effective_omod == 2)
+                        v *= 4.0f;
+                      else if (effective_omod == 3)
+                        v *= 0.5f;
+                      v = amdgpu::fp_mode::finalize_omod_f32(v, effective_omod);
+                      return v;
+                    }();
+                    if (inst_.clamp)
+                      v = amdgpu::clamp_floating_result(v, wf);
+                    return v;
+                  }(),
+                  wf.fp16_ovfl()),
+              amdgpu::fp_mode::effective_f16_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(),
+                                                  wf.ieee_mode(), false, inst_.omod))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
@@ -1535,55 +1599,63 @@ void VMinimummaximumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(util::f32_to_f16_mode(
-          [&]() {
-            float v = [&]() {
-              float v = [&]() {
-                auto a = [&]() {
-                  float sv = util::f16_to_f32(static_cast<uint16_t>(
-                      ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-                  if (inst_.abs & (1u << 0))
-                    sv = std::fabs(sv);
-                  if (inst_.neg & (1u << 0))
-                    sv = -sv;
-                  return sv;
-                }();
-                auto b = [&]() {
-                  float sv = util::f16_to_f32(static_cast<uint16_t>(
-                      ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
-                  if (inst_.abs & (1u << 1))
-                    sv = std::fabs(sv);
-                  if (inst_.neg & (1u << 1))
-                    sv = -sv;
-                  return sv;
-                }();
-                auto c = [&]() {
-                  float sv = util::f16_to_f32(static_cast<uint16_t>(
-                      ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
-                  if (inst_.abs & (1u << 2))
-                    sv = std::fabs(sv);
-                  if (inst_.neg & (1u << 2))
-                    sv = -sv;
-                  return sv;
-                }();
-                if (std::isnan(a) || std::isnan(b) || std::isnan(c))
-                  return std::numeric_limits<decltype(a)>::quiet_NaN();
-                auto ab = (a == b) ? (std::signbit(a) ? a : b) : (a < b ? a : b);
-                return (ab == c) ? (std::signbit(ab) ? c : ab) : (ab > c ? ab : c);
-              }();
-              if (inst_.omod == 1)
-                v *= 2.0f;
-              else if (inst_.omod == 2)
-                v *= 4.0f;
-              else if (inst_.omod == 3)
-                v *= 0.5f;
-              return v;
-            }();
-            if (inst_.clamp)
-              v = amdgpu::clamp_floating_result(v, wf);
-            return v;
-          }(),
-          wf.fp16_ovfl())));
+      uint32_t src_half =
+          static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::fp_mode::finalize_omod_f16(
+              util::f32_to_f16_mode(
+                  [&]() {
+                    float v = [&]() {
+                      float v = [&]() {
+                        auto a = [&]() {
+                          float sv = util::f16_to_f32(static_cast<uint16_t>(
+                              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+                          if (inst_.abs & (1u << 0))
+                            sv = std::fabs(sv);
+                          if (inst_.neg & (1u << 0))
+                            sv = -sv;
+                          return sv;
+                        }();
+                        auto b = [&]() {
+                          float sv = util::f16_to_f32(static_cast<uint16_t>(
+                              ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
+                          if (inst_.abs & (1u << 1))
+                            sv = std::fabs(sv);
+                          if (inst_.neg & (1u << 1))
+                            sv = -sv;
+                          return sv;
+                        }();
+                        auto c = [&]() {
+                          float sv = util::f16_to_f32(static_cast<uint16_t>(
+                              ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
+                          if (inst_.abs & (1u << 2))
+                            sv = std::fabs(sv);
+                          if (inst_.neg & (1u << 2))
+                            sv = -sv;
+                          return sv;
+                        }();
+                        if (std::isnan(a) || std::isnan(b) || std::isnan(c))
+                          return std::numeric_limits<decltype(a)>::quiet_NaN();
+                        auto ab = (a == b) ? (std::signbit(a) ? a : b) : (a < b ? a : b);
+                        return (ab == c) ? (std::signbit(ab) ? c : ab) : (ab > c ? ab : c);
+                      }();
+                      const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
+                          wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false,
+                          inst_.omod);
+                      if (effective_omod == 1)
+                        v *= 2.0f;
+                      else if (effective_omod == 2)
+                        v *= 4.0f;
+                      else if (effective_omod == 3)
+                        v *= 0.5f;
+                      v = amdgpu::fp_mode::finalize_omod_f32(v, effective_omod);
+                      return v;
+                    }();
+                    if (inst_.clamp)
+                      v = amdgpu::clamp_floating_result(v, wf);
+                    return v;
+                  }(),
+                  wf.fp16_ovfl()),
+              amdgpu::fp_mode::effective_f16_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(),
+                                                  wf.ieee_mode(), false, inst_.omod))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
@@ -1609,55 +1681,63 @@ void VMaximumminimumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(util::f32_to_f16_mode(
-          [&]() {
-            float v = [&]() {
-              float v = [&]() {
-                auto a = [&]() {
-                  float sv = util::f16_to_f32(static_cast<uint16_t>(
-                      ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-                  if (inst_.abs & (1u << 0))
-                    sv = std::fabs(sv);
-                  if (inst_.neg & (1u << 0))
-                    sv = -sv;
-                  return sv;
-                }();
-                auto b = [&]() {
-                  float sv = util::f16_to_f32(static_cast<uint16_t>(
-                      ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
-                  if (inst_.abs & (1u << 1))
-                    sv = std::fabs(sv);
-                  if (inst_.neg & (1u << 1))
-                    sv = -sv;
-                  return sv;
-                }();
-                auto c = [&]() {
-                  float sv = util::f16_to_f32(static_cast<uint16_t>(
-                      ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
-                  if (inst_.abs & (1u << 2))
-                    sv = std::fabs(sv);
-                  if (inst_.neg & (1u << 2))
-                    sv = -sv;
-                  return sv;
-                }();
-                if (std::isnan(a) || std::isnan(b) || std::isnan(c))
-                  return std::numeric_limits<decltype(a)>::quiet_NaN();
-                auto ab = (a == b) ? (std::signbit(a) ? b : a) : (a > b ? a : b);
-                return (ab == c) ? (std::signbit(ab) ? ab : c) : (ab < c ? ab : c);
-              }();
-              if (inst_.omod == 1)
-                v *= 2.0f;
-              else if (inst_.omod == 2)
-                v *= 4.0f;
-              else if (inst_.omod == 3)
-                v *= 0.5f;
-              return v;
-            }();
-            if (inst_.clamp)
-              v = amdgpu::clamp_floating_result(v, wf);
-            return v;
-          }(),
-          wf.fp16_ovfl())));
+      uint32_t src_half =
+          static_cast<uint32_t>(static_cast<uint16_t>(amdgpu::fp_mode::finalize_omod_f16(
+              util::f32_to_f16_mode(
+                  [&]() {
+                    float v = [&]() {
+                      float v = [&]() {
+                        auto a = [&]() {
+                          float sv = util::f16_to_f32(static_cast<uint16_t>(
+                              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+                          if (inst_.abs & (1u << 0))
+                            sv = std::fabs(sv);
+                          if (inst_.neg & (1u << 0))
+                            sv = -sv;
+                          return sv;
+                        }();
+                        auto b = [&]() {
+                          float sv = util::f16_to_f32(static_cast<uint16_t>(
+                              ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
+                          if (inst_.abs & (1u << 1))
+                            sv = std::fabs(sv);
+                          if (inst_.neg & (1u << 1))
+                            sv = -sv;
+                          return sv;
+                        }();
+                        auto c = [&]() {
+                          float sv = util::f16_to_f32(static_cast<uint16_t>(
+                              ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
+                          if (inst_.abs & (1u << 2))
+                            sv = std::fabs(sv);
+                          if (inst_.neg & (1u << 2))
+                            sv = -sv;
+                          return sv;
+                        }();
+                        if (std::isnan(a) || std::isnan(b) || std::isnan(c))
+                          return std::numeric_limits<decltype(a)>::quiet_NaN();
+                        auto ab = (a == b) ? (std::signbit(a) ? b : a) : (a > b ? a : b);
+                        return (ab == c) ? (std::signbit(ab) ? ab : c) : (ab < c ? ab : c);
+                      }();
+                      const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
+                          wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false,
+                          inst_.omod);
+                      if (effective_omod == 1)
+                        v *= 2.0f;
+                      else if (effective_omod == 2)
+                        v *= 4.0f;
+                      else if (effective_omod == 3)
+                        v *= 0.5f;
+                      v = amdgpu::fp_mode::finalize_omod_f32(v, effective_omod);
+                      return v;
+                    }();
+                    if (inst_.clamp)
+                      v = amdgpu::clamp_floating_result(v, wf);
+                    return v;
+                  }(),
+                  wf.fp16_ovfl()),
+              amdgpu::fp_mode::effective_f16_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(),
+                                                  wf.ieee_mode(), false, inst_.omod))));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }

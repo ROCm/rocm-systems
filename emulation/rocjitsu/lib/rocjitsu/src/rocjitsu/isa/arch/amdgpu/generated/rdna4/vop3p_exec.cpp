@@ -497,8 +497,6 @@ void VDot2F32F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     if (inst_.neg & 4)
       acc = -acc;
     float result = a0 * b0 + a1 * b1 + acc;
-    if (inst_.clamp)
-      result = amdgpu::clamp_floating_result(result, wf);
     amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, std::bit_cast<uint32_t>(result));
   }
 }
@@ -635,8 +633,6 @@ void VDot2F32Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     if (inst_.neg & 4)
       acc = -acc;
     float result = a0 * b0 + a1 * b1 + acc;
-    if (inst_.clamp)
-      result = amdgpu::clamp_floating_result(result, wf);
     amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, std::bit_cast<uint32_t>(result));
   }
 }

@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -438,12 +439,15 @@ void VFmacLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
               return sv;
             }(),
             std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vdst, lane)));
-        if (inst_.omod == 1)
+        const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
+            wf.cu().arch(), wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst_.omod);
+        if (effective_omod == 1)
           v *= 2.0f;
-        else if (inst_.omod == 2)
+        else if (effective_omod == 2)
           v *= 4.0f;
-        else if (inst_.omod == 3)
+        else if (effective_omod == 3)
           v *= 0.5f;
+        v = amdgpu::fp_mode::finalize_omod_f32(v, effective_omod);
         return v;
       }();
       if (inst_.clamp)
@@ -583,12 +587,15 @@ void VFmaLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
                 sv = -sv;
               return sv;
             }());
-        if (inst_.omod == 1)
+        const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
+            wf.cu().arch(), wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst_.omod);
+        if (effective_omod == 1)
           v *= 2.0f;
-        else if (inst_.omod == 2)
+        else if (effective_omod == 2)
           v *= 4.0f;
-        else if (inst_.omod == 3)
+        else if (effective_omod == 3)
           v *= 0.5f;
+        v = amdgpu::fp_mode::finalize_omod_f32(v, effective_omod);
         return v;
       }();
       if (inst_.clamp)

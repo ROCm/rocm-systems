@@ -11248,6 +11248,11 @@ class CodeGenerator:
             classifier = alu_classifiers.get(mnemonic)
             if classifier is not None:
                 lines.append(f'  uint32_t alu_causes = {classifier}(inst, wf);')
+                # SIMD probes return directly after a successful fast-path
+                # execution. Latch the architectural sticky status before any
+                # such return; the classifier separately records the transient
+                # per-instruction causes used for trap delivery.
+                lines.append('  wf.set_trapsts(wf.trapsts() | alu_causes);')
             if probe is not None:
                 if classifier is None:
                     lines.append(probe)
@@ -11256,8 +11261,6 @@ class CodeGenerator:
                     lines.append(probe.replace('  ', '    ', 1))
                     lines.append('  }')
             lines.append(prefixed_body)
-            if classifier is not None:
-                lines.append('  wf.set_trapsts(wf.trapsts() | alu_causes);')
             lines.append('}')
             lines.append('')
 

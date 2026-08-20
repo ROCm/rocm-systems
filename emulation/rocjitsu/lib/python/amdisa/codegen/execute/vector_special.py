@@ -658,8 +658,10 @@ def gen_vector_trig_preop(
     if is_vop3:
         L.extend(
             [
+                '    uint32_t effective_omod = amdgpu::fp_mode::effective_omod(',
+                '        wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst_.omod);',
                 '    result = amdgpu::fp_mode::finish_f64(',
-                '        result, wf.fp_round_mode_f16_f64(), inst_.omod, inst_.clamp,',
+                '        result, wf.fp_round_mode_f16_f64(), effective_omod, inst_.clamp,',
                 '        amdgpu::floating_clamp_nan_to_zero(wf));',
             ]
         )
@@ -920,9 +922,12 @@ def gen_vector_div_fixup(
         )
         L.append('    else result = p;')
         if is_vop3:
-            L.extend(vop3_dst_mod('result'))
+            L.extend(vop3_dst_mod('result', omod_result_type='f16'))
             L.append(
                 '    uint32_t result_bits = util::f32_to_f16_mode(result, wf.fp16_ovfl());'
+            )
+            L.append(
+                '    result_bits = amdgpu::fp_mode::finalize_omod_f16(result_bits, effective_omod);'
             )
             L.append(
                 f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, opsel, result_bits, true);'

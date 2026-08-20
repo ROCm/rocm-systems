@@ -4,10 +4,10 @@
 #include "cdna5_sim_test_common.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vbuffer.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
-#include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
+#include "rocjitsu/vm/plugins/execution_plugin_group.h"
 
 #include <cfenv>
 #include <span>
@@ -91,6 +91,66 @@ TEST(FpModePolicyTest, F16OmodFollowsProfileDenormIeeeAndPackedRules) {
   EXPECT_EQ(effective_f16_omod(ROCJITSU_CODE_ARCH_RDNA3, 0, true, false, 3), 0u);
   EXPECT_EQ(effective_f16_omod(ROCJITSU_CODE_ARCH_RDNA4, 3, true, false, 3), 3u);
   EXPECT_EQ(effective_f16_omod(ROCJITSU_CODE_ARCH_CDNA5, 3, true, false, 3), 3u);
+}
+
+TEST(FpModePolicyTest, ActiveOmodFlushesSubnormalsAndCanonicalizesZero) {
+  using amdgpu::fp_mode::finalize_omod_bf16;
+  using amdgpu::fp_mode::finalize_omod_f16;
+  using amdgpu::fp_mode::finalize_omod_f32;
+  using amdgpu::fp_mode::finalize_omod_f64;
+
+  EXPECT_EQ(finalize_omod_f16(0x0001u, 1), 0u);
+  EXPECT_EQ(finalize_omod_f16(0x8001u, 1), 0u);
+  EXPECT_EQ(finalize_omod_f16(0x8000u, 1), 0u);
+  EXPECT_EQ(finalize_omod_f16(0x8001u, 0), 0x8001u);
+
+  EXPECT_EQ(finalize_omod_bf16(0x0001u, 1), 0u);
+  EXPECT_EQ(finalize_omod_bf16(0x8001u, 1), 0u);
+  EXPECT_EQ(finalize_omod_bf16(0x8000u, 1), 0u);
+  EXPECT_EQ(finalize_omod_bf16(0x8001u, 0), 0x8001u);
+
+  EXPECT_EQ(std::bit_cast<uint32_t>(finalize_omod_f32(std::bit_cast<float>(0x00000001u), 1)), 0u);
+  EXPECT_EQ(std::bit_cast<uint32_t>(finalize_omod_f32(std::bit_cast<float>(0x80000001u), 1)), 0u);
+  EXPECT_EQ(std::bit_cast<uint32_t>(finalize_omod_f32(-0.0f, 1)), 0u);
+  EXPECT_EQ(std::bit_cast<uint32_t>(finalize_omod_f32(std::bit_cast<float>(0x80000001u), 0)),
+            0x80000001u);
+
+  EXPECT_EQ(std::bit_cast<uint64_t>(finalize_omod_f64(std::bit_cast<double>(uint64_t{1}), 1)), 0u);
+  EXPECT_EQ(
+      std::bit_cast<uint64_t>(finalize_omod_f64(std::bit_cast<double>(0x8000000000000001ULL), 1)),
+      0u);
+  EXPECT_EQ(std::bit_cast<uint64_t>(finalize_omod_f64(-0.0, 1)), 0u);
+  EXPECT_EQ(
+      std::bit_cast<uint64_t>(finalize_omod_f64(std::bit_cast<double>(0x8000000000000001ULL), 0)),
+      0x8000000000000001ULL);
+}
+
+TEST(Gfx1250ExecutionTest, GenericF16OmodStaysActiveAndFinalizesWithIeeeDenormMode) {
+  ForceScalarGuard guard;
+  for (uint32_t scalar = 0; scalar < 2; ++scalar) {
+    util::set_force_scalar_for_testing(scalar != 0);
+    Gfx1250Sim sim;
+    auto *cu = sim.cu();
+    auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(0x3u);
+    wf->set_mode_raw((3u << 6) | amdgpu::Wavefront::IEEE_BIT);
+    const uint32_t base = wf->vgpr_alloc().base;
+    cu->write_vgpr(base + 0, 0, 0x00000400u); // Minimum normal F16.
+    cu->write_vgpr(base + 0, 1, 0x00008000u); // Negative zero.
+    cu->write_vgpr(base + 1, 0, 0u);
+    cu->write_vgpr(base + 1, 1, 0u);
+
+    const auto words = cdna5::build_vop3(
+        cdna5::kVAddF16Vop3, {.vdst = 2, .src0 = 256, .src1 = 257, .src2 = 0, .omod = 3});
+    cdna5::VAddF16Vop3 inst(words.data());
+    inst.execute_impl(*wf);
+
+    // Dividing the minimum normal by two produces a subnormal, which active
+    // OMOD flushes even though output denormals and IEEE mode are enabled.
+    EXPECT_EQ(cu->read_vgpr(base + 2, 0), 0u) << "scalar " << scalar;
+    EXPECT_EQ(cu->read_vgpr(base + 2, 1), 0u) << "scalar " << scalar;
+  }
 }
 
 TEST(FpModePolicyTest, F64HelpersRestoreAmbientHostEnvironment) {
@@ -2175,6 +2235,8 @@ TEST(Gfx1250ExecutionTest, PkFmaF16UsesExactRoundingAndClamp) {
       results[scalar] = cu->read_vgpr(base + 3, 0);
     }
     EXPECT_EQ(results[0], results[1]) << "denorm mode " << denorm;
+    constexpr std::array<uint16_t, 4> kExpectedLow = {0u, 0u, 0u, 1u};
+    EXPECT_EQ(static_cast<uint16_t>(results[0]), kExpectedLow[denorm]) << "denorm mode " << denorm;
     EXPECT_EQ(static_cast<uint16_t>(results[0] >> 16), 0u); // CLAMP negative result.
   }
 

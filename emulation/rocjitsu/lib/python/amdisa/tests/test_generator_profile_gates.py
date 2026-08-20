@@ -25,7 +25,7 @@ from amdisa.codegen.execute.vector_special import (
     gen_vector_cvt_pk,
 )
 from amdisa.codegen.execute.vector_alu import gen_vector_unary
-from amdisa.codegen.execute.matrix import gen_mfma
+from amdisa.codegen.execute.matrix import gen_mfma as _gen_mfma
 from amdisa.codegen.execute.vector_cmp import (
     gen_vector_add_co,
     gen_vector_cmp,
@@ -122,6 +122,26 @@ def _profile_for_arch(arch_name: str):
         'cdna5': Cdna5Profile,
     }
     return profile_types[arch_name]()
+
+
+def gen_mfma(
+    inst: Instruction,
+    dst: list[str],
+    src: list[str],
+    arch_name: str,
+    *,
+    supports_gpr_idx: bool | None = None,
+) -> str:
+    """Call the matrix emitter with the selected ISA profile capability."""
+    if supports_gpr_idx is None:
+        supports_gpr_idx = _profile_for_arch(arch_name).supports_gpr_idx
+    return _gen_mfma(
+        inst,
+        dst,
+        src,
+        arch_name,
+        supports_gpr_idx=supports_gpr_idx,
+    )
 
 
 @pytest.fixture
@@ -807,6 +827,22 @@ def test_rdna4_parser_injects_s_waitcnt_compat():
     assert dte.sub_decode_funcs[9] == 'decodeSWaitcntSopp'
 
 
+def test_gfx1250_generated_inventory_omits_legacy_s_waitcnt(
+    gfx1250_generated_root: Path,
+):
+    opcodes = (gfx1250_generated_root / 'opcodes.h').read_text()
+    decoder = (gfx1250_generated_root / 'decoder.cpp').read_text()
+
+    assert 'kSWaitcntSopp' not in opcodes
+    table_start = decoder.index('DecoderImpl::sub_decode_sopp = {')
+    table_end = decoder.index('\n};', table_start)
+    decode_targets = re.findall(
+        r'&(detail|DecoderImpl)::([A-Za-z0-9_]+)',
+        decoder[table_start:table_end],
+    )
+    assert decode_targets[9] == ('DecoderImpl', 'decodeInvalid')
+
+
 def _fake_sopp_parser(arch_name: str, *, sub_decode_funcs: list[str | None] | None):
     parser = object.__new__(Parser)
     sopp = SimpleNamespace(
@@ -817,17 +853,37 @@ def _fake_sopp_parser(arch_name: str, *, sub_decode_funcs: list[str | None] | No
         primary_dt_ptrs=[-1] * 10,
     )
     sopp.primary_dt_ptrs[9] = 0
-    dte = SimpleNamespace(sub_decode_funcs=sub_decode_funcs, decode_func=None)
+    dte = SimpleNamespace(
+        sub_decode_funcs=sub_decode_funcs,
+        decode_func=None,
+        inst_name=None,
+    )
+    encoding_map = {'ENC_SOPP': sopp}
+    if arch_name == 'cdna5':
+        encoding_map['ENC_VOP1'] = SimpleNamespace(
+            insts=[Instruction('V_PERMLANE64_B32', 'ENC_VOP1', 103, [])],
+            primary_dt_ptrs=[0] * 104,
+        )
     parser.isa_spec = SimpleNamespace(
         arch_name=arch_name,
-        encoding_map={'ENC_SOPP': sopp},
+        encoding_map=encoding_map,
         primary_decode_table=[dte],
     )
     return parser, sopp, dte
 
 
-def test_gfx1250_parser_injects_s_waitcnt_compat_once_in_opcode_order():
-    parser, sopp, dte = _fake_sopp_parser('cdna5', sub_decode_funcs=[None] * 16)
+def _s_waitcnt_state(sopp, dte):
+    return (
+        list(sopp.insts),
+        list(sopp.primary_dt_ptrs),
+        None if dte.sub_decode_funcs is None else list(dte.sub_decode_funcs),
+        dte.decode_func,
+        dte.inst_name,
+    )
+
+
+def test_rdna4_parser_injects_s_waitcnt_compat_once_in_opcode_order():
+    parser, sopp, dte = _fake_sopp_parser('rdna4', sub_decode_funcs=[None] * 16)
 
     parser._inject_compat_insts()
     parser._inject_compat_insts()
@@ -843,6 +899,18 @@ def test_gfx1250_parser_injects_s_waitcnt_compat_once_in_opcode_order():
     assert dte.sub_decode_funcs[9] == 'decodeSWaitcntSopp'
 
 
+def test_gfx1250_parser_does_not_inject_legacy_s_waitcnt():
+    parser, sopp, dte = _fake_sopp_parser('cdna5', sub_decode_funcs=[None] * 16)
+
+    parser._inject_s_waitcnt_compat()
+
+    assert [(inst.name, inst.opcode) for inst in sopp.insts] == [
+        ('S_WAIT_ALU', 8),
+        ('S_WAIT_IDLE', 10),
+    ]
+    assert dte.sub_decode_funcs[9] is None
+
+
 def test_gfx1250_parser_injects_permlane64_compat_once():
     parser = object.__new__(Parser)
     vop1 = SimpleNamespace(
@@ -854,7 +922,7 @@ def test_gfx1250_parser_injects_permlane64_compat_once():
     )
     vop1.primary_dt_ptrs[102] = 0
     vop1.primary_dt_ptrs[104] = 0
-    dte = SimpleNamespace(sub_decode_funcs=[None] * 128, decode_func=None)
+    dte = SimpleNamespace(sub_decode_funcs=['decodeInvalid'] * 128, decode_func=None)
     parser.isa_spec = SimpleNamespace(
         arch_name='cdna5',
         encoding_map={'ENC_VOP1': vop1},
@@ -898,10 +966,138 @@ def test_gfx1250_parser_permlane64_requires_an_unambiguous_adjacent_route():
         ],
     )
 
-    parser._inject_cdna5_permlane64_compat()
+    with pytest.raises(ValueError, match='exactly one adjacent ENC_VOP1 decode route'):
+        parser._inject_cdna5_permlane64_compat()
 
     assert not any(inst.name == 'V_PERMLANE64_B32' for inst in vop1.insts)
     assert vop1.primary_dt_ptrs[103] == -1
+
+
+def test_gfx1250_parser_permlane64_rejects_opcode_collision_before_mutation():
+    parser = object.__new__(Parser)
+    collision = Instruction('V_OTHER_B32', 'ENC_VOP1', 103, [])
+    vop1 = SimpleNamespace(
+        insts=[collision],
+        primary_dt_ptrs=[0] * 128,
+    )
+    parser.isa_spec = SimpleNamespace(
+        arch_name='cdna5',
+        encoding_map={'ENC_VOP1': vop1},
+        primary_decode_table=[
+            SimpleNamespace(sub_decode_funcs=[None] * 128, decode_func=None)
+        ],
+    )
+
+    with pytest.raises(
+        ValueError, match='opcode 103 is already occupied by V_OTHER_B32'
+    ):
+        parser._inject_cdna5_permlane64_compat()
+
+    assert vop1.insts == [collision]
+    assert vop1.primary_dt_ptrs[103] == 0
+
+
+def test_gfx1250_parser_permlane64_rejects_invalid_decode_table_index_before_mutation():
+    parser = object.__new__(Parser)
+    vop1 = SimpleNamespace(
+        insts=[Instruction('V_SWAP_B16', 'ENC_VOP1', 102, [])],
+        primary_dt_ptrs=[-1] * 128,
+    )
+    vop1.primary_dt_ptrs[102] = 4
+    vop1.primary_dt_ptrs[104] = 4
+    parser.isa_spec = SimpleNamespace(
+        arch_name='cdna5',
+        encoding_map={'ENC_VOP1': vop1},
+        primary_decode_table=[
+            SimpleNamespace(sub_decode_funcs=[None] * 128, decode_func=None)
+        ],
+    )
+
+    with pytest.raises(ValueError, match='invalid primary decode-table index 4'):
+        parser._inject_cdna5_permlane64_compat()
+
+    assert not any(inst.opcode == 103 for inst in vop1.insts)
+    assert vop1.primary_dt_ptrs[103] == -1
+
+
+@pytest.mark.parametrize(
+    ('decode_entry', 'message'),
+    [
+        (
+            SimpleNamespace(
+                sub_decode_funcs=[None] * 103,
+                decode_func=None,
+                inst_name=None,
+            ),
+            'outside the selected subdecode table',
+        ),
+        (
+            SimpleNamespace(
+                sub_decode_funcs=[None] * 103 + ['decodeOther'],
+                decode_func=None,
+                inst_name=None,
+            ),
+            'subdecode slot is already occupied by decodeOther',
+        ),
+        (
+            SimpleNamespace(
+                sub_decode_funcs=None,
+                decode_func='decodeOther',
+                inst_name='V_OTHER_B32',
+            ),
+            'terminal decode entry is already occupied',
+        ),
+    ],
+)
+def test_gfx1250_parser_permlane64_rejects_terminal_conflicts_before_mutation(
+    decode_entry, message
+):
+    parser = object.__new__(Parser)
+    neighbor = Instruction('V_SWAP_B16', 'ENC_VOP1', 102, [])
+    vop1 = SimpleNamespace(
+        insts=[neighbor],
+        primary_dt_ptrs=[-1] * 128,
+    )
+    vop1.primary_dt_ptrs[102] = 0
+    parser.isa_spec = SimpleNamespace(
+        arch_name='cdna5',
+        encoding_map={'ENC_VOP1': vop1},
+        primary_decode_table=[decode_entry],
+    )
+
+    with pytest.raises(ValueError, match=message):
+        parser._inject_cdna5_permlane64_compat()
+
+    assert vop1.insts == [neighbor]
+    assert vop1.primary_dt_ptrs[103] == -1
+
+
+@pytest.mark.parametrize(
+    ('encoding_map', 'message'),
+    [
+        ({}, 'requires ENC_VOP1'),
+        (
+            {'ENC_VOP1': SimpleNamespace(insts=[], primary_dt_ptrs=None)},
+            'requires an ENC_VOP1 primary decode route table',
+        ),
+        (
+            {'ENC_VOP1': SimpleNamespace(insts=[], primary_dt_ptrs=[-1] * 103)},
+            'does not contain V_PERMLANE64_B32 opcode 103',
+        ),
+    ],
+)
+def test_gfx1250_parser_permlane64_rejects_missing_route_invariants(
+    encoding_map, message
+):
+    parser = object.__new__(Parser)
+    parser.isa_spec = SimpleNamespace(
+        arch_name='cdna5',
+        encoding_map=encoding_map,
+        primary_decode_table=[],
+    )
+
+    with pytest.raises(ValueError, match=message):
+        parser._inject_cdna5_permlane64_compat()
 
 
 def test_s_waitcnt_compat_injection_can_patch_direct_decode_entry():
@@ -911,6 +1107,104 @@ def test_s_waitcnt_compat_injection_can_patch_direct_decode_entry():
 
     assert any(inst.name == 'S_WAITCNT' and inst.opcode == 9 for inst in sopp.insts)
     assert dte.decode_func == 'decodeSWaitcntSopp'
+    assert dte.inst_name == 'SWaitcntSopp'
+
+
+def test_rdna4_s_waitcnt_rejects_opcode_collision_before_mutation():
+    parser, sopp, dte = _fake_sopp_parser('rdna4', sub_decode_funcs=[None] * 16)
+    sopp.insts.insert(1, Instruction('S_OTHER', 'ENC_SOPP', 9, []))
+    before = _s_waitcnt_state(sopp, dte)
+
+    with pytest.raises(ValueError, match='opcode 9 is already occupied by S_OTHER'):
+        parser._inject_s_waitcnt_compat()
+
+    assert _s_waitcnt_state(sopp, dte) == before
+
+
+@pytest.mark.parametrize(
+    ('encoding_map', 'message'),
+    [
+        ({}, 'requires ENC_SOPP'),
+        (
+            {'ENC_SOPP': SimpleNamespace(insts=[], primary_dt_ptrs=None)},
+            'requires an ENC_SOPP primary decode route table',
+        ),
+        (
+            {'ENC_SOPP': SimpleNamespace(insts=[], primary_dt_ptrs=[-1] * 9)},
+            'does not contain S_WAITCNT opcode 9',
+        ),
+    ],
+)
+def test_rdna4_s_waitcnt_rejects_missing_route_invariants(encoding_map, message):
+    parser = object.__new__(Parser)
+    parser.isa_spec = SimpleNamespace(
+        arch_name='rdna4',
+        encoding_map=encoding_map,
+        primary_decode_table=[],
+    )
+
+    with pytest.raises(ValueError, match=message):
+        parser._inject_s_waitcnt_compat()
+
+
+@pytest.mark.parametrize(
+    ('dt_ptr', 'message'),
+    [
+        (-1, 'has no ENC_SOPP primary decode route'),
+        (4, 'invalid primary decode-table index 4'),
+    ],
+)
+def test_rdna4_s_waitcnt_rejects_invalid_decode_route_before_mutation(dt_ptr, message):
+    parser, sopp, dte = _fake_sopp_parser('rdna4', sub_decode_funcs=[None] * 16)
+    sopp.primary_dt_ptrs[9] = dt_ptr
+    before = _s_waitcnt_state(sopp, dte)
+
+    with pytest.raises(ValueError, match=message):
+        parser._inject_s_waitcnt_compat()
+
+    assert _s_waitcnt_state(sopp, dte) == before
+
+
+@pytest.mark.parametrize(
+    ('decode_entry', 'message'),
+    [
+        (
+            SimpleNamespace(
+                sub_decode_funcs=[None] * 9,
+                decode_func=None,
+                inst_name=None,
+            ),
+            'outside the selected subdecode table',
+        ),
+        (
+            SimpleNamespace(
+                sub_decode_funcs=[None] * 9 + ['decodeOther'],
+                decode_func=None,
+                inst_name=None,
+            ),
+            'subdecode slot is already occupied by decodeOther',
+        ),
+        (
+            SimpleNamespace(
+                sub_decode_funcs=None,
+                decode_func='decodeOther',
+                inst_name='S_OTHER',
+            ),
+            'terminal decode entry is already occupied',
+        ),
+    ],
+)
+def test_rdna4_s_waitcnt_rejects_terminal_conflicts_before_mutation(
+    decode_entry, message
+):
+    parser, sopp, _ = _fake_sopp_parser('rdna4', sub_decode_funcs=[None] * 16)
+    parser.isa_spec.primary_decode_table[0] = decode_entry
+    before = _s_waitcnt_state(sopp, decode_entry)
+
+    with pytest.raises(ValueError, match=message):
+        parser._inject_s_waitcnt_compat()
+
+    assert _s_waitcnt_state(sopp, decode_entry) == before
 
 
 def test_s_waitcnt_compat_injection_skips_untargeted_arch():
@@ -1351,8 +1645,21 @@ def test_cdna4_matrix_bases_apply_gpr_idx_by_operand_role():
     dense = Instruction('V_MFMA_F32_16X16X4_F32', 'ENC_VOP3P_MFMA', 0, [])
     sparse = Instruction('V_SMFMAC_F32_16X16X64_BF16', 'ENC_VOP3P_MFMA', 0, [])
 
-    dense_body = gen_mfma(dense, ['vdst'], ['src0', 'src1', 'src2'], 'cdna4')
-    sparse_body = gen_mfma(sparse, ['vdst'], ['src0', 'src1', 'src2'], 'cdna4')
+    profile = CdnaProfile()
+    dense_body = gen_mfma(
+        dense,
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'cdna4',
+        supports_gpr_idx=profile.supports_gpr_idx,
+    )
+    sparse_body = gen_mfma(
+        sparse,
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'cdna4',
+        supports_gpr_idx=profile.supports_gpr_idx,
+    )
 
     for role in ('Dst', 'Src0', 'Src1', 'Src2'):
         assert f'amdgpu::VgprMsbRole::{role}' in dense_body
@@ -1360,6 +1667,48 @@ def test_cdna4_matrix_bases_apply_gpr_idx_by_operand_role():
     assert 'if (const_acc == amdgpu::ACC_FROM_VGPR)' in dense_body
     assert 'apply_gpr_idx_to_mma_base' in dense_body
     assert 'apply_gpr_idx_to_mma_base' in sparse_body
+
+
+def test_cdna5_matrix_bases_follow_profile_gpr_idx_policy():
+    inst = Instruction('V_WMMA_I32_16X16X16_IU8', 'ENC_VOP3P_MFMA', 0, [])
+    profile = Cdna5Profile()
+
+    body = gen_mfma(
+        inst,
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'cdna5',
+        supports_gpr_idx=profile.supports_gpr_idx,
+    )
+
+    assert not profile.supports_gpr_idx
+    assert 'apply_gpr_idx_to_mma_base' not in body
+
+
+def test_disabled_gpr_idx_capability_reaches_sparse_and_dense_mixed_matrix_branches():
+    sparse = Instruction('V_SMFMAC_F32_16X16X64_BF16', 'ENC_VOP3P_MFMA', 0, [])
+    dense = Instruction('V_MFMA_F32_16X16X32_F8_F6_F4', 'ENC_VOP3P_MFMA', 0, [])
+
+    sparse_body = gen_mfma(
+        sparse,
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'cdna4',
+        supports_gpr_idx=False,
+    )
+    dense_body = gen_mfma(
+        dense,
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'cdna4',
+        supports_gpr_idx=False,
+    )
+
+    assert 'apply_gpr_idx_to_mma_base' not in sparse_body
+    assert 'apply_gpr_idx_to_mma_base' not in dense_body
+    assert 'exec_f32_mixed' in dense_body
+    assert 'exec_f32_scaled_mixed' not in dense_body
+    assert 'raw_words_' not in dense_body
 
 
 def test_cdna4_wide_conversion_indexes_each_base_once():
@@ -1952,6 +2301,19 @@ def test_cdna_generated_vop3_b16_i16_u16_paths_use_selected_halves(
         assert 'write_vop3_true16_dst(vdst, wf, lane, opsel,' in body
 
 
+def test_generated_classified_alu_latches_trapsts_before_simd_return(
+    execute_shared_path: Path,
+):
+    execute_shared = execute_shared_path.read_text()
+    body = _shared_execute_body(execute_shared, 'v_mul_f32_vop3', 'v_mul_f64_vop2')
+
+    classify_pos = body.index('uint32_t alu_causes = classify_mul_f32_vop3')
+    trapsts_pos = body.index('wf.set_trapsts(wf.trapsts() | alu_causes);')
+    simd_pos = body.index('ROCJITSU_TRY_SIMD_VOP3_BINARY_FP')
+    assert classify_pos < trapsts_pos < simd_pos
+    assert body.count('wf.set_trapsts(wf.trapsts() | alu_causes);') == 1
+
+
 def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     execute_shared_path: Path,
     gfx1250_generated_root: Path,
@@ -1999,7 +2361,10 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
         '[[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);' in true16_binary
     )
     assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in true16_binary
-    assert 'read_vop3_true16_src(src1, wf, lane, opsel, 1)' in true16_binary
+    assert re.search(
+        r'read_vop3_true16_src\(src1,\s*wf,\s*lane,\s*opsel,\s*1\)',
+        true16_binary,
+    )
     assert 'write_vop3_true16_dst(vdst, wf, lane, opsel,' in true16_binary
     assert 'inst.vdst.write_lane' not in true16_binary
 

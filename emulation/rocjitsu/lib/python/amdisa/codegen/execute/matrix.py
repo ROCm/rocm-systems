@@ -20,12 +20,11 @@ from amdisa.gpuisa import Instruction
 # shapes / when stdx::simd is unavailable, so emitting them is always safe.
 _MFMA_F32_SPEC = {'F32': 'f32', 'XF32': 'f32', 'F16': 'f16', 'BF16': 'bf16'}
 _F8_FIXED = frozenset({'FP8_FP8', 'FP8_BF8', 'BF8_FP8', 'BF8_BF8'})
-_GPR_IDX_ARCHES = frozenset({'cdna1', 'cdna2', 'cdna3', 'cdna4'})
 
 
-def _matrix_base(arch_name: str, base: str, role: str) -> str:
+def _matrix_base(supports_gpr_idx: bool, base: str, role: str) -> str:
     """Apply MODE.GPR_IDX_EN to an architectural-VGPR MMA base."""
-    if arch_name not in _GPR_IDX_ARCHES:
+    if not supports_gpr_idx:
         return base
     return (
         f'amdgpu::apply_gpr_idx_to_mma_base(wf, vb, {base}, '
@@ -109,7 +108,12 @@ def gen_accvgpr_write(dst: list[str], src: list[str]) -> str:
 
 
 def gen_mfma(
-    inst: Instruction, dst: list[str], src: list[str], arch_name: str = ""
+    inst: Instruction,
+    dst: list[str],
+    src: list[str],
+    arch_name: str = "",
+    *,
+    supports_gpr_idx: bool,
 ) -> str:
     """Generate MFMA / SMFMAC matrix multiply-accumulate.
 
@@ -177,15 +181,15 @@ def gen_mfma(
             if has_acc_cd
             else f'amdgpu::dst_base(vb, {d}.encoding_value_, 1)'
         )
-        L.append(f'  uint32_t dst = {_matrix_base(arch_name, dst_base, "Dst")};')
+        L.append(f'  uint32_t dst = {_matrix_base(supports_gpr_idx, dst_base, "Dst")};')
         L.append(
-            f'  uint32_t s0b = {_matrix_base(arch_name, f"amdgpu::src_base(vb, {s0}.encoding_value_)", "Src0")};'
+            f'  uint32_t s0b = {_matrix_base(supports_gpr_idx, f"amdgpu::src_base(vb, {s0}.encoding_value_)", "Src0")};'
         )
         L.append(
-            f'  uint32_t s1b = {_matrix_base(arch_name, f"amdgpu::src_base(vb, {s1}.encoding_value_)", "Src1")};'
+            f'  uint32_t s1b = {_matrix_base(supports_gpr_idx, f"amdgpu::src_base(vb, {s1}.encoding_value_)", "Src1")};'
         )
         L.append(
-            f'  uint32_t idx = {_matrix_base(arch_name, f"amdgpu::src_base(vb, {s2}.encoding_value_)", "Src2")};'
+            f'  uint32_t idx = {_matrix_base(supports_gpr_idx, f"amdgpu::src_base(vb, {s2}.encoding_value_)", "Src2")};'
         )
 
         if input_type in ('F16', 'BF16'):
@@ -328,19 +332,19 @@ def gen_mfma(
         has_acc_cd = arch in ('cdna2', 'cdna3', 'cdna4')
         if has_acc_cd:
             L.append(
-                f'  uint32_t dst = {_matrix_base(arch, f"amdgpu::dst_base(vb, {d}.encoding_value_, inst_.acc_cd)", "Dst")};'
+                f'  uint32_t dst = {_matrix_base(supports_gpr_idx, f"amdgpu::dst_base(vb, {d}.encoding_value_, inst_.acc_cd)", "Dst")};'
             )
         elif uses_plain_vgpr_dst:
             L.append(f'  uint32_t dst = vb + {d}.encoding_value_;')
         else:
             L.append(
-                f'  uint32_t dst = {_matrix_base(arch, f"amdgpu::dst_base(vb, {d}.encoding_value_, 1)", "Dst")};'
+                f'  uint32_t dst = {_matrix_base(supports_gpr_idx, f"amdgpu::dst_base(vb, {d}.encoding_value_, 1)", "Dst")};'
             )
         L.append(
-            f'  uint32_t src0_base = {_matrix_base(arch, f"amdgpu::src_base(vb, {s0}.encoding_value_)", "Src0")};'
+            f'  uint32_t src0_base = {_matrix_base(supports_gpr_idx, f"amdgpu::src_base(vb, {s0}.encoding_value_)", "Src0")};'
         )
         L.append(
-            f'  uint32_t src1_base = {_matrix_base(arch, f"amdgpu::src_base(vb, {s1}.encoding_value_)", "Src1")};'
+            f'  uint32_t src1_base = {_matrix_base(supports_gpr_idx, f"amdgpu::src_base(vb, {s1}.encoding_value_)", "Src1")};'
         )
         if uses_rdna4_swmmac_layout:
             L.append(f'  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;')
@@ -356,7 +360,7 @@ def gen_mfma(
                 f'      {s2}.encoding_value_, const_acc,'
                 f' [&] {{ return amdgpu::RegisterAccess(wf).read_scalar({s2}); }});'
             )
-            if arch in _GPR_IDX_ARCHES:
+            if supports_gpr_idx:
                 L.append('  if (const_acc == amdgpu::ACC_FROM_VGPR)')
                 L.append(
                     '    s2 = amdgpu::apply_gpr_idx_to_mma_base('

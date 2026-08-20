@@ -131,7 +131,7 @@ TEST(Vop2FmaF64SimdCorrectness, InlineLiteralUsesEncodedHighWord) {
   const RunResult scalar = run_fmac(true, ~uint64_t{0}, /*mode=*/3u << 6, true);
   const RunResult simd = run_fmac(false, ~uint64_t{0}, /*mode=*/3u << 6, true);
   EXPECT_EQ(simd.output, scalar.output);
-  EXPECT_NE(simd.output[0], simd.accumulator[0]);
+  EXPECT_EQ(simd.output[0], 0x3e10000000000000ULL);
 }
 
 TEST(Vop2FmaF64SimdCorrectness, PartialExecPreservesBothInactiveVgprWords) {

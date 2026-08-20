@@ -428,7 +428,7 @@ util::native<T> apply_vop3_dst_mod(util::native<T> v, uint32_t omod, uint32_t cl
   if (clamp) {
 #if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
     if constexpr (std::is_same_v<T, double>) {
-      return util::map_native64_scalar<double>(v, [clamp_nan_to_zero](double x) {
+      v = util::map_native64_scalar<double>(v, [clamp_nan_to_zero](double x) {
         if (std::isnan(x))
           return clamp_nan_to_zero ? 0.0 : x;
         if (x <= 0.0)
@@ -446,6 +446,24 @@ util::native<T> apply_vop3_dst_mod(util::native<T> v, uint32_t omod, uint32_t cl
       util::stdx::where(v > T(1), v) = T(1);
     }
   }
+  if (omod != 0) {
+    if constexpr (std::is_same_v<T, float>) {
+      using U = util::native<uint32_t>;
+      U bits = std::bit_cast<U>(v);
+      const auto subnormal = ((bits & U(0x7f800000u)) == U(0)) && ((bits & U(0x007fffffu)) != U(0));
+      util::stdx::where(subnormal, bits) = bits & U(0x80000000u);
+      util::stdx::where((bits & U(0x7fffffffu)) == U(0), bits) = U(0);
+      v = std::bit_cast<util::native<float>>(bits);
+    } else {
+      using U = util::native<uint64_t>;
+      U bits = std::bit_cast<U>(v);
+      const auto subnormal = ((bits & U(0x7ff0000000000000ULL)) == U(0)) &&
+                             ((bits & U(0x000fffffffffffffULL)) != U(0));
+      util::stdx::where(subnormal, bits) = bits & U(0x8000000000000000ULL);
+      util::stdx::where((bits & U(0x7fffffffffffffffULL)) == U(0), bits) = U(0);
+      v = std::bit_cast<util::native<double>>(bits);
+    }
+  }
   return v;
 }
 
@@ -457,6 +475,30 @@ inline util::native<double> apply_vop3_dst_mod_f64(util::native<double> v, uint3
 inline util::native<float> apply_vop3_dst_mod_f32(util::native<float> v, uint32_t omod,
                                                   uint32_t clamp, bool clamp_nan_to_zero) {
   return apply_vop3_dst_mod<float>(v, omod, clamp, clamp_nan_to_zero);
+}
+
+inline uint32_t effective_vop3_omod_f32(const Wavefront &wf, uint32_t omod) {
+  return fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(), wf.ieee_mode(), omod);
+}
+
+inline uint32_t effective_vop3_omod_f16(const Wavefront &wf, uint32_t omod) {
+  return fp_mode::effective_f16_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(),
+                                     false, omod);
+}
+
+inline uint32_t effective_vop3_omod_f64(const Wavefront &wf, uint32_t omod) {
+  return fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), omod);
+}
+
+inline util::native<uint32_t> finalize_omod_f16_bits_simd(util::native<uint32_t> value,
+                                                          uint32_t omod) {
+  if (omod == 0)
+    return value;
+  using U = util::native<uint32_t>;
+  const auto subnormal = ((value & U(0x7c00u)) == U(0)) && ((value & U(0x03ffu)) != U(0));
+  util::stdx::where(subnormal, value) = value & U(0x8000u);
+  util::stdx::where((value & U(0x7fffu)) == U(0), value) = U(0);
+  return value;
 }
 
 /// @brief Execute a native-width batch of architectural F16 fused multiply-adds.
@@ -512,7 +554,7 @@ fma_f16_mode_simd(util::native<uint32_t> src0, util::native<uint32_t> src1,
                                                                clamp, fp16_ovfl, clamp_nan_to_zero);
       if ((denorm_mode & 2u) == 0 && (rounded & 0x7c00u) == 0 && (rounded & 0x03ffu) != 0)
         rounded &= 0x8000u;
-      out[base + i] = rounded;
+      out[base + i] = fp_mode::finalize_omod_f16(rounded, omod);
     }
   }
   return util::native<uint32_t>(out, util::stdx::vector_aligned);
@@ -1172,7 +1214,7 @@ template <typename Inst, typename CvtOp>
     return false;
   const uint32_t abs = inst.inst_.abs;
   const uint32_t neg = inst.inst_.neg;
-  const uint32_t omod = inst.inst_.omod;
+  const uint32_t omod = effective_vop3_omod_f32(wf, inst.inst_.omod);
   const uint32_t clamp = inst.inst_.clamp;
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -1199,6 +1241,12 @@ template <typename Inst, typename CvtOp>
         util::stdx::where(util::stdx::isnan(v), v) = 0.0f;
       util::stdx::where(v <= 0.0f, v) = 0.0f;
       util::stdx::where(v > 1.0f, v) = 1.0f;
+    }
+    if (omod != 0) {
+      // fixed_size_simd is not guaranteed to be trivially copyable, so avoid
+      // whole-vector bit_cast here. This predicate selects both subnormals and
+      // either signed zero, which OMOD maps to canonical +0.
+      util::stdx::where(util::stdx::abs(v) < std::numeric_limits<float>::min(), v) = 0.0f;
     }
     dst.template store_narrow<float>(base, v, chunk);
   }
@@ -1766,7 +1814,7 @@ template <typename T, typename Inst, typename BinOp>
     return false;
   const uint32_t abs = inst.inst_.abs;
   const uint32_t neg = inst.inst_.neg;
-  const uint32_t omod = inst.inst_.omod;
+  const uint32_t omod = effective_vop3_omod_f32(wf, inst.inst_.omod);
   const uint32_t clamp = inst.inst_.clamp;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -2038,7 +2086,7 @@ template <typename Inst, typename BinOp>
   using T = double;
   const uint32_t abs = inst.inst_.abs;
   const uint32_t neg = inst.inst_.neg;
-  const uint32_t omod = inst.inst_.omod;
+  const uint32_t omod = effective_vop3_omod_f64(wf, inst.inst_.omod);
   const uint32_t clamp = inst.inst_.clamp;
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -2079,7 +2127,7 @@ template <typename Inst, typename UnOp>
   using T = double;
   const uint32_t abs = inst.inst_.abs;
   const uint32_t neg = inst.inst_.neg;
-  const uint32_t omod = inst.inst_.omod;
+  const uint32_t omod = effective_vop3_omod_f64(wf, inst.inst_.omod);
   const uint32_t clamp = inst.inst_.clamp;
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -2121,7 +2169,7 @@ template <bool True16, typename Inst, typename UnOp>
   const uint32_t opsel = vop3_opsel(inst.inst_);
   const uint32_t abs = inst.inst_.abs;
   const uint32_t neg = inst.inst_.neg;
-  const uint32_t omod = inst.inst_.omod;
+  const uint32_t omod = effective_vop3_omod_f16(wf, inst.inst_.omod);
   const uint32_t clamp = inst.inst_.clamp;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -2141,7 +2189,8 @@ template <bool True16, typename Inst, typename UnOp>
       const auto in = util::f16_to_f32_simd(raw);
       const auto a = apply_vop3_src_mod_f32<0>(in, abs, neg);
       const auto r = apply_vop3_dst_mod_f32(un_op(a), omod, clamp, floating_clamp_nan_to_zero(wf));
-      const auto out_half = util::f32_to_f16_mode_simd(r, wf.fp16_ovfl());
+      const auto out_half =
+          finalize_omod_f16_bits_simd(util::f32_to_f16_mode_simd(r, wf.fp16_ovfl()), omod);
       auto prev = dst.template load_native<T>(base);
       auto out = (opsel & 0x8u) ? ((prev & util::broadcast<T>(0x0000ffffu)) | (out_half << 16))
                                 : ((prev & util::broadcast<T>(0xffff0000u)) | out_half);
@@ -2159,7 +2208,9 @@ template <bool True16, typename Inst, typename UnOp>
       const auto in = util::f16_to_f32_simd(raw);
       const auto a = apply_vop3_src_mod_f32<0>(in, abs, neg);
       const auto r = apply_vop3_dst_mod_f32(un_op(a), omod, clamp, floating_clamp_nan_to_zero(wf));
-      const auto out = util::f32_to_f16_mode_simd(r, wf.fp16_ovfl()) & util::broadcast<T>(0xffffu);
+      const auto out =
+          finalize_omod_f16_bits_simd(util::f32_to_f16_mode_simd(r, wf.fp16_ovfl()), omod) &
+          util::broadcast<T>(0xffffu);
       dst.template store_native<T>(base, out, chunk);
     }
   }
@@ -2309,7 +2360,7 @@ template <typename Inst, typename FmaOp>
   using T = float32_t;
   const uint32_t abs = inst.inst_.abs;
   const uint32_t neg = inst.inst_.neg;
-  const uint32_t omod = inst.inst_.omod;
+  const uint32_t omod = effective_vop3_omod_f32(wf, inst.inst_.omod);
   const uint32_t clamp = inst.inst_.clamp;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -2355,7 +2406,7 @@ template <bool True16, typename Inst, typename FmaOp>
   const uint32_t opsel = vop3_opsel(inst.inst_);
   const uint32_t abs = inst.inst_.abs;
   const uint32_t neg = inst.inst_.neg;
-  const uint32_t omod = inst.inst_.omod;
+  const uint32_t omod = effective_vop3_omod_f16(wf, inst.inst_.omod);
   const uint32_t clamp = inst.inst_.clamp;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -2383,7 +2434,8 @@ template <bool True16, typename Inst, typename FmaOp>
       const auto c = apply_vop3_src_mod_f32<2>(util::f16_to_f32_simd(c_raw), abs, neg);
       const auto r =
           apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp, floating_clamp_nan_to_zero(wf));
-      const auto out_half = util::f32_to_f16_mode_simd(r, wf.fp16_ovfl());
+      const auto out_half =
+          finalize_omod_f16_bits_simd(util::f32_to_f16_mode_simd(r, wf.fp16_ovfl()), omod);
       auto prev = dst.template load_native<T>(base);
       auto out = (opsel & 0x8u) ? ((prev & util::broadcast<T>(0x0000ffffu)) | (out_half << 16))
                                 : ((prev & util::broadcast<T>(0xffff0000u)) | out_half);
@@ -2405,7 +2457,9 @@ template <bool True16, typename Inst, typename FmaOp>
       const auto c = apply_vop3_src_mod_f32<2>(util::f16_to_f32_simd(c_raw), abs, neg);
       const auto r =
           apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp, floating_clamp_nan_to_zero(wf));
-      const auto out = util::f32_to_f16_mode_simd(r, wf.fp16_ovfl()) & util::broadcast<T>(0xffffu);
+      const auto out =
+          finalize_omod_f16_bits_simd(util::f32_to_f16_mode_simd(r, wf.fp16_ovfl()), omod) &
+          util::broadcast<T>(0xffffu);
       dst.template store_native<T>(base, out, chunk);
     }
   }
@@ -2535,7 +2589,7 @@ template <typename Inst, typename FmaOp>
   using T = double;
   const uint32_t abs = inst.inst_.abs;
   const uint32_t neg = inst.inst_.neg;
-  const uint32_t omod = inst.inst_.omod;
+  const uint32_t omod = effective_vop3_omod_f64(wf, inst.inst_.omod);
   const uint32_t clamp = inst.inst_.clamp;
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -2581,7 +2635,7 @@ template <typename Inst, typename FmaOp>
   using T = float32_t;
   const uint32_t abs = inst.inst_.abs;
   const uint32_t neg = inst.inst_.neg;
-  const uint32_t omod = inst.inst_.omod;
+  const uint32_t omod = effective_vop3_omod_f32(wf, inst.inst_.omod);
   const uint32_t clamp = inst.inst_.clamp;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -2625,7 +2679,7 @@ template <bool True16, typename Inst, typename FmaOp>
   const uint32_t opsel = vop3_opsel(inst.inst_);
   const uint32_t abs = inst.inst_.abs;
   const uint32_t neg = inst.inst_.neg;
-  const uint32_t omod = inst.inst_.omod;
+  const uint32_t omod = effective_vop3_omod_f16(wf, inst.inst_.omod);
   const uint32_t clamp = inst.inst_.clamp;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -2661,7 +2715,8 @@ template <bool True16, typename Inst, typename FmaOp>
     const auto r =
         apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp, floating_clamp_nan_to_zero(wf));
     const auto out_half =
-        util::f32_to_f16_mode_simd(r, wf.fp16_ovfl()) & util::broadcast<T>(0xffffu);
+        finalize_omod_f16_bits_simd(util::f32_to_f16_mode_simd(r, wf.fp16_ovfl()), omod) &
+        util::broadcast<T>(0xffffu);
     auto out = out_half;
     if constexpr (True16) {
       if (opsel & 0x8u)
@@ -2747,7 +2802,7 @@ template <typename Inst, typename FmaOp>
   using T = double;
   const uint32_t abs = inst.inst_.abs;
   const uint32_t neg = inst.inst_.neg;
-  const uint32_t omod = inst.inst_.omod;
+  const uint32_t omod = effective_vop3_omod_f64(wf, inst.inst_.omod);
   const uint32_t clamp = inst.inst_.clamp;
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -2829,7 +2884,7 @@ template <typename Inst, typename Op>
   using T = float32_t;
   const uint32_t abs = inst.inst_.abs;
   const uint32_t neg = inst.inst_.neg;
-  const uint32_t omod = inst.inst_.omod;
+  const uint32_t omod = effective_vop3_omod_f32(wf, inst.inst_.omod);
   const uint32_t clamp = inst.inst_.clamp;
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -2870,7 +2925,7 @@ template <typename Inst, typename Op>
   using T = double;
   const uint32_t abs = inst.inst_.abs;
   const uint32_t neg = inst.inst_.neg;
-  const uint32_t omod = inst.inst_.omod;
+  const uint32_t omod = effective_vop3_omod_f64(wf, inst.inst_.omod);
   const uint32_t clamp = inst.inst_.clamp;
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -2910,7 +2965,7 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
     return false;
   const uint32_t abs = inst.inst_.abs;
   const uint32_t neg = inst.inst_.neg;
-  const uint32_t omod = inst.inst_.omod;
+  const uint32_t omod = effective_vop3_omod_f32(wf, inst.inst_.omod);
   const uint32_t clamp = inst.inst_.clamp;
   constexpr std::size_t W = util::native_width_v<Tout>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
@@ -4011,7 +4066,7 @@ template <int ElemBits, bool Signed, typename Inst>
 }
 
 /// Whether a VOP3P dot widens its 16-bit float halves as F16 or BF16. The two
-/// formats share the entire dot2 structure (op_sel packing, neg/neg_hi, clamp,
+/// formats share the entire dot2 structure (op_sel packing and neg/neg_hi,
 /// left-to-right accumulate) and differ only in how each half is widened to f32.
 enum class Vop3pDotHalfFormat { F16, BF16 };
 
@@ -4020,8 +4075,9 @@ enum class Vop3pDotHalfFormat { F16, BF16 };
 /// acc (plain `*` / `+`, left-to-right — matching the scalar, NOT a contracted
 /// fma). op_sel / op_sel_hi pick the halves of src0/src1 (gated to the default
 /// packing op_sel == 0 && op_sel_hi == 3); neg / neg_hi flip the src0/src1
-/// product-operand signs and neg bit 2 flips the accumulator. Optional clamp to
-/// [0, 1]. NaN-input payload divergence accepted (same carve-out as the pk_fma
+/// product-operand signs and neg bit 2 flips the accumulator. The encoded CLAMP
+/// field is ignored for floating DOT instructions. NaN-input payload divergence accepted (same
+/// carve-out as the pk_fma
 /// slices). @tparam Fmt selects the f16 vs bf16 widening.
 template <Vop3pDotHalfFormat Fmt, typename Inst>
   requires(util::has_stdx_simd)
@@ -4041,7 +4097,6 @@ template <Vop3pDotHalfFormat Fmt, typename Inst>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  const bool clamp = inst.inst_.clamp;
   using F = util::native<float>;
   using U = util::native<uint32_t>;
   const U kSignBit(0x80000000u);
@@ -4083,8 +4138,6 @@ template <Vop3pDotHalfFormat Fmt, typename Inst>
     if (neg_acc)
       acc = std::bit_cast<F>(std::bit_cast<U>(acc) ^ kSignBit);
     F r = a0 * b0 + a1 * b1 + acc;
-    if (clamp)
-      r = apply_vop3_dst_mod_f32(r, 0, 1, floating_clamp_nan_to_zero(wf));
     dst.template store_native<float>(base, r, chunk);
   }
   return true;
