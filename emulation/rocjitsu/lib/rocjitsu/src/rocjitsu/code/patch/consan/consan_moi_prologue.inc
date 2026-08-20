@@ -1159,7 +1159,7 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_private_epoch_prologue_words(
     uint64_t prologue_text_offset, uint64_t original_entry_text_offset, uint16_t scratch_vgpr,
     uint32_t epoch_offset, std::optional<uint32_t> owner_offset,
-    std::optional<uint32_t> workgroup_key_offset,
+    std::optional<uint32_t> workgroup_key_offset, std::optional<uint32_t> dispatch_id_offset,
     const ConSanMoiPersistentWorkgroupPrivateOffsets &record_replay_workgroup_offsets,
     const VgprSpillSequence &spill, const std::optional<SgprSpillSequence> &entry_scalar_spill,
     std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow,
@@ -1177,6 +1177,15 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   if (workgroup_key_offset)
     workgroup_key_store =
         instrumentation::build_private_store_b32(scratch_vgpr, *workgroup_key_offset, arch);
+  std::optional<std::vector<uint32_t>> dispatch_id_low_store;
+  std::optional<std::vector<uint32_t>> dispatch_id_high_store;
+  if (dispatch_id_offset) {
+    dispatch_id_low_store =
+        instrumentation::build_private_store_b32(scratch_vgpr, *dispatch_id_offset, arch);
+    dispatch_id_high_store = instrumentation::build_private_store_b32(
+        static_cast<uint16_t>(scratch_vgpr + 1u), *dispatch_id_offset + SpillManager::kSlotBytes,
+        arch);
+  }
   std::array<std::optional<std::vector<uint32_t>>, 4> record_replay_workgroup_stores;
   const std::array<std::optional<uint32_t>, 4> record_replay_workgroup_offset_values = {
       record_replay_workgroup_offsets.x, record_replay_workgroup_offsets.y,
@@ -1190,6 +1199,7 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   const auto wait_store = instrumentation::build_s_wait_private_store0(arch);
   if (!epoch_store || (owner_offset && !owner_store) ||
       (workgroup_key_offset && !workgroup_key_store) ||
+      (dispatch_id_offset && (!dispatch_id_low_store || !dispatch_id_high_store)) ||
       std::ranges::any_of(std::views::iota(size_t{0}, record_replay_workgroup_stores.size()),
                           [&](size_t index) {
                             return record_replay_workgroup_offset_values[index] &&
@@ -1207,7 +1217,7 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
                                           entry_scalar_spill->restore_words.size()
                                     : 0u) +
                 48u);
-  if (dispatch_plan &&
+  if (dispatch_plan && !dispatch_id_offset &&
       !append_dispatch_id_capture_and_restore(
           words, *dispatch_plan, dispatch_capture,
           !workgroup_sources || !workgroup_sources->cdna_full_payload_base.has_value(), arch,
@@ -1237,6 +1247,21 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   if (entry_scalar_spill) {
     words.insert(words.end(), entry_scalar_spill->save_words.begin(),
                  entry_scalar_spill->save_words.end());
+  }
+  if (dispatch_id_offset) {
+    if (!dispatch_plan || !dispatch_capture.vgpr || dispatch_capture.sgpr ||
+        *dispatch_capture.vgpr != scratch_vgpr ||
+        !append_dispatch_id_capture_and_restore(
+            words, *dispatch_plan, dispatch_capture,
+            !workgroup_sources || !workgroup_sources->cdna_full_payload_base.has_value(), arch,
+            errors)) {
+      errors.emplace_back(
+          "ConSan MOI private-epoch prologue could not capture private dispatch identity");
+      return std::nullopt;
+    }
+    words.insert(words.end(), dispatch_id_low_store->begin(), dispatch_id_low_store->end());
+    words.insert(words.end(), dispatch_id_high_store->begin(), dispatch_id_high_store->end());
+    words.push_back(*wait_store);
   }
   if (workgroup_shadow &&
       !append_moi_workgroup_shadow_initialization(
@@ -1591,9 +1616,9 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
     result.errors.emplace_back("ConSan MOI private-epoch prologue found no .text section");
     return;
   }
-  const ConSanMoiDispatchIdCapture dispatch_capture{.sgpr = options.moi_dispatch_id_sgpr,
-                                                    .vgpr = options.moi_dispatch_id_vgpr};
-  if (dispatch_capture.present() && !dispatch_capture.unambiguous()) {
+  const ConSanMoiDispatchIdCapture object_dispatch_capture{.sgpr = options.moi_dispatch_id_sgpr,
+                                                           .vgpr = options.moi_dispatch_id_vgpr};
+  if (object_dispatch_capture.present() && !object_dispatch_capture.unambiguous()) {
     result.errors.emplace_back(
         "ConSan MOI private-epoch prologue has multiple dispatch-ID representations");
     return;
@@ -1604,6 +1629,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
     uint64_t active_descriptor_file_offset = 0;
     uint64_t active_entry_text_offset = 0;
     uint16_t scratch_vgpr = 0;
+    ConSanOptions kernel_options;
     MoiPrivateEpochLayout layout;
     VgprSpillSequence spill;
     std::optional<SgprSpillSequence> entry_scalar_spill;
@@ -1611,6 +1637,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
     std::optional<ConSanMoiWorkgroupSources> workgroup_sources;
     uint32_t required_private_bytes = 0;
     std::optional<ConSanMoiDispatchIdPreloadPlan> dispatch_plan;
+    ConSanMoiDispatchIdCapture dispatch_capture;
     bool has_kernarg_preload = false;
   };
   std::vector<PlannedPrivateEpochPrologue> planned;
@@ -1645,6 +1672,27 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
 
     if (!access_patch->persistent_epoch_private_offset)
       continue;
+    ConSanOptions kernel_options = options;
+    const std::array<uint64_t, 1> kernel_owner = {kernel.descriptor_file_offset};
+    if (!options.moi_transient_sgpr_assignments.empty() &&
+        !apply_moi_transient_sgpr_assignment(kernel_options, kernel_owner)) {
+      result.errors.emplace_back(
+          "ConSan MOI private-epoch prologue has no transient scalar assignment for kernel '" +
+          kernel.name + "'");
+      return;
+    }
+    const bool has_private_dispatch_id =
+        access_patch->persistent_dispatch_id_private_offset.has_value();
+    ConSanMoiDispatchIdCapture dispatch_capture{
+        .sgpr = has_private_dispatch_id ? std::nullopt : kernel_options.moi_dispatch_id_sgpr,
+        .vgpr = has_private_dispatch_id ? access_patch->scratch_vgpr
+                                        : kernel_options.moi_dispatch_id_vgpr};
+    if (dispatch_capture.present() && !dispatch_capture.unambiguous()) {
+      result.errors.emplace_back(
+          "ConSan MOI private-epoch prologue has an ambiguous dispatch-ID capture for kernel '" +
+          kernel.name + "'");
+      return;
+    }
     std::optional<ConSanMoiDispatchIdPreloadPlan> dispatch_plan;
     bool has_kernarg_preload = false;
     if (dispatch_capture.present()) {
@@ -1677,6 +1725,10 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
       persistent_end =
           std::max(persistent_end, *access_patch->persistent_workgroup_key_private_offset +
                                        SpillManager::kSlotBytes);
+    if (has_private_dispatch_id)
+      persistent_end =
+          std::max(persistent_end, *access_patch->persistent_dispatch_id_private_offset +
+                                       2u * SpillManager::kSlotBytes);
     for (const std::optional<uint32_t> offset :
          {access_patch->persistent_record_replay_workgroup_private_offsets.x,
           access_patch->persistent_record_replay_workgroup_private_offsets.y,
@@ -1689,6 +1741,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
         .epoch_offset = *access_patch->persistent_epoch_private_offset,
         .owner_offset = access_patch->persistent_owner_private_offset,
         .workgroup_key_offset = access_patch->persistent_workgroup_key_private_offset,
+        .dispatch_id_offset = access_patch->persistent_dispatch_id_private_offset,
         .record_replay_workgroup_offsets =
             access_patch->persistent_record_replay_workgroup_private_offsets,
         .ephemeral_base = access_patch->persistent_private_state_end.value_or(persistent_end)};
@@ -1771,13 +1824,13 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
       continue;
     }
     std::optional<SgprSpillSequence> entry_scalar_spill;
-    if (options.moi_exec_save_sgpr) {
+    if (kernel_options.moi_exec_save_sgpr) {
       const uint16_t guest_entry_sgpr_count =
           static_cast<uint16_t>(moi_descriptor_user_sgpr_count(descriptor) +
                                 moi_descriptor_system_sgpr_count(descriptor));
-      const uint16_t scalar_base = *options.moi_exec_save_sgpr;
+      const uint16_t scalar_base = *kernel_options.moi_exec_save_sgpr;
       const uint16_t scalar_end = static_cast<uint16_t>(std::min<uint32_t>(
-          static_cast<uint32_t>(scalar_base) + moi_exec_save_sgpr_count(options, arch),
+          static_cast<uint32_t>(scalar_base) + moi_exec_save_sgpr_count(kernel_options, arch),
           guest_entry_sgpr_count));
       if (scalar_base < scalar_end) {
         entry_scalar_spill = build_sgpr_spill_sequence(
@@ -1799,9 +1852,10 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
     }
     private_requirements[kernel.descriptor_file_offset] = required_private_bytes;
     planned.push_back({&kernel, active_kernel->descriptor_file_offset,
-                       active_kernel->entry_text_offset, *access_patch->scratch_vgpr, layout,
-                       *spill, entry_scalar_spill, workgroup_shadow, workgroup_sources,
-                       required_private_bytes, dispatch_plan, has_kernarg_preload});
+                       active_kernel->entry_text_offset, *access_patch->scratch_vgpr,
+                       std::move(kernel_options), layout, *spill, entry_scalar_spill,
+                       workgroup_shadow, workgroup_sources, required_private_bytes, dispatch_plan,
+                       dispatch_capture, has_kernarg_preload});
   }
 
   if (planned.empty()) {
@@ -1811,13 +1865,13 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
   if (!apply_spill_descriptor_requirements(patcher, code_object, active_bytes, result,
                                            private_requirements, result.errors))
     return;
-  if (dispatch_capture.present()) {
-    for (const PlannedPrivateEpochPrologue &item : planned) {
-      if (!item.dispatch_plan || !apply_moi_dispatch_id_descriptor(
-                                     patcher, item.active_descriptor_file_offset,
-                                     *item.dispatch_plan, dispatch_capture, arch, result.errors)) {
-        return;
-      }
+  for (const PlannedPrivateEpochPrologue &item : planned) {
+    if (item.dispatch_capture.present() &&
+        (!item.dispatch_plan ||
+         !apply_moi_dispatch_id_descriptor(patcher, item.active_descriptor_file_offset,
+                                           *item.dispatch_plan, item.dispatch_capture, arch,
+                                           result.errors))) {
+      return;
     }
   }
 
@@ -1830,14 +1884,16 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
     std::optional<ConSanMoiWorkgroupShadowLayout> prologue_workgroup_shadow = item.workgroup_shadow;
     if (prologue_workgroup_shadow) {
       prologue_workgroup_shadow->visible_evidence_sgpr =
-          inline_shadow_visible_evidence_sgpr(options);
+          inline_shadow_visible_evidence_sgpr(item.kernel_options);
     }
     auto words = build_private_epoch_prologue_words(
         prologue_text_offset, item.active_entry_text_offset, item.scratch_vgpr,
         item.layout.epoch_offset, item.layout.owner_offset, item.layout.workgroup_key_offset,
-        item.layout.record_replay_workgroup_offsets, item.spill, item.entry_scalar_spill,
-        prologue_workgroup_shadow, item.workgroup_sources, item.dispatch_plan, dispatch_capture,
-        moi_runtime_sample_counter_sgpr(options), options.moi_exec_save_sgpr, arch, result.errors);
+        item.layout.dispatch_id_offset, item.layout.record_replay_workgroup_offsets, item.spill,
+        item.entry_scalar_spill, prologue_workgroup_shadow, item.workgroup_sources,
+        item.dispatch_plan, item.dispatch_capture,
+        moi_runtime_sample_counter_sgpr(item.kernel_options),
+        item.kernel_options.moi_exec_save_sgpr, arch, result.errors);
     if (!words)
       return;
     if (!patcher.redirect_kernel_entry(item.active_descriptor_file_offset,
@@ -1854,10 +1910,11 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
       auto secondary_words = build_private_epoch_prologue_words(
           secondary_prologue_offset, item.active_entry_text_offset + kAmdhsaKernelEntryAlignment,
           item.scratch_vgpr, item.layout.epoch_offset, item.layout.owner_offset,
-          item.layout.workgroup_key_offset, item.layout.record_replay_workgroup_offsets, item.spill,
-          item.entry_scalar_spill, prologue_workgroup_shadow, item.workgroup_sources,
-          item.dispatch_plan, dispatch_capture, moi_runtime_sample_counter_sgpr(options),
-          options.moi_exec_save_sgpr, arch, result.errors);
+          item.layout.workgroup_key_offset, item.layout.dispatch_id_offset,
+          item.layout.record_replay_workgroup_offsets, item.spill, item.entry_scalar_spill,
+          prologue_workgroup_shadow, item.workgroup_sources, item.dispatch_plan,
+          item.dispatch_capture, moi_runtime_sample_counter_sgpr(item.kernel_options),
+          item.kernel_options.moi_exec_save_sgpr, arch, result.errors);
       if (!secondary_words)
         return;
       if (words->size() * sizeof(uint32_t) <= kAmdhsaKernelEntryAlignment &&
@@ -1871,20 +1928,22 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
         words = build_private_epoch_prologue_words(
             *primary_body_offset, item.active_entry_text_offset, item.scratch_vgpr,
             item.layout.epoch_offset, item.layout.owner_offset, item.layout.workgroup_key_offset,
-            item.layout.record_replay_workgroup_offsets, item.spill, item.entry_scalar_spill,
-            prologue_workgroup_shadow, item.workgroup_sources, item.dispatch_plan, dispatch_capture,
-            moi_runtime_sample_counter_sgpr(options), options.moi_exec_save_sgpr, arch,
-            result.errors);
+            item.layout.dispatch_id_offset, item.layout.record_replay_workgroup_offsets, item.spill,
+            item.entry_scalar_spill, prologue_workgroup_shadow, item.workgroup_sources,
+            item.dispatch_plan, item.dispatch_capture,
+            moi_runtime_sample_counter_sgpr(item.kernel_options),
+            item.kernel_options.moi_exec_save_sgpr, arch, result.errors);
         if (!words)
           return;
         secondary_body_offset = *primary_body_offset + words->size() * sizeof(uint32_t);
         secondary_words = build_private_epoch_prologue_words(
             *secondary_body_offset, item.active_entry_text_offset + kAmdhsaKernelEntryAlignment,
             item.scratch_vgpr, item.layout.epoch_offset, item.layout.owner_offset,
-            item.layout.workgroup_key_offset, item.layout.record_replay_workgroup_offsets,
-            item.spill, item.entry_scalar_spill, prologue_workgroup_shadow, item.workgroup_sources,
-            item.dispatch_plan, dispatch_capture, moi_runtime_sample_counter_sgpr(options),
-            options.moi_exec_save_sgpr, arch, result.errors);
+            item.layout.workgroup_key_offset, item.layout.dispatch_id_offset,
+            item.layout.record_replay_workgroup_offsets, item.spill, item.entry_scalar_spill,
+            prologue_workgroup_shadow, item.workgroup_sources, item.dispatch_plan,
+            item.dispatch_capture, moi_runtime_sample_counter_sgpr(item.kernel_options),
+            item.kernel_options.moi_exec_save_sgpr, arch, result.errors);
         const auto primary_relay =
             compute_sopp_branch_simm16(prologue_text_offset, *primary_body_offset);
         const auto secondary_relay = compute_sopp_branch_simm16(
@@ -1917,14 +1976,15 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
     info.persistent_epoch_private_offset = item.layout.epoch_offset;
     info.persistent_owner_private_offset = item.layout.owner_offset;
     info.persistent_workgroup_key_private_offset = item.layout.workgroup_key_offset;
+    info.persistent_dispatch_id_private_offset = item.layout.dispatch_id_offset;
     info.persistent_record_replay_workgroup_private_offsets =
         item.layout.record_replay_workgroup_offsets;
     info.persistent_private_state_end = item.layout.ephemeral_base;
     info.spilled_vgpr_count = item.spill.vgpr_count;
     info.required_private_segment_size = item.required_private_bytes;
     note_dynamic_stack_private_requirement(info, &item.spill);
-    if (item.dispatch_plan && dispatch_capture.present())
-      note_dispatch_id_patch_info(info, *item.dispatch_plan, dispatch_capture);
+    if (item.dispatch_plan && item.dispatch_capture.present())
+      note_dispatch_id_patch_info(info, *item.dispatch_plan, item.dispatch_capture);
     info.trampoline_size = static_cast<uint32_t>(new_text.size() - prologue_text_offset);
     info.owner_descriptor_file_offsets.push_back(item.kernel->descriptor_file_offset);
     patches.push_back(info);

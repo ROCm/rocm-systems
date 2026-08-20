@@ -2,6 +2,7 @@ struct MoiPrivateEpochLayout {
   uint32_t epoch_offset = 0;
   std::optional<uint32_t> owner_offset;
   std::optional<uint32_t> workgroup_key_offset;
+  std::optional<uint32_t> dispatch_id_offset;
   ConSanMoiPersistentWorkgroupPrivateOffsets record_replay_workgroup_offsets;
   uint32_t ephemeral_base = 0;
 };
@@ -261,7 +262,8 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
 build_moi_private_epoch_layout(const ConSanResult &result, const ResolvedMoiScratchPlan &resources,
                                rj_code_arch_t arch, std::vector<std::string> &warnings,
                                bool include_owner = false, bool include_workgroup_key = false,
-                               bool include_record_replay_workgroup = false) {
+                               bool include_record_replay_workgroup = false,
+                               bool include_dispatch_id = false) {
   if (resources.owner_descriptor_file_offsets.empty()) {
     warnings.emplace_back("ConSan MOI private epoch requires an owning kernel descriptor");
     return std::nullopt;
@@ -289,6 +291,10 @@ build_moi_private_epoch_layout(const ConSanResult &result, const ResolvedMoiScra
       include_workgroup_key ? std::optional<uint64_t>(persistent_end) : std::nullopt;
   if (workgroup_key_offset)
     persistent_end += SpillManager::kSlotBytes;
+  const std::optional<uint64_t> dispatch_id_offset =
+      include_dispatch_id ? std::optional<uint64_t>(persistent_end) : std::nullopt;
+  if (dispatch_id_offset)
+    persistent_end += 2u * SpillManager::kSlotBytes;
   ConSanMoiPersistentWorkgroupPrivateOffsets record_replay_workgroup_offsets;
   std::optional<std::array<uint64_t, 4>> record_replay_workgroup_offset_values;
   if (include_record_replay_workgroup) {
@@ -342,6 +348,9 @@ build_moi_private_epoch_layout(const ConSanResult &result, const ResolvedMoiScra
           workgroup_key_offset
               ? std::optional<uint32_t>(static_cast<uint32_t>(*workgroup_key_offset))
               : std::nullopt,
+      .dispatch_id_offset =
+          dispatch_id_offset ? std::optional<uint32_t>(static_cast<uint32_t>(*dispatch_id_offset))
+                             : std::nullopt,
       .record_replay_workgroup_offsets = record_replay_workgroup_offsets,
       .ephemeral_base = *ephemeral_base};
 }

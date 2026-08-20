@@ -2490,7 +2490,8 @@
     std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow,
     bool byte_granular_external_shadow, std::optional<uint32_t> private_epoch_offset,
     std::optional<uint32_t> private_owner_offset, std::optional<uint16_t> private_owner_shift,
-    std::optional<uint32_t> private_workgroup_key_offset, uint16_t workgroup_shadow_compact_token,
+    std::optional<uint32_t> private_workgroup_key_offset,
+    std::optional<uint32_t> private_dispatch_id_offset, uint16_t workgroup_shadow_compact_token,
     uint16_t scratch_count, const VgprSpillSequence *spill, std::vector<std::string> &errors,
     uint32_t *guest_instruction_word_count = nullptr) {
   if (!options.scratch_vgpr) {
@@ -2623,6 +2624,29 @@
   std::vector<uint32_t> words;
   words.reserve(candidate.size / sizeof(uint32_t) + 64u + (options.moi_exec_save_sgpr ? 120u : 0u) +
                 (options.moi_epoch_vgpr ? 2u : 0u));
+  if (private_dispatch_id_offset) {
+    const auto load_low =
+        instrumentation::build_private_load_b32(address_lo_vgpr, *private_dispatch_id_offset, arch);
+    const auto load_high = instrumentation::build_private_load_b32(
+        address_hi_vgpr, *private_dispatch_id_offset + SpillManager::kSlotBytes, arch);
+    const auto wait_load = instrumentation::build_s_wait_private_load0(arch);
+    const auto read_low = instrumentation::build_v_readfirstlane_b32(*options.moi_dispatch_id_sgpr,
+                                                                     address_lo_vgpr, arch);
+    const auto read_high = instrumentation::build_v_readfirstlane_b32(
+        static_cast<uint16_t>(*options.moi_dispatch_id_sgpr + 1u), address_hi_vgpr, arch);
+    const auto wait_scalar = instrumentation::build_valu_to_salu_dependency_wait(arch);
+    if (!load_low || !load_high || !wait_load || !read_low || !read_high || !wait_scalar) {
+      errors.emplace_back(
+          "ConSan MOI inline-shadow probe could not reload private dispatch identity");
+      return std::nullopt;
+    }
+    words.insert(words.end(), load_low->begin(), load_low->end());
+    words.insert(words.end(), load_high->begin(), load_high->end());
+    words.push_back(*wait_load);
+    words.push_back(*read_low);
+    words.push_back(*read_high);
+    words.push_back(*wait_scalar);
+  }
   const auto reload_spill_backed_lds_byte_offset = [&]() {
     if (!spill_backed_lds_byte_offset_source)
       return true;

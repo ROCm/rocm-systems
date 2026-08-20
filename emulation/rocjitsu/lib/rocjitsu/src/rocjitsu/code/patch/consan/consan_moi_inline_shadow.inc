@@ -154,6 +154,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     std::optional<uint32_t> private_epoch_offset;
     std::optional<uint32_t> private_owner_offset;
     std::optional<uint32_t> private_workgroup_key_offset;
+    std::optional<uint32_t> private_dispatch_id_offset;
     std::optional<uint16_t> private_owner_shift;
     std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow;
     uint16_t workgroup_shadow_compact_token = 0;
@@ -675,6 +676,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       // value. Preserve the complete key before arbitrary guest code can reuse
       // the ordinary SGPR or TTMP inputs.
       const bool persist_workgroup_key = true;
+      // The object-wide hardware pair may overlap one full-pressure owner's
+      // guest state. Capture that owner's identity in private storage and
+      // reload it into the access router's dead PC pair after the router has
+      // entered its body.
+      const bool persist_dispatch_id =
+          !candidate_options.moi_dispatch_id_sgpr && options.moi_dispatch_id_sgpr;
       if (direct_descriptor) {
         auto [cached, inserted] =
             direct_private_layout_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
@@ -682,14 +689,20 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           cached->second = build_moi_private_epoch_layout(result, *resources, arch, result.warnings,
                                                           /*include_owner=*/persist_workitem_owner,
                                                           /*include_workgroup_key=*/
-                                                          persist_workgroup_key);
+                                                          persist_workgroup_key,
+                                                          /*include_record_replay_workgroup=*/false,
+                                                          /*include_dispatch_id=*/
+                                                          persist_dispatch_id);
         }
         private_layout = cached->second;
       } else {
         private_layout = build_moi_private_epoch_layout(result, *resources, arch, result.warnings,
                                                         /*include_owner=*/persist_workitem_owner,
                                                         /*include_workgroup_key=*/
-                                                        persist_workgroup_key);
+                                                        persist_workgroup_key,
+                                                        /*include_record_replay_workgroup=*/false,
+                                                        /*include_dispatch_id=*/
+                                                        persist_dispatch_id);
       }
       if (!private_layout)
         continue;
@@ -707,6 +720,15 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         if (!private_owner_shift)
           continue;
       }
+    }
+
+    if (private_layout && private_layout->dispatch_id_offset) {
+      if (!candidate_options.moi_inline_indirect_pc_sgpr) {
+        result.warnings.emplace_back(
+            "ConSan MOI private dispatch identity has no owner-local scalar reload pair");
+        continue;
+      }
+      candidate_options.moi_dispatch_id_sgpr = candidate_options.moi_inline_indirect_pc_sgpr;
     }
 
     if (!persistent_assignment_applied &&
@@ -813,6 +835,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
         private_layout ? private_layout->owner_offset : std::nullopt, private_owner_shift,
         private_layout ? private_layout->workgroup_key_offset : std::nullopt,
+        private_layout ? private_layout->dispatch_id_offset : std::nullopt,
         workgroup_shadow_compact_token, resources->count, spill ? &*spill : nullptr,
         candidate_errors, &guest_instruction_word_count);
     if (!words) {
@@ -1101,6 +1124,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       planned.private_owner_offset = private_layout->owner_offset;
     if (private_layout)
       planned.private_workgroup_key_offset = private_layout->workgroup_key_offset;
+    if (private_layout)
+      planned.private_dispatch_id_offset = private_layout->dispatch_id_offset;
     planned.private_owner_shift = private_owner_shift;
     planned.workgroup_shadow = workgroup_shadow;
     planned.workgroup_shadow_compact_token = workgroup_shadow_compact_token;
@@ -1515,13 +1540,17 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       candidate_options.moi_inline_workgroup_shadow = planned_patch.workgroup_shadow.has_value();
       candidate_options.scratch_vgpr = planned_patch.resources.base;
       candidate_options.moi_spill_overlaps_guest_operands = planned_patch.spill.has_value();
+      if (planned_patch.private_dispatch_id_offset) {
+        candidate_options.moi_dispatch_id_sgpr = candidate_options.moi_inline_indirect_pc_sgpr;
+      }
       auto words = build_inline_shadow_words(
           bytes, candidate, candidate_options, arch, layout, planned_patch.workgroup_sources,
           planned_patch.workgroup_shadow, requires_wave_partitioned_exact_shadow,
           planned_patch.private_epoch_offset, planned_patch.private_owner_offset,
           planned_patch.private_owner_shift, planned_patch.private_workgroup_key_offset,
-          planned_patch.workgroup_shadow_compact_token, planned_patch.resources.count,
-          planned_patch.spill ? &*planned_patch.spill : nullptr, result.errors);
+          planned_patch.private_dispatch_id_offset, planned_patch.workgroup_shadow_compact_token,
+          planned_patch.resources.count, planned_patch.spill ? &*planned_patch.spill : nullptr,
+          result.errors);
       if (!words)
         return;
 
@@ -1554,6 +1583,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       info.persistent_epoch_private_offset = planned_patch.private_epoch_offset;
       info.persistent_owner_private_offset = planned_patch.private_owner_offset;
       info.persistent_workgroup_key_private_offset = planned_patch.private_workgroup_key_offset;
+      info.persistent_dispatch_id_private_offset = planned_patch.private_dispatch_id_offset;
       if (planned_patch.private_epoch_offset) {
         uint32_t persistent_state_end =
             *planned_patch.private_epoch_offset + SpillManager::kSlotBytes;
@@ -1564,6 +1594,10 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           persistent_state_end =
               std::max(persistent_state_end,
                        *planned_patch.private_workgroup_key_offset + SpillManager::kSlotBytes);
+        if (planned_patch.private_dispatch_id_offset)
+          persistent_state_end =
+              std::max(persistent_state_end,
+                       *planned_patch.private_dispatch_id_offset + 2u * SpillManager::kSlotBytes);
         info.persistent_private_state_end = persistent_state_end;
       }
       info.required_private_segment_size = planned_patch.required_private_bytes;
@@ -1925,6 +1959,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           "inline-shadow probe", arch,
           [&](const PlannedInlineShadowPatch &planned_patch) {
             ConSanOptions candidate_options = options;
+            if (!apply_moi_transient_sgpr_assignment(
+                    candidate_options, planned_patch.resources.owner_descriptor_file_offsets)) {
+              result.errors.emplace_back(
+                  "ConSan MOI inline-shadow access lost its transient scalar assignment");
+              return std::optional<std::vector<uint32_t>>{};
+            }
             if (!candidate_options.moi_persistent_vgpr_assignments.empty() &&
                 !apply_moi_persistent_vgpr_assignment(
                     candidate_options, planned_patch.resources.owner_descriptor_file_offsets)) {
@@ -1936,12 +1976,17 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                 planned_patch.workgroup_shadow.has_value();
             candidate_options.scratch_vgpr = planned_patch.resources.base;
             candidate_options.moi_spill_overlaps_guest_operands = planned_patch.spill.has_value();
+            if (planned_patch.private_dispatch_id_offset) {
+              candidate_options.moi_dispatch_id_sgpr =
+                  candidate_options.moi_inline_indirect_pc_sgpr;
+            }
             return build_inline_shadow_words(
                 bytes, *planned_patch.candidate, candidate_options, arch, layout,
                 planned_patch.workgroup_sources, planned_patch.workgroup_shadow,
                 requires_wave_partitioned_exact_shadow, planned_patch.private_epoch_offset,
                 planned_patch.private_owner_offset, planned_patch.private_owner_shift,
                 planned_patch.private_workgroup_key_offset,
+                planned_patch.private_dispatch_id_offset,
                 planned_patch.workgroup_shadow_compact_token, planned_patch.resources.count,
                 planned_patch.spill ? &*planned_patch.spill : nullptr, result.errors);
           },
@@ -1955,6 +2000,11 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             info.scratch_vgpr = planned_patch.resources.base;
             info.owner_descriptor_file_offsets =
                 planned_patch.resources.owner_descriptor_file_offsets;
+            info.persistent_epoch_private_offset = planned_patch.private_epoch_offset;
+            info.persistent_owner_private_offset = planned_patch.private_owner_offset;
+            info.persistent_workgroup_key_private_offset =
+                planned_patch.private_workgroup_key_offset;
+            info.persistent_dispatch_id_private_offset = planned_patch.private_dispatch_id_offset;
             if (planned_patch.workgroup_shadow) {
               info.workgroup_shadow_base = planned_patch.workgroup_shadow->base;
               info.workgroup_shadow_size = planned_patch.workgroup_shadow->size;

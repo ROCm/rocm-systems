@@ -523,6 +523,10 @@ struct ConSanPatchInfo {
   /// Entry-captured exact workgroup identity for kernels whose ordinary VGPR
   /// bank has no lifetime-safe persistent slot below ACCUM_OFFSET.
   std::optional<uint32_t> persistent_workgroup_key_private_offset;
+  /// Entry-captured hardware dispatch identity for an owner whose guest SGPR
+  /// pressure excludes the object-wide persistent pair. The high dword is in
+  /// the immediately following private slot.
+  std::optional<uint32_t> persistent_dispatch_id_private_offset;
   /// Full Record/Replay coordinates captured at entry. Unlike the compact
   /// Inline key above, these offsets preserve x/y/z without packing limits.
   ConSanMoiPersistentWorkgroupPrivateOffsets persistent_record_replay_workgroup_private_offsets;

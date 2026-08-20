@@ -3087,13 +3087,14 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
   };
   if (!std::ranges::any_of(result.patches, is_exact_patch))
     return errors;
-  const bool has_global_exact_patch =
+  const bool has_global_exact_patch_without_private_dispatch =
       std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
-        return is_exact_patch(patch) && patch.workgroup_shadow_size == 0u;
+        return is_exact_patch(patch) && patch.workgroup_shadow_size == 0u &&
+               !patch.persistent_dispatch_id_private_offset;
       });
   const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
   if (replacement.text_sections().size() != 1 ||
-      (has_global_exact_patch && !result.resolved_moi_dispatch_id_sgpr &&
+      (has_global_exact_patch_without_private_dispatch && !result.resolved_moi_dispatch_id_sgpr &&
        !result.resolved_moi_dispatch_id_vgpr &&
        !consan_arch_uses_literal_dispatch_identity(arch))) {
     errors.emplace_back(
@@ -3290,12 +3291,28 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
     const size_t transaction_count = exact_cas_count / 2u;
     std::vector<uint32_t> capture_low;
     std::vector<uint32_t> capture_high;
-    if (result.resolved_moi_dispatch_id_sgpr) {
-      capture_low.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 2u),
-                                                *result.resolved_moi_dispatch_id_sgpr, arch));
-      capture_high.push_back(build_v_mov_b32_e32(
-          static_cast<uint16_t>(scratch + 3u),
-          static_cast<uint16_t>(*result.resolved_moi_dispatch_id_sgpr + 1u), arch));
+    std::optional<uint16_t> expected_dispatch_sgpr = result.resolved_moi_dispatch_id_sgpr;
+    if (patch.persistent_dispatch_id_private_offset) {
+      expected_dispatch_sgpr.reset();
+      for (uint64_t owner : patch.owner_descriptor_file_offsets) {
+        const auto assignment =
+            std::ranges::find(result.resolved_moi_transient_sgpr_assignments, owner,
+                              &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
+        if (assignment == result.resolved_moi_transient_sgpr_assignments.end() ||
+            !assignment->indirect_pc_sgpr ||
+            (expected_dispatch_sgpr && *expected_dispatch_sgpr != *assignment->indirect_pc_sgpr)) {
+          expected_dispatch_sgpr.reset();
+          break;
+        }
+        expected_dispatch_sgpr = assignment->indirect_pc_sgpr;
+      }
+    }
+    if (expected_dispatch_sgpr) {
+      capture_low.push_back(
+          build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 2u), *expected_dispatch_sgpr, arch));
+      capture_high.push_back(
+          build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 3u),
+                              static_cast<uint16_t>(*expected_dispatch_sgpr + 1u), arch));
     } else if (result.resolved_moi_dispatch_id_vgpr) {
       capture_low.push_back(
           build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 2u),
@@ -3699,6 +3716,17 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
     }
   }
   for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.persistent_dispatch_id_private_offset) {
+      const uint32_t offset = *patch.persistent_dispatch_id_private_offset;
+      if (!patch.persistent_epoch_private_offset || !patch.persistent_private_state_end ||
+          offset % sizeof(uint32_t) != 0u ||
+          offset > std::numeric_limits<uint32_t>::max() - 2u * sizeof(uint32_t) ||
+          offset + 2u * sizeof(uint32_t) > *patch.persistent_private_state_end ||
+          patch.required_private_segment_size < *patch.persistent_private_state_end) {
+        errors.emplace_back(
+            "ConSan final validation found private dispatch identity outside persistent state");
+      }
+    }
     const ConSanMoiPersistentWorkgroupPrivateOffsets &private_workgroup =
         patch.persistent_record_replay_workgroup_private_offsets;
     if (!private_workgroup.empty() && !private_workgroup.complete()) {

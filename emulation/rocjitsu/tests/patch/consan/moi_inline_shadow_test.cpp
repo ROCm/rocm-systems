@@ -929,7 +929,6 @@ TEST(ConSanMoi, Cdna4InlineShadowUsesScalarEpochForFullOrdinaryVgprBank) {
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
   const ConSanResult result = try_patch_consan(bytes, options);
-
   ASSERT_TRUE(consan_patch_succeeded(result))
       << "warnings=" << testing::PrintToString(result.warnings)
       << " errors=" << testing::PrintToString(result.errors);
@@ -972,6 +971,177 @@ TEST(ConSanMoi, Cdna4InlineShadowUsesScalarEpochForFullOrdinaryVgprBank) {
                             kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
             15u);
   EXPECT_TRUE(result.final_validation_passed);
+}
+
+TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const auto store = build_cdna4_ds_store_b32(/*vaddr=*/0u, /*vdata=*/0u,
+                                              /*byte_offset=*/0u, kArch);
+  const auto barrier = build_cdna4_s_barrier(kArch);
+  ASSERT_TRUE(store && barrier);
+
+  std::vector<uint32_t> full_pressure_words(800u, build_s_nop(0u, kArch));
+  size_t cursor = 0u;
+  for (uint16_t sgpr = 4u; sgpr <= 105u; ++sgpr) {
+    if (sgpr >= 48u && sgpr <= 50u)
+      continue;
+    full_pressure_words[cursor++] = build_s_mov_b32(sgpr, scalar_positive_inline_u32(0u), kArch);
+  }
+  std::copy(store->begin(), store->end(), full_pressure_words.begin() + cursor);
+  cursor += store->size();
+  full_pressure_words[cursor++] = *barrier;
+  for (uint16_t sgpr = 4u; sgpr <= 105u; ++sgpr) {
+    if (sgpr >= 48u && sgpr <= 50u)
+      continue;
+    full_pressure_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, sgpr, kArch);
+  }
+  for (uint16_t sgpr = 48u; sgpr <= 50u; ++sgpr) {
+    full_pressure_words[cursor++] = build_s_mov_b32(sgpr, scalar_positive_inline_u32(0u), kArch);
+    full_pressure_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, sgpr, kArch);
+  }
+  // This owner reaches both architectural tails. Its SGPR allocation overlaps
+  // the object-wide dispatch pair, while site-local liveness still leaves a
+  // dead router pair. This models the component-local assignment selected for
+  // the full-pressure Exact owner in generated MFMA code objects.
+  full_pressure_words[cursor++] = build_v_mov_b32_e32(/*vdst=*/0u, vector_source_vgpr(63u), kArch);
+  full_pressure_words[cursor++] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/105u, kArch);
+  full_pressure_words.back() = build_s_endpgm(kArch);
+
+  std::vector<uint8_t> bytes = make_cdna4_lds_code_object(
+      full_pressure_words, "full_pressure_private_dispatch", /*vgpr_granulated=*/7u);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 15u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 7u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
+  });
+  append_kernel_metadata_note(bytes, "full_pressure_private_dispatch",
+                              /*uses_dynamic_stack=*/false,
+                              /*sgpr_count=*/106u, /*private_segment_fixed_size=*/0u,
+                              /*required_workgroup_size=*/std::nullopt,
+                              /*has_dynamic_lds=*/false,
+                              /*additional_kernel_names=*/{}, /*agpr_count=*/0u,
+                              /*vgpr_count=*/64u);
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  const auto original_full_kernel = std::ranges::find(
+      original.kernels(), "full_pressure_private_dispatch", &AmdGpuKernelInfo::name);
+  ASSERT_NE(original_full_kernel, original.kernels().end());
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
+  options.force_private_epoch = true;
+  options.force_vgpr_spill = true;
+  options.moi_exec_save_sgpr = 4u;
+  options.moi_dispatch_id_sgpr = 96u;
+  options.moi_inline_indirect_pc_sgpr = 48u;
+  options.moi_inline_indirect_scc_sgpr = 50u;
+  options.moi_inline_dispatch_key_sgpr = 50u;
+  options.moi_inline_call_return_sgpr = 48u;
+  options.automatic_moi_exec_save_sgprs = true;
+  options.automatic_moi_partial_exec_save_sgprs = true;
+  options.automatic_moi_inline_sgpr_spill = true;
+  options.automatic_moi_dispatch_id_sgprs = true;
+  options.moi_transient_sgpr_assignments.push_back(
+      {.descriptor_file_offset = original_full_kernel->descriptor_file_offset,
+       .exec_save_sgpr = 4u,
+       .owner_sgpr = 4u,
+       .dispatch_id_sgpr = std::nullopt,
+       .spill_backed = true,
+       .indirect_pc_sgpr = 48u,
+       .indirect_scc_sgpr = 50u,
+       .dispatch_key_sgpr = 50u,
+       .call_return_sgpr = 48u,
+       .visible_evidence_sgpr = std::nullopt,
+       .branch_only_scalar_spill = false,
+       .dynamic_stack_borrowed_sgpr = std::nullopt});
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = 16u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result))
+      << "warnings=" << testing::PrintToString(result.warnings)
+      << " errors=" << testing::PrintToString(result.errors)
+      << " plans=" << testing::PrintToString(result.resource_plans);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.final_validation_passed);
+  EXPECT_TRUE(result.moi_private_epoch_automatic) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
+  const auto full_kernel =
+      std::ranges::find(result.kernels, "full_pressure_private_dispatch", &ConSanKernelInfo::name);
+  ASSERT_NE(full_kernel, result.kernels.end());
+  const auto full_assignment = std::ranges::find(
+      result.resolved_moi_transient_sgpr_assignments, full_kernel->descriptor_file_offset,
+      &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
+  ASSERT_NE(full_assignment, result.resolved_moi_transient_sgpr_assignments.end());
+  EXPECT_FALSE(full_assignment->dispatch_id_sgpr);
+  ASSERT_TRUE(full_assignment->indirect_pc_sgpr);
+
+  const auto owns = [](const ConSanPatchInfo &patch, uint64_t descriptor_offset) {
+    return std::ranges::find(patch.owner_descriptor_file_offsets, descriptor_offset) !=
+           patch.owner_descriptor_file_offsets.end();
+  };
+  const auto is_access = [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
+           patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
+  };
+  const auto full_access = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+    return is_access(patch) && owns(patch, full_kernel->descriptor_file_offset);
+  });
+  ASSERT_NE(full_access, result.patches.end());
+  ASSERT_TRUE(full_access->persistent_dispatch_id_private_offset);
+  ASSERT_TRUE(full_access->persistent_private_state_end);
+  EXPECT_GE(*full_access->persistent_private_state_end,
+            *full_access->persistent_dispatch_id_private_offset + 2u * SpillManager::kSlotBytes);
+
+  const auto full_prologue =
+      std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+        return patch.kind == ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue &&
+               owns(patch, full_kernel->descriptor_file_offset);
+      });
+  ASSERT_NE(full_prologue, result.patches.end());
+  ASSERT_EQ(full_prologue->persistent_dispatch_id_private_offset,
+            full_access->persistent_dispatch_id_private_offset);
+  ASSERT_TRUE(full_prologue->dispatch_id_capture_vgpr);
+  EXPECT_EQ(full_prologue->dispatch_id_capture_vgpr, full_access->scratch_vgpr);
+  EXPECT_FALSE(full_prologue->dispatch_id_capture_sgpr);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> access_words =
+      text_words_at_offset(patched, full_access->trampoline_offset, full_access->trampoline_size);
+  const auto load_low = instrumentation::build_private_load_b32(
+      *full_access->scratch_vgpr, *full_access->persistent_dispatch_id_private_offset, kArch);
+  const auto load_high = instrumentation::build_private_load_b32(
+      static_cast<uint16_t>(*full_access->scratch_vgpr + 1u),
+      *full_access->persistent_dispatch_id_private_offset + SpillManager::kSlotBytes, kArch);
+  const auto read_low = instrumentation::build_v_readfirstlane_b32(
+      *full_assignment->indirect_pc_sgpr, *full_access->scratch_vgpr, kArch);
+  const auto read_high = instrumentation::build_v_readfirstlane_b32(
+      static_cast<uint16_t>(*full_assignment->indirect_pc_sgpr + 1u),
+      static_cast<uint16_t>(*full_access->scratch_vgpr + 1u), kArch);
+  ASSERT_TRUE(load_low && load_high && read_low && read_high);
+  EXPECT_TRUE(contains_subsequence(access_words, *load_low));
+  EXPECT_TRUE(contains_subsequence(access_words, *load_high));
+  EXPECT_NE(std::ranges::find(access_words, *read_low), access_words.end());
+  EXPECT_NE(std::ranges::find(access_words, *read_high), access_words.end());
+
+  ConSanResult invalid = result;
+  const auto invalid_access =
+      std::ranges::find_if(invalid.patches, [&](const ConSanPatchInfo &patch) {
+        return is_access(patch) && owns(patch, full_kernel->descriptor_file_offset);
+      });
+  ASSERT_NE(invalid_access, invalid.patches.end());
+  invalid_access->persistent_dispatch_id_private_offset =
+      invalid_access->persistent_private_state_end;
+  const std::vector<std::string> validation_errors = validate_consan_modified_elf(bytes, invalid);
+  EXPECT_TRUE(std::ranges::any_of(validation_errors, [](const std::string &error) {
+    return error.find("private dispatch identity outside persistent state") != std::string::npos;
+  })) << testing::PrintToString(validation_errors);
 }
 
 TEST(ConSanMoi, CdnaInlineShadowClobberingLoadFitsBelowAccumulatorBoundary) {
