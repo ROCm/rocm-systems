@@ -30,6 +30,8 @@
 #include "constmem.hpp"
 #include "log.hpp"
 #include "util.hpp"
+#include "tile_layout.hpp"
+#include "tile_memcpy_device.hpp"
 #include "context_gda_device.hpp"
 #include "gda_team.hpp"
 #include "queue_pair.hpp"
@@ -1421,31 +1423,6 @@ __device__ __forceinline__ uint32_t GDAContext::get_qp_index(int pe,
  ******************** TILE API RMA IMPLEMENTATIONS ****************************
  *****************************************************************************/
 
-// Layout classes for 2D tiles (element strides). Used by GDA worker RMA.
-enum class GdaTileLayout {
-  Contiguous,  // fully packed in both dimensions
-  RowContig,   // each row contiguous (stride1 == 1), rows may be gapped
-  ColContig,   // each column contiguous (stride0 == 1), cols may be gapped
-  Strided      // general strided / element-wise
-};
-
-__device__ __forceinline__ GdaTileLayout gda_tile_classify_2d(
-    size_t src_stride0, size_t src_stride1, size_t dst_stride0,
-    size_t dst_stride1, size_t extent0, size_t extent1) {
-  const bool row_contig = (src_stride1 == 1 && dst_stride1 == 1);
-  const bool col_contig = (src_stride0 == 1 && dst_stride0 == 1);
-  if (row_contig && src_stride0 == extent1 && dst_stride0 == extent1) {
-    return GdaTileLayout::Contiguous;
-  }
-  if (row_contig) {
-    return GdaTileLayout::RowContig;
-  }
-  if (col_contig) {
-    return GdaTileLayout::ColContig;
-  }
-  return GdaTileLayout::Strided;
-}
-
 // Multi-WQE requires every worker to post the same number of WQEs. When the
 // chunk count is smaller than the worker count, callers should use a
 // leader-sequential path instead.
@@ -1657,25 +1634,25 @@ __device__ inline void GDAContext::tile_put_gda_workers(
   const int qp_index = tile_qp_index_for_worker(pe, worker_id, worker_count);
 
   if (ndim == 2) {
-    const size_t src_s0 = src_strides[0];
-    const size_t src_s1 = src_strides[1];
-    const size_t dst_s0 = dst_strides[0];
-    const size_t dst_s1 = dst_strides[1];
-    const size_t ext0 = boundary[0] - start_coord[0];
-    const size_t ext1 = boundary[1] - start_coord[1];
-    char *src_base = static_cast<char *>(const_cast<void *>(src_data));
-    char *dst_base =
-        static_cast<char *>(dst_data) +
-        (start_coord[0] * dst_s0 + start_coord[1] * dst_s1) * element_size;
-    const GdaTileLayout layout =
-        gda_tile_classify_2d(src_s0, src_s1, dst_s0, dst_s1, ext0, ext1);
+    const TileView view = tile_make_view(
+        dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
+        ndim, element_size, true);
+    const size_t src_s0 = view.src_s0;
+    const size_t src_s1 = view.src_s1;
+    const size_t dst_s0 = view.dst_s0;
+    const size_t dst_s1 = view.dst_s1;
+    const size_t ext0 = view.ext0;
+    const size_t ext1 = view.ext1;
+    char *src_base = view.src_base;
+    char *dst_base = view.dst_base;
+    const TileLayout layout = tile_classify(view);
 
     switch (layout) {
-      case GdaTileLayout::Contiguous:
+      case TileLayout::Contiguous:
         tile_put_contig_slices_nbi(dst_base, src_base, ext0 * ext1 * element_size,
                                    qp_index, worker_id, worker_count);
         break;
-      case GdaTileLayout::RowContig: {
+      case TileLayout::RowContig: {
         const size_t row_bytes = ext1 * element_size;
         if (gda_tile_use_multi_wqe(ext0, worker_count)) {
           tile_put_rows_nbi(dst_base, src_base, dst_s0 * element_size,
@@ -1690,7 +1667,7 @@ __device__ inline void GDAContext::tile_put_gda_workers(
         }
         break;
       }
-      case GdaTileLayout::ColContig: {
+      case TileLayout::ColContig: {
         const size_t col_bytes = ext0 * element_size;
         if (gda_tile_use_multi_wqe(ext1, worker_count)) {
           tile_put_cols_nbi(dst_base, src_base, dst_s1 * element_size,
@@ -1705,7 +1682,7 @@ __device__ inline void GDAContext::tile_put_gda_workers(
         }
         break;
       }
-      case GdaTileLayout::Strided:
+      case TileLayout::Strided:
       default: {
         const size_t n = ext0 * ext1;
         if (gda_tile_use_multi_wqe(n, worker_count)) {
@@ -1721,20 +1698,22 @@ __device__ inline void GDAContext::tile_put_gda_workers(
       }
     }
   } else if (ndim == 1) {
-    const size_t ext = boundary[0] - start_coord[0];
-    char *src_ptr = static_cast<char *>(const_cast<void *>(src_data));
-    char *dst_ptr = static_cast<char *>(dst_data) +
-                    start_coord[0] * dst_strides[0] * element_size;
-    if (src_strides[0] == 1 && dst_strides[0] == 1) {
+    const TileView view = tile_make_view(
+        dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
+        ndim, element_size, true);
+    const size_t ext = view.ext0;
+    char *src_ptr = view.src_base;
+    char *dst_ptr = view.dst_base;
+    if (view.src_s0 == 1 && view.dst_s0 == 1) {
       tile_put_contig_slices_nbi(dst_ptr, src_ptr, ext * element_size, qp_index,
                                  worker_id, worker_count);
     } else if (gda_tile_use_multi_wqe(ext, worker_count)) {
-      tile_put_rows_nbi(dst_ptr, src_ptr, dst_strides[0] * element_size,
-                        src_strides[0] * element_size, ext, element_size,
+      tile_put_rows_nbi(dst_ptr, src_ptr, view.dst_s0 * element_size,
+                        view.src_s0 * element_size, ext, element_size,
                         qp_index, worker_id, worker_count, unused);
     } else if (worker_id == 0) {
-      tile_put_rows_nbi(dst_ptr, src_ptr, dst_strides[0] * element_size,
-                        src_strides[0] * element_size, ext, element_size,
+      tile_put_rows_nbi(dst_ptr, src_ptr, view.dst_s0 * element_size,
+                        view.src_s0 * element_size, ext, element_size,
                         qp_index, 0, 1, unused);
     }
   }
@@ -1751,25 +1730,25 @@ __device__ inline void GDAContext::tile_get_gda_workers(
   const int qp_index = tile_qp_index_for_worker(pe, worker_id, worker_count);
 
   if (ndim == 2) {
-    const size_t src_s0 = src_strides[0];
-    const size_t src_s1 = src_strides[1];
-    const size_t dst_s0 = dst_strides[0];
-    const size_t dst_s1 = dst_strides[1];
-    const size_t ext0 = boundary[0] - start_coord[0];
-    const size_t ext1 = boundary[1] - start_coord[1];
-    char *src_base =
-        static_cast<char *>(const_cast<void *>(src_data)) +
-        (start_coord[0] * src_s0 + start_coord[1] * src_s1) * element_size;
-    char *dst_base = static_cast<char *>(dst_data);
-    const GdaTileLayout layout =
-        gda_tile_classify_2d(src_s0, src_s1, dst_s0, dst_s1, ext0, ext1);
+    const TileView view = tile_make_view(
+        dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
+        ndim, element_size, false);
+    const size_t src_s0 = view.src_s0;
+    const size_t src_s1 = view.src_s1;
+    const size_t dst_s0 = view.dst_s0;
+    const size_t dst_s1 = view.dst_s1;
+    const size_t ext0 = view.ext0;
+    const size_t ext1 = view.ext1;
+    char *src_base = view.src_base;
+    char *dst_base = view.dst_base;
+    const TileLayout layout = tile_classify(view);
 
     switch (layout) {
-      case GdaTileLayout::Contiguous:
+      case TileLayout::Contiguous:
         tile_get_contig_slices_nbi(dst_base, src_base, ext0 * ext1 * element_size,
                                    qp_index, worker_id, worker_count);
         break;
-      case GdaTileLayout::RowContig: {
+      case TileLayout::RowContig: {
         const size_t row_bytes = ext1 * element_size;
         if (gda_tile_use_multi_wqe(ext0, worker_count)) {
           tile_get_rows_nbi(dst_base, src_base, dst_s0 * element_size,
@@ -1784,7 +1763,7 @@ __device__ inline void GDAContext::tile_get_gda_workers(
         }
         break;
       }
-      case GdaTileLayout::ColContig: {
+      case TileLayout::ColContig: {
         const size_t col_bytes = ext0 * element_size;
         if (gda_tile_use_multi_wqe(ext1, worker_count)) {
           tile_get_cols_nbi(dst_base, src_base, dst_s1 * element_size,
@@ -1799,7 +1778,7 @@ __device__ inline void GDAContext::tile_get_gda_workers(
         }
         break;
       }
-      case GdaTileLayout::Strided:
+      case TileLayout::Strided:
       default: {
         const size_t n = ext0 * ext1;
         if (gda_tile_use_multi_wqe(n, worker_count)) {
@@ -1815,20 +1794,22 @@ __device__ inline void GDAContext::tile_get_gda_workers(
       }
     }
   } else if (ndim == 1) {
-    const size_t ext = boundary[0] - start_coord[0];
-    char *src_ptr = static_cast<char *>(const_cast<void *>(src_data)) +
-                    start_coord[0] * src_strides[0] * element_size;
-    char *dst_ptr = static_cast<char *>(dst_data);
-    if (src_strides[0] == 1 && dst_strides[0] == 1) {
+    const TileView view = tile_make_view(
+        dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
+        ndim, element_size, false);
+    const size_t ext = view.ext0;
+    char *src_ptr = view.src_base;
+    char *dst_ptr = view.dst_base;
+    if (view.src_s0 == 1 && view.dst_s0 == 1) {
       tile_get_contig_slices_nbi(dst_ptr, src_ptr, ext * element_size, qp_index,
                                  worker_id, worker_count);
     } else if (gda_tile_use_multi_wqe(ext, worker_count)) {
-      tile_get_rows_nbi(dst_ptr, src_ptr, dst_strides[0] * element_size,
-                        src_strides[0] * element_size, ext, element_size,
+      tile_get_rows_nbi(dst_ptr, src_ptr, view.dst_s0 * element_size,
+                        view.src_s0 * element_size, ext, element_size,
                         qp_index, worker_id, worker_count, unused);
     } else if (worker_id == 0) {
-      tile_get_rows_nbi(dst_ptr, src_ptr, dst_strides[0] * element_size,
-                        src_strides[0] * element_size, ext, element_size,
+      tile_get_rows_nbi(dst_ptr, src_ptr, view.dst_s0 * element_size,
+                        view.src_s0 * element_size, ext, element_size,
                         qp_index, 0, 1, unused);
     }
   }
@@ -1844,77 +1825,57 @@ __device__ inline int GDAContext::tile_put(void* dst_data, const void* src_data,
                                            [[maybe_unused]] uint64_t flags) {
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
+  const TileView view = tile_make_view(
+      dst_data, src_data, dst_strides, src_strides, start_coord, boundary, ndim,
+      element_size, true);
 
-  // For 2D tensors (most common case for tiles)
-  if (ndim == 2) {
-    // Get strides
-    const auto src_stride_0 = src_strides[0];
-    const auto src_stride_1 = src_strides[1];
-    const auto dst_stride_0 = dst_strides[0];
-    const auto dst_stride_1 = dst_strides[1];
-
-    // Get tile dimensions from start_coord and boundary
-    const auto tile_extent_0 = boundary[0] - start_coord[0];
-    const auto tile_extent_1 = boundary[1] - start_coord[1];
-
-    // Calculate base pointers for the tile
-    char* src_base = static_cast<char*>(const_cast<void*>(src_data));
-    char* dst_base = static_cast<char*>(dst_data) +
-                     (start_coord[0] * dst_stride_0 + start_coord[1] * dst_stride_1) * element_size;
-
-    // Optimization: Check if tile is contiguous (all elements adjacent)
-    if (src_stride_1 == 1 && dst_stride_1 == 1 &&
-        src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
-      // Fully contiguous - single bulk transfer
-      size_t total_size = tile_extent_0 * tile_extent_1 * element_size;
-      internal_putmem_nbi(dst_base, src_base, total_size, pe, qp_index, wf_info);
-    }
-    // Optimization: Row-major with contiguous rows
-    else if (src_stride_1 == 1 && dst_stride_1 == 1) {
-      // Transfer row by row
-      for (size_t i = 0; i < tile_extent_0; i++) {
-        char* src_row = src_base + i * src_stride_0 * element_size;
-        char* dst_row = dst_base + i * dst_stride_0 * element_size;
-        size_t row_size = tile_extent_1 * element_size;
-        internal_putmem_nbi(dst_row, src_row, row_size, pe, qp_index, wf_info);
-      }
-    }
-    // Optimization: Column-major with contiguous columns
-    else if (src_stride_0 == 1 && dst_stride_0 == 1) {
-      // Transfer column by column
-      for (size_t j = 0; j < tile_extent_1; j++) {
-        char* src_col = src_base + j * src_stride_1 * element_size;
-        char* dst_col = dst_base + j * dst_stride_1 * element_size;
-        size_t col_size = tile_extent_0 * element_size;
-        internal_putmem_nbi(dst_col, src_col, col_size, pe, qp_index, wf_info);
-      }
-    }
-    // Fallback: Element-by-element transfer
-    else {
-      for (size_t i = 0; i < tile_extent_0; i++) {
-        for (size_t j = 0; j < tile_extent_1; j++) {
-          char* src_elem = src_base + (i * src_stride_0 + j * src_stride_1) * element_size;
-          char* dst_elem = dst_base + (i * dst_stride_0 + j * dst_stride_1) * element_size;
-          internal_putmem_nbi(dst_elem, src_elem, element_size, pe, qp_index, wf_info);
+  if (view.ndim == 2) {
+    switch (tile_classify(view)) {
+      case TileLayout::Contiguous:
+        internal_putmem_nbi(view.dst_base, view.src_base,
+                            view.ext0 * view.ext1 * view.element_size, pe,
+                            qp_index, wf_info);
+        break;
+      case TileLayout::RowContig:
+        for (size_t i = 0; i < view.ext0; i++) {
+          internal_putmem_nbi(
+              view.dst_base + i * view.dst_s0 * view.element_size,
+              view.src_base + i * view.src_s0 * view.element_size,
+              view.ext1 * view.element_size, pe, qp_index, wf_info);
         }
-      }
+        break;
+      case TileLayout::ColContig:
+        for (size_t j = 0; j < view.ext1; j++) {
+          internal_putmem_nbi(
+              view.dst_base + j * view.dst_s1 * view.element_size,
+              view.src_base + j * view.src_s1 * view.element_size,
+              view.ext0 * view.element_size, pe, qp_index, wf_info);
+        }
+        break;
+      case TileLayout::Strided:
+      default:
+        for (size_t i = 0; i < view.ext0; i++) {
+          for (size_t j = 0; j < view.ext1; j++) {
+            internal_putmem_nbi(
+                view.dst_base +
+                    (i * view.dst_s0 + j * view.dst_s1) * view.element_size,
+                view.src_base +
+                    (i * view.src_s0 + j * view.src_s1) * view.element_size,
+                view.element_size, pe, qp_index, wf_info);
+          }
+        }
+        break;
     }
-  }
-  // For 1D tensors
-  else if (ndim == 1) {
-    const auto tile_extent = boundary[0] - start_coord[0];
-    char* src_ptr = static_cast<char*>(const_cast<void*>(src_data));
-    char* dst_ptr = static_cast<char*>(dst_data) + start_coord[0] * dst_strides[0] * element_size;
-
-    if (src_strides[0] == 1 && dst_strides[0] == 1) {
-      // Contiguous transfer
-      internal_putmem_nbi(dst_ptr, src_ptr, tile_extent * element_size, pe, qp_index, wf_info);
+  } else if (view.ndim == 1) {
+    if (tile_classify(view) == TileLayout::Contiguous) {
+      internal_putmem_nbi(view.dst_base, view.src_base,
+                          view.ext0 * view.element_size, pe, qp_index, wf_info);
     } else {
-      // Strided transfer
-      for (size_t i = 0; i < tile_extent; i++) {
-        internal_putmem_nbi(dst_ptr + i * dst_strides[0] * element_size,
-                            src_ptr + i * src_strides[0] * element_size,
-                            element_size, pe, qp_index, wf_info);
+      for (size_t i = 0; i < view.ext0; i++) {
+        internal_putmem_nbi(
+            view.dst_base + i * view.dst_s0 * view.element_size,
+            view.src_base + i * view.src_s0 * view.element_size,
+            view.element_size, pe, qp_index, wf_info);
       }
     }
   }
@@ -1938,75 +1899,9 @@ __device__ inline int GDAContext::tile_put_wave(void* dst_data, const void* src_
       return ROCSHMEM_ERROR;
     }
 
-    if (ndim == 2) {
-      const auto src_stride_0 = src_strides[0];
-      const auto src_stride_1 = src_strides[1];
-      const auto dst_stride_0 = dst_strides[0];
-      const auto dst_stride_1 = dst_strides[1];
-      const auto tile_extent_0 = boundary[0] - start_coord[0];
-      const auto tile_extent_1 = boundary[1] - start_coord[1];
-
-      char* src_base = static_cast<char*>(const_cast<void*>(src_data));
-      char* dst_base = static_cast<char*>(remote_base) +
-                       (start_coord[0] * dst_stride_0 + start_coord[1] * dst_stride_1) * element_size;
-
-      // Wave-collective: threads cooperate to transfer tile
-      int wave_tid = get_flat_block_id() % WF_SIZE;
-
-      // Fully contiguous case - use wave-collective memcpy
-      if (src_stride_1 == 1 && dst_stride_1 == 1 &&
-          src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
-        size_t total_size = tile_extent_0 * tile_extent_1 * element_size;
-        memcpy_wave<MemcpyKind::Put>(dst_base, src_base, total_size);
-      }
-      // Row-major with contiguous rows - distribute rows among wave
-      else if (src_stride_1 == 1 && dst_stride_1 == 1) {
-        for (size_t i = wave_tid; i < tile_extent_0; i += WF_SIZE) {
-          char* src_row = src_base + i * src_stride_0 * element_size;
-          char* dst_row = dst_base + i * dst_stride_0 * element_size;
-          size_t row_size = tile_extent_1 * element_size;
-          memcpy_lane<MemcpyKind::Put>(dst_row, src_row, row_size);
-        }
-      }
-      // Column-major with contiguous columns - distribute columns among wave
-      else if (src_stride_0 == 1 && dst_stride_0 == 1) {
-        for (size_t j = wave_tid; j < tile_extent_1; j += WF_SIZE) {
-          char* src_col = src_base + j * src_stride_1 * element_size;
-          char* dst_col = dst_base + j * dst_stride_1 * element_size;
-          size_t col_size = tile_extent_0 * element_size;
-          memcpy_lane<MemcpyKind::Put>(dst_col, src_col, col_size);
-        }
-      }
-      // Fallback: Distribute elements among wave threads
-      else {
-        int total_elements = tile_extent_0 * tile_extent_1;
-        for (int idx = wave_tid; idx < total_elements; idx += WF_SIZE) {
-          int i = idx / tile_extent_1;
-          int j = idx % tile_extent_1;
-          char* src_elem = src_base + (i * src_stride_0 + j * src_stride_1) * element_size;
-          char* dst_elem = dst_base + (i * dst_stride_0 + j * dst_stride_1) * element_size;
-          memcpy_lane<MemcpyKind::Put>(dst_elem, src_elem, element_size);
-        }
-      }
-    } else if (ndim == 1) {
-      const auto tile_extent = boundary[0] - start_coord[0];
-      char* src_ptr = static_cast<char*>(const_cast<void*>(src_data));
-      char* dst_ptr = static_cast<char*>(remote_base) + start_coord[0] * dst_strides[0] * element_size;
-
-      int wave_tid = get_flat_block_id() % WF_SIZE;
-
-      if (src_strides[0] == 1 && dst_strides[0] == 1) {
-        size_t total_size = tile_extent * element_size;
-        memcpy_wave<MemcpyKind::Put>(dst_ptr, src_ptr, total_size);
-      } else {
-        for (size_t i = wave_tid; i < tile_extent; i += WF_SIZE) {
-          memcpy_lane<MemcpyKind::Put>(dst_ptr + i * dst_strides[0] * element_size,
-                                       src_ptr + i * src_strides[0] * element_size,
-                                       element_size);
-        }
-      }
-    }
-
+    tile_memcpy_rma<MemcpyKind::Put, TileScope::Wave>(
+        remote_base, src_data, dst_strides, src_strides, start_coord, boundary,
+        ndim, element_size);
     if (is_thread_zero_in_wave()) {
       ipcImpl_.ipcQuiet();
     }
@@ -2034,81 +1929,9 @@ __device__ inline int GDAContext::tile_put_wg(void* dst_data, const void* src_da
       return ROCSHMEM_ERROR;
     }
 
-    if (ndim == 2) {
-      const auto src_stride_0 = src_strides[0];
-      const auto src_stride_1 = src_strides[1];
-      const auto dst_stride_0 = dst_strides[0];
-      const auto dst_stride_1 = dst_strides[1];
-      const auto tile_extent_0 = boundary[0] - start_coord[0];
-      const auto tile_extent_1 = boundary[1] - start_coord[1];
-
-      char* src_base = static_cast<char*>(const_cast<void*>(src_data));
-      char* dst_base = static_cast<char*>(remote_base) +
-                       (start_coord[0] * dst_stride_0 + start_coord[1] * dst_stride_1) * element_size;
-
-      // Workgroup-collective: all threads in block cooperate
-      int thread_id = get_flat_block_id();
-      int block_size = get_flat_block_size();
-
-      // Fully contiguous case
-      if (src_stride_1 == 1 && dst_stride_1 == 1 &&
-          src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
-        size_t total_size = tile_extent_0 * tile_extent_1 * element_size;
-        if (thread_id == 0) {
-          memcpy_lane<MemcpyKind::Put>(dst_base, src_base, total_size);
-        }
-      }
-      // Row-major with contiguous rows - distribute rows among workgroup
-      else if (src_stride_1 == 1 && dst_stride_1 == 1) {
-        for (size_t i = thread_id; i < tile_extent_0; i += block_size) {
-          char* src_row = src_base + i * src_stride_0 * element_size;
-          char* dst_row = dst_base + i * dst_stride_0 * element_size;
-          size_t row_size = tile_extent_1 * element_size;
-          memcpy_lane<MemcpyKind::Put>(dst_row, src_row, row_size);
-        }
-      }
-      // Column-major with contiguous columns - distribute columns among workgroup
-      else if (src_stride_0 == 1 && dst_stride_0 == 1) {
-        for (size_t j = thread_id; j < tile_extent_1; j += block_size) {
-          char* src_col = src_base + j * src_stride_1 * element_size;
-          char* dst_col = dst_base + j * dst_stride_1 * element_size;
-          size_t col_size = tile_extent_0 * element_size;
-          memcpy_lane<MemcpyKind::Put>(dst_col, src_col, col_size);
-        }
-      }
-      // Fallback: Distribute elements among workgroup threads
-      else {
-        int total_elements = tile_extent_0 * tile_extent_1;
-        for (int idx = thread_id; idx < total_elements; idx += block_size) {
-          int i = idx / tile_extent_1;
-          int j = idx % tile_extent_1;
-          char* src_elem = src_base + (i * src_stride_0 + j * src_stride_1) * element_size;
-          char* dst_elem = dst_base + (i * dst_stride_0 + j * dst_stride_1) * element_size;
-          memcpy_lane<MemcpyKind::Put>(dst_elem, src_elem, element_size);
-        }
-      }
-    } else if (ndim == 1) {
-      const auto tile_extent = boundary[0] - start_coord[0];
-      char* src_ptr = static_cast<char*>(const_cast<void*>(src_data));
-      char* dst_ptr = static_cast<char*>(remote_base) + start_coord[0] * dst_strides[0] * element_size;
-
-      int thread_id = get_flat_block_id();
-      int block_size = get_flat_block_size();
-
-      if (src_strides[0] == 1 && dst_strides[0] == 1) {
-        size_t total_size = tile_extent * element_size;
-        if (thread_id == 0) {
-          memcpy_lane<MemcpyKind::Put>(dst_ptr, src_ptr, total_size);
-        }
-      } else {
-        for (size_t i = thread_id; i < tile_extent; i += block_size) {
-          memcpy_lane<MemcpyKind::Put>(dst_ptr + i * dst_strides[0] * element_size,
-                                       src_ptr + i * src_strides[0] * element_size,
-                                       element_size);
-        }
-      }
-    }
-
+    tile_memcpy_rma<MemcpyKind::Put, TileScope::Wg>(
+        remote_base, src_data, dst_strides, src_strides, start_coord, boundary,
+        ndim, element_size);
     if (get_flat_block_id() == 0) {
       ipcImpl_.ipcQuiet();
     }
@@ -2131,66 +1954,57 @@ __device__ inline int GDAContext::tile_get(void* dst_data, const void* src_data,
                                            [[maybe_unused]] uint64_t flags) {
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
+  const TileView view = tile_make_view(
+      dst_data, src_data, dst_strides, src_strides, start_coord, boundary, ndim,
+      element_size, false);
 
-  if (ndim == 2) {
-    const auto src_stride_0 = src_strides[0];
-    const auto src_stride_1 = src_strides[1];
-    const auto dst_stride_0 = dst_strides[0];
-    const auto dst_stride_1 = dst_strides[1];
-    const auto tile_extent_0 = boundary[0] - start_coord[0];
-    const auto tile_extent_1 = boundary[1] - start_coord[1];
-
-    char* src_base = static_cast<char*>(const_cast<void*>(src_data)) +
-                     (start_coord[0] * src_stride_0 + start_coord[1] * src_stride_1) * element_size;
-    char* dst_base = static_cast<char*>(dst_data);
-
-    // Fully contiguous
-    if (src_stride_1 == 1 && dst_stride_1 == 1 &&
-        src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
-      size_t total_size = tile_extent_0 * tile_extent_1 * element_size;
-      internal_getmem_nbi(dst_base, src_base, total_size, pe, qp_index, wf_info);
-    }
-    // Row-major with contiguous rows
-    else if (src_stride_1 == 1 && dst_stride_1 == 1) {
-      for (size_t i = 0; i < tile_extent_0; i++) {
-        char* src_row = src_base + i * src_stride_0 * element_size;
-        char* dst_row = dst_base + i * dst_stride_0 * element_size;
-        size_t row_size = tile_extent_1 * element_size;
-        internal_getmem_nbi(dst_row, src_row, row_size, pe, qp_index, wf_info);
-      }
-    }
-    // Column-major with contiguous columns
-    else if (src_stride_0 == 1 && dst_stride_0 == 1) {
-      for (size_t j = 0; j < tile_extent_1; j++) {
-        char* src_col = src_base + j * src_stride_1 * element_size;
-        char* dst_col = dst_base + j * dst_stride_1 * element_size;
-        size_t col_size = tile_extent_0 * element_size;
-        internal_getmem_nbi(dst_col, src_col, col_size, pe, qp_index, wf_info);
-      }
-    }
-    // Fallback: Element-by-element
-    else {
-      for (size_t i = 0; i < tile_extent_0; i++) {
-        for (size_t j = 0; j < tile_extent_1; j++) {
-          char* src_elem = src_base + (i * src_stride_0 + j * src_stride_1) * element_size;
-          char* dst_elem = dst_base + (i * dst_stride_0 + j * dst_stride_1) * element_size;
-          internal_getmem_nbi(dst_elem, src_elem, element_size, pe, qp_index, wf_info);
+  if (view.ndim == 2) {
+    switch (tile_classify(view)) {
+      case TileLayout::Contiguous:
+        internal_getmem_nbi(view.dst_base, view.src_base,
+                            view.ext0 * view.ext1 * view.element_size, pe,
+                            qp_index, wf_info);
+        break;
+      case TileLayout::RowContig:
+        for (size_t i = 0; i < view.ext0; i++) {
+          internal_getmem_nbi(
+              view.dst_base + i * view.dst_s0 * view.element_size,
+              view.src_base + i * view.src_s0 * view.element_size,
+              view.ext1 * view.element_size, pe, qp_index, wf_info);
         }
-      }
+        break;
+      case TileLayout::ColContig:
+        for (size_t j = 0; j < view.ext1; j++) {
+          internal_getmem_nbi(
+              view.dst_base + j * view.dst_s1 * view.element_size,
+              view.src_base + j * view.src_s1 * view.element_size,
+              view.ext0 * view.element_size, pe, qp_index, wf_info);
+        }
+        break;
+      case TileLayout::Strided:
+      default:
+        for (size_t i = 0; i < view.ext0; i++) {
+          for (size_t j = 0; j < view.ext1; j++) {
+            internal_getmem_nbi(
+                view.dst_base +
+                    (i * view.dst_s0 + j * view.dst_s1) * view.element_size,
+                view.src_base +
+                    (i * view.src_s0 + j * view.src_s1) * view.element_size,
+                view.element_size, pe, qp_index, wf_info);
+          }
+        }
+        break;
     }
-  } else if (ndim == 1) {
-    const auto tile_extent = boundary[0] - start_coord[0];
-    char* src_ptr = static_cast<char*>(const_cast<void*>(src_data)) +
-                    start_coord[0] * src_strides[0] * element_size;
-    char* dst_ptr = static_cast<char*>(dst_data);
-
-    if (src_strides[0] == 1 && dst_strides[0] == 1) {
-      internal_getmem_nbi(dst_ptr, src_ptr, tile_extent * element_size, pe, qp_index, wf_info);
+  } else if (view.ndim == 1) {
+    if (tile_classify(view) == TileLayout::Contiguous) {
+      internal_getmem_nbi(view.dst_base, view.src_base,
+                          view.ext0 * view.element_size, pe, qp_index, wf_info);
     } else {
-      for (size_t i = 0; i < tile_extent; i++) {
-        internal_getmem_nbi(dst_ptr + i * dst_strides[0] * element_size,
-                            src_ptr + i * src_strides[0] * element_size,
-                            element_size, pe, qp_index, wf_info);
+      for (size_t i = 0; i < view.ext0; i++) {
+        internal_getmem_nbi(
+            view.dst_base + i * view.dst_s0 * view.element_size,
+            view.src_base + i * view.src_s0 * view.element_size,
+            view.element_size, pe, qp_index, wf_info);
       }
     }
   }
@@ -2214,75 +2028,9 @@ __device__ inline int GDAContext::tile_get_wave(void* dst_data, const void* src_
       return ROCSHMEM_ERROR;
     }
 
-    if (ndim == 2) {
-      const auto src_stride_0 = src_strides[0];
-      const auto src_stride_1 = src_strides[1];
-      const auto dst_stride_0 = dst_strides[0];
-      const auto dst_stride_1 = dst_strides[1];
-      const auto tile_extent_0 = boundary[0] - start_coord[0];
-      const auto tile_extent_1 = boundary[1] - start_coord[1];
-
-      char* src_base = static_cast<char*>(remote_base) +
-                       (start_coord[0] * src_stride_0 + start_coord[1] * src_stride_1) * element_size;
-      char* dst_base = static_cast<char*>(dst_data);
-
-      // Wave-collective: threads cooperate to transfer tile
-      int wave_tid = get_flat_block_id() % WF_SIZE;
-
-      // Fully contiguous case - use wave-collective memcpy
-      if (src_stride_1 == 1 && dst_stride_1 == 1 &&
-          src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
-        size_t total_size = tile_extent_0 * tile_extent_1 * element_size;
-        memcpy_wave<MemcpyKind::Get>(dst_base, src_base, total_size);
-      }
-      // Row-major with contiguous rows - distribute rows among wave
-      else if (src_stride_1 == 1 && dst_stride_1 == 1) {
-        for (size_t i = wave_tid; i < tile_extent_0; i += WF_SIZE) {
-          char* src_row = src_base + i * src_stride_0 * element_size;
-          char* dst_row = dst_base + i * dst_stride_0 * element_size;
-          size_t row_size = tile_extent_1 * element_size;
-          memcpy_lane<MemcpyKind::Get>(dst_row, src_row, row_size);
-        }
-      }
-      // Column-major with contiguous columns - distribute columns among wave
-      else if (src_stride_0 == 1 && dst_stride_0 == 1) {
-        for (size_t j = wave_tid; j < tile_extent_1; j += WF_SIZE) {
-          char* src_col = src_base + j * src_stride_1 * element_size;
-          char* dst_col = dst_base + j * dst_stride_1 * element_size;
-          size_t col_size = tile_extent_0 * element_size;
-          memcpy_lane<MemcpyKind::Get>(dst_col, src_col, col_size);
-        }
-      }
-      // Fallback: Distribute elements among wave threads
-      else {
-        int total_elements = tile_extent_0 * tile_extent_1;
-        for (int idx = wave_tid; idx < total_elements; idx += WF_SIZE) {
-          int i = idx / tile_extent_1;
-          int j = idx % tile_extent_1;
-          char* src_elem = src_base + (i * src_stride_0 + j * src_stride_1) * element_size;
-          char* dst_elem = dst_base + (i * dst_stride_0 + j * dst_stride_1) * element_size;
-          memcpy_lane<MemcpyKind::Get>(dst_elem, src_elem, element_size);
-        }
-      }
-    } else if (ndim == 1) {
-      const auto tile_extent = boundary[0] - start_coord[0];
-      char* src_ptr = static_cast<char*>(remote_base) + start_coord[0] * src_strides[0] * element_size;
-      char* dst_ptr = static_cast<char*>(dst_data);
-
-      int wave_tid = get_flat_block_id() % WF_SIZE;
-
-      if (src_strides[0] == 1 && dst_strides[0] == 1) {
-        size_t total_size = tile_extent * element_size;
-        memcpy_wave<MemcpyKind::Get>(dst_ptr, src_ptr, total_size);
-      } else {
-        for (size_t i = wave_tid; i < tile_extent; i += WF_SIZE) {
-          memcpy_lane<MemcpyKind::Get>(dst_ptr + i * dst_strides[0] * element_size,
-                                       src_ptr + i * src_strides[0] * element_size,
-                                       element_size);
-        }
-      }
-    }
-
+    tile_memcpy_rma<MemcpyKind::Get, TileScope::Wave>(
+        dst_data, remote_base, dst_strides, src_strides, start_coord, boundary,
+        ndim, element_size);
     if (is_thread_zero_in_wave()) {
       ipcImpl_.ipcQuiet();
     }
@@ -2310,80 +2058,9 @@ __device__ inline int GDAContext::tile_get_wg(void* dst_data, const void* src_da
       return ROCSHMEM_ERROR;
     }
 
-    if (ndim == 2) {
-      const auto src_stride_0 = src_strides[0];
-      const auto src_stride_1 = src_strides[1];
-      const auto dst_stride_0 = dst_strides[0];
-      const auto dst_stride_1 = dst_strides[1];
-      const auto tile_extent_0 = boundary[0] - start_coord[0];
-      const auto tile_extent_1 = boundary[1] - start_coord[1];
-
-      char* src_base = static_cast<char*>(remote_base) +
-                       (start_coord[0] * src_stride_0 + start_coord[1] * src_stride_1) * element_size;
-      char* dst_base = static_cast<char*>(dst_data);
-
-      int thread_id = get_flat_block_id();
-      int block_size = get_flat_block_size();
-
-      // Fully contiguous
-      if (src_stride_1 == 1 && dst_stride_1 == 1 &&
-          src_stride_0 == tile_extent_1 && dst_stride_0 == tile_extent_1) {
-        size_t total_size = tile_extent_0 * tile_extent_1 * element_size;
-        if (thread_id == 0) {
-          memcpy_lane<MemcpyKind::Get>(dst_base, src_base, total_size);
-        }
-      }
-      // Row-major with contiguous rows - distribute among workgroup
-      else if (src_stride_1 == 1 && dst_stride_1 == 1) {
-        for (size_t i = thread_id; i < tile_extent_0; i += block_size) {
-          char* src_row = src_base + i * src_stride_0 * element_size;
-          char* dst_row = dst_base + i * dst_stride_0 * element_size;
-          size_t row_size = tile_extent_1 * element_size;
-          memcpy_lane<MemcpyKind::Get>(dst_row, src_row, row_size);
-        }
-      }
-      // Column-major with contiguous columns - distribute among workgroup
-      else if (src_stride_0 == 1 && dst_stride_0 == 1) {
-        for (size_t j = thread_id; j < tile_extent_1; j += block_size) {
-          char* src_col = src_base + j * src_stride_1 * element_size;
-          char* dst_col = dst_base + j * dst_stride_1 * element_size;
-          size_t col_size = tile_extent_0 * element_size;
-          memcpy_lane<MemcpyKind::Get>(dst_col, src_col, col_size);
-        }
-      }
-      // Fallback: Distribute elements among workgroup
-      else {
-        int total_elements = tile_extent_0 * tile_extent_1;
-        for (int idx = thread_id; idx < total_elements; idx += block_size) {
-          int i = idx / tile_extent_1;
-          int j = idx % tile_extent_1;
-          char* src_elem = src_base + (i * src_stride_0 + j * src_stride_1) * element_size;
-          char* dst_elem = dst_base + (i * dst_stride_0 + j * dst_stride_1) * element_size;
-          memcpy_lane<MemcpyKind::Get>(dst_elem, src_elem, element_size);
-        }
-      }
-    } else if (ndim == 1) {
-      const auto tile_extent = boundary[0] - start_coord[0];
-      char* src_ptr = static_cast<char*>(remote_base) + start_coord[0] * src_strides[0] * element_size;
-      char* dst_ptr = static_cast<char*>(dst_data);
-
-      int thread_id = get_flat_block_id();
-      int block_size = get_flat_block_size();
-
-      if (src_strides[0] == 1 && dst_strides[0] == 1) {
-        size_t total_size = tile_extent * element_size;
-        if (thread_id == 0) {
-          memcpy_lane<MemcpyKind::Get>(dst_ptr, src_ptr, total_size);
-        }
-      } else {
-        for (size_t i = thread_id; i < tile_extent; i += block_size) {
-          memcpy_lane<MemcpyKind::Get>(dst_ptr + i * dst_strides[0] * element_size,
-                                       src_ptr + i * src_strides[0] * element_size,
-                                       element_size);
-        }
-      }
-    }
-
+    tile_memcpy_rma<MemcpyKind::Get, TileScope::Wg>(
+        dst_data, remote_base, dst_strides, src_strides, start_coord, boundary,
+        ndim, element_size);
     if (get_flat_block_id() == 0) {
       ipcImpl_.ipcQuiet();
     }
