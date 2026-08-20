@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -97,14 +98,33 @@ TEST(CpuDispatchPoolTest, ZeroThreadsFallsBackToCallingThread) {
 
 TEST(CpuDispatchPoolTest, ZeroFunctionalQuantumRunsUntilWavefrontHalts) {
   constexpr uint32_t kSEndpgm = 0xBF810000u;
-  DispatchPoolFixture fixture(/*cu_count=*/1, /*functional_quantum=*/0);
+  constexpr uint64_t kSecondProgramBase = kProgramBase + 128 * sizeof(uint32_t);
+  DispatchPoolFixture fixture(/*cu_count=*/2, /*functional_quantum=*/0);
   fixture.memory.write32(kProgramBase + 2 * sizeof(uint32_t), kSEndpgm);
+  fixture.memory.write32(kSecondProgramBase + 3 * sizeof(uint32_t), kSEndpgm);
+  fixture.wfs[1]->pc = kSecondProgramBase;
 
-  auto result = fixture.cus.front()->run_quantum();
+  amdgpu::CpuDispatchPool pool(/*threads=*/2);
+  std::array<amdgpu::FunctionalQuantumResult, 2> per_cu{};
+  auto result = pool.run(std::span<amdgpu::ComputeUnitCore *>(fixture.tasks), /*threads=*/2,
+                         std::span<amdgpu::FunctionalQuantumResult>(per_cu));
 
   EXPECT_TRUE(result.ran);
-  EXPECT_EQ(result.iterations, 2u);
-  EXPECT_TRUE(fixture.cus.front()->is_idle());
+  EXPECT_FALSE(result.yielded);
+  EXPECT_EQ(result.iterations, 3u);
+  EXPECT_TRUE(per_cu[0].ran);
+  EXPECT_FALSE(per_cu[0].yielded);
+  EXPECT_EQ(per_cu[0].iterations, 2u);
+  EXPECT_TRUE(per_cu[1].ran);
+  EXPECT_FALSE(per_cu[1].yielded);
+  EXPECT_EQ(per_cu[1].iterations, 3u);
+  EXPECT_TRUE(fixture.cus[0]->is_idle());
+  EXPECT_TRUE(fixture.cus[1]->is_idle());
+
+  std::array<amdgpu::FunctionalQuantumResult, 1> wrong_size{};
+  EXPECT_THROW(pool.run(std::span<amdgpu::ComputeUnitCore *>(fixture.tasks), /*threads=*/2,
+                        std::span<amdgpu::FunctionalQuantumResult>(wrong_size)),
+               std::invalid_argument);
 }
 
 TEST(CpuDispatchPoolTest, WorkerExceptionsRethrowAndPoolRemainsReusable) {
@@ -116,6 +136,8 @@ TEST(CpuDispatchPoolTest, WorkerExceptionsRethrowAndPoolRemainsReusable) {
                std::exception);
 
   fixture.memory.write32(kProgramBase, kSNop);
+  for (auto &cu : fixture.cus)
+    cu->instruction_cache().invalidate_all();
   for (auto *wf : fixture.wfs)
     wf->pc = kProgramBase;
   EXPECT_NO_THROW(pool.run(std::span<amdgpu::ComputeUnitCore *>(fixture.tasks), /*threads=*/8));
