@@ -38,7 +38,7 @@ design must consume. The mechanism is a surrounding component and an external co
 does not propose changes to its replay algorithm.
 
 The PR adds a `KERNEL_REPLAY` callback domain with `CONFIG` and `PASS` operations. In the fixed-pass
-path that `rocprof-compute` would use, a profiling tool supplies `pass_count_cb` during `CONFIG`.
+path, a profiling tool supplies `pass_count_cb` during `CONFIG`.
 The callback is evaluated for each dispatch that reaches the replay gate and can use its agent
 information. Returning `1` opts out: the SDK follows its ordinary single-execution path without
 taking a snapshot or issuing `PASS` callbacks. Returning a count greater than one opens a replay
@@ -382,7 +382,7 @@ multi-bucket request into one pass.
 | Iteration multiplexing, live attach, or PC sampling selected with kernel replay | Hard error before profiling starts. |
 | Missing or empty per-agent profile vector | Diagnose the agent/profile mismatch and reject the profile; never return one as a fallback. |
 | SDK declines the device-memory snapshot | Abandon the entire profile without retry, reject incomplete output, and recommend application replay. |
-| Upstream drain timeout or process abort | Report the failed run without recovery. |
+| Upstream drain timeout or process abort | Abort the failed run without recovery. |
 
 A declined snapshot can currently leave a successful process status, so the required outcome cannot
 depend only on subprocess failure. Classifying an upstream warning string is the available but
