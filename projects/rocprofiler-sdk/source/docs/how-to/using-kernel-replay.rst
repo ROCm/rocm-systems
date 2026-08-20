@@ -17,8 +17,8 @@ The domain is not tied to hardware counters. A tool can use it for counters, tim
 thread trace, or any other per-pass work.
 
 This page is the SDK how-to. Conceptual and API detail live under :ref:`kernel-replay-conceptual`
-and :ref:`kernel-replay-sdk-api`. Command-line ``rocprofv3`` wiring
-(``--kernel-replay-beta-enabled``) is the stacked tool integration PR, not this SDK change.
+and :ref:`kernel-replay-sdk-api`. Command-line ``rocprofv3`` usage
+(``--kernel-replay-beta-enabled``) is :ref:`using-kernel-replay-rocprofv3`.
 
 .. warning::
 

@@ -15,8 +15,8 @@ device memory between those executions so each pass observes identical inputs. I
 
    This API is experimental. The public header is
    ``<rocprofiler-sdk/experimental/kernel_replay.h>``. The domain and payload are expected
-   to change before a stable release. Command-line ``rocprofv3`` wiring is the stacked tool
-   integration PR.
+   to change before a stable release. Command-line ``rocprofv3`` usage is
+   :ref:`using-kernel-replay-rocprofv3`.
 
 For the configure / ``pass_count_cb`` / local-context how-to, see :ref:`using-kernel-replay`. For
 pass-count semantics, localized context control, and source maps, see
@@ -123,6 +123,7 @@ See also
 --------
 
 * :ref:`using-kernel-replay` — configure, ``pass_count_cb``, local context
+* :ref:`using-kernel-replay-rocprofv3` — ``rocprofv3 --kernel-replay-beta-enabled``
 * :ref:`kernel-replay-callback-api` — API contract
 * :ref:`kernel-replay-concurrency` — isolation model
 * :ref:`kernel-replay-memory-snapshot` — what ``snap()`` / ``restore()`` actually do
