@@ -47,9 +47,14 @@ def override_bundled_rccl(rccl_lib_dir: Path) -> None:
 
     bundled = []
     for d in find_pip_sdk_lib_dirs():
-        bundled.extend(d.glob("librccl.so*"))
+        bundled.extend(
+            f for f in d.glob("librccl.so*") if ".pip-original" not in f.name
+        )
     if not bundled:
-        bundled = list(Path(sys.prefix).rglob("librccl.so*"))
+        bundled = [
+            f for f in Path(sys.prefix).rglob("librccl.so*")
+            if ".pip-original" not in f.name
+        ]
 
     replaced = 0
     for target in bundled:
@@ -102,9 +107,14 @@ def override_bundled_hip_runtime(artifact_lib_dir: Path) -> None:
 
     bundled = []
     for d in find_pip_sdk_lib_dirs():
-        bundled.extend(d.glob("libamdhip64.so*"))
+        bundled.extend(
+            f for f in d.glob("libamdhip64.so*") if ".pip-original" not in f.name
+        )
     if not bundled:
-        bundled = list(Path(sys.prefix).rglob("libamdhip64.so*"))
+        bundled = [
+            f for f in Path(sys.prefix).rglob("libamdhip64.so*")
+            if ".pip-original" not in f.name
+        ]
 
     replaced = 0
     for target in bundled:
@@ -329,6 +339,7 @@ def parse_junit_xml(xml_path: Path) -> dict:
 
     passed_tests = []
     failed_tests = []
+    skipped_tests = []
     error_details = []
     tests_run = 0
     failures = 0
@@ -346,6 +357,7 @@ def parse_junit_xml(xml_path: Path) -> dict:
 
         failure = tc.find("failure")
         error = tc.find("error")
+        skipped = tc.find("skipped")
         if failure is not None:
             failed_tests.append(name)
             error_details.append(
@@ -356,12 +368,15 @@ def parse_junit_xml(xml_path: Path) -> dict:
             error_details.append(
                 f"ERROR: {name}\n  {error.get('message', '')}"
             )
+        elif skipped is not None:
+            skipped_tests.append(name)
         else:
             passed_tests.append((name, duration))
 
     return {
         "passed": passed_tests,
         "failed": failed_tests,
+        "skipped": skipped_tests,
         "error_details": error_details,
         "tests_run": tests_run,
         "failures": failures,

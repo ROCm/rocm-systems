@@ -301,11 +301,20 @@ def run_tests(pytorch_src: Path, results_log: Path, test_scope: str = "smoke") -
     else:
         log.warning("JUnit XML not found at %s, falling back to exit code only", junit_xml)
 
+    ALL_TESTS_MIN = 200
     if test_scope == "smoke" and tests_run < len(SMOKE_TESTS):
         log.error(
             "Expected %d smoke tests but only %d were collected — "
             "test names may have changed in the nightly",
             len(SMOKE_TESTS),
+            tests_run,
+        )
+        exit_code = 1
+    elif test_scope == "all" and tests_run < ALL_TESTS_MIN:
+        log.error(
+            "Expected at least %d tests in 'all' scope but only %d were "
+            "collected — check -k expression or test discovery",
+            ALL_TESTS_MIN,
             tests_run,
         )
         exit_code = 1
@@ -321,9 +330,17 @@ def run_tests(pytorch_src: Path, results_log: Path, test_scope: str = "smoke") -
     known_failed = [t for t in failed_tests if t in known_set]
     unexpected_failed = [t for t in failed_tests if t not in known_set]
 
+    passed_names = {name for name, _ in passed_tests}
+    now_passing = sorted(known_set & passed_names)
+    if now_passing:
+        log.warning(
+            "%d known failure(s) now PASSING — consider removing from "
+            "known_failures.json: %s", len(now_passing), now_passing,
+        )
+
     if unexpected_failed:
         log.error("Unexpected failures: %s", unexpected_failed)
-    elif failed_tests and not unexpected_failed:
+    elif failed_tests and not unexpected_failed and proc.returncode in (0, 1):
         log.info("All %d failures are known — treating as PASSED", len(known_failed))
         exit_code = 0
 
