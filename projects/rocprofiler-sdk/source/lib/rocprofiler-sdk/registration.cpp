@@ -1586,6 +1586,7 @@ rocprofiler_set_api_table(const char* name,
                             ctx->is_tracing(ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY) ||
                             ctx->is_tracing(ROCPROFILER_CALLBACK_TRACING_HIP_EVENT) ||
                             ctx->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_EVENT) ||
+                            ctx->is_tracing(ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY) ||
                             (ctx->device_thread_trace != nullptr &&
                              ctx->device_thread_trace->requires_queue_intercept()));
                 });
