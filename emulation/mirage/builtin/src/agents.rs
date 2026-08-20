@@ -152,7 +152,7 @@ pub fn mi450x() -> AgentDef {
                     // node, so HSA aborts with OUT_OF_RESOURCES.
                     drm_render_minor: 128,
                     simd_count: 1024,
-                    max_waves_per_simd: 20,
+                    max_waves_per_simd: 16,
                     num_shader_engines: 4,
                     num_shader_arrays_per_engine: 2,
                     num_cu_per_sh: 4,
@@ -171,7 +171,7 @@ pub fn mi450x() -> AgentDef {
                 },
             },
         },
-        topology: topology(2, "4", "80", "128", "1024", "160"),
+        topology: topology(2, "4", "64", "128", "1024", "160"),
     }
 }
 
@@ -339,6 +339,30 @@ mod tests {
         assert_eq!(a.vm.arch, "cdna5");
         assert_eq!(a.vm.gpu.device.marketing_name, "gfx1250");
         assert_eq!(a.vm.gpu.device.gfx_target_version, 120500);
+        assert_eq!(a.vm.gpu.device.max_waves_per_simd, 16);
         assert_eq!(a.topology.links.len(), 6);
+
+        let xcd = a
+            .topology
+            .root
+            .children
+            .iter()
+            .find(|component| component.r#type == "xcd")
+            .unwrap();
+        let se = xcd
+            .children
+            .iter()
+            .find(|component| component.r#type == "shader_engine")
+            .unwrap();
+        let cu = se
+            .children
+            .iter()
+            .find(|component| component.r#type == "compute_unit")
+            .unwrap();
+        assert!(
+            cu.config
+                .iter()
+                .any(|entry| entry.key == "num_wf_slots" && entry.value == "64")
+        );
     }
 }
