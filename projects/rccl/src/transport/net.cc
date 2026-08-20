@@ -2338,7 +2338,11 @@ ncclResult_t ncclNetLocalRegisterBuffer(ncclComm* comm, const void* userbuff, si
     NCCLCHECKGOTO(ncclRegLocalIsValid(regRecord, &isValid), ret, fail);
     if (isValid) {
       int numSegments = 0;
-      NCCLCHECK(ncclCuMemGetAddressRange((CUdeviceptr)userbuff, buffSize, (CUdeviceptr*)&base, &baseSize,
+      // The proxy registers the complete user registration, not just the
+      // collective's current send/receive subrange. Count segments over that
+      // same range so netIbRegMrMultiSeg cannot stop after a partial prefix.
+      size_t regSize = regRecord->endAddr - regRecord->begAddr;
+      NCCLCHECK(ncclCuMemGetAddressRange((CUdeviceptr)regRecord->begAddr, regSize, (CUdeviceptr*)&base, &baseSize,
                                          &numSegments));
       if (numSegments > 1 && !ncclParamMultiSegmentRegister()) goto exit;
       NCCLCHECKGOTO(netRegisterBuffer(comm, userbuff, buffSize, peerConns, nPeers, regRecord, outRegBufFlag, outHandle,
@@ -2423,6 +2427,7 @@ static ncclResult_t netIbRegMrMultiSeg(struct ncclProxyState* proxyState, void* 
   ncclResult_t ret = ncclSuccess;
   void** segAddrs = NULL; size_t* segLens = NULL; uint64_t* segOffsets = NULL; int* segFds = NULL;
   int nSeg = 0;
+  size_t remaining = totalSize;
 
   if (proxyState->ncclNet != &ncclNetIb) {
     INFO(NCCL_NET|NCCL_REG, "Multi-segment (%d) NET registration only supported on the IB transport", numSegments);
@@ -2436,7 +2441,6 @@ static ncclResult_t netIbRegMrMultiSeg(struct ncclProxyState* proxyState, void* 
 
   {
     uintptr_t segPtr = (uintptr_t)buffer;
-    size_t remaining = totalSize;
     for (int s = 0; s < numSegments && remaining > 0; s++) {
       CUdeviceptr segBase = 0; size_t segSize = 0;
       CUCHECKGOTO(cuMemGetAddressRange(&segBase, &segSize, (CUdeviceptr)segPtr), ret, fail);
@@ -2449,6 +2453,16 @@ static ncclResult_t netIbRegMrMultiSeg(struct ncclProxyState* proxyState, void* 
       segAddrs[s] = (void*)segPtr; segLens[s] = thisLen; segOffsets[s] = 0ULL; segFds[s] = fd;
       segPtr += thisLen; remaining -= thisLen; nSeg++;
     }
+  }
+
+  // A count/range mismatch must never produce a partially registered handle:
+  // the CTS path would otherwise advertise addresses beyond the final MR with
+  // that MR's rkey, causing IBV_WC_REM_ACCESS_ERR on the remote write.
+  if (remaining != 0 || nSeg != numSegments) {
+    WARN("NET/IB: enumerated %d/%d segments for buffer %p but %zu/%zu bytes remain unregistered",
+         nSeg, numSegments, buffer, remaining, totalSize);
+    ret = ncclInvalidUsage;
+    goto fail;
   }
 
   // Uniform-segment guard: interior segments must be equal; the trailing segment
