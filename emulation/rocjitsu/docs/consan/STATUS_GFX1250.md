@@ -47,7 +47,7 @@ preserve an earlier green claim.
 | Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
 | **P0 Qwen3-0.6B prefill** | 🟧 Fresh current-workspace run transforms 1000/1000 accesses into a 365,536-byte object and reaches execution, but has no oracle or teardown verdict within 90 seconds; prior 1402/1402 evidence likewise had no verdict within 600 seconds | 🟧 Fresh current-workspace instrumentation is complete at 1000/1000 accesses plus 92/92 barriers, emits a 4,039,648-byte object, and reaches execution, but has no verdict within 60 seconds. A current standalone translation remains CPU-bound without diagnostics past five minutes; prior selected-object evidence diagnosed 17 unrecovered generated long-return targets | 🟧 Prior instrumentation is complete at 1402/1402 accesses plus 102/102 barriers and emits a 3,396,472-byte object; loader admission fails before execution, and standalone translation diagnoses the same 17 generated long-return targets; no oracle or accepted overhead | 🟧 Prior instrumentation is complete at 1402/1402 accesses plus 52/52 barriers and emits a 4,666,232-byte object; the installed runtime translator accepts it and execution begins but has no oracle within 60 seconds, while the newer standalone translator reports the same 17 generated long-return targets; no accepted overhead |
-| **P1 Sharktank TP1 prefill** | 🟩 Fresh exact prefill oracle with complete 352/352 access coverage; current paired 1.17x retained | 🟧 Fresh exact oracle and complete static 352/352 accesses plus 74/74 barriers, but the standard 65,536-stride policy records no visible evidence and fails the dynamic gate | 🟩 Fresh exact clean oracle with complete 352/352 accesses plus 64/64 applicable barriers, zero diagnostics or sampled conflicts, and a complete dynamic verdict; current paired 1.51x retained | 🟩 Fresh exact clean oracle in 31.07 seconds with complete 352/352 accesses plus 37/37 barriers and a complete dynamic verdict; the target-native manifest now retains a 60-second bound and current paired 2.11x |
+| **P1 Sharktank TP1 prefill** | 🟩 Current clean-revision exact oracle in 12.13 seconds with complete 352/352 access coverage; current paired 1.17x retained | 🟩 Current clean-revision exact oracle in 13.50 seconds with complete 352/352 accesses plus 74/74 barriers, zero diagnostics, and a complete dynamic verdict under the target's bounded validation stride | 🟩 Current clean-revision exact oracle in 20.89 seconds with complete 352/352 accesses plus 64/64 applicable barriers, zero diagnostics or sampled conflicts, and a complete dynamic verdict; current paired 1.51x retained | 🟩 Current clean-revision exact oracle in 30.81 seconds with complete 352/352 accesses plus 37/37 barriers and a complete dynamic verdict; the target-native manifest retains a 60-second bound and current paired 2.11x |
 | **P1 Sharktank TP1 decode/combined** | 🟩 Exact decode/combined oracles; 704/704 accesses; current paired 1.09x | 🟩 Exact decode/combined oracles; 704/704 accesses, 74/74 barriers; current paired 1.16x | 🟩 Exact decode/combined oracles; 704/704 accesses, 128/128 applicable barriers; current paired 1.28x | 🟩 Current accepted bundle: exact decode/combined clean and paired oracles, complete 704/704 accesses plus 74/74 barriers, 2.92x maximum paired slowdown, reviewed exact-one detected/pass barrier move, containment, health, cleanup, and clean provenance |
 | **P2 Sharktank TP2 family** | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained |
 | **P4 hip-moi D128 block attention** | 🟩 Current strict clean row: both exact host-reference oracles in 20.08 seconds; 18/18 accesses; paired 1.56x retained | 🟩 Current strict clean row: both exact host-reference oracles in 103.08 seconds; 18/18 accesses, 8/8 barriers, and 5,844 visible evidence records; paired 1.11x retained | 🟩 Current strict clean row: both exact host-reference oracles in 20.78 seconds; 18/18 accesses, 8/8 applicable barriers; paired 1.13x retained | 🟩 Current strict clean row: both exact host-reference oracles in 33.06 seconds; 18/18 accesses, 4/4 barriers; paired 1.09x retained |
@@ -117,6 +117,29 @@ complete 352/352 access and 37/37 barrier coverage and a complete dynamic
 verdict.  The corresponding host regression requires gfx1250 TP1 prefill to
 resolve to 60 seconds while gfx950 retains the ordinary 30-second bound.
 
+The clean-revision consolidation artifact
+`rebase-20260820-gfx1250-tp1-prefill-all-bcaf8e5` runs the baseline and all
+four profiles through RocJitsu at source revision `bcaf8e5b1f` and hook
+SHA-256
+`59ae90f075525cb84925717b7322d8f0d98b59c7a41b9d3e81e989a5ce0615c4`.
+All five rows pass the exact oracle.  Baseline, SuperCollider, Record/Replay,
+Sampled, and Inline Shadow take 10.79, 12.13, 13.50, 20.89, and 30.81 seconds,
+respectively.  Every instrumented row is analysis-, static-, and
+dynamic-complete; their access coverage is 352/352, with 74/74, 64/64, and
+37/37 barrier coverage in Record/Replay, Sampled, and Inline Shadow.
+Record/Replay emits zero diagnostics.
+
+Record/Replay now uses a checked-in target/workload validation stride of 256:
+the production 65,536 stride selects no workgroup in this compact 32-dispatch
+schedule.  Executing the selected dense gfx1250 path exposed two real lowering
+defects which the no-evidence run could not exercise.  Mixed code objects now
+initialize the persistent cluster coordinate to zero for ordinary kernels
+which do not receive that launch input.  The dense runtime gate now keeps its
+sampling residue out of the live `s_call_i64` return pair; previously it
+returned to `0x00007ffe00000000` and crashed RocJitsu's instruction fetch.
+Focused emitted-code regressions pin both contracts, and the complete 680-test
+`ConSanMoi.*` suite plus all 331 Python validation tests pass.
+
 ### 2026-08-20 cluster workgroup identity persistence
 
 The Sampled gate audit also found that the persistent exact-workgroup tuple
@@ -132,7 +155,7 @@ input keep the three-coordinate layout.
 Two focused host regressions pin both paths.  The dense fast-gate test requires
 the entry prologue to capture TTMP6 and the later gate to hash the persistent
 copy.  The spill-backed test requires all four coordinates to be captured in
-private memory and loaded by the body gate.  The complete 678-test
+private memory and loaded by the body gate.  The complete 680-test
 `ConSanMoi.*` host suite passes with these checks.  This is structural proof of
 the repaired lowering; the next clustered E2E refresh remains responsible for
 new runtime evidence rather than reinterpreting the earlier accepted bundle.
