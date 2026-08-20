@@ -1411,7 +1411,7 @@ def test_gfx1250_wmma_f16_f8_passes_fp16_overflow_mode(
     k: int, input_type: str, a_fp8: str, b_fp8: str
 ) -> None:
     inst = Instruction(f'V_WMMA_F16_16X16X{k}_{input_type}', 'ENC_VOP3P', 0, [])
-    body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'cdna5')
+    body = _gen_mfma(inst, 'cdna5')
 
     assert f'amdgpu::exec_wmma_f16_f8_spec<16, 16, {k}, {a_fp8}, {b_fp8}>(' in body
     assert 'const_acc, wf.fp16_ovfl());' in body
@@ -1419,7 +1419,7 @@ def test_gfx1250_wmma_f16_f8_passes_fp16_overflow_mode(
 
 def test_gfx1250_wmma_f16_overflow_mode_is_scoped_to_f8_helper() -> None:
     inst = Instruction('V_WMMA_F16_16X16X32_F16', 'ENC_VOP3P', 0, [])
-    body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'cdna5')
+    body = _gen_mfma(inst, 'cdna5')
 
     assert 'amdgpu::exec_wmma_f16_spec<16, 16, 32>(' in body
     assert 's2, const_acc);' in body
