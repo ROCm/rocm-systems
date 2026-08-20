@@ -1630,7 +1630,6 @@ VFmamkF32Vop2::VFmamkF32Vop2(const MachineInst *inst)
   simm32 =
       Operand(32, OperandType::OPR_SIMM32,
               static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
-  simm32.apply_fieldless_caps(true, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
@@ -1672,7 +1671,6 @@ VFmaakF32Vop2::VFmaakF32Vop2(const MachineInst *inst)
   simm32 =
       Operand(32, OperandType::OPR_SIMM32,
               static_cast<int>(reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32));
-  simm32.apply_fieldless_caps(true, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -2541,7 +2539,6 @@ VMadmkF16Vop2::VMadmkF16Vop2(const MachineInst *inst)
       Operand(16, OperandType::OPR_SIMM32,
               static_cast<int>(
                   (reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  simm32.apply_fieldless_caps(true, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
@@ -2591,7 +2588,6 @@ VMadakF16Vop2::VMadakF16Vop2(const MachineInst *inst)
       Operand(16, OperandType::OPR_SIMM32,
               static_cast<int>(
                   (reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
-  simm32.apply_fieldless_caps(true, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);

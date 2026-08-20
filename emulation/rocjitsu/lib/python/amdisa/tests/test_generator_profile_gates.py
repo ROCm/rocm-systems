@@ -176,6 +176,7 @@ def gen_mfma(
     arch_name: str,
     *,
     supports_gpr_idx: bool | None = None,
+    op_sel_hi_2_expr: str = 'inst_.op_sel_hi_2',
 ) -> str:
     """Call the matrix emitter with the selected ISA profile capability."""
     if supports_gpr_idx is None:
@@ -186,6 +187,7 @@ def gen_mfma(
         src,
         arch_name,
         supports_gpr_idx=supports_gpr_idx,
+        op_sel_hi_2_expr=op_sel_hi_2_expr,
     )
 
 
@@ -996,7 +998,11 @@ def test_rdna4_parser_injects_s_waitcnt_compat():
     ).parse()
 
     sopp = spec.encoding_map['ENC_SOPP']
-    assert any(inst.name == 'S_WAITCNT' and inst.opcode == 9 for inst in sopp.insts)
+    waitcnt = next(
+        inst for inst in sopp.insts if inst.name == 'S_WAITCNT' and inst.opcode == 9
+    )
+    assert waitcnt.available_encodings == frozenset({'ENC_SOPP'})
+    assert 'OPR_WAITCNT' in spec.operand_types
 
     dt_ptr = sopp.primary_dt_ptrs[9]
     dte = spec.primary_decode_table[dt_ptr]
@@ -1044,6 +1050,7 @@ def _fake_sopp_parser(arch_name: str, *, sub_decode_funcs: list[str | None] | No
         arch_name=arch_name,
         encoding_map=encoding_map,
         primary_decode_table=[dte],
+        operand_types=[],
     )
     return parser, sopp, dte
 
@@ -1741,6 +1748,20 @@ def test_gfx1250_wmma_f32_passes_c_modifier_to_accumulator_helper():
 
     assert 'amdgpu::exec_wmma_f32_16x16x32_f16(' in body
     assert 'amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi)' in body
+
+
+def test_gfx1250_mixed_wmma_uses_public_opsel_hi_2_field():
+    inst = Instruction('V_WMMA_F32_16X16X128_F8F6F4', 'ENC_VOP3P', 0, [])
+    body = gen_mfma(
+        inst,
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'cdna5',
+        op_sel_hi_2_expr='inst_.opsel_hi_2',
+    )
+
+    assert '(inst_.opsel_hi_2 << 2) | inst_.opsel_hi' in body
+    assert 'pad_14' not in body
 
 
 @pytest.mark.parametrize(
@@ -3767,8 +3788,18 @@ def test_gfx1250_packed_f32_execute_uses_local_simd_probe(
         assert 'amdgpu::execute_v_pk_' not in body
 
     assert 'ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_F32_SELECTORS' in fma_body
-    assert 'inst_.opsel, inst_.opsel_hi, inst_.pad_14' in fma_body
+    assert 'inst_.opsel, inst_.opsel_hi, inst_.opsel_hi_2' in fma_body
     assert fma_body.index('ROCJITSU_TRY_SIMD') < fma_body.index('for (uint32_t lane')
+
+
+def test_gfx1250_matrix_codegen_uses_public_opsel_hi_2_field(
+    gfx1250_generated_root: Path,
+):
+    source = (gfx1250_generated_root / 'vop3p.cpp').read_text()
+
+    assert 'pad_14' not in source
+    assert 'inst_.opsel_hi_2' in source
+    assert 'scale_inst_.opsel_hi_2' in source
 
 
 def test_gfx1250_vop3p_rejects_unencoded_literal64_selectors(
@@ -4799,6 +4830,12 @@ def test_gfx1250_helper_blocks_emit_scaled_wmma_table_decoder(
     codegen.isa_spec = SimpleNamespace(
         arch_name='cdna5',
         profile=Cdna5Profile(),
+        inst_encodings=[
+            SimpleNamespace(
+                enc_name='ENC_VOP3P',
+                ucode_fields=[SimpleNamespace(bit_offset=14, name='opsel_hi_2')],
+            )
+        ],
     )
 
     assert codegen._supports_cdna5_scaled_wmma_vop3px2()
@@ -5954,6 +5991,10 @@ def test_generated_flat_saddr_null_selector_follows_encoding(
     rdna3_flat = (amdgpu_generated_root / 'rdna3' / 'flat.cpp').read_text()
     assert 'inst_.saddr != 0x7F' in rdna3_flat
     assert 'inst_.saddr != OPR_SREG_NULL' not in rdna3_flat
+    assert (
+        'if (inst_.seg != 2)\n'
+        '    src_operands_[num_src_++] = &flat_scratch;' in rdna3_flat
+    )
 
     gfx1250_root = amdgpu_generated_root / _generated_dir_name('cdna5')
     gfx1250_vflat = (gfx1250_root / 'vflat.cpp').read_text()
