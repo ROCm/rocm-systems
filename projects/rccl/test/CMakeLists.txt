@@ -465,6 +465,7 @@ if(BUILD_TESTS)
       LL128RegVariantKernel_test.cpp
       IpcsocketTests.cpp
       TopoEnvPolicyTests.cpp
+      P2pMaxNchannelsTests.cpp
       TopoNicFusionTests.cpp
       NetSocketTests.cpp
       PluginCompatV10_test.cpp
