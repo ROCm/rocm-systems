@@ -17,9 +17,7 @@ from utils.utils_common import load_yaml
 _VALID_OPS = frozenset({"gte", "gt", "lt", "lte"})
 _VALID_LEVELS = frozenset({"GL1", "GL2", "EA"})
 
-# Populated in membw guided analysis Phase B;
-# the evaluator rejects specs whose hash is absent.
-_KNOWN_SCHEMA_HASHES: frozenset[str] = frozenset()
+_KNOWN_SCHEMA_HASHES: frozenset[str] = frozenset({"8b5c67d5c4e18966"})
 
 
 def load_tree_spec(arch: str) -> TreeSpec:
