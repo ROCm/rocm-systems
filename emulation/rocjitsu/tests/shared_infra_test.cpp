@@ -861,11 +861,19 @@ TEST(MfmaExecTest, WmmaF8f6f4K128InputLocMatchesManualLayoutsExhaustively) {
       for (uint32_t k = 0; k < 128; ++k) {
         SCOPED_TRACE(::testing::Message()
                      << "data_bits=" << data_bits << " index=" << index << " k=" << k);
-        const uint32_t expected_lane = index + 16u * ((k >> 2u) & 1u);
-        const uint32_t expected_reg = ((k >> 1u) & 1u) + 2u * ((k >> 3u) & 1u) +
-                                      4u * ((k >> 4u) & 1u) + 8u * ((k >> 5u) & 1u) +
-                                      16u * ((k >> 6u) & 1u);
-        const uint32_t expected_slot = 2u * expected_reg + (k & 1u);
+        uint32_t expected_lane;
+        uint32_t expected_slot;
+        if (data_bits == 8) {
+          // CDNA5 defines K=128 as two consecutive K=64 matrices.
+          expected_lane = index + 16u * ((k >> 3u) & 1u);
+          expected_slot = (k & 7u) + 8u * (k >> 4u);
+        } else {
+          expected_lane = index + 16u * ((k >> 2u) & 1u);
+          const uint32_t expected_reg = ((k >> 1u) & 1u) + 2u * ((k >> 3u) & 1u) +
+                                        4u * ((k >> 4u) & 1u) + 8u * ((k >> 5u) & 1u) +
+                                        16u * ((k >> 6u) & 1u);
+          expected_slot = 2u * expected_reg + (k & 1u);
+        }
         const uint32_t expected_bit = expected_slot * data_bits;
         const auto actual =
             amdgpu::wmma_f8f6f4_input_loc(16, 128, index, k, data_bits, /*mixed_subbyte=*/false);
