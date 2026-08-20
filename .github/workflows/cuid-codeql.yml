@@ -118,7 +118,9 @@ jobs:
         shell: bash
         run: |
           ./codeql/codeql database create codeqldb --language=${{ matrix.language }} --source-root=$PROJECT_DIR \
-          --command="bash -c 'mkdir -p build && cd build && cmake $PROJECT_DIR -DOPENSSL_ROOT_DIR=$OPENSSL_ROOT_DIR && make -j$(nproc)'"
+          --command=bash \
+          --command=-c \
+          --command="mkdir -p build && cd build && cmake $PROJECT_DIR -DOPENSSL_ROOT_DIR=$OPENSSL_ROOT_DIR && make -j$(nproc)"
 
       - name: Perform CodeQL Analysis
         shell: bash
