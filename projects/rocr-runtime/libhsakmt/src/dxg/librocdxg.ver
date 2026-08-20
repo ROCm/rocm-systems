@@ -1,7 +1,6 @@
 HSAKMT_1
 {
 global:
-DxgAbiCheck;
 hsaKmtOpenKFD;
 hsaKmtCloseKFD;
 hsaKmtGetVersion;

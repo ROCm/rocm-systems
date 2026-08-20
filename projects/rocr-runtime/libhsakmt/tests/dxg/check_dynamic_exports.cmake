@@ -71,14 +71,20 @@ endforeach()
 
 if (failures)
   string(REPLACE ";" "\n  " failures "${failures}")
-  string(REGEX MATCHALL "[^\r\n]*Dxg[^\r\n]*" dxg_lines "${nm_out}")
-  string(REPLACE ";" "\n  " dxg_lines "${dxg_lines}")
+  # Whatever the dynamic table does say about these names, which is usually
+  # what explains the failure.
+  set(context "")
+  foreach (symbol IN LISTS EXPECTED_SYMBOLS)
+    string(REGEX MATCHALL "[^\r\n]*${symbol}[^\r\n]*" symbol_lines "${nm_out}")
+    list(APPEND context ${symbol_lines})
+  endforeach()
+  string(REPLACE ";" "\n  " context "${context}")
   message(FATAL_ERROR
           "${LIBRARY} does not export what it must:\n  ${failures}\n"
-          "Dxg* lines in nm -D --defined-only:\n  ${dxg_lines}")
+          "Matching lines in nm -D --defined-only:\n  ${context}")
 endif()
 
 list(LENGTH EXPECTED_SYMBOLS count)
 message(STATUS
-        "${count} Dxg entry point(s) exported as global text @@${EXPECTED_VERSION}: "
+        "${count} entry point(s) exported as global text @@${EXPECTED_VERSION}: "
         "${EXPECTED_SYMBOLS}")

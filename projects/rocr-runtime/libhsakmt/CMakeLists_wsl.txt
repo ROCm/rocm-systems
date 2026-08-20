@@ -101,8 +101,7 @@ else ()
 endif ()
 
 ## Source files
-set ( ROCDXG_SRC "src/dxg/abi.cpp"
-                 "src/dxg/debug.cpp"
+set ( ROCDXG_SRC "src/dxg/debug.cpp"
                  "src/dxg/events.cpp"
                  "src/dxg/memory.cpp"
                  "src/dxg/libdrm.cpp"
@@ -204,12 +203,17 @@ install ( TARGETS ${ROCDXG_TARGET} EXPORT ${ROCDXG_TARGET}Targets
 # package would ship a library, a pkg-config file naming an include directory,
 # and nothing in it. There is no second install rule for these files.
 #
-# hsakmt.h declares the entry points this library exports, DxgAbiCheck among
-# them; hsakmttypes.h is the transitive closure behind it, and is also the
-# header rocprofiler-sdk includes for HsaNodeProperties and HsaStructureSizes.
+# hsakmt.h declares the entry points this library exports; hsakmttypes.h is
+# the transitive closure behind it, and is also the header rocprofiler-sdk
+# includes for HsaNodeProperties and HsaStructureSizes.
 # Neither needs anything but <stdbool.h> and <stdint.h>, and tests/dxg checks
 # that claim by compiling against a staged copy of exactly this list. The rest
 # of include/hsakmt describes the native thunk and is deliberately not shipped.
+#
+# TheRock is the one place a core-runtime built by the native branch and this
+# library sit side by side, and there its wsl-rocdxg_dev descriptor excludes
+# include/hsakmt/**. That exclusion, not the absence of a rule here, is what
+# keeps its cross-artifact overlap check quiet.
 set ( ROCDXG_PUBLIC_HEADERS
   ${CMAKE_CURRENT_SOURCE_DIR}/include/hsakmt/hsakmt.h
   ${CMAKE_CURRENT_SOURCE_DIR}/include/hsakmt/hsakmttypes.h )

@@ -15,29 +15,29 @@
  * agree with the declaration it is compiled against, so a signature that
  * drifts is a compile error here rather than undefined behaviour in whatever
  * dlsym()s the symbol.
+ *
+ * hsaKmtGetNodeProperties() is the entry point chosen for it because it is the
+ * one that copies a whole HsaNodeProperties across the interface with no size
+ * parameter, so the header each side is compiled against is the only thing
+ * that says how large that record is.
  */
 
 #include <hsakmt/hsakmt.h>
 
-HSAKMT_STATUS HSAKMTAPI DxgAbiCheck(HsaStructureSizes* StructureSizes) {
-  if (!StructureSizes ||
-      StructureSizes->StructureSizes != (HSAuint16)sizeof(HsaStructureSizes))
-    return HSAKMT_STATUS_INVALID_PARAMETER;
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeProperties(HSAuint32 NodeId,
+                                                HsaNodeProperties* NodeProperties) {
+  if (!NodeProperties) return HSAKMT_STATUS_INVALID_PARAMETER;
+  if (NodeId != 0) return HSAKMT_STATUS_INVALID_NODE_UNIT;
 
-  return StructureSizes->SizeOfHsaNodeProperties == (HSAuint16)sizeof(HsaNodeProperties)
-             ? HSAKMT_STATUS_SUCCESS
-             : HSAKMT_STATUS_DRIVER_MISMATCH;
+  NodeProperties->NumCPUCores = 1;
+  return HSAKMT_STATUS_SUCCESS;
 }
 
 int main(void) {
-  /* Filled the way ThunkLoader::CheckThunkAbi() fills it. */
-  HsaStructureSizes sizes = {0};
-  sizes.StructureSizes = (HSAuint16)sizeof(HsaStructureSizes);
-  sizes.SizeOfHsaNodeProperties = (HSAuint16)sizeof(HsaNodeProperties);
-  sizes.SizeOfHsaExternalHandleDesc = (HSAuint16)sizeof(HsaHandleImportDesc);
+  HsaNodeProperties props = {0};
 
-  if (DxgAbiCheck(&sizes) != HSAKMT_STATUS_SUCCESS) return 1;
+  if (hsaKmtGetNodeProperties(0, &props) != HSAKMT_STATUS_SUCCESS) return 1;
+  if (props.NumCPUCores != 1) return 1;
 
-  sizes.SizeOfHsaNodeProperties = (HSAuint16)(sizeof(HsaNodeProperties) - 1);
-  return DxgAbiCheck(&sizes) == HSAKMT_STATUS_DRIVER_MISMATCH ? 0 : 1;
+  return hsaKmtGetNodeProperties(1, &props) == HSAKMT_STATUS_INVALID_NODE_UNIT ? 0 : 1;
 }

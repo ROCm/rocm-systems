@@ -25,12 +25,11 @@ namespace thunk {
  * every one of these runs under hsakmtRuntime::hsakmt_mutex.
  *
  * librocdxg and libhsa-runtime64 are both built from rocr-runtime and are
- * expected to ship together. A runtime out of some other package is refused
- * where it is new enough to ask: DxgAbiCheck() answers with this build's
- * sizeof(HsaNodeProperties), 396 against ROCm 7.2.x's 376. One too old to ask
- * never reaches that check, and what then keeps it from tearing down a
- * snapshot another consumer still holds is this count, which rejects a release
- * it never handed out.
+ * expected to ship together, but nothing refuses a runtime out of some other
+ * package - ROCm 7.2.x, where sizeof(HsaNodeProperties) is 376 against this
+ * build's 396, loads against this thunk with no diagnostic. What keeps such a
+ * runtime from tearing down a snapshot another consumer still holds is this
+ * count, which rejects a release it never handed out.
  */
 class SnapshotRefcount {
  public:

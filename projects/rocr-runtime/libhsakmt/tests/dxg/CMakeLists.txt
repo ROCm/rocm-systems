@@ -77,28 +77,18 @@ set_target_properties(
 add_test(NAME dxg-installed-header-c COMMAND dxg-installed-header-c-test)
 add_test(NAME dxg-installed-header-cxx COMMAND dxg-installed-header-cxx-test)
 
-# Every Dxg* name the version script exports has to be declared in the header
-# the package ships, and the other way round. Reads the staged copy rather than
-# include/hsakmt, so dropping the header from ROCDXG_PUBLIC_HEADERS fails here
-# too.
-add_test(
-    NAME dxg-exported-symbols-match-header
-    COMMAND
-        ${CMAKE_COMMAND} -DHEADER=${ROCDXG_STAGED_INCLUDE}/hsakmt/hsakmt.h
-        -DVERSION_SCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/../../src/dxg/librocdxg.ver
-        -P ${CMAKE_CURRENT_SOURCE_DIR}/check_exported_symbols.cmake
-)
-
-# The same names in the built artifact's dynamic symbol table. The text check
-# above cannot see the library, and a symbol can be lost to mangling or to
-# local visibility while both the header and the version script still read
-# correctly - so this is the only test that speaks for what ROCr's dlsym() will
-# actually find. Named separately from the version script so that deleting an
-# entry there fails here rather than quietly narrowing the contract.
+# What the built artifact's dynamic symbol table actually offers. Nothing else
+# here links or loads librocdxg - the refcount test compiles a header on its
+# own and the two smoke tests define their entry point rather than binding it -
+# so this is the only test that speaks for what ROCr's dlsym() will find. A
+# symbol can be lost to mangling or to local visibility while the header and
+# the version script both still read correctly, and nothing at link time would
+# notice, because ROCr binds every one of these by name at run time.
 #
-# DxgAbiCheck is the whole list because it is the only Dxg* export left, and it
-# is the entry point that needs this most: ROCr binds it by dlsym(), so nothing
-# at link time would notice its absence.
+# The name is given here rather than parsed out of the version script, so that
+# deleting an entry there fails here rather than quietly narrowing the
+# contract. hsaKmtGetNodeProperties stands for the table: it is the entry point
+# whose record both ROCr and rocprofiler-sdk read.
 #
 # Requires nm, which a cross-build might not have.
 if(CMAKE_NM)
@@ -107,7 +97,7 @@ if(CMAKE_NM)
         COMMAND
             ${CMAKE_COMMAND} -DLIBRARY=$<TARGET_FILE:${ROCDXG_TARGET}>
             -DNM=${CMAKE_NM} -DEXPECTED_VERSION=HSAKMT_1
-            -DEXPECTED_SYMBOLS=DxgAbiCheck -P
+            -DEXPECTED_SYMBOLS=hsaKmtGetNodeProperties -P
             ${CMAKE_CURRENT_SOURCE_DIR}/check_dynamic_exports.cmake
     )
 else()
