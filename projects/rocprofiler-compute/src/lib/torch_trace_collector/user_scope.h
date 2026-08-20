@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "capture_buffer.h"
 #include "marker_stack.h"
 #include "process_state.h"
 #include "scope_guard.h"
@@ -120,8 +119,6 @@ inline void push_user_scope(const std::string& marker, const std::string& contex
             wire_string += '|';
             wire_string += backend;
         }
-        state.capture.capture(wire_string);
-
         // Nothing below can throw, so the two rollbacks above cover the whole
         // failure window and the ROCTX push needs no guard of its own.
         roctxRangePushA(wire_string.c_str());

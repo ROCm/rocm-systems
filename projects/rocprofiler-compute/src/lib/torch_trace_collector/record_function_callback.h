@@ -7,7 +7,6 @@
 
 #pragma once
 
-#include "capture_buffer.h"
 #include "leaf_context.h"
 #include "marker_stack.h"
 #include "process_state.h"
@@ -137,7 +136,6 @@ inline std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& r
         wire_string += kRecordFnBackend;
         roctxRangePushA(wire_string.c_str());
         observer_ctx->pushed_roctx_range = true;
-        state.capture.capture(wire_string);
         inc(state.stats.pushes);
 
         rollback.dismiss();
