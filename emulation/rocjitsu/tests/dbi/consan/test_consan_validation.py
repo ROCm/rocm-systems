@@ -1834,7 +1834,7 @@ class ConSanValidationTest(unittest.TestCase):
                 "hip_moi_reference_cdna4_jakub_matmul"
             ),
         )
-        self.assertEqual(workloads["jakub-attention"]["run_timeout_seconds"], 30)
+        self.assertEqual(workloads["jakub-attention"]["run_timeout_seconds"], 300)
         self.assertEqual(
             workloads["streamk-arrival"]["fault_families"],
             ("atomic-weaken-order",),
@@ -1983,7 +1983,7 @@ class ConSanValidationTest(unittest.TestCase):
                 ("gfx1250", "d128-block", 150),
                 ("gfx950", "d128-pressure", 30),
                 ("gfx1250", "d128-pressure", 180),
-                ("gfx950", "jakub-attention", 30),
+                ("gfx950", "jakub-attention", 300),
                 ("gfx1250", "jakub-attention", 90),
                 ("gfx950", "tp1-prefill", 300),
                 ("gfx1250", "tp1-prefill", 60),
@@ -2505,6 +2505,10 @@ class ConSanValidationTest(unittest.TestCase):
             ("clip-bf16", "gfx950", "256"),
             ("clip-bf16", "gfx1201", None),
             ("clip-bf16", "gfx1250", None),
+            ("jakub-attention", "gfx942", None),
+            ("jakub-attention", "gfx950", "1"),
+            ("jakub-attention", "gfx1201", None),
+            ("jakub-attention", "gfx1250", None),
         ):
             with self.subTest(workload=workload_id, target=target):
                 workload = validation.WORKLOAD_BY_ID[workload_id]

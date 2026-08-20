@@ -1496,9 +1496,9 @@ for target_id, overrides in NATIVE_GTEST_WORKLOAD_OVERRIDES.items():
 
 TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
     "gfx950": {
-        # The compact TP1 schedule selects no workgroup at the production
+        # These compact schedules select no workgroup at the production
         # stride.  A target-resolved validation cadence retains evidence from
-        # the same unmodified workload.  Native execution itself is fast, but
+        # the same unmodified workloads.  Native execution itself is fast, but
         # strict replay analysis scans the target's conservative 2M-slot table;
         # retain a bounded margin for that host-side validation step.
         "tp1-prefill": {
@@ -1511,6 +1511,12 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
         },
         "clip-bf16": {
             "record_replay_runtime_sample_stride": 256,
+            "run_timeout_seconds": 300,
+        },
+        # The four Jakub oracle dispatches also miss the denser 256 cadence,
+        # so this bounded row selects every workgroup deterministically.
+        "jakub-attention": {
+            "record_replay_runtime_sample_stride": 1,
             "run_timeout_seconds": 300,
         },
     },
