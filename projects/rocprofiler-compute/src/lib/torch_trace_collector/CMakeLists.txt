@@ -28,8 +28,7 @@ else()
     set(_ttc_unavailable_severity STATUS)
 endif()
 
-# Interpreter used to locate Torch and to read the CXX11 ABI and the source
-# fingerprint.
+# Interpreter used to locate Torch and to read the CXX11 ABI.
 if(TORCH_TRACE_PYTHON)
     set(Python3_EXECUTABLE "${TORCH_TRACE_PYTHON}")
 endif()
@@ -46,15 +45,17 @@ set(_ttc_python "${Python3_EXECUTABLE}")
 set(_py_major "${Python3_VERSION_MAJOR}")
 set(_py_minor "${Python3_VERSION_MINOR}")
 
-set(_ttc_torch_dir "")
-foreach(_ttc_site IN LISTS Python3_SITEARCH Python3_SITELIB)
-    if(EXISTS "${_ttc_site}/torch/share/cmake/Torch/TorchConfig.cmake")
-        set(_ttc_torch_dir "${_ttc_site}/torch/share/cmake/Torch")
+set(_ttc_torch_config_dir "")
+foreach(_ttc_site_packages IN LISTS Python3_SITEARCH Python3_SITELIB)
+    if(EXISTS "${_ttc_site_packages}/torch/share/cmake/Torch/TorchConfig.cmake")
+        set(_ttc_torch_config_dir
+            "${_ttc_site_packages}/torch/share/cmake/Torch"
+        )
         break()
     endif()
 endforeach()
-if(_ttc_torch_dir AND NOT Torch_DIR)
-    set(Torch_DIR "${_ttc_torch_dir}")
+if(_ttc_torch_config_dir AND NOT Torch_DIR)
+    set(Torch_DIR "${_ttc_torch_config_dir}")
 endif()
 
 find_package(Torch CONFIG QUIET)
@@ -97,25 +98,13 @@ elseif(NOT _ttc_torch_cxx11_abi_rc EQUAL 0)
     )
 endif()
 
-if(TORCH_TRACE_SOURCE_FINGERPRINT)
-    set(_src_fingerprint "${TORCH_TRACE_SOURCE_FINGERPRINT}")
-else()
-    execute_process(
-        COMMAND
-            "${_ttc_python}"
-            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/print_fingerprint.py"
-        OUTPUT_VARIABLE _src_fingerprint
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_VARIABLE _ttc_fingerprint_err
-        RESULT_VARIABLE _ttc_fingerprint_rc
+if(NOT TORCH_TRACE_SOURCE_FINGERPRINT)
+    message(
+        FATAL_ERROR
+        "torch_trace_collector: TORCH_TRACE_SOURCE_FINGERPRINT is not set."
     )
-    if(NOT _ttc_fingerprint_rc EQUAL 0)
-        message(
-            FATAL_ERROR
-            "torch_trace_collector: failed to compute the source fingerprint:\n${_ttc_fingerprint_err}"
-        )
-    endif()
 endif()
+set(_src_fingerprint "${TORCH_TRACE_SOURCE_FINGERPRINT}")
 
 set(_torch_includes ${TORCH_INCLUDE_DIRS})
 

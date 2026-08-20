@@ -90,7 +90,7 @@ def format_load_diagnostic_trail(
 
 
 def compute_tag() -> Optional[str]:
-    """Return the cache tag for the active Python and torch versions, or ``None``."""
+    """Return ``py{major}.{minor}_torch{version}_src{fingerprint}``, or ``None``."""
     try:
         import torch
     except Exception:

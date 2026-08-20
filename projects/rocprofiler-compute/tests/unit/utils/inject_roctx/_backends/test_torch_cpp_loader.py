@@ -119,23 +119,6 @@ def test_source_fingerprint_is_length_delimited(tmp_path, monkeypatch):
     assert fp1 != fp2, "fingerprint collided across an input boundary"
 
 
-def test_print_fingerprint_matches_source_fingerprint():
-    """print_fingerprint.py writes the same fingerprint CMake would use."""
-    import subprocess
-
-    script = inject_roctx_loader._SO_SOURCE_DIR / "cmake" / "print_fingerprint.py"
-    assert script.is_file(), f"missing {script}"
-
-    result = subprocess.run(
-        [sys.executable, str(script)],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, result.stderr
-    lines = result.stdout.splitlines()
-    assert lines == [torch_trace_fingerprint.source_fingerprint()]
-
-
 # ---------------------------------------------------------------------------
 # Source / buildfile hygiene
 # ---------------------------------------------------------------------------
@@ -197,7 +180,6 @@ def test_fingerprint_inputs_cover_every_build_input():
     # The module includes synchronized.hpp and gsl_assert.h from the shared utils.
     for required in (
         "CMakeLists.txt",
-        "print_fingerprint.py",
         "synchronized.hpp",
         "gsl_assert.h",
     ):
