@@ -208,7 +208,14 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         max_candidate_instruction_words,
         (static_cast<uint64_t>(candidate->size) + sizeof(uint32_t) - 1u) / sizeof(uint32_t));
   }
+  // Automatic persistent placement is code-object-wide: a cluster-aware
+  // owner can add the fourth coordinate even when every selected access is in
+  // a different kernel or helper. Size the dense gates from the tuple they
+  // will actually consume, not only from access-local analysis metadata.
   const bool has_cluster_workgroup_id =
+      options.moi_record_replay_workgroup_sgprs.cluster_workgroup_id.has_value() ||
+      options.moi_record_replay_workgroup_vgprs.cluster_workgroup_id.has_value() ||
+      options.moi_record_replay_workgroup_private_offsets.cluster_workgroup_id.has_value() ||
       std::ranges::any_of(candidates, [](const ConSanMoiCandidate *candidate) {
         return candidate->uses_gfx1250_cluster_workgroup_id;
       });
