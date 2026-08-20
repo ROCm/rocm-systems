@@ -11,6 +11,17 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - `ROCPROFSYS_SAMPLING_GPUS` is now restricted by the GPUs the ROCm runtime exposes
   via `ROCR_VISIBLE_DEVICES` / `HIP_VISIBLE_DEVICES`.
 
+- `rocprof-sys-python` no longer accepts abbreviated long options (for example,
+  `--conf` for `--config`). Spell out the full option name.
+
+### Resolved issues
+
+- Fixed `rocprof-sys-python` ignoring the `-c`/`--config` flag. The configuration
+  file is now applied to `ROCPROFSYS_CONFIG_FILE` before the profiler bindings are
+  loaded, so its settings take effect. A configuration file already named by
+  `ROCPROFSYS_CONFIG_FILE` is preserved, and the one given on the command line is
+  appended to it.
+
 ### Removed
 
 - Removed the `ROCPROFSYS_BUILD_SQLITE3` CMake option and the in-tree SQLite3/rocpd
