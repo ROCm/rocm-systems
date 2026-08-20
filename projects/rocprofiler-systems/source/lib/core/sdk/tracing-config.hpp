@@ -33,8 +33,8 @@ namespace rocprofsys::rocprofiler_sdk
 namespace concepts
 {
 
-template <typename SdkBackend, typename TracingKind>
-concept tracing_kind_for =
+template <typename TracingKind, typename SdkBackend>
+concept tracing_kind =
     std::same_as<TracingKind, typename SdkBackend::callback_tracing_kind_t> ||
     std::same_as<TracingKind, typename SdkBackend::buffer_tracing_kind_t>;
 }  // namespace concepts
@@ -85,16 +85,13 @@ public:
     static std::unordered_set<typename SdkBackend::buffer_tracing_kind_t>
     get_buffered_domains();
 
-    template <typename TracingKind>
-        requires concepts::tracing_kind_for<SdkBackend, TracingKind>
+    template <concepts::tracing_kind<SdkBackend> TracingKind>
     static std::vector<std::int32_t> get_operations(TracingKind kindv);
-    template <typename TracingKind>
-        requires concepts::tracing_kind_for<SdkBackend, TracingKind>
+    template <concepts::tracing_kind<SdkBackend> TracingKind>
     static std::unordered_set<std::int32_t> get_backtrace_operations(TracingKind kindv);
 
 private:
-    template <typename TracingKind>
-        requires concepts::tracing_kind_for<SdkBackend, TracingKind>
+    template <concepts::tracing_kind<SdkBackend> TracingKind>
     static std::vector<std::pair<std::int32_t, std::string>> all_operation_items_for_kind(
         TracingKind tracing_kind);
 
@@ -107,8 +104,7 @@ private:
 
     [[noreturn]] static void finalize_and_throw(std::string_view exception_message);
 
-    template <typename TracingKind>
-        requires concepts::tracing_kind_for<SdkBackend, TracingKind>
+    template <concepts::tracing_kind<SdkBackend> TracingKind>
     static operation_options_env_names assemble_operation_env_names_for_kind(
         TracingKind kind);
 
@@ -354,8 +350,7 @@ tracing_config<SdkBackend, Externals>::get_buffered_domains()
 
 template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
           policies::rocprofiler_sdk::tracing_config_externals Externals>
-template <typename TracingKind>
-    requires concepts::tracing_kind_for<SdkBackend, TracingKind>
+template <concepts::tracing_kind<SdkBackend> TracingKind>
 std::vector<std::int32_t>
 tracing_config<SdkBackend, Externals>::get_operations(TracingKind kind)
 {
@@ -412,8 +407,7 @@ tracing_config<SdkBackend, Externals>::get_operations(TracingKind kind)
 
 template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
           policies::rocprofiler_sdk::tracing_config_externals Externals>
-template <typename TracingKind>
-    requires concepts::tracing_kind_for<SdkBackend, TracingKind>
+template <concepts::tracing_kind<SdkBackend> TracingKind>
 std::unordered_set<std::int32_t>
 tracing_config<SdkBackend, Externals>::get_backtrace_operations(TracingKind kind)
 {
@@ -459,8 +453,7 @@ tracing_config<SdkBackend, Externals>::get_backtrace_operations(TracingKind kind
 
 template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
           policies::rocprofiler_sdk::tracing_config_externals Externals>
-template <typename TracingKind>
-    requires concepts::tracing_kind_for<SdkBackend, TracingKind>
+template <concepts::tracing_kind<SdkBackend> TracingKind>
 std::vector<std::pair<std::int32_t, std::string>>
 tracing_config<SdkBackend, Externals>::all_operation_items_for_kind(
     TracingKind tracing_kind)
@@ -551,8 +544,7 @@ tracing_config<SdkBackend, Externals>::finalize_and_throw(
 
 template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
           policies::rocprofiler_sdk::tracing_config_externals Externals>
-template <typename TracingKind>
-    requires concepts::tracing_kind_for<SdkBackend, TracingKind>
+template <concepts::tracing_kind<SdkBackend> TracingKind>
 typename tracing_config<SdkBackend, Externals>::operation_options_env_names
 tracing_config<SdkBackend, Externals>::assemble_operation_env_names_for_kind(
     TracingKind kind)
