@@ -1848,6 +1848,15 @@ class ConSanValidationTest(unittest.TestCase):
             workloads["pytorch-torch-histc"]["fault_families"],
             ("barrier-drop", "atomic-weaken-order"),
         )
+        self.assertEqual(
+            workloads["pytorch-torch-histc"][
+                "record_replay_runtime_sample_stride"
+            ],
+            1,
+        )
+        self.assertEqual(
+            workloads["pytorch-torch-histc"]["run_timeout_seconds"], 300
+        )
         native_spellings = json.dumps(
             [
                 workloads[workload_id]
@@ -2001,6 +2010,8 @@ class ConSanValidationTest(unittest.TestCase):
                 ("gfx1250", "tp1-decode-combined", 180),
                 ("gfx950", "clip-bf16", 300),
                 ("gfx1250", "clip-bf16", 30),
+                ("gfx950", "pytorch-torch-histc", 300),
+                ("gfx1250", "pytorch-torch-histc", 30),
                 ("gfx1250", "tensile-sk-mxf4gemm-tdm", 1860),
             )
             for target, workload, expected_timeout in cases:
@@ -2044,6 +2055,47 @@ class ConSanValidationTest(unittest.TestCase):
                         run_profile.call_args.args[2].run_timeout_seconds,
                         expected_timeout,
                     )
+
+    def test_run_forwards_target_launcher_to_runtime_provenance(self) -> None:
+        launcher = ["rocjitsu", "--config", "gfx1250.json", "--"]
+        with temporary_root() as root:
+            args = validation._parse_args(
+                [
+                    "--target",
+                    "gfx1250",
+                    "run",
+                    "--workload",
+                    "pytorch-torch-histc",
+                    "--profile",
+                    "record-replay",
+                    "--phase",
+                    "clean",
+                    "--artifact-root",
+                    str(root / "artifacts"),
+                    "--launcher-json",
+                    json.dumps(launcher),
+                ]
+            )
+            with (
+                mock.patch.object(
+                    validation, "_workspace_from_environment", return_value=root
+                ),
+                mock.patch.object(validation, "_doctor", return_value={"ok": True}),
+                mock.patch.object(
+                    validation,
+                    "_write_provenance",
+                    return_value=root / "provenance.json",
+                ) as write_provenance,
+                mock.patch.object(
+                    validation,
+                    "_run_profile",
+                    return_value={"accepted": True},
+                ),
+                redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(validation._run(args), 0)
+
+        self.assertEqual(write_provenance.call_args.args[4], launcher)
 
     def test_native_gtest_routing_matrix_pins_executables_and_phase_filters(
         self,
@@ -2520,6 +2572,10 @@ class ConSanValidationTest(unittest.TestCase):
             ("jakub-attention", "gfx950", "1"),
             ("jakub-attention", "gfx1201", None),
             ("jakub-attention", "gfx1250", None),
+            ("pytorch-torch-histc", "gfx942", None),
+            ("pytorch-torch-histc", "gfx950", "1"),
+            ("pytorch-torch-histc", "gfx1201", None),
+            ("pytorch-torch-histc", "gfx1250", None),
         ):
             with self.subTest(workload=workload_id, target=target):
                 workload = validation.WORKLOAD_BY_ID[workload_id]
@@ -3441,12 +3497,25 @@ class ConSanValidationTest(unittest.TestCase):
             ),
         ):
             identity = validation._workload_runtime_identity(
-                Path("/workspace"), "gfx1201", workload
+                Path("/workspace"),
+                "gfx1201",
+                workload,
+                ["rocjitsu", "--config", "gfx1250.json", "--"],
             )
         command = command_identity.call_args.args[0]
-        self.assertEqual(command[:2], ["/frozen/python", "-c"])
-        self.assertIn("torch_version", command[2])
-        self.assertIn("triton_version", command[2])
+        self.assertEqual(
+            command[:6],
+            [
+                "rocjitsu",
+                "--config",
+                "gfx1250.json",
+                "--",
+                "/frozen/python",
+                "-c",
+            ],
+        )
+        self.assertIn("torch_version", command[6])
+        self.assertIn("triton_version", command[6])
         self.assertEqual(
             command_identity.call_args.kwargs["timeout"], validation.TIMEOUT_SECONDS
         )
@@ -5907,7 +5976,7 @@ class ConSanValidationTest(unittest.TestCase):
                     validation,
                     "_write_provenance",
                     return_value=root / "provenance.json",
-                ),
+                ) as write_provenance,
                 mock.patch.object(
                     validation, "_workload_command", return_value=["payload"]
                 ),
@@ -5926,6 +5995,9 @@ class ConSanValidationTest(unittest.TestCase):
             ):
                 self.assertEqual(validation._inventory(args), 0)
         self.assertEqual(run_inventory.call_args.args[0], ["rocjitsu", "--", "payload"])
+        self.assertEqual(
+            write_provenance.call_args.args[4], ["rocjitsu", "--"]
+        )
 
     def test_fault_parser_accepts_paired_health_command_overrides(self) -> None:
         args = validation._parse_args(
@@ -6031,7 +6103,7 @@ class ConSanValidationTest(unittest.TestCase):
                         validation,
                         "_write_provenance",
                         return_value=root / "provenance.json",
-                    ),
+                    ) as write_provenance,
                     mock.patch.object(
                         validation, "_workload_command", return_value=["payload"]
                     ),
@@ -6076,6 +6148,7 @@ class ConSanValidationTest(unittest.TestCase):
                     ).read_text(encoding="utf-8")
                 )
                 self.assertEqual(summary["launcher"], launcher)
+                self.assertEqual(write_provenance.call_args.args[4], launcher)
 
     def test_marker_smoke_stops_after_independent_success_marker(self) -> None:
         script = Path(__file__).with_name("consan_marker_smoke.py")

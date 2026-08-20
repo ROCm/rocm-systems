@@ -1219,9 +1219,39 @@ above), not from renaming architecture-specific source.
 | P0 | `torch.mode`, large rows | 🟧 Exact oracle and dynamic execution pass, but static analysis is incomplete at 199/23,298 supported accesses | 🟥 Current strict transform rejects the 49.6 MB bundled object before the oracle (status 4112, 31.29 s) | 🟥 Current strict instrumentation rejects the bundled object before execution | 🟧 Exact oracle and dynamic execution pass, but static analysis is incomplete at 6,708/13,537 accesses and 27/3,998 barriers | Exact values/indices. Record/Replay artifact `consan-gfx950-rr-pytorch-fresh-20260722-mode` records the current one-repetition rejection; the other named current artifacts retain the per-profile frontiers. |
 | P0 | `torch.topk`, FP64 spill and BF16 coverage cases | 🟧 Exact oracle and dynamic execution pass, but static analysis is incomplete at 3,056/230,438 supported accesses | 🟥 Current one-repetition run reaches the 60-second bound before an oracle or coverage verdict | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | Exact values/indices across FP64 register pressure and BF16 coverage. Record/Replay artifact `consan-gfx950-pytorch-topk-rr-clean-20260722-010` records the bounded frontier; the SuperCollider artifact retains its current-hook coverage evidence. |
 | P1 | `torch.sort` over segmented rows | 🩶 Baseline exact; profile unassessed | 🟨 Exact segmented-sort oracle and dynamic execution pass; all 56,380 supported accesses and 6,032 barriers patch, runtime evidence is complete, and replay reports no conflict or unsupported records.  Static analysis remains incomplete because 504/56,884 discovered accesses are unsupported | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | One-repetition artifact `consan-gfx950-pytorch-sort-rr-dense-host-fix-20260722-195514`; elapsed 46.84 s.  Global dense-host exclusion removes the former cross-partition overlapping-patch rejection; the remaining gate is the 504 unsupported access shapes. |
-| P1 | `torch.histc` with a shared-memory-sized bin count | 🩶 Baseline exact; profile unassessed | 🟩 Current accepted bundle: exact clean and paired oracles, complete 179/179 access plus 84/84 barrier coverage across both loaded objects, zero diagnostics, 457.9x paired slowdown, and a reviewed exact-one executed FP32 barrier drop that fails the oracle with the expected no-diagnosis outcome; containment, health, cleanup, and provenance pass | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | Frozen one-repetition artifacts `consan-gfx950-pytorch-histc-rr-complete-frozen-20260722`, `consan-gfx950-pytorch-histc-rr-overhead-frozen-20260722`, and `consan-gfx950-pytorch-histc-rr-fault-frozen-20260722`; source revision `404f5a328b`, hook SHA `3d66d137a13d...`. |
+| P1 | `torch.histc` with a shared-memory-sized bin count | 🟧 Current exact oracle and dynamic execution pass with 102/102 supported accesses patched, but the aggregate analysis/static verdict is incomplete | 🟨 Current target-bounded stride-1 row passes the exact oracle in 146.47 seconds with complete 179/179 accesses plus 84/84 barriers, 352 visible records, zero diagnostics, and complete analysis/static/dynamic verdicts; paired overhead and reviewed-fault refresh remain | 🟨 Current exact oracle passes in 7.71 seconds with complete 179/179 access plus 84/84 barrier coverage, zero forbidden diagnostics, and complete analysis/static/dynamic verdicts; paired overhead and reviewed-fault acceptance remain | 🟨 Current exact oracle passes in 28.95 seconds with complete 179/179 access plus 84/84 barrier coverage and complete analysis/static/dynamic verdicts; paired overhead and reviewed-fault acceptance remain | Current all-profile artifact `rebase-20260820-gfx950-pytorch-histc-all-X38XO3` records the original selection regression and clean rows; `rebase-20260820-gfx950-pytorch-histc-rr-stride-fix-ZJHioX` records its accepted repair. The earlier green bundle remains useful comparison evidence, but paired/fault refresh is required at the repaired current tip. |
 | P2 | Collision-heavy `torch.scatter_reduce` (`sum`, BF16 and FP32) | 🩶 Baseline exact; profile unassessed | 🟧 Both exact collision-count oracles pass in 9.56 s with no diagnostics or dynamic incompleteness, but no atomic is admitted: 520 sites are blocked by cyclic CFGs and 440 have unknown/inapplicable roles | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | One-repetition clean artifact `consan-gfx950-rr-pytorch-scatter-reduce-fresh-20260722`; inventory `consan-gfx950-pytorch-scatter-reduce-inventory-fresh-20260722` proves real atomic structure, so the cell is incomplete rather than N/A. |
 | P2 | `torch.linalg.vector_norm` and large-row `torch.softmax` | 🩶 Baseline exact; profile unassessed | 🟥 Current strict Record/Replay run still rejects the bundled object before execution: preflight covers all 192 kernels and report planning completes, but persistent scalar owner/epoch state cannot be placed below heterogeneous CDNA4 AccVGPR boundaries; no oracle or coverage verdict | 🩶 Baseline exact; profile unassessed | 🩶 Baseline exact; profile unassessed | Exact 3-4-5 norms and CPU-referenced softmax reductions. One-repetition artifact `consan-gfx950-pytorch-norm-softmax-rr-current-20260722-195825` records the 32.75-second rejection; diagnostic log `consan-gfx950-pytorch-norm-softmax-rr-log2-diagnostic-20260722-195952/run.log` identifies the terminal placement reason. |
+
+### 2026-08-20 PyTorch `histc` all-profile refresh
+
+Artifact
+`/home/ossci/xx/consan-validation/rebase-20260820-gfx950-pytorch-histc-all-X38XO3`
+records a current-tip physical-gfx950 baseline and all four profiles at source
+revision `6ad008b654` and hook SHA-256
+`587f327b6c269414c61a79c8915867fdb68fc2a434cc8586ffe41e19e11cfbbc`.
+The exact baseline passes in 4.61 seconds. Sampled passes in 7.71 seconds and
+Inline Shadow in 28.95 seconds; both cover all 179/179 supported accesses and
+84/84 barriers with complete analysis, static, and dynamic verdicts.
+
+SuperCollider preserves the exact oracle and patches 102/102 supported
+accesses in 6.49 seconds, but reports an incomplete aggregate analysis/static
+verdict. Record/Replay preserves the exact oracle and statically patches all
+179/179 accesses plus 84/84 barriers with zero diagnostics, but its standard
+cadence publishes no visible record. It exits 86 after 7.35 seconds with
+`analysis_complete=false` and `dynamic_complete=false`. This current-tip
+result downgrades the former green Record/Replay claim until the runtime
+selection regression is repaired and covered.
+
+Repair artifact
+`/home/ossci/xx/consan-validation/rebase-20260820-gfx950-pytorch-histc-rr-stride-fix-ZJHioX`
+uses the target/workload-resolved stride 1 and a 300-second bound. The exact
+baseline passes in 4.56 seconds and Record/Replay passes in 146.47 seconds,
+publishing 320 access and 32 barrier records without drops or diagnostics.
+Coverage is complete at 179/179 accesses plus 84/84 barriers, and the final
+analysis, static, and dynamic verdicts are all complete. The conventional
+validator suite's 209 tests pin both the gfx950-only cadence and timeout while
+proving that gfx1250 and the other targets retain their standard defaults.
 
 The portable rows are now registered for gfx950.  The next step is an
 all-profile clean inventory, followed by focused repair of the first typed

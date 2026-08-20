@@ -1527,6 +1527,16 @@ TARGET_WORKLOAD_OVERRIDES: dict[str, dict[str, dict[str, object]]] = {
             "record_replay_runtime_sample_stride": 1,
             "run_timeout_seconds": 300,
         },
+        # The physical gfx950 histogram is one two-workgroup dispatch. Its
+        # current dispatch token misses the production stride-65,536 residue,
+        # which makes otherwise complete 179-access/84-barrier instrumentation
+        # terminate without runtime evidence. Select the complete bounded
+        # dispatch for validation and retain enough time for replay's
+        # conservative fixed-capacity report scan.
+        "pytorch-torch-histc": {
+            "record_replay_runtime_sample_stride": 1,
+            "run_timeout_seconds": 300,
+        },
     },
     "gfx1250": {
         # The strict Inline Shadow row completes in roughly 31 seconds after
@@ -2652,6 +2662,7 @@ def _write_provenance(
     target: str,
     workload: Workload,
     workload_root: Path,
+    launcher: list[str] | None = None,
 ) -> Path:
     workload_root.mkdir(parents=True, exist_ok=True)
     path = workload_root / "provenance.json"
@@ -2687,7 +2698,9 @@ def _write_provenance(
         },
         "machine": _machine_identity(target),
         "runtime_tools": _runtime_tool_identities(llvm_readelf, hook),
-        "workload_runtime": _workload_runtime_identity(workspace, target, workload),
+        "workload_runtime": _workload_runtime_identity(
+            workspace, target, workload, launcher
+        ),
         "observations": _empirical_observation_snapshot(),
     }
     normalized_document = json.loads(json.dumps(document))
@@ -2914,7 +2927,10 @@ def _llama_runtime_identity(
 
 
 def _workload_runtime_identity(
-    workspace: Path, target: str, workload: Workload
+    workspace: Path,
+    target: str,
+    workload: Workload,
+    launcher: list[str] | None = None,
 ) -> dict[str, object]:
     if workload.kind == "llama":
         return _llama_runtime_identity(workspace, target, workload)
@@ -2965,7 +2981,7 @@ print(json.dumps({
 }, sort_keys=True))
 """
     packages = _command_identity(
-        [str(python), "-c", script],
+        _with_launcher(launcher or [], [str(python), "-c", script]),
         timeout=TIMEOUT_SECONDS,
         environment=_clean_environment(None, workload, None, target, workspace),
     )
@@ -6287,7 +6303,9 @@ def _inventory(args: argparse.Namespace) -> int:
         raise ValidationError("workspace doctor failed; run the doctor subcommand")
     root = args.artifact_root.resolve() / workload.id / "inventory"
     root.mkdir(parents=True, exist_ok=False)
-    provenance = _write_provenance(workspace, target, workload, root)
+    provenance = _write_provenance(
+        workspace, target, workload, root, args.launcher
+    )
     hook = _hook_path(workspace)
     command = _workload_command(
         workspace, target, workload, "fault", root / "unused.json"
@@ -7212,7 +7230,9 @@ def _fault(args: argparse.Namespace) -> int:
     hook = _hook_path(workspace)
     fault_root = args.artifact_root.resolve() / workload.id / "faults" / fault["id"]
     fault_root.mkdir(parents=True, exist_ok=False)
-    provenance = _write_provenance(workspace, target, workload, fault_root)
+    provenance = _write_provenance(
+        workspace, target, workload, fault_root, launcher
+    )
     root = fault_root / "rows"
     root.mkdir()
     smoke = _health_smoke_command(
@@ -7860,6 +7880,7 @@ def _empirical_campaign(args: argparse.Namespace) -> int:
         target,
         workload,
         _workload_provenance_path(artifact_root, workload).parent,
+        args.launcher,
     )
     config = _empirical_config(args, target, workload, profiles, max_rounds, timeout)
     _write_or_verify_empirical_config(campaign_root / "config.json", config)
@@ -8181,6 +8202,7 @@ def _run(args: argparse.Namespace) -> int:
         target,
         workload,
         _workload_provenance_path(artifact_root, workload).parent,
+        launcher,
     )
     profiles = PROFILE_IDS if args.profile == "all" else (args.profile,)
     if args.phase == "overhead" and args.include_baseline:

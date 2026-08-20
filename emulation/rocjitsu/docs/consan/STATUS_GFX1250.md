@@ -191,11 +191,35 @@ The gfx1250 manifest now includes `pytorch-tdm-descriptor-add`,
 workspace wheel, `torch 2.14.0.dev20260722+rocm7.1`, works on physical gfx950
 but is not a gfx1250-capable runtime: its bundled ROCr sees the synthetic
 gfx1250 agent under RocJitsu, while bundled HIP reports zero supported GPU
-agents and the wheel contains gfx950 but no gfx1250 runtime support.  A
-target-capable prebuilt wheel or source build is therefore an external
-prerequisite for all eight rows.  The strict doctor catches this before an E2E
-artifact is accepted; substituting gfx950 code objects or bypassing RocJitsu is
-not valid gfx1250 evidence.
+agents and the wheel contains gfx950 but no gfx1250 runtime support.
+
+A retained target-specific environment at
+`rocm-systems-waitcheck/emulation/rocjitsu/.venv-gfx1250` supplies
+`torch 2.11.0+rocm7.15.0a20260719`. When selected explicitly, its
+workload-scoped doctor passes a numeric gfx1250 dispatch through RocJitsu and
+proves that the exact current ConSan hook is mapped. This is current evidence
+for the `histc` row below, not permission to substitute gfx950 code objects or
+bypass RocJitsu for any workload.
+
+### 2026-08-20 gfx1250 PyTorch launcher-provenance closure
+
+Artifact
+`/home/ossci/xx/consan-validation/rebase-20260820-gfx1250-pytorch-histc-rr-launcher-fix-bN76SO`
+records baseline and Record/Replay through the RocJitsu `gfx1250.json`
+launcher with hook SHA-256
+`587f327b6c269414c61a79c8915867fdb68fc2a434cc8586ffe41e19e11cfbbc`.
+The exact baseline passes in 1.53 seconds. Record/Replay passes in 3.41 seconds
+with complete 175/175 access and 168/168 split-barrier-member coverage, zero
+diagnostics, and complete analysis, static, and dynamic verdicts.
+
+The first current attempt failed before the workload because provenance's
+required PyTorch runtime-identity dispatch omitted the target launcher even
+though doctor and the validation row used it. Provenance now applies the exact
+launcher to that dispatch as well as to the payload, and records the prefixed
+command. The conventional validator suite's 209 tests include a launcher-
+propagation regression. The gfx950-only `histc` cadence override remains
+target-resolved; this gfx1250 row retains its standard Record/Replay cadence
+and 30-second bound.
 
 ### 2026-08-20 TP1 prefill post-fast-gate regression
 
@@ -781,7 +805,7 @@ have since advanced name their newer committed revision and retained evidence.
 | Tracking unit | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
 | `torch.mode` | 🟩 At `23236d897d`: strict exact oracle; 28,195/28,195 ordinary accesses; paired 116.51x; reviewed exact-one qualified miss and both health gates accepted | 🟩 At `6491647e31`: exact oracle; 28,939/28,939 accesses, 2/2 atomics, and 4,446/4,446 barriers; paired 208.78x; reviewed exact-one qualified miss and both health gates accepted | 🟩 At `96ecd9024a`: exact oracle; 28,939/28,939 accesses, 2/2 atomics, and 8,892/8,892 barrier members; paired 120.09x; reviewed exact-one qualified miss and both health gates accepted | 🟩 Exact oracle; 28,939/28,939 accesses and 4,446/4,446 barriers |
-| `torch.histc` | 🟩 At `502b286cfc`: strict exact oracle; 133/133 ordinary accesses; paired 85.67x; reviewed exact-one causal barrier mutation and both health gates accepted | 🟩 Exact oracle; 175/175 accesses and 84/84 barriers | 🟩 Exact oracle; 175/175 accesses and 168/168 barriers | 🟩 Exact oracle; 175/175 accesses and 84/84 barriers |
+| `torch.histc` | 🟩 At `502b286cfc`: strict exact oracle; 133/133 ordinary accesses; paired 85.67x; reviewed exact-one causal barrier mutation and both health gates accepted | 🟩 Current RocJitsu clean refresh passes the exact oracle with 175/175 accesses and 168/168 split-barrier members; prior paired/fault bundle retained | 🟩 Exact oracle; 175/175 accesses and 168/168 barriers | 🟩 Exact oracle; 175/175 accesses and 84/84 barriers |
 | `001_sk_mxf8f4gemm_tdm` | 🟩 Exact oracle; 768/768 accesses | 🟩 Exact oracle; 768/768 accesses, 204/204 barriers, and 24/24 fences | 🟩 Exact oracle; 768/768 accesses and 180/180 barriers | 🟩 Exact oracle; 768/768 accesses and 102/102 barriers; current paired 13.38x; reviewed exact-one fault and health accepted |
 | `006_sk_hgemm_quick` | 🟧 Existing bounded result retained | 🟩 At `82a0a1dd8b`: exact oracle; 8,162/8,162 accesses, 292/292 barriers, and 80/80 fences; paired 2.02x; reviewed exact-one fault and both health gates accepted | 🟩 Exact oracle; 8,162/8,162 accesses and 544/544 barriers | 🟧 Existing bounded result retained |
 
@@ -798,7 +822,7 @@ that workaround consistently.
 | P0 | `torch.topk`, FP64 spill and BF16 coverage cases | 🟩 Exact FP64/BF16 values and indices; 160,956/160,956 accesses; current paired 903.20x maximum; reviewed exact-one fault and health accepted | 🟧 Current tip transforms both large objects, then signals before an oracle; older exact run covered 160,345/161,136 accesses and all 11,423 barriers | 🟨 Current exact FP64/BF16 oracles pass in 93.52 seconds with dynamic completeness, 102,598/161,136 accesses, and 15,182/15,182 barriers; spill-backed scalar support does not address the remaining owner resource failures | 🟧 Both large objects finish patching; client signals during execution before an oracle | SuperCollider is accepted; Record/Replay and Inline Shadow signal before an oracle, while Sampled remains resource-incomplete. |
 | P1 | `torch.sort` over segmented rows | 🟩 Exact values/indices; 48,224/48,224 accesses; current paired 184.68x | 🟩 Exact values/indices; 48,224/48,224 accesses and 6,032/6,032 barriers; current paired 370.29x | 🟩 Exact values/indices; 48,224/48,224 accesses and 12,064/12,064 barrier members; current paired 171.77x; reviewed noncausal fault accepted | 🟩 Exact values/indices; 48,224/48,224 accesses and 6,032/6,032 barriers; current paired 416.22x | All four profile bundles accepted. |
 | P1 | Collision-heavy `torch.scatter_reduce` (`sum`, BF16 and FP32) | 🟩 Exact collision sums; 23/23 accesses; current paired 24.37x | 🟩 Exact collision sums; 23/23 accesses; current paired 42.30x | 🟩 Exact collision sums; 23/23 accesses; current paired 41.91x | 🟩 Exact collision sums; 23/23 accesses; current paired 40.17x | All profiles accepted; ordered-atomic fault modes are typed N/A for this relaxed singleton reduction. |
-| P1 | `torch.histc` with a shared-memory-sized bin count | 🟩 Exact counts; 133/133 supported accesses; current paired 60.11x | 🟩 Exact counts; 175/175 accesses and 84/84 barriers; current paired 72.00x | 🟩 Exact counts; 175/175 accesses and 168/168 applicable barriers; current paired 67.37x | 🟩 Exact counts; 175/175 accesses and 84/84 barriers; current paired 85.86x | All four profile bundles accepted, including causal barrier-fault evidence. |
+| P1 | `torch.histc` with a shared-memory-sized bin count | 🟩 Exact counts; 133/133 supported accesses; current paired 60.11x | 🟩 Current RocJitsu clean refresh passes exact counts in 3.41 seconds with 175/175 accesses and 168/168 split-barrier members; prior paired 72.00x and causal fault bundle retained | 🟩 Exact counts; 175/175 accesses and 168/168 applicable barriers; current paired 67.37x | 🟩 Exact counts; 175/175 accesses and 84/84 barriers; current paired 85.86x | All four profile bundles accepted, including causal barrier-fault evidence. |
 | P2 | `torch.linalg.vector_norm` and large-row `torch.softmax` | 🟩 Exact norm/softmax; 4,756/4,756 accesses; current paired 315.57x | 🟩 Exact norm/softmax; 4,756/4,756 accesses and 2,352/2,352 barriers; current paired 211.06x; reviewed exact-one fault and health accepted | 🟩 Exact norm/softmax; 4,756/4,756 accesses and 4,572/4,572 barriers; current paired 534.97x | 🟩 Exact norm/softmax; 4,756/4,756 accesses and 2,352/2,352 barriers; current paired 317.24x | Record/Replay uses owner-local zero-generation records where full-pressure kernels cannot preserve the global dispatch-ID pair; all profiles have accepted bundles. |
 | P1 | PyTorch cluster synchronization | 🟩 Exact oracle; 25/25 applicable accesses; current paired 1.02x | 🟩 Exact oracle; 25/25 accesses and 2/2 barriers; current paired 1.03x | 🟩 Exact oracle; 25/25 accesses and 4/4 barrier members; current paired 1.07x | 🟩 Exact oracle; 25/25 accesses and 2/2 barriers; current paired 1.24x | All profiles accepted for the causal cluster-scope synchronization workload. |
 | Survey | Cluster-memory and inter-workgroup synchronization from PyTorch | 🟩 Executable cluster-scope synchronization full bundle accepted | 🟩 Executable cluster-scope synchronization full bundle accepted | 🟩 Executable cluster-scope synchronization full bundle accepted | 🟩 Executable cluster-scope synchronization full bundle accepted | Cluster-scope synchronization is covered; no distinct cluster-memory opcode is claimed. |
