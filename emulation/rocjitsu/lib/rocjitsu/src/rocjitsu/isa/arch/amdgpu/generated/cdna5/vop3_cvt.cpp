@@ -7,7 +7,6 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
-#include "util/except.h"
 #include <memory>
 
 namespace rocjitsu {
@@ -18,7 +17,7 @@ VCvtI32F64Vop3::VCvtI32F64Vop3(const MachineInst *inst)
                ? "v_cvt_i32_f64_e64_dpp"
                : "v_cvt_i32_f64",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtI32F64Vop3), LiteralSupport::Literal32, 1),
+           selected_exec_fn(InstructionExecutionId::VCvtI32F64Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -39,14 +38,22 @@ VCvtI32F64Vop3::VCvtI32F64Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
-  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_I32_F64 does not support DPP8", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtI32F64Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtI32F64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_i32_f64_e64_dpp"
+          : "v_cvt_i32_f64",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_I32_F64 does not support DPP8";
   return std::make_unique<VCvtI32F64Vop3>(opcode);
 }
 } // namespace detail
@@ -56,7 +63,7 @@ VCvtF64I32Vop3::VCvtF64I32Vop3(const MachineInst *inst)
                ? "v_cvt_f64_i32_e64_dpp"
                : "v_cvt_f64_i32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtF64I32Vop3), LiteralSupport::Literal32, 1),
+           selected_exec_fn(InstructionExecutionId::VCvtF64I32Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -76,14 +83,22 @@ VCvtF64I32Vop3::VCvtF64I32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
-  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_F64_I32 does not support DPP8", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtF64I32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtF64I32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_f64_i32_e64_dpp"
+          : "v_cvt_f64_i32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_F64_I32 does not support DPP8";
   return std::make_unique<VCvtF64I32Vop3>(opcode);
 }
 } // namespace detail
@@ -93,7 +108,7 @@ VCvtF32I32Vop3::VCvtF32I32Vop3(const MachineInst *inst)
                ? "v_cvt_f32_i32_e64_dpp"
                : "v_cvt_f32_i32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtF32I32Vop3), LiteralSupport::Literal32, 1),
+           selected_exec_fn(InstructionExecutionId::VCvtF32I32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -126,7 +141,15 @@ VCvtF32I32Vop3::VCvtF32I32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtF32I32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtF32I32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_f32_i32_e64_dpp"
+          : "v_cvt_f32_i32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtF32I32Vop3>(opcode);
 }
 } // namespace detail
@@ -136,7 +159,7 @@ VCvtF32U32Vop3::VCvtF32U32Vop3(const MachineInst *inst)
                ? "v_cvt_f32_u32_e64_dpp"
                : "v_cvt_f32_u32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtF32U32Vop3), LiteralSupport::Literal32, 1),
+           selected_exec_fn(InstructionExecutionId::VCvtF32U32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -169,7 +192,15 @@ VCvtF32U32Vop3::VCvtF32U32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtF32U32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtF32U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_f32_u32_e64_dpp"
+          : "v_cvt_f32_u32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtF32U32Vop3>(opcode);
 }
 } // namespace detail
@@ -179,7 +210,7 @@ VCvtU32F32Vop3::VCvtU32F32Vop3(const MachineInst *inst)
                ? "v_cvt_u32_f32_e64_dpp"
                : "v_cvt_u32_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtU32F32Vop3), LiteralSupport::Literal32, 1),
+           selected_exec_fn(InstructionExecutionId::VCvtU32F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -212,7 +243,15 @@ VCvtU32F32Vop3::VCvtU32F32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtU32F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtU32F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_u32_f32_e64_dpp"
+          : "v_cvt_u32_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtU32F32Vop3>(opcode);
 }
 } // namespace detail
@@ -222,7 +261,7 @@ VCvtI32F32Vop3::VCvtI32F32Vop3(const MachineInst *inst)
                ? "v_cvt_i32_f32_e64_dpp"
                : "v_cvt_i32_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtI32F32Vop3), LiteralSupport::Literal32, 1),
+           selected_exec_fn(InstructionExecutionId::VCvtI32F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -255,7 +294,15 @@ VCvtI32F32Vop3::VCvtI32F32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtI32F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtI32F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_i32_f32_e64_dpp"
+          : "v_cvt_i32_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtI32F32Vop3>(opcode);
 }
 } // namespace detail
@@ -265,7 +312,7 @@ VCvtF16F32Vop3::VCvtF16F32Vop3(const MachineInst *inst)
                ? "v_cvt_f16_f32_e64_dpp"
                : "v_cvt_f16_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtF16F32Vop3), LiteralSupport::Literal32, 1),
+           selected_exec_fn(InstructionExecutionId::VCvtF16F32Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -298,7 +345,15 @@ VCvtF16F32Vop3::VCvtF16F32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtF16F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtF16F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_f16_f32_e64_dpp"
+          : "v_cvt_f16_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtF16F32Vop3>(opcode);
 }
 } // namespace detail
@@ -321,7 +376,7 @@ VCvtF32F16Vop3::VCvtF32F16Vop3(const MachineInst *inst)
                ? "v_cvt_f32_f16_e64_dpp"
                : "v_cvt_f32_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtF32F16Vop3), LiteralSupport::Literal32, 1),
+           selected_exec_fn(InstructionExecutionId::VCvtF32F16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -358,7 +413,15 @@ VCvtF32F16Vop3::VCvtF32F16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtF32F16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtF32F16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_f32_f16_e64_dpp"
+          : "v_cvt_f32_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtF32F16Vop3>(opcode);
 }
 } // namespace detail
@@ -368,8 +431,7 @@ VCvtNearestI32F32Vop3::VCvtNearestI32F32Vop3(const MachineInst *inst)
                ? "v_cvt_nearest_i32_f32_e64_dpp"
                : "v_cvt_nearest_i32_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtNearestI32F32Vop3),
-           LiteralSupport::Literal32, 1),
+           selected_exec_fn(InstructionExecutionId::VCvtNearestI32F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -402,7 +464,16 @@ VCvtNearestI32F32Vop3::VCvtNearestI32F32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtNearestI32F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtNearestI32F32Vop3(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_nearest_i32_f32_e64_dpp"
+          : "v_cvt_nearest_i32_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtNearestI32F32Vop3>(opcode);
 }
 } // namespace detail
@@ -412,8 +483,7 @@ VCvtFloorI32F32Vop3::VCvtFloorI32F32Vop3(const MachineInst *inst)
                ? "v_cvt_floor_i32_f32_e64_dpp"
                : "v_cvt_floor_i32_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtFloorI32F32Vop3), LiteralSupport::Literal32,
-           1),
+           selected_exec_fn(InstructionExecutionId::VCvtFloorI32F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -446,7 +516,16 @@ VCvtFloorI32F32Vop3::VCvtFloorI32F32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtFloorI32F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtFloorI32F32Vop3(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_floor_i32_f32_e64_dpp"
+          : "v_cvt_floor_i32_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtFloorI32F32Vop3>(opcode);
 }
 } // namespace detail
@@ -456,8 +535,7 @@ VCvtOffF32I4Vop3::VCvtOffF32I4Vop3(const MachineInst *inst)
                ? "v_cvt_off_f32_i4_e64_dpp"
                : "v_cvt_off_f32_i4",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtOffF32I4Vop3), LiteralSupport::Literal32,
-           1),
+           selected_exec_fn(InstructionExecutionId::VCvtOffF32I4Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -490,7 +568,16 @@ VCvtOffF32I4Vop3::VCvtOffF32I4Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtOffF32I4Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtOffF32I4Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_off_f32_i4_e64_dpp"
+          : "v_cvt_off_f32_i4",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtOffF32I4Vop3>(opcode);
 }
 } // namespace detail
@@ -500,7 +587,7 @@ VCvtF32F64Vop3::VCvtF32F64Vop3(const MachineInst *inst)
                ? "v_cvt_f32_f64_e64_dpp"
                : "v_cvt_f32_f64",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtF32F64Vop3), LiteralSupport::Literal32, 1),
+           selected_exec_fn(InstructionExecutionId::VCvtF32F64Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -521,14 +608,22 @@ VCvtF32F64Vop3::VCvtF32F64Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
-  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_F32_F64 does not support DPP8", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtF32F64Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtF32F64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_f32_f64_e64_dpp"
+          : "v_cvt_f32_f64",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_F32_F64 does not support DPP8";
   return std::make_unique<VCvtF32F64Vop3>(opcode);
 }
 } // namespace detail
@@ -538,7 +633,7 @@ VCvtF64F32Vop3::VCvtF64F32Vop3(const MachineInst *inst)
                ? "v_cvt_f64_f32_e64_dpp"
                : "v_cvt_f64_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtF64F32Vop3), LiteralSupport::Literal32, 1),
+           selected_exec_fn(InstructionExecutionId::VCvtF64F32Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -558,14 +653,22 @@ VCvtF64F32Vop3::VCvtF64F32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
-  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_F64_F32 does not support DPP8", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtF64F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtF64F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_f64_f32_e64_dpp"
+          : "v_cvt_f64_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_F64_F32 does not support DPP8";
   return std::make_unique<VCvtF64F32Vop3>(opcode);
 }
 } // namespace detail
@@ -575,8 +678,7 @@ VCvtF32Ubyte0Vop3::VCvtF32Ubyte0Vop3(const MachineInst *inst)
                ? "v_cvt_f32_ubyte0_e64_dpp"
                : "v_cvt_f32_ubyte0",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtF32Ubyte0Vop3), LiteralSupport::Literal32,
-           1),
+           selected_exec_fn(InstructionExecutionId::VCvtF32Ubyte0Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -609,7 +711,16 @@ VCvtF32Ubyte0Vop3::VCvtF32Ubyte0Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtF32Ubyte0Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtF32Ubyte0Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_f32_ubyte0_e64_dpp"
+          : "v_cvt_f32_ubyte0",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtF32Ubyte0Vop3>(opcode);
 }
 } // namespace detail
@@ -619,8 +730,7 @@ VCvtF32Ubyte1Vop3::VCvtF32Ubyte1Vop3(const MachineInst *inst)
                ? "v_cvt_f32_ubyte1_e64_dpp"
                : "v_cvt_f32_ubyte1",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtF32Ubyte1Vop3), LiteralSupport::Literal32,
-           1),
+           selected_exec_fn(InstructionExecutionId::VCvtF32Ubyte1Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -653,7 +763,16 @@ VCvtF32Ubyte1Vop3::VCvtF32Ubyte1Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtF32Ubyte1Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtF32Ubyte1Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_f32_ubyte1_e64_dpp"
+          : "v_cvt_f32_ubyte1",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtF32Ubyte1Vop3>(opcode);
 }
 } // namespace detail
@@ -663,8 +782,7 @@ VCvtF32Ubyte2Vop3::VCvtF32Ubyte2Vop3(const MachineInst *inst)
                ? "v_cvt_f32_ubyte2_e64_dpp"
                : "v_cvt_f32_ubyte2",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtF32Ubyte2Vop3), LiteralSupport::Literal32,
-           1),
+           selected_exec_fn(InstructionExecutionId::VCvtF32Ubyte2Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -697,7 +815,16 @@ VCvtF32Ubyte2Vop3::VCvtF32Ubyte2Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtF32Ubyte2Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtF32Ubyte2Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_f32_ubyte2_e64_dpp"
+          : "v_cvt_f32_ubyte2",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtF32Ubyte2Vop3>(opcode);
 }
 } // namespace detail
@@ -707,8 +834,7 @@ VCvtF32Ubyte3Vop3::VCvtF32Ubyte3Vop3(const MachineInst *inst)
                ? "v_cvt_f32_ubyte3_e64_dpp"
                : "v_cvt_f32_ubyte3",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtF32Ubyte3Vop3), LiteralSupport::Literal32,
-           1),
+           selected_exec_fn(InstructionExecutionId::VCvtF32Ubyte3Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -741,7 +867,16 @@ VCvtF32Ubyte3Vop3::VCvtF32Ubyte3Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtF32Ubyte3Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtF32Ubyte3Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_f32_ubyte3_e64_dpp"
+          : "v_cvt_f32_ubyte3",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtF32Ubyte3Vop3>(opcode);
 }
 } // namespace detail
@@ -751,7 +886,7 @@ VCvtU32F64Vop3::VCvtU32F64Vop3(const MachineInst *inst)
                ? "v_cvt_u32_f64_e64_dpp"
                : "v_cvt_u32_f64",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtU32F64Vop3), LiteralSupport::Literal32, 1),
+           selected_exec_fn(InstructionExecutionId::VCvtU32F64Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -772,14 +907,22 @@ VCvtU32F64Vop3::VCvtU32F64Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
-  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_U32_F64 does not support DPP8", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtU32F64Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtU32F64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_u32_f64_e64_dpp"
+          : "v_cvt_u32_f64",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_U32_F64 does not support DPP8";
   return std::make_unique<VCvtU32F64Vop3>(opcode);
 }
 } // namespace detail
@@ -789,7 +932,7 @@ VCvtF64U32Vop3::VCvtF64U32Vop3(const MachineInst *inst)
                ? "v_cvt_f64_u32_e64_dpp"
                : "v_cvt_f64_u32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtF64U32Vop3), LiteralSupport::Literal32, 1),
+           selected_exec_fn(InstructionExecutionId::VCvtF64U32Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -809,14 +952,22 @@ VCvtF64U32Vop3::VCvtF64U32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
-  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_F64_U32 does not support DPP8", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtF64U32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtF64U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_f64_u32_e64_dpp"
+          : "v_cvt_f64_u32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_F64_U32 does not support DPP8";
   return std::make_unique<VCvtF64U32Vop3>(opcode);
 }
 } // namespace detail
@@ -826,8 +977,7 @@ VFrexpExpI32F64Vop3::VFrexpExpI32F64Vop3(const MachineInst *inst)
                ? "v_frexp_exp_i32_f64_e64_dpp"
                : "v_frexp_exp_i32_f64",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VFrexpExpI32F64Vop3), LiteralSupport::Literal32,
-           1),
+           selected_exec_fn(InstructionExecutionId::VFrexpExpI32F64Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -848,14 +998,23 @@ VFrexpExpI32F64Vop3::VFrexpExpI32F64Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
-  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_FREXP_EXP_I32_F64 does not support DPP8", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVFrexpExpI32F64Vop3(const MachineInst *opcode) {
+DecodeResult decodeVFrexpExpI32F64Vop3(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_frexp_exp_i32_f64_e64_dpp"
+          : "v_frexp_exp_i32_f64",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_FREXP_EXP_I32_F64 does not support DPP8";
   return std::make_unique<VFrexpExpI32F64Vop3>(opcode);
 }
 } // namespace detail
@@ -865,8 +1024,7 @@ VFrexpMantF64Vop3::VFrexpMantF64Vop3(const MachineInst *inst)
                ? "v_frexp_mant_f64_e64_dpp"
                : "v_frexp_mant_f64",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VFrexpMantF64Vop3), LiteralSupport::Literal32,
-           1),
+           selected_exec_fn(InstructionExecutionId::VFrexpMantF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -887,14 +1045,23 @@ VFrexpMantF64Vop3::VFrexpMantF64Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
-  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_FREXP_MANT_F64 does not support DPP8", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVFrexpMantF64Vop3(const MachineInst *opcode) {
+DecodeResult decodeVFrexpMantF64Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_frexp_mant_f64_e64_dpp"
+          : "v_frexp_mant_f64",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_FREXP_MANT_F64 does not support DPP8";
   return std::make_unique<VFrexpMantF64Vop3>(opcode);
 }
 } // namespace detail
@@ -904,8 +1071,7 @@ VFrexpExpI32F32Vop3::VFrexpExpI32F32Vop3(const MachineInst *inst)
                ? "v_frexp_exp_i32_f32_e64_dpp"
                : "v_frexp_exp_i32_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VFrexpExpI32F32Vop3), LiteralSupport::Literal32,
-           1),
+           selected_exec_fn(InstructionExecutionId::VFrexpExpI32F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -938,7 +1104,16 @@ VFrexpExpI32F32Vop3::VFrexpExpI32F32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVFrexpExpI32F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVFrexpExpI32F32Vop3(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_frexp_exp_i32_f32_e64_dpp"
+          : "v_frexp_exp_i32_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VFrexpExpI32F32Vop3>(opcode);
 }
 } // namespace detail
@@ -948,8 +1123,7 @@ VFrexpMantF32Vop3::VFrexpMantF32Vop3(const MachineInst *inst)
                ? "v_frexp_mant_f32_e64_dpp"
                : "v_frexp_mant_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VFrexpMantF32Vop3), LiteralSupport::Literal32,
-           1),
+           selected_exec_fn(InstructionExecutionId::VFrexpMantF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -982,7 +1156,16 @@ VFrexpMantF32Vop3::VFrexpMantF32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVFrexpMantF32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVFrexpMantF32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_frexp_mant_f32_e64_dpp"
+          : "v_frexp_mant_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VFrexpMantF32Vop3>(opcode);
 }
 } // namespace detail
@@ -992,7 +1175,7 @@ VCvtF16U16Vop3::VCvtF16U16Vop3(const MachineInst *inst)
                ? "v_cvt_f16_u16_e64_dpp"
                : "v_cvt_f16_u16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtF16U16Vop3), LiteralSupport::Literal32, 1),
+           selected_exec_fn(InstructionExecutionId::VCvtF16U16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1029,7 +1212,15 @@ VCvtF16U16Vop3::VCvtF16U16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtF16U16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtF16U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_f16_u16_e64_dpp"
+          : "v_cvt_f16_u16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtF16U16Vop3>(opcode);
 }
 } // namespace detail
@@ -1052,7 +1243,7 @@ VCvtF16I16Vop3::VCvtF16I16Vop3(const MachineInst *inst)
                ? "v_cvt_f16_i16_e64_dpp"
                : "v_cvt_f16_i16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtF16I16Vop3), LiteralSupport::Literal32, 1),
+           selected_exec_fn(InstructionExecutionId::VCvtF16I16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1089,7 +1280,15 @@ VCvtF16I16Vop3::VCvtF16I16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtF16I16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtF16I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_f16_i16_e64_dpp"
+          : "v_cvt_f16_i16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtF16I16Vop3>(opcode);
 }
 } // namespace detail
@@ -1112,7 +1311,7 @@ VCvtU16F16Vop3::VCvtU16F16Vop3(const MachineInst *inst)
                ? "v_cvt_u16_f16_e64_dpp"
                : "v_cvt_u16_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtU16F16Vop3), LiteralSupport::Literal32, 1),
+           selected_exec_fn(InstructionExecutionId::VCvtU16F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1149,7 +1348,15 @@ VCvtU16F16Vop3::VCvtU16F16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtU16F16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtU16F16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_u16_f16_e64_dpp"
+          : "v_cvt_u16_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtU16F16Vop3>(opcode);
 }
 } // namespace detail
@@ -1172,7 +1379,7 @@ VCvtI16F16Vop3::VCvtI16F16Vop3(const MachineInst *inst)
                ? "v_cvt_i16_f16_e64_dpp"
                : "v_cvt_i16_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtI16F16Vop3), LiteralSupport::Literal32, 1),
+           selected_exec_fn(InstructionExecutionId::VCvtI16F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1209,7 +1416,15 @@ VCvtI16F16Vop3::VCvtI16F16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtI16F16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtI16F16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_i16_f16_e64_dpp"
+          : "v_cvt_i16_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtI16F16Vop3>(opcode);
 }
 } // namespace detail
@@ -1232,8 +1447,7 @@ VFrexpMantF16Vop3::VFrexpMantF16Vop3(const MachineInst *inst)
                ? "v_frexp_mant_f16_e64_dpp"
                : "v_frexp_mant_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VFrexpMantF16Vop3), LiteralSupport::Literal32,
-           1),
+           selected_exec_fn(InstructionExecutionId::VFrexpMantF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1270,7 +1484,16 @@ VFrexpMantF16Vop3::VFrexpMantF16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVFrexpMantF16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVFrexpMantF16Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_frexp_mant_f16_e64_dpp"
+          : "v_frexp_mant_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VFrexpMantF16Vop3>(opcode);
 }
 } // namespace detail
@@ -1293,8 +1516,7 @@ VFrexpExpI16F16Vop3::VFrexpExpI16F16Vop3(const MachineInst *inst)
                ? "v_frexp_exp_i16_f16_e64_dpp"
                : "v_frexp_exp_i16_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VFrexpExpI16F16Vop3), LiteralSupport::Literal32,
-           1),
+           selected_exec_fn(InstructionExecutionId::VFrexpExpI16F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1331,7 +1553,16 @@ VFrexpExpI16F16Vop3::VFrexpExpI16F16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVFrexpExpI16F16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVFrexpExpI16F16Vop3(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_frexp_exp_i16_f16_e64_dpp"
+          : "v_frexp_exp_i16_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VFrexpExpI16F16Vop3>(opcode);
 }
 } // namespace detail
@@ -1354,8 +1585,7 @@ VCvtNormI16F16Vop3::VCvtNormI16F16Vop3(const MachineInst *inst)
                ? "v_cvt_norm_i16_f16_e64_dpp"
                : "v_cvt_norm_i16_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtNormI16F16Vop3), LiteralSupport::Literal32,
-           1),
+           selected_exec_fn(InstructionExecutionId::VCvtNormI16F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1392,7 +1622,16 @@ VCvtNormI16F16Vop3::VCvtNormI16F16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtNormI16F16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtNormI16F16Vop3(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_norm_i16_f16_e64_dpp"
+          : "v_cvt_norm_i16_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtNormI16F16Vop3>(opcode);
 }
 } // namespace detail
@@ -1415,8 +1654,7 @@ VCvtNormU16F16Vop3::VCvtNormU16F16Vop3(const MachineInst *inst)
                ? "v_cvt_norm_u16_f16_e64_dpp"
                : "v_cvt_norm_u16_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtNormU16F16Vop3), LiteralSupport::Literal32,
-           1),
+           selected_exec_fn(InstructionExecutionId::VCvtNormU16F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1453,7 +1691,16 @@ VCvtNormU16F16Vop3::VCvtNormU16F16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtNormU16F16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtNormU16F16Vop3(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_norm_u16_f16_e64_dpp"
+          : "v_cvt_norm_u16_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtNormU16F16Vop3>(opcode);
 }
 } // namespace detail
@@ -1476,7 +1723,7 @@ VCvtI32I16Vop3::VCvtI32I16Vop3(const MachineInst *inst)
                ? "v_cvt_i32_i16_e64_dpp"
                : "v_cvt_i32_i16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtI32I16Vop3), LiteralSupport::Literal32, 1),
+           selected_exec_fn(InstructionExecutionId::VCvtI32I16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1513,7 +1760,15 @@ VCvtI32I16Vop3::VCvtI32I16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtI32I16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtI32I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_i32_i16_e64_dpp"
+          : "v_cvt_i32_i16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtI32I16Vop3>(opcode);
 }
 } // namespace detail
@@ -1523,7 +1778,7 @@ VCvtU32U16Vop3::VCvtU32U16Vop3(const MachineInst *inst)
                ? "v_cvt_u32_u16_e64_dpp"
                : "v_cvt_u32_u16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtU32U16Vop3), LiteralSupport::Literal32, 1),
+           selected_exec_fn(InstructionExecutionId::VCvtU32U16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1560,7 +1815,15 @@ VCvtU32U16Vop3::VCvtU32U16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtU32U16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtU32U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_u32_u16_e64_dpp"
+          : "v_cvt_u32_u16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtU32U16Vop3>(opcode);
 }
 } // namespace detail
@@ -1570,7 +1833,7 @@ VCvtF32Fp8Vop3::VCvtF32Fp8Vop3(const MachineInst *inst)
                ? "v_cvt_f32_fp8_e64_dpp"
                : "v_cvt_f32_fp8",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtF32Fp8Vop3), LiteralSupport::Literal32, 1),
+           selected_exec_fn(InstructionExecutionId::VCvtF32Fp8Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(8, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1603,7 +1866,15 @@ VCvtF32Fp8Vop3::VCvtF32Fp8Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtF32Fp8Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtF32Fp8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_f32_fp8_e64_dpp"
+          : "v_cvt_f32_fp8",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtF32Fp8Vop3>(opcode);
 }
 } // namespace detail
@@ -1613,7 +1884,7 @@ VCvtF32Bf8Vop3::VCvtF32Bf8Vop3(const MachineInst *inst)
                ? "v_cvt_f32_bf8_e64_dpp"
                : "v_cvt_f32_bf8",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtF32Bf8Vop3), LiteralSupport::Literal32, 1),
+           selected_exec_fn(InstructionExecutionId::VCvtF32Bf8Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(8, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1646,7 +1917,15 @@ VCvtF32Bf8Vop3::VCvtF32Bf8Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtF32Bf8Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtF32Bf8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_f32_bf8_e64_dpp"
+          : "v_cvt_f32_bf8",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtF32Bf8Vop3>(opcode);
 }
 } // namespace detail
@@ -1656,8 +1935,7 @@ VCvtPkF32Fp8Vop3::VCvtPkF32Fp8Vop3(const MachineInst *inst)
                ? "v_cvt_pk_f32_fp8_e64_dpp"
                : "v_cvt_pk_f32_fp8",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtPkF32Fp8Vop3), LiteralSupport::Literal32,
-           1),
+           selected_exec_fn(InstructionExecutionId::VCvtPkF32Fp8Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1672,15 +1950,24 @@ VCvtPkF32Fp8Vop3::VCvtPkF32Fp8Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_PK_F32_FP8 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtPkF32Fp8Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtPkF32Fp8Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_pk_f32_fp8_e64_dpp"
+          : "v_cvt_pk_f32_fp8",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_PK_F32_FP8 does not support DPP";
   return std::make_unique<VCvtPkF32Fp8Vop3>(opcode);
 }
 } // namespace detail
@@ -1690,8 +1977,7 @@ VCvtPkF32Bf8Vop3::VCvtPkF32Bf8Vop3(const MachineInst *inst)
                ? "v_cvt_pk_f32_bf8_e64_dpp"
                : "v_cvt_pk_f32_bf8",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtPkF32Bf8Vop3), LiteralSupport::Literal32,
-           1),
+           selected_exec_fn(InstructionExecutionId::VCvtPkF32Bf8Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1706,15 +1992,24 @@ VCvtPkF32Bf8Vop3::VCvtPkF32Bf8Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_PK_F32_BF8 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtPkF32Bf8Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtPkF32Bf8Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_pk_f32_bf8_e64_dpp"
+          : "v_cvt_pk_f32_bf8",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_PK_F32_BF8 does not support DPP";
   return std::make_unique<VCvtPkF32Bf8Vop3>(opcode);
 }
 } // namespace detail
@@ -1724,7 +2019,7 @@ VCvtF32Bf16Vop3::VCvtF32Bf16Vop3(const MachineInst *inst)
                ? "v_cvt_f32_bf16_e64_dpp"
                : "v_cvt_f32_bf16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtF32Bf16Vop3), LiteralSupport::Literal32, 1),
+           selected_exec_fn(InstructionExecutionId::VCvtF32Bf16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1761,7 +2056,16 @@ VCvtF32Bf16Vop3::VCvtF32Bf16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtF32Bf16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtF32Bf16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_f32_bf16_e64_dpp"
+          : "v_cvt_f32_bf16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtF32Bf16Vop3>(opcode);
 }
 } // namespace detail
@@ -1771,8 +2075,7 @@ VCvtPkF16Fp8Vop3::VCvtPkF16Fp8Vop3(const MachineInst *inst)
                ? "v_cvt_pk_f16_fp8_e64_dpp"
                : "v_cvt_pk_f16_fp8",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtPkF16Fp8Vop3), LiteralSupport::Literal32,
-           1),
+           selected_exec_fn(InstructionExecutionId::VCvtPkF16Fp8Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1809,7 +2112,16 @@ VCvtPkF16Fp8Vop3::VCvtPkF16Fp8Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtPkF16Fp8Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtPkF16Fp8Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_pk_f16_fp8_e64_dpp"
+          : "v_cvt_pk_f16_fp8",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtPkF16Fp8Vop3>(opcode);
 }
 } // namespace detail
@@ -1819,8 +2131,7 @@ VCvtPkF16Bf8Vop3::VCvtPkF16Bf8Vop3(const MachineInst *inst)
                ? "v_cvt_pk_f16_bf8_e64_dpp"
                : "v_cvt_pk_f16_bf8",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtPkF16Bf8Vop3), LiteralSupport::Literal32,
-           1),
+           selected_exec_fn(InstructionExecutionId::VCvtPkF16Bf8Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1857,7 +2168,16 @@ VCvtPkF16Bf8Vop3::VCvtPkF16Bf8Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtPkF16Bf8Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtPkF16Bf8Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_pk_f16_bf8_e64_dpp"
+          : "v_cvt_pk_f16_bf8",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtPkF16Bf8Vop3>(opcode);
 }
 } // namespace detail
@@ -1867,7 +2187,7 @@ VCvtF16Fp8Vop3::VCvtF16Fp8Vop3(const MachineInst *inst)
                ? "v_cvt_f16_fp8_e64_dpp"
                : "v_cvt_f16_fp8",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtF16Fp8Vop3), LiteralSupport::Literal32, 1),
+           selected_exec_fn(InstructionExecutionId::VCvtF16Fp8Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(8, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1900,7 +2220,15 @@ VCvtF16Fp8Vop3::VCvtF16Fp8Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtF16Fp8Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtF16Fp8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_f16_fp8_e64_dpp"
+          : "v_cvt_f16_fp8",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtF16Fp8Vop3>(opcode);
 }
 } // namespace detail
@@ -1923,7 +2251,7 @@ VCvtF16Bf8Vop3::VCvtF16Bf8Vop3(const MachineInst *inst)
                ? "v_cvt_f16_bf8_e64_dpp"
                : "v_cvt_f16_bf8",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtF16Bf8Vop3), LiteralSupport::Literal32, 1),
+           selected_exec_fn(InstructionExecutionId::VCvtF16Bf8Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(8, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -1956,7 +2284,15 @@ VCvtF16Bf8Vop3::VCvtF16Bf8Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtF16Bf8Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtF16Bf8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_f16_bf8_e64_dpp"
+          : "v_cvt_f16_bf8",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtF16Bf8Vop3>(opcode);
 }
 } // namespace detail
@@ -1979,8 +2315,7 @@ VCvtPkRtzF16F32Vop3::VCvtPkRtzF16F32Vop3(const MachineInst *inst)
                ? "v_cvt_pk_rtz_f16_f32_e64_dpp"
                : "v_cvt_pk_rtz_f16_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtPkRtzF16F32Vop3), LiteralSupport::Literal32,
-           2),
+           selected_exec_fn(InstructionExecutionId::VCvtPkRtzF16F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2020,7 +2355,16 @@ VCvtPkRtzF16F32Vop3::VCvtPkRtzF16F32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtPkRtzF16F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtPkRtzF16F32Vop3(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_pk_rtz_f16_f32_e64_dpp"
+          : "v_cvt_pk_rtz_f16_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtPkRtzF16F32Vop3>(opcode);
 }
 } // namespace detail
@@ -2030,7 +2374,7 @@ VCvtPkU8F32Vop3::VCvtPkU8F32Vop3(const MachineInst *inst)
                ? "v_cvt_pk_u8_f32_e64_dpp"
                : "v_cvt_pk_u8_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtPkU8F32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VCvtPkU8F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2077,7 +2421,16 @@ VCvtPkU8F32Vop3::VCvtPkU8F32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtPkU8F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtPkU8F32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_pk_u8_f32_e64_dpp"
+          : "v_cvt_pk_u8_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtPkU8F32Vop3>(opcode);
 }
 } // namespace detail
@@ -2087,8 +2440,7 @@ VCvtScalef32SrPk8Fp4F32Vop3::VCvtScalef32SrPk8Fp4F32Vop3(const MachineInst *inst
                ? "v_cvt_scalef32_sr_pk8_fp4_f32_e64_dpp"
                : "v_cvt_scalef32_sr_pk8_fp4_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk8Fp4F32Vop3),
-           LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk8Fp4F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2107,9 +2459,6 @@ VCvtScalef32SrPk8Fp4F32Vop3::VCvtScalef32SrPk8Fp4F32Vop3(const MachineInst *inst
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_SR_PK8_FP4_F32 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -2117,7 +2466,19 @@ VCvtScalef32SrPk8Fp4F32Vop3::VCvtScalef32SrPk8Fp4F32Vop3(const MachineInst *inst
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32SrPk8Fp4F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32SrPk8Fp4F32Vop3(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_sr_pk8_fp4_f32_e64_dpp"
+          : "v_cvt_scalef32_sr_pk8_fp4_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_SR_PK8_FP4_F32 does not support DPP";
   return std::make_unique<VCvtScalef32SrPk8Fp4F32Vop3>(opcode);
 }
 } // namespace detail
@@ -2127,8 +2488,7 @@ VCvtScalef32SrPk8Fp8F32Vop3::VCvtScalef32SrPk8Fp8F32Vop3(const MachineInst *inst
                ? "v_cvt_scalef32_sr_pk8_fp8_f32_e64_dpp"
                : "v_cvt_scalef32_sr_pk8_fp8_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk8Fp8F32Vop3),
-           LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk8Fp8F32Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2147,9 +2507,6 @@ VCvtScalef32SrPk8Fp8F32Vop3::VCvtScalef32SrPk8Fp8F32Vop3(const MachineInst *inst
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_SR_PK8_FP8_F32 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -2157,7 +2514,19 @@ VCvtScalef32SrPk8Fp8F32Vop3::VCvtScalef32SrPk8Fp8F32Vop3(const MachineInst *inst
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32SrPk8Fp8F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32SrPk8Fp8F32Vop3(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_sr_pk8_fp8_f32_e64_dpp"
+          : "v_cvt_scalef32_sr_pk8_fp8_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_SR_PK8_FP8_F32 does not support DPP";
   return std::make_unique<VCvtScalef32SrPk8Fp8F32Vop3>(opcode);
 }
 } // namespace detail
@@ -2167,8 +2536,7 @@ VCvtScalef32SrPk8Bf8F32Vop3::VCvtScalef32SrPk8Bf8F32Vop3(const MachineInst *inst
                ? "v_cvt_scalef32_sr_pk8_bf8_f32_e64_dpp"
                : "v_cvt_scalef32_sr_pk8_bf8_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk8Bf8F32Vop3),
-           LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk8Bf8F32Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2187,9 +2555,6 @@ VCvtScalef32SrPk8Bf8F32Vop3::VCvtScalef32SrPk8Bf8F32Vop3(const MachineInst *inst
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_SR_PK8_BF8_F32 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -2197,7 +2562,19 @@ VCvtScalef32SrPk8Bf8F32Vop3::VCvtScalef32SrPk8Bf8F32Vop3(const MachineInst *inst
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32SrPk8Bf8F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32SrPk8Bf8F32Vop3(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_sr_pk8_bf8_f32_e64_dpp"
+          : "v_cvt_scalef32_sr_pk8_bf8_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_SR_PK8_BF8_F32 does not support DPP";
   return std::make_unique<VCvtScalef32SrPk8Bf8F32Vop3>(opcode);
 }
 } // namespace detail
@@ -2207,8 +2584,7 @@ VCvtScalePk8F16Fp4Vop3::VCvtScalePk8F16Fp4Vop3(const MachineInst *inst)
                ? "v_cvt_scale_pk8_f16_fp4_e64_dpp"
                : "v_cvt_scale_pk8_f16_fp4",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalePk8F16Fp4Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalePk8F16Fp4Vop3)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2221,16 +2597,25 @@ VCvtScalePk8F16Fp4Vop3::VCvtScalePk8F16Fp4Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALE_PK8_F16_FP4 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalePk8F16Fp4Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalePk8F16Fp4Vop3(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scale_pk8_f16_fp4_e64_dpp"
+          : "v_cvt_scale_pk8_f16_fp4",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALE_PK8_F16_FP4 does not support DPP";
   return std::make_unique<VCvtScalePk8F16Fp4Vop3>(opcode);
 }
 } // namespace detail
@@ -2240,8 +2625,7 @@ VCvtScalePk8Bf16Fp4Vop3::VCvtScalePk8Bf16Fp4Vop3(const MachineInst *inst)
                ? "v_cvt_scale_pk8_bf16_fp4_e64_dpp"
                : "v_cvt_scale_pk8_bf16_fp4",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalePk8Bf16Fp4Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalePk8Bf16Fp4Vop3)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2254,16 +2638,25 @@ VCvtScalePk8Bf16Fp4Vop3::VCvtScalePk8Bf16Fp4Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALE_PK8_BF16_FP4 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalePk8Bf16Fp4Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalePk8Bf16Fp4Vop3(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scale_pk8_bf16_fp4_e64_dpp"
+          : "v_cvt_scale_pk8_bf16_fp4",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALE_PK8_BF16_FP4 does not support DPP";
   return std::make_unique<VCvtScalePk8Bf16Fp4Vop3>(opcode);
 }
 } // namespace detail
@@ -2273,8 +2666,7 @@ VCvtScalePk8F32Fp4Vop3::VCvtScalePk8F32Fp4Vop3(const MachineInst *inst)
                ? "v_cvt_scale_pk8_f32_fp4_e64_dpp"
                : "v_cvt_scale_pk8_f32_fp4",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalePk8F32Fp4Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalePk8F32Fp4Vop3)),
       vdst(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2287,16 +2679,25 @@ VCvtScalePk8F32Fp4Vop3::VCvtScalePk8F32Fp4Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALE_PK8_F32_FP4 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalePk8F32Fp4Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalePk8F32Fp4Vop3(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scale_pk8_f32_fp4_e64_dpp"
+          : "v_cvt_scale_pk8_f32_fp4",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALE_PK8_F32_FP4 does not support DPP";
   return std::make_unique<VCvtScalePk8F32Fp4Vop3>(opcode);
 }
 } // namespace detail
@@ -2306,8 +2707,7 @@ VCvtScalePk8F16Fp8Vop3::VCvtScalePk8F16Fp8Vop3(const MachineInst *inst)
                ? "v_cvt_scale_pk8_f16_fp8_e64_dpp"
                : "v_cvt_scale_pk8_f16_fp8",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalePk8F16Fp8Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalePk8F16Fp8Vop3)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2320,16 +2720,25 @@ VCvtScalePk8F16Fp8Vop3::VCvtScalePk8F16Fp8Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALE_PK8_F16_FP8 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalePk8F16Fp8Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalePk8F16Fp8Vop3(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scale_pk8_f16_fp8_e64_dpp"
+          : "v_cvt_scale_pk8_f16_fp8",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALE_PK8_F16_FP8 does not support DPP";
   return std::make_unique<VCvtScalePk8F16Fp8Vop3>(opcode);
 }
 } // namespace detail
@@ -2339,8 +2748,7 @@ VCvtScalePk8Bf16Fp8Vop3::VCvtScalePk8Bf16Fp8Vop3(const MachineInst *inst)
                ? "v_cvt_scale_pk8_bf16_fp8_e64_dpp"
                : "v_cvt_scale_pk8_bf16_fp8",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalePk8Bf16Fp8Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalePk8Bf16Fp8Vop3)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2353,16 +2761,25 @@ VCvtScalePk8Bf16Fp8Vop3::VCvtScalePk8Bf16Fp8Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALE_PK8_BF16_FP8 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalePk8Bf16Fp8Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalePk8Bf16Fp8Vop3(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scale_pk8_bf16_fp8_e64_dpp"
+          : "v_cvt_scale_pk8_bf16_fp8",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALE_PK8_BF16_FP8 does not support DPP";
   return std::make_unique<VCvtScalePk8Bf16Fp8Vop3>(opcode);
 }
 } // namespace detail
@@ -2372,8 +2789,7 @@ VCvtScalePk8F32Fp8Vop3::VCvtScalePk8F32Fp8Vop3(const MachineInst *inst)
                ? "v_cvt_scale_pk8_f32_fp8_e64_dpp"
                : "v_cvt_scale_pk8_f32_fp8",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalePk8F32Fp8Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalePk8F32Fp8Vop3)),
       vdst(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2386,16 +2802,25 @@ VCvtScalePk8F32Fp8Vop3::VCvtScalePk8F32Fp8Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALE_PK8_F32_FP8 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalePk8F32Fp8Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalePk8F32Fp8Vop3(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scale_pk8_f32_fp8_e64_dpp"
+          : "v_cvt_scale_pk8_f32_fp8",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALE_PK8_F32_FP8 does not support DPP";
   return std::make_unique<VCvtScalePk8F32Fp8Vop3>(opcode);
 }
 } // namespace detail
@@ -2405,8 +2830,7 @@ VCvtScalePk8F16Bf8Vop3::VCvtScalePk8F16Bf8Vop3(const MachineInst *inst)
                ? "v_cvt_scale_pk8_f16_bf8_e64_dpp"
                : "v_cvt_scale_pk8_f16_bf8",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalePk8F16Bf8Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalePk8F16Bf8Vop3)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2419,16 +2843,25 @@ VCvtScalePk8F16Bf8Vop3::VCvtScalePk8F16Bf8Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALE_PK8_F16_BF8 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalePk8F16Bf8Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalePk8F16Bf8Vop3(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scale_pk8_f16_bf8_e64_dpp"
+          : "v_cvt_scale_pk8_f16_bf8",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALE_PK8_F16_BF8 does not support DPP";
   return std::make_unique<VCvtScalePk8F16Bf8Vop3>(opcode);
 }
 } // namespace detail
@@ -2438,8 +2871,7 @@ VCvtScalePk8Bf16Bf8Vop3::VCvtScalePk8Bf16Bf8Vop3(const MachineInst *inst)
                ? "v_cvt_scale_pk8_bf16_bf8_e64_dpp"
                : "v_cvt_scale_pk8_bf16_bf8",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalePk8Bf16Bf8Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalePk8Bf16Bf8Vop3)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2452,16 +2884,25 @@ VCvtScalePk8Bf16Bf8Vop3::VCvtScalePk8Bf16Bf8Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALE_PK8_BF16_BF8 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalePk8Bf16Bf8Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalePk8Bf16Bf8Vop3(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scale_pk8_bf16_bf8_e64_dpp"
+          : "v_cvt_scale_pk8_bf16_bf8",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALE_PK8_BF16_BF8 does not support DPP";
   return std::make_unique<VCvtScalePk8Bf16Bf8Vop3>(opcode);
 }
 } // namespace detail
@@ -2471,8 +2912,7 @@ VCvtScalePk8F32Bf8Vop3::VCvtScalePk8F32Bf8Vop3(const MachineInst *inst)
                ? "v_cvt_scale_pk8_f32_bf8_e64_dpp"
                : "v_cvt_scale_pk8_f32_bf8",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalePk8F32Bf8Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalePk8F32Bf8Vop3)),
       vdst(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2485,16 +2925,25 @@ VCvtScalePk8F32Bf8Vop3::VCvtScalePk8F32Bf8Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALE_PK8_F32_BF8 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalePk8F32Bf8Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalePk8F32Bf8Vop3(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scale_pk8_f32_bf8_e64_dpp"
+          : "v_cvt_scale_pk8_f32_bf8",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALE_PK8_F32_BF8 does not support DPP";
   return std::make_unique<VCvtScalePk8F32Bf8Vop3>(opcode);
 }
 } // namespace detail
@@ -2504,8 +2953,7 @@ VCvtScalef32Pk8Fp4F32Vop3::VCvtScalef32Pk8Fp4F32Vop3(const MachineInst *inst)
                ? "v_cvt_scalef32_pk8_fp4_f32_e64_dpp"
                : "v_cvt_scalef32_pk8_fp4_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk8Fp4F32Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk8Fp4F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2518,16 +2966,25 @@ VCvtScalef32Pk8Fp4F32Vop3::VCvtScalef32Pk8Fp4F32Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_PK8_FP4_F32 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32Pk8Fp4F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32Pk8Fp4F32Vop3(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_pk8_fp4_f32_e64_dpp"
+          : "v_cvt_scalef32_pk8_fp4_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_PK8_FP4_F32 does not support DPP";
   return std::make_unique<VCvtScalef32Pk8Fp4F32Vop3>(opcode);
 }
 } // namespace detail
@@ -2537,8 +2994,7 @@ VCvtScalef32Pk8Fp4F16Vop3::VCvtScalef32Pk8Fp4F16Vop3(const MachineInst *inst)
                ? "v_cvt_scalef32_pk8_fp4_f16_e64_dpp"
                : "v_cvt_scalef32_pk8_fp4_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk8Fp4F16Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk8Fp4F16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2551,16 +3007,25 @@ VCvtScalef32Pk8Fp4F16Vop3::VCvtScalef32Pk8Fp4F16Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_PK8_FP4_F16 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32Pk8Fp4F16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32Pk8Fp4F16Vop3(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_pk8_fp4_f16_e64_dpp"
+          : "v_cvt_scalef32_pk8_fp4_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_PK8_FP4_F16 does not support DPP";
   return std::make_unique<VCvtScalef32Pk8Fp4F16Vop3>(opcode);
 }
 } // namespace detail
@@ -2570,8 +3035,7 @@ VCvtScalef32Pk8Fp8Bf16Vop3::VCvtScalef32Pk8Fp8Bf16Vop3(const MachineInst *inst)
                ? "v_cvt_scalef32_pk8_fp8_bf16_e64_dpp"
                : "v_cvt_scalef32_pk8_fp8_bf16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk8Fp8Bf16Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk8Fp8Bf16Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2584,16 +3048,25 @@ VCvtScalef32Pk8Fp8Bf16Vop3::VCvtScalef32Pk8Fp8Bf16Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_PK8_FP8_BF16 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32Pk8Fp8Bf16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32Pk8Fp8Bf16Vop3(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_pk8_fp8_bf16_e64_dpp"
+          : "v_cvt_scalef32_pk8_fp8_bf16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_PK8_FP8_BF16 does not support DPP";
   return std::make_unique<VCvtScalef32Pk8Fp8Bf16Vop3>(opcode);
 }
 } // namespace detail
@@ -2603,8 +3076,7 @@ VCvtScalef32Pk8Bf8Bf16Vop3::VCvtScalef32Pk8Bf8Bf16Vop3(const MachineInst *inst)
                ? "v_cvt_scalef32_pk8_bf8_bf16_e64_dpp"
                : "v_cvt_scalef32_pk8_bf8_bf16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk8Bf8Bf16Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk8Bf8Bf16Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2617,16 +3089,25 @@ VCvtScalef32Pk8Bf8Bf16Vop3::VCvtScalef32Pk8Bf8Bf16Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_PK8_BF8_BF16 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32Pk8Bf8Bf16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32Pk8Bf8Bf16Vop3(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_pk8_bf8_bf16_e64_dpp"
+          : "v_cvt_scalef32_pk8_bf8_bf16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_PK8_BF8_BF16 does not support DPP";
   return std::make_unique<VCvtScalef32Pk8Bf8Bf16Vop3>(opcode);
 }
 } // namespace detail
@@ -2636,8 +3117,7 @@ VCvtScalef32Pk8Fp4Bf16Vop3::VCvtScalef32Pk8Fp4Bf16Vop3(const MachineInst *inst)
                ? "v_cvt_scalef32_pk8_fp4_bf16_e64_dpp"
                : "v_cvt_scalef32_pk8_fp4_bf16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk8Fp4Bf16Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk8Fp4Bf16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2650,16 +3130,25 @@ VCvtScalef32Pk8Fp4Bf16Vop3::VCvtScalef32Pk8Fp4Bf16Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_PK8_FP4_BF16 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32Pk8Fp4Bf16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32Pk8Fp4Bf16Vop3(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_pk8_fp4_bf16_e64_dpp"
+          : "v_cvt_scalef32_pk8_fp4_bf16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_PK8_FP4_BF16 does not support DPP";
   return std::make_unique<VCvtScalef32Pk8Fp4Bf16Vop3>(opcode);
 }
 } // namespace detail
@@ -2669,8 +3158,7 @@ VCvtScalef32SrPk8Fp4F16Vop3::VCvtScalef32SrPk8Fp4F16Vop3(const MachineInst *inst
                ? "v_cvt_scalef32_sr_pk8_fp4_f16_e64_dpp"
                : "v_cvt_scalef32_sr_pk8_fp4_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk8Fp4F16Vop3),
-           LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk8Fp4F16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2689,9 +3177,6 @@ VCvtScalef32SrPk8Fp4F16Vop3::VCvtScalef32SrPk8Fp4F16Vop3(const MachineInst *inst
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_SR_PK8_FP4_F16 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -2699,7 +3184,19 @@ VCvtScalef32SrPk8Fp4F16Vop3::VCvtScalef32SrPk8Fp4F16Vop3(const MachineInst *inst
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32SrPk8Fp4F16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32SrPk8Fp4F16Vop3(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_sr_pk8_fp4_f16_e64_dpp"
+          : "v_cvt_scalef32_sr_pk8_fp4_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_SR_PK8_FP4_F16 does not support DPP";
   return std::make_unique<VCvtScalef32SrPk8Fp4F16Vop3>(opcode);
 }
 } // namespace detail
@@ -2709,8 +3206,7 @@ VCvtScalef32SrPk8Fp4Bf16Vop3::VCvtScalef32SrPk8Fp4Bf16Vop3(const MachineInst *in
                ? "v_cvt_scalef32_sr_pk8_fp4_bf16_e64_dpp"
                : "v_cvt_scalef32_sr_pk8_fp4_bf16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk8Fp4Bf16Vop3),
-           LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk8Fp4Bf16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2729,9 +3225,6 @@ VCvtScalef32SrPk8Fp4Bf16Vop3::VCvtScalef32SrPk8Fp4Bf16Vop3(const MachineInst *in
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_SR_PK8_FP4_BF16 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -2739,7 +3232,19 @@ VCvtScalef32SrPk8Fp4Bf16Vop3::VCvtScalef32SrPk8Fp4Bf16Vop3(const MachineInst *in
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32SrPk8Fp4Bf16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32SrPk8Fp4Bf16Vop3(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_sr_pk8_fp4_bf16_e64_dpp"
+          : "v_cvt_scalef32_sr_pk8_fp4_bf16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_SR_PK8_FP4_BF16 does not support DPP";
   return std::make_unique<VCvtScalef32SrPk8Fp4Bf16Vop3>(opcode);
 }
 } // namespace detail
@@ -2749,8 +3254,7 @@ VCvtScalef32SrPk8Fp8F16Vop3::VCvtScalef32SrPk8Fp8F16Vop3(const MachineInst *inst
                ? "v_cvt_scalef32_sr_pk8_fp8_f16_e64_dpp"
                : "v_cvt_scalef32_sr_pk8_fp8_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk8Fp8F16Vop3),
-           LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk8Fp8F16Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2769,9 +3273,6 @@ VCvtScalef32SrPk8Fp8F16Vop3::VCvtScalef32SrPk8Fp8F16Vop3(const MachineInst *inst
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_SR_PK8_FP8_F16 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -2779,7 +3280,19 @@ VCvtScalef32SrPk8Fp8F16Vop3::VCvtScalef32SrPk8Fp8F16Vop3(const MachineInst *inst
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32SrPk8Fp8F16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32SrPk8Fp8F16Vop3(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_sr_pk8_fp8_f16_e64_dpp"
+          : "v_cvt_scalef32_sr_pk8_fp8_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_SR_PK8_FP8_F16 does not support DPP";
   return std::make_unique<VCvtScalef32SrPk8Fp8F16Vop3>(opcode);
 }
 } // namespace detail
@@ -2789,8 +3302,7 @@ VCvtScalef32SrPk8Fp8Bf16Vop3::VCvtScalef32SrPk8Fp8Bf16Vop3(const MachineInst *in
                ? "v_cvt_scalef32_sr_pk8_fp8_bf16_e64_dpp"
                : "v_cvt_scalef32_sr_pk8_fp8_bf16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk8Fp8Bf16Vop3),
-           LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk8Fp8Bf16Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2809,9 +3321,6 @@ VCvtScalef32SrPk8Fp8Bf16Vop3::VCvtScalef32SrPk8Fp8Bf16Vop3(const MachineInst *in
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_SR_PK8_FP8_BF16 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -2819,7 +3328,19 @@ VCvtScalef32SrPk8Fp8Bf16Vop3::VCvtScalef32SrPk8Fp8Bf16Vop3(const MachineInst *in
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32SrPk8Fp8Bf16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32SrPk8Fp8Bf16Vop3(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_sr_pk8_fp8_bf16_e64_dpp"
+          : "v_cvt_scalef32_sr_pk8_fp8_bf16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_SR_PK8_FP8_BF16 does not support DPP";
   return std::make_unique<VCvtScalef32SrPk8Fp8Bf16Vop3>(opcode);
 }
 } // namespace detail
@@ -2829,8 +3350,7 @@ VCvtScalef32SrPk8Bf8F16Vop3::VCvtScalef32SrPk8Bf8F16Vop3(const MachineInst *inst
                ? "v_cvt_scalef32_sr_pk8_bf8_f16_e64_dpp"
                : "v_cvt_scalef32_sr_pk8_bf8_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk8Bf8F16Vop3),
-           LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk8Bf8F16Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2849,9 +3369,6 @@ VCvtScalef32SrPk8Bf8F16Vop3::VCvtScalef32SrPk8Bf8F16Vop3(const MachineInst *inst
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_SR_PK8_BF8_F16 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -2859,7 +3376,19 @@ VCvtScalef32SrPk8Bf8F16Vop3::VCvtScalef32SrPk8Bf8F16Vop3(const MachineInst *inst
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32SrPk8Bf8F16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32SrPk8Bf8F16Vop3(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_sr_pk8_bf8_f16_e64_dpp"
+          : "v_cvt_scalef32_sr_pk8_bf8_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_SR_PK8_BF8_F16 does not support DPP";
   return std::make_unique<VCvtScalef32SrPk8Bf8F16Vop3>(opcode);
 }
 } // namespace detail
@@ -2869,8 +3398,7 @@ VCvtScalef32SrPk8Bf8Bf16Vop3::VCvtScalef32SrPk8Bf8Bf16Vop3(const MachineInst *in
                ? "v_cvt_scalef32_sr_pk8_bf8_bf16_e64_dpp"
                : "v_cvt_scalef32_sr_pk8_bf8_bf16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk8Bf8Bf16Vop3),
-           LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk8Bf8Bf16Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2889,9 +3417,6 @@ VCvtScalef32SrPk8Bf8Bf16Vop3::VCvtScalef32SrPk8Bf8Bf16Vop3(const MachineInst *in
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_SR_PK8_BF8_BF16 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -2899,7 +3424,19 @@ VCvtScalef32SrPk8Bf8Bf16Vop3::VCvtScalef32SrPk8Bf8Bf16Vop3(const MachineInst *in
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32SrPk8Bf8Bf16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32SrPk8Bf8Bf16Vop3(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_sr_pk8_bf8_bf16_e64_dpp"
+          : "v_cvt_scalef32_sr_pk8_bf8_bf16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_SR_PK8_BF8_BF16 does not support DPP";
   return std::make_unique<VCvtScalef32SrPk8Bf8Bf16Vop3>(opcode);
 }
 } // namespace detail
@@ -2909,8 +3446,7 @@ VCvtScalef32Pk8Fp8F32Vop3::VCvtScalef32Pk8Fp8F32Vop3(const MachineInst *inst)
                ? "v_cvt_scalef32_pk8_fp8_f32_e64_dpp"
                : "v_cvt_scalef32_pk8_fp8_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk8Fp8F32Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk8Fp8F32Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2923,16 +3459,25 @@ VCvtScalef32Pk8Fp8F32Vop3::VCvtScalef32Pk8Fp8F32Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_PK8_FP8_F32 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32Pk8Fp8F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32Pk8Fp8F32Vop3(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_pk8_fp8_f32_e64_dpp"
+          : "v_cvt_scalef32_pk8_fp8_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_PK8_FP8_F32 does not support DPP";
   return std::make_unique<VCvtScalef32Pk8Fp8F32Vop3>(opcode);
 }
 } // namespace detail
@@ -2942,8 +3487,7 @@ VCvtScalef32Pk8Fp8F16Vop3::VCvtScalef32Pk8Fp8F16Vop3(const MachineInst *inst)
                ? "v_cvt_scalef32_pk8_fp8_f16_e64_dpp"
                : "v_cvt_scalef32_pk8_fp8_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk8Fp8F16Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk8Fp8F16Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2956,16 +3500,25 @@ VCvtScalef32Pk8Fp8F16Vop3::VCvtScalef32Pk8Fp8F16Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_PK8_FP8_F16 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32Pk8Fp8F16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32Pk8Fp8F16Vop3(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_pk8_fp8_f16_e64_dpp"
+          : "v_cvt_scalef32_pk8_fp8_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_PK8_FP8_F16 does not support DPP";
   return std::make_unique<VCvtScalef32Pk8Fp8F16Vop3>(opcode);
 }
 } // namespace detail
@@ -2975,8 +3528,7 @@ VCvtScalef32Pk8Bf8F32Vop3::VCvtScalef32Pk8Bf8F32Vop3(const MachineInst *inst)
                ? "v_cvt_scalef32_pk8_bf8_f32_e64_dpp"
                : "v_cvt_scalef32_pk8_bf8_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk8Bf8F32Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk8Bf8F32Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -2989,16 +3541,25 @@ VCvtScalef32Pk8Bf8F32Vop3::VCvtScalef32Pk8Bf8F32Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_PK8_BF8_F32 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32Pk8Bf8F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32Pk8Bf8F32Vop3(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_pk8_bf8_f32_e64_dpp"
+          : "v_cvt_scalef32_pk8_bf8_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_PK8_BF8_F32 does not support DPP";
   return std::make_unique<VCvtScalef32Pk8Bf8F32Vop3>(opcode);
 }
 } // namespace detail
@@ -3008,8 +3569,7 @@ VCvtScalef32Pk8Bf8F16Vop3::VCvtScalef32Pk8Bf8F16Vop3(const MachineInst *inst)
                ? "v_cvt_scalef32_pk8_bf8_f16_e64_dpp"
                : "v_cvt_scalef32_pk8_bf8_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk8Bf8F16Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk8Bf8F16Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -3022,16 +3582,25 @@ VCvtScalef32Pk8Bf8F16Vop3::VCvtScalef32Pk8Bf8F16Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_PK8_BF8_F16 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32Pk8Bf8F16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32Pk8Bf8F16Vop3(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_pk8_bf8_f16_e64_dpp"
+          : "v_cvt_scalef32_pk8_bf8_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_PK8_BF8_F16 does not support DPP";
   return std::make_unique<VCvtScalef32Pk8Bf8F16Vop3>(opcode);
 }
 } // namespace detail
@@ -3041,8 +3610,7 @@ VCvtScalePk16F16Fp6Vop3::VCvtScalePk16F16Fp6Vop3(const MachineInst *inst)
                ? "v_cvt_scale_pk16_f16_fp6_e64_dpp"
                : "v_cvt_scale_pk16_f16_fp6",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalePk16F16Fp6Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalePk16F16Fp6Vop3)),
       vdst(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(96, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -3055,16 +3623,25 @@ VCvtScalePk16F16Fp6Vop3::VCvtScalePk16F16Fp6Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALE_PK16_F16_FP6 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalePk16F16Fp6Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalePk16F16Fp6Vop3(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scale_pk16_f16_fp6_e64_dpp"
+          : "v_cvt_scale_pk16_f16_fp6",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALE_PK16_F16_FP6 does not support DPP";
   return std::make_unique<VCvtScalePk16F16Fp6Vop3>(opcode);
 }
 } // namespace detail
@@ -3074,8 +3651,7 @@ VCvtScalePk16Bf16Fp6Vop3::VCvtScalePk16Bf16Fp6Vop3(const MachineInst *inst)
                ? "v_cvt_scale_pk16_bf16_fp6_e64_dpp"
                : "v_cvt_scale_pk16_bf16_fp6",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalePk16Bf16Fp6Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalePk16Bf16Fp6Vop3)),
       vdst(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(96, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -3088,16 +3664,25 @@ VCvtScalePk16Bf16Fp6Vop3::VCvtScalePk16Bf16Fp6Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALE_PK16_BF16_FP6 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalePk16Bf16Fp6Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalePk16Bf16Fp6Vop3(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scale_pk16_bf16_fp6_e64_dpp"
+          : "v_cvt_scale_pk16_bf16_fp6",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALE_PK16_BF16_FP6 does not support DPP";
   return std::make_unique<VCvtScalePk16Bf16Fp6Vop3>(opcode);
 }
 } // namespace detail
@@ -3107,8 +3692,7 @@ VCvtScalePk16F32Fp6Vop3::VCvtScalePk16F32Fp6Vop3(const MachineInst *inst)
                ? "v_cvt_scale_pk16_f32_fp6_e64_dpp"
                : "v_cvt_scale_pk16_f32_fp6",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalePk16F32Fp6Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalePk16F32Fp6Vop3)),
       vdst(512, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(96, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -3121,16 +3705,25 @@ VCvtScalePk16F32Fp6Vop3::VCvtScalePk16F32Fp6Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALE_PK16_F32_FP6 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalePk16F32Fp6Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalePk16F32Fp6Vop3(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scale_pk16_f32_fp6_e64_dpp"
+          : "v_cvt_scale_pk16_f32_fp6",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALE_PK16_F32_FP6 does not support DPP";
   return std::make_unique<VCvtScalePk16F32Fp6Vop3>(opcode);
 }
 } // namespace detail
@@ -3140,8 +3733,7 @@ VCvtScalePk16F16Bf6Vop3::VCvtScalePk16F16Bf6Vop3(const MachineInst *inst)
                ? "v_cvt_scale_pk16_f16_bf6_e64_dpp"
                : "v_cvt_scale_pk16_f16_bf6",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalePk16F16Bf6Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalePk16F16Bf6Vop3)),
       vdst(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(96, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -3154,16 +3746,25 @@ VCvtScalePk16F16Bf6Vop3::VCvtScalePk16F16Bf6Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALE_PK16_F16_BF6 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalePk16F16Bf6Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalePk16F16Bf6Vop3(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scale_pk16_f16_bf6_e64_dpp"
+          : "v_cvt_scale_pk16_f16_bf6",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALE_PK16_F16_BF6 does not support DPP";
   return std::make_unique<VCvtScalePk16F16Bf6Vop3>(opcode);
 }
 } // namespace detail
@@ -3173,8 +3774,7 @@ VCvtScalePk16Bf16Bf6Vop3::VCvtScalePk16Bf16Bf6Vop3(const MachineInst *inst)
                ? "v_cvt_scale_pk16_bf16_bf6_e64_dpp"
                : "v_cvt_scale_pk16_bf16_bf6",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalePk16Bf16Bf6Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalePk16Bf16Bf6Vop3)),
       vdst(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(96, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -3187,16 +3787,25 @@ VCvtScalePk16Bf16Bf6Vop3::VCvtScalePk16Bf16Bf6Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALE_PK16_BF16_BF6 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalePk16Bf16Bf6Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalePk16Bf16Bf6Vop3(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scale_pk16_bf16_bf6_e64_dpp"
+          : "v_cvt_scale_pk16_bf16_bf6",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALE_PK16_BF16_BF6 does not support DPP";
   return std::make_unique<VCvtScalePk16Bf16Bf6Vop3>(opcode);
 }
 } // namespace detail
@@ -3206,8 +3815,7 @@ VCvtScalePk16F32Bf6Vop3::VCvtScalePk16F32Bf6Vop3(const MachineInst *inst)
                ? "v_cvt_scale_pk16_f32_bf6_e64_dpp"
                : "v_cvt_scale_pk16_f32_bf6",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalePk16F32Bf6Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalePk16F32Bf6Vop3)),
       vdst(512, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(96, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -3220,16 +3828,25 @@ VCvtScalePk16F32Bf6Vop3::VCvtScalePk16F32Bf6Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALE_PK16_F32_BF6 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalePk16F32Bf6Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalePk16F32Bf6Vop3(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scale_pk16_f32_bf6_e64_dpp"
+          : "v_cvt_scale_pk16_f32_bf6",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALE_PK16_F32_BF6 does not support DPP";
   return std::make_unique<VCvtScalePk16F32Bf6Vop3>(opcode);
 }
 } // namespace detail
@@ -3239,8 +3856,7 @@ VCvtScalef32Pk16Fp6F32Vop3::VCvtScalef32Pk16Fp6F32Vop3(const MachineInst *inst)
                ? "v_cvt_scalef32_pk16_fp6_f32_e64_dpp"
                : "v_cvt_scalef32_pk16_fp6_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk16Fp6F32Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk16Fp6F32Vop3)),
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(512, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -3253,16 +3869,25 @@ VCvtScalef32Pk16Fp6F32Vop3::VCvtScalef32Pk16Fp6F32Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_PK16_FP6_F32 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32Pk16Fp6F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32Pk16Fp6F32Vop3(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_pk16_fp6_f32_e64_dpp"
+          : "v_cvt_scalef32_pk16_fp6_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_PK16_FP6_F32 does not support DPP";
   return std::make_unique<VCvtScalef32Pk16Fp6F32Vop3>(opcode);
 }
 } // namespace detail
@@ -3272,8 +3897,7 @@ VCvtScalef32Pk16Bf6F32Vop3::VCvtScalef32Pk16Bf6F32Vop3(const MachineInst *inst)
                ? "v_cvt_scalef32_pk16_bf6_f32_e64_dpp"
                : "v_cvt_scalef32_pk16_bf6_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk16Bf6F32Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk16Bf6F32Vop3)),
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(512, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -3286,16 +3910,25 @@ VCvtScalef32Pk16Bf6F32Vop3::VCvtScalef32Pk16Bf6F32Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_PK16_BF6_F32 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32Pk16Bf6F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32Pk16Bf6F32Vop3(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_pk16_bf6_f32_e64_dpp"
+          : "v_cvt_scalef32_pk16_bf6_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_PK16_BF6_F32 does not support DPP";
   return std::make_unique<VCvtScalef32Pk16Bf6F32Vop3>(opcode);
 }
 } // namespace detail
@@ -3305,8 +3938,7 @@ VCvtScalef32Pk16Fp6F16Vop3::VCvtScalef32Pk16Fp6F16Vop3(const MachineInst *inst)
                ? "v_cvt_scalef32_pk16_fp6_f16_e64_dpp"
                : "v_cvt_scalef32_pk16_fp6_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk16Fp6F16Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk16Fp6F16Vop3)),
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -3319,16 +3951,25 @@ VCvtScalef32Pk16Fp6F16Vop3::VCvtScalef32Pk16Fp6F16Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_PK16_FP6_F16 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32Pk16Fp6F16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32Pk16Fp6F16Vop3(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_pk16_fp6_f16_e64_dpp"
+          : "v_cvt_scalef32_pk16_fp6_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_PK16_FP6_F16 does not support DPP";
   return std::make_unique<VCvtScalef32Pk16Fp6F16Vop3>(opcode);
 }
 } // namespace detail
@@ -3338,8 +3979,7 @@ VCvtScalef32Pk16Bf6F16Vop3::VCvtScalef32Pk16Bf6F16Vop3(const MachineInst *inst)
                ? "v_cvt_scalef32_pk16_bf6_f16_e64_dpp"
                : "v_cvt_scalef32_pk16_bf6_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk16Bf6F16Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk16Bf6F16Vop3)),
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -3352,16 +3992,25 @@ VCvtScalef32Pk16Bf6F16Vop3::VCvtScalef32Pk16Bf6F16Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_PK16_BF6_F16 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32Pk16Bf6F16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32Pk16Bf6F16Vop3(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_pk16_bf6_f16_e64_dpp"
+          : "v_cvt_scalef32_pk16_bf6_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_PK16_BF6_F16 does not support DPP";
   return std::make_unique<VCvtScalef32Pk16Bf6F16Vop3>(opcode);
 }
 } // namespace detail
@@ -3371,8 +4020,7 @@ VCvtScalef32Pk16Fp6Bf16Vop3::VCvtScalef32Pk16Fp6Bf16Vop3(const MachineInst *inst
                ? "v_cvt_scalef32_pk16_fp6_bf16_e64_dpp"
                : "v_cvt_scalef32_pk16_fp6_bf16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk16Fp6Bf16Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk16Fp6Bf16Vop3)),
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -3385,16 +4033,25 @@ VCvtScalef32Pk16Fp6Bf16Vop3::VCvtScalef32Pk16Fp6Bf16Vop3(const MachineInst *inst
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_PK16_FP6_BF16 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32Pk16Fp6Bf16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32Pk16Fp6Bf16Vop3(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_pk16_fp6_bf16_e64_dpp"
+          : "v_cvt_scalef32_pk16_fp6_bf16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_PK16_FP6_BF16 does not support DPP";
   return std::make_unique<VCvtScalef32Pk16Fp6Bf16Vop3>(opcode);
 }
 } // namespace detail
@@ -3404,8 +4061,7 @@ VCvtScalef32Pk16Bf6Bf16Vop3::VCvtScalef32Pk16Bf6Bf16Vop3(const MachineInst *inst
                ? "v_cvt_scalef32_pk16_bf6_bf16_e64_dpp"
                : "v_cvt_scalef32_pk16_bf6_bf16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk16Bf6Bf16Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32Pk16Bf6Bf16Vop3)),
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -3418,16 +4074,25 @@ VCvtScalef32Pk16Bf6Bf16Vop3::VCvtScalef32Pk16Bf6Bf16Vop3(const MachineInst *inst
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_PK16_BF6_BF16 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32Pk16Bf6Bf16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32Pk16Bf6Bf16Vop3(const MachineInst *opcode,
+                                               const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_pk16_bf6_bf16_e64_dpp"
+          : "v_cvt_scalef32_pk16_bf6_bf16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_PK16_BF6_BF16 does not support DPP";
   return std::make_unique<VCvtScalef32Pk16Bf6Bf16Vop3>(opcode);
 }
 } // namespace detail
@@ -3437,8 +4102,7 @@ VCvtScalef32SrPk16Fp6F32Vop3::VCvtScalef32SrPk16Fp6F32Vop3(const MachineInst *in
                ? "v_cvt_scalef32_sr_pk16_fp6_f32_e64_dpp"
                : "v_cvt_scalef32_sr_pk16_fp6_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk16Fp6F32Vop3),
-           LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk16Fp6F32Vop3)),
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(512, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3457,9 +4121,6 @@ VCvtScalef32SrPk16Fp6F32Vop3::VCvtScalef32SrPk16Fp6F32Vop3(const MachineInst *in
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_SR_PK16_FP6_F32 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -3467,7 +4128,19 @@ VCvtScalef32SrPk16Fp6F32Vop3::VCvtScalef32SrPk16Fp6F32Vop3(const MachineInst *in
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32SrPk16Fp6F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32SrPk16Fp6F32Vop3(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_sr_pk16_fp6_f32_e64_dpp"
+          : "v_cvt_scalef32_sr_pk16_fp6_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_SR_PK16_FP6_F32 does not support DPP";
   return std::make_unique<VCvtScalef32SrPk16Fp6F32Vop3>(opcode);
 }
 } // namespace detail
@@ -3477,8 +4150,7 @@ VCvtScalef32SrPk16Bf6F32Vop3::VCvtScalef32SrPk16Bf6F32Vop3(const MachineInst *in
                ? "v_cvt_scalef32_sr_pk16_bf6_f32_e64_dpp"
                : "v_cvt_scalef32_sr_pk16_bf6_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk16Bf6F32Vop3),
-           LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk16Bf6F32Vop3)),
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(512, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3497,9 +4169,6 @@ VCvtScalef32SrPk16Bf6F32Vop3::VCvtScalef32SrPk16Bf6F32Vop3(const MachineInst *in
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_SR_PK16_BF6_F32 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -3507,7 +4176,19 @@ VCvtScalef32SrPk16Bf6F32Vop3::VCvtScalef32SrPk16Bf6F32Vop3(const MachineInst *in
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32SrPk16Bf6F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32SrPk16Bf6F32Vop3(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_sr_pk16_bf6_f32_e64_dpp"
+          : "v_cvt_scalef32_sr_pk16_bf6_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_SR_PK16_BF6_F32 does not support DPP";
   return std::make_unique<VCvtScalef32SrPk16Bf6F32Vop3>(opcode);
 }
 } // namespace detail
@@ -3517,8 +4198,7 @@ VCvtScalef32SrPk16Fp6F16Vop3::VCvtScalef32SrPk16Fp6F16Vop3(const MachineInst *in
                ? "v_cvt_scalef32_sr_pk16_fp6_f16_e64_dpp"
                : "v_cvt_scalef32_sr_pk16_fp6_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk16Fp6F16Vop3),
-           LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk16Fp6F16Vop3)),
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3537,9 +4217,6 @@ VCvtScalef32SrPk16Fp6F16Vop3::VCvtScalef32SrPk16Fp6F16Vop3(const MachineInst *in
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_SR_PK16_FP6_F16 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -3547,7 +4224,19 @@ VCvtScalef32SrPk16Fp6F16Vop3::VCvtScalef32SrPk16Fp6F16Vop3(const MachineInst *in
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32SrPk16Fp6F16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32SrPk16Fp6F16Vop3(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_sr_pk16_fp6_f16_e64_dpp"
+          : "v_cvt_scalef32_sr_pk16_fp6_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_SR_PK16_FP6_F16 does not support DPP";
   return std::make_unique<VCvtScalef32SrPk16Fp6F16Vop3>(opcode);
 }
 } // namespace detail
@@ -3557,8 +4246,7 @@ VCvtScalef32SrPk16Bf6F16Vop3::VCvtScalef32SrPk16Bf6F16Vop3(const MachineInst *in
                ? "v_cvt_scalef32_sr_pk16_bf6_f16_e64_dpp"
                : "v_cvt_scalef32_sr_pk16_bf6_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk16Bf6F16Vop3),
-           LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk16Bf6F16Vop3)),
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3577,9 +4265,6 @@ VCvtScalef32SrPk16Bf6F16Vop3::VCvtScalef32SrPk16Bf6F16Vop3(const MachineInst *in
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_SR_PK16_BF6_F16 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -3587,7 +4272,19 @@ VCvtScalef32SrPk16Bf6F16Vop3::VCvtScalef32SrPk16Bf6F16Vop3(const MachineInst *in
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32SrPk16Bf6F16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32SrPk16Bf6F16Vop3(const MachineInst *opcode,
+                                                const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_sr_pk16_bf6_f16_e64_dpp"
+          : "v_cvt_scalef32_sr_pk16_bf6_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_SR_PK16_BF6_F16 does not support DPP";
   return std::make_unique<VCvtScalef32SrPk16Bf6F16Vop3>(opcode);
 }
 } // namespace detail
@@ -3597,8 +4294,7 @@ VCvtScalef32SrPk16Fp6Bf16Vop3::VCvtScalef32SrPk16Fp6Bf16Vop3(const MachineInst *
                ? "v_cvt_scalef32_sr_pk16_fp6_bf16_e64_dpp"
                : "v_cvt_scalef32_sr_pk16_fp6_bf16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk16Fp6Bf16Vop3),
-           LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk16Fp6Bf16Vop3)),
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3617,9 +4313,6 @@ VCvtScalef32SrPk16Fp6Bf16Vop3::VCvtScalef32SrPk16Fp6Bf16Vop3(const MachineInst *
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_SR_PK16_FP6_BF16 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -3627,7 +4320,19 @@ VCvtScalef32SrPk16Fp6Bf16Vop3::VCvtScalef32SrPk16Fp6Bf16Vop3(const MachineInst *
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32SrPk16Fp6Bf16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32SrPk16Fp6Bf16Vop3(const MachineInst *opcode,
+                                                 const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_sr_pk16_fp6_bf16_e64_dpp"
+          : "v_cvt_scalef32_sr_pk16_fp6_bf16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_SR_PK16_FP6_BF16 does not support DPP";
   return std::make_unique<VCvtScalef32SrPk16Fp6Bf16Vop3>(opcode);
 }
 } // namespace detail
@@ -3637,8 +4342,7 @@ VCvtScalef32SrPk16Bf6Bf16Vop3::VCvtScalef32SrPk16Bf6Bf16Vop3(const MachineInst *
                ? "v_cvt_scalef32_sr_pk16_bf6_bf16_e64_dpp"
                : "v_cvt_scalef32_sr_pk16_bf6_bf16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk16Bf6Bf16Vop3),
-           LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VCvtScalef32SrPk16Bf6Bf16Vop3)),
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -3657,9 +4361,6 @@ VCvtScalef32SrPk16Bf6Bf16Vop3::VCvtScalef32SrPk16Bf6Bf16Vop3(const MachineInst *
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0))
-    throw util::InvalidInst("V_CVT_SCALEF32_SR_PK16_BF6_BF16 does not support DPP", "");
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
@@ -3667,7 +4368,19 @@ VCvtScalef32SrPk16Bf6Bf16Vop3::VCvtScalef32SrPk16Bf6Bf16Vop3(const MachineInst *
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtScalef32SrPk16Bf6Bf16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtScalef32SrPk16Bf6Bf16Vop3(const MachineInst *opcode,
+                                                 const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_scalef32_sr_pk16_bf6_bf16_e64_dpp"
+          : "v_cvt_scalef32_sr_pk16_bf6_bf16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+    return emit_error.emit() << "V_CVT_SCALEF32_SR_PK16_BF6_BF16 does not support DPP";
   return std::make_unique<VCvtScalef32SrPk16Bf6Bf16Vop3>(opcode);
 }
 } // namespace detail
@@ -3677,8 +4390,7 @@ VCvtPkI16F32Vop3::VCvtPkI16F32Vop3(const MachineInst *inst)
                ? "v_cvt_pk_i16_f32_e64_dpp"
                : "v_cvt_pk_i16_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtPkI16F32Vop3), LiteralSupport::Literal32,
-           2),
+           selected_exec_fn(InstructionExecutionId::VCvtPkI16F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -3718,7 +4430,16 @@ VCvtPkI16F32Vop3::VCvtPkI16F32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtPkI16F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtPkI16F32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_pk_i16_f32_e64_dpp"
+          : "v_cvt_pk_i16_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtPkI16F32Vop3>(opcode);
 }
 } // namespace detail
@@ -3728,8 +4449,7 @@ VCvtPkU16F32Vop3::VCvtPkU16F32Vop3(const MachineInst *inst)
                ? "v_cvt_pk_u16_f32_e64_dpp"
                : "v_cvt_pk_u16_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtPkU16F32Vop3), LiteralSupport::Literal32,
-           2),
+           selected_exec_fn(InstructionExecutionId::VCvtPkU16F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -3769,7 +4489,16 @@ VCvtPkU16F32Vop3::VCvtPkU16F32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtPkU16F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtPkU16F32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_pk_u16_f32_e64_dpp"
+          : "v_cvt_pk_u16_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtPkU16F32Vop3>(opcode);
 }
 } // namespace detail
@@ -3779,7 +4508,7 @@ VPackB32F16Vop3::VPackB32F16Vop3(const MachineInst *inst)
                ? "v_pack_b32_f16_e64_dpp"
                : "v_pack_b32_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VPackB32F16Vop3), LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VPackB32F16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -3827,7 +4556,16 @@ VPackB32F16Vop3::VPackB32F16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVPackB32F16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVPackB32F16Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_pack_b32_f16_e64_dpp"
+          : "v_pack_b32_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VPackB32F16Vop3>(opcode);
 }
 } // namespace detail
@@ -3837,8 +4575,7 @@ VCvtPkNormI16F16Vop3::VCvtPkNormI16F16Vop3(const MachineInst *inst)
                ? "v_cvt_pk_norm_i16_f16_e64_dpp"
                : "v_cvt_pk_norm_i16_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtPkNormI16F16Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtPkNormI16F16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -3886,7 +4623,16 @@ VCvtPkNormI16F16Vop3::VCvtPkNormI16F16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtPkNormI16F16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtPkNormI16F16Vop3(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_pk_norm_i16_f16_e64_dpp"
+          : "v_cvt_pk_norm_i16_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtPkNormI16F16Vop3>(opcode);
 }
 } // namespace detail
@@ -3896,8 +4642,7 @@ VCvtPkNormU16F16Vop3::VCvtPkNormU16F16Vop3(const MachineInst *inst)
                ? "v_cvt_pk_norm_u16_f16_e64_dpp"
                : "v_cvt_pk_norm_u16_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtPkNormU16F16Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtPkNormU16F16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -3945,7 +4690,16 @@ VCvtPkNormU16F16Vop3::VCvtPkNormU16F16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtPkNormU16F16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtPkNormU16F16Vop3(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_pk_norm_u16_f16_e64_dpp"
+          : "v_cvt_pk_norm_u16_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtPkNormU16F16Vop3>(opcode);
 }
 } // namespace detail
@@ -3955,8 +4709,7 @@ VCvtPkNormI16F32Vop3::VCvtPkNormI16F32Vop3(const MachineInst *inst)
                ? "v_cvt_pk_norm_i16_f32_e64_dpp"
                : "v_cvt_pk_norm_i16_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtPkNormI16F32Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtPkNormI16F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -3996,7 +4749,16 @@ VCvtPkNormI16F32Vop3::VCvtPkNormI16F32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtPkNormI16F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtPkNormI16F32Vop3(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_pk_norm_i16_f32_e64_dpp"
+          : "v_cvt_pk_norm_i16_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtPkNormI16F32Vop3>(opcode);
 }
 } // namespace detail
@@ -4006,8 +4768,7 @@ VCvtPkNormU16F32Vop3::VCvtPkNormU16F32Vop3(const MachineInst *inst)
                ? "v_cvt_pk_norm_u16_f32_e64_dpp"
                : "v_cvt_pk_norm_u16_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtPkNormU16F32Vop3),
-           LiteralSupport::Literal32, 2),
+           selected_exec_fn(InstructionExecutionId::VCvtPkNormU16F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4047,7 +4808,16 @@ VCvtPkNormU16F32Vop3::VCvtPkNormU16F32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtPkNormU16F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtPkNormU16F32Vop3(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_pk_norm_u16_f32_e64_dpp"
+          : "v_cvt_pk_norm_u16_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtPkNormU16F32Vop3>(opcode);
 }
 } // namespace detail
@@ -4057,8 +4827,7 @@ VCvtPkU16U32Vop3::VCvtPkU16U32Vop3(const MachineInst *inst)
                ? "v_cvt_pk_u16_u32_e64_dpp"
                : "v_cvt_pk_u16_u32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtPkU16U32Vop3), LiteralSupport::Literal32,
-           2),
+           selected_exec_fn(InstructionExecutionId::VCvtPkU16U32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4098,7 +4867,16 @@ VCvtPkU16U32Vop3::VCvtPkU16U32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtPkU16U32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtPkU16U32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_pk_u16_u32_e64_dpp"
+          : "v_cvt_pk_u16_u32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtPkU16U32Vop3>(opcode);
 }
 } // namespace detail
@@ -4108,8 +4886,7 @@ VCvtPkI16I32Vop3::VCvtPkI16I32Vop3(const MachineInst *inst)
                ? "v_cvt_pk_i16_i32_e64_dpp"
                : "v_cvt_pk_i16_i32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtPkI16I32Vop3), LiteralSupport::Literal32,
-           2),
+           selected_exec_fn(InstructionExecutionId::VCvtPkI16I32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4149,7 +4926,16 @@ VCvtPkI16I32Vop3::VCvtPkI16I32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtPkI16I32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtPkI16I32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_pk_i16_i32_e64_dpp"
+          : "v_cvt_pk_i16_i32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtPkI16I32Vop3>(opcode);
 }
 } // namespace detail
@@ -4159,8 +4945,7 @@ VCvtPkFp8F32Vop3::VCvtPkFp8F32Vop3(const MachineInst *inst)
                ? "v_cvt_pk_fp8_f32_e64_dpp"
                : "v_cvt_pk_fp8_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtPkFp8F32Vop3), LiteralSupport::Literal32,
-           2),
+           selected_exec_fn(InstructionExecutionId::VCvtPkFp8F32Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4200,7 +4985,16 @@ VCvtPkFp8F32Vop3::VCvtPkFp8F32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtPkFp8F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtPkFp8F32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_pk_fp8_f32_e64_dpp"
+          : "v_cvt_pk_fp8_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtPkFp8F32Vop3>(opcode);
 }
 } // namespace detail
@@ -4223,8 +5017,7 @@ VCvtPkBf8F32Vop3::VCvtPkBf8F32Vop3(const MachineInst *inst)
                ? "v_cvt_pk_bf8_f32_e64_dpp"
                : "v_cvt_pk_bf8_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtPkBf8F32Vop3), LiteralSupport::Literal32,
-           2),
+           selected_exec_fn(InstructionExecutionId::VCvtPkBf8F32Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4264,7 +5057,16 @@ VCvtPkBf8F32Vop3::VCvtPkBf8F32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtPkBf8F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtPkBf8F32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_pk_bf8_f32_e64_dpp"
+          : "v_cvt_pk_bf8_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtPkBf8F32Vop3>(opcode);
 }
 } // namespace detail
@@ -4287,8 +5089,7 @@ VCvtSrFp8F32Vop3::VCvtSrFp8F32Vop3(const MachineInst *inst)
                ? "v_cvt_sr_fp8_f32_e64_dpp"
                : "v_cvt_sr_fp8_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtSrFp8F32Vop3), LiteralSupport::Literal32,
-           2),
+           selected_exec_fn(InstructionExecutionId::VCvtSrFp8F32Vop3)),
       vdst(8, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4328,7 +5129,16 @@ VCvtSrFp8F32Vop3::VCvtSrFp8F32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtSrFp8F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtSrFp8F32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_sr_fp8_f32_e64_dpp"
+          : "v_cvt_sr_fp8_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtSrFp8F32Vop3>(opcode);
 }
 } // namespace detail
@@ -4351,8 +5161,7 @@ VCvtSrBf8F32Vop3::VCvtSrBf8F32Vop3(const MachineInst *inst)
                ? "v_cvt_sr_bf8_f32_e64_dpp"
                : "v_cvt_sr_bf8_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtSrBf8F32Vop3), LiteralSupport::Literal32,
-           2),
+           selected_exec_fn(InstructionExecutionId::VCvtSrBf8F32Vop3)),
       vdst(8, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4392,7 +5201,16 @@ VCvtSrBf8F32Vop3::VCvtSrBf8F32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtSrBf8F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtSrBf8F32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_sr_bf8_f32_e64_dpp"
+          : "v_cvt_sr_bf8_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtSrBf8F32Vop3>(opcode);
 }
 } // namespace detail
@@ -4415,8 +5233,7 @@ VCvtPkBf16F32Vop3::VCvtPkBf16F32Vop3(const MachineInst *inst)
                ? "v_cvt_pk_bf16_f32_e64_dpp"
                : "v_cvt_pk_bf16_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtPkBf16F32Vop3), LiteralSupport::Literal32,
-           2),
+           selected_exec_fn(InstructionExecutionId::VCvtPkBf16F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4456,7 +5273,16 @@ VCvtPkBf16F32Vop3::VCvtPkBf16F32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtPkBf16F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtPkBf16F32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_pk_bf16_f32_e64_dpp"
+          : "v_cvt_pk_bf16_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtPkBf16F32Vop3>(opcode);
 }
 } // namespace detail
@@ -4466,8 +5292,7 @@ VCvtSrPkBf16F32Vop3::VCvtSrPkBf16F32Vop3(const MachineInst *inst)
                ? "v_cvt_sr_pk_bf16_f32_e64_dpp"
                : "v_cvt_sr_pk_bf16_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtSrPkBf16F32Vop3),
-           LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VCvtSrPkBf16F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4514,7 +5339,16 @@ VCvtSrPkBf16F32Vop3::VCvtSrPkBf16F32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtSrPkBf16F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtSrPkBf16F32Vop3(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_sr_pk_bf16_f32_e64_dpp"
+          : "v_cvt_sr_pk_bf16_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtSrPkBf16F32Vop3>(opcode);
 }
 } // namespace detail
@@ -4524,8 +5358,7 @@ VCvtPkF16F32Vop3::VCvtPkF16F32Vop3(const MachineInst *inst)
                ? "v_cvt_pk_f16_f32_e64_dpp"
                : "v_cvt_pk_f16_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtPkF16F32Vop3), LiteralSupport::Literal32,
-           2),
+           selected_exec_fn(InstructionExecutionId::VCvtPkF16F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4565,7 +5398,16 @@ VCvtPkF16F32Vop3::VCvtPkF16F32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtPkF16F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtPkF16F32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_pk_f16_f32_e64_dpp"
+          : "v_cvt_pk_f16_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtPkF16F32Vop3>(opcode);
 }
 } // namespace detail
@@ -4575,7 +5417,7 @@ VCvtSrPkF16F32Vop3::VCvtSrPkF16F32Vop3(const MachineInst *inst)
                ? "v_cvt_sr_pk_f16_f32_e64_dpp"
                : "v_cvt_sr_pk_f16_f32",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtSrPkF16F32Vop3), LiteralSupport::Literal32),
+           selected_exec_fn(InstructionExecutionId::VCvtSrPkF16F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -4622,7 +5464,16 @@ VCvtSrPkF16F32Vop3::VCvtSrPkF16F32Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtSrPkF16F32Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtSrPkF16F32Vop3(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_sr_pk_f16_f32_e64_dpp"
+          : "v_cvt_sr_pk_f16_f32",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtSrPkF16F32Vop3>(opcode);
 }
 } // namespace detail
@@ -4632,8 +5483,7 @@ VCvtPkFp8F16Vop3::VCvtPkFp8F16Vop3(const MachineInst *inst)
                ? "v_cvt_pk_fp8_f16_e64_dpp"
                : "v_cvt_pk_fp8_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtPkFp8F16Vop3), LiteralSupport::Literal32,
-           1),
+           selected_exec_fn(InstructionExecutionId::VCvtPkFp8F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOINLINE, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -4666,7 +5516,16 @@ VCvtPkFp8F16Vop3::VCvtPkFp8F16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtPkFp8F16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtPkFp8F16Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_pk_fp8_f16_e64_dpp"
+          : "v_cvt_pk_fp8_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtPkFp8F16Vop3>(opcode);
 }
 } // namespace detail
@@ -4689,8 +5548,7 @@ VCvtPkBf8F16Vop3::VCvtPkBf8F16Vop3(const MachineInst *inst)
                ? "v_cvt_pk_bf8_f16_e64_dpp"
                : "v_cvt_pk_bf8_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtPkBf8F16Vop3), LiteralSupport::Literal32,
-           1),
+           selected_exec_fn(InstructionExecutionId::VCvtPkBf8F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_NOINLINE, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
@@ -4723,7 +5581,16 @@ VCvtPkBf8F16Vop3::VCvtPkBf8F16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtPkBf8F16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtPkBf8F16Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_pk_bf8_f16_e64_dpp"
+          : "v_cvt_pk_bf8_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 1);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtPkBf8F16Vop3>(opcode);
 }
 } // namespace detail
@@ -4746,8 +5613,7 @@ VCvtSrFp8F16Vop3::VCvtSrFp8F16Vop3(const MachineInst *inst)
                ? "v_cvt_sr_fp8_f16_e64_dpp"
                : "v_cvt_sr_fp8_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtSrFp8F16Vop3), LiteralSupport::Literal32,
-           2),
+           selected_exec_fn(InstructionExecutionId::VCvtSrFp8F16Vop3)),
       vdst(8, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4791,7 +5657,16 @@ VCvtSrFp8F16Vop3::VCvtSrFp8F16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtSrFp8F16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtSrFp8F16Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_sr_fp8_f16_e64_dpp"
+          : "v_cvt_sr_fp8_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtSrFp8F16Vop3>(opcode);
 }
 } // namespace detail
@@ -4814,8 +5689,7 @@ VCvtSrBf8F16Vop3::VCvtSrBf8F16Vop3(const MachineInst *inst)
                ? "v_cvt_sr_bf8_f16_e64_dpp"
                : "v_cvt_sr_bf8_f16",
            reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::VCvtSrBf8F16Vop3), LiteralSupport::Literal32,
-           2),
+           selected_exec_fn(InstructionExecutionId::VCvtSrBf8F16Vop3)),
       vdst(8, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
@@ -4859,7 +5733,16 @@ VCvtSrBf8F16Vop3::VCvtSrBf8F16Vop3(const MachineInst *inst)
 }
 
 namespace detail {
-std::unique_ptr<Instruction> decodeVCvtSrBf8F16Vop3(const MachineInst *opcode) {
+DecodeResult decodeVCvtSrBf8F16Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Vop3::validate_encoding(
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
+          ? "v_cvt_sr_bf8_f16_e64_dpp"
+          : "v_cvt_sr_bf8_f16",
+      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32, 2);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
   return std::make_unique<VCvtSrBf8F16Vop3>(opcode);
 }
 } // namespace detail

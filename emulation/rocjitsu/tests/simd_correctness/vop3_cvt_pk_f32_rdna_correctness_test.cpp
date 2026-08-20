@@ -26,6 +26,7 @@
 /// any future re-introduction of a mismatched SIMD functor is caught. The CU and
 /// decoder are built for RDNA3; VOP3 encoding marker is 0x35<<26.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -195,7 +196,7 @@ void check_op(uint32_t opcode, bool is_u16, uint64_t exec) {
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     rdna3_vop3_encode(opcode, kDstVgpr, /*src0=*/256, /*src1=*/257, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << name << " decode failed";
     auto out = fx.run(inst, exec);
     delete inst;
@@ -254,7 +255,7 @@ TEST(Vop3CvtPkF32RdnaCorrectness, BugMarker_40000) {
     auto exec_op = [&](uint32_t opcode) -> uint32_t {
       uint32_t words[4] = {0u, 0u, 0u, 0u};
       rdna3_vop3_encode(opcode, kDstVgpr, 256, 257, words);
-      Instruction *inst = fx.decoder->decode(words);
+      Instruction *inst = decode_valid(*fx.decoder, words);
       EXPECT_NE(inst, nullptr);
       fx.cu->execute_instruction(inst, *fx.wf);
       uint32_t r = fx.cu->read_vgpr(vb + kDstVgpr, 0);
@@ -291,7 +292,7 @@ void check_cvt_pk_norm_i16(uint64_t exec) {
     fx.wf->set_exec(exec);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     rdna3_vop3_encode(kOpCvtPkNormI16F32, kDstVgpr, /*src0=*/256, /*src1=*/257, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << name << " decode failed";
     fx.cu->execute_instruction(inst, *fx.wf);
     std::array<uint32_t, WF_SIZE> out{};
@@ -344,7 +345,7 @@ TEST(Vop3CvtPkF32RdnaCorrectness, NormI16_SignedMarker) {
 
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     rdna3_vop3_encode(kOpCvtPkNormI16F32, kDstVgpr, 256, 257, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     ASSERT_NE(inst, nullptr);
     fx.cu->execute_instruction(inst, *fx.wf);
     const uint32_t lane0 = fx.cu->read_vgpr(vb + kDstVgpr, 0);

@@ -81,75 +81,155 @@ using ncclUniquePtr = std::unique_ptr<T, ncclDeleterFree>;
 template <typename T>
 using ncclUniqueArrayPtr = std::unique_ptr<T[], ncclDeleterFree>;
 
+// Side streams are cached per (busId, priority) and reference counted by the
+// number of active "allocation scopes" (comm init and P2P connect bursts,
+// including lazy connect). The stream is created on the first acquire of a
+// given (busId, priority) and destroyed - releasing its scarce GPU hardware
+// queue - when the last scope for that key exits. This keeps allocations within
+// a burst churn-free while ensuring no side stream persists (and holds a HW
+// queue) through the steady-state collective phase.
+struct ncclSideStreamKey {
+  int64_t busId;
+  int priority;
+  bool operator==(const ncclSideStreamKey& o) const {
+    return busId == o.busId && priority == o.priority;
+  }
+};
+struct ncclSideStreamKeyHash {
+  size_t operator()(const ncclSideStreamKey& k) const {
+    return std::hash<int64_t>()(k.busId) ^ (std::hash<int>()(k.priority) << 1);
+  }
+};
+
 struct ncclSideStream {
   cudaStream_t stream;
   uint64_t refCount;
 };
 
-inline std::unordered_map<int64_t, ncclSideStream> sideStream;
+inline std::unordered_map<ncclSideStreamKey, ncclSideStream, ncclSideStreamKeyHash> sideStream;
 inline pthread_mutex_t sideStreamLock = PTHREAD_MUTEX_INITIALIZER;
 extern ncclResult_t getBusId(int cudaDev, int64_t* busId);
 
-static inline ncclResult_t ncclCreateSideStream(int cudaDev) {
+// Clamp a requested stream priority into the device-supported range.
+// greatest is the most-prioritized (numerically smallest) value.
+static inline int ncclClampStreamPriority(int priority) {
+  int least = 0, greatest = 0;
+  cudaError_t err = cudaDeviceGetStreamPriorityRange(&least, &greatest);
+  if (err != cudaSuccess) {
+    // Fall back to priority 0 rather than leaving an out-of-range value. This
+    // path does not go through CUDACHECK/rcclCudaErrorHandler, so log here.
+    WARN("cudaDeviceGetStreamPriorityRange failed: '%s'; defaulting side-stream "
+         "priority clamp to 0",
+         cudaGetErrorString(err));
+    return 0;
+  }
+  if (priority < greatest) priority = greatest;
+  if (priority > least) priority = least;
+  return priority;
+}
+
+// Acquire a scoped, refcounted, priority-keyed side stream for this device.
+static inline ncclResult_t ncclSideStreamAcquire(int cudaDev, int priority = 0) {
   ncclResult_t res = ncclSuccess;
   int64_t busId;
   NCCLCHECK(getBusId(cudaDev, &busId));
+  priority = ncclClampStreamPriority(priority);
+  ncclSideStreamKey key{busId, priority};
   pthread_mutex_lock(&sideStreamLock);
-  if (auto it = sideStream.find(busId); it != sideStream.end()) {
+  if (auto it = sideStream.find(key); it != sideStream.end()) {
     it->second.refCount++;
-    INFO(NCCL_ALLOC, "Side stream %p of dev %d busid %lx inc count to %ld", it->second.stream, cudaDev, busId,
-         it->second.refCount);
+    INFO(NCCL_ALLOC, "Side stream %p dev %d busid %lx prio %d inc count to %ld", it->second.stream, cudaDev, busId,
+         priority, it->second.refCount);
   } else {
     cudaStream_t stream;
-    CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), res, fail);
-    sideStream.emplace(busId, ncclSideStream{stream, 1});
-    INFO(NCCL_ALLOC, "Created side stream %p of dev %d busid %lx", stream, cudaDev, busId);
+    // cudaStreamCreateWithPriority can fail for OOM, invalid value, init/driver
+    // errors, etc. — not only cudaErrorStreamCaptureInvalidated. CUDACHECKGOTO
+    // logs the HIP string via rcclCudaErrorHandler; add operation context here.
+    CUDACHECKGOTO(cudaStreamCreateWithPriority(&stream, cudaStreamNonBlocking, priority), res, fail);
+    sideStream.emplace(key, ncclSideStream{stream, 1});
+    INFO(NCCL_ALLOC, "Created side stream %p dev %d busid %lx prio %d", stream, cudaDev, busId, priority);
   }
 fail:
+  if (res != ncclSuccess)
+    WARN("ncclSideStreamAcquire: cudaStreamCreateWithPriority failed for "
+         "dev %d busid %lx prio %d (see HIP failure above)",
+         cudaDev, busId, priority);
   pthread_mutex_unlock(&sideStreamLock);
   return res;
-};
+}
 
-static inline ncclResult_t ncclDestroySideStream(int cudaDev) {
+// Release a previously-acquired side stream. Destroys it (freeing the HW queue)
+// when the last scope for this (busId, priority) exits.
+static inline ncclResult_t ncclSideStreamRelease(int cudaDev, int priority = 0) {
   ncclResult_t res = ncclSuccess;
   int64_t busId;
   NCCLCHECK(getBusId(cudaDev, &busId));
+  priority = ncclClampStreamPriority(priority);
+  ncclSideStreamKey key{busId, priority};
   pthread_mutex_lock(&sideStreamLock);
-  if (auto it = sideStream.find(busId); it != sideStream.end()) {
-    it->second.refCount--;
-    if (it->second.refCount == 0) {
-      INFO(NCCL_ALLOC, "Destroyed side stream %p of dev %d busid %lx", it->second.stream, cudaDev, busId);
-      CUDACHECKGOTO(cudaStreamDestroy(it->second.stream), res, fail);
+  if (auto it = sideStream.find(key); it != sideStream.end()) {
+    if (--it->second.refCount == 0) {
+      // Drop the map entry before destroy so a CUDACHECKGOTO failure cannot
+      // leave a refCount==0 zombie that getSideStream would still return.
+      // If destroy itself fails, the HW queue may leak until process exit, but
+      // that is preferable to handing out a dead/half-released stream later.
+      cudaStream_t stream = it->second.stream;
+      INFO(NCCL_ALLOC, "Destroyed side stream %p dev %d busid %lx prio %d", stream, cudaDev, busId, priority);
       sideStream.erase(it);
+      CUDACHECKGOTO(cudaStreamDestroy(stream), res, fail);
     } else {
-      INFO(NCCL_ALLOC, "Side stream %p of dev %d busid %lx dec count to %ld", it->second.stream, cudaDev, busId,
-           it->second.refCount);
+      INFO(NCCL_ALLOC, "Side stream %p dev %d busid %lx prio %d dec count to %ld", it->second.stream, cudaDev, busId,
+           priority, it->second.refCount);
     }
   } else {
-    WARN("Side stream of dev %d busid %lx was not found for destroy", cudaDev, busId);
+    WARN("Side stream of dev %d busid %lx prio %d was not found for release", cudaDev, busId, priority);
   }
 fail:
+  if (res != ncclSuccess)
+    WARN("ncclSideStreamRelease: cudaStreamDestroy failed for "
+         "dev %d busid %lx prio %d (see HIP failure above)",
+         cudaDev, busId, priority);
   pthread_mutex_unlock(&sideStreamLock);
   return res;
-};
+}
 
-static inline ncclResult_t getSideStream(cudaStream_t* stream) {
+// Return the cached side stream for the current device+priority, or nullptr if
+// no scope is currently active (caller then uses a local fallback stream).
+static inline ncclResult_t getSideStream(cudaStream_t* stream, int priority = 0) {
   int cudaDev;
   int64_t busId;
   CUDACHECK(cudaGetDevice(&cudaDev));
   NCCLCHECK(getBusId(cudaDev, &busId));
+  priority = ncclClampStreamPriority(priority);
   pthread_mutex_lock(&sideStreamLock);
-  if (auto it = sideStream.find(busId); it != sideStream.end()) {
+  if (auto it = sideStream.find(ncclSideStreamKey{busId, priority}); it != sideStream.end()) {
     *stream = it->second.stream;
-    INFO(NCCL_ALLOC, "Found side stream %p of dev %d busid %lx count %ld", it->second.stream, cudaDev, busId,
-         it->second.refCount);
   } else {
-    *stream = 0;
-    WARN("Side stream of dev %d busid %lx was not found", cudaDev, busId);
+    *stream = nullptr;
   }
   pthread_mutex_unlock(&sideStreamLock);
   return ncclSuccess;
 }
+
+// RAII helper: hold a side-stream scope for the duration of an allocation-heavy
+// phase (e.g. transport pre-connect). All ncclCudaCalloc/ncclCudaMemcpy in the
+// phase - including those issued on the proxy thread for the same device while
+// the calling thread blocks - reuse the one pooled stream, then the HW queue is
+// freed on scope exit. The pool is keyed by (busId, priority), so cross-thread
+// reuse for the same device and priority works without merging priorities.
+struct ncclSideStreamScope {
+  int dev;
+  int prio;
+  bool active;
+  explicit ncclSideStreamScope(int cudaDev, int priority = 0) : dev(cudaDev), prio(priority), active(false) {
+    if (ncclSideStreamAcquire(dev, prio) == ncclSuccess) active = true;
+  }
+  ~ncclSideStreamScope() {
+    if (active) ncclSideStreamRelease(dev, prio);
+  }
+  ncclSideStreamScope(const ncclSideStreamScope&) = delete;
+  ncclSideStreamScope& operator=(const ncclSideStreamScope&) = delete;
+};
 
 #if CUDART_VERSION >= 12020 || ROCM_VERSION >= 71200
 

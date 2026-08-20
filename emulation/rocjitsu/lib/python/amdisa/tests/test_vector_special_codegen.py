@@ -15,7 +15,7 @@ from amdisa.codegen.execute.vector_special import (
 )
 from amdisa.codegen._generator import CodeGenerator
 from amdisa.gpuisa import Instruction, Operand
-from amdisa.isa_profile import Gfx1250Profile, Rdna3Profile, Rdna4Profile
+from amdisa.isa_profile import Cdna5Profile, Rdna3Profile, Rdna4Profile
 
 
 def test_permlane_uses_opsel_fi_and_bound_ctrl_bits():
@@ -131,8 +131,8 @@ def test_true16_vop3_simd_probe_leaves_unsupported_b16_scalar():
 def test_gfx1250_true16_execute_bodies_are_arch_local():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
-        arch_name='gfx1250',
-        profile=Gfx1250Profile(),
+        arch_name='cdna5',
+        profile=Cdna5Profile(),
     )
     mov_b16 = Instruction(
         'V_MOV_B16',
@@ -195,8 +195,8 @@ def test_gfx1250_true16_execute_bodies_are_arch_local():
 def test_gfx1250_non_true16_simd_probe_can_still_be_shared():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
-        arch_name='gfx1250',
-        profile=Gfx1250Profile(),
+        arch_name='cdna5',
+        profile=Cdna5Profile(),
     )
     mov_b32 = Instruction(
         'V_MOV_B32',
@@ -214,7 +214,7 @@ def test_gfx1250_non_true16_simd_probe_can_still_be_shared():
 
 def test_gfx1250_true16_e32_dst_reg_uses_physical_vgpr():
     codegen = object.__new__(CodeGenerator)
-    codegen.isa_spec = SimpleNamespace(arch_name='gfx1250', profile=Gfx1250Profile())
+    codegen.isa_spec = SimpleNamespace(arch_name='cdna5', profile=Cdna5Profile())
     fmac_f16 = Instruction(
         'V_FMAC_F16',
         'ENC_VOP2',

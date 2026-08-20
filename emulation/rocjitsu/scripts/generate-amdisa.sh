@@ -79,8 +79,8 @@ isa_entries=(
   "rdna3:$isa_xml/amdgpu_isa_rdna3.xml"
   "rdna3_5:$isa_xml/amdgpu_isa_rdna3_5.xml"
   "rdna4:$isa_xml/amdgpu_isa_rdna4.xml"
-  # CDNA5 retains gfx1250 as its MR ISA and logical architecture key.
-  "gfx1250:$cdna5_xml"
+  # CDNA5 retains gfx1250 as its MR ISA target identifier.
+  "cdna5:$cdna5_xml"
 )
 
 for dir in "$repo" "$rocjitsu" "$isa_out" "$dbt_out" "$venv"; do

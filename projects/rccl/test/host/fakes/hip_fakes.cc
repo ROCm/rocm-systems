@@ -287,6 +287,8 @@ hipError_t hipGetDeviceProperties(hipDeviceProp_t*, int) { return hipErrorInvali
 hipError_t hipDriverGetVersion(int* v) { if (v) *v = 70002000; return hipSuccess; }
 hipError_t hipStreamWaitEvent(hipStream_t, hipEvent_t, unsigned int) { return hipErrorInvalidValue; }
 hipError_t hipStreamCreate(hipStream_t*) { return hipErrorInvalidValue; }
+hipError_t hipStreamCreateWithPriority(hipStream_t* stream, unsigned int, int) { if (stream) *stream = nullptr; return hipErrorInvalidValue; }
+hipError_t hipDeviceGetStreamPriorityRange(int* least, int* greatest) { if (least) *least = 0; if (greatest) *greatest = 0; return hipSuccess; }
 hipError_t hipPointerGetAttributes(hipPointerAttribute_t*, const void*) { return hipErrorInvalidValue; }
 hipError_t hipHostGetDevicePointer(void**, void*, unsigned int) { return hipErrorInvalidValue; }
 hipError_t hipIpcGetEventHandle(hipIpcEventHandle_t*, hipEvent_t) { return hipErrorInvalidValue; }

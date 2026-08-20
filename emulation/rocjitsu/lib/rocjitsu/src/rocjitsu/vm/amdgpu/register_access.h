@@ -39,6 +39,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace rocjitsu::amdgpu {
 
@@ -652,20 +653,30 @@ public:
     [[nodiscard]] uint32_t wf_size() const { return wf_size_; }
     [[nodiscard]] bool empty() const { return cu_ == nullptr || reg_count_ == 0; }
 
+    /// @brief Visit each logical VGPR as one lane span, in register order.
+    template <typename Function> void for_each(Function &&function) const {
+      assert(cu_ && "VgprReadRegion is empty");
+      if (byte_mask_ != rocjitsu::ExecutionPlugin::kFullByteMask)
+        throw std::logic_error("partial-byte VgprReadRegion does not expose raw lane spans");
+      cu_->for_each_raw_vgpr(base_, reg_count_, std::forward<Function>(function));
+    }
+
+    /// @brief Gather physical-layout words from this logical VGPR range.
+    void copy_to(std::span<uint32_t> destination) const {
+      assert(cu_ && "VgprReadRegion is empty");
+      assert(destination.size() <= static_cast<size_t>(reg_count_) * wf_size_ &&
+             "destination exceeds read region");
+      if (byte_mask_ != rocjitsu::ExecutionPlugin::kFullByteMask)
+        throw std::logic_error("partial-byte VgprReadRegion cannot copy raw words");
+      cu_->copy_raw_vgprs_to(base_, reg_count_, std::as_writable_bytes(destination));
+    }
+
     [[nodiscard]] std::span<const uint32_t> lanes(uint32_t relative_reg = 0) const {
       assert(cu_ && "VgprReadRegion is empty");
       assert(relative_reg < reg_count_ && "relative VGPR outside read region");
       if (byte_mask_ != rocjitsu::ExecutionPlugin::kFullByteMask)
         throw std::logic_error("partial-byte VgprReadRegion does not expose raw lane spans");
       return {reg_data(relative_reg), wf_size_};
-    }
-
-    [[nodiscard]] const uint32_t *reg_data(uint32_t relative_reg = 0) const {
-      assert(cu_ && "VgprReadRegion is empty");
-      assert(relative_reg < reg_count_ && "relative VGPR outside read region");
-      if (byte_mask_ != rocjitsu::ExecutionPlugin::kFullByteMask)
-        throw std::logic_error("partial-byte VgprReadRegion does not expose raw register data");
-      return reinterpret_cast<const uint32_t *>(cu_->raw_vgpr_data(base_ + relative_reg));
     }
 
     [[nodiscard]] uint32_t lane(uint32_t relative_reg, uint32_t lane) const {
@@ -685,6 +696,22 @@ public:
 
   private:
     friend class RegisterAccess;
+
+    /// @brief Return the lane storage for one VGPR in this region.
+    /// @details The returned pointer spans exactly @c wf_size() lanes. Adjacent
+    /// VGPRs are not required to have contiguous backing, and this pointer must
+    /// not be incremented to traverse adjacent registers. For an unmaterialized
+    /// register, the pointer may refer to shared immutable zero backing: treat
+    /// it as an ephemeral value snapshot that need not observe a later write
+    /// through another handle. Pointers must not be retained after the owning
+    /// wavefront retires.
+    [[nodiscard]] const uint32_t *reg_data(uint32_t relative_reg) const {
+      assert(cu_ && "VgprReadRegion is empty");
+      assert(relative_reg < reg_count_ && "relative VGPR outside read region");
+      if (byte_mask_ != rocjitsu::ExecutionPlugin::kFullByteMask)
+        throw std::logic_error("partial-byte VgprReadRegion does not expose raw register data");
+      return reinterpret_cast<const uint32_t *>(cu_->raw_vgpr_data(base_ + relative_reg));
+    }
 
     VgprReadRegion(const ComputeUnitCore &cu, uint32_t base, uint32_t reg_count, uint8_t byte_mask)
         : cu_(&cu), base_(base), reg_count_(reg_count), wf_size_(cu.wf_size()),
