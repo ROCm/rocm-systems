@@ -36,6 +36,11 @@ namespace
 volatile std::sig_atomic_t sigint_received = 0;
 }
 
+// This target is used by the rocprofv3 attach test to keep the process alive
+// before issuing ROCTx profiler-control calls. The trigger file is created
+// after rocprofv3 attaches, so the Pause/Resume calls below are observed by
+// the attached tool instead of being lost before attachment.
+
 extern "C" void
 roctx_attach_pause_resume_signal_handler(int signum)
 {
@@ -90,22 +95,27 @@ roctx_attach_outside_after_kernel(float* data)
     data[threadIdx.x] += 6.0f;
 }
 
-void
+bool
 wait_for_trigger(const std::string& trigger_file)
 {
-    constexpr auto max_wait = std::chrono::seconds{30};
-    const auto     beg      = std::chrono::steady_clock::now();
+    constexpr auto max_wait   = std::chrono::seconds{30};
+    const auto     start_time = std::chrono::steady_clock::now();
 
+    // The test driver creates this file only after rocprofv3 has attached.
+    // That keeps the ROCTx Pause/Resume calls below inside the attachment
+    // window, which is the behavior this target is validating.
     while(!sigint_received)
     {
-        if(std::ifstream{trigger_file}.good()) return;
-        if(std::chrono::steady_clock::now() - beg > max_wait)
+        if(std::ifstream{trigger_file}.good()) return true;
+        if(std::chrono::steady_clock::now() - start_time > max_wait)
         {
             std::cerr << "Timed out waiting for trigger file: " << trigger_file << "\n";
             std::exit(EXIT_FAILURE);
         }
         std::this_thread::sleep_for(std::chrono::milliseconds{50});
     }
+
+    return false;
 }
 
 template <typename KernelT>
@@ -121,6 +131,8 @@ launch_kernel(const char* name, KernelT kernel, float* data)
 void
 run_normal_mode(float* data)
 {
+    // Normal attach starts collecting immediately. The middle kernel is
+    // bracketed by Pause/Resume and should be excluded from profiler output.
     launch_kernel("before_pause", roctx_attach_before_pause_kernel, data);
 
     roctxProfilerPause(0);
@@ -133,6 +145,8 @@ run_normal_mode(float* data)
 void
 run_selected_regions_mode(float* data)
 {
+    // With --selected-regions, attach starts paused. Only work between
+    // Resume/Pause should be collected.
     launch_kernel("outside_before", roctx_attach_outside_before_kernel, data);
 
     roctxProfilerResume(0);
@@ -156,19 +170,23 @@ main(int argc, char** argv)
     const auto mode         = std::string{argv[1]};
     const auto trigger_file = std::string{argv[2]};
 
-    HIP_ASSERT(hipFree(nullptr));
-
     float* data = nullptr;
     HIP_ASSERT(hipMalloc(&data, 64 * sizeof(float)));
     HIP_ASSERT(hipMemset(data, 0, 64 * sizeof(float)));
 
     if(mode == "normal")
     {
+        // This happens before attach and should not determine the attached
+        // session's pause state.
         roctxProfilerPause(0);
     }
 
     std::cout << "ROCTx attach pause/resume target ready in mode: " << mode << "\n";
-    wait_for_trigger(trigger_file);
+    if(!wait_for_trigger(trigger_file))
+    {
+        HIP_ASSERT(hipFree(data));
+        return EXIT_FAILURE;
+    }
 
     if(mode == "normal")
     {
@@ -185,6 +203,8 @@ main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
+    // Keep the target alive until the test driver detaches rocprofv3 and
+    // signals that output collection is complete.
     while(!sigint_received)
     {
         std::this_thread::sleep_for(std::chrono::milliseconds{50});
