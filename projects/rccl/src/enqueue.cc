@@ -1068,28 +1068,6 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
 #endif
     if (!plan->kernelSpecialized) {
       int kernelIndex = ncclGetKernelIndex(comm);
-      if (IsArchMatch(comm->archName, "gfx1250") && task->protocol == NCCL_PROTO_LL) {
-        if (getenv("RCCL_UNROLL_FACTOR") != nullptr) {
-          if (kernelIndex == NCCL_UNROLL_32) {
-            static bool warnedLlUnroll32 = false;
-            if (!warnedLlUnroll32) {
-              WARN("RCCL_UNROLL_FACTOR=5 (unroll 32) may cause issues with LL protocol on gfx1250; "
-                   "consider RCCL_UNROLL_FACTOR=3 (unroll 8) for LL protocol collectives.");
-              warnedLlUnroll32 = true;
-            }
-          }
-        } else if (ncclDevFuncUnrollGenerated[NCCL_UNROLL_8]) {
-          if (kernelIndex != NCCL_UNROLL_8) {
-            static bool loggedLlUnrollClamp = false;
-            if (!loggedLlUnrollClamp) {
-              INFO(NCCL_INIT, "Using unroll 8 for LL protocol on gfx1250 (default unroll %d)",
-                   (int)(pow(2.0, (double)kernelIndex)));
-              loggedLlUnrollClamp = true;
-            }
-          }
-          kernelIndex = NCCL_UNROLL_8;
-        }
-      }
       plan->kernelFn = ncclKerns[kernelIndex].kernelFn;
       plan->kernelSpecialized = ncclKerns[kernelIndex].specialized;
     }
@@ -2848,10 +2826,14 @@ rccl_static ncclResult_t getAlgoInfo(struct ncclComm* comm, struct ncclTaskColl*
 
   info->nMaxChannels = nMaxChannels == 0 ? info->nMaxChannels : nMaxChannels;
 
-  // Direct ReduceScatter only works with the RING kernel (its direct
-  // branch reads the pre-staged tempBuff and skips proxies). Force RING/SIMPLE
-  // in case the tuner picked another algo.
-  if (info->func == ncclFuncReduceScatter && comm->enableDirectReduceScatter && info->algorithm != NCCL_ALGO_RING) {
+  // Direct ReduceScatter only works with the RING/Simple kernel (reduceCopy path
+  // is compiled only for ProtoSimple). Force RING/SIMPLE regardless of tuner choice.
+  if (info->func == ncclFuncReduceScatter && comm->enableDirectReduceScatter) {
+    if (info->algorithm != NCCL_ALGO_RING || info->protocol != NCCL_PROTO_SIMPLE) {
+      INFO(NCCL_TUNING, "%s: %ld Bytes -> Direct ReduceScatter overrides tuner Algo %s proto %s with Ring/Simple",
+           ncclFuncToString(info->func), (long)nBytes, ncclAlgoToString(info->algorithm),
+           ncclProtoToString(info->protocol));
+    }
     info->algorithm = NCCL_ALGO_RING;
     info->protocol = NCCL_PROTO_SIMPLE;
     info->nWarps = comm->maxThreads[info->algorithm][info->protocol] / comm->WarpSize;
