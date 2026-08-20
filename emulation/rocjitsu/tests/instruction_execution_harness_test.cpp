@@ -194,6 +194,24 @@ public:
   }
 };
 
+template <typename Isa>
+class ControlFlowTestCu : public amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, Isa> {
+public:
+  using Base = amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, Isa>;
+
+  ControlFlowTestCu(std::string name, const amdgpu::ComputeUnitCore::Config &config,
+                    amdgpu::GpuMemory *memory, amdgpu::L2Cache *l2)
+      : Base(std::move(name), config, memory, l2) {}
+
+  void issue(uint32_t word, amdgpu::Wavefront &wf) {
+    typename Base::FetchedInstruction words{word, 0, 0, 0};
+    this->issue_instruction(&wf, words);
+  }
+};
+
+using Cdna4ControlFlowTestCu = ControlFlowTestCu<cdna4::Isa>;
+using Gfx1250ControlFlowTestCu = ControlFlowTestCu<cdna5::Isa>;
+
 /// @brief Check if a mnemonic should be skipped in the execution harness.
 ///
 /// Memory instructions require valid addresses and will crash on zeroed state.
@@ -810,6 +828,54 @@ TEST(Cdna4Vop3Test, CmpClassF16WritesWave64UpperMaskDword) {
     if (!wf->is_halted())
       wf->halt();
   }
+}
+
+TEST(Cdna4ControlFlowTest, SetpcVccNullGuardReadsArchitecturalVcc) {
+  amdgpu::GpuMemory gpu_mem("cdna4_setpc_vcc_mem");
+  amdgpu::L2Cache l2("cdna4_setpc_vcc_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  Cdna4ControlFlowTestCu cu("cdna4_setpc_vcc", cfg, &gpu_mem, &l2);
+  auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint64_t kTarget = 0x1234567800010000ULL;
+  wf->pc = 0x8000;
+  wf->set_vcc(kTarget);
+  cu.issue(build_s_setpc_b64(/*ssrc0=*/106, ROCJITSU_CODE_ARCH_CDNA4), *wf);
+
+  EXPECT_FALSE(wf->is_halted());
+  EXPECT_EQ(wf->pc, kTarget);
+  if (!wf->is_halted())
+    wf->halt();
+}
+
+TEST(Gfx1250ControlFlowTest, SetpcVccNullGuardRecognizesCdna5Mnemonic) {
+  amdgpu::GpuMemory gpu_mem("gfx1250_setpc_vcc_mem");
+  amdgpu::L2Cache l2("gfx1250_setpc_vcc_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  Gfx1250ControlFlowTestCu cu("gfx1250_setpc_vcc", cfg, &gpu_mem, &l2);
+  auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  wf->pc = 0x8000;
+  wf->set_vcc(0);
+  cu.issue(build_s_setpc_b64(/*ssrc0=*/106, ROCJITSU_CODE_ARCH_GFX1250), *wf);
+
+  EXPECT_TRUE(wf->is_halted());
 }
 
 TEST(CdnaVop3True16Test, B16I16U16OpsUseOpSelAndCdnaDestinationPolicy) {

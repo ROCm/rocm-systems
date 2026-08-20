@@ -17,6 +17,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "util/except.h"
 #include "util/log.h"
 
@@ -682,12 +683,11 @@ void ComputeUnitCore::issue_instruction(Wavefront *active, const FetchedInstruct
 
   {
     auto mn = std::string_view(inst->mnemonic());
-    if (mn.find("s_setpc") != std::string_view::npos ||
-        mn.find("s_swappc") != std::string_view::npos) {
-      uint32_t ssrc0_idx = words[0] & 0x7F;
-      uint32_t sb = active->sgpr_alloc().base;
-      uint64_t target = static_cast<uint64_t>(read_sgpr(sb + ssrc0_idx)) |
-                        (static_cast<uint64_t>(read_sgpr(sb + ssrc0_idx + 1)) << 32);
+    if (mn == "s_setpc_b64" || mn == "s_swappc_b64" || mn == "s_set_pc_i64" ||
+        mn == "s_swap_pc_i64") {
+      const Operand *target_operand = inst->src_operand(0);
+      assert(target_operand && "indirect branch must have a target operand");
+      uint64_t target = RegisterAccess(*active).read_scalar64(*target_operand);
       if (target == 0) {
         active->halt();
         delete inst;
