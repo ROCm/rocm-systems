@@ -3,7 +3,6 @@
 //
 // pybind11 module exposing the torch_trace_collector API to Python.
 
-#include "capture_buffer.h"
 #include "process_state.h"
 #include "record_function_installation.h"
 #include "snapshot_store.h"
@@ -57,6 +56,4 @@ PYBIND11_MODULE(torch_trace_collector, m)
           "Push a USER_SCOPE frame, emit a ROCTX range, publish chain into TLS DebugInfo.");
     m.def("pop_user_scope", &pop_user_scope, "Pop the most recent push_user_scope() frame on this thread.");
     m.def("dump_stats", &dump_stats, "Internal counters for tests/debugging.");
-    m.def("start_capture", &start_capture, "Begin recording wire strings (test hook).");
-    m.def("stop_capture", &stop_capture, "Stop and return captured wire strings.");
 }

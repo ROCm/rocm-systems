@@ -1,11 +1,11 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
-#include "capture_buffer.h"
 #include "leaf_context.h"
 #include "marker_stack.h"
 #include "process_state.h"
 #include "record_function_installation.h"
+#include "roctx_range_intercept.h"
 #include "snapshot_store.h"
 #include "stack_entry.h"
 #include "stats.h"
@@ -15,6 +15,11 @@
 #include <ATen/ATen.h>
 #include <ATen/Context.h>
 #include <gtest/gtest.h>
+
+extern "C"
+{
+#include <rocprofiler-sdk-roctx/roctx.h>
+}
 
 #include <array>
 #include <atomic>
@@ -60,6 +65,7 @@ void reset_state()
     stats().user_scope_pushes.store(0);
     stats().user_scope_pops.store(0);
     stats().user_scope_inherits.store(0);
+    (void)roctx_range_intercept::stop();
 }
 
 class RoctxRecordFnTest : public ::testing::Test
@@ -225,6 +231,17 @@ TEST(MarkerEncoding, RoundTripsThroughBuildCallTreesDecode)
     const std::vector<std::string> decoded = decode_marker_path(build_marker_string(stack));
 
     EXPECT_EQ(decoded, names);
+}
+
+TEST(RoctxRangeIntercept, RecordsPushA)
+{
+    roctx_range_intercept::start();
+    roctxRangePushA("probe");
+    const auto recorded = roctx_range_intercept::stop();
+    roctxRangePop();
+
+    ASSERT_EQ(recorded.size(), 1u);
+    EXPECT_EQ(recorded.front(), "probe");
 }
 
 TEST_F(RoctxRecordFnTest, SaveThenConsumeReturnsSavedStack)
@@ -529,7 +546,7 @@ TEST_F(RoctxRecordFnRealOpsTest, FwdBwdCounterSanity)
 TEST_F(RoctxRecordFnRealOpsTest, CaptureLeafLabelsAndUserScope)
 {
     install();
-    start_capture();
+    roctx_range_intercept::start();
 
     {
         auto warmup = at::randn({4, 4}, at::TensorOptions().device(at::kCUDA));
@@ -542,7 +559,7 @@ TEST_F(RoctxRecordFnRealOpsTest, CaptureLeafLabelsAndUserScope)
     y.backward();
     pop_user_scope();
 
-    const auto captured = stop_capture();
+    const auto captured = roctx_range_intercept::stop();
     ASSERT_FALSE(captured.empty());
 
     bool        saw_aten_top      = false;
@@ -637,7 +654,7 @@ TEST_F(RoctxRecordFnRealOpsTest, DetachedForwardBounded)
 TEST_F(RoctxRecordFnRealOpsTest, ConcurrentThreadsScopedMarkers)
 {
     install();
-    start_capture();
+    roctx_range_intercept::start();
 
     constexpr int            n_workers = 4;
     std::vector<std::thread> threads;
@@ -662,7 +679,7 @@ TEST_F(RoctxRecordFnRealOpsTest, ConcurrentThreadsScopedMarkers)
         t.join();
     }
 
-    const auto captured = stop_capture();
+    const auto captured = roctx_range_intercept::stop();
     ASSERT_FALSE(captured.empty());
 
     const std::array<std::string, 4> cpp_leaves = {"aten:0",

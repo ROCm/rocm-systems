@@ -207,7 +207,6 @@ set(CMAKE_REQUIRED_INCLUDES "${_ttc_saved_includes}")
 # the torch, synchronized and gsl_assert libraries, and the compile definitions.
 # torch_python is not among them.
 set(_ttc_headers
-    capture_buffer.h
     leaf_context.h
     marker_stack.h
     process_state.h

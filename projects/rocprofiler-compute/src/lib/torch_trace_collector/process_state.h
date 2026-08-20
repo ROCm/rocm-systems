@@ -7,7 +7,6 @@
 
 #pragma once
 
-#include "capture_buffer.h"
 #include "snapshot_store.h"
 #include "stats.h"
 #include "synchronized.hpp"
@@ -31,16 +30,11 @@ struct ProcessState
 {
     Stats                        stats;
     synchronized_t<InstallState> install;
-    CaptureBuffer                capture;
     SnapshotStore                snapshots{stats};
 };
 
 // The one instance, constructed on first use. Each binary that links the
 // collector holds its own and registers its own callback.
-inline ProcessState& process_state()
-{
-    static ProcessState state;
-    return state;
-}
+ProcessState& process_state();
 
 }  // namespace torch_trace_collector::detail
