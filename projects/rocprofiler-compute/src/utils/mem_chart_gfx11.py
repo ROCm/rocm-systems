@@ -8,7 +8,6 @@ Hierarchy (GCEA = Graphics Core Efficiency Arbiter):
          -> LDS (on-CU, no GL1 connection)
 
 Metric keys must match ``gfx115x/0300_memory_chart.yaml``.
-BW values are Bytes/s.
 """
 
 from typing import Any, Optional, Union
@@ -458,7 +457,7 @@ def create_mem_chart_diagram(
     console: Console,
     show_debug: bool = False,
     chart_title: str = "",
-    gpu_arch: Optional[str] = None,  # noqa: ARG001
+    gpu_arch: Optional[str] = None,
 ) -> None:
     """Render the RDNA3.5 memory diagram to *console*."""
     metrics = _extract_metrics(metric_dict)

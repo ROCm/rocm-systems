@@ -16,7 +16,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Each edge now reports the traffic measured at the interface it represents.
   * Updated arrows, labels, and the legend in the memory chart to better represent their meaning.
 
-* Redesigned the CDNA (gfx9) Memory Chart with a new Rich-based layout that improves readability in the terminal. Added Flat/Buffer request breakdowns (Read/Write/Atomic wavefronts) and L2-Fabric bandwidth metrics across all CDNA architectures.
+* Redesigned the CDNA (gfx9) Memory Chart with a new Rich-based layout that improves readability in the terminal. Added Non-buffer/Buffer request breakdowns (Read/Write/Atomic wavefronts) and L2-Fabric bandwidth metrics across all CDNA architectures.
   * gfx908–gfx942: added HBM and remote traffic percentages.
   * gfx950: added LDS Read/Write/Atomic instruction counts and per-channel bandwidth for HBM, xGMI, and PCIe.
 
