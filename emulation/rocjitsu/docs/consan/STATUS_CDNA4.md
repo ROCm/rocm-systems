@@ -111,7 +111,18 @@ shared spill allocator and the complete emitted gfx950 prologue.  On physical
 gfx950, the previously nil-faulting fourth oracle passes with its first access
 probe enabled.  The unrestricted Inline run still faults only on that fourth
 oracle, now at nonzero address `0xc00e2000`, which isolates a separate
-access-probe defect without promoting the matrix cell.
+access-probe defect without promoting the matrix cell.  A tighter physical
+bisect with barrier and atomic instrumentation disabled passes prefixes of 8,
+10, and 11 access probes and first faults when a twelfth probe is added.  The
+twelfth access (`ds_write_b32 v97, v32` at text offset `0x4c214`) passes by
+itself with its complete 30-SGPR fixed-private spill, and the eleventh and
+twelfth probes pass as a pair.  Conversely, replacing that access with the
+next candidate while retaining a 12-site prefix still faults.  The remaining
+defect is therefore aggregate cross-site Inline state or its conflict path,
+not the individual instruction or scalar-spill encoding.  The passing
+11-site prefix emits 8,704 conflict diagnostics (704 retained and 8,000
+capacity-dropped) when synchronization tracking is deliberately disabled,
+giving the next investigation a bounded high-conflict reproducer.
 
 ### Current-matrix executable audit
 
