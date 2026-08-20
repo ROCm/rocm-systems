@@ -47,7 +47,7 @@ namespace {
 // device's context) and restores the caller's device on scope exit, including during exceptions.
 class DeviceGuard {
 public:
-    DeviceGuard(int prev_device, int buffer_device) : prev_device_{prev_device}
+    explicit DeviceGuard(int buffer_device) : prev_device_{Context<Hip>::get()->hipGetDevice()}
     {
         if (buffer_device != prev_device_) {
             Context<Hip>::get()->hipSetDevice(buffer_device);
@@ -120,7 +120,7 @@ Fallback::_io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBu
         throw std::invalid_argument("The selected file or buffer region is invalid");
     }
 
-    DeviceGuard device_guard{Context<Hip>::get()->hipGetDevice(), buffer->getGpuId()};
+    DeviceGuard device_guard{buffer->getGpuId()};
 
     auto ptr     = Context<Sys>::get()->mmap(nullptr, chunk_size, PROT_READ | PROT_WRITE,
                                              MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
