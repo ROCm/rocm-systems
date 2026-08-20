@@ -7,6 +7,7 @@
 #include "common/string_utility.hpp"
 #include "common/version.hpp"
 #include "logger/debug.hpp"
+#include "policies/rocprofiler-sdk/tracing-config.hpp"
 
 #include <cctype>
 #include <cstddef>
@@ -36,26 +37,10 @@ template <typename SdkBackend, typename TracingKind>
 concept tracing_kind_for =
     std::same_as<TracingKind, typename SdkBackend::callback_tracing_kind_t> ||
     std::same_as<TracingKind, typename SdkBackend::buffer_tracing_kind_t>;
-
-template <typename Externals>
-concept tracing_config_externals = requires(std::string_view setting_name) {
-    typename Externals::ProcessState;
-    typename Externals::ProcessState::State;
-    {
-        Externals::ProcessState::Finalized
-    } -> std::convertible_to<typename Externals::ProcessState::State>;
-    { Externals::ProcessState::set(Externals::ProcessState::Finalized) };
-    { Externals::get_use_rcclp() } -> std::convertible_to<bool>;
-    { Externals::get_use_ompt() } -> std::convertible_to<bool>;
-    { Externals::get_use_unified_memory_profiling() } -> std::convertible_to<bool>;
-    { Externals::get_rocm_domains() } -> std::convertible_to<std::string>;
-    {
-        Externals::get_setting_value(setting_name)
-    } -> std::same_as<std::optional<std::string>>;
-};
 }  // namespace concepts
 
-template <typename SdkBackend, concepts::tracing_config_externals Externals>
+template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
+          policies::rocprofiler_sdk::tracing_config_externals Externals>
 class tracing_config
 {
 public:
@@ -156,7 +141,8 @@ private:
 };
 
 /// @brief Return the version of the rocprofiler-sdk
-template <typename SdkBackend, concepts::tracing_config_externals Externals>
+template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
+          policies::rocprofiler_sdk::tracing_config_externals Externals>
 common::version
 tracing_config<SdkBackend, Externals>::get_version()
 {
@@ -165,7 +151,8 @@ tracing_config<SdkBackend, Externals>::get_version()
     return version;
 }
 
-template <typename SdkBackend, concepts::tracing_config_externals Externals>
+template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
+          policies::rocprofiler_sdk::tracing_config_externals Externals>
 std::vector<std::string>
 tracing_config<SdkBackend, Externals>::get_domain_choices()
 {
@@ -206,7 +193,8 @@ tracing_config<SdkBackend, Externals>::get_domain_choices()
     return choices_vec;
 }
 
-template <typename SdkBackend, concepts::tracing_config_externals Externals>
+template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
+          policies::rocprofiler_sdk::tracing_config_externals Externals>
 std::string
 tracing_config<SdkBackend, Externals>::get_domain_defaults()
 {
@@ -222,7 +210,8 @@ tracing_config<SdkBackend, Externals>::get_domain_defaults()
     return defaults;
 }
 
-template <typename SdkBackend, concepts::tracing_config_externals Externals>
+template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
+          policies::rocprofiler_sdk::tracing_config_externals Externals>
 std::vector<typename tracing_config<SdkBackend, Externals>::operation_setting_spec>
 tracing_config<SdkBackend, Externals>::get_operation_settings()
 {
@@ -255,7 +244,8 @@ tracing_config<SdkBackend, Externals>::get_operation_settings()
     return result;
 }
 
-template <typename SdkBackend, concepts::tracing_config_externals Externals>
+template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
+          policies::rocprofiler_sdk::tracing_config_externals Externals>
 std::unordered_set<typename SdkBackend::callback_tracing_kind_t>
 tracing_config<SdkBackend, Externals>::get_callback_domains()
 {
@@ -311,7 +301,8 @@ tracing_config<SdkBackend, Externals>::get_callback_domains()
     return callback_domains;
 }
 
-template <typename SdkBackend, concepts::tracing_config_externals Externals>
+template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
+          policies::rocprofiler_sdk::tracing_config_externals Externals>
 std::unordered_set<typename SdkBackend::buffer_tracing_kind_t>
 tracing_config<SdkBackend, Externals>::get_buffered_domains()
 {
@@ -361,7 +352,8 @@ tracing_config<SdkBackend, Externals>::get_buffered_domains()
     return data;
 }
 
-template <typename SdkBackend, concepts::tracing_config_externals Externals>
+template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
+          policies::rocprofiler_sdk::tracing_config_externals Externals>
 template <typename TracingKind>
     requires concepts::tracing_kind_for<SdkBackend, TracingKind>
 std::vector<std::int32_t>
@@ -418,7 +410,8 @@ tracing_config<SdkBackend, Externals>::get_operations(TracingKind kind)
     return operation_ids;
 }
 
-template <typename SdkBackend, concepts::tracing_config_externals Externals>
+template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
+          policies::rocprofiler_sdk::tracing_config_externals Externals>
 template <typename TracingKind>
     requires concepts::tracing_kind_for<SdkBackend, TracingKind>
 std::unordered_set<std::int32_t>
@@ -464,7 +457,8 @@ tracing_config<SdkBackend, Externals>::get_backtrace_operations(TracingKind kind
     return matched_operation_ids;
 }
 
-template <typename SdkBackend, concepts::tracing_config_externals Externals>
+template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
+          policies::rocprofiler_sdk::tracing_config_externals Externals>
 template <typename TracingKind>
     requires concepts::tracing_kind_for<SdkBackend, TracingKind>
 std::vector<std::pair<std::int32_t, std::string>>
@@ -496,7 +490,8 @@ tracing_config<SdkBackend, Externals>::all_operation_items_for_kind(
                                                               named_items.end() };
 }
 
-template <typename SdkBackend, concepts::tracing_config_externals Externals>
+template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
+          policies::rocprofiler_sdk::tracing_config_externals Externals>
 std::vector<std::pair<std::string, std::regex>>
 tracing_config<SdkBackend, Externals>::compile_operation_patterns(
     const std::string& operations_setting_env_name)
@@ -525,7 +520,8 @@ tracing_config<SdkBackend, Externals>::compile_operation_patterns(
                                                             compiled_patterns.end() };
 }
 
-template <typename SdkBackend, concepts::tracing_config_externals Externals>
+template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
+          policies::rocprofiler_sdk::tracing_config_externals Externals>
 bool
 tracing_config<SdkBackend, Externals>::matches_any_operation_pattern(
     std::string_view operations_setting_env_name, const std::string& operation_name,
@@ -543,7 +539,8 @@ tracing_config<SdkBackend, Externals>::matches_any_operation_pattern(
     });
 }
 
-template <typename SdkBackend, concepts::tracing_config_externals Externals>
+template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
+          policies::rocprofiler_sdk::tracing_config_externals Externals>
 void
 tracing_config<SdkBackend, Externals>::finalize_and_throw(
     std::string_view exception_message)
@@ -552,7 +549,8 @@ tracing_config<SdkBackend, Externals>::finalize_and_throw(
     throw std::runtime_error(std::string{ exception_message });
 }
 
-template <typename SdkBackend, concepts::tracing_config_externals Externals>
+template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
+          policies::rocprofiler_sdk::tracing_config_externals Externals>
 template <typename TracingKind>
     requires concepts::tracing_kind_for<SdkBackend, TracingKind>
 typename tracing_config<SdkBackend, Externals>::operation_options_env_names
@@ -586,7 +584,8 @@ tracing_config<SdkBackend, Externals>::assemble_operation_env_names_for_kind(
     return operation_options_env_names{ name };
 }
 
-template <typename SdkBackend, concepts::tracing_config_externals Externals>
+template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
+          policies::rocprofiler_sdk::tracing_config_externals Externals>
 constexpr std::unordered_set<typename SdkBackend::callback_tracing_kind_t>
 tracing_config<SdkBackend, Externals>::get_supported_callback_domains()
 {
@@ -627,7 +626,8 @@ tracing_config<SdkBackend, Externals>::get_supported_callback_domains()
     return supported;
 }
 
-template <typename SdkBackend, concepts::tracing_config_externals Externals>
+template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
+          policies::rocprofiler_sdk::tracing_config_externals Externals>
 constexpr std::unordered_set<typename SdkBackend::buffer_tracing_kind_t>
 tracing_config<SdkBackend, Externals>::get_supported_buffer_domains()
 {
@@ -666,7 +666,8 @@ tracing_config<SdkBackend, Externals>::get_supported_buffer_domains()
     return supported;
 }
 
-template <typename SdkBackend, concepts::tracing_config_externals Externals>
+template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
+          policies::rocprofiler_sdk::tracing_config_externals Externals>
 std::unordered_map<std::string, std::vector<typename SdkBackend::callback_tracing_kind_t>>
 tracing_config<SdkBackend, Externals>::get_callback_domain_map()
 {
@@ -718,7 +719,8 @@ tracing_config<SdkBackend, Externals>::get_callback_domain_map()
     return domain_map;
 }
 
-template <typename SdkBackend, concepts::tracing_config_externals Externals>
+template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
+          policies::rocprofiler_sdk::tracing_config_externals Externals>
 std::unordered_map<std::string, std::vector<typename SdkBackend::buffer_tracing_kind_t>>
 tracing_config<SdkBackend, Externals>::get_buffered_domain_map()
 {
@@ -824,7 +826,8 @@ tracing_config<SdkBackend, Externals>::get_buffered_domain_map()
     return domain_map;
 }
 
-template <typename SdkBackend, concepts::tracing_config_externals Externals>
+template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
+          policies::rocprofiler_sdk::tracing_config_externals Externals>
 const std::unordered_set<std::string_view> tracing_config<
     SdkBackend, Externals>::s_domains_to_skip_for_operation_options{
 
@@ -832,7 +835,8 @@ const std::unordered_set<std::string_view> tracing_config<
     "code_object", "kernel_dispatch",           "page_migration",
 };
 
-template <typename SdkBackend, concepts::tracing_config_externals Externals>
+template <policies::rocprofiler_sdk::tracing_config_backend   SdkBackend,
+          policies::rocprofiler_sdk::tracing_config_externals Externals>
 const std::unordered_set<std::string_view>
     tracing_config<SdkBackend, Externals>::s_domains_to_skip_for_domain_choices{
 
