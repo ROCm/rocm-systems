@@ -19,6 +19,8 @@
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
 
+#include <memory>
+
 #include "comm.h"
 #include "common/MockComm.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
@@ -46,13 +48,14 @@ struct ResolvedChannels
 ResolvedChannels ResolveP2pChannels(const char* arch, int nRanks, int collChannels = kDefaultCollChannels,
                                     int nNodes = 1)
 {
-    ncclComm_t                 comm = nullptr;
-    struct ncclTopoSystem      topo;
-    struct ncclTopoNode        gpu;
-    struct ncclSharedResources sharedRes;
+    // Heap, not stack: ncclTopoSystem is ~13 MiB and the default stack is 8 MB.
+    ncclComm_t comm      = nullptr;
+    auto       topo      = std::make_unique<ncclTopoSystem>();
+    auto       gpu       = std::make_unique<ncclTopoNode>();
+    auto       sharedRes = std::make_unique<ncclSharedResources>();
 
-    CreateMockComm(comm, topo, gpu, arch, nRanks);
-    AttachMockSharedRes(comm, sharedRes);
+    CreateMockComm(comm, *topo, *gpu, arch, nRanks);
+    AttachMockSharedRes(comm, *sharedRes);
     if (nNodes > 1) SetMockNodes(comm, nNodes, nRanks);
     comm->nChannels           = collChannels;
     comm->p2pnChannelsPerPeer = kInputChannelsPerPeer;
