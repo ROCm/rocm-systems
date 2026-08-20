@@ -284,6 +284,14 @@ def run_prof(
         )
         shutil.rmtree(pass_path, ignore_errors=True)
         return
+
+    bytes_removed = rocpd_data.compact_pass_rocpd_dbs(pass_path)
+    if bytes_removed:
+        console_debug(
+            f"Compacted rocpd databases under {pass_path} "
+            f"(-{bytes_removed // 1024} KiB PMC catalog data)"
+        )
+
     if ml_api_trace_enabled:
         save_ml_api_trace_inputs(workload_dir, fbase, pass_path)
 

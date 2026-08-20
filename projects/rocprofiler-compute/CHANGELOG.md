@@ -32,6 +32,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Analyze mode now gzip-compresses the merged counter intermediate, which is written as `pmc_perf.csv.gz` instead of `pmc_perf.csv`.
 * Profile mode no longer converts rocpd databases to CSV or merges counter lanes during collection.
+* Profile compacts per-process rocpd databases at end of each pass when native counter CSVs exist, dropping unused PMC catalog tables.
 
 ### Resolved issues
 
