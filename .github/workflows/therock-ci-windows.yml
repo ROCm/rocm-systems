@@ -107,7 +107,7 @@ jobs:
           cmake_preset: windows-release
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ${{ inputs.package_version }}
-          extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../ -DTHEROCK_ENABLE_ML_LIBS=OFF ${{ inputs.cmake_options }}"
+          extra_cmake_options: "-Dhip-tests_CMAKE_ARGS=-DHIP_TESTS_ENABLE_WERROR=ON -DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../ -DTHEROCK_ENABLE_ML_LIBS=OFF ${{ inputs.cmake_options }}"
         run: |
           # clear cache before build and after download
           ccache -z
