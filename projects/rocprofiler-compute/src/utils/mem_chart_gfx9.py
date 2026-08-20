@@ -11,7 +11,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from membw.models import BottleneckNode
+from membw.models import BottleneckNode, MemBwAnalysisResult
 from utils.mem_chart_common import (
     COLORS,
     CachePanelRow,
@@ -320,7 +320,7 @@ def _build_request_edges(
 
 
 def _collect_stall_rows(
-    membw: Optional[Any],  # noqa: ANN401
+    membw: Optional[MemBwAnalysisResult],
     level: str,
 ) -> list[CachePanelRow]:
     """Extract active bottleneck rows for a memory level."""
@@ -348,7 +348,7 @@ def _collect_active_leaves(
 
 
 def _build_ea_stall_content(
-    membw: Optional[Any],  # noqa: ANN401
+    membw: Optional[MemBwAnalysisResult],
 ) -> str:
     """Build EA stall indicator content for the Data Fabric panel."""
     stall_rows = _collect_stall_rows(membw, "EA")
@@ -362,19 +362,22 @@ def _build_ea_stall_content(
 
 def _build_l1_stack(
     metrics: dict[str, Any],
-    membw: Optional[Any] = None,  # noqa: ANN401
+    membw: Optional[MemBwAnalysisResult] = None,
 ) -> Group:
     """Build vertically stacked L1 cache panels: VL1D, LDS, sL1D, L1I."""
     vl1_rows: list[CachePanelRow] = [
         ("Hit", metrics["vl1_hit"], "%", COLORS["hit"]),
     ]
-    vl1_rows.extend(_collect_stall_rows(membw, "GL1"))
+    gl1_stall_rows = _collect_stall_rows(membw, "GL1")
+    vl1_rows.extend(gl1_stall_rows)
 
+    vl1_border = COLORS["stall"] if gl1_stall_rows else COLORS["block"]
     vl1_panel = build_cache_panel(
         "VL1D",
         vl1_rows,
         width=_IP_BLOCK_W,
         height=_VL1D_H,
+        border_style=vl1_border,
     )
     lds_util_line = (
         f"{metric_line('Util', metrics['lds_util'], '%', COLORS['util'])}\n"
@@ -579,9 +582,8 @@ def create_mem_chart_diagram(
     show_debug: bool = False,
     chart_title: str = "",
     gpu_arch: Optional[str] = None,
-    membw: Optional[Any] = None,  # noqa: ANN401
+    membw: Optional[MemBwAnalysisResult] = None,
 ) -> None:
-    """Create the CDNA memory diagram matching the reference PNG layout."""
     metrics = _extract_metrics(metric_dict)
     kernel_arrows = make_arrows(_KERNEL_ARROW_LEN)
     std_arrows = make_arrows(_STD_ARROW_LEN)
@@ -596,12 +598,15 @@ def create_mem_chart_diagram(
     l2_rows: list[CachePanelRow] = [
         ("Hit", metrics["l2_hit"], "%", COLORS["hit"]),
     ]
-    l2_rows.extend(_collect_stall_rows(membw, "GL2"))
+    gl2_stall_rows = _collect_stall_rows(membw, "GL2")
+    l2_rows.extend(gl2_stall_rows)
+    l2_border = COLORS["stall"] if gl2_stall_rows else COLORS["block"]
     l2 = build_cache_panel(
         "L2",
         l2_rows,
         width=_IP_BLOCK_W,
         height=_TOTAL_H,
+        border_style=l2_border,
     )
     l2_fab_edges = build_bw_edge_column(
         [
@@ -622,7 +627,14 @@ def create_mem_chart_diagram(
     )
     if is_gfx950:
         ea_content = _build_ea_stall_content(membw)
-        fabric = build_ip_block("Data Fabric", _IP_BLOCK_W, _TOTAL_H, ea_content)
+        ea_border = COLORS["stall"] if ea_content else COLORS["block"]
+        fabric = build_ip_block(
+            "Data Fabric",
+            _IP_BLOCK_W,
+            _TOTAL_H,
+            ea_content,
+            border_style=ea_border,
+        )
         hbm_content = _build_hbm_content(metrics)
         hbm = build_ip_block("HBM", _IP_BLOCK_W, _TOTAL_H, hbm_content)
     else:
@@ -732,7 +744,7 @@ def plot_mem_chart(
     *,
     chart_title: str,
     gpu_arch: Optional[str] = None,
-    membw: Optional[Any] = None,  # noqa: ANN401
+    membw: Optional[MemBwAnalysisResult] = None,
 ) -> str:
     """Render the CDNA memory chart and return as a string."""
     return render_chart_to_string(
