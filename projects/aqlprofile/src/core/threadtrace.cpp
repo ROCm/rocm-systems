@@ -24,6 +24,7 @@
 #include "aqlprofile-sdk/aql_profile_v2.h"
 
 #include <cstdint>
+#include <cstdio>
 #include <future>
 #include <map>
 #include <string>
@@ -110,6 +111,20 @@ hsa_status_t _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
       sample_size = sample_capacity;
       if (status == HSA_STATUS_SUCCESS) status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
+
+    // [DIAG] Surface the raw write-pointer / status readback on stderr (the ERR_LOGGING path
+    // above only writes to the HSA_VEN_AMD_AQLPROFILE_LOG file, which is usually disabled).
+    // This lets us distinguish "buffer legitimately filled/wrapped" (full/wrap bits set,
+    // wptr == capacity) from "wptr readback broken" (identical constant across SEs).
+    fprintf(stderr,
+            "[AQL-Diag] iterate_data SE%zu: wptr_raw=0x%08x wptr_mask=0x%zx blocks=%zu "
+            "sample_size=%zu capacity=%zu (%.1f%%) status=0x%08x status2=0x%08x full=%d\n",
+            se_index, control_ptr[se_index].wptr, wptr_mask,
+            static_cast<size_t>(control_ptr[se_index].wptr & wptr_mask),
+            sample_size, static_cast<size_t>(sample_capacity),
+            sample_capacity ? 100.0 * sample_size / sample_capacity : 0.0,
+            control_ptr[se_index].status, control_ptr[se_index].status2,
+            (status2_value & sqttbuilder->GetBufferFullMask()) ? 1 : 0);
 
     sample_sizes.at(se_index) = sample_size;
     max_sample_size = std::max(sample_size, max_sample_size);

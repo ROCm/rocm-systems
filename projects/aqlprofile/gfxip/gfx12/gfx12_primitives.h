@@ -515,7 +515,12 @@ class gfx12_cntx_prim {
   static uint32_t sqtt_token_mask_on_value(bool exclude_wait) {
     uint32_t sq_thread_trace_token_mask{0};
     sq_thread_trace_token_mask =
-        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, REG_DETAIL_ALL, 1) |
+        // REG_DETAIL_ALL=1 logs EVERY register write in full detail, flooding the token
+        // stream with redundant REG tokens (observed: ~55% of the trace was one repeating
+        // REG token, which RGP rejects as malformed).  PAL leaves REG_DETAIL_ALL=0 for a
+        // normal RGP capture and relies on REG_INCLUDE/REG_EXCLUDE to select register
+        // classes (gfx12PerfExperiment.cpp GetSqttTokenMask).  Match PAL.
+        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, REG_DETAIL_ALL, 0) |
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, REG_EXCLUDE, 0x3) |
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, REG_INCLUDE,
                            (SQ_TT_TOKEN_MASK_SQDEC_BIT | SQ_TT_TOKEN_MASK_SHDEC_BIT |

@@ -24,6 +24,7 @@
 #include "aqlprofile-sdk/aql_profile_v2.h"
 
 #include <cstdint>
+#include <cstdio>
 #include <future>
 #include <map>
 #include <string>
@@ -599,6 +600,10 @@ PUBLIC_API hsa_status_t
 hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* profile,
                                     hsa_ven_amd_aqlprofile_data_callback_t callback, void* data) {
   hsa_status_t status = HSA_STATUS_SUCCESS;
+  // Sticky trace-overflow error. The per-SE data callback below unconditionally overwrites
+  // `status` with its own return value, which would clobber an OUT_OF_RESOURCES set by the
+  // SQTT wrap / out-of-bounds checks. Record the overflow here so it survives to the return.
+  hsa_status_t sticky_trace_error = HSA_STATUS_SUCCESS;
 
   try {
     aql_profile::Pm4Factory* pm4_factory = aql_profile::Pm4Factory::Create(profile);
@@ -735,12 +740,23 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
             reinterpret_cast<pm4_builder::TraceControl*>(cmd_buffer_mgr.GetPrefix1());
         // Check if SQTT buffer was wrapped
         for (size_t se_index = 0; se_index < se_number_total; se_index++) {
+          // Skip SEs excluded by se_mask: they have no buffer allocated (capacity 0) and
+          // their control-buffer status/wptr are meaningless, so checking them yields false
+          // positives (e.g. buffer-full on stale status2). Matches the v2 path in threadtrace.cpp.
+          if (trace_config.GetTargetCU(se_index) < 0) continue;
+          // On gfx12 the buffer-full bit lives in status2, not status. The UTC/WRITE_ERROR
+          // bit stays in status on all gens (0x01000000 on gfx12, same as older gens).
+          auto status2_value = (pm4_factory->GetGpuId() >= aql_profile::GFX12_GPU_ID)
+                                   ? control_ptr[se_index].status2
+                                   : control_ptr[se_index].status;
           if (control_ptr[se_index].status & sqttbuilder->GetUTCErrorMask()) {
             ERR_LOGGING << "SQTT memory error received, SE(" << se_index << ")";
             status = HSA_STATUS_ERROR_EXCEPTION;
-          } else if (control_ptr[se_index].status & sqttbuilder->GetBufferFullMask()) {
+          } else if (status2_value & sqttbuilder->GetBufferFullMask()) {
             ERR2_LOGGING << "SQTT data buffer full, SE(" << se_index << ")";
             if (status == HSA_STATUS_SUCCESS) status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+            if (sticky_trace_error == HSA_STATUS_SUCCESS)
+              sticky_trace_error = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
           }
         }
 
@@ -760,12 +776,41 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
             sample_size &= (1ull << 29) - 1;
           }
 
-          if (sample_size >= sample_capacity) {
+          // Only masked-in SEs have a real buffer. A masked-out SE has capacity 0, which would
+          // make the bounds check below (0 >= 0) a false positive and spuriously flag the whole
+          // capture as overflowed. Guard on bMaskedIn (matches the v2 path in threadtrace.cpp).
+          if (bMaskedIn && sample_size >= sample_capacity) {
             ERR_LOGGING << "SQTT data out of bounds, sample_id(" << se_index << ") size("
                         << sample_size << "/" << sample_capacity << ")";
             sample_size = sample_capacity;
             if (status == HSA_STATUS_SUCCESS) status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+            if (sticky_trace_error == HSA_STATUS_SUCCESS)
+              sticky_trace_error = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
           }
+
+          // [AQL-Diag] Surface the raw write-pointer / status readback on stderr.  The
+          // ERR_LOGGING path only writes to the HSA_VEN_AMD_AQLPROFILE_LOG file (usually
+          // disabled).  This distinguishes "buffer legitimately full/wrapped" (full bit set,
+          // wptr==capacity) from "wptr readback broken" (identical constant across SEs).
+          // NOTE: on gfx12 the buffer-full bit is in status2, not status (see the wrap check
+          // above which only reads .status — a latent bug for gfx12).
+          {
+            const uint32_t full_mask = static_cast<uint32_t>(sqttbuilder->GetBufferFullMask());
+            fprintf(stderr,
+                    "[AQL-Diag] iterate_data SE%zu: wptr_raw=0x%08x blocks=%zu sample_size=%zu "
+                    "capacity=%zu (%.1f%%) status=0x%08x status2=0x%08x full(status)=%d "
+                    "full(status2)=%d masked_in=%d\n",
+                    se_index, control_ptr[se_index].wptr,
+                    static_cast<size_t>(control_ptr[se_index].wptr &
+                                        sqttbuilder->GetWritePtrMask()),
+                    sample_size, static_cast<size_t>(sample_capacity),
+                    sample_capacity ? 100.0 * sample_size / sample_capacity : 0.0,
+                    control_ptr[se_index].status, control_ptr[se_index].status2,
+                    (control_ptr[se_index].status & full_mask) ? 1 : 0,
+                    (control_ptr[se_index].status2 & full_mask) ? 1 : 0,
+                    bMaskedIn ? 1 : 0);
+          }
+
           hsa_status_t call_status;
           if (mode == 0) {  // SQTT trace
             if (bMaskedIn) {
@@ -820,6 +865,12 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
     ERR_LOGGING << e.what();
     return HSA_STATUS_ERROR;
   }
+
+  // A successful data callback must not mask a trace-buffer overflow detected above. If the
+  // callback loop reset `status` to SUCCESS, promote the recorded overflow so callers (CLR)
+  // see OUT_OF_RESOURCES instead of silently accepting truncated SQTT data.
+  if (status == HSA_STATUS_SUCCESS && sticky_trace_error != HSA_STATUS_SUCCESS)
+    status = sticky_trace_error;
 
   return status;
 }
