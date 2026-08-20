@@ -48,7 +48,7 @@ jobs:
       - name: Download and extract CodeQL bundle
         shell: bash
         run: |
-          wget -q -O codeql-bundle-linux64.tar.gz \
+          curl -sS -o codeql-bundle-linux64.tar.gz \
             "https://mkmartifactory.amd.com:8443/artifactory/system-provisioning/CodeQL/bundles/latest/codeql-bundle-linux64.tar.gz"
           tar -xzf codeql-bundle-linux64.tar.gz
           chmod +x ./codeql/codeql
