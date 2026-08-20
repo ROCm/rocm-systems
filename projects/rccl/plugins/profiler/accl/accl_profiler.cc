@@ -11,6 +11,7 @@
 
 #include <dlfcn.h>
 #include <errno.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "accl_shim.h"
@@ -381,6 +382,8 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
 
   char hostname[256] = {0};
   gethostname(hostname, sizeof(hostname) - 1);
+
+  mkdir(outDir, 0755);
 
   snprintf(ctx->outputPath, sizeof(ctx->outputPath),
     "%s/accl_profiler_rank%d_%s_pid%d_0x%lx.jsonl",
