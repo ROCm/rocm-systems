@@ -427,6 +427,21 @@ class GDAContext : public Context {
 
   __device__ void tile_finish_get(int pe, int qp_index, ActiveWFInfo &wf_info);
 
+  __device__ void tile_put_chunk_nbi(char *dst, const char *src, size_t bytes,
+                                     int qp_index);
+  __device__ void tile_get_chunk_nbi(char *dst, const char *src, size_t bytes,
+                                     int qp_index);
+  __device__ int tile_qp_index_for_worker(int pe, int worker_id,
+                                          int worker_count);
+  __device__ void tile_quiet_gda_workers(int pe, int worker_id, int worker_count,
+                                         int wave_qp_index);
+  __device__ void tile_put_contig_slices_nbi(char *dst, const char *src,
+                                             size_t bytes, int qp_index,
+                                             int worker_id, int worker_count);
+  __device__ void tile_get_contig_slices_nbi(char *dst, const char *src,
+                                             size_t bytes, int qp_index,
+                                             int worker_id, int worker_count);
+
   /**
    * @brief Post NBI puts for contiguous rows, striped across workers.
    *
@@ -472,6 +487,34 @@ class GDAContext : public Context {
                                     size_t num_cols, size_t col_bytes,
                                     int qp_index, int worker_id,
                                     int worker_count, ActiveWFInfo &wf_info);
+
+  __device__ void tile_put_strided_2d_nbi(char *dst_base, const char *src_base,
+                                          size_t dst_s0, size_t dst_s1,
+                                          size_t src_s0, size_t src_s1,
+                                          size_t extent0, size_t extent1,
+                                          size_t element_size, int qp_index,
+                                          int worker_id, int worker_count);
+  __device__ void tile_get_strided_2d_nbi(char *dst_base, const char *src_base,
+                                          size_t dst_s0, size_t dst_s1,
+                                          size_t src_s0, size_t src_s1,
+                                          size_t extent0, size_t extent1,
+                                          size_t element_size, int qp_index,
+                                          int worker_id, int worker_count);
+
+  __device__ void tile_put_gda_workers(void *dst_data, const void *src_data,
+                                       const size_t *dst_strides,
+                                       const size_t *src_strides,
+                                       const size_t *start_coord,
+                                       const size_t *boundary, int ndim,
+                                       size_t element_size, int pe,
+                                       int worker_id, int worker_count);
+  __device__ void tile_get_gda_workers(void *dst_data, const void *src_data,
+                                       const size_t *dst_strides,
+                                       const size_t *src_strides,
+                                       const size_t *start_coord,
+                                       const size_t *boundary, int ndim,
+                                       size_t element_size, int pe,
+                                       int worker_id, int worker_count);
 
   __device__
   void internal_quiet(ActiveWFInfo &wf_info);
