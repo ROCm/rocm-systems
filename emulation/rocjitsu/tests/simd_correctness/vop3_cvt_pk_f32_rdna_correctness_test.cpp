@@ -17,7 +17,7 @@
 /// with src0 -> low half, src1 -> high half of the dst.
 ///
 /// This file also pins the normalized packed signed i16 behavior:
-/// v_cvt_pk_norm_i16_f32 scales by 32767, clamps to [-32768, 32767], truncates,
+/// v_cvt_pk_norm_i16_f32 scales by 32767, clamps to [-32768, 32767], rounds to nearest-even,
 /// and packs the signed 16-bit results. The no-underscore signed spelling
 /// (v_cvt_pknorm_i16_f32) is CDNA-only and not decodable here.
 ///
@@ -109,12 +109,20 @@ uint32_t golden(bool is_u16, float f0, float f1) {
 }
 
 // --- Normalized pack-convert ------------------------------------------------
-// Both arch-generated lambdas scale by K, clamp, map NaN->0, then truncate
-// toward zero (mirrors execute_shared.h / util::cvt_pknorm_*_f32_simd).
+// Both arch-generated lambdas scale by K, clamp, map NaN->0, then round to
+// nearest-even (mirrors execute_shared.h / util::cvt_pknorm_*_f32_simd).
+float round_nearest_even_golden(float value) {
+  float lower = std::floor(value);
+  float fraction = value - lower;
+  if (fraction > 0.5f || (fraction == 0.5f && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
+    lower += 1.0f;
+  return lower;
+}
 uint16_t cvt_norm_i16(float f) {
   if (std::isnan(f))
     return 0;
-  return static_cast<uint16_t>(static_cast<int16_t>(std::clamp(f * 32767.0f, -32768.0f, 32767.0f)));
+  return static_cast<uint16_t>(static_cast<int16_t>(
+      round_nearest_even_golden(std::clamp(f * 32767.0f, -32768.0f, 32767.0f))));
 }
 uint32_t golden_norm_i16(float f0, float f1) {
   return (static_cast<uint32_t>(cvt_norm_i16(f1)) << 16) | static_cast<uint32_t>(cvt_norm_i16(f0));

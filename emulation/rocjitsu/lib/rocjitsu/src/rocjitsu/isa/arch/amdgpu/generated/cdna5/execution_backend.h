@@ -396,6 +396,7 @@ enum class InstructionExecutionId : size_t {
   VCvtNormU16F16Vop1,
   VSwapB32Vop1,
   VSwapB16Vop1,
+  VPermlane64B32Vop1,
   VSwaprelB32Vop1,
   VNotB16Vop1,
   VCvtI32I16Vop1,

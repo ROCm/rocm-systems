@@ -7,19 +7,29 @@
 //! hook library so the contract is checked even when rocjitsu is not
 //! installed).
 //!
+//! Environment overrides are supplied through
+//! [`RocjitsuDbt::injection_def_with`] rather than by mutating the
+//! process environment. `std::env::set_var` is `unsafe` in Rust 2024
+//! because it races every other thread reading the environment, and the
+//! test binary is multi-threaded; passing the lookup in keeps these tests
+//! sound and independent of each other.
+//!
 //! The final test attempts a *real* end-to-end translation with the
 //! `rj_dbt_translate` CLI when both the tool and a sample code object
 //! are discoverable on this host; it skips cleanly otherwise.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
 
 use mirage_core::common::{MaybeRef, SimpleValue};
 use mirage_core::emulator::{EmulatorDef, ExecMode, get_emulator_backend};
 use mirage_core::profile::ProfileDef;
-use mirage_core::session::{SessionDef, SessionId};
+use mirage_core::session::{SessionContext, SessionId};
 use mirage_core::topology::TopologyDef;
-use mirage_rocjitsu::dbt;
+use mirage_rocjitsu::dbt::{self, EnvLookup, RocjitsuDbt};
 
 /// Build a single-GPU emulator def pinning a `gfx_target_version` guest.
 fn def_for_guest(gfx_target_version: u32) -> EmulatorDef {
@@ -38,26 +48,41 @@ fn def_for_guest(gfx_target_version: u32) -> EmulatorDef {
     }
 }
 
-/// Persist a session whose inline profile uses `emulator`, returning its
-/// id so `injection_def` can resolve it.
-fn write_session(emulator: EmulatorDef) -> SessionId {
-    let id = SessionId::new("dbt-test").unwrap();
-    let profile = ProfileDef {
-        name: "dbt-test".to_string(),
-        description: None,
-        emulator,
-        containerize: None,
-    };
-    let def = SessionDef {
-        id: id.clone(),
-        profile: MaybeRef::Owned(profile),
-        workdir: ".".to_string(),
+/// Build the resolved session context a backend is handed.
+///
+/// Backends used to be given only a `SessionId` and had to read the
+/// session's definition back off disk; they are now handed everything
+/// they need, so a test can construct one directly with no filesystem
+/// state at all.
+fn context(emulator: EmulatorDef, runtime_dir: &std::path::Path) -> SessionContext {
+    SessionContext {
+        id: SessionId::new("dbt-test").unwrap(),
+        profile: ProfileDef {
+            name: "dbt-test".to_string(),
+            description: None,
+            emulator,
+            containerize: None,
+        },
+        runtime_dir: runtime_dir.to_path_buf(),
         daemon: false,
-        created_at: chrono::Utc::now(),
-    };
-    let layout = mirage_core::paths::SessionLayout::for_id(&id);
-    mirage_core::state::write_json(&layout.def(), &def).unwrap();
-    id
+    }
+}
+
+/// An environment containing exactly the given pairs.
+fn env_of(pairs: &[(&str, &str)]) -> impl EnvLookup + use<> {
+    let map: HashMap<String, String> = pairs
+        .iter()
+        .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+        .collect();
+    move |key: &str| map.get(key).cloned()
+}
+
+/// Write a stand-in hook library so discovery succeeds without a built
+/// rocjitsu, and return its path.
+fn stub_hook(dir: &std::path::Path) -> PathBuf {
+    let path = dir.join("librocjitsu_hooks.so");
+    std::fs::write(&path, b"\x7fELF stub").unwrap();
+    path
 }
 
 #[test]
@@ -78,28 +103,19 @@ fn backend_is_registered() {
 
 #[test]
 fn injection_emits_hsa_tools_env_contract() {
-    let _g = mirage_core::paths::test_env_lock();
     let tmp = tempfile::tempdir().unwrap();
-    mirage_core::paths::set_test_root(tmp.path());
-
-    // Stand in for the real hook library so discovery succeeds without a
-    // built rocjitsu; `ROCJITSU_HOOKS_LIB` is an explicit file override.
-    let fake_hook = tmp.path().join("librocjitsu_hooks.so");
-    std::fs::write(&fake_hook, b"\x7fELF stub").unwrap();
+    let fake_hook = stub_hook(tmp.path());
     // Pin both ISAs explicitly so the contract is deterministic and
     // independent of whatever GPU (if any) this host has.
-    // SAFETY: serialised by `test_env_lock`; cleared before returning.
-    unsafe {
-        std::env::set_var("ROCJITSU_HOOKS_LIB", &fake_hook);
-        std::env::set_var("RJ_DBT_TARGET_ISA", "gfx1201");
-        std::env::remove_var("RJ_DBT_SOURCE_ISA");
-        std::env::set_var("RJ_DBT_LOG", "2");
-    }
+    let env = env_of(&[
+        ("ROCJITSU_HOOKS_LIB", fake_hook.to_str().unwrap()),
+        ("RJ_DBT_TARGET_ISA", "gfx1201"),
+        ("RJ_DBT_LOG", "2"),
+    ]);
 
-    let session = write_session(def_for_guest(90500)); // gfx950 guest
-    let backend = get_emulator_backend(dbt::NAME).unwrap();
-    let injection = backend
-        .injection_def(&session)
+    let ctx = context(def_for_guest(90500), tmp.path()); // gfx950 guest
+    let injection = RocjitsuDbt
+        .injection_def_with(&ctx, &env)
         .expect("injection should succeed with a discoverable hook");
 
     // The hook is loaded via HSA_TOOLS_LIB, never LD_PRELOAD.
@@ -124,36 +140,21 @@ fn injection_emits_hsa_tools_env_contract() {
     );
     // DBT runs translated code on the host's real GPU.
     assert!(injection.host_gpus);
-
-    unsafe {
-        std::env::remove_var("ROCJITSU_HOOKS_LIB");
-        std::env::remove_var("RJ_DBT_TARGET_ISA");
-        std::env::remove_var("RJ_DBT_LOG");
-    }
 }
 
 #[test]
 fn injection_fails_without_a_target_isa() {
-    let _g = mirage_core::paths::test_env_lock();
     let tmp = tempfile::tempdir().unwrap();
-    mirage_core::paths::set_test_root(tmp.path());
-
-    let fake_hook = tmp.path().join("librocjitsu_hooks.so");
-    std::fs::write(&fake_hook, b"\x7fELF stub").unwrap();
-    // SAFETY: serialised by `test_env_lock`.
-    unsafe {
-        std::env::set_var("ROCJITSU_HOOKS_LIB", &fake_hook);
-        std::env::remove_var("RJ_DBT_TARGET_ISA");
-    }
+    let fake_hook = stub_hook(tmp.path());
+    let env = env_of(&[("ROCJITSU_HOOKS_LIB", fake_hook.to_str().unwrap())]);
 
     // A gfx950 guest with no target option: on a host with no supported
     // GPU there is no target to translate to, so injection must fail
     // loudly rather than run unemulated. (On a host that *does* have a
     // supported GPU, a target is auto-selected and injection succeeds —
     // accept either, but never a silent wrong env.)
-    let session = write_session(def_for_guest(90500));
-    let backend = get_emulator_backend(dbt::NAME).unwrap();
-    match backend.injection_def(&session) {
+    let ctx = context(def_for_guest(90500), tmp.path());
+    match RocjitsuDbt.injection_def_with(&ctx, &env) {
         Err(e) => assert!(
             e.to_string().contains("no target ISA"),
             "unexpected error: {e}"
@@ -163,33 +164,43 @@ fn injection_fails_without_a_target_isa() {
             "a successful injection must carry a target ISA"
         ),
     }
+}
 
-    unsafe { std::env::remove_var("ROCJITSU_HOOKS_LIB") };
+#[test]
+fn injection_fails_without_a_hook_library() {
+    // The hook is what performs the translation. Without it the workload
+    // would load its untranslated code objects and either fail obscurely
+    // or run native code, so this must be a loud error.
+    let tmp = tempfile::tempdir().unwrap();
+    let missing = tmp.path().join("nope.so");
+    let env = env_of(&[
+        ("ROCJITSU_HOOKS_LIB", missing.to_str().unwrap()),
+        ("RJ_DBT_TARGET_ISA", "gfx1201"),
+    ]);
+    let ctx = context(def_for_guest(90500), tmp.path());
+
+    // Only assert the failure when the host has no real hook library to
+    // fall back on; a developer machine with rocjitsu built legitimately
+    // finds one.
+    if dbt::hooks_preload().is_none() {
+        let err = RocjitsuDbt.injection_def_with(&ctx, &env).unwrap_err();
+        assert!(err.to_string().contains("not found"), "{err}");
+    }
 }
 
 #[test]
 fn target_isa_option_drives_injection() {
-    let _g = mirage_core::paths::test_env_lock();
     let tmp = tempfile::tempdir().unwrap();
-    mirage_core::paths::set_test_root(tmp.path());
-
-    let fake_hook = tmp.path().join("librocjitsu_hooks.so");
-    std::fs::write(&fake_hook, b"\x7fELF stub").unwrap();
-    // SAFETY: serialised by `test_env_lock`.
-    unsafe {
-        std::env::set_var("ROCJITSU_HOOKS_LIB", &fake_hook);
-        std::env::remove_var("RJ_DBT_TARGET_ISA");
-        std::env::remove_var("RJ_DBT_SOURCE_ISA");
-    }
+    let fake_hook = stub_hook(tmp.path());
+    let env = env_of(&[("ROCJITSU_HOOKS_LIB", fake_hook.to_str().unwrap())]);
 
     let mut emulator = def_for_guest(90402); // gfx942 guest
     emulator.options.insert(
         dbt::OPT_TARGET_ISA.to_string(),
         SimpleValue::String("gfx950".to_string()),
     );
-    let session = write_session(emulator);
-    let backend = get_emulator_backend(dbt::NAME).unwrap();
-    let injection = backend.injection_def(&session).unwrap();
+    let ctx = context(emulator, tmp.path());
+    let injection = RocjitsuDbt.injection_def_with(&ctx, &env).unwrap();
     assert_eq!(
         injection.env.get("RJ_DBT_TARGET_ISA").map(String::as_str),
         Some("gfx950")
@@ -198,8 +209,46 @@ fn target_isa_option_drives_injection() {
         injection.env.get("RJ_DBT_SOURCE_ISA").map(String::as_str),
         Some("gfx942")
     );
+}
 
-    unsafe { std::env::remove_var("ROCJITSU_HOOKS_LIB") };
+#[test]
+fn a_containerised_session_points_the_hook_at_its_in_container_path() {
+    // The host path does not exist inside the container; ROCR would fail
+    // to load the hook and the workload would run untranslated.
+    let tmp = tempfile::tempdir().unwrap();
+    let fake_hook = stub_hook(tmp.path());
+    let env = env_of(&[
+        ("ROCJITSU_HOOKS_LIB", fake_hook.to_str().unwrap()),
+        ("RJ_DBT_TARGET_ISA", "gfx1201"),
+    ]);
+
+    let mut ctx = context(def_for_guest(90500), tmp.path());
+    ctx.profile.containerize = Some(mirage_core::profile::ContainerizedDef {
+        provider: None,
+        image: "img:latest".to_string(),
+        mounts: Vec::new(),
+        ports: Vec::new(),
+        devices: Vec::new(),
+        groups: Vec::new(),
+        hacks: Vec::new(),
+    });
+
+    let injection = RocjitsuDbt.injection_def_with(&ctx, &env).unwrap();
+    let tools_lib = injection.env.get("HSA_TOOLS_LIB").unwrap();
+    assert!(
+        tools_lib.starts_with("/mnt/mirage/lib/"),
+        "expected an in-container path, got {tools_lib}"
+    );
+    // And the host library must actually be mounted there.
+    assert!(
+        injection
+            .mounts
+            .iter()
+            .any(|m| &m.container_path == tools_lib
+                && m.host_path == fake_hook.display().to_string()),
+        "the hook must be bind-mounted at the path HSA_TOOLS_LIB names: {:?}",
+        injection.mounts
+    );
 }
 
 /// Locate the `rj_dbt_translate` CLI: an explicit `RJ_DBT_TRANSLATE`

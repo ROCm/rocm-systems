@@ -133,7 +133,7 @@ INSTANTIATE_TEST_SUITE_P(
         SmemCase{ROCJITSU_CODE_ARCH_RDNA3, "rdna3", kRdnaGfx1011SLoad64, "s_load_b64", 2},
         SmemCase{ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", kRdnaGfx1011SLoad64, "s_load_b64", 2},
         SmemCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4", kGfx12SLoadB64, "s_load_b64", 2},
-        SmemCase{ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", kGfx12SLoadB64, "s_load_b64", 2},
+        SmemCase{ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", kGfx12SLoadB64, "s_load_b64", 2},
         // 128-bit buffer-descriptor SBASE (width 4) -> s[4:7], both naming forms.
         SmemCase{ROCJITSU_CODE_ARCH_CDNA4, "cdna4_buffer_load_x4", kCdnaSBufferLoadDwordx4,
                  "s_buffer_load_dwordx4", 4},
