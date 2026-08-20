@@ -29,6 +29,11 @@ Testing
 tmp
 .cache
 CMakePresets.json
+model_validation/**/.deps/
+model_validation/**/.cache/
+model_validation/**/.run/
+model_validation/**/model_cache/
+model_validation/**/results/
 
 # python
 .venv

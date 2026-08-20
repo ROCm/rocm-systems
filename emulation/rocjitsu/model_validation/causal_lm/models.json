@@ -1,0 +1,6 @@
+{
+  "llama32_1b": "meta-llama/Llama-3.2-1B-Instruct",
+  "qwen2p5_1p5b": "Qwen/Qwen2.5-1.5B-Instruct",
+  "qwen3_0_6b": "Qwen/Qwen3-0.6B",
+  "tinyllama_1b": "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+}
