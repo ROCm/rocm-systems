@@ -639,6 +639,26 @@ if(BUILD_TESTS)
     endif()
   endif()
 
+  # Build the GIN example plugin for host-API custom-plugin regression tests.
+  if(ENABLE_MPI_TESTS AND ENABLE_HOST_API_TESTS)
+    set(RCCL_GIN_EXAMPLE_PLUGIN_DIR "${CMAKE_BINARY_DIR}/test/unit/plugins")
+    set(RCCL_GIN_EXAMPLE_PLUGIN "${RCCL_GIN_EXAMPLE_PLUGIN_DIR}/libnccl-gin-example.so")
+    find_program(RCCL_GIN_EXAMPLE_CC NAMES gcc cc REQUIRED)
+    add_custom_command(
+      OUTPUT "${RCCL_GIN_EXAMPLE_PLUGIN}"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${RCCL_GIN_EXAMPLE_PLUGIN_DIR}"
+      COMMAND ${RCCL_GIN_EXAMPLE_CC}
+              -I${PROJECT_SOURCE_DIR}/plugins/gin/example/nccl
+              -fPIC -shared
+              -o "${RCCL_GIN_EXAMPLE_PLUGIN}"
+              ${PROJECT_SOURCE_DIR}/plugins/gin/example/plugin.c
+      DEPENDS ${PROJECT_SOURCE_DIR}/plugins/gin/example/plugin.c
+      COMMENT "Building libnccl-gin-example.so for Host API regression tests"
+      VERBATIM
+    )
+    add_custom_target(nccl-gin-example DEPENDS "${RCCL_GIN_EXAMPLE_PLUGIN}")
+  endif()
+
   # Create separate MPI test binary if MPI tests are enabled
   if(ENABLE_MPI_TESTS)
     set(MPI_TEST_SOURCE_FILES
@@ -666,6 +686,7 @@ if(BUILD_TESTS)
       NChannelsPerNetPeerMPITests.cpp
       RegistrationMPITests.cpp
       HostApiMPITests.cpp
+      HostApiCustomGinPluginMPITests.cpp
       RmaExternalPluginPutSignalMPITests.cpp
       plugin/net_reload_plugin.cpp
       mem_manager/SuspendResumeMPITests.cpp
@@ -699,6 +720,29 @@ if(BUILD_TESTS)
       add_dependencies(rccl-UnitTestsMPI rccl-profiler-inspector)
       target_compile_definitions(rccl-UnitTestsMPI PRIVATE
         RCCL_INSPECTOR_PLUGIN_SO="$<TARGET_FILE:rccl-profiler-inspector>")
+    endif()
+
+    if(ENABLE_HOST_API_TESTS)
+      add_dependencies(rccl-UnitTestsMPI nccl-gin-example)
+      target_compile_definitions(rccl-UnitTestsMPI PRIVATE
+        RCCL_GIN_EXAMPLE_PLUGIN_DIR="${RCCL_GIN_EXAMPLE_PLUGIN_DIR}"
+      )
+
+      # Minimal MPI binary for NCCL 2.30.7 custom-GIN-plugin regression only.
+      add_executable(rccl-HostApiCustomGinPluginMPI
+        common/main_mpi.cpp
+        common/MPIHelpers.cpp
+        common/MPITestCore.cpp
+        common/MPIEnvironment.cpp
+        common/TestChecks.cpp
+        common/MPIHostUtils.cc
+        HostApiCustomGinPluginMPITests.cpp
+      )
+      list(APPEND RCCL_TEST_EXECUTABLES rccl-HostApiCustomGinPluginMPI)
+      add_dependencies(rccl-HostApiCustomGinPluginMPI nccl-gin-example)
+      target_compile_definitions(rccl-HostApiCustomGinPluginMPI PRIVATE
+        RCCL_GIN_EXAMPLE_PLUGIN_DIR="${RCCL_GIN_EXAMPLE_PLUGIN_DIR}"
+      )
     endif()
   endif()
 
