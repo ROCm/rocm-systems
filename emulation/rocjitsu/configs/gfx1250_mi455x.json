@@ -3,7 +3,7 @@
   "num_threads": 1,
   "exec_mode": "functional",
   "vm": {
-    "arch": "gfx1250",
+    "arch": "cdna5",
     "gpu": {
       "device": {
         "gpu_id": 1250,
@@ -12,6 +12,7 @@
         "device_id": 1250,
         "family_id": 0,
         "unique_id": 1250,
+        "revision_id": 1,
         "marketing_name": "AMD Instinct MI455X",
         "simd_count": 1024,
         "max_waves_per_simd": 16,

@@ -1574,7 +1574,17 @@ NCCL_P2P_LL_THRESHOLD
 ---------------------
 (since 2.14)
 
-The ``NCCL_P2P_LL_THRESHOLD`` is the maximum message size that NCCL will use the LL protocol for P2P operations.
+The ``NCCL_P2P_LL_THRESHOLD`` is the maximum per-channel message size (in bytes) at or below which RCCL uses the legacy LL low-latency protocol for P2P (send/recv) operations. Above this size, RCCL uses the SIMPLE protocol. This threshold applies when the P2P latency path uses the legacy LL protocol (i.e. when the LL128 path is not active for the communicator). Because legacy LL carries roughly 2x wire overhead, it stops beating SIMPLE at relatively small sizes, so this defaults lower than ``NCCL_P2P_LL128_THRESHOLD``.
+
+Values accepted
+^^^^^^^^^^^^^^^
+Decimal number. Default is 4096.
+
+NCCL_P2P_LL128_THRESHOLD
+------------------------
+(since 2.28)
+
+The ``NCCL_P2P_LL128_THRESHOLD`` is the maximum per-channel message size (in bytes) at or below which RCCL uses the LL128 low-latency protocol for P2P (send/recv) operations. Above this size, RCCL uses the SIMPLE protocol. This threshold is used instead of ``NCCL_P2P_LL_THRESHOLD`` whenever the LL128 P2P send/recv path is active (gfx942/gfx950 with ``NCCL_ALLOC_P2P_NET_LL_BUFFERS=1`` and LL128 enabled for the communicator). LL128's much lower per-line flag overhead keeps it faster than SIMPLE to larger per-channel sizes than legacy LL, so it can be set higher than ``NCCL_P2P_LL_THRESHOLD``.
 
 Values accepted
 ^^^^^^^^^^^^^^^
@@ -1584,8 +1594,8 @@ NCCL_ALLOC_P2P_NET_LL_BUFFERS
 -----------------------------
 (since 2.14)
 
-``NCCL_ALLOC_P2P_NET_LL_BUFFERS`` instructs communicators to allocate dedicated LL buffers for all P2P network connections. This enables all ranks to use the LL protocol for latency-bound send and receive operations below ``NCCL_P2P_LL_THRESHOLD`` sizes.
-Intranode P2P transfers always have dedicated LL buffers allocated. If running all-to-all workloads with high numbers of ranks, this will result in a high scaling memory overhead.
+``NCCL_ALLOC_P2P_NET_LL_BUFFERS`` instructs communicators to allocate dedicated low-latency buffers for all P2P network connections. This enables all ranks to use the low-latency (LL128) protocol for latency-bound send and receive operations below ``NCCL_P2P_LL128_THRESHOLD`` sizes over the network.
+Intranode P2P transfers always have dedicated low-latency buffers allocated. If running all-to-all workloads with high numbers of ranks, this will result in a high scaling memory overhead.
 
 Values accepted
 ^^^^^^^^^^^^^^^

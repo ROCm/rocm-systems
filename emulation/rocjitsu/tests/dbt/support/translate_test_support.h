@@ -48,11 +48,16 @@ void write_kernel_descriptor_for_test(void *descriptor, const TestKernelDescript
 uint16_t append_elf_section_for_test(std::vector<uint8_t> &image, Elf64_Shdr section,
                                      std::span<const uint8_t> contents);
 
+/// @param export_text_function Give the `.text` function global binding and a name of its own.
+/// @details A device function is LOCAL and shares the fixture's "kernel" name by default, which
+/// object_defines_only_kernels() then pairs with the "kernel.kd" descriptor and counts as a kernel.
+/// Set this when the object must look like one that defines a device function a host could have
+/// taken the address of -- the shape the kernarg admission has to handle.
 [[nodiscard]] std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text(
     const std::vector<uint32_t> &text_words,
     std::optional<size_t> text_function_words = std::nullopt, size_t text_function_offset_words = 0,
     std::optional<size_t> function_pointer_table_target_words = std::nullopt,
-    bool name_function_pointer_table_with_symbol = true);
+    bool name_function_pointer_table_with_symbol = true, bool export_text_function = false);
 [[nodiscard]] std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text();
 /// @brief One sized `STT_FUNC` body in the fixture's `.text`.
 struct TestTextFunction {

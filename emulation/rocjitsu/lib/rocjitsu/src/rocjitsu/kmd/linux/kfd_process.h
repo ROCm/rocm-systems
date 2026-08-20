@@ -13,10 +13,12 @@
 #define ROCJITSU_KMD_LINUX_KFD_PROCESS_H_
 
 #include "rocjitsu/kmd/linux/events.h"
+#include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "util/unique_handle.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <cstdint>
@@ -42,9 +44,19 @@ class KfdProcess {
 public:
   /// @brief Per-GPU state within a process.
   struct PerGpuState {
-    void *doorbell_page = nullptr;
+    /// @brief One live client mapping of the canonical doorbell backing.
+    struct DoorbellView {
+      void *page = nullptr;
+      uint64_t gpu_va = 0;
+    };
+
+    /// @brief Canonical shared backing retained for the process lifetime.
+    int doorbell_memfd = -1;
+    /// @brief Every client doorbell view still owned by the mapping layer.
+    std::vector<DoorbellView> doorbell_views;
+    /// @brief Stable driver-side alias used exclusively by the command processor.
+    void *doorbell_monitor_page = nullptr;
     size_t doorbell_page_size = 0;
-    uint64_t doorbell_gpu_va = 0;
     uint64_t next_doorbell_offset = 0;
     std::vector<uint32_t> free_doorbell_offsets;
     uint64_t scratch_backing_va = 0;
@@ -129,13 +141,15 @@ public:
     uint64_t r_debug = 0;
   };
 
-  /// @brief Per-process debugger session state.
+  /// @brief Debugger session state for one target process.
   ///
   /// @details Mirrors the debug-related fields the kernel maintains on
   /// @c struct @c kfd_process in
   /// @c drivers/gpu/drm/amd/amdkfd/kfd_priv.h.
-  /// Managed by the @c AMDKFD_IOC_DBG_TRAP ioctl handler
-  /// (@c kfd_ioctl_set_debug_trap in the real driver).
+  /// SimulatedKfd stores these sessions in a table keyed by the target's Linux
+  /// pid, independently of KfdProcess, so a debugger can attach before the
+  /// inferior opens /dev/kfd. This mirrors the real driver's DBG_TRAP_ENABLE
+  /// path creating the target kfd_process.
   ///
   /// Field mapping to @c kfd_priv.h:
   /// | DebugSession field     | kfd_process field                               |
@@ -158,6 +172,15 @@ public:
     /// Bitmask of exception classes that are forwarded to the debugger.
     uint64_t exception_enable_mask = 0;
 
+    /// @brief Previously configured process debug flags.
+    uint32_t flags = 0;
+
+    /// @brief Current wave launch mode.
+    uint32_t launch_mode = 0;
+
+    /// @brief Current wave-launch trap override mask.
+    uint32_t launch_override_enable = 0;
+
     /// @brief Mirrors @c kfd_process::dbg_ev_file (flattened from @c struct @c file* to fd).
     /// File descriptor used as the debugger notification / poll target.
     /// -1 when no debugger is attached.
@@ -171,9 +194,98 @@ public:
     /// descriptor and is not owned here. RAII replaces an explicit close.
     util::UniqueHandle owned_dbg_fd;
 
+    /// @brief Debugger-authorized access to the target's address space.
+    /// @details The ptrace parent opens /proc/<target>/mem and transfers it to
+    /// the daemon, which cannot use process_vm_readv/process_vm_writev itself.
+    util::UniqueHandle target_mem_fd;
+
+    /// @brief Pins the target process identity and reports target exit.
+    /// @details Prevents a stale session from being mistaken for a later process
+    /// that reuses the same numeric pid.
+    util::UniqueHandle target_pidfd;
+
+    /// @brief Pins the target's procfs directory used for ptrace authorization.
+    /// @details Status is opened relative to this descriptor so authorization
+    /// cannot silently switch to a process that reuses the numeric pid.
+    util::UniqueHandle target_procfd;
+
     /// @brief Mirrors @c kfd_process::debugger_process (stored as pid instead of pointer).
     /// Linux PID of the attached debugger (ptrace parent). 0 when not attached.
     pid_t debugger_pid = 0;
+
+    /// @brief Target exit was observed and owned resources were released.
+    /// @details Keeps the pinned pidfd identity until a racing DISABLE consumes
+    /// the session, so numeric PID reuse cannot turn process exit into EINVAL.
+    bool target_exited = false;
+
+    /// @brief The target's KfdProcess has been observed at least once.
+    /// @details Distinguishes the two ways a target can have no KfdProcess.
+    /// The real driver has only one: DBG_TRAP_ENABLE calls kfd_create_process,
+    /// so from then on the kfd_process exists and a failed lookup means the
+    /// process is gone (-ESRCH). Here the KfdProcess appears only when the
+    /// inferior opens /dev/kfd, which can be after the debugger attaches, so
+    /// "not up yet" and "torn down" are otherwise indistinguishable.
+    bool saw_kfd_process = false;
+
+    /// @brief Pins the debugger process identity and reports debugger exit.
+    /// @details Mirrors the kernel's debugger-process notifier: the session is
+    /// disabled when the debugger task exits, even if the target remains alive.
+    util::UniqueHandle debugger_pidfd;
+
+    /// @brief One programmed hardware address-watch register (TCP_WATCH0..3).
+    struct AddressWatch {
+      bool active = false;
+      uint64_t address = 0;
+      uint64_t mask = 0;
+      uint32_t mode = 0;
+
+      /// @brief Construct the full hardware compare state from the KFD UAPI.
+      /// @details KFD transports only the programmable low 32 mask bits. The
+      /// upper address bits are fixed compares in TCP_WATCH and must remain
+      /// set, or unrelated addresses with the same low 32 bits alias.
+      static constexpr AddressWatch from_kfd(uint64_t address, uint32_t mask, uint32_t mode) {
+        return AddressWatch{true, address, 0xFFFFFFFF00000000ULL | mask, mode};
+      }
+
+      /// @brief Return whether an access overlaps the watched address block.
+      [[nodiscard]] constexpr bool overlaps(uint64_t access_address, uint32_t bytes) const {
+        if (!active || bytes == 0)
+          return false;
+        const uint64_t block_base = address & mask;
+        const uint64_t block_size = ~mask + 1;
+        const uint64_t access_end =
+            access_address > UINT64_MAX - bytes ? UINT64_MAX : access_address + bytes;
+        const uint64_t block_end = block_size == 0 || block_base > UINT64_MAX - block_size
+                                       ? UINT64_MAX
+                                       : block_base + block_size;
+        return block_size == 0 || (access_address < block_end && block_base < access_end);
+      }
+    };
+    /// The register file the topology advertises, so a debugger can never hold
+    /// more watchpoints than the device snapshot told it exist.
+    static constexpr uint32_t kMaxAddressWatches = kmd::kNumWatchPoints;
+    std::array<AddressWatch, kMaxAddressWatches> address_watches;
+
+    /// @brief Return a bit for every hardware watch slot matching an access.
+    /// @details A single access may overlap multiple programmed watch ranges.
+    /// Hardware reports all of them concurrently in TRAPSTS, allowing the
+    /// debugger to associate every logical watchpoint with the same stop.
+    /// @param matching_modes Bit set of watch modes the access satisfies,
+    /// indexed by mode value. The modes overlap (a write is both NONREAD and
+    /// ALL), so the caller -- which owns the KFD ABI -- resolves them into this
+    /// set rather than passing a single mode to compare for equality.
+    [[nodiscard]] constexpr uint32_t matching_address_watch_slots(uint64_t access_address,
+                                                                  uint32_t bytes,
+                                                                  uint32_t matching_modes) const {
+      uint32_t slots = 0;
+      for (uint32_t slot = 0; slot < kMaxAddressWatches; ++slot) {
+        const auto &watch = address_watches[slot];
+        if (watch.mode < 32 && ((matching_modes >> watch.mode) & 1u) != 0 &&
+            watch.overlaps(access_address, bytes))
+          slots |= uint32_t{1} << slot;
+      }
+      return slots;
+    }
   };
 
   // GPUVM uses the simulator's fixed 4 KiB translation granule. This models
@@ -188,6 +300,8 @@ public:
     size_t host_backed_bytes = 0;
     /// GPU-page offset that corresponds to host_ptr.
     size_t gpu_page_offset = 0;
+
+    bool operator==(const HostExtent &) const = default;
   };
 
   /// @brief One inline host extent, spilling to dynamic storage only for split pages.
@@ -211,6 +325,7 @@ public:
         move_from(std::move(other));
       return *this;
     }
+    bool operator==(const HostExtentList &) const = default;
 
     [[nodiscard]] size_t size() const {
       if (std::holds_alternative<std::monostate>(storage_))
@@ -345,6 +460,8 @@ public:
 
     amdgpu::Mtype mtype = amdgpu::Mtype::RW;
     HostExtentList host_extents;
+
+    bool operator==(const PageTableEntry &) const = default;
   };
 
   /// @brief Per-process GPU page table (GPU VA page number → PTE).
@@ -497,6 +614,27 @@ public:
   };
   std::unordered_map<uint32_t, QueueDoorbellInfo> queue_doorbell_map_;
 
+  /// @brief Debug-relevant per-queue info reported by GET_QUEUE_SNAPSHOT.
+  ///
+  /// @details Captured when CREATE_QUEUE completes. rocm-dbgapi consumes the
+  /// context-save-restore address/size to locate each queue's CWSR area (from
+  /// which it walks the wave save state), plus the ring pointers to correlate
+  /// dispatches. Mirrors the fields the kernel fills in
+  /// @c kfd_queue_snapshot_entry (kfd_process_queue_manager.c:
+  /// @c pqm_get_queue_snapshot).
+  struct QueueSnapshotInfo {
+    uint64_t ring_base_address = 0;
+    uint64_t write_pointer_address = 0;
+    uint64_t read_pointer_address = 0;
+    uint64_t ctx_save_restore_address = 0;
+    uint32_t ctx_save_restore_area_size = 0;
+    uint32_t ring_size = 0;
+    uint32_t queue_type = 0;
+    uint32_t gpu_id = 0;
+    uint64_t exception_status = 0; ///< Raised exceptions on this queue (KFD_EC_MASK bits).
+  };
+  std::unordered_map<uint32_t, QueueSnapshotInfo> queue_snapshot_map_;
+
   EventState event_state_;
 
   std::unordered_map<uint32_t, MemoryPolicy> memory_policies_;
@@ -505,9 +643,6 @@ public:
   std::unordered_map<uint64_t, SvmRange> svm_ranges_;
   std::mutex runtime_mutex_;
   RuntimeState runtime_state_;
-
-  mutable std::mutex debug_mutex_;
-  DebugSession debug_session_;
 
 private:
   static void normalize_host_extents(PageTableEntry &page) {

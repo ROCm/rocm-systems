@@ -73,7 +73,7 @@ void print_usage(std::ostream &os) {
   if (value == "gfx1200" || value == "gfx1201")
     return ROCJITSU_CODE_ARCH_RDNA4;
   if (value == "gfx1250")
-    return ROCJITSU_CODE_ARCH_GFX1250;
+    return ROCJITSU_CODE_ARCH_CDNA5;
   return std::nullopt;
 }
 
@@ -87,7 +87,7 @@ void print_usage(std::ostream &os) {
   case ROCJITSU_CODE_TARGET_GFX1201:
     return ROCJITSU_CODE_ARCH_RDNA4;
   case ROCJITSU_CODE_TARGET_GFX1250:
-    return ROCJITSU_CODE_ARCH_GFX1250;
+    return ROCJITSU_CODE_ARCH_CDNA5;
   default:
     return std::nullopt;
   }

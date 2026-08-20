@@ -15,8 +15,9 @@
 /// row of the 4x4 accumulator.  The K-loop iterates over the shared dimension,
 /// feeding one column of A and one row of B per iteration via rank-1 updates.
 ///
-/// With N=64 and 256 workgroups of 64 threads each, all 256 CUs across 8 XCDs
-/// are utilized (16x16 tiles of 4x4 = 64x64 output elements).
+/// With N=64, the first 256 workgroups cover the 16x16 grid of 4x4 tiles. A
+/// 288-workgroup MI350X topology stress dispatch gives each physical CU a group;
+/// the final 32 groups exit before accessing the matrices.
 ///
 /// Kernel arguments (passed via the argument buffer):
 ///   A - pointer to input matrix A  (N*N floats, row-major)
@@ -26,11 +27,12 @@
 
 using v4f32 = __attribute__((ext_vector_type(4))) float;
 
-extern "C" __global__ void matmul_mfma(const float *__restrict__ A,
-                                       const float *__restrict__ B,
+extern "C" __global__ void matmul_mfma(const float *__restrict__ A, const float *__restrict__ B,
                                        float *__restrict__ C, unsigned N) {
   constexpr unsigned TILE = 4;
   unsigned tiles_per_row = N / TILE;
+  if (blockIdx.x >= tiles_per_row * tiles_per_row)
+    return;
   unsigned tile_row = blockIdx.x / tiles_per_row;
   unsigned tile_col = blockIdx.x % tiles_per_row;
   unsigned lane = threadIdx.x % TILE;

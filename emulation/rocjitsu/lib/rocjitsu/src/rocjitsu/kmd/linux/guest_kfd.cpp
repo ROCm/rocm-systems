@@ -1136,6 +1136,14 @@ bool GuestKfd::is_doorbell_range(const void *addr, size_t length) const {
   return execution_driver_ && execution_driver_->is_doorbell_range(addr, length);
 }
 
+void *GuestKfd::mmap_replacing_client_doorbell_views(void *addr, size_t length, int prot, int flags,
+                                                     int fd, off_t offset) {
+  if (execution_driver_)
+    return execution_driver_->mmap_replacing_client_doorbell_views(addr, length, prot, flags, fd,
+                                                                   offset);
+  return libc_passthrough().mmap(addr, length, prot, flags, fd, offset);
+}
+
 bool GuestKfd::handles_drm_render_minor(uint32_t minor) const {
   if (ready_.load(std::memory_order_acquire) && minor == guest_.drm_render_minor)
     return true;

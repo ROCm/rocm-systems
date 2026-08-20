@@ -105,7 +105,7 @@ static std::vector<uint8_t> make_kernel_descriptor_bytes(int64_t entry_offset) {
 std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text(
     const std::vector<uint32_t> &text_words, std::optional<size_t> text_function_words,
     size_t text_function_offset_words, std::optional<size_t> function_pointer_table_target_words,
-    bool name_function_pointer_table_with_symbol) {
+    bool name_function_pointer_table_with_symbol, bool export_text_function) {
   if (text_function_words && text_function_offset_words + *text_function_words > text_words.size())
     throw std::invalid_argument("text function extent exceeds .text fixture");
   if (function_pointer_table_target_words &&
@@ -130,7 +130,8 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text(
 
   std::vector<uint8_t> strtab{'\0'};
   const uint32_t kd_symbol_name = add_elf_name(strtab, "kernel.kd");
-  const uint32_t text_symbol_name = text_function_words ? add_elf_name(strtab, "kernel") : 0;
+  const uint32_t text_symbol_name =
+      text_function_words ? add_elf_name(strtab, export_text_function ? "device_fn" : "kernel") : 0;
   const uint32_t table_symbol_name = has_table ? add_elf_name(strtab, "function_table") : 0;
 
   // The kernel descriptor requires 8-byte alignment (tests reinterpret_cast the
@@ -225,8 +226,9 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text(
     syms[2].st_name = text_symbol_name;
     // Real device functions are LOCAL and appear only in .symtab. Offset zero is the kernel entry,
     // which function discovery excludes; a non-zero offset names a callee body.
-    syms[2].st_info = elf_symbol_info(text_function_offset_words == 0 ? kElfSymbolBindGlobal
-                                                                      : kElfSymbolBindLocal,
+    syms[2].st_info = elf_symbol_info((text_function_offset_words == 0 || export_text_function)
+                                          ? kElfSymbolBindGlobal
+                                          : kElfSymbolBindLocal,
                                       kElfSymbolTypeFunc);
     syms[2].st_shndx = 1;
     syms[2].st_value = text_vaddr + text_function_offset_words * sizeof(uint32_t);

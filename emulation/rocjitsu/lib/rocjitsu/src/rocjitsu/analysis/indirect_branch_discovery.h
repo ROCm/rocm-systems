@@ -43,8 +43,20 @@ struct IndirectCallFixup {
   uint64_t source_recovery_end_offset = 0;   ///< One-past-end source byte of builder code.
   uint64_t source_call_offset = 0;           ///< Source offset of the setpc/swappc consumer.
   uint64_t source_target_offset = 0;         ///< Recovered source branch target offset.
-  uint16_t source_call_sreg = 0;             ///< Low SGPR of the recovered PC pair.
-  bool source_is_call = false;               ///< Whether the consumer is a call-like swappc.
+  uint16_t source_call_sreg = 0;             ///< Low SGPR the consumer reads the PC pair from.
+  /// @brief Low SGPR of the pair the builder range itself writes.
+  ///
+  /// @details Usually the same pair the consumer reads, and for a plain getpc/add/swappc chain
+  /// it always is. A lane-banked dispatcher breaks the two apart: it builds the address in a
+  /// scratch pair, stashes it with `v_writelane_b32`, and restores it into the consumer's pair
+  /// with `v_readlane_b32` much later. patch_recovered_builder_fixups regenerates only the add
+  /// half of the builder and leaves the original `s_getpc_b64` where it is, so the replacement
+  /// has to name the pair that getpc writes. Naming the consumer's pair instead emits an add
+  /// against a getpc that wrote a different register: it corrupts the consumer's pair, breaks
+  /// the stash the dispatcher still reads back, and leaves a getpc/add pairing that the next
+  /// translation's relocation lattice reads as a code address naming no body at all.
+  uint16_t source_builder_sreg = 0;
+  bool source_is_call = false; ///< Whether the consumer is a call-like swappc.
   /// @brief True when the recovered fact for this consumer was incomplete: at least
   /// one predecessor path left the PC pair at an unconstrained value. The concrete
   /// targets are still valid for relocation and liveness, but the consumer must NOT

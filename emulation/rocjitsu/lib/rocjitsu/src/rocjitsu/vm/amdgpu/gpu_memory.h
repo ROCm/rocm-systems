@@ -11,13 +11,16 @@
 #include "simdojo/components/sparse_memory.h"
 #include "simdojo/sim/component.h"
 #include "util/log.h"
+#include "util/unique_handle.h"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <cassert>
 #include <cstring>
+#include <fcntl.h>
 #include <format>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -96,6 +99,7 @@ public:
         .page_table = pt,
         .mutex = mu,
         .client_pid = 0,
+        .client_mem_fd = {},
         .generation = generation,
     };
     // The VMID may now select a different page table even though neither page
@@ -120,6 +124,15 @@ public:
     auto it = vmid_table_.find(pid);
     if (it != vmid_table_.end())
       it->second.client_pid = client_pid;
+  }
+
+  void set_process_mem_fd(uint32_t pid, int mem_fd) {
+    std::unique_lock lk(vmid_mutex_);
+    auto it = vmid_table_.find(pid);
+    if (it == vmid_table_.end())
+      return;
+    const int duplicate = mem_fd >= 0 ? ::fcntl(mem_fd, F_DUPFD_CLOEXEC, 0) : -1;
+    it->second.client_mem_fd.reset(duplicate);
   }
 
   /// @brief Enable passthrough for unmapped addresses (local/user-mode only).
@@ -154,14 +167,8 @@ public:
   /// callers can retry a not-yet-installed range while still allowing a mapped
   /// page's deliberately clipped extent to produce bounded partial accesses.
   bool has_range_mapping(uint64_t addr, size_t size, uint32_t vmid = 0) const {
-    if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - addr)
-      return false;
-    bool mapped = true;
-    for_each_page_chunk(addr, size, [&](uint64_t ea, size_t, size_t) {
-      if (mapped && !has_page_mapping(ea, vmid))
-        mapped = false;
-    });
-    return mapped;
+    return every_page(addr, size,
+                      [&](uint64_t page_addr) { return has_page_mapping(page_addr, vmid); });
   }
 
   /// @brief Resolve a GPU VA range to its first borrowed host byte.
@@ -187,6 +194,29 @@ public:
     return contiguous ? first_host_ptr : nullptr;
   }
 
+  /// @brief Return whether a GPU VA has a VMID page-table mapping.
+  bool is_mapped(uint64_t addr, uint32_t vmid = 0) const {
+    if (vmid == 0)
+      return passthrough_;
+    std::shared_lock lk(vmid_mutex_);
+    auto it = vmid_table_.find(vmid);
+    if (it == vmid_table_.end())
+      return false;
+    auto &entry = it->second;
+    std::shared_lock pt_lk(*entry.mutex);
+    return entry.page_table->contains(addr >> PAGE_SHIFT);
+  }
+
+  /// @brief Return whether every page touched by a range has a VMID mapping.
+  /// @details The range-aware form of is_mapped(), with the same deliberate
+  /// strictness: passthrough is ignored for vmid != 0. Use this rather than
+  /// is_mapped() on a base address when the access is wider than a byte -- an
+  /// access starting near the end of a mapped page can still run off it.
+  /// A zero size, or a range that wraps the address space, is not mapped.
+  bool is_range_mapped(uint64_t addr, size_t size, uint32_t vmid = 0) const {
+    return every_page(addr, size, [&](uint64_t page_addr) { return is_mapped(page_addr, vmid); });
+  }
+
   /// @brief Look up PTE MTYPE for a GPU VA in the given VMID's page table.
   Mtype pte_mtype(uint64_t addr, uint32_t vmid = 0) const {
     if (vmid == 0)
@@ -198,6 +228,20 @@ public:
   }
 
   uint32_t fetch32(uint64_t addr, uint32_t vmid = 0) const { return read32(addr, vmid); }
+
+  bool is_fetchable(uint64_t addr, uint32_t vmid = 0) const {
+    if (is_mapped(addr, vmid) || simdojo::SparseMemory::has_page(addr))
+      return true;
+    uint8_t byte = 0;
+    if (util::UniqueHandle mem_fd = duplicate_client_mem_fd(vmid); mem_fd.get() >= 0)
+      return pread(mem_fd.get(), &byte, sizeof(byte), static_cast<off_t>(addr)) == sizeof(byte);
+    pid_t pid = client_pid_for_vmid(vmid);
+    if (pid <= 0)
+      return false;
+    iovec local{&byte, sizeof(byte)};
+    iovec remote{reinterpret_cast<void *>(addr), sizeof(byte)};
+    return process_vm_readv(pid, &local, 1, &remote, 1, 0) == sizeof(byte);
+  }
 
   /// @brief Read a contiguous range from simulated GPU memory.
   /// @details Handles each page through mapped host memory, client memory, or
@@ -271,6 +315,38 @@ public:
     atomic_rmw_unmapped(addr, size, entry.client_pid, fn);
   }
 
+  /// @brief Copy a contiguous range between two VMID-scoped addresses.
+  /// @details Unlike read_block()/write_block(), this does not fall back to
+  /// sparse memory: an SDMA packet must remain pending when either endpoint is
+  /// inaccessible. In daemon mode, pageable host pointers are accessed through
+  /// process_vm_readv/process_vm_writev while GPU allocations use their mapped
+  /// daemon backing. Transfers are split at both source and destination page
+  /// boundaries so each chunk resolves within one page, and each read and write
+  /// runs inside the page-table mapping callback: no host pointer outlives the
+  /// lock that keeps its allocation alive, so a concurrent process teardown
+  /// cannot unmap the storage mid-copy.
+  bool copy_block(uint64_t dst_addr, uint64_t src_addr, size_t len, uint32_t vmid = 0) {
+    std::array<uint8_t, PAGE_SIZE> buffer{};
+    size_t offset = 0;
+    while (offset < len) {
+      const uint64_t src_ea = src_addr + offset;
+      const uint64_t dst_ea = dst_addr + offset;
+      const size_t chunk = std::min(
+          {len - offset, PAGE_SIZE - (src_ea & PAGE_MASK), PAGE_SIZE - (dst_ea & PAGE_MASK)});
+
+      if (!copy_from_mapped(src_ea, buffer.data(), chunk, vmid) &&
+          (vmid == 0 || !read_client_memory(src_ea, buffer.data(), chunk, vmid)))
+        return false;
+
+      if (!copy_to_mapped(dst_ea, buffer.data(), chunk, vmid) &&
+          (vmid == 0 || !write_client_memory(dst_ea, buffer.data(), chunk, vmid)))
+        return false;
+
+      offset += chunk;
+    }
+    return true;
+  }
+
   uint8_t *translate_debug(uint64_t addr, uint32_t vmid, size_t size = 1) const {
     return translate(addr, vmid, size);
   }
@@ -278,7 +354,9 @@ public:
   /// @brief Find the contiguous host range containing a VMID-scoped GPU VA.
   /// @details KFD dispatches use per-process page tables. Kernel-symbol
   /// resolution needs a daemon-accessible host pointer range so it can scan
-  /// backward from the kernel descriptor to the loaded ELF header.
+  /// backward from the kernel descriptor to the loaded ELF header. Sanitized
+  /// builds release the VMID and page-table locks around allocator queries,
+  /// then revalidate the registry generation and every contributing PTE.
   std::pair<uint64_t, uint64_t> find_host_range(uint64_t addr, uint32_t vmid) const {
     if (vmid == 0) {
       auto *host = translate(addr, vmid, 1);
@@ -289,61 +367,113 @@ public:
       return {reinterpret_cast<uint64_t>(range), size};
     }
 
-    std::shared_lock vmid_lock(vmid_mutex_);
-    auto vmid_entry = vmid_table_.find(vmid);
-    if (vmid_entry == vmid_table_.end())
-      return {0, 0};
+#if defined(RJ_GPU_MEMORY_WITH_ASAN)
+    size_t metadata_retries = 0;
+#endif
+    while (true) {
+      std::shared_lock vmid_lock(vmid_mutex_);
+#if defined(RJ_GPU_MEMORY_WITH_ASAN)
+      const uint64_t registry_generation = vmid_registry_generation_;
+#endif
+      auto vmid_entry = vmid_table_.find(vmid);
+      if (vmid_entry == vmid_table_.end())
+        return {0, 0};
 
-    auto &entry = vmid_entry->second;
-    std::shared_lock page_table_lock(*entry.mutex);
-    const uint64_t page = addr >> PAGE_SHIFT;
-    auto page_entry = entry.page_table->find(page);
-    if (page_entry == entry.page_table->end())
-      return {0, 0};
+      auto &entry = vmid_entry->second;
+      auto *page_table = entry.page_table;
+      auto *page_table_mutex = entry.mutex;
+#if defined(RJ_GPU_MEMORY_WITH_ASAN)
+      const uint64_t *generation_ptr = entry.generation;
+#endif
+      std::shared_lock page_table_lock(*page_table_mutex);
+      const uint64_t page = addr >> PAGE_SHIFT;
+      auto page_entry = page_table->find(page);
+      if (page_entry == page_table->end())
+        return {0, 0};
 
-    const size_t page_offset = addr & PAGE_MASK;
-    const auto *current_extent = host_extent_at(page_entry->second, page_offset);
-    if (!current_extent)
-      return {0, 0};
+      const size_t page_offset = addr & PAGE_MASK;
+      const auto *current_extent = host_extent_at(page_entry->second, page_offset);
+      if (!current_extent)
+        return {0, 0};
 
-    uint64_t first_page = page;
-    const auto *first_extent = current_extent;
-    uint8_t *first_host_byte = first_extent->host_ptr;
-    while (first_page > 0 && first_extent->gpu_page_offset == 0) {
-      auto previous_page_entry = entry.page_table->find(first_page - 1);
-      if (previous_page_entry == entry.page_table->end())
-        break;
-      const auto *previous_extent = host_extent_ending_at_page(previous_page_entry->second);
-      if (!previous_extent ||
-          previous_extent->host_ptr + previous_extent->host_backed_bytes != first_host_byte)
-        break;
-      --first_page;
-      first_extent = previous_extent;
-      first_host_byte = first_extent->host_ptr;
+      uint64_t first_page = page;
+      const auto *first_extent = current_extent;
+      uint8_t *first_host_byte = first_extent->host_ptr;
+      while (first_page > 0 && first_extent->gpu_page_offset == 0) {
+        auto previous_page_entry = page_table->find(first_page - 1);
+        if (previous_page_entry == page_table->end())
+          break;
+        const auto *previous_extent = host_extent_ending_at_page(previous_page_entry->second);
+        if (!previous_extent ||
+            previous_extent->host_ptr + previous_extent->host_backed_bytes != first_host_byte)
+          break;
+        --first_page;
+        first_extent = previous_extent;
+        first_host_byte = first_extent->host_ptr;
+      }
+
+      uint64_t last_page = page;
+      const auto *last_extent = current_extent;
+      while (last_extent->gpu_page_offset + last_extent->host_backed_bytes == PAGE_SIZE) {
+        auto next_page_entry = page_table->find(last_page + 1);
+        if (next_page_entry == page_table->end())
+          break;
+        const auto *next_extent = host_extent_starting_at_page(next_page_entry->second);
+        if (!next_extent ||
+            next_extent->host_ptr != last_extent->host_ptr + last_extent->host_backed_bytes)
+          break;
+        ++last_page;
+        last_extent = next_extent;
+      }
+
+      const uintptr_t first_host_address = reinterpret_cast<uintptr_t>(first_host_byte);
+      const uintptr_t last_host_address = reinterpret_cast<uintptr_t>(last_extent->host_ptr);
+      const uint64_t declared_range_size =
+          last_host_address - first_host_address + last_extent->host_backed_bytes;
+#if defined(RJ_GPU_MEMORY_WITH_ASAN)
+      auto *host_byte = current_extent->host_ptr + (page_offset - current_extent->gpu_page_offset);
+      std::vector<std::pair<uint64_t, KfdProcess::PageTableEntry>> pte_snapshot;
+      pte_snapshot.reserve(last_page - first_page + 1);
+      for (uint64_t snapshot_page = first_page;; ++snapshot_page) {
+        pte_snapshot.emplace_back(snapshot_page, page_table->at(snapshot_page));
+        if (snapshot_page == last_page)
+          break;
+      }
+
+      page_table_lock.unlock();
+      vmid_lock.unlock();
+      run_asan_page_table_unlocked_hook();
+      auto [range, range_size] =
+          addressable_range_containing(first_host_byte, declared_range_size, host_byte);
+
+      vmid_lock.lock();
+      auto current_vmid_entry = vmid_table_.find(vmid);
+      bool snapshot_valid = vmid_registry_generation_ == registry_generation &&
+                            current_vmid_entry != vmid_table_.end() &&
+                            current_vmid_entry->second.page_table == page_table &&
+                            current_vmid_entry->second.mutex == page_table_mutex &&
+                            current_vmid_entry->second.generation == generation_ptr;
+      if (snapshot_valid) {
+        page_table_lock.lock();
+        for (const auto &[snapshot_page, snapshot_pte] : pte_snapshot) {
+          auto current_pte = page_table->find(snapshot_page);
+          if (current_pte == page_table->end() || current_pte->second != snapshot_pte) {
+            snapshot_valid = false;
+            break;
+          }
+        }
+      }
+      if (snapshot_valid)
+        return {reinterpret_cast<uint64_t>(range), range_size};
+      if (++metadata_retries >= kMaxMetadataRetries)
+        return {0, 0};
+#else
+      auto [range, range_size] = addressable_range_containing(
+          first_host_byte, declared_range_size,
+          current_extent->host_ptr + (page_offset - current_extent->gpu_page_offset));
+      return {reinterpret_cast<uint64_t>(range), range_size};
+#endif
     }
-
-    uint64_t last_page = page;
-    const auto *last_extent = current_extent;
-    while (last_extent->gpu_page_offset + last_extent->host_backed_bytes == PAGE_SIZE) {
-      auto next_page_entry = entry.page_table->find(last_page + 1);
-      if (next_page_entry == entry.page_table->end())
-        break;
-      const auto *next_extent = host_extent_starting_at_page(next_page_entry->second);
-      if (!next_extent ||
-          next_extent->host_ptr != last_extent->host_ptr + last_extent->host_backed_bytes)
-        break;
-      ++last_page;
-      last_extent = next_extent;
-    }
-
-    const uintptr_t first_host_address = reinterpret_cast<uintptr_t>(first_host_byte);
-    const uintptr_t last_host_address = reinterpret_cast<uintptr_t>(last_extent->host_ptr);
-    const uint64_t declared_range_size =
-        last_host_address - first_host_address + last_extent->host_backed_bytes;
-    auto *host_byte = current_extent->host_ptr + (page_offset - current_extent->gpu_page_offset);
-    auto [range, range_size] =
-        addressable_range_containing(first_host_byte, declared_range_size, host_byte);
-    return {reinterpret_cast<uint64_t>(range), range_size};
   }
 
   std::string debug_page_table_info(uint32_t vmid, uint64_t page_key) const {
@@ -447,6 +577,8 @@ private:
   static constexpr unsigned kBackingAtomicHashFoldShift2 = 31;
   // Bound mutex storage while keeping collisions low for common GPU workloads.
   static constexpr size_t kBackingAtomicLockStripes = 4096;
+  // Bound repeated allocator queries when one page is continuously remapped.
+  static constexpr size_t kMaxMetadataRetries = 8;
   // The 64-bit golden-ratio hash constant scatters adjacent client PIDs.
   static constexpr uintptr_t kClientPidHashSalt = static_cast<uintptr_t>(0x9e3779b97f4a7c15ULL);
   static_assert((kBackingAtomicLockStripes & (kBackingAtomicLockStripes - 1)) == 0,
@@ -597,6 +729,25 @@ private:
     }
   }
 
+  /// @brief Whether @p pred holds for every page touched by [addr, addr+size).
+  /// @details Shared spine of has_range_mapping() and is_range_mapped(), which
+  /// differ only in their per-page predicate. Unlike for_each_page_chunk() this
+  /// stops at the first page that fails, so a large unmapped range costs one
+  /// page-table walk rather than one per 4 KiB. A zero size, or a range that
+  /// wraps the address space, satisfies nothing.
+  template <typename Pred> static bool every_page(uint64_t addr, size_t size, Pred &&pred) {
+    if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - addr)
+      return false;
+    size_t offset = 0;
+    while (offset < size) {
+      const uint64_t ea = addr + offset;
+      if (!pred(ea))
+        return false;
+      offset += std::min(size - offset, PAGE_SIZE - (ea & PAGE_MASK));
+    }
+    return true;
+  }
+
   static constexpr uint64_t kUserSpaceLimit = 0x800000000000ULL;
 
   static size_t addressable_prefix(const uint8_t *ptr, size_t len) {
@@ -676,6 +827,11 @@ private:
 
   static size_t heap_allocation_bounded_length([[maybe_unused]] uint8_t *base, size_t len) {
 #if defined(RJ_GPU_MEMORY_WITH_ASAN)
+    // A fully addressable range cannot cross an ASan heap allocation boundary:
+    // heap redzones are poisoned. Clean shadow also covers memory owned by
+    // external allocators, where the declared mapping is the available bound.
+    if (__asan_region_is_poisoned(base, len) == nullptr)
+      return len;
     std::array<char, 1> name{};
     void *region_address = nullptr;
     size_t region_size = 0;
@@ -698,6 +854,8 @@ private:
     KfdProcess::PageTable *page_table = nullptr;
     std::shared_mutex *mutex = nullptr;
     pid_t client_pid = 0;
+    /// Debugger-authorized /proc/<target>/mem fd, or empty.
+    util::UniqueHandle client_mem_fd;
     const uint64_t *generation = nullptr;
   };
 
@@ -714,6 +872,11 @@ private:
     std::shared_mutex *mutex = nullptr;
     const uint64_t *generation_ptr = nullptr;
   };
+
+#if defined(RJ_GPU_MEMORY_WITH_ASAN)
+  /// @brief Test-only callback invoked while page-table and VMID locks are released.
+  using AsanPageTableUnlockedHook = std::function<void()>;
+#endif
 
   static const KfdProcess::HostExtent *host_extent_at(const KfdProcess::PageTableEntry &pte,
                                                       size_t page_offset) {
@@ -770,58 +933,164 @@ private:
   }
 
   /// @brief Walk a VMID page table with a generation-keyed thread-local cache.
-  /// @details The callback runs while both VMID registration and the selected
-  /// page table are shared-locked. This keeps a cached host pointer alive for
-  /// the whole copy and makes translate() and pte_mtype() share one invalidation
-  /// protocol.
+  /// @details A mapped-PTE callback runs while both VMID registration and the
+  /// selected page table are shared-locked. Miss callbacks and ASan allocator
+  /// queries run without either lock. After an unlocked query, the VMID binding
+  /// and exact PTE contents are revalidated before the bounded copy is published.
+  /// Addressability checks in the mapped-span helpers remain the final guard
+  /// against host-allocation reuse that preserves identical PTE contents.
   template <typename F>
   auto cached_walk(uint64_t addr, uint32_t vmid, PteCache &cache,
                    F &&fn) const -> std::invoke_result_t<F, const KfdProcess::PageTableEntry *> {
     const uint64_t page_key = addr >> PAGE_SHIFT;
-    std::shared_lock vmid_lock(vmid_mutex_);
-    const uint64_t registry_generation = vmid_registry_generation_;
+#if defined(RJ_GPU_MEMORY_WITH_ASAN)
+    size_t metadata_retries = 0;
+#endif
+    bool allow_cache_hit = true;
+    while (true) {
+      std::shared_lock vmid_lock(vmid_mutex_);
+      const uint64_t registry_generation = vmid_registry_generation_;
+      const bool cached_table =
+          cache.memory == this && cache.memory_instance == instance_id_ && cache.vmid == vmid &&
+          cache.registry_generation == registry_generation && cache.page_table && cache.mutex;
+      KfdProcess::PageTable *page_table = cache.page_table;
+      std::shared_mutex *page_table_mutex = cache.mutex;
+      const uint64_t *generation_ptr = cache.generation_ptr;
+      if (!cached_table) {
+        auto vmid_entry = vmid_table_.find(vmid);
+        if (vmid_entry == vmid_table_.end()) {
+          cache = {};
+          vmid_lock.unlock();
+          return fn(nullptr);
+        }
+        page_table = vmid_entry->second.page_table;
+        page_table_mutex = vmid_entry->second.mutex;
+        generation_ptr = vmid_entry->second.generation;
+      }
 
-    const bool cached_table =
-        cache.memory == this && cache.memory_instance == instance_id_ && cache.vmid == vmid &&
-        cache.registry_generation == registry_generation && cache.page_table && cache.mutex;
-    if (!cached_table) {
-      auto it = vmid_table_.find(vmid);
-      if (it == vmid_table_.end()) {
-        cache = {};
+      std::shared_lock page_table_lock(*page_table_mutex);
+      uint64_t generation = generation_ptr ? *generation_ptr : 0;
+      auto publish_cache = [&](bool found, KfdProcess::PageTableEntry pte) {
+        cache = {
+            .memory = this,
+            .memory_instance = instance_id_,
+            .vmid = vmid,
+            .registry_generation = registry_generation,
+            .page_key = page_key,
+            .generation = generation,
+            .found = found,
+            .pte = std::move(pte),
+            .page_table = page_table,
+            .mutex = page_table_mutex,
+            .generation_ptr = generation_ptr,
+        };
+      };
+      const bool cached_page = allow_cache_hit && cached_table && generation_ptr &&
+                               cache.generation == generation && cache.page_key == page_key;
+      if (cached_page) {
+        if (cache.found)
+          return fn(&cache.pte);
+        page_table_lock.unlock();
+        vmid_lock.unlock();
         return fn(nullptr);
       }
-      cache.memory = this;
-      cache.memory_instance = instance_id_;
-      cache.vmid = vmid;
-      cache.registry_generation = registry_generation;
-      cache.page_table = it->second.page_table;
-      cache.mutex = it->second.mutex;
-      cache.generation_ptr = it->second.generation;
-      cache.found = false;
-    }
+      allow_cache_hit = false;
 
-    std::shared_lock page_table_lock(*cache.mutex);
-    const uint64_t generation = cache.generation_ptr ? *cache.generation_ptr : 0;
-    const bool cached_page = cached_table && cache.generation_ptr &&
-                             cache.generation == generation && cache.page_key == page_key;
-    if (!cached_page) {
-      auto it = cache.page_table->find(page_key);
-      cache.page_key = page_key;
-      cache.generation = generation;
-      cache.found = it != cache.page_table->end();
-      if (cache.found)
-        cache.pte = it->second;
-#if defined(RJ_GPU_MEMORY_WITH_ASAN)
-      if (cache.found) {
-        for (auto &extent : cache.pte.host_extents)
-          extent.host_backed_bytes =
-              heap_allocation_bounded_length(extent.host_ptr, extent.host_backed_bytes);
+      auto it = page_table->find(page_key);
+      if (it == page_table->end()) {
+        publish_cache(false, {});
+        // A miss exposes no page-table storage. Release this lock before a
+        // passthrough callback performs any ASan allocator query.
+        page_table_lock.unlock();
+        vmid_lock.unlock();
+        return fn(nullptr);
       }
-#endif
-    }
+      const auto &[candidate_mtype, candidate_host_extents] = it->second;
+      KfdProcess::PageTableEntry candidate;
+      candidate.mtype = candidate_mtype;
+      candidate.host_extents = candidate_host_extents;
+#if defined(RJ_GPU_MEMORY_WITH_ASAN)
+      const KfdProcess::PageTableEntry raw_pte = candidate;
+      // AMD's ASan address lookup may consult ROCr for device allocations.
+      // Drop the page-table lock around that external query, then validate the
+      // copied PTE before exposing its host pointers to the callback.
+      page_table_lock.unlock();
+      vmid_lock.unlock();
+      run_asan_page_table_unlocked_hook();
+      for (auto &extent : candidate.host_extents)
+        extent.host_backed_bytes =
+            heap_allocation_bounded_length(extent.host_ptr, extent.host_backed_bytes);
 
-    return fn(cache.found ? &cache.pte : nullptr);
+      vmid_lock.lock();
+      if (vmid_registry_generation_ != registry_generation) {
+        cache = {};
+        if (++metadata_retries < kMaxMetadataRetries)
+          continue;
+
+        // Unrelated VMID churn consumes the same bounded retry budget as a
+        // target remap. Re-resolve the target registration under its locks so
+        // this access remains fail-closed without turning a live mapping into
+        // a passthrough miss.
+        auto current_vmid_entry = vmid_table_.find(vmid);
+        if (current_vmid_entry == vmid_table_.end()) {
+          vmid_lock.unlock();
+          return fn(nullptr);
+        }
+        auto *current_page_table = current_vmid_entry->second.page_table;
+        std::shared_lock current_page_table_lock(*current_vmid_entry->second.mutex);
+        auto current_pte = current_page_table->find(page_key);
+        if (current_pte == current_page_table->end()) {
+          current_page_table_lock.unlock();
+          vmid_lock.unlock();
+          return fn(nullptr);
+        }
+        candidate = current_pte->second;
+        for (auto &extent : candidate.host_extents)
+          extent.host_backed_bytes = 0;
+        return fn(&candidate);
+      }
+      page_table_lock.lock();
+      const bool generation_unchanged = generation_ptr && *generation_ptr == generation;
+      bool mapping_changed = !generation_unchanged;
+      if (mapping_changed) {
+        it = page_table->find(page_key);
+        mapping_changed = it == page_table->end() || it->second != raw_pte;
+      }
+      if (mapping_changed) {
+        if (++metadata_retries < kMaxMetadataRetries)
+          continue;
+
+        // Preserve mapped-page identity while preventing access through bounds
+        // that could not be validated under continuous remapping.
+        if (it == page_table->end()) {
+          publish_cache(false, {});
+          page_table_lock.unlock();
+          vmid_lock.unlock();
+          return fn(nullptr);
+        }
+        candidate = it->second;
+        for (auto &extent : candidate.host_extents)
+          extent.host_backed_bytes = 0;
+        // Use the fail-closed bounds for this access only. Publishing this
+        // synthetic PTE would make later accesses reuse zero-length extents
+        // after remapping has stopped.
+        cache = {};
+        return fn(&candidate);
+      }
+      if (generation_ptr)
+        generation = *generation_ptr;
+#endif
+      publish_cache(true, std::move(candidate));
+      return fn(&cache.pte);
+    }
   }
+
+#if defined(RJ_GPU_MEMORY_WITH_ASAN)
+  void run_asan_page_table_unlocked_hook() const {
+    if (auto *hook = asan_page_table_unlocked_hook_.load(std::memory_order_acquire))
+      (*hook)();
+  }
+#endif
 
   template <typename F> bool with_page_mapping(uint64_t addr, uint32_t vmid, F &&fn) const {
     if (vmid == 0) {
@@ -901,6 +1170,53 @@ private:
         });
   }
 
+  /// @brief Run @p fn over a fully-backed, page-bounded host span with the
+  /// page-table lock held for the duration.
+  /// @details Applies exactly translate()'s resolution rules -- the range must
+  /// be contiguous, host-backed and addressable -- but hands the pointer to a
+  /// callback instead of returning it, so a concurrent unmap or VMID
+  /// unregistration cannot free the storage between resolution and use.
+  /// @return true if the span resolved and @p fn ran.
+  template <typename F>
+  bool with_translated_span(uint64_t addr, uint32_t vmid, size_t size, F &&fn) const {
+    if (size == 0 || (addr & PAGE_MASK) + size > PAGE_SIZE)
+      return false;
+    bool copied = false;
+    with_page_mapping(addr, vmid,
+                      [&](const KfdProcess::PageTableEntry *pte, uint8_t *passthrough_page) {
+                        const size_t page_offset = addr & PAGE_MASK;
+                        uint8_t *candidate = nullptr;
+                        if (pte) {
+                          const auto *extent = host_extent_at(*pte, page_offset);
+                          if (!extent || size > extent->host_backed_bytes -
+                                                    (page_offset - extent->gpu_page_offset))
+                            return;
+                          candidate = extent->host_ptr + (page_offset - extent->gpu_page_offset);
+                        } else {
+                          if (addr >= kUserSpaceLimit || size > kUserSpaceLimit - addr)
+                            return;
+                          candidate = passthrough_page + page_offset;
+                        }
+                        if (addressable_prefix(candidate, size) != size)
+                          return;
+                        fn(candidate);
+                        copied = true;
+                      });
+    return copied;
+  }
+
+  /// @brief Read a mapped span into @p dst without ever exposing a bare pointer.
+  bool copy_from_mapped(uint64_t addr, void *dst, size_t size, uint32_t vmid) const {
+    return with_translated_span(addr, vmid, size,
+                                [&](const uint8_t *host_ptr) { std::memcpy(dst, host_ptr, size); });
+  }
+
+  /// @brief Write @p src into a mapped span without ever exposing a bare pointer.
+  bool copy_to_mapped(uint64_t addr, const void *src, size_t size, uint32_t vmid) const {
+    return with_translated_span(addr, vmid, size,
+                                [&](uint8_t *host_ptr) { std::memcpy(host_ptr, src, size); });
+  }
+
   uint8_t *translate(uint64_t addr, uint32_t vmid, size_t size) const {
     if (size == 0 || (addr & PAGE_MASK) + size > PAGE_SIZE)
       return nullptr;
@@ -933,7 +1249,24 @@ private:
     return (it != vmid_table_.end()) ? it->second.client_pid : 0;
   }
 
+  util::UniqueHandle duplicate_client_mem_fd(uint32_t vmid) const {
+    std::shared_lock lk(vmid_mutex_);
+    auto it = vmid_table_.find(vmid);
+    if (it == vmid_table_.end() || it->second.client_mem_fd.get() < 0)
+      return {};
+    return util::UniqueHandle(::fcntl(it->second.client_mem_fd.get(), F_DUPFD_CLOEXEC, 0));
+  }
+
   bool read_client_memory(uint64_t addr, void *dst, size_t len, uint32_t vmid) const {
+    // Prefer the debugger-authorized /proc/<pid>/mem fd when the debug session
+    // transferred one. The daemon is not the debuggee's ptrace parent, so the
+    // process_vm_readv() fallback below is refused (EPERM) for a target it did
+    // not itself attach to.
+    if (util::UniqueHandle mem_fd = duplicate_client_mem_fd(vmid); mem_fd.get() >= 0) {
+      const ssize_t rc = pread(mem_fd.get(), dst, len, static_cast<off_t>(addr));
+      if (rc == static_cast<ssize_t>(len))
+        return true;
+    }
     return read_client_memory_for_pid(addr, dst, len, client_pid_for_vmid(vmid));
   }
 
@@ -952,6 +1285,13 @@ private:
   }
 
   bool write_client_memory(uint64_t addr, const void *src, size_t len, uint32_t vmid) {
+    // See read_client_memory(): the authorized fd is the only path that works
+    // for a debuggee the daemon did not ptrace-attach to itself.
+    if (util::UniqueHandle mem_fd = duplicate_client_mem_fd(vmid); mem_fd.get() >= 0) {
+      const ssize_t rc = pwrite(mem_fd.get(), src, len, static_cast<off_t>(addr));
+      if (rc == static_cast<ssize_t>(len))
+        return true;
+    }
     return write_client_memory_for_pid(addr, src, len, client_pid_for_vmid(vmid));
   }
 
@@ -978,6 +1318,11 @@ private:
   std::unordered_map<uint32_t, VmidEntry> vmid_table_;
   // Version of VMID-to-page-table bindings, accessed only under vmid_mutex_.
   uint64_t vmid_registry_generation_ = 1;
+#if defined(RJ_GPU_MEMORY_WITH_ASAN)
+  /// @brief Private unit-test seam for deterministic unlocked-query coverage.
+  /// @details The pointed-to callback must outlive every concurrent invocation.
+  mutable std::atomic<AsanPageTableUnlockedHook *> asan_page_table_unlocked_hook_{nullptr};
+#endif
   mutable std::atomic<uint64_t> clipped_mapped_accesses_{0};
   bool passthrough_ = false;
 };
