@@ -467,27 +467,18 @@ testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, 
 }
 
 // Device-side (in-kernel wall_clock64) timing for AllToAll (GIN and Hybrid
-// tiers). Opt-in via NCCL_GIN_ANVIL_DEVICE_TIMING (legacy
-// NCCL_GIN_ANVIL_A2A_DEVICE_TIMING): launches the persistent timed kernel once
+// tiers). Opt-in via --device_timing: launches the persistent timed kernel once
 // for the current size, brackets only the (skip+loop) steady-state collectives
 // with the GPU wall clock, reduces the grid busy window (min start .. max end
 // over CTAs) and the slowest rank (MPI MAX), and reports the per-iteration
-// device latency. loop/skip come from NCCL_GIN_ANVIL_A2A_DEVTIME_LOOP/_SKIP
-// (default 10/10); auto-reduce for very large chunks is opt-in via
-// NCCL_GIN_ANVIL_A2A_DEVTIME_AUTOREDUCE=1. The timed kernel launches with the
-// same <<<deviceCtaCount, 512>>> grid the production path uses, and selects the
+// device latency. loop/skip come from --devtime_loop/--devtime_skip (default
+// 10/10); size-tier overrides via --devtime_loop_mid/_large and
+// --devtime_skip_mid/_large. The timed kernel launches with the same
+// <<<deviceCtaCount, 512>>> grid the production path uses, and selects the
 // GIN (deviceImpl 3) or Hybrid (deviceImpl 4) body to match RunColl.
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
 testResult_t AlltoAllDeviceTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place, double* outDeltaSec) {
-  static const int devTiming = []() {
-    const char* e = getenv("NCCL_GIN_ANVIL_DEVICE_TIMING");          // generic (all collectives)
-    if (!(e && *e)) e = getenv("NCCL_GIN_ANVIL_A2A_DEVICE_TIMING");  // legacy A2A-specific name
-    return (e && *e) ? atoi(e) : 0;
-  }();
-  if (!devTiming) return testSuccess;
-
-  static const int loopEnv = gin_devtime::envInt("NCCL_GIN_ANVIL_A2A_DEVTIME_LOOP", 10);  // rocSHMEM default
-  static const int skipEnv = gin_devtime::envInt("NCCL_GIN_ANVIL_A2A_DEVTIME_SKIP", 10);  // rocSHMEM default
+  if (!deviceTimingMode) return testSuccess;
 
   // Only the GIN (deviceImpl 3) and Hybrid (deviceImpl 4) tiers provision the GIN
   // signals/barriers the timed bodies rely on. The Nvl LSA impls (-D1/-D2) only
@@ -496,21 +487,25 @@ testResult_t AlltoAllDeviceTime(struct threadArgs* args, ncclDataType_t type, nc
   if (deviceImpl != 3 && deviceImpl != 4) return testSuccess;
 
   const size_t count = args->nbytes / wordSize(type);
-  if (count == 0 || loopEnv < 1) return testSuccess;
+  if (count == 0 || devtimeLoop < 1) return testSuccess;
   const size_t perPeerBytes = count * wordSize(type);
 
   // By default use the exact skip/loop counts at every size so the device-timing
-  // window matches the host tests' -w/-n. Opt in to auto-reducing iteration
-  // counts for very large chunks (bounded runtime; per-call copy dominates) via
-  // NCCL_GIN_ANVIL_A2A_DEVTIME_AUTOREDUCE=1.
-  static const int autoReduce = gin_devtime::envInt("NCCL_GIN_ANVIL_A2A_DEVTIME_AUTOREDUCE", 0);
+  // window matches the host tests' -w/-n. Optional mid/large tier overrides cap
+  // iteration counts for very large chunks (bounded runtime; per-call copy dominates).
   // Clamp skip to >= 0: the timed kernel only stamps start_time[] at i == skip, so
   // a negative skip would leave start_time[] as uninitialized cudaMalloc memory and
   // measure() would reduce mx - mn over garbage (reported as the mode-2 metric).
-  int loop = loopEnv, skip = skipEnv < 0 ? 0 : skipEnv;
-  if (autoReduce) {
-    if (perPeerBytes >= (size_t)64 * 1024 * 1024) { loop = loop < 2 ? loop : 2; skip = skip < 1 ? skip : 1; }
-    else if (perPeerBytes >= (size_t)8 * 1024 * 1024) { loop = loop < 4 ? loop : 4; skip = skip < 2 ? skip : 2; }
+  int loop = devtimeLoop;
+  int skip = devtimeSkip < 0 ? 0 : devtimeSkip;
+  if (devtimeLoopLarge > 0 && perPeerBytes >= (size_t)64 * 1024 * 1024) {
+    loop = devtimeLoopLarge;
+    if (devtimeSkipLarge >= 0) skip = devtimeSkipLarge;
+    else skip = (skip < 1) ? skip : 1;
+  } else if (devtimeLoopMid > 0 && perPeerBytes >= (size_t)8 * 1024 * 1024) {
+    loop = devtimeLoopMid;
+    if (devtimeSkipMid >= 0) skip = devtimeSkipMid;
+    else skip = (skip < 2) ? skip : 2;
   }
 
   int gridCtas = deviceCtaCount;
