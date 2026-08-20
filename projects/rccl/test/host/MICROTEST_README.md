@@ -126,9 +126,14 @@ test:
    hipified copy, and `#include` it from the test TU *after* the fakes/macro shims
    are in scope. A new unit generally warrants its own binary (see
    [Units under test](#units-under-test)) so its file-scope state stays isolated.
-2. **Register the source.** Add the test `.cc` to the target's source list in
-   `test/host/CMakeLists.txt` (`RCCL_MICRO_TEST_SOURCES` for
-   `rccl-UnitTestsMicro`). If you add a new gtest suite, add its pattern to the
+2. **Register the source.** Add the test `.cc` to the shared source lists at
+   the top of `test/host/CMakeLists.txt` — the per-binary unit files go in
+   `RCCL_MICRO_UNIT_SOURCES` or `RCCL_DEVR_UNIT_SOURCES`;
+   files common to every binary (extra fakes, gtest main, isolation
+   runner) go in `RCCL_MICRO_COMMON_SOURCES`. These lists are consumed by both
+   build modes (the in-RCCL-build targets and the standalone
+   `add_host_micro_test(...)` binaries), so a single edit applies everywhere.
+   If you add a new gtest suite, add its pattern to the
    target's `test/test_categories_micro*.yaml` so CTest runs it.
 3. **Write the `TEST` / fixture.** Use a fixture whose `TearDown()` calls the
    unit's reset entry point (`ResetP2pFakes()`, `ResetEnqueueFakes()`, ...) so
@@ -367,13 +372,20 @@ version's arm so the test passes regardless of the toolchain — see
 When the link fails with `undefined symbol: foo`, find `foo` and
 triage it into the right bucket:
 
+  The fakes are split by concern under `fakes/`: `nccl_fakes.cc` holds the
+  reusable `nccl*` stubs (logging, env params, proxy/shm/topo), `hip_fakes.cc`
+  the HIP-runtime seams, and the per-unit files (`p2p_fakes.cc`,
+  `devr_fakes.cc`) the unit-specific stubs. Put a new stub in whichever file
+  matches; unit-specific behaviour goes in the per-unit fake.
+
 - **It's a global variable (`extern int foo;`)** → add a definition
-  to `fakes/p2p_fakes.cc`. Use a sensible default (usually zero).
+  to the matching fake. Use a sensible default (usually zero).
 - **It's a logging or env-param helper** → already covered by the
-  no-op `ncclDebugLog` / `ncclLoadParam`. If a new logging primitive
-  appears, follow the same pattern.
+  no-op `ncclDebugLog` / `ncclLoadParam` in `fakes/nccl_fakes.cc`. If a new
+  logging primitive appears, follow the same pattern.
 - **It's a `ncclProxy*` / `ncclShm*` / `ncclCommGraph*` / `ncclTopo*`
-  function** → add a return-failure stub. If a future test will need
+  function** → add a return-failure stub (`fakes/nccl_fakes.cc`, or the
+  per-unit fake if unit-specific). If a future test will need
   to drive it, plan for the function-pointer-hook upgrade.
 - **It's a `cuMem*` / `hipMem*` symbol** → first identify which test
   model you are extending; the two treat the HIP runtime differently:
@@ -498,10 +510,12 @@ make -j $(nproc) rccl-UnitTestsMicro
 `test/host/CMakeLists.txt` is dual-mode. Alongside the in-RCCL-build target
 above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
 can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
-`rccl-UnitTestsMicro`, `rccl-UnitTestsMicroInit[-uncached]` and
-`rccl-UnitTestsMicroEnqueue[-devlinker]` — **without configuring/building all of
-librccl**. It compiles just the tests + fakes + the hipified unit-under-test
-sources.
+`rccl-UnitTestsMicro` (p2p), `rccl-UnitTestsDevRuntime` (dev_runtime),
+`rccl-UnitTestsMicroInit[-uncached]` and `rccl-UnitTestsMicroEnqueue[-devlinker]`
+— **without configuring/building all of librccl**. It compiles just the tests +
+fakes + the hipified unit-under-test sources. The micro binaries are declared
+via the shared `add_host_micro_test(...)` helper, wiring up the same source
+lists (`RCCL_MICRO_*_SOURCES`) used by the in-RCCL-build path.
 
 Two of those names are preprocessor variants, not duplicates. `init.cc` gates
 part of its allocation path on `HIP_*_UNCACHED_MEMORY` and `enqueue.cc` gates
