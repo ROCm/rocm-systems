@@ -1044,8 +1044,8 @@ void CommandProcessor::set_queue_debug_suspended(uint32_t queue_id, uint32_t pro
           // neither resume path with anything to release.
           if (state.next_dispatch_idx < state.entries.size()) {
             const auto &entry = state.entries[state.next_dispatch_idx];
-            const bool barrier_ready = !entry.wait_for_predecessors ||
-                                       barrier_satisfied(state, state.next_dispatch_idx);
+            const bool barrier_ready =
+                !entry.wait_for_predecessors || barrier_satisfied(state, state.next_dispatch_idx);
             q.debug_work_deferred |=
                 barrier_ready && (entry.is_non_kernel() || !entry.fully_dispatched());
           }
