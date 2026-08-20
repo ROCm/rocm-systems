@@ -106,10 +106,24 @@ hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize,
     return g_hipMemGetAddressRange(pbase, psize, dptr);
 }
 
+hipError_t hipIpcGetMemHandle(hipIpcMemHandle_t* handle, void* devPtr)
+{
+    return g_hipIpcGetMemHandle(handle, devPtr);
+}
+
 hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle,
                                         void* addr)
 {
     return g_hipMemRetainAllocationHandle(handle, addr);
+}
+
+hipError_t hipMemExportToShareableHandle(void* shareableHandle,
+                                         hipMemGenericAllocationHandle_t handle,
+                                         hipMemAllocationHandleType handleType,
+                                         unsigned long long flags)
+{
+    return g_hipMemExportToShareableHandle(shareableHandle, handle, handleType,
+                                           flags);
 }
 
 hipError_t hipMemRelease(hipMemGenericAllocationHandle_t handle)

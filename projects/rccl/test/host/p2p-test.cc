@@ -22,15 +22,6 @@
 #define NCCL_PARAM(name, env, deftVal) \
     int64_t ncclParam##name() { return g_loadParam((env), (deftVal)); }
 
-// Macro shim: route the HIP driver entry points that ipcRegisterBuffer's
-// fresh-registration arm calls (hipMemGetAddressRange, hipIpcGetMemHandle)
-// through hookable fakes. The real symbols resolve at link time from
-// hip::host but would need a real GPU at runtime.
-#define hipIpcGetMemHandle(handle, devPtr) \
-    g_hipIpcGetMemHandle((handle), (devPtr))
-#define hipMemExportToShareableHandle(shareableHandle, handle, handleType, flags) \
-    g_hipMemExportToShareableHandle((shareableHandle), (handle), (handleType), (flags))
-
 // Pull in the hipified copy of p2p.cc (cudaXxx -> hipXxx rewrites already
 // applied by the hipify pass that runs as part of the main RCCL build).
 // P2P_CC_PATH is defined by this target's CMakeLists.txt as a string
