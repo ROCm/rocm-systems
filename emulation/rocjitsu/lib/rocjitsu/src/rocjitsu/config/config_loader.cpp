@@ -480,11 +480,39 @@ void do_wire_cps(simdojo::CompositeComponent *root) {
     auto *par = static_cast<simdojo::CompositeComponent *>(cp->parent());
     if (!par)
       continue;
-    std::vector<simdojo::Component *> sub;
-    par->collect_components(sub);
-    for (auto *s : sub) {
-      if (auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(s))
+
+    // Preserve the physical SE/CU hierarchy when flattening the XCD's CUs into
+    // the command processor. gfx12 CWSR records identify scratch with a shader
+    // engine plus a per-SE scoreboard slot, so a flat CU ordinal is not enough.
+    uint32_t shader_engine_id = 0;
+    bool found_shader_engine = false;
+    for (auto &child : par->children()) {
+      auto *se = dynamic_cast<amdgpu::ShaderEngine *>(child.get());
+      if (!se)
+        continue;
+      found_shader_engine = true;
+      uint32_t cu_index = 0;
+      for (auto &se_child : se->children()) {
+        auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(se_child.get());
+        if (!cu)
+          continue;
+        cu->set_shader_engine_location(shader_engine_id, cu_index++);
         cp->add_compute_unit(cu);
+      }
+      ++shader_engine_id;
+    }
+
+    // Keep custom topologies with CUs directly below the XCD working. They
+    // form one shader engine and retain their child order as scoreboard order.
+    if (!found_shader_engine) {
+      uint32_t cu_index = 0;
+      for (auto &child : par->children()) {
+        auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(child.get());
+        if (!cu)
+          continue;
+        cu->set_shader_engine_location(0, cu_index++);
+        cp->add_compute_unit(cu);
+      }
     }
   }
 }

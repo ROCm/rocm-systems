@@ -360,7 +360,8 @@ private:
   /// @param gpu_id KFD GPU id of the queue whose wave would stop.
   bool debug_stop_publishable(uint32_t gpu_id);
   int resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uint32_t num_queues);
-  void apply_cwsr_to_wave(amdgpu::Wavefront &wf, const kmd::CwsrWaveState &state);
+  void apply_cwsr_to_wave(amdgpu::Wavefront &wf, const kmd::CwsrWaveState &state,
+                          rj_code_arch_t arch);
 
   /// @brief Address-watchpoint handler installed on every compute unit.
   /// @details Runs on the engine thread for each active-lane global-memory
