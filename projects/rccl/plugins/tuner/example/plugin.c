@@ -367,9 +367,6 @@ __hidden ncclResult_t pluginGetCollInfo(void* context, ncclFunc_t collType, size
                      collTypeToString(collType), nBytes, numPipeOps, regBuff, ctx->numConfigs);
   }
 
-  // Cast the collCostTable pointer to a 2D array to fix the segmentation fault
-  float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
-
   // Look for matching configuration
   for (int i = 0; i < ctx->numConfigs; i++) {
     TuningConfig* config = &ctx->configs[i];
