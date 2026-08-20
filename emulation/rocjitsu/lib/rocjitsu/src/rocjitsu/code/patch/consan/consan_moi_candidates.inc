@@ -964,12 +964,22 @@ struct ConSanMoiReportDispatchIdWordSource {
   return options.moi_dispatch_id_sgpr || options.moi_dispatch_id_vgpr;
 }
 
-// Code-object-wide CDNA instrumentation keeps the preloaded-SGPR contract
-// until its dispatch-identity resolver and final validation accept literal
-// state. Per-record and causal-metadata emitters may use the configured
-// literal after owner-local resolution has established that no SGPR pair is
-// available. Keep every caller explicit so a new path cannot silently choose
-// the wrong side of that contract.
+// Sampled reports are already isolated by their versioned report-buffer
+// generation. Their dispatch field identifies the instrumented code object,
+// so the stable reader-identity literal is sufficient when a CDNA owner has
+// no persistent SGPR pair. Record/Replay and Inline Shadow retain their
+// stronger hardware-dispatch identity contract.
+[[nodiscard]] bool moi_permits_literal_dispatch_identity(const ConSanOptions &options,
+                                                         rj_code_arch_t arch) {
+  return consan_arch_uses_literal_dispatch_identity(arch) ||
+         options.moi_engine == ConSanMoiEngine::Sampled;
+}
+
+// Code-object-wide CDNA Record/Replay and Inline instrumentation keeps the
+// preloaded-SGPR contract. Sampled per-record and causal-metadata emitters may
+// use the configured literal after owner-local resolution establishes that no
+// SGPR pair is available. Keep every caller explicit so a new path cannot
+// silently choose the wrong side of that contract.
 enum class ConSanMoiLiteralDispatchIdPolicy : uint8_t { RdnaFamilyOnly, AnyArchitecture };
 
 [[nodiscard]] ConSanMoiReportDispatchIdWordSource

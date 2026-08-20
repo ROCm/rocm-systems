@@ -4315,6 +4315,80 @@ TEST(ConSanMoi, Gfx1250RuntimeSamplingUsesLiteralDispatchIdAtFullScalarPressure)
   }
 }
 
+TEST(ConSanMoi, CdnaRuntimeSamplingUsesLiteralDispatchIdAtFullScalarPressure) {
+  for (const SampledTarget &target : kSampledCdnaTargets) {
+    SCOPED_TRACE(target.label);
+    const auto store = target.arch == ROCJITSU_CODE_ARCH_CDNA3
+                           ? build_cdna3_ds_store_b32(/*vaddr=*/0u, /*vdata=*/1u,
+                                                      /*byte_offset=*/0u, target.arch)
+                           : build_cdna4_ds_store_b32(/*vaddr=*/0u, /*vdata=*/1u,
+                                                      /*byte_offset=*/0u, target.arch);
+    ASSERT_TRUE(store);
+    std::vector<uint32_t> text_words(800u, build_s_nop(0, target.arch));
+    std::copy(store->begin(), store->end(), text_words.begin());
+    text_words[store->size()] = build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/101u, target.arch);
+    text_words.back() = build_s_endpgm(target.arch);
+    std::vector<uint8_t> bytes =
+        target.arch == ROCJITSU_CODE_ARCH_CDNA3
+            ? make_cdna3_lds_code_object(text_words, "sampled_literal_dispatch_full_sgpr")
+            : make_cdna4_lds_code_object(text_words, "sampled_literal_dispatch_full_sgpr");
+    mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                      kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13u);
+    });
+
+    ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+    options.moi_report_buffer_address = 0x123456780000ull;
+    options.moi_report_generation = 7u;
+    options.moi_report_dispatch_id = 0x1122334455667788ull;
+    options.moi_report_buffer_size = direct_sampled_report_bytes(16u);
+    options.moi_runtime_sample_stride = 4u;
+    options.moi_track_barriers = false;
+    options.moi_track_atomics = false;
+    options.max_patches = 1u;
+
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    EXPECT_TRUE(result.final_validation_passed);
+    EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
+    const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &candidate) {
+      return candidate.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
+             candidate.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
+    });
+    ASSERT_NE(patch, result.patches.end());
+    ASSERT_TRUE(patch->scratch_vgpr);
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    const uint64_t patch_offset = patch->kind == ConSanPatchKind::InlineMoiSampledWatchpointStore
+                                      ? patch->anchor_offset
+                                      : patch->trampoline_offset;
+    const uint32_t patch_size = patch->kind == ConSanPatchKind::InlineMoiSampledWatchpointStore
+                                    ? patch->original_size
+                                    : patch->trampoline_size;
+    const std::vector<uint32_t> patch_words =
+        text_words_at_offset(patched, patch_offset, patch_size);
+    const uint16_t address_vgpr = *patch->scratch_vgpr;
+    const uint16_t record_temporary_vgpr = static_cast<uint16_t>(address_vgpr + 4u);
+    for (const bool high_word : {false, true}) {
+      const uint32_t offset =
+          offsetof(ConSanMoiSampledCausalWindow, dispatch_id) + (high_word ? sizeof(uint32_t) : 0u);
+      const uint32_t literal = high_word
+                                   ? static_cast<uint32_t>(options.moi_report_dispatch_id >> 32u)
+                                   : static_cast<uint32_t>(options.moi_report_dispatch_id);
+      const auto materialize =
+          instrumentation::build_v_mov_b32_literal(record_temporary_vgpr, literal, target.arch);
+      const auto store_literal = instrumentation::build_flat_store_b32(
+          address_vgpr, record_temporary_vgpr, target.arch, offset);
+      ASSERT_TRUE(materialize && store_literal);
+      std::vector<uint32_t> expected(materialize->begin(), materialize->end());
+      expected.insert(expected.end(), store_literal->begin(), store_literal->end());
+      EXPECT_TRUE(contains_subsequence(patch_words, expected));
+    }
+  }
+}
+
 TEST(ConSanMoi, DirectSampledProbeCanCheckPriorSlotInKernel) {
   constexpr uint32_t kSecondSiteWord = 500;
   std::vector<uint32_t> text_words(1100, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));

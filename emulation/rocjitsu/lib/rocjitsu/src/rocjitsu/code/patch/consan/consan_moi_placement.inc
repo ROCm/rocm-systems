@@ -4879,9 +4879,11 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanResult &
     }
   }
 
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
+  if (arch == ROCJITSU_CODE_ARCH_RDNA4 || options.moi_engine == ConSanMoiEngine::Sampled) {
     // Automatic banked Record/Replay can capture the preload into persistent
     // descriptor-grown VGPRs during the later owner-state placement pass.
+    // Sampled instead records the stable reader identity literal when no
+    // persistent hardware pair survives every owner.
     if (record_replay_uses_automatic_banked_capture(options))
       return false;
     result.warnings.emplace_back(
