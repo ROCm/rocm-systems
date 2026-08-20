@@ -57,6 +57,7 @@ jobs:
       - name: Locate AMD custom query suite
         shell: bash
         run: |
+          apt-get update && apt-get install -y jq
           QLPACKS_ROOT=$(./codeql/codeql resolve qlpacks --format=json | jq -r '.[][]')
           AMD_SUITE=$(find $QLPACKS_ROOT -path "*/amd-sit-sast-scv/cpp-queries/*/codeql-suites/amd-cpp-windows-driver.qls" | head -1)
           echo "Using AMD suite: $AMD_SUITE"
@@ -65,11 +66,24 @@ jobs:
             exit 1
           fi
           echo "AMD_SUITE=$AMD_SUITE" >> "$GITHUB_ENV"
-      # CodeQL's bundled autobuilder still auto-detects Makefile/CMake, same as the old Autobuild action
-      - name: Create CodeQL database
-        shell: bash
+
+      - name: Set Project Directory
         run: |
-          ./codeql/codeql database create codeqldb --language=${{ matrix.language }} --source-root=.
+          # Find the directory containing the main CMakeLists.txt for CUID
+          # Prioritize finding it in projects/cuid
+          TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/cuid/CMakeLists.txt" -exec dirname {} \; | head -n 1)
+
+          if [ -z "$TARGET_DIR" ]; then
+            echo "Could not find CMakeLists.txt in projects/cuid. Searching workspace..."
+            TARGET_DIR=$(find $GITHUB_WORKSPACE -name "CMakeLists.txt" | grep "projects/cuid" | head -n 1 | xargs dirname)
+          fi
+
+          if [ -z "$TARGET_DIR" ]; then
+             echo "Could not find CMakeLists.txt for CUID."
+             exit 1
+          fi
+
+          echo "PROJECT_DIR=$TARGET_DIR" >> $GITHUB_ENV
 
       - name: Build and Install OpenSSL 3.0 (if needed)
         run: |
@@ -99,15 +113,12 @@ jobs:
              echo "OpenSSL 3.0+ already installed."
           fi
 
-      - name: Build CUID
+      # CodeQL's bundled autobuilder still auto-detects Makefile/CMake, same as the old Autobuild action
+      - name: Create CodeQL database
+        shell: bash
         run: |
-          set -e
-          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
-          rm -rf $BUILD_FOLDER
-          mkdir -p $BUILD_FOLDER
-          cd $BUILD_FOLDER
-          cmake ${{ env.PROJECT_DIR }} -DOPENSSL_ROOT_DIR=${{ env.OPENSSL_ROOT_DIR }}
-          make -j $(nproc)
+          ./codeql/codeql database create codeqldb --language=${{ matrix.language }} --source-root=$PROJECT_DIR \
+          --command="bash -c 'mkdir -p build && cd build && cmake $PROJECT_DIR -DOPENSSL_ROOT_DIR=$OPENSSL_ROOT_DIR && make -j$(nproc)'"
 
       - name: Perform CodeQL Analysis
         shell: bash
