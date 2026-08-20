@@ -26,6 +26,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Optimized
 
+* Analyze mode now gzip-compresses the merged counter intermediate, which is written as `pmc_perf.csv.gz` instead of `pmc_perf.csv`.
+
 ### Resolved issues
 
 * Fixed false `0` values in the gfx115x Memory Chart; missing counter data now reports `N/A`.

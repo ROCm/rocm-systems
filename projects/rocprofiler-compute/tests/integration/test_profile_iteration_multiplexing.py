@@ -126,7 +126,7 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
     )
     integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
     binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
-    counters_no_multiplexing = pd.read_csv(Path(workload_dir) / "pmc_perf.csv")
+    counters_no_multiplexing = pd.read_csv(Path(workload_dir) / "pmc_perf.csv.gz")
     common.clean_output_dir(config["cleanup"], workload_dir)
 
     options = [
@@ -150,7 +150,7 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
     )
     integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
     binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
-    counters_kernel = pd.read_csv(Path(workload_dir) / "pmc_perf.csv")
+    counters_kernel = pd.read_csv(Path(workload_dir) / "pmc_perf.csv.gz")
     common.clean_output_dir(config["cleanup"], workload_dir)
 
     options = [
@@ -174,7 +174,9 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
     )
     integration_common.check_csv_files(workload_dir_klp, num_devices, num_kernels)
     binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir_klp])
-    counters_kernel_launch_params = pd.read_csv(Path(workload_dir_klp) / "pmc_perf.csv")
+    counters_kernel_launch_params = pd.read_csv(
+        Path(workload_dir_klp) / "pmc_perf.csv.gz"
+    )
 
     assert are_deterministic_counters_equal(
         [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
@@ -212,7 +214,7 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
     )
     integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
     binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
-    counters_no_multiplexing = pd.read_csv(Path(workload_dir) / "pmc_perf.csv")
+    counters_no_multiplexing = pd.read_csv(Path(workload_dir) / "pmc_perf.csv.gz")
     common.clean_output_dir(config["cleanup"], workload_dir)
 
     options = [
@@ -234,7 +236,7 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
     )
     integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
     binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
-    counters_kernel = pd.read_csv(Path(workload_dir) / "pmc_perf.csv")
+    counters_kernel = pd.read_csv(Path(workload_dir) / "pmc_perf.csv.gz")
     common.clean_output_dir(config["cleanup"], workload_dir)
 
     options = [
@@ -256,7 +258,9 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
     )
     integration_common.check_csv_files(workload_dir_klp, num_devices, num_kernels)
     binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir_klp])
-    counters_kernel_launch_params = pd.read_csv(Path(workload_dir_klp) / "pmc_perf.csv")
+    counters_kernel_launch_params = pd.read_csv(
+        Path(workload_dir_klp) / "pmc_perf.csv.gz"
+    )
 
     assert are_stochastic_counters_similar(
         [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
@@ -286,7 +290,7 @@ def test_iteration_multiplexing_all_counter_accuracy(
     )
     integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
     binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
-    counters_no_multiplexing = pd.read_csv(Path(workload_dir) / "pmc_perf.csv")
+    counters_no_multiplexing = pd.read_csv(Path(workload_dir) / "pmc_perf.csv.gz")
     common.clean_output_dir(config["cleanup"], workload_dir)
 
     options = ["--iteration-multiplexing", "kernel"]
@@ -301,7 +305,7 @@ def test_iteration_multiplexing_all_counter_accuracy(
     )
     integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
     binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
-    counters_kernel = pd.read_csv(Path(workload_dir) / "pmc_perf.csv")
+    counters_kernel = pd.read_csv(Path(workload_dir) / "pmc_perf.csv.gz")
     common.clean_output_dir(config["cleanup"], workload_dir)
 
     options = ["--iteration-multiplexing", "kernel_launch_params"]
@@ -316,7 +320,7 @@ def test_iteration_multiplexing_all_counter_accuracy(
     )
     integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
     binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
-    counters_kernel_launch_params = pd.read_csv(Path(workload_dir) / "pmc_perf.csv")
+    counters_kernel_launch_params = pd.read_csv(Path(workload_dir) / "pmc_perf.csv.gz")
     common.clean_output_dir(config["cleanup"], workload_dir)
 
     assert are_deterministic_counters_equal(

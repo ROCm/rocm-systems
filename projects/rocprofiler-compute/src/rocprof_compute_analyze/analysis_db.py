@@ -36,7 +36,7 @@ from pc_sampling.source_snapshot_analysis import (
 )
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED
-from utils import schema, utils_analysis
+from utils import csv_compression, schema, utils_analysis
 from utils.analysis_orm import Database
 from utils.file_io import (
     load_pc_sampling_results,
@@ -553,12 +553,13 @@ class db_analysis(OmniAnalyze_Base):
         pmc_df_per_workload: dict[str, pd.DataFrame] = {}
 
         for workload_path in self._runs.keys():
-            if not (Path(workload_path) / "pmc_perf.csv").exists():
+            pmc_perf = csv_compression.compressed_name(
+                Path(workload_path) / "pmc_perf.csv"
+            )
+            if not pmc_perf.exists():
                 continue
 
-            pmc_df = utils_analysis.process_rocpd_csv(
-                pd.read_csv(Path(workload_path) / "pmc_perf.csv")
-            )
+            pmc_df = utils_analysis.process_rocpd_csv(pd.read_csv(pmc_perf))
 
             utils_analysis.add_unit_counter(pmc_df)
 
