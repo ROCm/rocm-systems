@@ -84,6 +84,15 @@ service_sync(rocprofiler_client_id_t client_id);
 
 void
 service_fini();
+
+/// \brief Stops the HSA-level PC sampling session (if enabled) on every registered
+/// context. Must be invoked before `hsa::queue_controller_fini()` tears down the queue
+/// interceptor infrastructure that the HSA PC sampling stop/flush path relies on
+/// (e.g. the intercept-marker callbacks registered in
+/// `pc_sampling_service_finish_configuration`). Safe to call unconditionally: contexts
+/// whose PC sampling service is not currently enabled are simply skipped.
+void
+stop_all_services();
 }  // namespace pc_sampling
 }  // namespace rocprofiler
 
