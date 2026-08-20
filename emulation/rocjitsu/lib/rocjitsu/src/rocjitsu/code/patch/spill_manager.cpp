@@ -248,6 +248,84 @@ std::optional<VgprSpillSequence> build_vgpr_spill_sequence(SpillManager &manager
   return sequence;
 }
 
+std::optional<SgprSpillSequence> build_sgpr_spill_sequence(SpillManager &manager,
+                                                           uint16_t sgpr_base, uint16_t sgpr_count,
+                                                           uint16_t transfer_vgpr,
+                                                           rj_code_arch_t arch) {
+  if ((arch != ROCJITSU_CODE_ARCH_RDNA3 && !is_rdna4_family_arch(arch) &&
+       arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4) ||
+      sgpr_count == 0 || static_cast<uint32_t>(sgpr_base) + sgpr_count > REGISTER_SET_MAX_SGPRS ||
+      transfer_vgpr >= REGISTER_SET_MAX_VGPRS) {
+    return std::nullopt;
+  }
+
+  SpillManager planned_manager = manager;
+  if (!planned_manager.allocate_slots(RegisterRef{RegClass::SGPR, sgpr_base, 1u}, sgpr_count))
+    return std::nullopt;
+  const auto required_private_bytes =
+      normalize_address_free_scratch_private_size(arch, planned_manager.total_private_bytes());
+  const auto wait_store = arch == ROCJITSU_CODE_ARCH_RDNA3   ? build_rdna3_s_wait_vmcnt0(arch)
+                          : arch == ROCJITSU_CODE_ARCH_CDNA3 ? build_cdna3_s_wait_vmcnt0(arch)
+                          : arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(arch)
+                                                             : build_s_wait_storecnt0(arch);
+  const auto wait_load = arch == ROCJITSU_CODE_ARCH_RDNA3   ? build_rdna3_s_wait_vmcnt0(arch)
+                         : arch == ROCJITSU_CODE_ARCH_CDNA3 ? build_cdna3_s_wait_vmcnt0(arch)
+                         : arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(arch)
+                                                            : build_s_wait_loadcnt0(arch);
+  if (!required_private_bytes || !wait_store || !wait_load)
+    return std::nullopt;
+
+  SgprSpillSequence sequence;
+  sequence.sgpr_base = sgpr_base;
+  sequence.sgpr_count = sgpr_count;
+  sequence.save_words.reserve(static_cast<size_t>(sgpr_count) * 4u + 1u);
+  sequence.restore_words.reserve(static_cast<size_t>(sgpr_count) * 5u);
+  for (uint16_t i = 0; i < sgpr_count; ++i) {
+    const uint16_t sgpr = static_cast<uint16_t>(sgpr_base + i);
+    const auto offset = planned_manager.offset_for(RegisterRef{RegClass::SGPR, sgpr, 1u});
+    const auto save = build_sgpr_to_vgpr_move(transfer_vgpr, sgpr, arch);
+    const auto restore = build_vgpr_to_sgpr_move(sgpr, transfer_vgpr, arch);
+    if (!offset || !save || !restore)
+      return std::nullopt;
+    sequence.save_words.push_back(*save);
+    if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
+      const auto store = build_rdna3_address_free_scratch_store_b32(transfer_vgpr, *offset, arch);
+      const auto load = build_rdna3_address_free_scratch_load_b32(transfer_vgpr, *offset, arch);
+      if (!store || !load)
+        return std::nullopt;
+      sequence.save_words.insert(sequence.save_words.end(), store->begin(), store->end());
+      sequence.restore_words.insert(sequence.restore_words.end(), load->begin(), load->end());
+    } else if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
+      const auto store = build_cdna3_address_free_scratch_store_b32(transfer_vgpr, *offset, arch);
+      const auto load = build_cdna3_address_free_scratch_load_b32(transfer_vgpr, *offset, arch);
+      if (!store || !load)
+        return std::nullopt;
+      sequence.save_words.insert(sequence.save_words.end(), store->begin(), store->end());
+      sequence.restore_words.insert(sequence.restore_words.end(), load->begin(), load->end());
+    } else if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      const auto store = build_cdna4_address_free_scratch_store_b32(transfer_vgpr, *offset, arch);
+      const auto load = build_cdna4_address_free_scratch_load_b32(transfer_vgpr, *offset, arch);
+      if (!store || !load)
+        return std::nullopt;
+      sequence.save_words.insert(sequence.save_words.end(), store->begin(), store->end());
+      sequence.restore_words.insert(sequence.restore_words.end(), load->begin(), load->end());
+    } else {
+      const auto store = build_address_free_scratch_store_b32(transfer_vgpr, *offset, arch);
+      const auto load = build_address_free_scratch_load_b32(transfer_vgpr, *offset, arch);
+      if (!store || !load)
+        return std::nullopt;
+      sequence.save_words.insert(sequence.save_words.end(), store->begin(), store->end());
+      sequence.restore_words.insert(sequence.restore_words.end(), load->begin(), load->end());
+    }
+    sequence.restore_words.push_back(*wait_load);
+    sequence.restore_words.push_back(*restore);
+  }
+  sequence.save_words.push_back(*wait_store);
+  sequence.total_private_bytes = *required_private_bytes;
+  manager = std::move(planned_manager);
+  return sequence;
+}
+
 std::optional<VgprSpillSequence>
 build_dynamic_stack_vgpr_spill_sequence(uint16_t vgpr_base, uint16_t vgpr_count,
                                         uint16_t stack_top_sgpr, uint16_t frame_base_sgpr,

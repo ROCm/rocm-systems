@@ -240,6 +240,17 @@ struct SgprSpillSequence {
                                                                          uint16_t vgpr_count,
                                                                          rj_code_arch_t arch);
 
+/// @brief Reserve private slots and encode a save/restore sequence for one
+/// ordinary SGPR window.
+///
+/// @details The caller-provided transfer VGPR must already have been
+/// preserved. This is the fixed-private counterpart of
+/// build_dynamic_stack_sgpr_spill_sequence and shares the caller's spill
+/// manager so independently scoped VGPR and SGPR saves cannot alias.
+[[nodiscard]] std::optional<SgprSpillSequence>
+build_sgpr_spill_sequence(SpillManager &manager, uint16_t sgpr_base, uint16_t sgpr_count,
+                          uint16_t transfer_vgpr, rj_code_arch_t arch);
+
 /// @brief Encode a site-local dynamic-stack frame around one VGPR spill window.
 ///
 /// @details Follows the AMDGPU callable-function convention used by dynamic

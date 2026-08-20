@@ -57,45 +57,12 @@ moi_scalar_spill_requires_dynamic_vgpr_frame(const ConSanResult &result,
     planned_manager = it->second;
     committed_manager = &it->second;
   }
-  if (!planned_manager.allocate_slots(RegisterRef{RegClass::SGPR, *options.moi_exec_save_sgpr, 1u},
-                                      count)) {
-    warnings.emplace_back("ConSan MOI could not reserve the Inline scalar spill slots");
+  auto sequence = build_sgpr_spill_sequence(planned_manager, *options.moi_exec_save_sgpr, count,
+                                            resources.base, arch);
+  if (!sequence) {
+    warnings.emplace_back("ConSan MOI could not encode the Inline scalar spill sequence");
     return std::nullopt;
   }
-  const auto required_private_bytes =
-      normalize_address_free_scratch_private_size(arch, planned_manager.total_private_bytes());
-  const auto wait_store = instrumentation::build_s_wait_private_store0(arch);
-  const auto wait_load = instrumentation::build_s_wait_private_load0(arch);
-  if (!required_private_bytes || !wait_store || !wait_load) {
-    warnings.emplace_back("ConSan MOI could not encode the Inline scalar spill waits");
-    return std::nullopt;
-  }
-
-  InlineSgprSpillSequence sequence;
-  sequence.sgpr_base = *options.moi_exec_save_sgpr;
-  sequence.sgpr_count = count;
-  sequence.save_words.reserve(static_cast<size_t>(count) * 4u + 1u);
-  sequence.restore_words.reserve(static_cast<size_t>(count) * 5u);
-  for (uint16_t i = 0; i < count; ++i) {
-    const uint16_t sgpr = static_cast<uint16_t>(sequence.sgpr_base + i);
-    const auto offset = planned_manager.offset_for(RegisterRef{RegClass::SGPR, sgpr, 1u});
-    if (!offset)
-      return std::nullopt;
-    sequence.save_words.push_back(build_v_mov_b32_e32(resources.base, sgpr, arch));
-    const auto store = instrumentation::build_private_store_b32(resources.base, *offset, arch);
-    const auto load = instrumentation::build_private_load_b32(resources.base, *offset, arch);
-    const auto restore = instrumentation::build_v_readfirstlane_b32(sgpr, resources.base, arch);
-    if (!store || !load || !restore) {
-      warnings.emplace_back("ConSan MOI could not encode the Inline scalar spill sequence");
-      return std::nullopt;
-    }
-    sequence.save_words.insert(sequence.save_words.end(), store->begin(), store->end());
-    sequence.restore_words.insert(sequence.restore_words.end(), load->begin(), load->end());
-    sequence.restore_words.push_back(*wait_load);
-    sequence.restore_words.push_back(*restore);
-  }
-  sequence.save_words.push_back(*wait_store);
-  sequence.total_private_bytes = *required_private_bytes;
   if (committed_manager)
     *committed_manager = std::move(planned_manager);
   return sequence;

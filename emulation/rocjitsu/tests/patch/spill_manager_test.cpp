@@ -703,6 +703,33 @@ TEST(SpillManager, BuildsGfx950VgprSaveRestoreSequence) {
   EXPECT_EQ(sequence->restore_words[6], 0xbf8c0f70u);
 }
 
+TEST(SpillManager, ComposesGfx950EntrySgprSpillAfterTemporaryVgprs) {
+  SpillManager manager(/*original_private_bytes=*/8u, kMaxCdnaAddressFreeScratchPrivateBytes);
+  const auto vgprs = build_vgpr_spill_sequence(manager, /*vgpr_base=*/10u, /*vgpr_count=*/3u,
+                                               ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(vgprs);
+  const auto sgprs = build_sgpr_spill_sequence(manager, /*sgpr_base=*/0u, /*sgpr_count=*/5u,
+                                               /*transfer_vgpr=*/10u, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(sgprs);
+
+  EXPECT_EQ(vgprs->slot_offsets, (std::vector<uint32_t>{16u, 20u, 24u}));
+  EXPECT_EQ(sgprs->sgpr_base, 0u);
+  EXPECT_EQ(sgprs->sgpr_count, 5u);
+  EXPECT_EQ(sgprs->total_private_bytes, 48u);
+  EXPECT_EQ(manager.total_private_bytes(), 48u);
+  for (uint16_t sgpr = 0u; sgpr < 5u; ++sgpr) {
+    const uint32_t offset = 28u + static_cast<uint32_t>(sgpr) * SpillManager::kSlotBytes;
+    const auto store = build_cdna4_address_free_scratch_store_b32(
+        /*vsrc=*/10u, offset, ROCJITSU_CODE_ARCH_CDNA4);
+    const auto load = build_cdna4_address_free_scratch_load_b32(
+        /*vdst=*/10u, offset, ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_TRUE(store && load);
+    EXPECT_TRUE(std::ranges::search(sgprs->save_words, *store).begin() != sgprs->save_words.end());
+    EXPECT_TRUE(std::ranges::search(sgprs->restore_words, *load).begin() !=
+                sgprs->restore_words.end());
+  }
+}
+
 TEST(SpillManager, BuildsGfx942VgprSaveRestoreSequence) {
   SpillManager manager(/*original_private_bytes=*/0, kMaxCdnaAddressFreeScratchPrivateBytes);
   const auto sequence = build_vgpr_spill_sequence(manager, /*vgpr_base=*/10,

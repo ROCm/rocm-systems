@@ -1097,7 +1097,8 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
     uint32_t epoch_offset, std::optional<uint32_t> owner_offset,
     std::optional<uint32_t> workgroup_key_offset,
     const ConSanMoiPersistentWorkgroupPrivateOffsets &record_replay_workgroup_offsets,
-    const VgprSpillSequence &spill, std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow,
+    const VgprSpillSequence &spill, const std::optional<SgprSpillSequence> &entry_scalar_spill,
+    std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow,
     std::optional<ConSanMoiWorkgroupSources> workgroup_sources,
     std::optional<ConSanMoiDispatchIdPreloadPlan> dispatch_plan,
     ConSanMoiDispatchIdCapture dispatch_capture,
@@ -1137,7 +1138,11 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   }
 
   std::vector<uint32_t> words;
-  words.reserve(spill.save_words.size() + spill.restore_words.size() + 48u);
+  words.reserve(spill.save_words.size() + spill.restore_words.size() +
+                (entry_scalar_spill ? entry_scalar_spill->save_words.size() +
+                                          entry_scalar_spill->restore_words.size()
+                                    : 0u) +
+                48u);
   if (dispatch_plan &&
       !append_dispatch_id_capture_and_restore(
           words, *dispatch_plan, dispatch_capture,
@@ -1165,6 +1170,10 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
     return std::nullopt;
   }
   words.insert(words.end(), spill.save_words.begin(), spill.save_words.end());
+  if (entry_scalar_spill) {
+    words.insert(words.end(), entry_scalar_spill->save_words.begin(),
+                 entry_scalar_spill->save_words.end());
+  }
   if (workgroup_shadow &&
       !append_moi_workgroup_shadow_initialization(
           words, *workgroup_shadow, scratch_vgpr, static_cast<uint16_t>(scratch_vgpr + 1u),
@@ -1220,6 +1229,10 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   words.push_back(build_v_mov_b32_e32(scratch_vgpr, scalar_positive_inline_u32(0), arch));
   words.insert(words.end(), epoch_store->begin(), epoch_store->end());
   words.push_back(*wait_store);
+  if (entry_scalar_spill) {
+    words.insert(words.end(), entry_scalar_spill->restore_words.begin(),
+                 entry_scalar_spill->restore_words.end());
+  }
   words.insert(words.end(), spill.restore_words.begin(), spill.restore_words.end());
 
   if (!append_moi_prologue_return(words, prologue_text_offset, original_entry_text_offset,
@@ -1514,6 +1527,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
     uint16_t scratch_vgpr = 0;
     MoiPrivateEpochLayout layout;
     VgprSpillSequence spill;
+    std::optional<SgprSpillSequence> entry_scalar_spill;
     std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow;
     std::optional<ConSanMoiWorkgroupSources> workgroup_sources;
     uint32_t required_private_bytes = 0;
@@ -1541,20 +1555,20 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
       continue;
     }
 
+    if (active_kernel->descriptor_file_offset > active_bytes.size() ||
+        sizeof(KD) > active_bytes.size() - active_kernel->descriptor_file_offset) {
+      result.errors.emplace_back("ConSan MOI private-epoch descriptor exceeds ELF bytes");
+      return;
+    }
+    KD descriptor{};
+    std::memcpy(&descriptor, active_bytes.data() + active_kernel->descriptor_file_offset,
+                sizeof(descriptor));
+
     if (!access_patch->persistent_epoch_private_offset)
       continue;
     std::optional<ConSanMoiDispatchIdPreloadPlan> dispatch_plan;
     bool has_kernarg_preload = false;
     if (dispatch_capture.present()) {
-      if (active_kernel->descriptor_file_offset > active_bytes.size() ||
-          sizeof(KD) > active_bytes.size() - active_kernel->descriptor_file_offset) {
-        rollback_moi_dispatch_id_as_unsupported(result,
-                                                "private-epoch descriptor exceeds ELF bytes");
-        return;
-      }
-      KD descriptor{};
-      std::memcpy(&descriptor, active_bytes.data() + active_kernel->descriptor_file_offset,
-                  sizeof(descriptor));
       dispatch_plan = moi_descriptor_dispatch_id_preload_plan(descriptor, arch);
       if (!dispatch_plan->supported() ||
           (dispatch_capture.sgpr && *dispatch_capture.sgpr < dispatch_plan->required_sgpr_count)) {
@@ -1676,7 +1690,28 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
           "ConSan MOI private-epoch prologue could not preserve its temporary VGPR");
       continue;
     }
-    uint32_t required_private_bytes = spill->total_private_bytes;
+    std::optional<SgprSpillSequence> entry_scalar_spill;
+    if (options.moi_exec_save_sgpr) {
+      const uint16_t guest_entry_sgpr_count =
+          static_cast<uint16_t>(moi_descriptor_user_sgpr_count(descriptor) +
+                                moi_descriptor_system_sgpr_count(descriptor));
+      const uint16_t scalar_base = *options.moi_exec_save_sgpr;
+      const uint16_t scalar_end = static_cast<uint16_t>(std::min<uint32_t>(
+          static_cast<uint32_t>(scalar_base) + moi_exec_save_sgpr_count(options, arch),
+          guest_entry_sgpr_count));
+      if (scalar_base < scalar_end) {
+        entry_scalar_spill = build_sgpr_spill_sequence(
+            manager, scalar_base, static_cast<uint16_t>(scalar_end - scalar_base),
+            *access_patch->scratch_vgpr, arch);
+        if (!entry_scalar_spill) {
+          result.warnings.emplace_back(
+              "ConSan MOI private-epoch prologue could not preserve its entry ABI SGPRs");
+          continue;
+        }
+      }
+    }
+    uint32_t required_private_bytes =
+        entry_scalar_spill ? entry_scalar_spill->total_private_bytes : spill->total_private_bytes;
     for (const ConSanPatchInfo &patch : result.patches) {
       if (kernel_owns_patch(kernel, patch))
         required_private_bytes =
@@ -1685,8 +1720,8 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
     private_requirements[kernel.descriptor_file_offset] = required_private_bytes;
     planned.push_back({&kernel, active_kernel->descriptor_file_offset,
                        active_kernel->entry_text_offset, *access_patch->scratch_vgpr, layout,
-                       *spill, workgroup_shadow, workgroup_sources, required_private_bytes,
-                       dispatch_plan, has_kernarg_preload});
+                       *spill, entry_scalar_spill, workgroup_shadow, workgroup_sources,
+                       required_private_bytes, dispatch_plan, has_kernarg_preload});
   }
 
   if (planned.empty()) {
@@ -1720,8 +1755,8 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
     auto words = build_private_epoch_prologue_words(
         prologue_text_offset, item.active_entry_text_offset, item.scratch_vgpr,
         item.layout.epoch_offset, item.layout.owner_offset, item.layout.workgroup_key_offset,
-        item.layout.record_replay_workgroup_offsets, item.spill, prologue_workgroup_shadow,
-        item.workgroup_sources, item.dispatch_plan, dispatch_capture,
+        item.layout.record_replay_workgroup_offsets, item.spill, item.entry_scalar_spill,
+        prologue_workgroup_shadow, item.workgroup_sources, item.dispatch_plan, dispatch_capture,
         moi_runtime_sample_counter_sgpr(options), options.moi_exec_save_sgpr, arch, result.errors);
     if (!words)
       return;
@@ -1740,9 +1775,9 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
           secondary_prologue_offset, item.active_entry_text_offset + kAmdhsaKernelEntryAlignment,
           item.scratch_vgpr, item.layout.epoch_offset, item.layout.owner_offset,
           item.layout.workgroup_key_offset, item.layout.record_replay_workgroup_offsets, item.spill,
-          prologue_workgroup_shadow, item.workgroup_sources, item.dispatch_plan, dispatch_capture,
-          moi_runtime_sample_counter_sgpr(options), options.moi_exec_save_sgpr, arch,
-          result.errors);
+          item.entry_scalar_spill, prologue_workgroup_shadow, item.workgroup_sources,
+          item.dispatch_plan, dispatch_capture, moi_runtime_sample_counter_sgpr(options),
+          options.moi_exec_save_sgpr, arch, result.errors);
       if (!secondary_words)
         return;
       if (words->size() * sizeof(uint32_t) <= kAmdhsaKernelEntryAlignment &&
@@ -1756,8 +1791,8 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
         words = build_private_epoch_prologue_words(
             *primary_body_offset, item.active_entry_text_offset, item.scratch_vgpr,
             item.layout.epoch_offset, item.layout.owner_offset, item.layout.workgroup_key_offset,
-            item.layout.record_replay_workgroup_offsets, item.spill, prologue_workgroup_shadow,
-            item.workgroup_sources, item.dispatch_plan, dispatch_capture,
+            item.layout.record_replay_workgroup_offsets, item.spill, item.entry_scalar_spill,
+            prologue_workgroup_shadow, item.workgroup_sources, item.dispatch_plan, dispatch_capture,
             moi_runtime_sample_counter_sgpr(options), options.moi_exec_save_sgpr, arch,
             result.errors);
         if (!words)
@@ -1767,9 +1802,9 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
             *secondary_body_offset, item.active_entry_text_offset + kAmdhsaKernelEntryAlignment,
             item.scratch_vgpr, item.layout.epoch_offset, item.layout.owner_offset,
             item.layout.workgroup_key_offset, item.layout.record_replay_workgroup_offsets,
-            item.spill, prologue_workgroup_shadow, item.workgroup_sources, item.dispatch_plan,
-            dispatch_capture, moi_runtime_sample_counter_sgpr(options), options.moi_exec_save_sgpr,
-            arch, result.errors);
+            item.spill, item.entry_scalar_spill, prologue_workgroup_shadow, item.workgroup_sources,
+            item.dispatch_plan, dispatch_capture, moi_runtime_sample_counter_sgpr(options),
+            options.moi_exec_save_sgpr, arch, result.errors);
         const auto primary_relay =
             compute_sopp_branch_simm16(prologue_text_offset, *primary_body_offset);
         const auto secondary_relay = compute_sopp_branch_simm16(
