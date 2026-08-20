@@ -15,10 +15,11 @@ namespace kmd {
 
 namespace {
 
-// Layout constants matching gfx9_4/mi cwsr_record_t in rocdbgapi.
-constexpr uint32_t kHwregCount = 32; // hwreg_count()
-constexpr uint32_t kTtmpCount = 16;  // ttmps saved at the top of the hwreg block
-constexpr uint32_t kVgprLaneBytes = 64 * sizeof(uint32_t); // one VGPR = 64 lanes * 4 bytes
+// Layout constants matching gfx9_4/mi cwsr_record_t in rocdbgapi. hwreg_count,
+// the TTMP count and the VGPR lane width now come from the CwsrFormat the
+// caller supplies, so a second record family can be added without a parallel
+// serializer; CwsrFormat's defaults are these gfx9.4 values.
+constexpr uint32_t kTtmpCount = 16; // ttmps saved at the top of the hwreg block
 // The saved block holds kCwsrSavedSgprSlots scalars, so that is the ceiling a
 // wave can carry. It is deliberately not the architected count (102): s104 and
 // s105 are ordinary registers above the FLAT_SCRATCH alias, and CDNA3/CDNA4
@@ -99,6 +100,7 @@ uint32_t encode_ttmp11(const CwsrWaveState &w) {
 }
 
 struct CwsrGeometry {
+  CwsrFormat format{};
   CwsrLayout layout{};
   uint32_t vgpr_count = 0;
   uint32_t sgpr_count = kCwsrSavedSgprSlots;
@@ -111,8 +113,10 @@ struct CwsrGeometry {
   uint64_t per_wave = 0;
 };
 
-CwsrGeometry compute_geometry(uint32_t area_size, const std::vector<CwsrWaveState> &waves) {
+CwsrGeometry compute_geometry(uint32_t area_size, const std::vector<CwsrWaveState> &waves,
+                              CwsrFormat format) {
   CwsrGeometry geometry{};
+  geometry.format = format;
   if (waves.empty() || waves.size() > std::numeric_limits<uint32_t>::max())
     return geometry;
 
@@ -136,16 +140,18 @@ CwsrGeometry compute_geometry(uint32_t area_size, const std::vector<CwsrWaveStat
   // Alias slots come from cwsr.h so the codec, the wave writeback and the tests
   // share one definition. FLAT_SCRATCH being written but read back from a
   // separately open-coded offset is exactly how it came to be dropped.
-  geometry.hwreg_bytes = kHwregCount * sizeof(uint32_t);
+  geometry.hwreg_bytes = format.hwreg_count * sizeof(uint32_t);
   geometry.sgpr_bytes = geometry.sgpr_count * sizeof(uint32_t);
-  geometry.vgpr_bytes = geometry.vgpr_count * kVgprLaneBytes;
+  geometry.vgpr_bytes = geometry.vgpr_count * format.lane_count * sizeof(uint32_t);
   geometry.per_wave = 64u + geometry.hwreg_bytes + geometry.sgpr_bytes + geometry.vgpr_bytes;
 
   const uint64_t num_waves = waves.size();
   const uint64_t num_groups = std::count_if(
       waves.begin(), waves.end(), [](const auto &wave) { return wave.is_first_in_group; });
   const uint64_t wave_state_size = geometry.per_wave * num_waves + geometry.lds_bytes * num_groups;
-  const uint64_t control_stack_size = (3u + num_waves) * sizeof(uint32_t);
+  // 2 skipped PM4 words + the state entry + one wave word each. gfx10 and later
+  // read a two-word state entry, so this is format-driven rather than a literal.
+  const uint64_t control_stack_size = (2u + format.state_words + num_waves) * sizeof(uint32_t);
   const uint64_t wave_area_begin = kControlStackOffset + control_stack_size;
   const uint64_t wave_state_offset = wave_area_begin + wave_state_size;
   if (control_stack_size > std::numeric_limits<uint32_t>::max() ||
@@ -185,14 +191,15 @@ uint32_t image_word(std::span<const uint8_t> image, uint32_t offset) {
 
 CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
                                 const std::vector<CwsrWaveState> &waves,
-                                const std::function<void(uint64_t, uint32_t)> &write32) {
+                                const std::function<void(uint64_t, uint32_t)> &write32,
+                                CwsrFormat format) {
   CwsrLayout layout{};
   if (waves.empty() || !write32 || (ctx_base & (alignof(uint32_t) - 1)) != 0)
     return layout;
 
   // Uniform per-dispatch register geometry. ACC-VGPRs are not modeled. gfx950
   // saves one uniformly-sized LDS block before each workgroup leader.
-  const CwsrGeometry geometry = compute_geometry(area_size, waves);
+  const CwsrGeometry geometry = compute_geometry(area_size, waves, format);
   if (!geometry.layout.ok)
     return layout;
   layout = geometry.layout;
@@ -203,6 +210,8 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
   const uint32_t sgpr_bytes = geometry.sgpr_bytes;
   const uint32_t vgpr_bytes = geometry.vgpr_bytes;
   const uint32_t lds_bytes = geometry.lds_bytes;
+  const uint32_t lanes = geometry.format.lane_count;
+  const uint32_t vgpr_lane_bytes = lanes * static_cast<uint32_t>(sizeof(uint32_t));
   const uint64_t num_waves = waves.size();
   const uint64_t wave_state_offset = layout.wave_state_offset;
   if (ctx_base > std::numeric_limits<uint64_t>::max() - wave_state_offset)
@@ -214,12 +223,17 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
   write32(cs_base + 0, 0); // PM4 (skipped)
   write32(cs_base + 4, 0); // PM4 (skipped)
   write32(cs_base + 8, encode_state_word(vgpr_count, sgpr_count, lds_bytes));
+  // gfx10 and later consume a second state word before the wave entries; gfx9
+  // consumes one. Anything after the state entry shifts with it.
+  for (uint32_t extra = 1; extra < geometry.format.state_words; ++extra)
+    write32(cs_base + 8 + extra * 4, 0);
+  const uint32_t cs_wave_base = 8 + geometry.format.state_words * 4;
   for (size_t i = 0; i < num_waves; ++i) {
     // first/last mark workgroup boundaries in the control stack, not the whole
     // queue: a wave is "first" if it opens a new workgroup (group leader) and
     // "last" if it closes one. Callers order waves so each workgroup's waves are
     // contiguous and set these flags per workgroup.
-    write32(cs_base + 12 + i * 4,
+    write32(cs_base + cs_wave_base + i * 4,
             encode_wave_word(waves[i].is_first_in_group, waves[i].is_last_in_group,
                              waves[i].scratch_scoreboard_id));
   }
@@ -304,10 +318,10 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
 
     // VGPR block: each VGPR is 64 lanes * 4 bytes; lane l of vgpr r at +r*256+l*4.
     for (uint32_t r = 0; r < vgpr_count; ++r) {
-      for (uint32_t lane = 0; lane < 64; ++lane) {
-        uint32_t idx = r * 64 + lane;
+      for (uint32_t lane = 0; lane < lanes; ++lane) {
+        uint32_t idx = r * lanes + lane;
         uint32_t val = (r < w.num_vgprs && idx < w.vgprs.size()) ? w.vgprs[idx] : 0u;
-        write32(vgprs_addr + r * kVgprLaneBytes + lane * 4, val);
+        write32(vgprs_addr + r * vgpr_lane_bytes + lane * 4, val);
       }
     }
 
@@ -332,18 +346,20 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
 
 CwsrLayout serialize_queue_cwsr_bulk(
     uint64_t ctx_base, uint32_t area_size, const std::vector<CwsrWaveState> &waves,
-    const std::function<void(uint64_t, std::span<const uint8_t>)> &write_block) {
+    const std::function<void(uint64_t, std::span<const uint8_t>)> &write_block, CwsrFormat format) {
   if (!write_block)
     return {};
 
   std::vector<uint8_t> image;
-  CwsrLayout layout =
-      serialize_queue_cwsr(ctx_base, area_size, waves, [&](uint64_t address, uint32_t value) {
+  CwsrLayout layout = serialize_queue_cwsr(
+      ctx_base, area_size, waves,
+      [&](uint64_t address, uint32_t value) {
         const uint64_t offset = address - ctx_base;
         if (offset + sizeof(value) > image.size())
           image.resize(static_cast<size_t>(offset + sizeof(value)));
         std::memcpy(image.data() + offset, &value, sizeof(value));
-      });
+      },
+      format);
   if (!layout.ok)
     return layout;
 
@@ -358,14 +374,14 @@ CwsrLayout serialize_queue_cwsr_bulk(
 
 bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
                             std::vector<CwsrWaveState> &waves,
-                            const std::function<uint32_t(uint64_t)> &read32) {
+                            const std::function<uint32_t(uint64_t)> &read32, CwsrFormat format) {
   if (waves.empty() || !read32 || (ctx_base & (alignof(uint32_t) - 1)) != 0)
     return false;
 
   // Reproduce the exact geometry serialize_queue_cwsr chose (see that function).
   // The wave count and per-wave sgpr/vgpr counts must match, so the register
   // block addresses computed below land on the same dwords that were written.
-  const CwsrGeometry geometry = compute_geometry(area_size, waves);
+  const CwsrGeometry geometry = compute_geometry(area_size, waves, format);
   if (!geometry.layout.ok ||
       ctx_base > std::numeric_limits<uint64_t>::max() - geometry.layout.wave_state_offset)
     return false;
@@ -373,6 +389,8 @@ bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
   const uint32_t hwreg_bytes = geometry.hwreg_bytes;
   const uint32_t sgpr_bytes = geometry.sgpr_bytes;
   const uint32_t vgpr_bytes = geometry.vgpr_bytes;
+  const uint32_t lanes = geometry.format.lane_count;
+  const uint32_t vgpr_lane_bytes = lanes * static_cast<uint32_t>(sizeof(uint32_t));
   const uint32_t lds_bytes = geometry.lds_bytes;
   const uint32_t num_waves = static_cast<uint32_t>(waves.size());
 
@@ -436,10 +454,10 @@ bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
     const uint32_t fs_hi = read32(sgprs_addr + (flat_scratch_lo_slot + 1) * 4);
     w.flat_scratch = static_cast<uint64_t>(fs_lo) | (static_cast<uint64_t>(fs_hi) << 32);
 
-    w.vgprs.resize(static_cast<size_t>(w.num_vgprs) * 64);
+    w.vgprs.resize(static_cast<size_t>(w.num_vgprs) * lanes);
     for (uint32_t r = 0; r < w.num_vgprs; ++r)
-      for (uint32_t lane = 0; lane < 64; ++lane)
-        w.vgprs[r * 64 + lane] = read32(vgprs_addr + r * kVgprLaneBytes + lane * 4);
+      for (uint32_t lane = 0; lane < lanes; ++lane)
+        w.vgprs[r * lanes + lane] = read32(vgprs_addr + r * vgpr_lane_bytes + lane * 4);
 
     last_wave_area = vgprs_addr;
   }
@@ -448,10 +466,10 @@ bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
 
 bool deserialize_queue_cwsr_bulk(
     uint64_t ctx_base, uint32_t area_size, std::vector<CwsrWaveState> &waves,
-    const std::function<void(uint64_t, std::span<uint8_t>)> &read_block) {
+    const std::function<void(uint64_t, std::span<uint8_t>)> &read_block, CwsrFormat format) {
   if (!read_block || (ctx_base & (alignof(uint32_t) - 1)) != 0)
     return false;
-  const CwsrGeometry geometry = compute_geometry(area_size, waves);
+  const CwsrGeometry geometry = compute_geometry(area_size, waves, format);
   if (!geometry.layout.ok ||
       ctx_base > std::numeric_limits<uint64_t>::max() - geometry.layout.wave_state_offset)
     return false;

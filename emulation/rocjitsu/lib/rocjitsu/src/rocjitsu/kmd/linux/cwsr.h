@@ -160,6 +160,61 @@ struct CwsrWaveState {
   std::vector<uint8_t> lds;
 };
 
+/// @brief Which record layout a serialization uses.
+///
+/// @details rocm-dbgapi decodes a CWSR image through a per-architecture
+/// cwsr_record_t, and the families differ in ways that are not confined to one
+/// field. Naming the family explicitly keeps those differences in one place
+/// instead of spread through the codec as bare constants.
+///
+/// - @c Gfx9_4 is CDNA3/CDNA4 (gfx942/gfx950): one COMPUTE_RELAUNCH state word,
+///   wave64 only, TRAPSTS present, FLAT_SCRATCH aliased into the SGPR block.
+/// - @c Gfx12 is the gfx10-derived layout GFX12 parts inherit (see
+///   gfx10_architecture_t::control_stack_iterate and
+///   gfx12_architecture_t::cwsr_record_t::register_address in
+///   projects/rocdbgapi/src/architecture.cpp): two state words, wave32 or
+///   wave64 plus 32-wide shared VGPRs, no TRAPSTS, and FLAT_SCRATCH architected
+///   into the hwreg block.
+enum class CwsrFamily : uint8_t {
+  Gfx9_4,
+  Gfx12,
+};
+
+/// @brief The layout parameters a @ref CwsrFamily implies.
+///
+/// @details Split out so the codec reads its shape from data rather than from
+/// constants baked into the arithmetic, and so a second family can be added
+/// without a parallel copy of the serializer.
+struct CwsrFormat {
+  CwsrFamily family = CwsrFamily::Gfx9_4;
+  /// COMPUTE_RELAUNCH state words per state entry in the control stack.
+  /// gfx9 writes one; gfx10 and later read a second (control_stack_iterate).
+  uint32_t state_words = 1;
+  /// Lanes per VGPR in the save area. gfx9.4 is wave64 only.
+  uint32_t lane_count = 64;
+  /// Saved hwreg block size, in dwords (hwreg_count()).
+  uint32_t hwreg_count = 32;
+  /// TTMPs saved at the top of the hwreg block.
+  uint32_t ttmp_count = 16;
+};
+
+/// @brief The format @p family implies.
+constexpr CwsrFormat cwsr_format(CwsrFamily family, uint32_t lane_count = 64) {
+  CwsrFormat format{};
+  format.family = family;
+  if (family == CwsrFamily::Gfx12) {
+    format.state_words = 2;
+    format.lane_count = lane_count;
+  }
+  return format;
+}
+
+/// @brief The record family @p arch is serialized with.
+/// @details Only meaningful where cwsr_layout_modelled() is true.
+constexpr CwsrFamily cwsr_family(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA5 ? CwsrFamily::Gfx12 : CwsrFamily::Gfx9_4;
+}
+
 /// @brief The CWSR geometry chosen for a serialized wave save area.
 ///
 /// @details Returned so callers (and tests) can locate the per-register offsets
@@ -202,7 +257,8 @@ struct CwsrLayout {
 /// responsibility.
 CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
                                 const std::vector<CwsrWaveState> &waves,
-                                const std::function<void(uint64_t, uint32_t)> &write32);
+                                const std::function<void(uint64_t, uint32_t)> &write32,
+                                CwsrFormat format = {});
 
 /// @brief Serialize a queue using two block writes: payload first, then header.
 ///
@@ -218,7 +274,8 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
 ///          made when the image is invalid or does not fit.
 CwsrLayout serialize_queue_cwsr_bulk(
     uint64_t ctx_base, uint32_t area_size, const std::vector<CwsrWaveState> &waves,
-    const std::function<void(uint64_t, std::span<const uint8_t>)> &write_block);
+    const std::function<void(uint64_t, std::span<const uint8_t>)> &write_block,
+    CwsrFormat format = {});
 
 /// @brief Read wave register state back from a serialized CWSR area.
 ///
@@ -240,7 +297,8 @@ CwsrLayout serialize_queue_cwsr_bulk(
 ///          case @p waves is left unchanged).
 bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
                             std::vector<CwsrWaveState> &waves,
-                            const std::function<uint32_t(uint64_t)> &read32);
+                            const std::function<uint32_t(uint64_t)> &read32,
+                            CwsrFormat format = {});
 
 /// @brief Read and deserialize a queue CWSR image using block transfers.
 ///
@@ -250,7 +308,7 @@ bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
 /// the complete operation.
 bool deserialize_queue_cwsr_bulk(
     uint64_t ctx_base, uint32_t area_size, std::vector<CwsrWaveState> &waves,
-    const std::function<void(uint64_t, std::span<uint8_t>)> &read_block);
+    const std::function<void(uint64_t, std::span<uint8_t>)> &read_block, CwsrFormat format = {});
 
 } // namespace kmd
 } // namespace rocjitsu
