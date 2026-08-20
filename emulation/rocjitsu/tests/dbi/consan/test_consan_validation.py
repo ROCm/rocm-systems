@@ -4809,6 +4809,21 @@ class ConSanValidationTest(unittest.TestCase):
             "--gtest_filter=HipMoiRdna4D128AttentionBlock.*",
         )
 
+    def test_gfx1250_tp1_decode_inline_fault_contract_is_diagnostic_owned(
+        self,
+    ) -> None:
+        path = Path(__file__).with_name("consan_validation_faults_gfx1250.json")
+        workload = validation.WORKLOAD_BY_ID["tp1-decode-combined"]
+        fault = validation._load_fault(path, "gfx1250", workload, "barrier-move")
+        policy, trials = validation._fault_trials(fault, "inline-shadow")
+        self.assertEqual(policy["detector"], "detected")
+        self.assertEqual(policy["oracle"], "pass")
+        self.assertEqual(trials, [{}])
+        self.assertIn(
+            "decode_bs1$async_dispatch_30_matmul_1x23x256_f16xf16xf32",
+            policy["environment"]["RJ_CONSAN_TEST_KERNEL_FILTER"],
+        )
+
     def test_gfx1250_jakub_barrier_drop_policy_uses_numeric_oracle(self) -> None:
         path = Path(__file__).with_name("consan_validation_faults_gfx1250.json")
         workload = validation.WORKLOAD_BY_ID["jakub-attention"]
