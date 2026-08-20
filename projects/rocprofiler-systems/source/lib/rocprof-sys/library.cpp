@@ -21,8 +21,7 @@
 #include "core/components/fwd.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
-#include "core/constraint.hpp"
-#include "core/constraint_deps.hpp"
+#include "core/config/trace_period_config.hpp"
 #include "core/control/clocks/posix.hpp"
 #include "core/control/clocks/steady.hpp"
 #include "core/control/session.hpp"
@@ -441,8 +440,8 @@ using trace_window_t =
     rocprofsys::control::triggers::time_window<rocprofsys::control::clocks::steady>;
 using posix_trace_window_t =
     rocprofsys::control::triggers::time_window<rocprofsys::control::clocks::posix>;
-using trace_config_t = rocprofsys::constraint::trace_config<
-    rocprofsys::constraint::default_trace_config_externals>;
+using trace_config_t =
+    rocprofsys::config::trace_config<rocprofsys::config::default_trace_config_externals>;
 
 // Constructs a time_window<Clock>, which self-registers with the session
 // (and its initial action is reflected) as soon as it's constructed. Does
