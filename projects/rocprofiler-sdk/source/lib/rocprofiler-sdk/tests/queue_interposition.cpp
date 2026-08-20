@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 #include "lib/common/environment.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue.hpp"
 
 #include <gtest/gtest.h>
 
@@ -33,6 +34,7 @@
 #include <chrono>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <thread>
 
 namespace rocprofiler
@@ -440,6 +442,56 @@ TEST(queue_interposition, doorbell_out_of_order_does_not_hang)
     EXPECT_EQ(state->next_scan_pos, 2u);
     EXPECT_EQ(get_pkt(ring, 0, 255)->kernel_object, static_cast<uint64_t>(0xB0));
     EXPECT_EQ(get_pkt(ring, 1, 255)->kernel_object, static_cast<uint64_t>(0xB1));
+}
+
+// Regression test for the Queue use-after-free: destroy_queue() takes
+// queue_lifetime_mutex() exclusively around the erase that runs ~Queue(), so the doorbell
+// path must not reach the Queue until that lock is released.
+TEST(queue_interposition, doorbell_blocks_while_queue_lifetime_lock_is_held)
+{
+    auto             state = std::make_shared<QueueState>();
+    alignas(64) char ring[64 * 256];
+    memset(ring, 0, sizeof(ring));
+    uint64_t real_wdid = 0;
+    uint64_t real_rdid = 0;
+
+    state->ring_buf  = ring;
+    state->ring_size = 256;
+    state->ring_mask = 255;
+    state->real_wdid = &real_wdid;
+    state->real_rdid = &real_rdid;
+
+    state->virtual_wptr.store(1);
+    auto* pkt          = get_pkt(ring, 0, 255);
+    pkt->header        = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE);
+    pkt->kernel_object = 0xFEEDFACE;
+
+    auto _destroying = std::unique_lock{queue_lifetime_mutex()};
+
+    std::atomic<bool> done{false};
+    std::thread       worker([&]() {
+        process_doorbell_impl(state, 0, [](hsa_signal_t, hsa_signal_value_t) {});
+        done.store(true, std::memory_order_release);
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds{200});
+    EXPECT_FALSE(done.load(std::memory_order_acquire))
+        << "process_doorbell_impl reached the Queue while queue_lifetime_mutex() was held "
+           "exclusively; a concurrent ~Queue() could free the Queue mid-call";
+
+    _destroying.unlock();
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{3};
+    while(!done.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    const bool completed = done.load(std::memory_order_acquire);
+    worker.join();
+
+    ASSERT_TRUE(completed) << "process_doorbell_impl did not resume after the exclusive "
+                              "queue_lifetime_mutex() was released";
+    EXPECT_EQ(real_wdid, 1u);
+    EXPECT_EQ(state->next_submit_pos, 1u);
+    EXPECT_EQ(get_pkt(ring, 0, 255)->kernel_object, static_cast<uint64_t>(0xFEEDFACE));
 }
 }  // namespace
 }  // namespace queue_interposition
