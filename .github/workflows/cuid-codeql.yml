@@ -57,12 +57,10 @@ jobs:
       - name: Locate AMD custom query suite
         shell: bash
         run: |
-          apt-get update && apt-get install -y jq
-          QLPACKS_ROOT=$(./codeql/codeql resolve qlpacks --format=json | jq -r '.[][]')
-          AMD_SUITE=$(find $QLPACKS_ROOT -path "*/amd-sit-sast-scv/cpp-queries/*/codeql-suites/amd-cpp-windows-driver.qls" | head -1)
+          AMD_SUITE=$(find ./codeql/qlpacks/codeql/cpp-queries -path "*/amd-sit-sast-scv/cpp-queries/*/codeql-suites/amd-cpp-windows-driver.qls" | head -1)
           echo "Using AMD suite: $AMD_SUITE"
           if [ -z "$AMD_SUITE" ]; then
-            echo "Could not locate AMD custom query suite (amd-cpp-windows-driver.qls) under: $QLPACKS_ROOT" >&2
+            echo "Could not locate AMD custom query suite (amd-cpp-windows-driver.qls) under: ./codeql/qlpacks/codeql/cpp-queries" >&2
             exit 1
           fi
           echo "AMD_SUITE=$AMD_SUITE" >> "$GITHUB_ENV"
