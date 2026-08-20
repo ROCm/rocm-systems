@@ -60,9 +60,7 @@ public:
             return;
         }
         av_md5_update(md5_ctx_, hstPtr, buf_size);
-        if (hstPtr) {
-            delete [] hstPtr;
-        }
+        delete [] hstPtr;
     }
 
     /*! \brief Function to update MD5 digest for a decoded frame

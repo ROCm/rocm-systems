@@ -39,6 +39,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   # Only allow one run at a time for 'pull_request' events.

@@ -22,6 +22,7 @@
 
 #include "simdojo/sim/component.h"
 
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <memory>
@@ -43,16 +44,22 @@ struct WavefrontSnapshot {
   uint64_t exec = 0;
   uint64_t vcc = 0;
   uint32_t status = 0;
-  uint32_t mode_raw = 0;          ///< MODE register at halt.
-  uint8_t vgpr_msb_mode = 0;      ///< Decoded s_set_vgpr_msb layout at halt.
-  uint64_t lds_size_bytes = 0;    ///< Size of the LDS region visible to this wave.
-  simdojo::ComponentID cu_id = 0; ///< Originating CU component id (for per-CU grouping).
-  std::vector<uint32_t> sgprs;    ///< Full physical SGPR block (sgprs_per_wf), so TTMP
-                                  ///< slots past num_sgprs remain visible to tests.
-  std::vector<uint32_t> vgprs;    ///< [vgpr_block * wf_size], row-major by physical reg.
+  uint32_t mode_raw = 0;            ///< MODE register at halt.
+  uint8_t vgpr_msb_mode = 0;        ///< Decoded s_set_vgpr_msb layout at halt.
+  uint64_t lds_size_bytes = 0;      ///< Size of the LDS region visible to this wave.
+  simdojo::ComponentID cu_id = 0;   ///< Originating CU component id (for per-CU grouping).
+  std::vector<uint32_t> sgprs;      ///< Full physical SGPR block (sgprs_per_wf).
+  std::array<uint32_t, 16> ttmps{}; ///< Trap-temporary file (TTMP0-15).
+  std::vector<uint32_t> vgprs;      ///< [vgpr_block * wf_size], row-major by physical reg.
 
   /// @brief Read a captured SGPR by architectural index.
   uint32_t sgpr(uint32_t idx) const { return sgprs.at(idx); }
+
+  /// @brief Read a captured trap-temporary register.
+  /// @details TTMPs are a separate register file, not the tail of the SGPR
+  /// allocation: the ISA decoder routes scalar selectors 108..123 here. Tests
+  /// that want TTMP7 ask for ttmp(7), not sgpr(115).
+  uint32_t ttmp(uint32_t idx) const { return ttmps.at(idx); }
 
   /// @brief Read a captured 64-bit SGPR pair (lo at idx, hi at idx+1).
   uint64_t sgpr64(uint32_t idx) const {
@@ -126,14 +133,17 @@ public:
     // to observe physical registers while the wave is still resident at halt.
     const amdgpu::RegisterAccess regs(wf);
 
-    // Capture the full physical SGPR block (sgprs_per_wf), not just the requested
-    // count: TTMP registers alias into the high slots of the block and tests read
-    // them by physical index (e.g. TTMP7 at 115, TTMP9 at 117).
+    // Capture the full physical SGPR block (sgprs_per_wf), not just the
+    // requested count, so tests can inspect slots past num_sgprs.
     const uint32_t sbase = wf.sgpr_alloc().base;
     const uint32_t sgpr_block = wf.cu().sgprs_per_wf();
     s.sgprs.reserve(sgpr_block);
     for (uint32_t i = 0; i < sgpr_block; ++i)
       s.sgprs.push_back(regs.read_sgpr(sbase + i));
+
+    // TTMPs live in their own file, so capture them separately.
+    for (uint32_t i = 0; i < s.ttmps.size(); ++i)
+      s.ttmps[i] = wf.ttmp(i);
 
     // Capture the full physical VGPR block (normal + AccVGPR bank) so tests can
     // inspect accumulator registers as well as ordinary VGPRs.

@@ -75,31 +75,35 @@ __global__ void ReduceWaveTest(int loop, int skip, long long int *start_time,
                                long long int *end_time, T1 *s_buf, T1 *r_buf,
                                size_t size, [[maybe_unused]] TestType type,
                                ShmemContextType ctx_type, int wf_size,
-                               rocshmem_team_t *teams) {
-  int t_id  = get_flat_block_id();
-  int wg_id = get_flat_grid_id();
-  int wf_id = t_id / wf_size;
-  int wg_offset = wg_id * ((get_flat_block_size() - 1 ) / wf_size + 1);
+                               rocshmem_team_t *teams, int num_waves_per_wg) {
+  extern __shared__ rocshmem_ctx_t ctx_array[];
 
-  int flat_wf_id = wf_id + wg_offset;
+  int t_id       = get_flat_block_id();
+  int wg_id      = get_flat_grid_id();
+  int wf_id      = t_id / wf_size;
+  int wg_offset  = wg_id * num_waves_per_wg;
+  int flat_wf_id = wg_offset + wf_id;
 
-  __shared__ rocshmem_ctx_t ctx;
-
-  rocshmem_wg_ctx_create(ctx_type, &ctx);
-
-  __syncthreads();
+  // All threads in the WG collectively create one context per wave.
+  // Each iteration is WG-collective so __syncthreads() guards each call.
+  for (int wf_i = 0; wf_i < num_waves_per_wg; wf_i++) {
+    rocshmem_wg_team_create_ctx(teams[wg_offset + wf_i], ctx_type,
+                                &ctx_array[wf_i]);
+    __syncthreads();
+  }
 
   int num_elems = size / sizeof(T1);
-  r_buf += flat_wf_id * num_elems;
-  s_buf += flat_wf_id * num_elems;
+
+  // Each wave uses its own buffer slice
+  T1 *my_s_buf = s_buf + flat_wf_id * num_elems;
+  T1 *my_r_buf = r_buf + flat_wf_id * num_elems;
 
   for (int i = 0; i < loop + skip; i++) {
     if (i == skip && t_id % wf_size == 0) {
       start_time[flat_wf_id] = wall_clock64();
     }
-    if (wf_id == 0)
-      wave_reduce<T1, T2>(ctx, teams[flat_wf_id], r_buf, s_buf, num_elems);
-    __syncthreads();
+    wave_reduce<T1, T2>(ctx_array[wf_id], teams[flat_wf_id],
+                        my_r_buf, my_s_buf, num_elems);
   }
 
   __syncthreads();
@@ -108,7 +112,11 @@ __global__ void ReduceWaveTest(int loop, int skip, long long int *start_time,
     end_time[flat_wf_id] = wall_clock64();
   }
 
-  rocshmem_wg_ctx_destroy(&ctx);
+  // Destroy all contexts — WG-collective, same order as creation
+  for (int wf_i = 0; wf_i < num_waves_per_wg; wf_i++) {
+    rocshmem_wg_ctx_destroy(&ctx_array[wf_i]);
+    __syncthreads();
+  }
 }
 
 /******************************************************************************
@@ -133,14 +141,16 @@ ReduceWaveTester<T1, T2>::ReduceWaveTester(
     num_teams = atoi(value);
   }
 
-  if (num_teams < args.num_wgs * num_warps){
+  // Need one team per wave
+  int total_waves = args.num_wgs * num_warps;
+  if (num_teams < total_waves){
     printf(
       "not enough teams for each wavefront, try increasing ROCSHMEM_MAX_NUM_TEAMS\n");
     exit(0);
   }
 
   CHECK_HIP(hipMalloc(&team_reduce_wave_world_dup,
-                      sizeof(rocshmem_team_t) * num_teams));
+                      sizeof(rocshmem_team_t) * total_waves));
 }
 
 template <typename T1, ROCSHMEM_OP T2>
@@ -154,7 +164,8 @@ template <typename T1, ROCSHMEM_OP T2>
 void ReduceWaveTester<T1, T2>::preLaunchKernel() {
   bw_factor = n_pes;
 
-  for (int team_i = 0; team_i < num_teams; team_i++) {
+  int total_waves = args.num_wgs * num_warps;
+  for (int team_i = 0; team_i < total_waves; team_i++) {
     team_reduce_wave_world_dup[team_i] = ROCSHMEM_TEAM_INVALID;
     rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0,
                                 &team_reduce_wave_world_dup[team_i]);
@@ -168,12 +179,13 @@ void ReduceWaveTester<T1, T2>::preLaunchKernel() {
 template <typename T1, ROCSHMEM_OP T2>
 void ReduceWaveTester<T1, T2>::launchKernel(dim3 gridSize, dim3 blockSize,
                                             int loop, size_t size) {
-  size_t shared_bytes = 0;
+  size_t shared_bytes = num_warps * sizeof(rocshmem_ctx_t);
 
   hipLaunchKernelGGL(HIP_KERNEL_NAME(ReduceWaveTest<T1, T2>), gridSize,
                      blockSize, shared_bytes, stream, loop, args.skip,
                      start_time, end_time, s_buf, r_buf, size, _type,
-                     _shmem_context, wf_size, team_reduce_wave_world_dup);
+                     _shmem_context, wf_size, team_reduce_wave_world_dup,
+                     num_warps);
 
   num_msgs = (loop + args.skip) * gridSize.x * num_warps;
   num_timed_msgs = loop * gridSize.x * num_warps;
@@ -181,7 +193,8 @@ void ReduceWaveTester<T1, T2>::launchKernel(dim3 gridSize, dim3 blockSize,
 
 template <typename T1, ROCSHMEM_OP T2>
 void ReduceWaveTester<T1, T2>::postLaunchKernel() {
-  for (int team_i = 0; team_i < num_teams; team_i++) {
+  int total_waves = args.num_wgs * num_warps;
+  for (int team_i = 0; team_i < total_waves; team_i++) {
     rocshmem_team_destroy(team_reduce_wave_world_dup[team_i]);
   }
 }

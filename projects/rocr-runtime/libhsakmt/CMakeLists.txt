@@ -243,28 +243,51 @@ else()
 
   find_package(PkgConfig)
   if (UNIX)
-    # Check for libraries required for building
+    # hsakmt is a static library, so every item in its link interface is
+    # re-emitted verbatim into the installed hsakmtTargets.cmake as
+    # $<LINK_ONLY:...> and is then resolved on the *consumer's* machine.
+    # Anything build-machine specific therefore must not reach the interface:
+    # an absolute /usr/lib64/libc.so found on a RHEL builder does not exist on
+    # a Debian/Ubuntu multiarch host, and a pkg-config -L pointing into the CI
+    # runner's workspace exists nowhere at all.  Both break the link for every
+    # consumer of the exported target (ROCM-29513).  Propagate plain link item
+    # names instead and let each consumer's toolchain resolve them per-distro.
+
+    # Check for libraries required for building.  Only the presence of libc is
+    # asserted here; the resolved path is deliberately not propagated.
     find_library(LIBC NAMES c REQUIRED)
     find_package(NUMA)
     if(NUMA_FOUND)
       set(NUMA "${NUMA_LIBRARIES}")
-      # In BUILD_SHARED_LIBS mode hsakmt-config.cmake loads hsakmtTargets.cmake.
-      # Because hsakmt is static, its private imported dependencies are exported
-      # through LINK_ONLY and must be recreated by the package config. The
-      # staticdrm package path links the raw library name instead.
-      if(BUILD_SHARED_LIBS)
-        foreach(_numa_library IN LISTS NUMA_LIBRARIES)
-          if(TARGET "${_numa_library}")
-            set(HSAKMT_FIND_NUMA_DEPENDENCY ON)
-            break()
-          endif()
-        endforeach()
-      endif()
+      # When NUMA was found as a target, ensure consumers can find it too
+      # by having hsakmt-config.cmake call find_dependency(NUMA).
+      # This is needed regardless of BUILD_SHARED_LIBS because hsakmt's
+      # exported targets reference numa::numa.
+      foreach(_numa_library IN LISTS NUMA_LIBRARIES)
+        if(TARGET "${_numa_library}")
+          set(HSAKMT_FIND_NUMA_DEPENDENCY ON)
+          break()
+        endif()
+      endforeach()
     else()
       find_library(NUMA NAMES numa REQUIRED)
     endif()
-    message(STATUS "LIBC: " ${LIBC})
+    message(STATUS "LIBC (presence check only, links as plain 'c'): " ${LIBC})
     message(STATUS "NUMA: " ${NUMA})
+
+    # An imported target is safe to propagate as-is: hsakmt-config.cmake
+    # recreates it through find_dependency(NUMA) before loading the export.
+    # Anything else has resolved to an absolute path on this machine, so
+    # export the plain link item instead.
+    set(NUMA_LINK_ITEMS "")
+    foreach(_numa_library IN LISTS NUMA)
+      if(TARGET "${_numa_library}")
+        list(APPEND NUMA_LINK_ITEMS "${_numa_library}")
+      else()
+        list(APPEND NUMA_LINK_ITEMS "numa")
+      endif()
+    endforeach()
+    list(REMOVE_DUPLICATES NUMA_LINK_ITEMS)
 
     ## If environment variable DRM_DIR is set, the script
     ## will pick up the corresponding libraries from that path.
@@ -279,9 +302,33 @@ else()
     include_directories(${DRM_AMDGPU_INCLUDE_DIRS})
     include_directories(${DRM_INCLUDE_DIRS})
 
+    # Separate pkg-config's link flags into the -l items consumers need and the
+    # -L search paths, which are valid only on this build machine.  The search
+    # paths still have to reach in-tree consumers (hsa-runtime64 links
+    # hsakmt::hsakmt from the build tree), so keep them behind BUILD_INTERFACE:
+    # they apply while building and vanish from the installed export.
+    set(DRM_LINK_ITEMS "")
+    set(DRM_SEARCH_PATHS "")
+    foreach(_drm_ldflag IN LISTS DRM_LDFLAGS DRM_AMDGPU_LDFLAGS)
+      if(_drm_ldflag MATCHES "^-L")
+        list(APPEND DRM_SEARCH_PATHS "${_drm_ldflag}")
+      else()
+        list(APPEND DRM_LINK_ITEMS "${_drm_ldflag}")
+      endif()
+    endforeach()
+    list(REMOVE_DUPLICATES DRM_SEARCH_PATHS)
+
     target_link_libraries ( ${HSAKMT_TARGET}
-      PRIVATE ${DRM_LDFLAGS} ${DRM_AMDGPU_LDFLAGS} pthread rt ${LIBC} ${NUMA} ${CMAKE_DL_LIBS}
+      PRIVATE ${DRM_LINK_ITEMS} pthread rt c ${NUMA_LINK_ITEMS} ${CMAKE_DL_LIBS}
     )
+
+    # One entry per path: a genex wrapping a ;-separated list would rely on
+    # CMake's list splitting looking inside $<...>, which is needless subtlety.
+    foreach(_drm_search_path IN LISTS DRM_SEARCH_PATHS)
+      target_link_libraries ( ${HSAKMT_TARGET}
+        INTERFACE "$<BUILD_INTERFACE:${_drm_search_path}>"
+      )
+    endforeach()
 
     target_compile_options(${HSAKMT_TARGET} PRIVATE ${DRM_CFLAGS} ${HSAKMT_C_FLAGS})
 

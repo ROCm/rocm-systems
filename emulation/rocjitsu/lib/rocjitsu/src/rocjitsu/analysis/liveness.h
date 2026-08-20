@@ -73,6 +73,14 @@ struct LivenessAnalysisOptions {
   /// @brief Kernel entry block where architectural VGPR_MSB state is zero.
   BasicBlock *entry_block = nullptr;
 
+  /// @brief Further blocks entered with the same architectural state as entry_block.
+  ///
+  /// @details These are address-taken device functions adopted into this scope. They are reached
+  /// by a call through a pointer rather than by a decoded edge, so without seeding their blocks
+  /// stay unreachable and every VGPR_MSB query over them answers nullopt. The state to seed them
+  /// with is the ABI's, which is the same one entry_block gets.
+  std::span<BasicBlock *const> additional_entry_blocks;
+
   /// @brief Lowest VGPR index that a VGPR scratch query may return.
   ///
   /// @details This is a debug-oriented allocation floor, not a dataflow fact.
@@ -188,8 +196,24 @@ public:
 
   /// @brief gfx1250 VGPR bank selected for @p role before @p inst.
   /// @returns nullopt when this is not a gfx1250 analysis or the state is ambiguous.
+  /// @brief The VGPR_MSB analysis this liveness owns, or nullptr when it has none.
+  ///
+  /// @details Exposed so a caller that needs the same dataflow does not build a second one over
+  /// the same scope: the fixpoint is superlinear in scope size, and on a large object the two
+  /// copies were the same computation run twice.
+  [[nodiscard]] const Gfx1250VgprMsbAnalysis *gfx1250_vgpr_msb() const {
+    return gfx1250_vgpr_msb_.get();
+  }
+
   [[nodiscard]] std::optional<uint8_t> vgpr_msb_bank_before(const Instruction &inst,
                                                             amdgpu::VgprMsbRole role) const;
+
+  /// @brief Whether statically decoded operands cover every VGPR access in the scope.
+  ///
+  /// @details False when relative addressing or runtime GPR indexing can redirect
+  /// an encoded VGPR operand. Transformations that compare or reuse physical
+  /// VGPR ranges must fail closed when this query returns false.
+  [[nodiscard]] bool global_vgpr_usage_is_complete() const;
 
   /// @brief Find a VGPR tuple that no instruction in the kernel reads or writes.
   ///

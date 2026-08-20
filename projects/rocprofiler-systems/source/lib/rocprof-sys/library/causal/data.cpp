@@ -63,12 +63,12 @@ using progress_bundles_t = component_bundle_cache<component::progress_point>;
 auto speedup_seeds     = std::vector<size_t>{};
 auto speedup_divisions = get_env<std::uint16_t>(env_vars::CAUSAL_SPEEDUP_DIVISIONS, 5);
 auto speedup_dist      = []() {
-    size_t                     _n = std::max<size_t>(1, 100 / speedup_divisions);
+    const size_t               _n = std::max<size_t>(1, 100 / speedup_divisions);
     std::vector<std::uint16_t> _v(_n, std::uint16_t{ 0 });
     std::generate(_v.begin(), _v.end(),
                        [_value = 0]() mutable { return (_value += speedup_divisions); });
     // approximately 25% of bins should be zero speedup
-    size_t _nzero = std::ceil(_v.size() / 4.0);
+    const size_t _nzero = std::ceil(_v.size() / 4.0);
     _v.resize(_v.size() + _nzero, 0);
     std::sort(_v.begin(), _v.end());
     if(_v.back() > 100)
@@ -135,7 +135,7 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
         _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::FUNCTION_FILTER,
                                   "( main\\(|^main$|^main\\.cold$)" });
 
-    bool _use_default_excludes =
+    const bool _use_default_excludes =
         config::get_setting_value<bool>(
             std::string{ env_vars::CAUSAL_FUNCTION_EXCLUDE_DEFAULTS })
             .value_or(true);
@@ -494,7 +494,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
     if(_delay_sec > 0.0)
     {
         LOG_DEBUG("[causal] delaying experimentation for {} seconds...", _delay_sec);
-        std::uint64_t _delay_nsec = _delay_sec * units::sec;
+        const std::uint64_t _delay_nsec = _delay_sec * units::sec;
         std::this_thread::yield();
         std::this_thread::sleep_for(std::chrono::nanoseconds{ _delay_nsec });
     }
@@ -855,7 +855,7 @@ sample_selection(size_t _nitr, size_t _wait_ns)
                 continue;
             }
 
-            uintptr_t _addr = aitr->load();
+            const uintptr_t _addr = aitr->load();
             if(_addr > 0) _addresses.emplace_back(_addr);
         }
 
@@ -883,7 +883,7 @@ get_line_info(uintptr_t _addr, bool _include_discarded)
 
             // make sure the address is in the coarse grained mapped regions
             // before performing an exhaustive search
-            bool _is_mapped =
+            const bool _is_mapped =
                 std::find_if(litr.mappings.begin(), litr.mappings.end(),
                                     [_addr](const auto& mitr) {
                                  return binary::address_range{ mitr.load_address,

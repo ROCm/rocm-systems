@@ -19,10 +19,11 @@
 /// initialize src0+src1+vdst (the third FMA arg comes from vdst, no src2
 /// member), so they need a separate accumulate-form glue path.
 
+#include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -244,7 +245,7 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
     uint32_t words[4] = {0u, 0u, 0u, 0u};
     vop3_encode(c.opcode, vdst, /*src0=*/256, /*src1=*/256 + src1_v, /*src2=*/256 + src2_v, abs,
                 neg, omod, clamp, words);
-    Instruction *inst = fx.decoder->decode(words);
+    Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
     auto out = fx.run(inst, c.kind, rot, exec);
     delete inst;
