@@ -92,6 +92,13 @@ on:
         required: false
         type: string
         default: ""
+      quartz_tracking_id:
+        description: >-
+          Leave empty. Internal Quartz tracking id, set automatically by the
+          top-level orchestrator to link this run to its release lineage. Do not
+          set it manually.
+        type: string
+        default: ""
   workflow_dispatch:
     inputs:
       test_amdgpu_family:
@@ -184,6 +191,13 @@ on:
           File of test paths to run instead of the whole subset, e.g.
           external-builds/jax/test_selection/small_tests.txt. Empty runs all of
           it.
+        type: string
+        default: ""
+      quartz_tracking_id:
+        description: >-
+          Leave empty. Internal Quartz tracking id, set automatically by the
+          top-level orchestrator to link this run to its release lineage. Do not
+          set it manually.
         type: string
         default: ""
 permissions:
