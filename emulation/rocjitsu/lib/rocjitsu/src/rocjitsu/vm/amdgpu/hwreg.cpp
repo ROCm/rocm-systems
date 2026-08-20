@@ -33,6 +33,7 @@ enum class HwregState : uint8_t {
   ExcpFlagPrivGfx12,
   ExcpFlagUserGfx12,
   TrapCtrlGfx12,
+  XnackStatePrivGfx12,
 };
 
 enum class HwregWritePolicy : uint8_t {
@@ -313,7 +314,7 @@ constexpr HwregDescriptor GFX1250_HWREGS[] = {
     {24, "WAVE_HW_ID2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {26, "WAVE_SCHED_MODE", HwregState::WaveSchedMode, HwregWritePolicy::UserWritable},
     {28, "IB_STS2", HwregState::IbSts2Gfx1250, HwregWritePolicy::ReadOnly},
-    {33, "WAVE_XNACK_STATE_PRIV", HwregState::Unsupported, HwregWritePolicy::Privileged},
+    {33, "WAVE_XNACK_STATE_PRIV", HwregState::XnackStatePrivGfx12, HwregWritePolicy::Privileged},
     {34, "WAVE_XNACK_MASK", HwregState::Unsupported, HwregWritePolicy::Privileged},
 };
 
@@ -492,6 +493,9 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
   case HwregState::TrapCtrlGfx12:
     raw_value = gfx12_trap_ctrl_raw(wf);
     return HwregAccessResult::Success;
+  case HwregState::XnackStatePrivGfx12:
+    raw_value = wf.xnack_state_priv();
+    return HwregAccessResult::Success;
   case HwregState::Unsupported:
     return HwregAccessResult::Unsupported;
   }
@@ -538,6 +542,11 @@ HwregAccessResult write_raw_hwreg(Wavefront &wf, HwregState state, uint32_t raw_
     return HwregAccessResult::Success;
   case HwregState::TrapCtrlGfx12:
     set_gfx12_trap_ctrl(wf, raw_value);
+    return HwregAccessResult::Success;
+  case HwregState::XnackStatePrivGfx12:
+    // Stored, not modelled: the handler reads back what it writes, and a
+    // dropped write leaves it spinning. See Wavefront::xnack_state_priv().
+    wf.set_xnack_state_priv(raw_value);
     return HwregAccessResult::Success;
   case HwregState::GprAllocGfx9_10:
   case HwregState::GprAllocCdna3_4:

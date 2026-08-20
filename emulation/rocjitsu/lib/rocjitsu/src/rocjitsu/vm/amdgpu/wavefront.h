@@ -609,6 +609,15 @@ public:
   /// @brief Write the trap status register.
   void set_trapsts(uint32_t val) { trapsts_ = val; }
 
+  /// @brief GFX12 WAVE_XNACK_STATE_PRIV, stored verbatim.
+  /// @details The emulator does not model XNACK replay, so nothing consumes
+  /// this. It is still real storage rather than a discarded write because the
+  /// GFX12 trap handler reads back what it writes here: with the write dropped
+  /// the handler never observes its own update and spins, wedging the dispatch
+  /// and hanging the inferior the moment a GPU breakpoint is hit.
+  uint32_t xnack_state_priv() const { return xnack_state_priv_; }
+  void set_xnack_state_priv(uint32_t val) { xnack_state_priv_ = val; }
+
   /// @brief EXCP causes raised by the instruction currently executing.
   /// @details TRAPSTS.EXCP is a sticky accumulator: hardware records a cause
   /// there and never clears it on its own, so it cannot say whether *this*
@@ -803,6 +812,7 @@ public:
     for (auto &t : ttmp_)
       t = 0;
     trapsts_ = 0;
+    xnack_state_priv_ = 0;
     pending_alu_causes_ = 0;
     sleep_cycles_ = 0;
     in_trap_handler_ = false;
@@ -889,6 +899,7 @@ private:
 
   uint32_t ttmp_[16] = {};           ///< Trap temporary registers (TTMP0-15).
   uint32_t trapsts_ = 0;             ///< Trap status register (EXCP flags).
+  uint32_t xnack_state_priv_ = 0;    ///< GFX12 WAVE_XNACK_STATE_PRIV (stored, not modelled).
   uint32_t pending_alu_causes_ = 0;  ///< EXCP causes from the current instruction.
   uint32_t sleep_cycles_ = 0;        ///< Cycles left on an in-flight S_SLEEP.
   bool in_trap_handler_ = false;     ///< Executing the configured trap-handler shader.
