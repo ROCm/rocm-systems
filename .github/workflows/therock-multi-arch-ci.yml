@@ -28,11 +28,11 @@
 name: TheRock Multi-Arch CI
 
 on:
-  # pull_request:
-  #   types:
-  #     - opened
-  #     - synchronize
-  #     - reopened
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:

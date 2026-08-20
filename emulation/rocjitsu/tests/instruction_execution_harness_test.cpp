@@ -9,12 +9,16 @@
 /// rejected, and UnimplementedInst results must exactly match the explicit
 /// expectation for that ISA.
 
+#include "decode_test_util.h"
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
@@ -33,6 +37,7 @@
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "test_encodings_util.h"
 #include "util/data_types.h"
 #include "util/except.h"
 #include "util/simd.h"
@@ -72,12 +77,6 @@
 namespace {
 
 using namespace rocjitsu;
-
-/// @brief Common test encoding entry (matches all ISA test_encodings.h).
-struct TestEncEntry {
-  std::string_view mnemonic;
-  std::array<uint32_t, 2> words;
-};
 
 constexpr uint32_t pack16(uint16_t lo, uint16_t hi) {
   return static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 16);
@@ -156,7 +155,7 @@ constexpr HwregArchCase kHwregArchCases[] = {
      rdna3_5::kSSetregImm32B32Sopk},
     {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", rdna4::kSGetregB32Sopk, rdna4::kSSetregB32Sopk,
      rdna4::kSSetregImm32B32Sopk},
-    {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", cdna5::kSGetregB32Sopk, cdna5::kSSetregB32Sopk,
+    {ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", cdna5::kSGetregB32Sopk, cdna5::kSSetregB32Sopk,
      cdna5::kSSetregImm32B32Sopk},
 };
 
@@ -176,6 +175,29 @@ public:
 
   Gfx1250MemoryTestCu(std::string name, const amdgpu::ComputeUnitCore::Config &config,
                       amdgpu::GpuMemory *memory, amdgpu::L2Cache *l2)
+      : Base(std::move(name), config, memory, l2) {
+    if (l2)
+      l2->set_backing_memory(memory);
+    set_memory(memory);
+    set_l2(l2);
+  }
+
+  void execute_and_route(Instruction *inst, amdgpu::Wavefront &wf) {
+    execute_instruction(inst, wf);
+    if (inst->is_memory_op())
+      route_memory_inst(inst, wf);
+    else
+      delete inst;
+  }
+};
+
+class Cdna4MemoryTestCu
+    : public amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, cdna4::Isa> {
+public:
+  using Base = amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, cdna4::Isa>;
+
+  Cdna4MemoryTestCu(std::string name, const amdgpu::ComputeUnitCore::Config &config,
+                    amdgpu::GpuMemory *memory, amdgpu::L2Cache *l2)
       : Base(std::move(name), config, memory, l2) {
     if (l2)
       l2->set_backing_memory(memory);
@@ -236,10 +258,7 @@ inline bool should_skip_inst(std::string_view mn) {
       "s_setreg",
       "s_rfe",
   };
-  for (auto p : SKIP_PREFIXES)
-    if (mn.substr(0, p.size()) == p)
-      return true;
-  return false;
+  return mnemonic_has_any_prefix(mn, SKIP_PREFIXES);
 }
 
 constexpr std::array<std::string_view, 1> EXPECTED_CDNA_UNIMPLEMENTED = {"s_setvskip"};
@@ -270,8 +289,9 @@ const HarnessExpectation *harness_expectation(std::string_view arch_name) {
 }
 
 /// @brief Helper to run all test encodings for a given ISA.
+template <typename Encoding>
 void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
-                           const TestEncEntry *encodings, size_t num_encodings) {
+                           const Encoding *encodings, size_t num_encodings) {
   // Set up minimal CU with zeroed memory.
   amdgpu::GpuMemory gpu_mem(std::string(arch_name) + "_mem");
   amdgpu::L2Cache l2(std::string(arch_name) + "_l2");
@@ -309,16 +329,7 @@ void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
     }
 
     // Decode the instruction.
-    std::unique_ptr<Instruction> inst;
-    try {
-      inst.reset(decoder->decode(te.words.data()));
-    } catch (const util::InvalidInst &) {
-      decode_fail_list.emplace_back(te.mnemonic);
-      continue;
-    } catch (...) {
-      decode_fail_list.emplace_back(te.mnemonic);
-      continue;
-    }
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, te.words.data()));
     if (!inst) {
       decode_fail_list.emplace_back(te.mnemonic);
       continue;
@@ -395,11 +406,8 @@ void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
 
 // --- Parameterized tests per ISA ---
 
-// Helper macro: cast the ISA-specific TestEncoding array to the common layout.
-// The struct layout (string_view + array<uint32_t,2>) is identical across all ISAs.
 #define RUN_HARNESS(ISA_NS, ARCH_ENUM, ARCH_STR)                                                   \
-  run_execution_harness(ARCH_ENUM, ARCH_STR,                                                       \
-                        reinterpret_cast<const TestEncEntry *>(ISA_NS::test_data::ENCODINGS),      \
+  run_execution_harness(ARCH_ENUM, ARCH_STR, ISA_NS::test_data::ENCODINGS,                         \
                         ISA_NS::test_data::NUM_ENCODINGS)
 
 TEST(InstructionExecutionHarness, Cdna1) { RUN_HARNESS(cdna1, ROCJITSU_CODE_ARCH_CDNA1, "cdna1"); }
@@ -446,7 +454,7 @@ TEST(Rdna4ExecMaskTest, Wave32ExecHiRemainsAvailableAsScalarScratch) {
 
   for (size_t i = 0; i < sequence.size(); ++i) {
     const uint32_t words[] = {sequence[i].first, 0};
-    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), sequence[i].second);
     cu->execute_instruction(inst.get(), *wf);
@@ -465,7 +473,7 @@ TEST(Rdna4ExecMaskTest, Wave32ExecHiRemainsAvailableAsScalarScratch) {
   wf->set_exec_raw(0xdeadbeef'ffffffffULL);
 
   const auto mov_b64 = encode_sop1(/*s_mov_b64=*/1, /*exec=*/126, /*s0=*/0);
-  std::unique_ptr<Instruction> inst(decoder->decode(mov_b64.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, mov_b64.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "s_mov_b64");
   cu->execute_instruction(inst.get(), *wf);
@@ -474,7 +482,7 @@ TEST(Rdna4ExecMaskTest, Wave32ExecHiRemainsAvailableAsScalarScratch) {
   EXPECT_EQ(wf->exec(), static_cast<uint32_t>(kRawExec));
 }
 TEST(InstructionExecutionHarness, Gfx1250) {
-  RUN_HARNESS(cdna5, ROCJITSU_CODE_ARCH_GFX1250, "gfx1250");
+  RUN_HARNESS(cdna5, ROCJITSU_CODE_ARCH_CDNA5, "gfx1250");
 }
 
 #undef RUN_HARNESS
@@ -484,7 +492,7 @@ TEST(Gfx1250MemoryExecutionHarness, ExecutesRepresentativeValidAddressStores) {
   amdgpu::L2Cache l2("gfx1250_memory_harness_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -492,7 +500,7 @@ TEST(Gfx1250MemoryExecutionHarness, ExecutesRepresentativeValidAddressStores) {
 
   Gfx1250MemoryTestCu cu("gfx1250", cfg, &gpu_mem, &l2);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -513,7 +521,7 @@ TEST(Gfx1250MemoryExecutionHarness, ExecutesRepresentativeValidAddressStores) {
 
   // global_store_b32 v0, v1, s[4:5]
   const uint32_t global_store_words[] = {0xEE068004u, 0x00800000u, 0x00000000u};
-  std::unique_ptr<Instruction> global_store(decoder->decode(global_store_words));
+  std::unique_ptr<Instruction> global_store(decode_valid(*decoder, global_store_words));
   ASSERT_NE(global_store, nullptr);
   ASSERT_EQ(std::string_view(global_store->mnemonic()), "global_store_b32");
   cu.execute_and_route(global_store.release(), *wf);
@@ -537,7 +545,7 @@ TEST(Gfx1250MemoryExecutionHarness, ExecutesRepresentativeValidAddressStores) {
 
   // buffer_store_b32 v0, v5, s[4:7], m0 offen
   const uint32_t buffer_store_words[] = {0xC406807Du, 0x40800800u, 0x00000005u};
-  std::unique_ptr<Instruction> buffer_store(decoder->decode(buffer_store_words));
+  std::unique_ptr<Instruction> buffer_store(decode_valid(*decoder, buffer_store_words));
   ASSERT_NE(buffer_store, nullptr);
   ASSERT_EQ(std::string_view(buffer_store->mnemonic()), "buffer_store_b32");
   cu.execute_and_route(buffer_store.release(), *wf);
@@ -575,7 +583,7 @@ TEST(Rdna4ScalarSccTest, AddSubCoI32UseSignedOverflow) {
   const uint32_t sb = wf->sgpr_alloc().base;
   auto run = [&](const std::array<uint32_t, 2> &words, std::string_view mnemonic, uint32_t lhs,
                  uint32_t rhs, uint32_t expected_result, bool expected_scc) {
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic);
 
@@ -634,7 +642,7 @@ void run_scalar_cvt_preserves_scc(rj_code_arch_t arch, std::string_view arch_nam
     const auto &tc = cases[i];
     const auto words = encode_sop1(tc.op, /*sdst=*/1, /*ssrc0=*/0);
     for (bool initial_scc : std::array<bool, 2>{false, true}) {
-      std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
       ASSERT_EQ(std::string_view(inst->mnemonic()), tc.mnemonic) << arch_name;
 
@@ -679,7 +687,7 @@ TEST(ScalarSccTest, ScalarCvtPreservesScc) {
 
   run_scalar_cvt_preserves_scc(ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", cases.data(), cases.size());
   run_scalar_cvt_preserves_scc(ROCJITSU_CODE_ARCH_RDNA4, "rdna4", cases.data(), cases.size());
-  run_scalar_cvt_preserves_scc(ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", cases.data(), cases.size());
+  run_scalar_cvt_preserves_scc(ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", cases.data(), cases.size());
 }
 
 TEST(Cdna4Vop3Test, CmpClassF16WritesWave64UpperMaskDword) {
@@ -742,7 +750,7 @@ TEST(Cdna4Vop3Test, CmpClassF16WritesWave64UpperMaskDword) {
 
     // CDNA4 v_cmp_class_f16 s0, v0, v1.
     const uint32_t words[] = {0xD0140000U, 0x00020300U};
-    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cmp_class_f16");
     cu->execute_instruction(inst.get(), *wf);
@@ -750,6 +758,46 @@ TEST(Cdna4Vop3Test, CmpClassF16WritesWave64UpperMaskDword) {
     EXPECT_EQ(cu->read_sgpr(sb + 0), static_cast<uint32_t>(expected_mask));
     EXPECT_EQ(cu->read_sgpr(sb + 1), static_cast<uint32_t>(expected_mask >> 32));
 
+    if (!wf->is_halted())
+      wf->halt();
+  }
+}
+
+TEST(Cdna4Vop3Test, BcntAddsSourceAccumulator) {
+  for (bool force_scalar : {false, true}) {
+    ForceScalarGuard guard(force_scalar);
+    amdgpu::GpuMemory gpu_mem(force_scalar ? "cdna4_bcnt_scalar_mem" : "cdna4_bcnt_simd_mem");
+    amdgpu::L2Cache l2(force_scalar ? "cdna4_bcnt_scalar_l2" : "cdna4_bcnt_simd_l2");
+
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = 106;
+    cfg.vgprs_per_wf = 256;
+    cfg.lds_size_kb = 64;
+
+    auto cu = amdgpu::ComputeUnitCore::create("cdna4", cfg, &gpu_mem, &l2);
+    ASSERT_NE(cu, nullptr);
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_NE(decoder, nullptr);
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+
+    const uint32_t vb = wf->vgpr_alloc().base;
+    cu->raw_vgpr_reg<64>(vb + 0)[0] = 0x80000001u;
+    cu->raw_vgpr_reg<64>(vb + 1)[0] = 7u;
+    wf->set_exec(1);
+
+    const auto words = encode_cdna_vop3(cdna4::kVBcntU32B32Vop3, /*vdst=*/2,
+                                        /*src0=*/256, /*src1=*/257, /*src2=*/0);
+    DecodeResult decoded = decoder->decode(words.data());
+    ASSERT_TRUE(decoded.succeeded());
+    std::unique_ptr<Instruction> inst = std::move(decoded.value());
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(std::string_view(inst->mnemonic()), "v_bcnt_u32_b32");
+    cu->execute_instruction(inst.get(), *wf);
+
+    EXPECT_EQ(cu->raw_vgpr_reg<64>(vb + 2)[0], 9u);
     if (!wf->is_halted())
       wf->halt();
   }
@@ -796,7 +844,7 @@ TEST(CdnaVop3True16Test, B16I16U16OpsUseOpSelAndCdnaDestinationPolicy) {
       const uint32_t vb = wf->vgpr_alloc().base;
 
       auto execute = [&](const std::array<uint32_t, 2> &words, std::string_view mnemonic) {
-        std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
         ASSERT_NE(inst, nullptr) << arch.name << " " << mnemonic;
         ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic) << arch.name;
         cu->execute_instruction(inst.get(), *wf);
@@ -879,7 +927,7 @@ TEST(Rdna3Dot2ExecutionTest, Vop2Dot2accF32F16AccumulatesDst) {
   cu->write_vgpr(vb + 2, 0, std::bit_cast<uint32_t>(5.0f));
 
   const auto words = encode_vop2(/*op=*/2, /*vdst=*/2, /*src0=*/256, /*vsrc1=*/1);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_dot2acc_f32_f16_e32");
   cu->execute_instruction(inst.get(), *wf);
@@ -920,7 +968,7 @@ TEST(Rdna4Dot2True16ExecutionTest, F16AppliesVop3ModifiersAndSelectedHalves) {
   const auto words = encode_vop3(/*op=*/0x266, /*vdst=*/3, /*src0=*/256, /*src1=*/257,
                                  /*src2=*/258, /*abs=*/0x1, /*opsel=*/0xCu, /*clamp=*/1,
                                  /*omod=*/3, /*neg=*/0x2);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_dot2_f16_f16");
   cu->execute_instruction(inst.get(), *wf);
@@ -960,7 +1008,7 @@ TEST(Rdna4Dot2True16ExecutionTest, Bf16UsesSelectedAccumulatorAndDestinationHalf
 
   const auto words = encode_vop3(/*op=*/0x267, /*vdst=*/3, /*src0=*/256, /*src1=*/257,
                                  /*src2=*/258, /*abs=*/0, /*opsel=*/0x4u);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_dot2_bf16_bf16");
   cu->execute_instruction(inst.get(), *wf);
@@ -1012,7 +1060,7 @@ void run_cdna4_dot2_f32_bf16(bool force_scalar) {
                                                      .src1 = static_cast<uint16_t>(257),
                                                      .src2 = static_cast<uint16_t>(258),
                                                      .op_sel_hi = 3});
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_dot2_f32_bf16");
   cu->execute_instruction(inst.get(), *wf);
@@ -1073,7 +1121,7 @@ TEST(Cdna4Permlane16SwapExecutionTest, Wave64SwapsAllFourGroups) {
   const auto words = cdna4::build_vop1(
       cdna4::kVPermlane16SwapB32Vop1,
       {.src0 = static_cast<uint16_t>(256 + vsrc_reg), .vdst = static_cast<uint8_t>(vdst_reg)});
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_permlane16_swap_b32_e32");
   cu->execute_instruction(inst.get(), *wf);
@@ -1138,7 +1186,7 @@ TEST(Gfx1250WmmaTest, F16Fp8K64MatchesReferenceLayout) {
   amdgpu::L2Cache l2("gfx1250_wmma_f16_fp8_k64_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -1152,7 +1200,7 @@ TEST(Gfx1250WmmaTest, F16Fp8K64MatchesReferenceLayout) {
   ASSERT_EQ(wf->wf_size(), 32u);
   wf->set_exec((1ULL << wf->wf_size()) - 1ULL);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   const uint32_t vb = wf->vgpr_alloc().base;
@@ -1222,7 +1270,7 @@ TEST(Gfx1250WmmaTest, F16Fp8K64MatchesReferenceLayout) {
       0xCC6E0000U | 40u,
       (256u + 10u) | ((256u + 20u) << 9u) | ((256u + 30u) << 18u),
   };
-  std::unique_ptr<Instruction> inst(decoder->decode(wmma_words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, wmma_words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_wmma_f16_16x16x64_fp8_fp8");
   cu->execute_instruction(inst.get(), *wf);
@@ -1255,7 +1303,7 @@ TEST(Gfx1250WmmaTest, Bf16F32K32Bf16PreservesAccumulatorLayout) {
   amdgpu::L2Cache l2("gfx1250_wmma_bf16f32_k32_bf16_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -1330,7 +1378,7 @@ TEST(Gfx1250Dpp8Test, Vop2AddF16UsesPermutedSourceLanes) {
   amdgpu::L2Cache l2("gfx1250_dpp8_add_f16_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -1339,7 +1387,7 @@ TEST(Gfx1250Dpp8Test, Vop2AddF16UsesPermutedSourceLanes) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -1364,7 +1412,7 @@ TEST(Gfx1250Dpp8Test, Vop2AddF16UsesPermutedSourceLanes) {
       0x64000000u | amdgpu::SRC_DPP8_FI_0 | (kSrc1 << 9u) | (kDst << 17u),
       kSrc0 | (lane_sel << 8u),
   };
-  std::unique_ptr<Instruction> inst(decoder->decode(add_f16_dpp8_words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, add_f16_dpp8_words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_add_f16_dpp");
   EXPECT_EQ(inst->disassemble(), "v_add_f16_dpp v4.l, v2, v3.l dpp8:[7,0,3,2,5,4,1,6]");
@@ -1386,7 +1434,7 @@ TEST(Gfx1250ExecMaskTest, CmpxNeqAndScalarOrRestoreExec) {
   amdgpu::L2Cache l2("gfx1250_exec_mask_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -1395,7 +1443,7 @@ TEST(Gfx1250ExecMaskTest, CmpxNeqAndScalarOrRestoreExec) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -1406,7 +1454,7 @@ TEST(Gfx1250ExecMaskTest, CmpxNeqAndScalarOrRestoreExec) {
 
   // s_mov_b32 s1, exec_lo
   const uint32_t save_exec_words[] = {0xBE81007EU, 0};
-  std::unique_ptr<Instruction> save_exec(decoder->decode(save_exec_words));
+  std::unique_ptr<Instruction> save_exec(decode_valid(*decoder, save_exec_words));
   ASSERT_NE(save_exec, nullptr);
   ASSERT_EQ(std::string_view(save_exec->mnemonic()), "s_mov_b32");
   cu->execute_instruction(save_exec.get(), *wf);
@@ -1420,7 +1468,7 @@ TEST(Gfx1250ExecMaskTest, CmpxNeqAndScalarOrRestoreExec) {
 
   // v_cmpx_neq_f32_e32 0, v4
   const uint32_t mask_zero_lane_words[] = {0x7D3A0880U, 0};
-  std::unique_ptr<Instruction> mask_zero_lane(decoder->decode(mask_zero_lane_words));
+  std::unique_ptr<Instruction> mask_zero_lane(decode_valid(*decoder, mask_zero_lane_words));
   ASSERT_NE(mask_zero_lane, nullptr);
   ASSERT_EQ(std::string_view(mask_zero_lane->mnemonic()), "v_cmpx_neq_f32_e32");
   cu->execute_instruction(mask_zero_lane.get(), *wf);
@@ -1428,7 +1476,7 @@ TEST(Gfx1250ExecMaskTest, CmpxNeqAndScalarOrRestoreExec) {
 
   // s_or_b32 exec_lo, exec_lo, s1
   const uint32_t restore_exec_words[] = {0x8C7E017EU, 0};
-  std::unique_ptr<Instruction> restore_exec(decoder->decode(restore_exec_words));
+  std::unique_ptr<Instruction> restore_exec(decode_valid(*decoder, restore_exec_words));
   ASSERT_NE(restore_exec, nullptr);
   ASSERT_EQ(std::string_view(restore_exec->mnemonic()), "s_or_b32");
   cu->execute_instruction(restore_exec.get(), *wf);
@@ -1443,7 +1491,7 @@ TEST(Gfx1250ExecMaskTest, Vop3CmpxGtI32KeepsInRangeLanesActive) {
   amdgpu::L2Cache l2("gfx1250_cmpx_gt_i32_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -1452,7 +1500,7 @@ TEST(Gfx1250ExecMaskTest, Vop3CmpxGtI32KeepsInRangeLanesActive) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -1468,7 +1516,7 @@ TEST(Gfx1250ExecMaskTest, Vop3CmpxGtI32KeepsInRangeLanesActive) {
 
   // v_cmpx_gt_i32_e64 s3, v2
   const uint32_t in_range_words[] = {0xD4C4007EU, 0x02020403U};
-  std::unique_ptr<Instruction> in_range(decoder->decode(in_range_words));
+  std::unique_ptr<Instruction> in_range(decode_valid(*decoder, in_range_words));
   ASSERT_NE(in_range, nullptr);
   ASSERT_EQ(std::string_view(in_range->mnemonic()), "v_cmpx_gt_i32");
   cu->execute_instruction(in_range.get(), *wf);
@@ -1483,7 +1531,7 @@ TEST(Gfx1250ExecMaskTest, Vop3CmpF32PreservesHighMaskSgprOnWave32) {
   amdgpu::L2Cache l2("gfx1250_cmp_f32_mask_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -1492,7 +1540,7 @@ TEST(Gfx1250ExecMaskTest, Vop3CmpF32PreservesHighMaskSgprOnWave32) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -1512,7 +1560,7 @@ TEST(Gfx1250ExecMaskTest, Vop3CmpF32PreservesHighMaskSgprOnWave32) {
 
   // v_cmp_eq_f32_e64 s0, 0, v4
   const uint32_t compare_words[] = {0xD4120000U, 0x02020880U};
-  std::unique_ptr<Instruction> compare(decoder->decode(compare_words));
+  std::unique_ptr<Instruction> compare(decode_valid(*decoder, compare_words));
   ASSERT_NE(compare, nullptr);
   ASSERT_EQ(std::string_view(compare->mnemonic()), "v_cmp_eq_f32");
   cu->execute_instruction(compare.get(), *wf);
@@ -1529,7 +1577,7 @@ TEST(Gfx1250True16Vop3Test, SelectedHalfArithmeticPreservesDestinationHalf) {
   amdgpu::L2Cache l2("gfx1250_true16_arith_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -1538,7 +1586,7 @@ TEST(Gfx1250True16Vop3Test, SelectedHalfArithmeticPreservesDestinationHalf) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -1554,7 +1602,7 @@ TEST(Gfx1250True16Vop3Test, SelectedHalfArithmeticPreservesDestinationHalf) {
   }
 
   auto execute = [&](const uint32_t(&words)[2], std::string_view mnemonic) {
-    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic);
     cu->execute_instruction(inst.get(), *wf);
@@ -1603,7 +1651,7 @@ TEST(Gfx1250True16Vop2Test, AddF16UsesSelectedHighVsrc1AndPreservesLowDestinatio
   amdgpu::L2Cache l2("gfx1250_true16_vop2_add_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -1612,7 +1660,7 @@ TEST(Gfx1250True16Vop2Test, AddF16UsesSelectedHighVsrc1AndPreservesLowDestinatio
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -1626,7 +1674,7 @@ TEST(Gfx1250True16Vop2Test, AddF16UsesSelectedHighVsrc1AndPreservesLowDestinatio
 
   // v_add_f16_e32 v2.h, v0.h, v1.h
   const uint32_t words[] = {0x65050380U, 0x00000000U};
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_add_f16_e32");
   EXPECT_NE(inst->disassemble().find("v2.h"), std::string::npos);
@@ -1645,7 +1693,7 @@ TEST(Gfx1250True16Vop2Test, FmacF16HighDestinationUsesSelectedAccumulatorHalf) {
   amdgpu::L2Cache l2("gfx1250_true16_vop2_fmac_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -1654,7 +1702,7 @@ TEST(Gfx1250True16Vop2Test, FmacF16HighDestinationUsesSelectedAccumulatorHalf) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -1668,7 +1716,7 @@ TEST(Gfx1250True16Vop2Test, FmacF16HighDestinationUsesSelectedAccumulatorHalf) {
 
   // v_fmac_f16_e32 v0.h, v1.h, v2.h
   const uint32_t words[] = {0x6D010581U, 0x00000000U};
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_fmac_f16_e32");
   EXPECT_NE(inst->disassemble().find("v0.h"), std::string::npos);
@@ -1687,7 +1735,7 @@ TEST(Gfx1250True16Vop3Test, MulLoU16UsesSelectedHighSourceHalf) {
   amdgpu::L2Cache l2("gfx1250_true16_mul_src_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -1696,7 +1744,7 @@ TEST(Gfx1250True16Vop3Test, MulLoU16UsesSelectedHighSourceHalf) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -1709,7 +1757,7 @@ TEST(Gfx1250True16Vop3Test, MulLoU16UsesSelectedHighSourceHalf) {
 
   // v_mul_lo_u16 v2.l, 0x12b3, v0.h op_sel:[0,1,0]
   const uint32_t words[] = {0xD7051002U, 0x020200FFU, 0x000012B3U};
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_mul_lo_u16");
   cu->execute_instruction(inst.get(), *wf);
@@ -1725,7 +1773,7 @@ TEST(Gfx1250True16Vop3Test, CmpLtI16UsesSelectedHighSourceHalf) {
   amdgpu::L2Cache l2("gfx1250_true16_cmp_src_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -1734,7 +1782,7 @@ TEST(Gfx1250True16Vop3Test, CmpLtI16UsesSelectedHighSourceHalf) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -1750,7 +1798,7 @@ TEST(Gfx1250True16Vop3Test, CmpLtI16UsesSelectedHighSourceHalf) {
 
   // v_cmp_lt_i16 s0, -1, v0.h op_sel:[0,1,0]
   const uint32_t words[] = {0xD4311000U, 0x020200C1U};
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cmp_lt_i16");
   cu->execute_instruction(inst.get(), *wf);
@@ -1771,7 +1819,7 @@ TEST(Gfx1250True16Vop3Test, CmpClassF16UsesSelectedMaskHalf) {
                                     : "gfx1250_true16_class_simd_l2");
 
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+    cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 256;
@@ -1780,7 +1828,7 @@ TEST(Gfx1250True16Vop3Test, CmpClassF16UsesSelectedMaskHalf) {
     auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
     ASSERT_NE(cu, nullptr);
 
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
     ASSERT_NE(decoder, nullptr);
 
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -1797,7 +1845,7 @@ TEST(Gfx1250True16Vop3Test, CmpClassF16UsesSelectedMaskHalf) {
 
     constexpr auto words = encode_vop3(/*op=*/125, /*vdst=*/0, /*src0=*/256, /*src1=*/256,
                                        /*src2=*/0, /*abs=*/0, /*opsel=*/0x2);
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cmp_class_f16");
     cu->execute_instruction(inst.get(), *wf);
@@ -1819,7 +1867,7 @@ TEST(Gfx1250True16Vop3Test, CmpxClassF16UsesSelectedMaskHalf) {
                                     : "gfx1250_true16_cmpx_class_simd_l2");
 
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+    cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 256;
@@ -1828,7 +1876,7 @@ TEST(Gfx1250True16Vop3Test, CmpxClassF16UsesSelectedMaskHalf) {
     auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
     ASSERT_NE(cu, nullptr);
 
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
     ASSERT_NE(decoder, nullptr);
 
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -1843,7 +1891,7 @@ TEST(Gfx1250True16Vop3Test, CmpxClassF16UsesSelectedMaskHalf) {
 
     constexpr auto words = encode_vop3(/*op=*/253, /*vdst=*/126, /*src0=*/256, /*src1=*/256,
                                        /*src2=*/0, /*abs=*/0, /*opsel=*/0x2);
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cmpx_class_f16");
     cu->execute_instruction(inst.get(), *wf);
@@ -1865,7 +1913,7 @@ TEST(Gfx1250True16Vop3Test, SpecialVop3OpsUseSelectedHalves) {
                                     : "gfx1250_true16_special_simd_l2");
 
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+    cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 256;
@@ -1874,7 +1922,7 @@ TEST(Gfx1250True16Vop3Test, SpecialVop3OpsUseSelectedHalves) {
     auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
     ASSERT_NE(cu, nullptr);
 
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
     ASSERT_NE(decoder, nullptr);
 
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -1884,7 +1932,7 @@ TEST(Gfx1250True16Vop3Test, SpecialVop3OpsUseSelectedHalves) {
 
     const uint32_t vb = wf->vgpr_alloc().base;
     auto execute = [&](const std::array<uint32_t, 2> &words, std::string_view mnemonic) {
-      std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
       ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic);
       cu->execute_instruction(inst.get(), *wf);
@@ -1944,7 +1992,7 @@ TEST(Gfx1250True16VopcTest, CmpLtI16ReadsPackedHighVsrc1) {
   amdgpu::L2Cache l2("gfx1250_true16_vopc_cmp_src_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -1953,7 +2001,7 @@ TEST(Gfx1250True16VopcTest, CmpLtI16ReadsPackedHighVsrc1) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -1968,7 +2016,7 @@ TEST(Gfx1250True16VopcTest, CmpLtI16ReadsPackedHighVsrc1) {
 
   // v_cmp_lt_i16_e32 vcc_lo, -1, v0.h
   const uint32_t words[] = {0x7C6300C1U};
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cmp_lt_i16_e32");
   cu->execute_instruction(inst.get(), *wf);
@@ -2014,7 +2062,7 @@ TEST(Rdna4True16Vop3Test, CmpGeF16UsesSelectedHighSourceHalf) {
 
     // v_cmp_ge_f16_e64 s0, |v0.h|, 0.5 op_sel:[1,0,0]
     const uint32_t words[] = {0xD4060900U, 0x0201E100U};
-    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cmp_ge_f16");
     cu->execute_instruction(inst.get(), *wf);
@@ -2062,7 +2110,7 @@ TEST(Rdna4True16Vop3Test, CmpClassF16UsesSelectedMaskHalf) {
 
     constexpr auto words = encode_vop3(/*op=*/125, /*vdst=*/0, /*src0=*/256, /*src1=*/256,
                                        /*src2=*/0, /*abs=*/0, /*opsel=*/0x2);
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cmp_class_f16");
     cu->execute_instruction(inst.get(), *wf);
@@ -2109,7 +2157,7 @@ TEST(Rdna4True16Vop3Test, CmpClassF16InlineConstantUsesF16Broadcast) {
 
     constexpr auto words = encode_vop3(/*op=*/125, /*vdst=*/0, /*src0=*/242, /*src1=*/4,
                                        /*src2=*/0, /*abs=*/0, /*opsel=*/0);
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cmp_class_f16");
     cu->execute_instruction(inst.get(), *wf);
@@ -2155,7 +2203,7 @@ TEST(Rdna4True16Vop3Test, CmpxClassF16UsesSelectedMaskHalf) {
 
     constexpr auto words = encode_vop3(/*op=*/253, /*vdst=*/126, /*src0=*/256, /*src1=*/256,
                                        /*src2=*/0, /*abs=*/0, /*opsel=*/0x2);
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cmpx_class_f16");
     cu->execute_instruction(inst.get(), *wf);
@@ -2224,13 +2272,13 @@ TEST(Rdna4True16Vop3Test, ClassF16HelperSequenceMovesMaskIntoSelectedHighHalf) {
     const uint32_t mov_words[] = {0x7F003901U, 0};
     const uint32_t cmp_words[] = {0xD47D1000U, 0x02020100U};
     const uint32_t select_words[] = {0xD5010000U, 0x00010280U};
-    std::unique_ptr<Instruction> mov(decoder->decode(mov_words));
+    std::unique_ptr<Instruction> mov(decode_valid(*decoder, mov_words));
     ASSERT_NE(mov, nullptr);
     ASSERT_EQ(std::string_view(mov->mnemonic()), "v_mov_b16_e32");
-    std::unique_ptr<Instruction> cmp(decoder->decode(cmp_words));
+    std::unique_ptr<Instruction> cmp(decode_valid(*decoder, cmp_words));
     ASSERT_NE(cmp, nullptr);
     ASSERT_EQ(std::string_view(cmp->mnemonic()), "v_cmp_class_f16");
-    std::unique_ptr<Instruction> select(decoder->decode(select_words));
+    std::unique_ptr<Instruction> select(decode_valid(*decoder, select_words));
     ASSERT_NE(select, nullptr);
     ASSERT_EQ(std::string_view(select->mnemonic()), "v_cndmask_b32");
 
@@ -2297,7 +2345,7 @@ TEST(Rdna4True16Vop3Test, RcpF16WritesSelectedHighDestinationHalf) {
 
     // v_rcp_f16_e64 v0.h, -v0.l op_sel:[0,1]
     const uint32_t words[] = {0xD5D44000U, 0x22010100U};
-    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_rcp_f16");
     cu->execute_instruction(inst.get(), *wf);
@@ -2339,7 +2387,7 @@ TEST(Rdna4True16Vop3Test, CvtF32F16AppliesAbsToSelectedSourceHalf) {
 
     // v_cvt_f32_f16_e64 v4, |v2.l|
     const uint32_t words[] = {0xD58B0104U, 0x02010102U};
-    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_f32_f16");
     cu->execute_instruction(inst.get(), *wf);
@@ -2389,7 +2437,7 @@ TEST(Rdna4True16Vop3Test, AddF16UsesSelectedHalvesAndPreservesDestinationHalf) {
     constexpr auto words = encode_vop3(/*op=*/0x132, /*vdst=*/2, /*src0=*/256,
                                        /*src1=*/257, /*src2=*/0, /*abs=*/0,
                                        /*opsel=*/0xB);
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_add_f16");
     cu->execute_instruction(inst.get(), *wf);
@@ -2524,7 +2572,8 @@ TEST(Rdna4True16Vop3Test, UnaryDpp16ScalarAndSimdMatchMaskedLaneRouting) {
 
     static_assert(sizeof(raw) == 3 * sizeof(uint32_t));
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
-    std::unique_ptr<Instruction> inst(decoder->decode(reinterpret_cast<const uint32_t *>(&raw)));
+    std::unique_ptr<Instruction> inst(
+        decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&raw)));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_rcp_f16");
     cu->execute_instruction(inst.get(), *wf);
@@ -2612,7 +2661,8 @@ TEST(Rdna4True16Vop3Test, VopcDpp16ScalarAndSimdMatchMaskedLaneRouting) {
 
     static_assert(sizeof(raw) == 3 * sizeof(uint32_t));
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
-    std::unique_ptr<Instruction> inst(decoder->decode(reinterpret_cast<const uint32_t *>(&raw)));
+    std::unique_ptr<Instruction> inst(
+        decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&raw)));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cmp_ge_f16");
     cu->execute_instruction(inst.get(), *wf);
@@ -2699,7 +2749,8 @@ TEST(Rdna4True16Vop3Test, UnaryDpp8ScalarAndSimdMatchPermutedLanes) {
 
     static_assert(sizeof(raw) == 3 * sizeof(uint32_t));
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
-    std::unique_ptr<Instruction> inst(decoder->decode(reinterpret_cast<const uint32_t *>(&raw)));
+    std::unique_ptr<Instruction> inst(
+        decode_valid(*decoder, reinterpret_cast<const uint32_t *>(&raw)));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_rcp_f16_e64_dpp");
     EXPECT_EQ(inst->disassemble(), "v_rcp_f16_e64_dpp v2, v0 dpp8:[7,0,5,2,3,6,1,4] fi:1");
@@ -2761,7 +2812,7 @@ TEST(Rdna4True16Vop3Test, FmacF16UsesSelectedAccumulatorHalfAndPreservesDestinat
     constexpr auto words = encode_vop3(/*op=*/0x136, /*vdst=*/3, /*src0=*/256,
                                        /*src1=*/257, /*src2=*/0, /*abs=*/0,
                                        /*opsel=*/0xB);
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_fmac_f16");
     cu->execute_instruction(inst.get(), *wf);
@@ -2813,7 +2864,7 @@ TEST(Rdna4True16Vop3Test, TernaryI16U16UsesSelectedHalvesAndPreservesDestination
                        std::string_view mnemonic, uint16_t expected_high) {
       cu->write_vgpr(vb + dst, 0, pack16(static_cast<uint16_t>(0xA000u | dst), 0xCAFEu));
       const auto words = encode_vop3(op, dst, src0, src1, src2, /*abs=*/0, /*opsel=*/0xF);
-      std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
       ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic);
       cu->execute_instruction(inst.get(), *wf);
@@ -2864,7 +2915,7 @@ TEST(Rdna4True16Vop3Test, SpecialVop3OpsUseSelectedHalves) {
 
     const uint32_t vb = wf->vgpr_alloc().base;
     auto execute = [&](const std::array<uint32_t, 2> &words, std::string_view mnemonic) {
-      std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
       ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic);
       cu->execute_instruction(inst.get(), *wf);
@@ -2957,7 +3008,7 @@ TEST(Rdna4Vop3CndmaskTest, B32AppliesNegModifierBeforeSelect) {
 
     // v_cndmask_b32 v2, -v0, v1, s[0:1]
     const uint32_t words[] = {0xD5010002U, 0x20020300U};
-    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cndmask_b32");
     cu->execute_instruction(inst.get(), *wf);
@@ -3003,7 +3054,7 @@ TEST(Rdna4Atan2F16Test, SignedHalfCompareFeedsQuadrantSelect) {
 
     // v_cmp_gt_i16_e32 vcc_lo, 0, v2.l
     const uint32_t i16_cmp_words[] = {0x7C680480U, 0};
-    std::unique_ptr<Instruction> i16_cmp(decoder->decode(i16_cmp_words));
+    std::unique_ptr<Instruction> i16_cmp(decode_valid(*decoder, i16_cmp_words));
     ASSERT_NE(i16_cmp, nullptr);
     ASSERT_EQ(std::string_view(i16_cmp->mnemonic()), "v_cmp_gt_i16_e32");
     cu->execute_instruction(i16_cmp.get(), *wf);
@@ -3011,7 +3062,7 @@ TEST(Rdna4Atan2F16Test, SignedHalfCompareFeedsQuadrantSelect) {
 
     // v_cndmask_b32_e64 v6, 0, 0x40490fdb, vcc_lo
     const uint32_t pi_select_words[] = {0xD5010006U, 0x01A9FE80U, 0x40490FDBU};
-    std::unique_ptr<Instruction> pi_select(decoder->decode(pi_select_words));
+    std::unique_ptr<Instruction> pi_select(decode_valid(*decoder, pi_select_words));
     ASSERT_NE(pi_select, nullptr);
     ASSERT_EQ(std::string_view(pi_select->mnemonic()), "v_cndmask_b32");
     cu->execute_instruction(pi_select.get(), *wf);
@@ -3020,7 +3071,7 @@ TEST(Rdna4Atan2F16Test, SignedHalfCompareFeedsQuadrantSelect) {
 
     // v_cmp_gt_f16_e32 vcc_lo, 0, v2.l
     const uint32_t f16_cmp_words[] = {0x7C080480U, 0};
-    std::unique_ptr<Instruction> f16_cmp(decoder->decode(f16_cmp_words));
+    std::unique_ptr<Instruction> f16_cmp(decode_valid(*decoder, f16_cmp_words));
     ASSERT_NE(f16_cmp, nullptr);
     ASSERT_EQ(std::string_view(f16_cmp->mnemonic()), "v_cmp_gt_f16_e32");
     cu->execute_instruction(f16_cmp.get(), *wf);
@@ -3062,7 +3113,7 @@ TEST(Rdna4Atan2F16Test, DualCndmaskReadsOldPairedSlotSource) {
 
   // v_dual_cndmask_b32 v4, v4, v5 :: v_dual_mov_b32 v5, 0x4016cbe4
   const uint32_t words[] = {0xCA500B04U, 0x040400FFU, 0x4016CBE4U};
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_dual_cndmask_b32 :: v_dual_mov_b32");
   cu->execute_instruction(inst.get(), *wf);
@@ -3125,7 +3176,7 @@ TEST(Rdna4Atan2F16Test, TailSequenceKeepsNegativeXQuadrant) {
   }};
 
   for (const auto &words : program) {
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     cu->execute_instruction(inst.get(), *wf);
   }
@@ -3169,7 +3220,7 @@ TEST(Rdna4Vop3pFmaMixTest, F32AppliesAbsModifiersFromNegHi) {
 
     // v_fma_mix_f32 v0, |v3|, s0, neg(0) op_sel_hi:[1,0,0]
     const uint32_t abs_src0_words[] = {0xCC200100U, 0x8A000103U};
-    std::unique_ptr<Instruction> abs_src0_inst(decoder->decode(abs_src0_words));
+    std::unique_ptr<Instruction> abs_src0_inst(decode_valid(*decoder, abs_src0_words));
     ASSERT_NE(abs_src0_inst, nullptr);
     ASSERT_EQ(std::string_view(abs_src0_inst->mnemonic()), "v_fma_mix_f32");
     cu->execute_instruction(abs_src0_inst.get(), *wf);
@@ -3182,7 +3233,7 @@ TEST(Rdna4Vop3pFmaMixTest, F32AppliesAbsModifiersFromNegHi) {
 
     // v_fma_mix_f32 v0, v4, s0, |v3| op_sel_hi:[0,0,1]
     const uint32_t abs_src2_words[] = {0xCC204400U, 0x040C0104U};
-    std::unique_ptr<Instruction> abs_src2_inst(decoder->decode(abs_src2_words));
+    std::unique_ptr<Instruction> abs_src2_inst(decode_valid(*decoder, abs_src2_words));
     ASSERT_NE(abs_src2_inst, nullptr);
     ASSERT_EQ(std::string_view(abs_src2_inst->mnemonic()), "v_fma_mix_f32");
     cu->execute_instruction(abs_src2_inst.get(), *wf);
@@ -3193,7 +3244,7 @@ TEST(Rdna4Vop3pFmaMixTest, F32AppliesAbsModifiersFromNegHi) {
 
     // v_fma_mix_f32 v0, v2, 1.0, v0 op_sel_hi:[1,1,0]
     const uint32_t inline_one_f32_words[] = {0xCC200000U, 0x1C01E502U};
-    std::unique_ptr<Instruction> inline_one_f32_inst(decoder->decode(inline_one_f32_words));
+    std::unique_ptr<Instruction> inline_one_f32_inst(decode_valid(*decoder, inline_one_f32_words));
     ASSERT_NE(inline_one_f32_inst, nullptr);
     ASSERT_EQ(std::string_view(inline_one_f32_inst->mnemonic()), "v_fma_mix_f32");
     cu->execute_instruction(inline_one_f32_inst.get(), *wf);
@@ -3204,7 +3255,7 @@ TEST(Rdna4Vop3pFmaMixTest, F32AppliesAbsModifiersFromNegHi) {
 
     // v_fma_mixlo_f16 v0, v2, 1.0, 0 op_sel_hi:[1,1,0]
     const uint32_t inline_one_f16_words[] = {0xCC210000U, 0x1A01E502U};
-    std::unique_ptr<Instruction> inline_one_f16_inst(decoder->decode(inline_one_f16_words));
+    std::unique_ptr<Instruction> inline_one_f16_inst(decode_valid(*decoder, inline_one_f16_words));
     ASSERT_NE(inline_one_f16_inst, nullptr);
     ASSERT_EQ(std::string_view(inline_one_f16_inst->mnemonic()), "v_fma_mixlo_f16");
     cu->execute_instruction(inline_one_f16_inst.get(), *wf);
@@ -3216,7 +3267,7 @@ TEST(Rdna4Vop3pFmaMixTest, F32AppliesAbsModifiersFromNegHi) {
 
     // v_fma_mix_f32 v0, |v2|, -1.0, s0 op_sel_hi:[1,1,0]
     const uint32_t atanh_den_words[] = {0xCC200100U, 0x1801E702U};
-    std::unique_ptr<Instruction> atanh_den_inst(decoder->decode(atanh_den_words));
+    std::unique_ptr<Instruction> atanh_den_inst(decode_valid(*decoder, atanh_den_words));
     ASSERT_NE(atanh_den_inst, nullptr);
     ASSERT_EQ(std::string_view(atanh_den_inst->mnemonic()), "v_fma_mix_f32");
     cu->execute_instruction(atanh_den_inst.get(), *wf);
@@ -3226,7 +3277,7 @@ TEST(Rdna4Vop3pFmaMixTest, F32AppliesAbsModifiersFromNegHi) {
 
     // v_fma_mix_f32 v3, |v2|, 1.0, s0 op_sel_hi:[1,1,0]
     const uint32_t atanh_num_words[] = {0xCC200103U, 0x1801E502U};
-    std::unique_ptr<Instruction> atanh_num_inst(decoder->decode(atanh_num_words));
+    std::unique_ptr<Instruction> atanh_num_inst(decode_valid(*decoder, atanh_num_words));
     ASSERT_NE(atanh_num_inst, nullptr);
     ASSERT_EQ(std::string_view(atanh_num_inst->mnemonic()), "v_fma_mix_f32");
     cu->execute_instruction(atanh_num_inst.get(), *wf);
@@ -3238,7 +3289,7 @@ TEST(Rdna4Vop3pFmaMixTest, F32AppliesAbsModifiersFromNegHi) {
 
     // v_fma_mixhi_f16 v0, v3, s0, 0
     const uint32_t atanh_scale_words[] = {0xCC220000U, 0x02000103U};
-    std::unique_ptr<Instruction> atanh_scale_inst(decoder->decode(atanh_scale_words));
+    std::unique_ptr<Instruction> atanh_scale_inst(decode_valid(*decoder, atanh_scale_words));
     ASSERT_NE(atanh_scale_inst, nullptr);
     ASSERT_EQ(std::string_view(atanh_scale_inst->mnemonic()), "v_fma_mixhi_f16");
     cu->execute_instruction(atanh_scale_inst.get(), *wf);
@@ -3281,7 +3332,7 @@ TEST(Rdna4True16Vop3Test, B16BitwiseLiteralPreservesInputSignBit) {
 
     // v_and_b16 v1.l, 0x8000, v3.l
     const uint32_t and_words[] = {0xD7620001U, 0x020206FFU, 0xFFFF8000U};
-    std::unique_ptr<Instruction> and_inst(decoder->decode(and_words));
+    std::unique_ptr<Instruction> and_inst(decode_valid(*decoder, and_words));
     ASSERT_NE(and_inst, nullptr);
     ASSERT_EQ(std::string_view(and_inst->mnemonic()), "v_and_b16");
     ASSERT_NE(and_inst->src_operand(0), nullptr);
@@ -3296,7 +3347,7 @@ TEST(Rdna4True16Vop3Test, B16BitwiseLiteralPreservesInputSignBit) {
 
     // v_and_b16 v1.l, 0x8000, v3.l op_sel:[1,0,0]
     const uint32_t and_high_words[] = {0xD7620801U, 0x020206FFU, 0x80000000U};
-    std::unique_ptr<Instruction> and_high_inst(decoder->decode(and_high_words));
+    std::unique_ptr<Instruction> and_high_inst(decode_valid(*decoder, and_high_words));
     ASSERT_NE(and_high_inst, nullptr);
     ASSERT_EQ(std::string_view(and_high_inst->mnemonic()), "v_and_b16");
     ASSERT_NE(and_high_inst->src_operand(0), nullptr);
@@ -3311,7 +3362,7 @@ TEST(Rdna4True16Vop3Test, B16BitwiseLiteralPreservesInputSignBit) {
 
     // v_and_b16 v1.l, v3.l, 0x8000 op_sel:[0,1,0]
     const uint32_t and_src1_high_words[] = {0xD7621001U, 0x0201FF03U, 0x80000000U};
-    std::unique_ptr<Instruction> and_src1_high_inst(decoder->decode(and_src1_high_words));
+    std::unique_ptr<Instruction> and_src1_high_inst(decode_valid(*decoder, and_src1_high_words));
     ASSERT_NE(and_src1_high_inst, nullptr);
     ASSERT_EQ(std::string_view(and_src1_high_inst->mnemonic()), "v_and_b16");
     ASSERT_NE(and_src1_high_inst->src_operand(1), nullptr);
@@ -3325,7 +3376,7 @@ TEST(Rdna4True16Vop3Test, B16BitwiseLiteralPreservesInputSignBit) {
 
     // v_xor_b16 v0.l, v1.l, v0.l
     const uint32_t xor_words[] = {0xD7640000U, 0x02020101U};
-    std::unique_ptr<Instruction> xor_inst(decoder->decode(xor_words));
+    std::unique_ptr<Instruction> xor_inst(decode_valid(*decoder, xor_words));
     ASSERT_NE(xor_inst, nullptr);
     ASSERT_EQ(std::string_view(xor_inst->mnemonic()), "v_xor_b16");
     cu->execute_instruction(xor_inst.get(), *wf);
@@ -3341,7 +3392,7 @@ TEST(Gfx1250True16Vop3Test, CndmaskB16UsesSelectedSourceHalfAndPreservesDestinat
   amdgpu::L2Cache l2("gfx1250_true16_cndmask_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -3350,7 +3401,7 @@ TEST(Gfx1250True16Vop3Test, CndmaskB16UsesSelectedSourceHalfAndPreservesDestinat
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -3370,7 +3421,7 @@ TEST(Gfx1250True16Vop3Test, CndmaskB16UsesSelectedSourceHalfAndPreservesDestinat
 
   // v_cndmask_b16 v2.h, v0.l, v1.h, s[0:1] op_sel:[0,1,0,1]
   const uint32_t words[] = {0xD65D5002U, 0x00020300U};
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cndmask_b16");
   cu->execute_instruction(inst.get(), *wf);
@@ -3388,7 +3439,7 @@ TEST(Gfx1250True16Vop3Test, LshrrevB16UsesSelectedSourceHalfAndPreservesDestinat
   amdgpu::L2Cache l2("gfx1250_true16_lshrrev_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -3397,7 +3448,7 @@ TEST(Gfx1250True16Vop3Test, LshrrevB16UsesSelectedSourceHalfAndPreservesDestinat
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -3410,7 +3461,7 @@ TEST(Gfx1250True16Vop3Test, LshrrevB16UsesSelectedSourceHalfAndPreservesDestinat
 
   // v_lshrrev_b16 v16.h, 8, v17.l op_sel:[0,0,1]
   const uint32_t words[] = {0xD7394010U, 0x02022288U};
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_lshrrev_b16");
   cu->execute_instruction(inst.get(), *wf);
@@ -3426,7 +3477,7 @@ TEST(Gfx1250True16Vop3Test, Bitop3B16UsesSelectedSourceHalfAndPreservesDestinati
   amdgpu::L2Cache l2("gfx1250_true16_bitop_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -3435,7 +3486,7 @@ TEST(Gfx1250True16Vop3Test, Bitop3B16UsesSelectedSourceHalfAndPreservesDestinati
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -3453,7 +3504,7 @@ TEST(Gfx1250True16Vop3Test, Bitop3B16UsesSelectedSourceHalfAndPreservesDestinati
   }
 
   auto execute = [&](const uint32_t(&words)[2], std::string_view mnemonic) {
-    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic);
     cu->execute_instruction(inst.get(), *wf);
@@ -3490,7 +3541,7 @@ TEST(Gfx1250True16Vop1Test, MovB16HighDestinationPreservesLowHalf) {
   amdgpu::L2Cache l2("gfx1250_true16_vop1_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -3499,7 +3550,7 @@ TEST(Gfx1250True16Vop1Test, MovB16HighDestinationPreservesLowHalf) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -3512,7 +3563,7 @@ TEST(Gfx1250True16Vop1Test, MovB16HighDestinationPreservesLowHalf) {
 
   // v_mov_b16_e32 v2.h, v0.l
   const uint32_t words[] = {0x7F043900U, 0x00000000U};
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_mov_b16_e32");
   EXPECT_NE(inst->disassemble().find("v2.h"), std::string::npos);
@@ -3551,7 +3602,7 @@ TEST(Rdna3True16Vop1Test, MovB16HighDestinationPreservesLowHalf) {
 
   // v_mov_b16_e32 v2.h, v0.l
   const uint32_t words[] = {0x7F043900U, 0x00000000U};
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_mov_b16_e32");
   EXPECT_NE(inst->disassemble().find("v2.h"), std::string::npos);
@@ -3603,7 +3654,7 @@ TEST(Rdna3DppTest, VAddF32RowShrMatchesWaveReduceSequence) {
       cu->write_vgpr(vb + 3, lane, std::bit_cast<uint32_t>(input[lane]));
 
     for (const auto &words : dpp_adds) {
-      std::unique_ptr<Instruction> inst(decoder->decode(words));
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
       ASSERT_NE(inst, nullptr);
       ASSERT_EQ(std::string_view(inst->mnemonic()), "v_add_f32_e32");
       cu->execute_instruction(inst.get(), *wf);
@@ -3613,14 +3664,14 @@ TEST(Rdna3DppTest, VAddF32RowShrMatchesWaveReduceSequence) {
     EXPECT_EQ(cu->read_vgpr(vb + 3, 31), std::bit_cast<uint32_t>(2.0f));
 
     const uint32_t swizzle_words[] = {0xD8D401E0U, 0x04000003U};
-    std::unique_ptr<Instruction> swizzle_inst(decoder->decode(swizzle_words));
+    std::unique_ptr<Instruction> swizzle_inst(decode_valid(*decoder, swizzle_words));
     ASSERT_NE(swizzle_inst, nullptr);
     ASSERT_EQ(std::string_view(swizzle_inst->mnemonic()), "ds_swizzle_b32");
     cu->execute_instruction(swizzle_inst.get(), *wf);
     EXPECT_EQ(cu->read_vgpr(vb + 4, 31), std::bit_cast<uint32_t>(-4.0f));
 
     const uint32_t final_add_words[] = {0xD5030003U, 0x02020903U};
-    std::unique_ptr<Instruction> final_add_inst(decoder->decode(final_add_words));
+    std::unique_ptr<Instruction> final_add_inst(decode_valid(*decoder, final_add_words));
     ASSERT_NE(final_add_inst, nullptr);
     ASSERT_EQ(std::string_view(final_add_inst->mnemonic()), "v_add_f32");
     cu->execute_instruction(final_add_inst.get(), *wf);
@@ -3663,7 +3714,7 @@ TEST(Rdna3ScalarOperandTest, NullSdstDoesNotClobberM0) {
 
   // v_add_co_ci_u32_e64 v5, null, 0, 0, s9
   const uint32_t words[] = {0xD5207C05U, 0x00250080U};
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_add_co_ci_u32");
   EXPECT_NE(inst->disassemble().find("null"), std::string::npos);
@@ -3683,7 +3734,7 @@ TEST(Gfx1250True16Vop1Test, CvtF16F32HighDestinationPreservesLowHalf) {
   amdgpu::L2Cache l2("gfx1250_true16_cvt_vop1_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -3692,7 +3743,7 @@ TEST(Gfx1250True16Vop1Test, CvtF16F32HighDestinationPreservesLowHalf) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -3705,7 +3756,7 @@ TEST(Gfx1250True16Vop1Test, CvtF16F32HighDestinationPreservesLowHalf) {
 
   // v_cvt_f16_f32_e32 v0.h, v2
   const uint32_t words[] = {0x7F001502U, 0x00000000U};
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_f16_f32_e32");
   EXPECT_NE(inst->disassemble().find("v0.h"), std::string::npos);
@@ -3722,7 +3773,7 @@ TEST(Gfx1250CvtFp8Test, F16DecodeVop3UsesSelectedByte) {
   amdgpu::L2Cache l2("gfx1250_cvt_fp8_bytesel_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -3731,7 +3782,7 @@ TEST(Gfx1250CvtFp8Test, F16DecodeVop3UsesSelectedByte) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -3744,7 +3795,7 @@ TEST(Gfx1250CvtFp8Test, F16DecodeVop3UsesSelectedByte) {
 
   // v_cvt_f16_fp8 v1.l, v0 byte_sel:2
   const uint32_t fp8_words[] = {0xD5F70801U, 0x00000100U};
-  std::unique_ptr<Instruction> fp8_inst(decoder->decode(fp8_words));
+  std::unique_ptr<Instruction> fp8_inst(decode_valid(*decoder, fp8_words));
   ASSERT_NE(fp8_inst, nullptr);
   ASSERT_EQ(std::string_view(fp8_inst->mnemonic()), "v_cvt_f16_fp8");
   cu->execute_instruction(fp8_inst.get(), *wf);
@@ -3755,7 +3806,7 @@ TEST(Gfx1250CvtFp8Test, F16DecodeVop3UsesSelectedByte) {
 
   // v_cvt_f16_bf8 v1.l, v0 byte_sel:3
   const uint32_t bf8_words[] = {0xD5F81801U, 0x00000100U};
-  std::unique_ptr<Instruction> bf8_inst(decoder->decode(bf8_words));
+  std::unique_ptr<Instruction> bf8_inst(decode_valid(*decoder, bf8_words));
   ASSERT_NE(bf8_inst, nullptr);
   ASSERT_EQ(std::string_view(bf8_inst->mnemonic()), "v_cvt_f16_bf8");
   cu->execute_instruction(bf8_inst.get(), *wf);
@@ -3770,7 +3821,7 @@ TEST(Gfx1250CvtFp8Test, F16E5M3OverflowHonorsFp16OvflMode) {
   amdgpu::L2Cache l2("gfx1250_cvt_fp8_f16_e5m3_overflow_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -3779,7 +3830,7 @@ TEST(Gfx1250CvtFp8Test, F16E5M3OverflowHonorsFp16OvflMode) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -3792,7 +3843,7 @@ TEST(Gfx1250CvtFp8Test, F16E5M3OverflowHonorsFp16OvflMode) {
   // v_cvt_f16_fp8 v1.l, v0 byte_sel:2 clamp. On gfx1250, clamp selects the
   // unsigned E5M3 FP8 decode; 0xFE is finite but overflows FP16.
   const uint32_t fp8_words[] = {0xD5F78801U, 0x00000100U};
-  std::unique_ptr<Instruction> fp8_inst(decoder->decode(fp8_words));
+  std::unique_ptr<Instruction> fp8_inst(decode_valid(*decoder, fp8_words));
   ASSERT_NE(fp8_inst, nullptr);
   ASSERT_EQ(std::string_view(fp8_inst->mnemonic()), "v_cvt_f16_fp8");
 
@@ -3808,7 +3859,7 @@ TEST(Gfx1250CvtFp8Test, F16E5M3OverflowHonorsFp16OvflMode) {
 
   // Same conversion with OPSEL[3]=1 writes the high destination half.
   const uint32_t fp8_high_words[] = {0xD5F7C801U, 0x00000100U};
-  std::unique_ptr<Instruction> fp8_high_inst(decoder->decode(fp8_high_words));
+  std::unique_ptr<Instruction> fp8_high_inst(decode_valid(*decoder, fp8_high_words));
   ASSERT_NE(fp8_high_inst, nullptr);
   ASSERT_EQ(std::string_view(fp8_high_inst->mnemonic()), "v_cvt_f16_fp8");
   cu->write_vgpr(vb + 1, 0, 0x5555BEEFu);
@@ -3824,7 +3875,7 @@ TEST(Gfx1250CvtFp8Test, F32DecodeVop3UsesSelectedByte) {
   amdgpu::L2Cache l2("gfx1250_cvt_fp8_f32_bytesel_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -3833,7 +3884,7 @@ TEST(Gfx1250CvtFp8Test, F32DecodeVop3UsesSelectedByte) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -3845,7 +3896,7 @@ TEST(Gfx1250CvtFp8Test, F32DecodeVop3UsesSelectedByte) {
 
   // v_cvt_f32_fp8 v1, v0 byte_sel:2
   const uint32_t fp8_words[] = {0xD5EC0801U, 0x00000100U};
-  std::unique_ptr<Instruction> fp8_inst(decoder->decode(fp8_words));
+  std::unique_ptr<Instruction> fp8_inst(decode_valid(*decoder, fp8_words));
   ASSERT_NE(fp8_inst, nullptr);
   ASSERT_EQ(std::string_view(fp8_inst->mnemonic()), "v_cvt_f32_fp8");
   cu->execute_instruction(fp8_inst.get(), *wf);
@@ -3855,7 +3906,7 @@ TEST(Gfx1250CvtFp8Test, F32DecodeVop3UsesSelectedByte) {
 
   // v_cvt_f32_bf8 v1, v0 byte_sel:3
   const uint32_t bf8_words[] = {0xD5ED1801U, 0x00000100U};
-  std::unique_ptr<Instruction> bf8_inst(decoder->decode(bf8_words));
+  std::unique_ptr<Instruction> bf8_inst(decode_valid(*decoder, bf8_words));
   ASSERT_NE(bf8_inst, nullptr);
   ASSERT_EQ(std::string_view(bf8_inst->mnemonic()), "v_cvt_f32_bf8");
   cu->execute_instruction(bf8_inst.get(), *wf);
@@ -3870,7 +3921,7 @@ TEST(Gfx1250CvtFp8Test, E4M3OverflowHonorsFp16OvflMode) {
   amdgpu::L2Cache l2("gfx1250_cvt_fp8_overflow_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -3879,7 +3930,7 @@ TEST(Gfx1250CvtFp8Test, E4M3OverflowHonorsFp16OvflMode) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -3893,7 +3944,7 @@ TEST(Gfx1250CvtFp8Test, E4M3OverflowHonorsFp16OvflMode) {
 
   // v_cvt_pk_fp8_f32 v2.l, v5, v6
   const auto words = encode_vop3(cdna5::kVCvtPkFp8F32Vop3, 2, vgpr_src(5), vgpr_src(6), 0);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_pk_fp8_f32");
   cu->execute_instruction(inst.get(), *wf);
@@ -3913,7 +3964,7 @@ TEST(Gfx1250CvtFp8Test, Bf8OverflowHonorsFp16OvflMode) {
   amdgpu::L2Cache l2("gfx1250_cvt_bf8_overflow_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -3922,7 +3973,7 @@ TEST(Gfx1250CvtFp8Test, Bf8OverflowHonorsFp16OvflMode) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -3936,7 +3987,7 @@ TEST(Gfx1250CvtFp8Test, Bf8OverflowHonorsFp16OvflMode) {
 
   // v_cvt_pk_bf8_f32 v2.l, v5, v6
   const auto words = encode_vop3(cdna5::kVCvtPkBf8F32Vop3, 2, vgpr_src(5), vgpr_src(6), 0);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_pk_bf8_f32");
   cu->execute_instruction(inst.get(), *wf);
@@ -3956,7 +4007,7 @@ TEST(Gfx1250CvtF16Test, SrPackedF16ConsumesAdvancedSeedAndFp16OvflMode) {
   amdgpu::L2Cache l2("gfx1250_cvt_sr_pk_f16_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -3965,12 +4016,12 @@ TEST(Gfx1250CvtF16Test, SrPackedF16ConsumesAdvancedSeedAndFp16OvflMode) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   const auto words =
       encode_vop3(cdna5::kVCvtSrPkF16F32Vop3, 2, vgpr_src(5), vgpr_src(6), vgpr_src(7));
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_sr_pk_f16_f32");
 
@@ -4034,7 +4085,7 @@ TEST(Rdna4CvtFp8Test, E4M3OverflowHonorsFp16OvflMode) {
 
   // v_cvt_pk_fp8_f32 v2.l, v5, v6
   const auto words = encode_vop3(rdna4::kVCvtPkFp8F32Vop3, 2, vgpr_src(5), vgpr_src(6), 0);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_pk_fp8_f32");
   cu->execute_instruction(inst.get(), *wf);
@@ -4077,7 +4128,7 @@ TEST(Rdna4CvtFp8Test, Bf8OverflowHonorsFp16OvflMode) {
 
   // v_cvt_pk_bf8_f32 v2.l, v5, v6
   const auto packed_words = encode_vop3(rdna4::kVCvtPkBf8F32Vop3, 2, vgpr_src(5), vgpr_src(6), 0);
-  std::unique_ptr<Instruction> packed_inst(decoder->decode(packed_words.data()));
+  std::unique_ptr<Instruction> packed_inst(decode_valid(*decoder, packed_words.data()));
   ASSERT_NE(packed_inst, nullptr);
   ASSERT_EQ(std::string_view(packed_inst->mnemonic()), "v_cvt_pk_bf8_f32");
 
@@ -4095,7 +4146,7 @@ TEST(Rdna4CvtFp8Test, Bf8OverflowHonorsFp16OvflMode) {
 
   // v_cvt_sr_bf8_f32 v2, v5, v6 byte_sel:0
   const auto sr_words = encode_vop3(rdna4::kVCvtSrBf8F32Vop3, 2, vgpr_src(5), vgpr_src(6), 0);
-  std::unique_ptr<Instruction> sr_inst(decoder->decode(sr_words.data()));
+  std::unique_ptr<Instruction> sr_inst(decode_valid(*decoder, sr_words.data()));
   ASSERT_NE(sr_inst, nullptr);
   ASSERT_EQ(std::string_view(sr_inst->mnemonic()), "v_cvt_sr_bf8_f32");
 
@@ -4139,7 +4190,7 @@ TEST(Rdna4CvtF16Test, F32OverflowHonorsFp16OvflMode) {
 
   // v_cvt_f16_f32 v2.l, v5
   const auto words = encode_vop3(rdna4::kVCvtF16F32Vop3, 2, vgpr_src(5), 0, 0);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_f16_f32");
   cu->execute_instruction(inst.get(), *wf);
@@ -4186,7 +4237,7 @@ TEST(Rdna4CvtF16Test, U16OverflowHonorsFp16OvflModeInScalarAndSimdPaths) {
 
     // v_cvt_f16_u16 v2.l, v5
     const auto words = encode_vop3(rdna4::kVCvtF16U16Vop3, 2, vgpr_src(5), 0, 0);
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_f16_u16");
     cu->execute_instruction(inst.get(), *wf);
@@ -4234,7 +4285,7 @@ TEST(Rdna4Fp16ValuTest, AddOverflowHonorsFp16OvflModeInScalarAndSimdPaths) {
     cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
 
     const auto words = encode_vop3(rdna4::kVAddF16Vop3, 2, vgpr_src(0), vgpr_src(1), 0);
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), "v_add_f16");
     cu->execute_instruction(inst.get(), *wf);
@@ -4268,25 +4319,25 @@ TEST(Cdna4CvtSrTest, SingleResultF16Bf16ConsumesSeedAndFp16OvflMode) {
   ASSERT_NE(decoder, nullptr);
 
   const auto f16_words = encode_cdna_vop3(cdna4::kVCvtSrF16F32Vop3, 2, vgpr_src(5), vgpr_src(6), 0);
-  std::unique_ptr<Instruction> f16_inst(decoder->decode(f16_words.data()));
+  std::unique_ptr<Instruction> f16_inst(decode_valid(*decoder, f16_words.data()));
   ASSERT_NE(f16_inst, nullptr);
   ASSERT_EQ(std::string_view(f16_inst->mnemonic()), "v_cvt_sr_f16_f32");
 
   const auto f16_hi_words =
       encode_cdna_vop3(cdna4::kVCvtSrF16F32Vop3, 2, vgpr_src(5), vgpr_src(6), 0, 0x8);
-  std::unique_ptr<Instruction> f16_hi_inst(decoder->decode(f16_hi_words.data()));
+  std::unique_ptr<Instruction> f16_hi_inst(decode_valid(*decoder, f16_hi_words.data()));
   ASSERT_NE(f16_hi_inst, nullptr);
   ASSERT_EQ(std::string_view(f16_hi_inst->mnemonic()), "v_cvt_sr_f16_f32");
 
   const auto bf16_words =
       encode_cdna_vop3(cdna4::kVCvtSrBf16F32Vop3, 3, vgpr_src(5), vgpr_src(6), 0);
-  std::unique_ptr<Instruction> bf16_inst(decoder->decode(bf16_words.data()));
+  std::unique_ptr<Instruction> bf16_inst(decode_valid(*decoder, bf16_words.data()));
   ASSERT_NE(bf16_inst, nullptr);
   ASSERT_EQ(std::string_view(bf16_inst->mnemonic()), "v_cvt_sr_bf16_f32");
 
   const auto bf16_hi_words =
       encode_cdna_vop3(cdna4::kVCvtSrBf16F32Vop3, 3, vgpr_src(5), vgpr_src(6), 0, 0x8);
-  std::unique_ptr<Instruction> bf16_hi_inst(decoder->decode(bf16_hi_words.data()));
+  std::unique_ptr<Instruction> bf16_hi_inst(decode_valid(*decoder, bf16_hi_words.data()));
   ASSERT_NE(bf16_hi_inst, nullptr);
   ASSERT_EQ(std::string_view(bf16_hi_inst->mnemonic()), "v_cvt_sr_bf16_f32");
 
@@ -4401,7 +4452,7 @@ TEST(Cdna4CvtPkTest, F16Bf16F32OverflowHonorsFp16OvflMode) {
 
   // v_cvt_pk_f16_f32 v2, v5, v6
   const auto f16_words = encode_cdna_vop3(cdna4::kVCvtPkF16F32Vop3, 2, vgpr_src(5), vgpr_src(6), 0);
-  std::unique_ptr<Instruction> f16_inst(decoder->decode(f16_words.data()));
+  std::unique_ptr<Instruction> f16_inst(decode_valid(*decoder, f16_words.data()));
   ASSERT_NE(f16_inst, nullptr);
   ASSERT_EQ(std::string_view(f16_inst->mnemonic()), "v_cvt_pk_f16_f32");
 
@@ -4419,7 +4470,7 @@ TEST(Cdna4CvtPkTest, F16Bf16F32OverflowHonorsFp16OvflMode) {
   // v_cvt_pk_bf16_f32 v2, v5, v6
   const auto bf16_words =
       encode_cdna_vop3(cdna4::kVCvtPkBf16F32Vop3, 2, vgpr_src(5), vgpr_src(6), 0);
-  std::unique_ptr<Instruction> bf16_inst(decoder->decode(bf16_words.data()));
+  std::unique_ptr<Instruction> bf16_inst(decode_valid(*decoder, bf16_words.data()));
   ASSERT_NE(bf16_inst, nullptr);
   ASSERT_EQ(std::string_view(bf16_inst->mnemonic()), "v_cvt_pk_bf16_f32");
 
@@ -4482,13 +4533,13 @@ TEST(CdnaLegacyCvtF16Test, SetregImm32ModeControlsOverflowingF32ToF16) {
     cu->write_vgpr(vb + 5, 0, std::bit_cast<uint32_t>(70000.0f));
 
     const auto cvt_words = encode_cdna_vop3(arch_case.cvt_op, 2, vgpr_src(5), 0, 0);
-    std::unique_ptr<Instruction> cvt_inst(decoder->decode(cvt_words.data()));
+    std::unique_ptr<Instruction> cvt_inst(decode_valid(*decoder, cvt_words.data()));
     ASSERT_NE(cvt_inst, nullptr);
     ASSERT_EQ(std::string_view(cvt_inst->mnemonic()), "v_cvt_f16_f32");
 
     constexpr uint32_t kHwregFp16Ovfl = encode_hwreg(1, 23, 1);
     const auto setreg_words = encode_sopk(arch_case.setreg_imm_op, 0, kHwregFp16Ovfl, 1);
-    std::unique_ptr<Instruction> setreg_inst(decoder->decode(setreg_words.data()));
+    std::unique_ptr<Instruction> setreg_inst(decode_valid(*decoder, setreg_words.data()));
     ASSERT_NE(setreg_inst, nullptr);
     ASSERT_EQ(std::string_view(setreg_inst->mnemonic()), "s_setreg_imm32_b32");
 
@@ -4532,7 +4583,7 @@ TEST(Rdna4ScalarF16Test, AddDoesNotConsumeFp16OvflMode) {
   cu->write_sgpr(sb + 1, util::f32_to_f16(65504.0f));
 
   const auto words = encode_sop2(rdna4::kSAddF16Sop2, 2, 0, 1);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "s_add_f16");
 
@@ -4568,7 +4619,7 @@ TEST(Rdna4ScalarF16Test, CvtF16F32ConsumesFp16OvflMode) {
   cu->write_sgpr(sb + 0, std::bit_cast<uint32_t>(70000.0f));
 
   const auto words = encode_sop1(rdna4::kSCvtF16F32Sop1, 2, 0);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "s_cvt_f16_f32");
 
@@ -4612,13 +4663,13 @@ TEST(Cdna3CvtFp8Test, SetregImm32ModeChangeRecomputesFp16OvflRounding) {
 
   // v_cvt_pk_fp8_f32 v2.l, v5, v6. CDNA3 uses FNUZ FP8 encodings.
   const auto words = encode_cdna_vop3(cdna3::kVCvtPkFp8F32Vop3, 2, vgpr_src(5), vgpr_src(6), 0);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_pk_fp8_f32");
 
   constexpr uint32_t kHwregFp16Ovfl = encode_hwreg(1, 23, 1);
   const auto setreg_words = encode_sopk(cdna3::kSSetregImm32B32Sopk, 0, kHwregFp16Ovfl, 1);
-  std::unique_ptr<Instruction> setreg_inst(decoder->decode(setreg_words.data()));
+  std::unique_ptr<Instruction> setreg_inst(decode_valid(*decoder, setreg_words.data()));
   ASSERT_NE(setreg_inst, nullptr);
   ASSERT_EQ(std::string_view(setreg_inst->mnemonic()), "s_setreg_imm32_b32");
 
@@ -4645,7 +4696,7 @@ TEST(Gfx1250CvtFp8Test, F16SourceFp8Bf8ConversionsIgnoreFp16OvflMode) {
   amdgpu::L2Cache l2("gfx1250_cvt_fp8_f16_source_mode_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -4654,7 +4705,7 @@ TEST(Gfx1250CvtFp8Test, F16SourceFp8Bf8ConversionsIgnoreFp16OvflMode) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -4668,7 +4719,7 @@ TEST(Gfx1250CvtFp8Test, F16SourceFp8Bf8ConversionsIgnoreFp16OvflMode) {
   auto run_packed_case = [&](uint32_t op, std::string_view mnemonic, uint32_t src,
                              uint32_t expected) {
     const auto words = encode_vop3(op, 2, vgpr_src(5), 0, 0);
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic);
 
@@ -4687,7 +4738,7 @@ TEST(Gfx1250CvtFp8Test, F16SourceFp8Bf8ConversionsIgnoreFp16OvflMode) {
   auto run_sr_case = [&](uint32_t op, std::string_view mnemonic, uint32_t src, uint32_t seed,
                          uint32_t expected_byte) {
     const auto words = encode_vop3(op, 2, vgpr_src(5), vgpr_src(6), 0);
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic);
 
@@ -4742,7 +4793,7 @@ TEST(Cdna3CvtFp8Test, Bf8AndStochasticPathsHonorFp16OvflMode) {
 
   // v_cvt_pk_bf8_f32 v2.l, v5, v6
   const auto bf8_words = encode_cdna_vop3(cdna3::kVCvtPkBf8F32Vop3, 2, vgpr_src(5), vgpr_src(6), 0);
-  std::unique_ptr<Instruction> bf8_inst(decoder->decode(bf8_words.data()));
+  std::unique_ptr<Instruction> bf8_inst(decode_valid(*decoder, bf8_words.data()));
   ASSERT_NE(bf8_inst, nullptr);
   ASSERT_EQ(std::string_view(bf8_inst->mnemonic()), "v_cvt_pk_bf8_f32");
 
@@ -4762,7 +4813,7 @@ TEST(Cdna3CvtFp8Test, Bf8AndStochasticPathsHonorFp16OvflMode) {
   // v_cvt_sr_fp8_f32 v2, v5, v6 byte_sel:0
   const auto sr_fp8_words =
       encode_cdna_vop3(cdna3::kVCvtSrFp8F32Vop3, 2, vgpr_src(5), vgpr_src(6), 0);
-  std::unique_ptr<Instruction> sr_fp8_inst(decoder->decode(sr_fp8_words.data()));
+  std::unique_ptr<Instruction> sr_fp8_inst(decode_valid(*decoder, sr_fp8_words.data()));
   ASSERT_NE(sr_fp8_inst, nullptr);
   ASSERT_EQ(std::string_view(sr_fp8_inst->mnemonic()), "v_cvt_sr_fp8_f32");
 
@@ -4782,7 +4833,7 @@ TEST(Cdna3CvtFp8Test, Bf8AndStochasticPathsHonorFp16OvflMode) {
   // v_cvt_sr_bf8_f32 v2, v5, v6 byte_sel:0
   const auto sr_bf8_words =
       encode_cdna_vop3(cdna3::kVCvtSrBf8F32Vop3, 2, vgpr_src(5), vgpr_src(6), 0);
-  std::unique_ptr<Instruction> sr_bf8_inst(decoder->decode(sr_bf8_words.data()));
+  std::unique_ptr<Instruction> sr_bf8_inst(decode_valid(*decoder, sr_bf8_words.data()));
   ASSERT_NE(sr_bf8_inst, nullptr);
   ASSERT_EQ(std::string_view(sr_bf8_inst->mnemonic()), "v_cvt_sr_bf8_f32");
 
@@ -4830,7 +4881,7 @@ TEST(Cdna4CvtScaleTest, ScaledFp8Bf8OverflowHonorsFp16OvflMode) {
   // v_cvt_scalef32_pk_fp8_f32 v2.l, v5, v6, v7
   const auto scaled_fp8_words =
       encode_cdna_vop3(cdna4::kVCvtScalef32PkFp8F32Vop3, 2, vgpr_src(5), vgpr_src(6), vgpr_src(7));
-  std::unique_ptr<Instruction> scaled_fp8_inst(decoder->decode(scaled_fp8_words.data()));
+  std::unique_ptr<Instruction> scaled_fp8_inst(decode_valid(*decoder, scaled_fp8_words.data()));
   ASSERT_NE(scaled_fp8_inst, nullptr);
   ASSERT_EQ(std::string_view(scaled_fp8_inst->mnemonic()), "v_cvt_scalef32_pk_fp8_f32");
 
@@ -4851,7 +4902,7 @@ TEST(Cdna4CvtScaleTest, ScaledFp8Bf8OverflowHonorsFp16OvflMode) {
   // v_cvt_scalef32_pk_bf8_f32 v2.l, v5, v6, v7
   const auto scaled_bf8_words =
       encode_cdna_vop3(cdna4::kVCvtScalef32PkBf8F32Vop3, 2, vgpr_src(5), vgpr_src(6), vgpr_src(7));
-  std::unique_ptr<Instruction> scaled_bf8_inst(decoder->decode(scaled_bf8_words.data()));
+  std::unique_ptr<Instruction> scaled_bf8_inst(decode_valid(*decoder, scaled_bf8_words.data()));
   ASSERT_NE(scaled_bf8_inst, nullptr);
   ASSERT_EQ(std::string_view(scaled_bf8_inst->mnemonic()), "v_cvt_scalef32_pk_bf8_f32");
 
@@ -4867,12 +4918,12 @@ TEST(Cdna4CvtScaleTest, ScaledFp8Bf8OverflowHonorsFp16OvflMode) {
   auto run_scaled_f16_dst_case = [&](uint32_t op, std::string_view mnemonic, uint32_t packed_src,
                                      float scale) {
     const auto low_words = encode_cdna_vop3(op, 2, vgpr_src(5), vgpr_src(7), 0);
-    std::unique_ptr<Instruction> low_inst(decoder->decode(low_words.data()));
+    std::unique_ptr<Instruction> low_inst(decode_valid(*decoder, low_words.data()));
     ASSERT_NE(low_inst, nullptr);
     ASSERT_EQ(std::string_view(low_inst->mnemonic()), mnemonic);
 
     const auto high_words = encode_cdna_vop3(op, 2, vgpr_src(5), vgpr_src(7), 0, 0x8);
-    std::unique_ptr<Instruction> high_inst(decoder->decode(high_words.data()));
+    std::unique_ptr<Instruction> high_inst(decode_valid(*decoder, high_words.data()));
     ASSERT_NE(high_inst, nullptr);
     ASSERT_EQ(std::string_view(high_inst->mnemonic()), mnemonic);
 
@@ -4902,7 +4953,7 @@ TEST(Cdna4CvtScaleTest, ScaledFp8Bf8OverflowHonorsFp16OvflMode) {
   auto run_scaled_packed_case = [&](uint32_t op, std::string_view mnemonic, uint32_t packed_src,
                                     uint32_t expected_clear, uint32_t expected_set) {
     const auto words = encode_cdna_vop3(op, 2, vgpr_src(5), vgpr_src(7), 0);
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic);
 
@@ -4975,7 +5026,7 @@ TEST(Cdna4CvtScaleTest, WideFp6ToF16ConsumesFp16OvflMode) {
   // v_cvt_scalef32_pk32_f16_fp6 v[2:17], v[20:25], v30
   const auto words =
       encode_cdna_vop3(cdna4::kVCvtScalef32Pk32F16Fp6Vop3, 2, vgpr_src(20), vgpr_src(30), 0);
-  std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_scalef32_pk32_f16_fp6");
 
@@ -4998,7 +5049,7 @@ TEST(Gfx1250CvtFp8Test, E5M3ClampSelectsUnsignedFp8Format) {
   amdgpu::L2Cache l2("gfx1250_cvt_fp8_e5m3_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -5007,7 +5058,7 @@ TEST(Gfx1250CvtFp8Test, E5M3ClampSelectsUnsignedFp8Format) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -5023,7 +5074,7 @@ TEST(Gfx1250CvtFp8Test, E5M3ClampSelectsUnsignedFp8Format) {
 
   // v_cvt_f32_fp8 v1, v0 byte_sel:2 clamp
   const uint32_t decode_words[] = {0xD5EC8801U, 0x00000100U};
-  std::unique_ptr<Instruction> decode_inst(decoder->decode(decode_words));
+  std::unique_ptr<Instruction> decode_inst(decode_valid(*decoder, decode_words));
   ASSERT_NE(decode_inst, nullptr);
   ASSERT_EQ(std::string_view(decode_inst->mnemonic()), "v_cvt_f32_fp8");
   cu->execute_instruction(decode_inst.get(), *wf);
@@ -5035,7 +5086,7 @@ TEST(Gfx1250CvtFp8Test, E5M3ClampSelectsUnsignedFp8Format) {
 
   // v_cvt_pk_fp8_f32 v2.l, s5, s6 clamp
   const uint32_t pack_lo_words[] = {0xD7698002U, 0x02000C05U};
-  std::unique_ptr<Instruction> pack_lo_inst(decoder->decode(pack_lo_words));
+  std::unique_ptr<Instruction> pack_lo_inst(decode_valid(*decoder, pack_lo_words));
   ASSERT_NE(pack_lo_inst, nullptr);
   ASSERT_EQ(std::string_view(pack_lo_inst->mnemonic()), "v_cvt_pk_fp8_f32");
   cu->execute_instruction(pack_lo_inst.get(), *wf);
@@ -5045,7 +5096,7 @@ TEST(Gfx1250CvtFp8Test, E5M3ClampSelectsUnsignedFp8Format) {
 
   // v_cvt_pk_fp8_f32 v2.h, s5, s6 op_sel:[0,0,1] clamp
   const uint32_t pack_hi_words[] = {0xD769C002U, 0x02000C05U};
-  std::unique_ptr<Instruction> pack_hi_inst(decoder->decode(pack_hi_words));
+  std::unique_ptr<Instruction> pack_hi_inst(decode_valid(*decoder, pack_hi_words));
   ASSERT_NE(pack_hi_inst, nullptr);
   ASSERT_EQ(std::string_view(pack_hi_inst->mnemonic()), "v_cvt_pk_fp8_f32");
   cu->execute_instruction(pack_hi_inst.get(), *wf);
@@ -5055,7 +5106,7 @@ TEST(Gfx1250CvtFp8Test, E5M3ClampSelectsUnsignedFp8Format) {
 
   // v_cvt_sr_fp8_f32 v2, s5, s6 byte_sel:2 clamp
   const uint32_t sr_words[] = {0xD76BC002U, 0x02000C05U};
-  std::unique_ptr<Instruction> sr_inst(decoder->decode(sr_words));
+  std::unique_ptr<Instruction> sr_inst(decode_valid(*decoder, sr_words));
   ASSERT_NE(sr_inst, nullptr);
   ASSERT_EQ(std::string_view(sr_inst->mnemonic()), "v_cvt_sr_fp8_f32");
   cu->execute_instruction(sr_inst.get(), *wf);
@@ -5067,7 +5118,7 @@ TEST(Gfx1250CvtFp8Test, E5M3ClampSelectsUnsignedFp8Format) {
 
   // v_cvt_sr_fp8_f16 v2, s5, s6 byte_sel:2 clamp
   const uint32_t sr_f16_words[] = {0xD774C002U, 0x02000C05U};
-  std::unique_ptr<Instruction> sr_f16_inst(decoder->decode(sr_f16_words));
+  std::unique_ptr<Instruction> sr_f16_inst(decode_valid(*decoder, sr_f16_words));
   ASSERT_NE(sr_f16_inst, nullptr);
   ASSERT_EQ(std::string_view(sr_f16_inst->mnemonic()), "v_cvt_sr_fp8_f16");
   cu->execute_instruction(sr_f16_inst.get(), *wf);
@@ -5082,7 +5133,7 @@ TEST(Gfx1250CvtScaleTest, UnpackUsesSelectedE8M0ScaleByte) {
   amdgpu::L2Cache l2("gfx1250_cvt_scale_e8m0_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -5091,7 +5142,7 @@ TEST(Gfx1250CvtScaleTest, UnpackUsesSelectedE8M0ScaleByte) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -5107,7 +5158,7 @@ TEST(Gfx1250CvtScaleTest, UnpackUsesSelectedE8M0ScaleByte) {
 
   // v_cvt_scale_pk8_f32_fp8 v[2:9], v[0:1], v10 scale_sel:2
   const uint32_t pk8_words[] = {0xD6AA1002U, 0x02021500U};
-  std::unique_ptr<Instruction> pk8_inst(decoder->decode(pk8_words));
+  std::unique_ptr<Instruction> pk8_inst(decode_valid(*decoder, pk8_words));
   ASSERT_NE(pk8_inst, nullptr);
   ASSERT_EQ(std::string_view(pk8_inst->mnemonic()), "v_cvt_scale_pk8_f32_fp8");
   cu->execute_instruction(pk8_inst.get(), *wf);
@@ -5121,7 +5172,7 @@ TEST(Gfx1250CvtScaleTest, UnpackUsesSelectedE8M0ScaleByte) {
 
   // v_cvt_scale_pk16_f32_fp6 v[18:33], v[0:2], v10 scale_sel:1
   const uint32_t pk16_words[] = {0xD6C90812U, 0x02021500U};
-  std::unique_ptr<Instruction> pk16_inst(decoder->decode(pk16_words));
+  std::unique_ptr<Instruction> pk16_inst(decode_valid(*decoder, pk16_words));
   ASSERT_NE(pk16_inst, nullptr);
   ASSERT_EQ(std::string_view(pk16_inst->mnemonic()), "v_cvt_scale_pk16_f32_fp6");
   cu->execute_instruction(pk16_inst.get(), *wf);
@@ -5137,7 +5188,7 @@ TEST(Gfx1250DsSwizzleTest, VdsBroadcastReadsAddrSource) {
   amdgpu::L2Cache l2("gfx1250_ds_swizzle_vds_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -5146,7 +5197,7 @@ TEST(Gfx1250DsSwizzleTest, VdsBroadcastReadsAddrSource) {
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -5164,7 +5215,7 @@ TEST(Gfx1250DsSwizzleTest, VdsBroadcastReadsAddrSource) {
   // ds_swizzle_b32 v2, v1 offset:swizzle(BROADCAST,32,15)
   // gfx1250 encodes this as VDS, where the sole source VGPR is the addr field.
   const uint32_t swizzle_words[] = {0xD8D401E0U, 0x02000001U};
-  std::unique_ptr<Instruction> swizzle_inst(decoder->decode(swizzle_words));
+  std::unique_ptr<Instruction> swizzle_inst(decode_valid(*decoder, swizzle_words));
   ASSERT_NE(swizzle_inst, nullptr);
   ASSERT_EQ(std::string_view(swizzle_inst->mnemonic()), "ds_swizzle_b32");
   cu->execute_instruction(swizzle_inst.get(), *wf);
@@ -5177,7 +5228,7 @@ TEST(Gfx1250DsSwizzleTest, VdsBroadcastReadsAddrSource) {
 
   // ds_swizzle_b32 v2, v1 offset:0x80b1, QDMode quad permutation (1, 0, 3, 2)
   const uint32_t quad_perm_words[] = {0xD8D480B1U, 0x02000001U};
-  std::unique_ptr<Instruction> quad_perm_inst(decoder->decode(quad_perm_words));
+  std::unique_ptr<Instruction> quad_perm_inst(decode_valid(*decoder, quad_perm_words));
   ASSERT_NE(quad_perm_inst, nullptr);
   ASSERT_EQ(std::string_view(quad_perm_inst->mnemonic()), "ds_swizzle_b32");
   cu->execute_instruction(quad_perm_inst.get(), *wf);
@@ -5197,7 +5248,7 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddF32ReturnsOldValue) {
   amdgpu::L2Cache l2("gfx1250_atomic_add_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -5205,7 +5256,7 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddF32ReturnsOldValue) {
 
   Gfx1250MemoryTestCu cu("gfx1250", cfg, &gpu_mem, &l2);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -5223,7 +5274,7 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddF32ReturnsOldValue) {
 
   // global_atomic_add_f32 v0, v2, v1, s[4:5] th:TH_ATOMIC_RETURN scope:SCOPE_DEV
   const uint32_t words[] = {0xEE158004U, 0x00980000U, 0x00000002U};
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "global_atomic_add_f32");
   cu.execute_and_route(inst.release(), *wf);
@@ -5240,7 +5291,7 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddF32AllowsDstSrcAlias) {
   amdgpu::L2Cache l2("gfx1250_atomic_add_alias_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -5248,7 +5299,7 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddF32AllowsDstSrcAlias) {
 
   Gfx1250MemoryTestCu cu("gfx1250", cfg, &gpu_mem, &l2);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -5266,7 +5317,7 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddF32AllowsDstSrcAlias) {
 
   // global_atomic_add_f32 v1, v2, v1, s[4:5] th:TH_ATOMIC_RETURN scope:SCOPE_DEV
   const uint32_t words[] = {0xEE158004U, 0x00980001U, 0x00000002U};
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "global_atomic_add_f32");
   cu.execute_and_route(inst.release(), *wf);
@@ -5283,7 +5334,7 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddU64CopiesHighSourceDword) {
   amdgpu::L2Cache l2("gfx1250_atomic_add_u64_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -5291,7 +5342,7 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddU64CopiesHighSourceDword) {
 
   Gfx1250MemoryTestCu cu("gfx1250", cfg, &gpu_mem, &l2);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -5310,7 +5361,7 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicAddU64CopiesHighSourceDword) {
 
   // global_atomic_add_u64 v2, v[0:1], s[4:5] scope:SCOPE_DEV
   const uint32_t words[] = {0xEE10C004U, 0x00080000U, 0x00000002U};
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "global_atomic_add_u64");
   cu.execute_and_route(inst.release(), *wf);
@@ -5326,7 +5377,7 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicCmpswapB32ReturnsOldValue) {
   amdgpu::L2Cache l2("gfx1250_atomic_cmpswap_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -5334,7 +5385,7 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicCmpswapB32ReturnsOldValue) {
 
   Gfx1250MemoryTestCu cu("gfx1250", cfg, &gpu_mem, &l2);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
 
   auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -5353,7 +5404,7 @@ TEST(Gfx1250AtomicReturnTest, GlobalAtomicCmpswapB32ReturnsOldValue) {
 
   // global_atomic_cmpswap_b32 v0, v2, v[4:5], s[4:5] th:TH_ATOMIC_RETURN scope:SCOPE_DEV
   const uint32_t words[] = {0xEE0D0004U, 0x02180000U, 0x00000002U};
-  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "global_atomic_cmpswap_b32");
   cu.execute_and_route(inst.release(), *wf);
@@ -5393,13 +5444,13 @@ TEST(HwregTest, GetregReadsModeAndStatusTargetIds) {
     const std::array<uint32_t, 2> unknown_words =
         encode_sopk(arch_case.getreg_op, 6, kHwregUnknown32);
 
-    std::unique_ptr<Instruction> mode_inst(decoder->decode(mode_words.data()));
+    std::unique_ptr<Instruction> mode_inst(decode_valid(*decoder, mode_words.data()));
     ASSERT_NE(mode_inst, nullptr);
     EXPECT_EQ(std::string_view(mode_inst->mnemonic()), "s_getreg_b32");
-    std::unique_ptr<Instruction> status_inst(decoder->decode(status_words.data()));
+    std::unique_ptr<Instruction> status_inst(decode_valid(*decoder, status_words.data()));
     ASSERT_NE(status_inst, nullptr);
     EXPECT_EQ(std::string_view(status_inst->mnemonic()), "s_getreg_b32");
-    std::unique_ptr<Instruction> unknown_inst(decoder->decode(unknown_words.data()));
+    std::unique_ptr<Instruction> unknown_inst(decode_valid(*decoder, unknown_words.data()));
     ASSERT_NE(unknown_inst, nullptr);
     EXPECT_EQ(std::string_view(unknown_inst->mnemonic()), "s_getreg_b32");
 
@@ -5467,7 +5518,7 @@ TEST(HwregHelperTest, Gfx1250PreservesWaveSchedModeHwreg) {
   amdgpu::L2Cache l2("hwreg_helper_gfx1250_wave_sched_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -5504,7 +5555,7 @@ TEST(HwregHelperTest, Gfx1250UsesManualHwregIdsInsteadOfLegacyAliases) {
   amdgpu::L2Cache l2("hwreg_helper_gfx1250_hwreg_ids_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -5539,7 +5590,7 @@ TEST(HwregHelperTest, Gfx1250ReadsModeledIbStsCounters) {
   amdgpu::L2Cache l2("hwreg_helper_gfx1250_ib_sts_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -5579,7 +5630,7 @@ TEST(HwregHelperTest, Gfx1250ReadsModeledIbSts2Counters) {
   amdgpu::L2Cache l2("hwreg_helper_gfx1250_ib_sts2_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -5636,7 +5687,7 @@ TEST(HwregHelperTest, ModeBit27OnlyEnablesGprIndexingWhereArchitected) {
       {ROCJITSU_CODE_ARCH_CDNA3, "cdna3", true},  {ROCJITSU_CODE_ARCH_CDNA4, "cdna4", true},
       {ROCJITSU_CODE_ARCH_RDNA1, "rdna1", false}, {ROCJITSU_CODE_ARCH_RDNA2, "rdna2", false},
       {ROCJITSU_CODE_ARCH_RDNA3, "rdna3", false}, {ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", false},
-      {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", false}, {ROCJITSU_CODE_ARCH_GFX1250, "gfx1250", true},
+      {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", false}, {ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", true},
   };
 
   for (const GprIdxModeCase &arch_case : cases) {
@@ -5791,9 +5842,16 @@ TEST(HwregHelperTest, Rdna3TablesNameXmlHwregIds) {
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
     ASSERT_NE(wf, nullptr);
 
+    // TRAPSTS is backed by Wavefront::trapsts_ on every arch: the GPU trap
+    // handler reads the excp cause on entry and clears it before s_rfe, so a
+    // write has to reach wave state rather than report Unsupported.
     EXPECT_STREQ(amdgpu::hwreg_name(*wf, encode_hwreg(3)), "TRAPSTS");
     EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(3), 1u),
-              amdgpu::HwregAccessResult::Unsupported);
+              amdgpu::HwregAccessResult::Success);
+    uint32_t trapsts = 0;
+    EXPECT_EQ(amdgpu::read_hwreg_field(*wf, encode_hwreg(3), trapsts),
+              amdgpu::HwregAccessResult::Success);
+    EXPECT_EQ(trapsts, 1u);
     EXPECT_STREQ(amdgpu::hwreg_name(*wf, encode_hwreg(14)), "FLUSH_IB");
     EXPECT_EQ(amdgpu::write_hwreg_field(*wf, encode_hwreg(14), 1u),
               amdgpu::HwregAccessResult::Unsupported);
@@ -5836,10 +5894,10 @@ TEST(HwregTest, GetregExtractsPartialModeAndStatusFields) {
     const std::array<uint32_t, 2> status_words =
         encode_sopk(arch_case.getreg_op, 5, kHwregStatusNibble);
 
-    std::unique_ptr<Instruction> mode_inst(decoder->decode(mode_words.data()));
+    std::unique_ptr<Instruction> mode_inst(decode_valid(*decoder, mode_words.data()));
     ASSERT_NE(mode_inst, nullptr);
     EXPECT_EQ(std::string_view(mode_inst->mnemonic()), "s_getreg_b32");
-    std::unique_ptr<Instruction> status_inst(decoder->decode(status_words.data()));
+    std::unique_ptr<Instruction> status_inst(decode_valid(*decoder, status_words.data()));
     ASSERT_NE(status_inst, nullptr);
     EXPECT_EQ(std::string_view(status_inst->mnemonic()), "s_getreg_b32");
 
@@ -5887,7 +5945,7 @@ TEST(HwregTest, SetregImm32StatusIsReadOnly) {
     const std::array<uint32_t, 2> words =
         encode_sopk(arch_case.setreg_imm_op, 0, kHwregStatus32, kImm32Value);
 
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr) << "Failed to decode s_setreg_imm32_b32";
     EXPECT_EQ(std::string_view(inst->mnemonic()).substr(0, 16), "s_setreg_imm32_b");
 
@@ -5929,7 +5987,7 @@ TEST(HwregTest, SetregImm32WritesModeFp16Ovfl) {
     const std::array<uint32_t, 2> words =
         encode_sopk(arch_case.setreg_imm_op, 0, kHwregMode32, kImm32Value);
 
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr) << "Failed to decode s_setreg_imm32_b32";
 
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -5968,7 +6026,7 @@ TEST(HwregTest, SetregB32WritesModeFp16OvflFromSgpr) {
 
     constexpr uint32_t kHwregMode32 = encode_hwreg(1);
     const std::array<uint32_t, 2> words = encode_sopk(arch_case.setreg_op, 4, kHwregMode32);
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr) << "Failed to decode s_setreg_b32";
     EXPECT_EQ(std::string_view(inst->mnemonic()), "s_setreg_b32");
 
@@ -6014,7 +6072,7 @@ TEST(HwregTest, SetregImm32PartialBitfield) {
     constexpr uint32_t kImm32 = 0xFFFFFFFF;
     const std::array<uint32_t, 2> words = encode_sopk(arch_case.setreg_imm_op, 0, kHwreg, kImm32);
 
-    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
 
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
@@ -6069,7 +6127,7 @@ TEST(D16FormatExecution, PackedFormatD16LoadStoreThrowUnimplemented) {
   // reused across cases without any reset.
   for (const auto &c : cases) {
     SCOPED_TRACE(c.mnemonic);
-    std::unique_ptr<Instruction> inst(decoder->decode(c.words.data()));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, c.words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), c.mnemonic);
     EXPECT_TRUE(inst->is_memory_op()) << c.mnemonic;
@@ -6078,3 +6136,83 @@ TEST(D16FormatExecution, PackedFormatD16LoadStoreThrowUnimplemented) {
 }
 
 } // namespace
+
+// FLAT routing is decided per lane against the private aperture, so one wave can
+// mix scratch lanes with global ones. The dword-interleaved scratch swizzle is a
+// property of the private lanes only: applying its stride instruction-wide put a
+// global lane's second dword at addr + wf_size*4 instead of addr + 4.
+TEST(Cdna4FlatMixedApertureTest, ScratchSwizzleDoesNotStrideGlobalLanes) {
+  amdgpu::GpuMemory gpu_mem("cdna4_flat_mixed_mem");
+  amdgpu::L2Cache l2("cdna4_flat_mixed_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  Cdna4MemoryTestCu cu("cdna4", cfg, &gpu_mem, &l2);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint64_t kPrivateBase = 0x0000200000000000ULL;
+  constexpr uint64_t kScratchBase = 0x8000;
+  constexpr uint64_t kGlobalAddr = 0x2000;
+  constexpr uint32_t kScratchWord0 = 0xAA0000A0u;
+  constexpr uint32_t kScratchWord1 = 0xAA0000A1u;
+  constexpr uint32_t kGlobalWord0 = 0xBB0000B0u;
+  constexpr uint32_t kGlobalWord1 = 0xBB0000B1u;
+
+  wf->set_apertures(0, 0, kPrivateBase, kPrivateBase + 0x10000);
+  wf->set_scratch_base(kScratchBase);
+  wf->set_exec(0x3u); // lane 0 -> private aperture, lane 1 -> global
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  const uint64_t lane_addr[2] = {kPrivateBase, kGlobalAddr};
+  const uint32_t lane_data[2][2] = {{kScratchWord0, kScratchWord1}, {kGlobalWord0, kGlobalWord1}};
+  for (uint32_t lane = 0; lane < 2; ++lane) {
+    cu.write_vgpr(vb + 0, lane, static_cast<uint32_t>(lane_addr[lane]));
+    cu.write_vgpr(vb + 1, lane, static_cast<uint32_t>(lane_addr[lane] >> 32));
+    cu.write_vgpr(vb + 2, lane, lane_data[lane][0]);
+    cu.write_vgpr(vb + 3, lane, lane_data[lane][1]);
+  }
+
+  const uint32_t stride = wf->wf_size() * static_cast<uint32_t>(sizeof(uint32_t));
+  for (uint64_t a : {kGlobalAddr, kGlobalAddr + 4, kGlobalAddr + stride, kScratchBase,
+                     kScratchBase + 4, kScratchBase + stride})
+    gpu_mem.write32(a, 0u);
+
+  // flat_store_dwordx2 v[0:1], v[2:3]
+  cdna4::FlatMachineInst enc{};
+  enc.encoding = cdna4::encoding::kFlat >> 3;
+  enc.op = cdna4::kFlatStoreDwordx2;
+  enc.seg = 0; // FLAT
+  enc.addr = 0;
+  enc.data = 2;
+  enc.saddr = 0x7F;
+  const auto words = std::bit_cast<std::array<uint32_t, 2>>(enc);
+
+  std::unique_ptr<Instruction> store(decode_valid(*decoder, words.data()));
+  ASSERT_NE(store, nullptr);
+  ASSERT_EQ(std::string_view(store->mnemonic()), "flat_store_dwordx2");
+  cu.execute_and_route(store.release(), *wf);
+  cu.flush_all();
+
+  // The global lane stays contiguous even though lane 0 went to scratch.
+  EXPECT_EQ(gpu_mem.read32(kGlobalAddr), kGlobalWord0);
+  EXPECT_EQ(gpu_mem.read32(kGlobalAddr + 4), kGlobalWord1);
+  EXPECT_EQ(gpu_mem.read32(kGlobalAddr + stride), 0u)
+      << "global lane was strided by the scratch swizzle";
+
+  // The private lane keeps the dword-interleaved layout rocm-dbgapi reads.
+  EXPECT_EQ(gpu_mem.read32(kScratchBase), kScratchWord0);
+  EXPECT_EQ(gpu_mem.read32(kScratchBase + stride), kScratchWord1);
+  EXPECT_EQ(gpu_mem.read32(kScratchBase + 4), 0u);
+
+  if (!wf->is_halted())
+    wf->halt();
+}

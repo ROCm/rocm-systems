@@ -163,12 +163,12 @@ def gen_vector_cmp_class(
     L.append('  }')
     if is_cmpx:
         if cmpx_writes_vcc:
-            L.append('  wf.set_vcc(result);')
+            L.append('  wf.set_vcc_mask(result);')
         L.append('  wf.set_exec(result);')
     elif dst:
         L.extend(_write_explicit_lane_mask(dst[0], 'vcc'))
     else:
-        L.append('  wf.set_vcc(vcc);')
+        L.append('  wf.set_vcc_mask(vcc);')
     return '\n'.join(L)
 
 
@@ -372,7 +372,7 @@ def gen_vector_cmp(
         L.extend(_write_explicit_lane_mask(dst[0], 'vcc'))
     else:
         # VOPC: write to VCC.
-        L.append('  wf.set_vcc(vcc);')
+        L.append('  wf.set_vcc_mask(vcc);')
     return '\n'.join(L)
 
 
@@ -412,7 +412,7 @@ def gen_vector_cmpx(
         if dst and is_vop3:
             L.extend(_write_explicit_lane_mask(dst[0], 'result'))
         else:
-            L.append('  wf.set_vcc(result);')
+            L.append('  wf.set_vcc_mask(result);')
     L.append('  wf.set_exec(result);')
     return '\n'.join(L)
 
@@ -498,5 +498,5 @@ def gen_vector_add_co(
         # VOP3_SDST_ENC: carry-out goes to sdst (any SGPR pair).
         L.extend(_write_explicit_lane_mask(dst[1], 'vcc'))
     else:
-        L.append('  wf.set_vcc(vcc);')
+        L.append('  wf.set_vcc_mask(vcc);')
     return '\n'.join(L)

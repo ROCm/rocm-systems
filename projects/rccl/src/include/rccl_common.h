@@ -138,8 +138,10 @@ ncclResult_t rcclHierarchicalAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, ui
                                       int* algo, int* protocol, int* maxChannels);
 bool rcclUseAlltoAllGda(struct ncclComm* comm);
 // Returns true when the CE AllReduce path should be used instead of the standard ring/tree kernels.
+// Pass the bias buffer as acc (nullptr when the caller is plain AllReduce).
 // Does NOT check ceARTmpBuf initialization; the caller is responsible.
-bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op);
+bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op,
+                        const void* acc);
 // Updates the CE AllReduce graph latch from this call's capture state.
 // Invoke once per collective (any type) at each CE AR decision point.
 void rcclCeAllReduceGraphLatchTick(struct ncclComm* comm, bool ceCapturing);
@@ -189,6 +191,30 @@ bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Defaul
 
 int getFirmwareVersion();
 bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, char const* archName);
+
+// Decide the host-side value of comm->cheapPostSendFenceOff.
+// Returns 1 if the cheap post-send fence must be OFF (kernel uses the full
+// __threadfence_system()), or 0 if the cheap post-send fence can be ON.
+//   cudaArch             : numeric device arch (comm->cudaArch = 100*major +
+//                          10*minor, i.e. gfx942 = 940, gfx950 = 950,
+//                          gfx1250 = 1250).
+//   param                : RCCL_CHEAP_POST_SEND_FENCE_OFF value
+//                          (0 = arch-tuned auto, 1 = force off, 2 = force on).
+//   uncachedMemSupported : whether cache-bypassing load/store builtins are
+//                          available (HIP_UNCACHED_MEMORY); cheap fence is only
+//                          safe when true.
+inline int rcclComputeCheapPostSendFenceOff(int cudaArch, int64_t param, bool uncachedMemSupported) {
+  // Cheap fence is only safe when cache-bypassing load/store builtins are available.
+  if (!uncachedMemSupported) return 1;
+  // Force cheap fence on regardless of arch (override auto, e.g. re-enable on gfx950).
+  if (param == 2) return 0;
+  // Any other non-zero value forces the full __threadfence_system().
+  if (param != 0) return 1;
+  // Arch-tuned auto: cheap fence on for gfx942 (940) and gfx1250 (1250);
+  // off for gfx950 (950) and everything else.
+  if (cudaArch == 940 || cudaArch == 1250) return 0;
+  return 1;
+}
 #ifdef ENABLE_WARP_SPEED
 RCCL_PARAM_DECLARE(WarpSpeedARThreshold);
 RCCL_PARAM_DECLARE(WarpSpeedAutoMode);
