@@ -88,7 +88,7 @@ profiler-hub exposes a type-aware reader API for retrieving profiling events by 
 - `get_scalar_track(track_id)` — scalar/PMC sample events with deterministic per-metric resolution
 - `get_flows()` — causal flow edges between events (CPU→GPU correlations)
 
-Both rocpd v3 and v4.0 schema backends are supported. See [`docs/reader-api-track-based-overview.md`](docs/reader-api-track-based-overview.md) for the full API reference, and [`docs/optiq-loader-reference-migration.md`](docs/optiq-loader-reference-migration.md) for a worked example of building on top of these methods.
+Both rocpd v3 and v4.0 schema backends are supported.
 
 ## License
 
