@@ -7,17 +7,11 @@
 // Reusable fakes for NCCL (`nccl*`) symbols that the micro-test binary
 // links against instead of pulling in librccl.so.
 //
-// These fakes are not p2p-specific -- any micro-test that #includes a
-// production TU referencing these `nccl*` functions can link against
-// nccl_fakes.cc. p2p-specific fakes (the alloc-macro emulators, arch/topo
-// helpers) live in p2p_fakes.{h,cc}; HIP runtime seams live in
-// hip_fakes.{h,cc}.
-//
 // Several of the symbols below are "controllable seams": a std::function
 // hook whose default preserves the historical stub behaviour, plus a thin
 // `nccl*` wrapper that dispatches through the hook. Tests install per-test
 // behaviour by overwriting a hook in a fixture's SetUp() and
-// ResetNcclFakes() (called from ResetP2pFakes()) restores the defaults so
+// ResetNcclFakes() restores the defaults so
 // tests don't contaminate each other.
 
 #ifndef RCCL_TEST_HOST_NCCL_FAKES_H_
@@ -89,7 +83,6 @@ extern std::function<int64_t(const char* /*env*/, int64_t /*deftVal*/)>
     g_loadParam;
 
 // Restore every NCCL controllable seam in this header to its default.
-// Called by ResetP2pFakes(); exposed for tests that only touch NCCL hooks.
 void ResetNcclFakes();
 
 #endif  // RCCL_TEST_HOST_NCCL_FAKES_H_

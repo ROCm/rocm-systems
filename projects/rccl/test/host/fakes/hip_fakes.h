@@ -62,8 +62,7 @@ extern std::function<hipError_t(void* /*data*/,
                                 hipDeviceptr_t /*ptr*/)>
     g_hipPointerGetAttribute;
 
-// Restore the HIP controllable seams above to their defaults. Called by
-// ResetP2pFakes(); exposed for tests that only touch HIP hooks.
+// Restore the HIP controllable seams above to their defaults.
 void ResetHipFakes();
 
 #endif  // RCCL_TEST_HOST_HIP_FAKES_H_

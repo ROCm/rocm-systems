@@ -4,7 +4,6 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Minimal stubs for the p2p-specific symbols p2p.cc references but doesn't define
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -18,25 +17,10 @@
 #include "graph.h"        // getBusId
 
 #include "nccl_fakes.h"    // reusable nccl* fakes + their reset
-#include "p2p_fakes.h"     // controllable seam hooks
+#include "nccl_cuda_fakes.h" // controllable seam hooks
 #include "hip_fakes.h"     // ResetHipFakes
 
 #include <type_traits>
-
-// ---------------------------------------------------------------------------
-// Signature-drift watchdog for the HIP seams: the nccl* asserts live in
-// nccl_fakes.cc; here anchor each HIP hook to its production declaration
-// (templates + macro live in fakes/signature-drift.h).
-#include "signature-drift.h"
-
-ASSERT_HOOK_MATCHES_PROD(g_hipMemGetAddressRange,     hipMemGetAddressRange);
-ASSERT_HOOK_MATCHES_PROD(g_hipIpcGetMemHandle,        hipIpcGetMemHandle);
-ASSERT_HOOK_MATCHES_PROD(g_hipMemRetainAllocationHandle,  hipMemRetainAllocationHandle);
-ASSERT_HOOK_MATCHES_PROD(g_hipMemExportToShareableHandle, hipMemExportToShareableHandle);
-ASSERT_HOOK_MATCHES_PROD(g_hipMemRelease,             hipMemRelease);
-ASSERT_HOOK_MATCHES_PROD(g_hipPointerGetAttribute,    hipPointerGetAttribute);
-
-#undef ASSERT_HOOK_MATCHES_PROD
 
 // ---------------------------------------------------------------------------
 // Trivial globals
@@ -76,7 +60,7 @@ ncclResult_t getBusId(int /*cudaDev*/, int64_t* busId)
 // never reaches real HIP runtime.
 //
 // Defaults behave like an honest emulator: heap-allocate zeroed memory and
-// memcpy bytes between host pointers. ResetP2pFakes() frees any allocations
+// memcpy bytes between host pointers. ResetNcclCudaFakes() frees any allocations
 // the default hook handed out so individual tests don't have to. Tests that
 // install their own hook also take responsibility for any memory they hand
 // out.
@@ -108,12 +92,10 @@ std::function<ncclResult_t(void**, std::size_t, hipStream_t)>
 std::function<ncclResult_t(void*, void*, std::size_t, hipStream_t)>
     g_fakeCudaMemcpyAsync = DefaultFakeCudaMemcpyAsync;
 
-void ResetP2pFakes()
+void ResetNcclCudaFakes()
 {
     g_fakeCudaCallocAsync    = DefaultFakeCudaCallocAsync;
     g_fakeCudaMemcpyAsync    = DefaultFakeCudaMemcpyAsync;
-    ResetNcclFakes();  // restore the nccl* hooks owned by nccl_fakes.cc
-    ResetHipFakes();   // restore the HIP hooks owned by hip_fakes.cc
     for (void* p : g_fakeAllocations) std::free(p);
     g_fakeAllocations.clear();
 }

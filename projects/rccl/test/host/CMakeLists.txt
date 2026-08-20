@@ -25,7 +25,7 @@ if(BUILD_TESTS)
   set(TEST_MICRO_SOURCE_FILES
     p2p-test.cc
     fakes/nccl_fakes.cc                  # reusable stubs for nccl* symbols
-    fakes/p2p_fakes.cc                   # p2p-specific stubs (arch/topo + alloc emulators)
+    fakes/nccl_cuda_fakes.cc             # p2p-specific stubs (arch/topo + ncclCuda* alloc emulators)
     fakes/hip_fakes.cc                   # HIP runtime seams + link-satisfying stubs
     ../common/main_altrsmi.cpp           # minimal gtest main, no RCCL deps
     ../common/ProcessIsolatedTestRunner.cpp
@@ -392,7 +392,7 @@ target_link_libraries(rccl-HostUnitTests PRIVATE
 add_executable(rccl-UnitTestsMicro
   p2p-test.cc
   fakes/nccl_fakes.cc
-  fakes/p2p_fakes.cc
+  fakes/nccl_cuda_fakes.cc
   fakes/hip_fakes.cc
   ${RCCL_TEST_DIR}/common/main_altrsmi.cpp
   ${RCCL_TEST_DIR}/common/ProcessIsolatedTestRunner.cpp

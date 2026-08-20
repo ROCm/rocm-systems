@@ -14,58 +14,23 @@
 #include <utility>
 #include <vector>
 
-#include "fakes/p2p_fakes.h"
+#include "fakes/nccl_cuda_fakes.h"
 
-// Same pattern for param.h: pull it in now so we can #undef NCCL_PARAM and
-// replace it with a redirector that routes every generated ncclParamXxx()
-// through g_loadParam on every call (no caching). Without this,
-// ncclParamLegacyCudaRegister() and friends would cache their default on
-// first call -- which means tests can't flip them between cases. The
-// redirected body matches the real NCCL_PARAM signature
-// (`int64_t ncclParam<name>()`) but skips the cache and uninitialized
-// machinery entirely.
-#include "param.h"
+// TODO: Replace with projects/rccl/test/host/fakes/param_redirect.h after
+// https://github.com/ROCm/rocm-systems/pull/10182 lands
 #undef NCCL_PARAM
 #define NCCL_PARAM(name, env, deftVal) \
     int64_t ncclParam##name() { return g_loadParam((env), (deftVal)); }
 
-// Macro shim: replace the header-only function templates ncclCudaCallocAsync
-// and ncclCudaMemcpyAsync from alloc.h with thin trampolines that route
-// through hookable fakes in fakes/p2p_fakes.cc. Without this, p2p.cc's call
-// sites bind directly to the templates, which hit real HIP runtime (no GPU
-// in this binary by design).
-//
-// The shims preserve type information at the call site via sizeof(**ptr) /
-// sizeof(*dst); the fake hooks themselves are type-erased to (void*, nbytes).
-// This mirrors the existing macro-intercept pattern used for ncclDebugLog
-// and ncclLoadParam.
-#undef ncclCudaCallocAsync
-#undef ncclCudaMemcpyAsync
-// Variadic: production's ncclCudaCallocAsync now takes trailing
-// manager/memType args (e.g. comm->memManager). We ignore them here --
-// the fake is type-erased to (void**, nbytes, stream) -- but the macro
-// must still swallow the extra arguments so the call site expands.
-#define ncclCudaCallocAsync(ptr, nelem, stream, ...) \
-    g_fakeCudaCallocAsync(reinterpret_cast<void**>(ptr), \
-                          (nelem) * sizeof(**(ptr)), (stream))
-#define ncclCudaMemcpyAsync(dst, src, nelem, stream) \
-    g_fakeCudaMemcpyAsync(reinterpret_cast<void*>(dst), \
-                          reinterpret_cast<void*>(src), \
-                          (nelem) * sizeof(*(dst)), (stream))
-
 // Macro shim: route the HIP driver entry points that ipcRegisterBuffer's
 // fresh-registration arm calls (hipMemGetAddressRange, hipIpcGetMemHandle)
 // through hookable fakes. The real symbols resolve at link time from
-// hip::host but would need a real GPU at runtime. Same pattern as the
-// ncclCudaCallocAsync shim above.
+// hip::host but would need a real GPU at runtime.
 #define hipMemGetAddressRange(pbase, psize, dptr) \
     g_hipMemGetAddressRange((pbase), (psize), (dptr))
 #define hipIpcGetMemHandle(handle, devPtr) \
     g_hipIpcGetMemHandle((handle), (devPtr))
 
-// Same pattern for the three cuMem*-export entry points the ROCm 7+ arm
-// of ipcRegisterBuffer calls. Without these macro shims, the call sites
-// bind directly to the real hip::host symbols and need a GPU at runtime.
 #define hipMemRetainAllocationHandle(handle, addr) \
     g_hipMemRetainAllocationHandle((handle), (addr))
 #define hipMemExportToShareableHandle(shareableHandle, handle, handleType, flags) \
@@ -86,17 +51,14 @@
 
 // ===========================================================================
 // Default fixture for every test in this file.
-//
-// Several tests install per-test hooks into the controllable seams declared
-// in fakes/p2p_fakes.h (e.g. g_strongStreamAcquire). ResetP2pFakes() puts
-// every hook back to its default in TearDown so tests don't leak state into
-// each other. Tests that don't currently install hooks still use this
-// fixture -- it's the file-wide default so adding a hook to a test that
-// previously didn't need one doesn't silently contaminate the next test.
 // ===========================================================================
 class P2pMicrotest : public ::testing::Test {
 protected:
-    void TearDown() override { ResetP2pFakes(); }
+    void TearDown() override {
+        ResetNcclCudaFakes();
+        ResetNcclFakes();
+        ResetHipFakes();
+    }
 };
 
 // ===========================================================================
@@ -110,14 +72,14 @@ protected:
 namespace {
 
 // ScopedHook -- RAII wrapper around a controllable seam (any of the
-// std::function<...> hooks declared in fakes/p2p_fakes.h).
+// std::function<...> hooks declared in fakes/nccl_cuda_fakes.h).
 //
 // Three jobs in one type:
 //   1. Installs the test's behaviour on construction.
 //   2. Counts calls automatically (.calls), so tests don't hand-roll a
 //      separate `int xCalls = 0; ++xCalls` per hook.
 //   3. Restores the previous behaviour on destruction. This means tests
-//      don't have to inherit the fixture or rely on ResetP2pFakes() to
+//      don't have to inherit the fixture or rely on ResetNcclCudaFakes() to
 //      avoid contaminating each other -- the hook's lifetime ends with
 //      the ScopedHook local, before the captured stack locals die.
 //
