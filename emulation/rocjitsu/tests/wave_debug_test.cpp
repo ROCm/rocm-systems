@@ -573,20 +573,32 @@ TEST(WaveDebugTest, SendmsghaltWithoutADebugSessionHaltsAndStaysReleasable) {
 // elsewhere are not confined to one field. Serializing a wave from an
 // unmodelled architecture would hand rocm-dbgapi an image it decodes against a
 // different layout, so the codec has to say plainly which ones it covers.
-TEST(WaveDebugTest, CwsrLayoutIsModelledOnlyForTheGfx94Parts) {
+TEST(WaveDebugTest, CwsrLayoutIsModelledForTheGfx94AndGfx12Parts) {
   EXPECT_TRUE(kmd::cwsr_layout_modelled(ROCJITSU_CODE_ARCH_CDNA3)); // gfx942
   EXPECT_TRUE(kmd::cwsr_layout_modelled(ROCJITSU_CODE_ARCH_CDNA4)); // gfx950
+  EXPECT_TRUE(kmd::cwsr_layout_modelled(ROCJITSU_CODE_ARCH_CDNA5)); // gfx1250
+
+  // The two gfx9.4 parts share one record family; gfx1250 uses the GFX12 one.
+  EXPECT_EQ(kmd::cwsr_family(ROCJITSU_CODE_ARCH_CDNA4), kmd::CwsrFamily::Gfx9_4);
+  EXPECT_EQ(kmd::cwsr_family(ROCJITSU_CODE_ARCH_CDNA5), kmd::CwsrFamily::Gfx12);
+
+  // GFX12 reads a two-word COMPUTE_RELAUNCH state entry and has no TRAPSTS.
+  EXPECT_EQ(kmd::cwsr_format(kmd::CwsrFamily::Gfx9_4).state_words, 1u);
+  EXPECT_EQ(kmd::cwsr_format(kmd::CwsrFamily::Gfx12).state_words, 2u);
+  EXPECT_EQ(kmd::cwsr_format(kmd::CwsrFamily::Gfx12).slot_trapsts, kmd::CwsrFormat::kNoSlot);
+  EXPECT_EQ(kmd::cwsr_format(kmd::CwsrFamily::Gfx12).slot_excp_flag_priv, 6u);
 
   // gfx908 saves an ACC-VGPR block and gfx908/gfx90a keep the packet id in
   // TTMP6, so being gfx9 is not enough.
   EXPECT_FALSE(kmd::cwsr_layout_modelled(ROCJITSU_CODE_ARCH_CDNA1));
   EXPECT_FALSE(kmd::cwsr_layout_modelled(ROCJITSU_CODE_ARCH_CDNA2));
 
-  // RDNA and GFX12.5 differ in the control stack, the COMPUTE_RELAUNCH fields,
-  // the wave size behind the VGPR stride, and where dispatch identity lives.
+  // No RDNA record family is modelled: they differ in the control stack, the
+  // COMPUTE_RELAUNCH fields, the wave size behind the VGPR stride, and where
+  // dispatch identity lives.
   for (rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
-        ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5})
+        ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4})
     EXPECT_FALSE(kmd::cwsr_layout_modelled(arch)) << "arch " << static_cast<int>(arch);
 }
 

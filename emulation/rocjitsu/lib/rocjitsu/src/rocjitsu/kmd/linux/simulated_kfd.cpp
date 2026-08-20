@@ -2587,7 +2587,8 @@ bool SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t que
   util::UniqueHandle target_mem = duplicate_debug_target_mem(proc->client_pid());
   bool publish_ok = true;
   const auto layout = kmd::serialize_queue_cwsr_bulk(
-      ctx_base, ctx_size, waves, [&](uint64_t address, std::span<const uint8_t> bytes) {
+      ctx_base, ctx_size, waves,
+      [&](uint64_t address, std::span<const uint8_t> bytes) {
         if (target_mem.get() < 0) {
           memory->write_block(address, bytes, process_id);
           return;
@@ -2600,7 +2601,8 @@ bool SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t que
                              " pid=", std::dec, proc->client_pid(), " rc=", written,
                              " errno=", errno);
         }
-      });
+      },
+      kmd::cwsr_format(kmd::cwsr_family(gpu->soc->arch())));
   if (!layout.ok || !publish_ok)
     return false;
 
@@ -3275,7 +3277,8 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
       util::UniqueHandle target_mem = duplicate_debug_target_mem(proc->client_pid());
       bool read_ok = true;
       restored = kmd::deserialize_queue_cwsr_bulk(
-          context.base, context.size, states, [&](uint64_t address, std::span<uint8_t> bytes) {
+          context.base, context.size, states,
+          [&](uint64_t address, std::span<uint8_t> bytes) {
             if (target_mem.get() < 0) {
               memory->read_block(address, bytes, proc->process_id());
               return;
@@ -3289,7 +3292,8 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
                                  " pid=", std::dec, proc->client_pid(), " rc=", bytes_read,
                                  " errno=", errno);
             }
-          });
+          },
+          kmd::cwsr_format(kmd::cwsr_family(gpu->soc->arch())));
       restored = restored && read_ok;
     }
     std::unordered_set<amdgpu::ComputeUnitCore *> wake;

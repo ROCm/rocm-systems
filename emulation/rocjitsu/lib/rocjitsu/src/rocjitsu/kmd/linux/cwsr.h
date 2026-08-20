@@ -43,10 +43,12 @@ namespace kmd {
 /// @param arch Architecture of the GPU whose queue would be serialized.
 /// @returns True if serialize/deserialize produce an image dbgapi can decode.
 constexpr bool cwsr_layout_modelled(rj_code_arch_t arch) {
-  // gfx942 / gfx950. gfx908 adds an ACC-VGPR block and gfx908/gfx90a keep the
-  // packet id in TTMP6, so CDNA1/CDNA2 are deliberately excluded even though
-  // they are also gfx9.
-  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+  // gfx942 / gfx950 through the gfx9.4 record, gfx1250 through the GFX12 one.
+  // gfx908 adds an ACC-VGPR block and gfx908/gfx90a keep the packet id in
+  // TTMP6, so CDNA1/CDNA2 are deliberately excluded even though they are also
+  // gfx9. RDNA is excluded because no RDNA record family is modelled.
+  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+         arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 
 /// @brief The same question as cwsr_layout_modelled(), asked of a GPU named the
@@ -64,7 +66,8 @@ constexpr bool cwsr_layout_modelled(rj_code_arch_t arch) {
 /// @returns True if serialize/deserialize produce an image dbgapi can decode.
 constexpr bool cwsr_layout_modelled_for_gc_ip_version(uint32_t gc_ip_version) {
   return gc_ip_version == make_gc_ip_version(9, 4, 3) || // gfx942 (CDNA3)
-         gc_ip_version == make_gc_ip_version(9, 5, 0);   // gfx950 (CDNA4)
+         gc_ip_version == make_gc_ip_version(9, 5, 0) || // gfx950 (CDNA4)
+         gc_ip_version == make_gc_ip_version(12, 1, 0);  // gfx1250 (CDNA5)
 }
 
 /// @brief Number of scalar slots in a saved SGPR block (gfx9.4 sgpr_count).
@@ -196,6 +199,33 @@ struct CwsrFormat {
   uint32_t hwreg_count = 32;
   /// TTMPs saved at the top of the hwreg block.
   uint32_t ttmp_count = 16;
+
+  /// @brief Dword slot of each saved register within the hwreg block.
+  ///
+  /// @details gfx9.4 lays these out as m0, pc, exec, status, trapsts,
+  /// xnack_mask, mode. GFX12 keeps m0/pc/exec where they are and moves the
+  /// rest, because several registers were renamed or replaced: TRAPSTS no
+  /// longer exists (dbgapi asserts if asked for it), the privileged bits moved
+  /// into STATE_PRIV, EXCP_FLAG_USER and TRAP_CTRL are new, and FLAT_SCRATCH
+  /// became architected so it lives here rather than aliased into the SGPR
+  /// block. Slots are the `first_hwreg + N` values in
+  /// gfx10_architecture_t::cwsr_record_t::register_address and
+  /// gfx12_architecture_t::cwsr_record_t::register_address.
+  ///
+  /// A slot of @ref kNoSlot means the register is absent in this family.
+  static constexpr uint32_t kNoSlot = 0xFFFFFFFFu;
+  uint32_t slot_m0 = 0;
+  uint32_t slot_pc_lo = 1;   ///< pc_hi is the next slot up.
+  uint32_t slot_exec_lo = 3; ///< exec_hi is the next slot up (wave64).
+  uint32_t slot_status = 5;
+  uint32_t slot_trapsts = 6; ///< kNoSlot on GFX12.
+  uint32_t slot_xnack_lo = 7;
+  uint32_t slot_mode = 9;
+  uint32_t slot_state_priv = kNoSlot;      ///< GFX12 only.
+  uint32_t slot_excp_flag_priv = kNoSlot;  ///< GFX12 only; the TRAPSTS successor.
+  uint32_t slot_excp_flag_user = kNoSlot;  ///< GFX12 only.
+  uint32_t slot_trap_ctrl = kNoSlot;       ///< GFX12 only.
+  uint32_t slot_flat_scratch_lo = kNoSlot; ///< GFX12 only; aliased in the SGPR block on gfx9.4.
 };
 
 /// @brief The format @p family implies.
@@ -205,6 +235,15 @@ constexpr CwsrFormat cwsr_format(CwsrFamily family, uint32_t lane_count = 64) {
   if (family == CwsrFamily::Gfx12) {
     format.state_words = 2;
     format.lane_count = lane_count;
+    format.slot_status = 13;
+    format.slot_trapsts = CwsrFormat::kNoSlot;
+    format.slot_xnack_lo = 7;
+    format.slot_mode = 8;
+    format.slot_state_priv = 5;
+    format.slot_excp_flag_priv = 6;
+    format.slot_excp_flag_user = 11;
+    format.slot_trap_ctrl = 12;
+    format.slot_flat_scratch_lo = 9;
   }
   return format;
 }

@@ -263,19 +263,33 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
     const uint64_t sgprs_addr = hwregs_addr - sgpr_bytes;
     const uint64_t vgprs_addr = sgprs_addr - vgpr_bytes;
 
-    // HWREG block (32 dwords). The top 16 dwords are the TTMPs.
-    write32(hwregs_addr + 0 * 4, w.m0);
-    write32(hwregs_addr + 1 * 4, static_cast<uint32_t>(w.pc & 0xFFFFFFFF));
-    write32(hwregs_addr + 2 * 4, static_cast<uint32_t>(w.pc >> 32));
-    write32(hwregs_addr + 3 * 4, static_cast<uint32_t>(w.exec & 0xFFFFFFFF));
-    write32(hwregs_addr + 4 * 4, static_cast<uint32_t>(w.exec >> 32));
-    write32(hwregs_addr + 5 * 4, w.status);
-    write32(hwregs_addr + 6 * 4, w.trapsts);
-    write32(hwregs_addr + 7 * 4, 0); // xnack_mask_lo
-    write32(hwregs_addr + 8 * 4, 0); // xnack_mask_hi
-    write32(hwregs_addr + 9 * 4, w.mode);
-    for (uint32_t h = 10; h < 16; ++h)
+    // HWREG block. The top ttmp_count dwords are the TTMPs; everything below
+    // is placed by the family's slot map, because GFX12 moved most of it.
+    const auto &fmt = geometry.format;
+    const auto put = [&](uint32_t slot, uint32_t value) {
+      if (slot != CwsrFormat::kNoSlot)
+        write32(hwregs_addr + slot * 4, value);
+    };
+    for (uint32_t h = 0; h < fmt.hwreg_count - fmt.ttmp_count; ++h)
       write32(hwregs_addr + h * 4, 0);
+    put(fmt.slot_m0, w.m0);
+    put(fmt.slot_pc_lo, static_cast<uint32_t>(w.pc & 0xFFFFFFFF));
+    put(fmt.slot_pc_lo + 1, static_cast<uint32_t>(w.pc >> 32));
+    put(fmt.slot_exec_lo, static_cast<uint32_t>(w.exec & 0xFFFFFFFF));
+    if (lanes == 64)
+      put(fmt.slot_exec_lo + 1, static_cast<uint32_t>(w.exec >> 32));
+    put(fmt.slot_status, w.status);
+    put(fmt.slot_trapsts, w.trapsts);
+    put(fmt.slot_mode, w.mode);
+    // GFX12 successors of the gfx9 privileged bits. The wave stores them in the
+    // gfx9 shape, so publish the same values through their new homes; see the
+    // translations in vm/amdgpu/hwreg.cpp.
+    put(fmt.slot_excp_flag_priv, w.trapsts);
+    put(fmt.slot_state_priv, w.status);
+    if (fmt.slot_flat_scratch_lo != CwsrFormat::kNoSlot) {
+      put(fmt.slot_flat_scratch_lo, static_cast<uint32_t>(w.flat_scratch & 0xFFFFFFFF));
+      put(fmt.slot_flat_scratch_lo + 1, static_cast<uint32_t>(w.flat_scratch >> 32));
+    }
 
     // TTMP0-15 occupy hwreg[16..31] (== ttmps_addr).
     uint32_t ttmp[kTtmpCount] = {};
@@ -414,14 +428,28 @@ bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
     const uint64_t sgprs_addr = hwregs_addr - sgpr_bytes;
     const uint64_t vgprs_addr = sgprs_addr - vgpr_bytes;
 
-    w.m0 = read32(hwregs_addr + 0 * 4);
-    w.pc = static_cast<uint64_t>(read32(hwregs_addr + 1 * 4)) |
-           (static_cast<uint64_t>(read32(hwregs_addr + 2 * 4)) << 32);
-    w.exec = static_cast<uint64_t>(read32(hwregs_addr + 3 * 4)) |
-             (static_cast<uint64_t>(read32(hwregs_addr + 4 * 4)) << 32);
-    w.status = read32(hwregs_addr + 5 * 4);
-    w.trapsts = read32(hwregs_addr + 6 * 4);
-    w.mode = read32(hwregs_addr + 9 * 4);
+    // Mirror of the serializer's slot map, so the debugger's edits are read
+    // back from wherever this family stores them.
+    const auto &fmt = geometry.format;
+    const auto get = [&](uint32_t slot, uint32_t fallback = 0) {
+      return slot == CwsrFormat::kNoSlot ? fallback : read32(hwregs_addr + slot * 4);
+    };
+    w.m0 = get(fmt.slot_m0);
+    w.pc = static_cast<uint64_t>(get(fmt.slot_pc_lo)) |
+           (static_cast<uint64_t>(get(fmt.slot_pc_lo + 1)) << 32);
+    w.exec = static_cast<uint64_t>(get(fmt.slot_exec_lo));
+    if (lanes == 64)
+      w.exec |= static_cast<uint64_t>(get(fmt.slot_exec_lo + 1)) << 32;
+    // On GFX12 the gfx9 STATUS/TRAPSTS values live in their successors.
+    w.status = get(fmt.slot_status, 0);
+    if (fmt.slot_state_priv != CwsrFormat::kNoSlot)
+      w.status = get(fmt.slot_state_priv);
+    w.trapsts = fmt.slot_trapsts != CwsrFormat::kNoSlot ? get(fmt.slot_trapsts)
+                                                        : get(fmt.slot_excp_flag_priv);
+    w.mode = get(fmt.slot_mode);
+    if (fmt.slot_flat_scratch_lo != CwsrFormat::kNoSlot)
+      w.flat_scratch = static_cast<uint64_t>(get(fmt.slot_flat_scratch_lo)) |
+                       (static_cast<uint64_t>(get(fmt.slot_flat_scratch_lo + 1)) << 32);
 
     const uint32_t ttmp4 = read32(ttmps_addr + 4 * 4);
     const uint32_t ttmp5 = read32(ttmps_addr + 5 * 4);

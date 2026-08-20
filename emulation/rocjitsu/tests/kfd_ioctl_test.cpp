@@ -3444,9 +3444,9 @@ TEST(KfdTopologyTest, TrapDebugSupportTracksTheModelledCwsrLayouts) {
     const char *name;
   };
   // Every part the arch-keyed predicate accepts, and a representative spread of
-  // the ones it does not: an older gfx9, an RDNA3 and the newest gfx12.
-  constexpr Part kModelled[] = {{90402u, "gfx942"}, {90500u, "gfx950"}};
-  constexpr Part kUnmodelled[] = {{90010u, "gfx90a"}, {110000u, "gfx1100"}, {120500u, "gfx1250"}};
+  // the ones it does not: an older gfx9 and an RDNA3.
+  constexpr Part kModelled[] = {{90402u, "gfx942"}, {90500u, "gfx950"}, {120500u, "gfx1250"}};
+  constexpr Part kUnmodelled[] = {{90010u, "gfx90a"}, {110000u, "gfx1100"}};
 
   for (const Part &part : kModelled) {
     const rocjitsu::kmd::DebugTopology topology =
