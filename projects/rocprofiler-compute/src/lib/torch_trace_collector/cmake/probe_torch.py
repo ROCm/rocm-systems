@@ -28,17 +28,18 @@ def main() -> int:
         sys.stderr.write(f"torch_trace_collector probe: torch not importable: {exc}\n")
         return 3
 
-    # Reuse the loader's fingerprint helper. parents[3] is the repo `src` dir
-    # (dev) or `libexec/<project>` (installed); both host the utils package.
+    # parents[3] is the repo `src` dir (dev) or `libexec/<project>` (installed);
+    # both host the utils package.
     src_root = pathlib.Path(__file__).resolve().parents[3]
     sys.path.insert(0, str(src_root))
-    from utils.inject_roctx._backends.torch_cpp_loader import _source_fingerprint
+    from utils.inject_roctx._backends.torch_trace_fingerprint import source_fingerprint
 
     lines = [
         str(sys.version_info.major),
         str(sys.version_info.minor),
         torch.__version__,
-        _source_fingerprint(),
+        source_fingerprint(),
+        str(int(torch.compiled_with_cxx11_abi())),
     ]
     sys.stdout.write("\n".join(lines) + "\n")
     return 0

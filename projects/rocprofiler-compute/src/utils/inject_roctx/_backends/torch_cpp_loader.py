@@ -12,7 +12,6 @@ again. Set ``ROCPROFCOMPUTE_REBUILD_TORCH_TRACE=1`` to discard the build
 directory and build again.
 """
 
-import hashlib
 import importlib.util
 import os
 import shutil
@@ -22,6 +21,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from utils.inject_roctx._backends import torch_trace_fingerprint
+
 _THIS_DIR = Path(__file__).resolve().parent
 # parents[2] resolves to <repo>/src in dev and <install>/libexec/<project>
 # in installed layouts; both host the torch_trace_collector sources at lib/.
@@ -29,10 +30,6 @@ _NATIVE_TOOL_ROOT = _THIS_DIR.parents[2]
 _NATIVE_SOURCE_DIR = _NATIVE_TOOL_ROOT / "lib"
 _SO_SOURCE_DIR = _NATIVE_SOURCE_DIR / "torch_trace_collector"
 _SO_BUILDFILE = _SO_SOURCE_DIR / "CMakeLists.txt"
-_SHARED_UTILS_HEADERS = (
-    _NATIVE_SOURCE_DIR / "utils" / "synchronized" / "synchronized.hpp",
-    _NATIVE_SOURCE_DIR / "utils" / "gsl_assert" / "gsl_assert.h",
-)
 
 _INSTALL_TREE_PROJECT_NAME = "rocprofiler-compute"
 
@@ -41,22 +38,7 @@ TIER_RUNTIME_BUILD = "runtime-build"
 
 C_TIER_NAMES = frozenset((TIER_PREBUILT, TIER_RUNTIME_BUILD))
 
-
-def _fingerprint_input_paths() -> tuple[Path, ...]:
-    """The build inputs that determine the artifact: the C++ sources and
-    headers, the shared utility headers the module includes, the build file,
-    and the CMake probe scripts.
-
-    Sorted so the fingerprint does not depend on filesystem enumeration order.
-    """
-    inputs = set(_SO_SOURCE_DIR.glob("*.cpp")) | set(_SO_SOURCE_DIR.glob("*.h"))
-    inputs |= set(_SO_SOURCE_DIR.glob("cmake/*.py"))
-    inputs |= set(_SHARED_UTILS_HEADERS)
-    inputs.add(_SO_BUILDFILE)
-    return tuple(sorted(inputs))
-
-
-_FINGERPRINT_INPUTS = _fingerprint_input_paths()
+_source_fingerprint = torch_trace_fingerprint.source_fingerprint
 
 _REBUILD_ENV_VAR = "ROCPROFCOMPUTE_REBUILD_TORCH_TRACE"
 
@@ -105,23 +87,6 @@ def format_load_diagnostic_trail(
         return ""
     rendered = [f"  [{lvl}] {msg}" for lvl, msg in diagnostics[-max_lines:]]
     return "\n".join(rendered)
-
-
-def _source_fingerprint() -> str:
-    """First 12 hex chars of a SHA-256 over the source inputs, or ``"missing"``."""
-    h = hashlib.sha256()
-    seen = 0
-    for path in _FINGERPRINT_INPUTS:
-        try:
-            data = path.read_bytes()
-        except OSError:
-            continue
-        h.update(f"{path.name}:{len(data)}\n".encode("ascii"))
-        h.update(data)
-        seen += 1
-    if seen == 0:
-        return "missing"
-    return h.hexdigest()[:12]
 
 
 def compute_tag() -> Optional[str]:
@@ -284,7 +249,11 @@ def _try_runtime_build(
     diagnostics: Optional[_Diagnostics] = None,
 ) -> Optional[types.ModuleType]:
     """Build the extension from the source tree and import the result."""
-    missing_inputs = [p.name for p in _FINGERPRINT_INPUTS if not p.exists()]
+    missing_inputs = [
+        p.name
+        for p in torch_trace_fingerprint.fingerprint_input_paths()
+        if not p.exists()
+    ]
     if missing_inputs:
         _safe_log(
             "log",
