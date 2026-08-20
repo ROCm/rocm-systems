@@ -28,7 +28,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Resolved issues
 
-  - Host function ids are no longer allocated once per subscribed context. Two clients subscribed to `ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT` each observed a different id for the same symbol, and the ids outgrew the number of symbols a client recorded, so the JSON output writer indexed past the end of its vector and aborted. rocprofv3 then wedged instead of exiting, because the abort re-entered its error signal handler.
+  - Fixed `rocprofv3` crashing during output generation when a second tool subscribed to code object tracing in the same process, which blocked profiling PyTorch and Triton workloads through rocprofiler-compute.
+  - Fixed `rocprofv3` hanging instead of exiting when it fails during output generation, which left GPU child processes running and required killing the process manually.
 
 ### Removed
 
