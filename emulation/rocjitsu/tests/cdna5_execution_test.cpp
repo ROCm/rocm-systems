@@ -32,11 +32,94 @@ public:
   uint32_t read_count = 0;
 };
 
+class Gfx1250MemoryTestCu
+    : public amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, cdna5::Isa> {
+public:
+  using Base = amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, cdna5::Isa>;
+
+  Gfx1250MemoryTestCu(std::string name, const amdgpu::ComputeUnitCore::Config &config,
+                      amdgpu::GpuMemory *memory, amdgpu::L2Cache *l2)
+      : Base(std::move(name), config, memory, l2) {
+    l2->set_backing_memory(memory);
+    set_memory(memory);
+    set_l2(l2);
+  }
+
+  void execute_and_route(std::unique_ptr<Instruction> instruction, amdgpu::Wavefront &wave) {
+    execute_instruction(instruction.get(), wave);
+    if (instruction->is_memory_op())
+      route_memory_inst(instruction.release(), wave);
+  }
+};
+
 TEST(Gfx1250ExecutionTest, TargetProvidesImmutableExecutionBackend) {
   const IsaTargetDescriptor *target = default_isa_target_registry().find("cdna5");
   ASSERT_NE(target, nullptr);
   EXPECT_TRUE(target->supports_execution);
   EXPECT_TRUE(cdna5::Operand::full_execution_backend_complete());
+}
+
+TEST(Gfx1250ExecutionTest, SramEccD16LoadsZeroUnselectedHalf) {
+  amdgpu::GpuMemory memory("gfx1250_d16_memory");
+  amdgpu::L2Cache l2("gfx1250_d16_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = kGfx1250ScalarSlots;
+  config.vgprs_per_wf = 64;
+  config.lds_size_kb = kGfx1250LdsSizeKb;
+  auto compute_unit = std::make_unique<Gfx1250MemoryTestCu>("gfx1250_d16_cu", config, &memory, &l2);
+
+  auto *wave = compute_unit->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+  ASSERT_NE(wave, nullptr);
+  ASSERT_TRUE(compute_unit->sram_ecc());
+  wave->set_exec(1u);
+
+  constexpr uint64_t kAddress = 0x1000;
+  memory.write8(kAddress + 1, 0x7eu);
+  memory.write8(kAddress + 2, 0x7fu);
+  write_wave_sgpr(*compute_unit, *wave, 24, static_cast<uint32_t>(kAddress));
+  write_wave_sgpr(*compute_unit, *wave, 25, static_cast<uint32_t>(kAddress >> 32));
+  write_wave_sgpr(*compute_unit, *wave, 26, 0x100u);
+  write_wave_sgpr(*compute_unit, *wave, 27, 0u);
+
+  const uint32_t vgpr_base = wave->vgpr_alloc().base;
+  compute_unit->write_vgpr(vgpr_base + 33, 0, 0u);
+  struct LoadCase {
+    std::string_view mnemonic;
+    std::array<uint32_t, 3> words;
+    uint32_t destination;
+    uint32_t expected;
+  };
+
+  constexpr std::array<LoadCase, 2> kLoads = {{
+      {
+          "buffer_load_d16_u8",
+          {0xc407807cu, 0x40803038u, 0x00000121u},
+          56,
+          0x0000007eu,
+      },
+      {
+          "buffer_load_d16_hi_u8",
+          {0xc408407cu, 0x40803039u, 0x00000221u},
+          57,
+          0x007f0000u,
+      },
+  }};
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  for (const auto &test : kLoads) {
+    SCOPED_TRACE(test.mnemonic);
+    compute_unit->write_vgpr(vgpr_base + test.destination, 0, 0xdeadbeefu);
+    std::unique_ptr<Instruction> load(decode_valid(*decoder, test.words.data()));
+    ASSERT_NE(load, nullptr);
+    ASSERT_EQ(std::string_view(load->mnemonic()), test.mnemonic);
+
+    compute_unit->execute_and_route(std::move(load), *wave);
+
+    EXPECT_EQ(compute_unit->read_vgpr(vgpr_base + test.destination, 0), test.expected);
+  }
 }
 
 TEST(Gfx1250ExecutionTest, ScalarMovesTreatS102AndS103AsOrdinarySgprs) {

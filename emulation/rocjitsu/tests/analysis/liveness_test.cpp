@@ -3974,10 +3974,10 @@ TEST(LivenessAnalysis, Gfx1250ImplicitVgprUseResolvesDestinationBank) {
       << "the low-bank alias must not be treated as the read register";
 }
 
-TEST(LivenessAnalysis, Gfx1250D16LoadImplicitUseResolvesDestinationBank) {
-  // A gfx1250 D16 load's destination preserve-read must resolve through the Dst
-  // VGPR-MSB bank via implicit_use_operands(); implicit_uses() VGPRs are dropped
-  // there. DST bank 2 (0x80), vdst v1 -> physical v513 must be live before it.
+TEST(LivenessAnalysis, Gfx1250D16LoadDoesNotReadDestination) {
+  // gfx1250 SRAM ECC makes a D16 load a full-dword write by zero-filling the
+  // unselected half. Even with DST bank 2 (0x80), neither physical v513 nor its
+  // low-bank alias v1 is therefore live before the load.
   constexpr auto set_dst_bank_two = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 0x80});
   constexpr auto load = cdna5::build_vflat(cdna5::kFlatLoadD16U8Vflat, {.vdst = 1});
   constexpr auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
@@ -3999,10 +3999,10 @@ TEST(LivenessAnalysis, Gfx1250D16LoadImplicitUseResolvesDestinationBank) {
   ASSERT_NE(instruction, blocks.front()->instructions().end());
   ASSERT_EQ(std::string_view((*instruction).mnemonic()), "flat_load_d16_u8");
   EXPECT_EQ(liveness.vgpr_msb_bank_before(*instruction, amdgpu::VgprMsbRole::Dst), 2);
-  EXPECT_TRUE(liveness.is_live_before(*instruction, {RegClass::VGPR, 513, 1}))
-      << "D16 load preserve-read must resolve to the DST bank";
+  EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 513, 1}))
+      << "SRAM ECC zero-fills the unselected half instead of preserving it";
   EXPECT_FALSE(liveness.is_live_before(*instruction, {RegClass::VGPR, 1, 1}))
-      << "the low-bank alias must not be treated as the read register";
+      << "the low-bank alias must not be treated as a read register";
 }
 
 TEST(LivenessAnalysis, Gfx1250ImplicitVgprUseResolvesDespiteExplicitBank0Alias) {
@@ -5945,14 +5945,21 @@ std::unique_ptr<Instruction> decode_cdna3(std::initializer_list<uint32_t> words)
   return std::unique_ptr<Instruction>(decoder ? decode_valid(*decoder, buf.data()) : nullptr);
 }
 
-TEST(GeneratedInstDefUse, D16TbufferLoadReadsDestination) {
+std::unique_ptr<Instruction> decode_cdna1(std::initializer_list<uint32_t> words) {
+  std::array<uint32_t, 4> buf{};
+  std::copy(words.begin(), words.end(), buf.begin());
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA1);
+  return std::unique_ptr<Instruction>(decoder ? decode_valid(*decoder, buf.data()) : nullptr);
+}
+
+TEST(GeneratedInstDefUse, D16TbufferLoadDoesNotReadDestinationWithSramEcc) {
   auto inst = decode_cdna3({0xE8040000U, 0x00000500U}); // tbuffer_load_format_d16_x, vdata=5
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()), "tbuffer_load_format_d16_x");
 
   InstDefUse idu(*inst);
   EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
-  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 1}));
 }
 
 // Negative case: D16 stores share the d16 flags but are not in
@@ -6001,17 +6008,17 @@ TEST(GeneratedInstDefUse, D16TypedFormatXyzLoadUnderVbufferReadsOnlyLastDestinat
 // On older MUBUF encodings the LDS bit (word0 bit 16) redirects the loaded data
 // to LDS, leaving no VGPR destination -- so the preserved-destination read must
 // be suppressed there, or liveness invents a false live range. Same opcode
-// (buffer_load_short_d16, MUBUF op 36 on CDNA3), toggling only LDS. VDATA is
+// (buffer_load_short_d16, MUBUF op 36 on CDNA1), toggling only LDS. VDATA is
 // word1[8:15] (=5).
 TEST(GeneratedInstDefUse, D16BufferLoadLdsBitSuppressesDestinationRead) {
-  auto normal = decode_cdna3({0xE0900000U, 0x00000500U}); // buffer_load_short_d16, vdata=5, lds=0
+  auto normal = decode_cdna1({0xE0900000U, 0x00000500U}); // buffer_load_short_d16, vdata=5, lds=0
   ASSERT_NE(normal, nullptr);
   ASSERT_EQ(std::string_view(normal->mnemonic()), "buffer_load_short_d16");
   InstDefUse normal_idu(*normal);
   EXPECT_TRUE(normal_idu.uses.contains({RegClass::VGPR, 5, 1}))
       << "LDS clear: the preserved half of vdata is a read";
 
-  auto lds = decode_cdna3({0xE0910000U, 0x00000500U}); // ...same, lds=1 (bit 16 set)
+  auto lds = decode_cdna1({0xE0910000U, 0x00000500U}); // ...same, lds=1 (bit 16 set)
   ASSERT_NE(lds, nullptr);
   ASSERT_EQ(std::string_view(lds->mnemonic()), "buffer_load_short_d16");
   InstDefUse lds_idu(*lds);

@@ -314,6 +314,11 @@ class IsaProfile(ABC):
         return False
 
     @property
+    def d16_loads_zero_unselected_half(self) -> bool:
+        """True when D16 loads zero the unselected destination half."""
+        return False
+
+    @property
     def uses_packed_16bit_e32_source_selectors(self) -> bool:
         """True when E32 16-bit source selectors can address packed high halves."""
         return False
@@ -1178,6 +1183,11 @@ class CdnaProfile(_AmdgpuProfileBase):
         # zero the upper half; see the CDNA ISA OP_SEL field description.
         return True
 
+    @property
+    def d16_loads_zero_unselected_half(self) -> bool:
+        # CDNA2/3/4 enable SRAM ECC in the runtime ISA traits.
+        return True
+
 
 class Cdna4Profile(CdnaProfile):
     """ISA profile for CDNA4-only encoding capabilities."""
@@ -1218,7 +1228,12 @@ class Cdna1Profile(CdnaProfile):
     - GFX9-style GLC-only coherency model.
     - Scratch base via SGPR pair (not HW register).
     - ENC_VOP3PX2 does not exist in CDNA1 XML.
+    - The current runtime ISA trait leaves SRAM ECC disabled.
     """
+
+    @property
+    def d16_loads_zero_unselected_half(self) -> bool:
+        return False
 
     @property
     def has_acc_vgpr(self) -> bool:
@@ -1908,6 +1923,10 @@ class Cdna5Profile(Rdna4Profile):
 
     @property
     def uses_vgpr_msb_indexing(self) -> bool:
+        return True
+
+    @property
+    def d16_loads_zero_unselected_half(self) -> bool:
         return True
 
     @property

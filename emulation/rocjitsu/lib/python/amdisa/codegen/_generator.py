@@ -3730,9 +3730,13 @@ class CodeGenerator:
 
         The last register is partial when the written bytes (num_elems *
         elem_size) do not fill whole 32-bit registers (e.g. ushort_d16, or
-        format_d16_xyz).
+        format_d16_xyz). Architectures with SRAM ECC can instead zero-fill the
+        unselected half, making the destination a full write rather than a
+        read-modify-write.
         """
         if not self.semantics:
+            return False
+        if self.isa_spec.profile.d16_loads_zero_unselected_half:
             return False
         sem = self.semantics.instructions.get(inst.name)
         if not sem or sem.num_elems is None or sem.elem_size is None:
@@ -8196,13 +8200,14 @@ class CodeGenerator:
                     dst_idx = 0
                     vgpr_msb_src_role_idx = 0
                     reads_dst = self._dst_is_also_source(inst)
-                    # D16(_HI) loads read the destination they partially write.
-                    # Model it as an implicit use so vdst stays out of the
-                    # printed operand list (see _d16_load_reads_dst). The
-                    # override declaration/definition is emitted below, sharing
-                    # the path with generic partial defs (buffer/tbuffer loads
-                    # name the dest 'vdata' and are sized as a full 32-bit
-                    # register, so _partial_def_outputs does not catch them).
+                    # D16(_HI) loads on architectures without SRAM ECC read the
+                    # destination they partially write. Model that preservation
+                    # as an implicit use so vdst stays out of the printed operand
+                    # list (see _d16_load_reads_dst). The override
+                    # declaration/definition is emitted below, sharing the path
+                    # with generic partial defs (buffer/tbuffer loads name the
+                    # dest 'vdata' and are sized as a full 32-bit register, so
+                    # _partial_def_outputs does not catch them).
                     d16_implicit_use_opnd = None
                     # Offset (in 32-bit registers) of the one partially-written
                     # register within the destination: only the last register of
