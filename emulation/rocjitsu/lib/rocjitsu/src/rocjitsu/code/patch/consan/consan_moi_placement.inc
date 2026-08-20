@@ -1443,18 +1443,10 @@ apply_record_replay_entry_workgroup_assignment(ConSanOptions &options,
 }
 
 [[nodiscard]] bool is_indirect_vgpr_access(const Instruction &instruction) {
-  return instruction.mnemonic().starts_with("v_movrel");
-}
-
-[[nodiscard]] bool has_indirect_vgpr_access(const KernelCfgScope &scope) {
-  for (BasicBlock *block : scope.blocks) {
-    if (block == nullptr)
-      continue;
-    if (std::ranges::any_of(block->instructions(), is_indirect_vgpr_access)) {
-      return true;
-    }
-  }
-  return false;
+  const std::string_view mnemonic = instruction.mnemonic();
+  return mnemonic.starts_with("v_movrel") || mnemonic.starts_with("v_swaprel") ||
+         mnemonic.starts_with("s_set_gpr_idx") || mnemonic == "s_setreg_b32" ||
+         mnemonic == "s_setreg_imm32_b32";
 }
 
 [[nodiscard]] uint16_t max_referenced_vgpr_count(const KernelCfgScope &scope) {
@@ -1543,6 +1535,10 @@ struct MoiOwnerRegisterReferenceSummary {
   for (const MoiKernelResourceContext *context : owner_contexts) {
     if (context == nullptr)
       continue;
+    // Reuse liveness's architecture-aware completeness proof. In particular,
+    // S_SET_GPR_IDX_ON makes later ordinary VOP operands indirect even though
+    // no V_MOVREL mnemonic appears in the kernel.
+    result.uses_indirect_vgprs |= !context->liveness->global_vgpr_usage_is_complete();
 
     // Closure is context-specific: a setpc can be a validated return for one
     // owner while remaining an unproven branch for another. Require every CFG
@@ -1822,7 +1818,11 @@ struct MoiResourcePlanningState {
           summarize_moi_owner_register_references(owner);
       stored.has_indirect_sgpr_access = scalar_references.uses_indirect_sgprs;
       stored.sgpr_reference_coverage_complete = scalar_references.control_flow_closed;
-      stored.has_indirect_vgpr_access = has_indirect_vgpr_access(stored.scope);
+      // Static live-before sets cannot name registers reached through relative
+      // or runtime-indexed VGPR operands. Use the liveness analysis's shared
+      // completeness gate instead of maintaining a second, narrower opcode
+      // inventory here.
+      stored.has_indirect_vgpr_access = !stored.liveness->global_vgpr_usage_is_complete();
 
       if (kernel.descriptor_file_offset > bytes.size() ||
           sizeof(KD) > bytes.size() - kernel.descriptor_file_offset) {

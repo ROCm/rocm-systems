@@ -2037,6 +2037,42 @@ TEST(ConSanMoi, FirstLightProbeAutomaticallyUsesDeadVgprs) {
   EXPECT_EQ(only_non_entry_prologue_patch(result).scratch_vgpr, 1);
 }
 
+TEST(ConSanMoi, Cdna4GprIndexedKernelSpillsInsteadOfTrustingPointLiveness) {
+  const auto guest = build_cdna4_ds_store_b32(
+      /*vaddr=*/38, /*vdata=*/50, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(guest);
+  std::array<uint32_t, 420> text_words{};
+  text_words[0] = 0xBF11082Eu; // s_set_gpr_idx_on s46, gpr_idx(DST)
+  text_words[1] = 0x7E000332u; // v_mov_b32_e32 v0, v50 (indexed destination)
+  text_words[2] = 0xBF9C0000u; // s_set_gpr_idx_off
+  std::copy(guest->begin(), guest->end(), text_words.begin() + 3);
+  for (size_t i = 5; i + 1 < text_words.size(); ++i)
+    text_words[i] = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+
+  constexpr uint32_t kCdna4Wave64AllVgprsGranulated = 31u;
+  const std::vector<uint8_t> bytes = make_cdna4_lds_code_object(
+      text_words, "gpr_indexed_record_replay", kCdna4Wave64AllVgprsGranulated);
+  ConSanOptions options = moi_options();
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result))
+      << "warnings=" << testing::PrintToString(result.warnings)
+      << " errors=" << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  const ConSanCandidateResourcePlan &plan = result.resource_plans.front();
+  EXPECT_TRUE(plan.has_indirect_vgpr_access);
+  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::SpillRequired);
+  const auto patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(patch, result.patches.end());
+  EXPECT_GT(patch->spilled_vgpr_count, 0u);
+}
+
 TEST(ConSanMoi, FirstLightProbeAutomaticallyGrowsOwningDescriptor) {
   std::array<uint32_t, 170> text_words{};
   text_words[0] = 0xD8340000u;
