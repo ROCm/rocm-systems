@@ -180,6 +180,16 @@ enum class ScalarSop2Op {
 struct PcValue {
   int64_t offset = 0;
   uint64_t source_getpc_offset = 0;
+  /// @brief Low SGPR of the pair the producing `s_getpc_b64` wrote.
+  ///
+  /// @details Not always the pair the eventual consumer reads. A lane-banked dispatcher builds
+  /// the address in a scratch pair, stashes it through `v_writelane_b32`, and restores it into a
+  /// different pair before the transfer. patch_recovered_builder_fixups regenerates only the add
+  /// half and leaves the original getpc in place, so its replacement has to name this pair:
+  /// naming the consumer's would pair a fresh add against a getpc that writes something else and
+  /// materialize an address derived from an unrelated register. Fully determined by
+  /// source_getpc_offset, so carrying it splits no lattice value that was previously merged.
+  uint16_t source_sreg = 0;
   uint64_t source_recovery_begin_offset = 0;
   uint64_t source_recovery_end_offset = 0;
   /// @brief False once a non-chain instruction was observed inside the recovery
@@ -188,6 +198,16 @@ struct PcValue {
   /// two builder steps would be erased. A value that stops being contiguous can
   /// never regain the property, so any later delta step keeps it false.
   bool contiguous = true;
+  /// @brief True between a split low `s_add_u32` and the `s_addc_u32` that closes it.
+  ///
+  /// @details The high-half step only advances the recovery range; it never changes @ref offset,
+  /// so a half-built chain is numerically indistinguishable from a finished one. Publishing the
+  /// half-built state would let the patcher regenerate `[begin, end)` -- which stops before the
+  /// carry -- and leave that `s_addc_u32` to apply a stale SCC to the freshly written high half,
+  /// because the gfx1250 replacement is the SCC-neutral `s_add_nc_u64`. The single-instruction
+  /// `s_add_nc_u64` form and the temp-delta patterns that already absorb their own carry never set
+  /// this.
+  bool pending_high_carry = false;
 
   friend bool operator==(const PcValue &, const PcValue &) = default;
 };
@@ -650,7 +670,7 @@ private:
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return add_base(0x47);
   case ROCJITSU_CODE_ARCH_RV32I:
   case ROCJITSU_CODE_ARCH_RV64I:
@@ -687,7 +707,7 @@ private:
       return std::nullopt;
     }
     return std::nullopt;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     switch (op) {
     case ScalarSop2Op::AddU32:
       return 0;
@@ -1082,6 +1102,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
 
   value.offset += delta;
   value.source_recovery_end_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
+  value.pending_high_carry = true;
   return true;
 }
 
@@ -1102,6 +1123,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   if (sop2_sreg_inline_zero_to_sreg(inst, word, *addc_u32_opcode, pair_hi, pair_hi) ||
       sop2_sreg_inline_zero_to_sreg(inst, word, *subb_u32_opcode, pair_hi, pair_hi)) {
     value.source_recovery_end_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
+    value.pending_high_carry = false;
     return true;
   }
 
@@ -1113,6 +1135,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
                                 literal)) {
     if (literal == 0 || literal == 0xffffffffu) {
       value.source_recovery_end_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
+      value.pending_high_carry = false;
       return true;
     }
   }
@@ -1132,7 +1155,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   //
   // Match only the self-update literal forms. Register addends would require a
   // separate constant-propagation proof and must continue to fail closed.
-  if (arch != ROCJITSU_CODE_ARCH_GFX1250 || inst.mnemonic() != "s_add_nc_u64" ||
+  if (arch != ROCJITSU_CODE_ARCH_CDNA5 || inst.mnemonic() != "s_add_nc_u64" ||
       inst.num_dst_operands() != 1 || inst.num_src_operands() != 2)
     return false;
 
@@ -1184,10 +1207,45 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
       .source_call_offset = ctx.insts[inst_index]->src_loc(),
       .source_target_offset = static_cast<uint64_t>(value.offset),
       .source_call_sreg = pair_lo,
+      .source_builder_sreg = value.source_sreg,
       .source_is_call = ctx.facts[inst_index].swappc_sdst.has_value(),
       .source_return_sreg = ctx.facts[inst_index].swappc_sdst.value_or(0),
   };
 }
+
+/// @brief Identity of a fixup for deduplication: exactly the fields append_unique() compares.
+struct FixupIdentity {
+  uint64_t call;
+  uint64_t target;
+  uint64_t getpc;
+  uint64_t begin;
+  uint64_t end;
+  uint16_t sreg;
+  friend bool operator==(const FixupIdentity &, const FixupIdentity &) = default;
+};
+
+struct FixupIdentityHash {
+  size_t operator()(const FixupIdentity &id) const noexcept {
+    size_t h = std::hash<uint64_t>{}(id.call);
+    const auto mix = [&h](uint64_t v) {
+      h ^= std::hash<uint64_t>{}(v) + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+    };
+    mix(id.target);
+    mix(id.getpc);
+    mix(id.begin);
+    mix(id.end);
+    mix(id.sreg);
+    return h;
+  }
+};
+
+[[nodiscard]] FixupIdentity fixup_identity(const IndirectCallFixup &fixup) {
+  return {fixup.source_call_offset,         fixup.source_target_offset,
+          fixup.source_getpc_offset,        fixup.source_recovery_begin_offset,
+          fixup.source_recovery_end_offset, fixup.source_call_sreg};
+}
+
+using FixupIndex = std::unordered_map<FixupIdentity, size_t, FixupIdentityHash>;
 
 bool append_unique(std::vector<IndirectCallFixup> &out, IndirectCallFixup fixup) {
   // Deduplicate only FULLY identical fixups. A consumer with several distinct
@@ -1219,6 +1277,26 @@ bool append_unique(std::vector<IndirectCallFixup> &out, IndirectCallFixup fixup)
     duplicate->source_incomplete = duplicate->source_incomplete || fixup.source_incomplete;
     duplicate->source_requires_xcnt_drain =
         duplicate->source_requires_xcnt_drain || fixup.source_requires_xcnt_drain;
+    return false;
+  }
+  out.push_back(fixup);
+  return true;
+}
+
+/// @brief append_unique() with an O(1) duplicate lookup.
+///
+/// @details Same semantics as the scanning form -- same identity, same monotonic flag merge -- but
+/// the caller keeps an index so accumulating N fixups costs O(N) rather than O(N^2). A large
+/// device library recovers tens of thousands of them, and the scan was quadratic in that count on
+/// every round.
+bool append_unique_indexed(std::vector<IndirectCallFixup> &out, FixupIndex &index,
+                           IndirectCallFixup fixup) {
+  const auto [it, inserted] = index.try_emplace(fixup_identity(fixup), out.size());
+  if (!inserted) {
+    IndirectCallFixup &duplicate = out[it->second];
+    duplicate.source_incomplete = duplicate.source_incomplete || fixup.source_incomplete;
+    duplicate.source_requires_xcnt_drain =
+        duplicate.source_requires_xcnt_drain || fixup.source_requires_xcnt_drain;
     return false;
   }
   out.push_back(fixup);
@@ -1360,7 +1438,6 @@ explicit_external_entries(const std::vector<AnalysisBlock> &blocks,
   std::vector<uint8_t> entries(blocks.size(), 0);
   if (!entries.empty())
     entries[0] = 1;
-
   // Analysis blocks are built from the ordered instruction stream. Both input
   // sequences are therefore ascending and can be matched in one merge pass.
   assert(std::ranges::is_sorted(blocks, {}, &AnalysisBlock::offset));
@@ -1492,7 +1569,7 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
     return std::nullopt;
 
   const auto is_gfx1250_padding = [&](size_t index) {
-    if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
+    if (ctx.arch != ROCJITSU_CODE_ARCH_CDNA5)
       return false;
     const Instruction &inst = *ctx.insts[index];
     // The gfx1250 sequence drains XCNT before an instruction prefetch. The
@@ -1577,7 +1654,7 @@ match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock 
     return std::nullopt;
 
   const auto is_gfx1250_padding = [&](size_t index) {
-    if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
+    if (ctx.arch != ROCJITSU_CODE_ARCH_CDNA5)
       return false;
     const Instruction &inst = *ctx.insts[index];
     if (inst.mnemonic() == "s_wait_xcnt" || inst.mnemonic() == "s_prefetch_inst_pc_rel")
@@ -1692,10 +1769,21 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
   // Publish every still-live builder's current value. Called only where the
   // tracked pairs are about to stop being tracked, so the published value is
   // the one the original builder range really produces at that point.
+  // A chain still waiting on its s_addc_u32 is not the value the range produces, and no rewrite of
+  // [begin, end) can be right for it: the regenerated range stops before the carry. Poison instead
+  // of publishing, so a whole-scope relocation claim fails closed rather than resting on a value
+  // the program never finished computing.
+  const auto publish_or_poison = [&](uint16_t pair_lo, const PcValue &value) {
+    if (value.pending_high_carry)
+      poison_pc_builder(pc_builders, value.source_getpc_offset);
+    else
+      note_pc_builder(pc_builders, pair_lo, value);
+  };
+
   const auto note_live_pc_builders = [&] {
     for (uint16_t pair_lo : state.active_pairs()) {
       if (const PcValue *value = state.builder(pair_lo))
-        note_pc_builder(pc_builders, pair_lo, *value);
+        publish_or_poison(pair_lo, *value);
     }
   };
 
@@ -1708,14 +1796,22 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
       // s_getpc_b64 writes the address of the following instruction. The
       // low/high add sequence edits this base to the eventual branch target.
       const uint16_t pair_lo = *facts.getpc_sdst;
-      // A second builder overwriting the same pair abandons the first one at an
-      // unknown point in its chain. No single delta rewrite is provably correct
-      // for an abandoned chain, so poison it rather than publish a partial value.
+      // A second builder seeding the same pair is a stable point for the first one, in exactly the
+      // sense note_pc_builder means: the pair stops being tracked as the old builder here, and the
+      // old chain cannot be extended afterwards because any later arithmetic on this pair edits the
+      // new builder's value. Whatever the replaced range produces at this instruction is therefore
+      // final, and it is precisely what any consumer between the two getpcs read -- so publish it.
+      //
+      // Poisoning instead used to abandon a completed producer merely because its pair was reused.
+      // Code that materializes several function pointers through one scratch pair -- build, spill
+      // to a VGPR lane, rebuild -- would leave a poisoned record behind for the first pointer and
+      // defeat any whole-scope or whole-object claim that every code address is relocated.
       if (const PcValue *replaced = state.builder(pair_lo))
-        poison_pc_builder(pc_builders, replaced->source_getpc_offset);
+        publish_or_poison(pair_lo, *replaced);
       seed_pc_builder(pc_builders, inst.src_loc(), pair_lo);
       state.set_builder(pair_lo, PcValue{.offset = static_cast<int64_t>(next_offset),
                                          .source_getpc_offset = inst.src_loc(),
+                                         .source_sreg = pair_lo,
                                          .source_recovery_begin_offset = next_offset,
                                          .source_recovery_end_offset = next_offset});
       continue;
@@ -1861,16 +1957,67 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
   // that bounded set avoids repeatedly scanning every fact
   // to recover information that changes only when the corresponding vector does.
   std::vector<std::bitset<REGISTER_SET_MAX_SGPRS>> entry_pairs(blocks.size());
-  std::deque<size_t> worklist;
+
+  // Visit blocks in reverse postorder. The least fixed point of this monotone
+  // join does not depend on the visit order, but the order decides how many
+  // times it is recomputed. A recovered indirect call gives its shared callee
+  // block one predecessor per call site -- thousands of them on a large device
+  // library -- and popping in block-index order then re-evaluates that
+  // O(predecessors x pairs) join once for every predecessor that happens to be
+  // processed after it. Reverse postorder evaluates a predecessor before its
+  // successors wherever the graph is acyclic, so a block is normally recomputed
+  // only for its back edges. On the largest hipTensor object this is the
+  // difference between 84.8M block visits and 558k, and between 264 s and 0.7 s
+  // per round.
+  //
+  // The order is a pure function of the block graph: roots are tried in
+  // ascending block index, successors in their stored order, and the root loop
+  // covers every block, so blocks unreachable from any earlier root still
+  // receive a position and are still seeded onto the worklist below.
+  std::vector<size_t> rpo_order;
+  rpo_order.reserve(blocks.size());
+  {
+    std::vector<uint8_t> visited(blocks.size(), 0);
+    std::vector<std::pair<size_t, size_t>> stack;
+    for (size_t root = 0; root < blocks.size(); ++root) {
+      if (visited[root])
+        continue;
+      visited[root] = 1;
+      stack.emplace_back(root, 0);
+      while (!stack.empty()) {
+        const size_t node = stack.back().first;
+        size_t &next_successor = stack.back().second;
+        if (next_successor < blocks[node].successors.size()) {
+          const size_t successor = blocks[node].successors[next_successor++];
+          if (successor < blocks.size() && !visited[successor]) {
+            visited[successor] = 1;
+            stack.emplace_back(successor, 0);
+          }
+          continue;
+        }
+        rpo_order.push_back(node);
+        stack.pop_back();
+      }
+    }
+  }
+  std::ranges::reverse(rpo_order);
+  std::vector<size_t> rpo_position(blocks.size(), 0);
+  for (size_t position = 0; position < rpo_order.size(); ++position)
+    rpo_position[rpo_order[position]] = position;
+
+  // Keyed by reverse-postorder position so the lowest position is always popped
+  // next. Positions are unique, so this is a total order and the pop sequence is
+  // fully determined by the block graph.
+  std::set<size_t> worklist;
   std::vector<bool> on_worklist(blocks.size(), false);
   for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
-    worklist.push_back(block_index);
+    worklist.insert(rpo_position[block_index]);
     on_worklist[block_index] = true;
   }
 
   while (!worklist.empty()) {
-    const size_t block_index = worklist.front();
-    worklist.pop_front();
+    const size_t block_index = rpo_order[*worklist.begin()];
+    worklist.erase(worklist.begin());
     on_worklist[block_index] = false;
 
     LatticeFacts new_entry;
@@ -1956,7 +2103,7 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
     for (size_t successor : blocks[block_index].successors) {
       if (on_worklist[successor])
         continue;
-      worklist.push_back(successor);
+      worklist.insert(rpo_position[successor]);
       on_worklist[successor] = true;
     }
   }
@@ -2137,7 +2284,28 @@ private:
 // state even when their backing storage is shared, so the bound is
 // conservative. Recovery is optional and fails closed on exhaustion.
 constexpr size_t kRetainedAnalysisUnitBytes = 64;
-constexpr size_t kMaxRetainedAnalysisUnits = size_t{1} << 20;
+// The retained charge scales with block count, not with how many lane stashes an object actually
+// uses: hipTensor's contraction kernels reach ~2.9M units across ~55k blocks and exhausted a 1<<20
+// bound partway through, which abandons lane recovery for the WHOLE object and leaves every
+// s_swap_pc_i64 unrecovered for the by-construction gate to refuse. The charge is deliberately
+// conservative -- states share copy-on-write backing and are billed once per entry/exit/call even
+// when identical -- so the nominal figure overstates real memory several times over. Measured peak
+// RSS across the hipTensor objects this admits is 243 MB, 273 MB, 288 MB and 653 MB for a 3.4 MB
+// input, against the corpus per-object budget of 4096 MiB, and the slowest takes 4.4 s of a 30 s
+// budget. Exhaustion remains fail-closed, so a still larger object loses recovery rather than
+// memory.
+//
+// Sized to admit the objects real workloads dispatch rather than to leave headroom. hipTensor's
+// scale_contraction and trinary_scale_contraction tests dispatch 4.65 MB and 4.70 MB objects that
+// 1<<24 still refused; at this bound they translate in 7.6 s and 1.06 GB, against a 30 s and
+// 4096 MiB per-object budget.
+//
+// Raising it does NOT expose the loader to the multi-minute translations some very large objects
+// take. Those are pre-existing and not governed by this constant: the 8.3 MB hipTensor object costs
+// 510 s / 2.4 GB on unmodified develop at 1<<20, 541 s at 1<<24 and 552 s at 1<<26 -- about 6%
+// across a 64x change in the bound, because the time is spent outside lane recovery almost
+// entirely. Exhaustion stays fail-closed: an object that outgrows this loses recovery, not memory.
+constexpr size_t kMaxRetainedAnalysisUnits = size_t{1} << 26;
 constexpr size_t kMaxCalleeSummaryVariantsPerTarget = 8;
 constexpr size_t kCalleeSummaryCacheEntryUnits =
     1 + (sizeof(CalleeSummaryCacheKey) + sizeof(std::optional<CalleeSummary>) + 3 * sizeof(void *) -
@@ -2452,7 +2620,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
   // This pass only observes MODE; it never inserts or reorders
   // S_SETREG/S_SET_VGPR_MSB and therefore cannot violate the required co-issue
   // spacing.
-  if (ctx.arch != ROCJITSU_CODE_ARCH_GFX1250)
+  if (ctx.arch != ROCJITSU_CODE_ARCH_CDNA5)
     return;
 
   if (blocks.empty())
@@ -2721,6 +2889,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         const uint64_t next_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
         builders.set_builder(*facts.getpc_sdst, PcValue{.offset = static_cast<int64_t>(next_offset),
                                                         .source_getpc_offset = inst.src_loc(),
+                                                        .source_sreg = *facts.getpc_sdst,
                                                         .source_recovery_begin_offset = next_offset,
                                                         .source_recovery_end_offset = next_offset});
         continue;
@@ -3281,6 +3450,7 @@ void recover_signed_delta_templates(const AnalysisContext &ctx,
         .offset = static_cast<int64_t>(getpc_next) +
                   static_cast<int64_t>(static_cast<int32_t>(literal)) + 4,
         .source_getpc_offset = getpc_inst.src_loc(),
+        .source_sreg = *pair_lo,
         .source_recovery_begin_offset = getpc_next,
         .source_recovery_end_offset = sub_consumer->recovery_end,
     };
@@ -3310,14 +3480,23 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
 [[nodiscard]] std::vector<IndirectCallFixup> discover_indirect_branch_edges_unfiltered(
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
     std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
-    std::vector<PcAddressBuilder> *pc_builders) {
+    std::vector<PcAddressBuilder> *pc_builders, std::span<const uint64_t> extra_split_points) {
   std::vector<IndirectCallFixup> recovered;
+  FixupIndex recovered_index;
   AnalysisContext ctx = build_context(insts, text, arch);
   std::vector<uint64_t> sorted_extra_leaders(extra_leaders.begin(), extra_leaders.end());
   std::ranges::sort(sorted_extra_leaders);
   sorted_extra_leaders.erase(std::ranges::unique(sorted_extra_leaders).begin(),
                              sorted_extra_leaders.end());
+  // A split point shapes the block graph but says nothing about how a block is entered. Keeping
+  // these out of sorted_extra_leaders is the whole point of the distinction: under ExplicitOnly
+  // every explicit entry is treated as externally entered, so promoting an ordinary helper to one
+  // would discard the incoming SGPR-pair facts its real callers establish and leave otherwise
+  // recoverable getpc flows unresolved.
   std::vector<uint64_t> leaders(sorted_extra_leaders);
+  leaders.insert(leaders.end(), extra_split_points.begin(), extra_split_points.end());
+  std::ranges::sort(leaders);
+  leaders.erase(std::ranges::unique(leaders).begin(), leaders.end());
 
   PcAddressBuilderMap round_builders;
   for (size_t iteration = 0; iteration < kMaxIndirectDiscoveryIterations; ++iteration) {
@@ -3351,7 +3530,7 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
 
     bool changed = false;
     for (const IndirectCallFixup &fixup : iteration_recovered)
-      changed |= append_unique(recovered, fixup);
+      changed |= append_unique_indexed(recovered, recovered_index, fixup);
     if (!changed)
       break;
   }
@@ -3389,7 +3568,7 @@ bool is_callee_saved_sgpr(uint16_t sgpr) {
 std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
     std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
-    std::vector<PcAddressBuilder> *pc_builders) {
+    std::vector<PcAddressBuilder> *pc_builders, std::span<const uint64_t> extra_split_points) {
   if (pc_builders != nullptr)
     pc_builders->clear();
   if (insts.empty())
@@ -3408,14 +3587,14 @@ std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     // Keep the cheap predicate coupled to every fixup producer. A future
     // recovery path for another consumer kind must extend the predicate above.
     const auto unfiltered = discover_indirect_branch_edges_unfiltered(
-        insts, text, arch, extra_leaders, entry_policy, nullptr);
+        insts, text, arch, extra_leaders, entry_policy, nullptr, extra_split_points);
     assert(unfiltered.empty() && "indirect-recovery prefilter skipped a fixup-producing consumer");
 #endif
     return {};
   }
 
   return discover_indirect_branch_edges_unfiltered(insts, text, arch, extra_leaders, entry_policy,
-                                                   pc_builders);
+                                                   pc_builders, extra_split_points);
 }
 
 } // namespace rocjitsu

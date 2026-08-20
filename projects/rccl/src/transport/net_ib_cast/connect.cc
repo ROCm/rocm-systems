@@ -897,6 +897,9 @@ ib_recv_dev_list:
     if (comm->base.resiliency) {
       IbCastResiliencyDataCqSizeGet(comm->base.resiliency, i, &cqSize);
     }
+    if (IbCastDevs[ibDevN].maxCqe > 0) {
+      cqSize = std::min(IbCastDevs[ibDevN].maxCqe, cqSize);
+    }
     NCCLCHECKGOTO(IbCastInitCommDevBase(ibDevN, &comm->devs[i].base, &comm->base.stats, cqSize), ret, fail);
     comm->ar = comm->ar && IbCastDevs[ibDevN].ar; // ADAPTIVE_ROUTING - if all merged devs have it enabled
     if (comm->base.resiliency) {
@@ -1463,11 +1466,14 @@ ib_recv:
   /* copy back the received info */
   memcpy(&remMeta, stage->buffer, sizeof(struct ncclIbConnectionMetadata));
 
-  rComm->useCtsOffload = IbCastIsCtsOffloadEnabled(remMeta.isP2p);
+  rComm->useCtsOffload = IbCastIsCtsOffloadEnabled(remMeta.isP2p) && !remMeta.isRMA;
   rComm->base.recvMatchingScheme = IbCastResolveRecvMatchingScheme(rComm->useCtsOffload);
-  INFO(NCCL_NET, "NET/IB: ncclIbAccept isP2p=%d useCtsOffload=%d (IbP2pDisableCts=%ld) recvMatchingScheme=%d",
-       remMeta.isP2p, rComm->useCtsOffload, rcclParamIbCastP2pDisableCts(), rComm->base.recvMatchingScheme);
+  INFO(NCCL_NET, "NET/IB: ncclIbAccept isP2p=%d isRMA=%d useCtsOffload=%d (IbP2pDisableCts=%ld) recvMatchingScheme=%d",
+       remMeta.isP2p, remMeta.isRMA, rComm->useCtsOffload, rcclParamIbCastP2pDisableCts(), rComm->base.recvMatchingScheme);
   rComm->base.nqps = IbCastCalculateNqps(remMeta.isP2p, rComm->base.vProps.ndevs, remMeta.ndevs, __func__);
+  if (remMeta.isRMA) {
+    rComm->base.nqps = 1;
+  }
   rComm->base.nDataQps = std::max(rComm->base.vProps.ndevs, remMeta.ndevs);
 
   // IB setup
@@ -1496,6 +1502,9 @@ ib_recv:
     ibDevN = rComm->base.vProps.devs[i];
     if (rComm->base.resiliency) {
       IbCastResiliencyDataCqSizeGet(rComm->base.resiliency, i, &cqSize);
+    }
+    if (IbCastDevs[ibDevN].maxCqe > 0) {
+      cqSize = std::min(IbCastDevs[ibDevN].maxCqe, cqSize);
     }
     NCCLCHECKGOTO(IbCastInitCommDevBase(ibDevN, &rCommDev->base, &rComm->base.stats, cqSize), ret, fail);
     if (rComm->base.resiliency) {

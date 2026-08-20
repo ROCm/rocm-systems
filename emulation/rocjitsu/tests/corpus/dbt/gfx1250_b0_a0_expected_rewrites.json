@@ -1,7 +1,7 @@
 {
   "expected_rewrites": {
     "00023c9f3fc277f35d928cca3a2e5614bba26b581e71abd3bbcff3fe3a417405": {
-      "instructions_requiring_rewrite": 9
+      "instructions_requiring_rewrite": 10
     }
   },
   "input_revision": "b0",

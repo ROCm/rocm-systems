@@ -262,6 +262,8 @@ public:
             rankToLocalRankInstalled_ = true;
         }
         rankToLocalRankStorage_[peerRank] = peerLocalRank;
+        if (comm_.nRanks <= peerRank) comm_.nRanks = peerRank + 1;
+        if (comm_.localRanks <= peerLocalRank) comm_.localRanks = peerLocalRank + 1;
         return *this;
     }
 

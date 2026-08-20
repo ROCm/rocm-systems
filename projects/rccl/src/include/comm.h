@@ -554,6 +554,7 @@ struct ncclPeerInfo {
   uint64_t pidHash;
   dev_t shmDev;
   int64_t busId;
+  cudaUUID_t gpuUuid;
   struct ncclComm* comm;
   int cudaCompCap;
   size_t totalGlobalMem;
@@ -573,6 +574,7 @@ struct ncclPeerInfo {
   bool crossNicSupport;
   bool rmaPluginAvailable;
   bool cuMemGdrSupport;
+  int mloPart; // MLOPart partition index, or -1 if not an MLOPart GPU
 };
 
 typedef enum ncclGroupTaskType {
@@ -611,14 +613,16 @@ struct ncclComm {
   struct ncclProxyConnector* gproxyConn;
   struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next> legacyRegCleanupQueue;
   bool peerInfoValid;
-  float minNetBw;
+  int minNetCount; // Minimum number of network devices local to a rank
+  float minNetBw; // Minimum bw of any network device local to a rank
 
   ncclNet_t* ncclNet;
   void* netContext;
   void* ginContext;
-  void* rmaGinContext;
+  void* rmaContext;
   int netPluginIndex;
   int ginPluginIndex;
+  int rmaPluginIndex;
   int ncclNetVer;
   ncclNetDeviceType netDeviceType;
   ncclCollNet_t* ncclCollNet;
@@ -666,6 +670,8 @@ struct ncclComm {
   int compCap; // compute capability of the GPU
   int minCompCap, maxCompCap; // min/max compute capability in the communicator
   int64_t busId; // my PCI bus ID in int format
+  bool sideStreamAcquired; // whether this comm holds a side-stream scope ref
+  int sideStreamPriority;  // priority key of the side stream this comm acquired
   ncclAffinity cpuAffinity; // CPU affinity of the GPU
   int WarpSize;
   int cudaArch; // matches __CUDA_ARCH__ of device
@@ -702,7 +708,6 @@ struct ncclComm {
 
   // MNNVL: Multi-Node NVLink
   int MNNVL; // true when MNNVL is available
-  bool isMultiRankGpu; // true when multiple ranks use the same GPU device on the same host
   struct cliqueInfo clique; // Our MNNVL clique information
   int cliqueRank; // Our rank within the MNNVL clique
 
@@ -807,6 +812,7 @@ struct ncclComm {
   uint8_t collNetSupportMatrix[4 /*sum,prod,max,min*/][ncclNumTypes];
   int* collNetHeads;
   int collNetHeadsNum;
+  int collNetChainSupport;
   int* collNetDenseToUserRank;
   int* collNetUserToDenseRank;
   /* sharable collNet proxy progress resource. */
@@ -919,6 +925,9 @@ struct ncclComm {
   int symmetricSupport;
   bool useNetPXN;
   bool useGdr;
+  bool hasMloPart; // if mlopart is used
+  bool hasMultiRankNvml; // if multiple ranks are using the NVML device
+  bool isMultiRankGpu; // if multiple ranks are sharing the same GPU (bus id) on a node
   ncclGinConnectionType_t globalGinSupport;
   bool globalRmaProxySupport;
   bool hostRmaSupport;

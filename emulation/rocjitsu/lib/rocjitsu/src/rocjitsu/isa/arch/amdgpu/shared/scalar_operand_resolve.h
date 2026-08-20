@@ -26,9 +26,9 @@ namespace amdgpu {
 // value for this arch (124 on most arches; 125 on RDNA 3 / RDNA 3.5 / RDNA4
 // / GFX1250, where 124 is the NULL slot).
 inline uint32_t resolve_src_scalar(const Wavefront &wf, int ev, int m0_ev) {
-  if (ev == 102)
+  if (arch_uses_legacy_flat_scratch_sgprs(wf.cu().arch()) && ev == 102)
     return static_cast<uint32_t>(wf.scratch_base());
-  if (ev == 103)
+  if (arch_uses_legacy_flat_scratch_sgprs(wf.cu().arch()) && ev == 103)
     return static_cast<uint32_t>(wf.scratch_base() >> 32);
   if (ev <= 105)
     return RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
@@ -36,8 +36,13 @@ inline uint32_t resolve_src_scalar(const Wavefront &wf, int ev, int m0_ev) {
     return static_cast<uint32_t>(wf.vcc());
   if (ev == 107)
     return static_cast<uint32_t>(wf.vcc() >> 32);
+  // TTMP0-15 are the trap handler's private scratch registers. They are NOT
+  // part of the wave's SGPR allocation: hardware banks them separately, the CP
+  // seeds them with the dispatch/queue identity that rocm-dbgapi reads back out
+  // of the CWSR area, and a shader that never enters a trap must not be able to
+  // clobber them through an SGPR write.
   if (ev >= 108 && ev <= 123)
-    return RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
+    return wf.ttmp(static_cast<uint32_t>(ev - 108));
   if (m0_ev == 125 && ev == 124)
     return 0u; // NULL
   if (ev == m0_ev)
@@ -85,13 +90,9 @@ inline uint32_t resolve_src_scalar(const Wavefront &wf, int ev, int m0_ev) {
   if (ev == 250)
     return 0u; // NULL
   if (ev == 251)
-    return (wf.vcc() & (wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL))) == 0
-               ? 1u
-               : 0u; // VCCZ
-  if (ev == 252) {
-    uint64_t active = wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL);
-    return (wf.exec() & active) == 0 ? 1u : 0u; // EXECZ
-  }
+    return wf.vcc_mask() == 0 ? 1u : 0u; // VCCZ
+  if (ev == 252)
+    return wf.exec() == 0 ? 1u : 0u; // EXECZ
   if (ev == 253)
     return wf.read_scc() ? 1u : 0u; // SCC
   throw std::logic_error("Unsupported encoding value for scalar read: " + std::to_string(ev));
@@ -139,7 +140,7 @@ inline bool can_resolve_src_scalar(int ev, int m0_ev) {
 }
 
 inline uint64_t resolve_src_scalar64(const Wavefront &wf, int ev, int m0_ev) {
-  if (ev == 102)
+  if (arch_uses_legacy_flat_scratch_sgprs(wf.cu().arch()) && ev == 102)
     return wf.scratch_base();
   if (ev <= 105) {
     uint32_t lo = RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
@@ -149,10 +150,9 @@ inline uint64_t resolve_src_scalar64(const Wavefront &wf, int ev, int m0_ev) {
   }
   if (ev == 106)
     return wf.vcc();
-  if (ev >= 108 && ev <= 122) {
-    uint32_t lo = RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
-    uint32_t hi =
-        RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));
+  if (ev >= 108 && ev <= 122) { // TTMP pair; see resolve_src_scalar()
+    uint32_t lo = wf.ttmp(static_cast<uint32_t>(ev - 108));
+    uint32_t hi = wf.ttmp(static_cast<uint32_t>(ev - 107));
     return static_cast<uint64_t>(hi) << 32 | lo;
   }
   if (m0_ev == 125 && ev == 124)
@@ -197,12 +197,12 @@ inline uint64_t resolve_src_scalar64(const Wavefront &wf, int ev, int m0_ev) {
 }
 
 inline void resolve_dst_write(Wavefront &wf, int ev, uint32_t val, int m0_ev) {
-  if (ev == 102) {
+  if (arch_uses_legacy_flat_scratch_sgprs(wf.cu().arch()) && ev == 102) {
     uint64_t sb = wf.scratch_base();
     wf.set_scratch_base((sb & 0xFFFFFFFF00000000ULL) | val);
     return;
   }
-  if (ev == 103) {
+  if (arch_uses_legacy_flat_scratch_sgprs(wf.cu().arch()) && ev == 103) {
     uint64_t sb = wf.scratch_base();
     wf.set_scratch_base((sb & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));
     return;
@@ -219,8 +219,8 @@ inline void resolve_dst_write(Wavefront &wf, int ev, uint32_t val, int m0_ev) {
     wf.set_vcc((wf.vcc() & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));
     return;
   }
-  if (ev >= 108 && ev <= 123) {
-    RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);
+  if (ev >= 108 && ev <= 123) { // see resolve_src_scalar()
+    wf.set_ttmp(static_cast<uint32_t>(ev - 108), val);
     return;
   }
   if (m0_ev == 125 && ev == 124)
@@ -241,7 +241,7 @@ inline void resolve_dst_write(Wavefront &wf, int ev, uint32_t val, int m0_ev) {
 }
 
 inline void resolve_dst_write64(Wavefront &wf, int ev, uint64_t val) {
-  if (ev == 102) {
+  if (arch_uses_legacy_flat_scratch_sgprs(wf.cu().arch()) && ev == 102) {
     wf.set_scratch_base(val);
     return;
   }
@@ -256,11 +256,9 @@ inline void resolve_dst_write64(Wavefront &wf, int ev, uint64_t val) {
     wf.set_vcc(val);
     return;
   }
-  if (ev >= 108 && ev <= 122) {
-    RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev),
-                                  static_cast<uint32_t>(val));
-    RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1),
-                                  static_cast<uint32_t>(val >> 32));
+  if (ev >= 108 && ev <= 122) { // TTMP pair; see resolve_src_scalar()
+    wf.set_ttmp(static_cast<uint32_t>(ev - 108), static_cast<uint32_t>(val));
+    wf.set_ttmp(static_cast<uint32_t>(ev - 107), static_cast<uint32_t>(val >> 32));
     return;
   }
   if (ev == 124)

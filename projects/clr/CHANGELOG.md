@@ -2,6 +2,13 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
+## HIP 10.1.0 for ROCm 10.1.0
+
+### Added
+* New HIP APIs
+    - Device Management: support for querying a device identifier.
+      * `hipDeviceGetLuid` returns the locally unique identifier (LUID) and device node mask for a device
+
 ## HIP 10.0.0 for ROCm 10.0.0
 
 ### Added

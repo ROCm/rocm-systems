@@ -32,6 +32,7 @@
 #include "simdojo/sim/component.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <functional>
@@ -40,6 +41,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -70,7 +72,19 @@ struct HwQueue {
   uint64_t last_doorbell = 0;
   bool host_accessible = false;
   bool is_sdma = false;
+  bool debug_suspended = false;
+  bool runtime_suspended = false;
+  /// A command-processor pass observed this queue while its debugger gate was closed.
+  /// Cleared on resume after scheduling one pass to process the deferred work.
+  bool debug_work_deferred = false;
   uint64_t queue_desc_va = 0;
+  uint64_t exception_status_va = 0;
+  uint32_t exception_event_id = 0;
+  /// CP-private monotonic fetch cursor: the next ring index to fetch. Normally
+  /// tracks read_ptr_va exactly, but stays ahead of it while the debugger holds
+  /// the queue's read_dispatch_id at a trapped dispatch (so packets are not
+  /// re-fetched). See fetch_from_queue and serialize_queue_debug_waves.
+  uint64_t fetch_cursor = 0;
 };
 
 enum class SdmaPacketDialect {
@@ -137,10 +151,24 @@ public:
     scratch_allocator_ = std::move(cb);
   }
 
+  /// @brief Number of shader engines per XCC (array_count / simd_arrays_per_engine).
+  /// Used as the divisor when publishing COMPUTE_TMPRING_SIZE.WAVES so that
+  /// rocm-dbgapi's scratch_memory_region does not disable private access.
+  void set_scratch_wave_divisor(uint32_t se_per_xcc) {
+    scratch_wave_divisor_ = se_per_xcc == 0 ? 1 : se_per_xcc;
+  }
+
   void register_queue(HwQueue queue);
   void unregister_queue(uint32_t queue_id, uint32_t process_id);
   void update_queue(uint32_t queue_id, uint32_t process_id, uint64_t ring_base_va,
-                    uint32_t ring_size);
+                    uint32_t ring_size, uint32_t queue_percentage);
+  void set_queue_debug_suspended(uint32_t queue_id, uint32_t process_id, bool suspended);
+  bool signal_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status);
+  uint64_t read_process_memory64(uint64_t address, uint32_t process_id) const {
+    return memory_ && memory_->is_fetchable(address, process_id)
+               ? memory_->read64(address, process_id)
+               : 0;
+  }
 
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
@@ -174,6 +202,19 @@ public:
 
   size_t dispatched_count() const { return total_dispatched_; }
 
+  /// @brief Total workgroups this CP has placed on its own XCD's compute units.
+  /// @details Distinct from dispatched_count(), which counts AQL packets. This is
+  /// a lifetime running total, not a per-dispatch figure: to see how one grid was
+  /// spread, snapshot every XCD's counter before the dispatch and diff afterwards.
+  ///
+  /// Atomic because the increment happens on the dispatch path under
+  /// hw_queue_mutex_ while SoC::dispatched_workgroups_per_xcd() reads every XCD's
+  /// counter without that lock. Relaxed ordering is enough: this is a cumulative
+  /// statistic, not a synchronization point.
+  [[nodiscard]] uint64_t dispatched_workgroups() const {
+    return dispatched_workgroups_.load(std::memory_order_relaxed);
+  }
+
   size_t next_cu_index() const { return next_cu_; }
 
   const std::vector<simdojo::Port *> &dispatch_ports() const { return dispatch_ports_; }
@@ -186,15 +227,45 @@ public:
   /// @brief Test-only view of the doorbell monitor lifecycle flag.
   ///
   /// @details Exposes doorbell_running_ so a regression test can observe the
-  /// monitor retiring after the last host-accessible queue is destroyed and
+  /// monitor stopping after the last host-accessible queue is destroyed and
   /// restarting when a new one registers. Read under doorbell_thread_mutex_ so it
-  /// never races the loop's self-exit or ensure_doorbell_monitor().
+  /// never races monitor teardown or ensure_doorbell_monitor().
   [[nodiscard]] bool doorbell_monitor_running_for_test() {
     std::lock_guard<std::mutex> lock(doorbell_thread_mutex_);
     return doorbell_running_;
   }
+  /// @brief Test-only check that teardown reaped the monitor's thread handle.
+  [[nodiscard]] bool doorbell_monitor_joinable_for_test() {
+    std::lock_guard<std::mutex> lock(doorbell_thread_mutex_);
+    return doorbell_thread_.joinable();
+  }
+
+  /// @brief Test-only view of one queue's debugger suspension gate.
+  [[nodiscard]] bool queue_debug_suspended_for_test(uint32_t queue_id, uint32_t process_id) {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    auto queue = std::find_if(hw_queues_.begin(), hw_queues_.end(), [&](const auto &candidate) {
+      return candidate.queue_id == queue_id && candidate.process_id == process_id;
+    });
+    return queue != hw_queues_.end() && queue->debug_suspended;
+  }
+
+  [[nodiscard]] bool queue_runtime_suspended_for_test(uint32_t queue_id, uint32_t process_id) {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    auto queue = std::find_if(hw_queues_.begin(), hw_queues_.end(), [&](const auto &candidate) {
+      return candidate.queue_id == queue_id && candidate.process_id == process_id;
+    });
+    return queue != hw_queues_.end() && queue->runtime_suspended;
+  }
+
+  /// @brief Test-only count of executed command-processor doorbell passes.
+  [[nodiscard]] uint64_t doorbell_handle_count_for_test() const {
+    return doorbell_handle_count_.load(std::memory_order_relaxed);
+  }
 
 private:
+  struct ClusterWorkgroupPlacement;
+  struct ClusterBarrierState;
+
   /// @brief Initialize a wavefront's registers per the AMDHSA ABI.
   void init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf, const DispatchEntry &entry,
                            uint32_t global_wg_id, uint32_t wf_index_in_wg);
@@ -240,9 +311,10 @@ private:
   void flush_gpu_caches();
 
   /// @brief Parse an AQL dispatch packet, read its kernel descriptor, and create a DispatchEntry.
+  /// @param aql_packet_id AQL ring packet id (queue read index) for debugger correlation.
   void process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt, const HwQueue &queue,
-                          uint64_t pkt_addr, HwQueueState &qs,
-                          ClusterDispatchShape cluster_shape = {});
+                          uint64_t pkt_addr, uint32_t queue_packet_id, HwQueueState &qs,
+                          uint64_t aql_packet_id = 0, ClusterDispatchShape cluster_shape = {});
 
   rocr::llvm::amdhsa::kernel_descriptor_t
   read_kernel_descriptor(uint64_t kernel_object, uint32_t vmid, bool host_accessible = false);
@@ -251,9 +323,22 @@ private:
 
   void register_cluster_workgroup(const DispatchEntry &entry, uint32_t local_wg_id,
                                   uint32_t global_wg_id, ComputeUnitCore *cu, uint32_t lds_base);
+  bool cluster_barrier_signal(Wavefront &wf, int32_t barrier_id);
+  uint32_t cluster_barrier_state(const Wavefront &wf, int32_t barrier_id,
+                                 uint32_t allocation_blocks) const;
+  bool cluster_barrier_valid(const Wavefront &wf, int32_t barrier_id) const;
+  bool find_valid_cluster_barrier_locked(const Wavefront &wf, int32_t barrier_id,
+                                         ClusterWorkgroupPlacement *&placement,
+                                         ClusterBarrierState *&barriers);
+  bool find_valid_cluster_barrier_locked(const Wavefront &wf, int32_t barrier_id,
+                                         const ClusterWorkgroupPlacement *&placement,
+                                         const ClusterBarrierState *&barriers) const;
   void mark_cluster_workgroup_complete(uint32_t dispatch_id, uint32_t wg_id);
   void erase_cluster_workgroup(uint32_t dispatch_id, uint32_t wg_id);
   void erase_cluster_workgroups(uint32_t dispatch_id);
+  /// @brief Drop cluster LDS pins collected under cluster_placements_mutex_.
+  /// @warning Must run with that lock released; it reaches the CUs' wave-state lock.
+  void release_cluster_lds_pins(const std::vector<std::pair<ComputeUnitCore *, uint64_t>> &unpin);
 
   /// @brief Asynchronous Compute Engine (ACE): dispatch workgroups from all
   /// active queues to SPIs and run CUs to completion.
@@ -322,6 +407,7 @@ private:
   SdmaPacketDialect sdma_packet_dialect_ = SdmaPacketDialect::Legacy;
   uint32_t next_dispatch_id_ = 1;
   size_t total_dispatched_ = 0;
+  std::atomic<uint64_t> dispatched_workgroups_{0};
 
   struct ClusterWorkgroupPlacement {
     ComputeUnitCore *cu = nullptr;
@@ -333,11 +419,30 @@ private:
     std::vector<uint32_t> peer_wg_ids;
   };
   std::unordered_map<uint64_t, ClusterWorkgroupPlacement> cluster_wg_placements_;
+  /// @brief Guards @ref cluster_wg_placements_ and @ref cluster_barriers_, not the
+  /// queue state.
+  /// @details A multicast LDS write resolves its peers from the CU's execute
+  /// path, which already holds that CU's wave-state lock, while a dispatch takes
+  /// hw_queue_mutex_ and then the wave-state lock. Sharing hw_queue_mutex_ here
+  /// would close that cycle, so the map gets its own lock, ordered after both.
+  /// Nothing may call into a CU while holding it -- see
+  /// erase_cluster_workgroup(), which collects its LDS cleanup and runs it after
+  /// the unlock.
+  mutable std::recursive_mutex cluster_placements_mutex_;
+  struct ClusterBarrierState {
+    uint32_t expected_member_count = 0;
+    uint32_t member_count = 0;
+    std::unordered_set<uint32_t> registered_workgroups;
+    std::array<std::unordered_set<uint32_t>, 2> signaled_workgroups;
+  };
+  std::unordered_map<uint64_t, ClusterBarrierState> cluster_barriers_;
 
   simdojo::Event doorbell_event_{this, simdojo::EventType::TIMER_CALLBACK};
   std::recursive_mutex hw_queue_mutex_;
 
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
+
+  friend class ComputeUnitCore;
 
   /// @brief Read a uint64 from GPU virtual address space via GpuMemory translation.
   uint64_t read_gpu_u64(uint64_t va, uint32_t vmid) const;
@@ -352,21 +457,28 @@ private:
   void write_gpu_block(uint64_t va, const void *src, size_t size, uint32_t vmid);
 
   void stop_doorbell_monitor();
-  /// @brief Start the doorbell monitor if one is not already running, reaping a
-  /// previously self-exited thread first. Serialized by doorbell_thread_mutex_.
-  /// @details Caller MUST NOT hold hw_queue_mutex_: this may join a monitor that
-  /// self-exited, and that monitor's final self-exit check takes hw_queue_mutex_,
-  /// so joining under it would deadlock. This also fixes the lock order to
-  /// doorbell_thread_mutex_ -> hw_queue_mutex_ (never the reverse).
+  /// @brief Stop and join the monitor only when no host-accessible queue remains.
+  /// @details Caller MUST NOT hold hw_queue_mutex_: this helper takes that mutex
+  /// to recheck the queue set, then may join a poller that needs the same mutex to
+  /// finish its current scan. Serializing the recheck with startup ensures a
+  /// concurrently registered queue cannot be left without a polling thread.
+  void stop_doorbell_monitor_if_idle();
+  /// @brief Start the doorbell monitor if one is not already running.
+  /// @details Serialized by doorbell_thread_mutex_. Caller MUST NOT hold
+  /// hw_queue_mutex_ so lifecycle operations consistently acquire
+  /// doorbell_thread_mutex_ before hw_queue_mutex_.
   void ensure_doorbell_monitor();
   bool scan_doorbells();
 
   InterruptCallback interrupt_cb_;
   ScratchBackingResolver scratch_resolver_;
   ScratchBackingAllocator scratch_allocator_;
+  uint32_t scratch_wave_divisor_ = 1;
   std::unique_ptr<CompletionTracker> completion_;
 
   std::atomic<bool> invalid_pending_{false};
+
+  std::atomic<uint64_t> doorbell_handle_count_{0};
 
   // Set when a queue stalls on an unsatisfied barrier/dependency signal (or an
   // SDMA VA not yet translatable) — a wait on progress that is external to the
@@ -382,17 +494,12 @@ private:
   void doorbell_poll_loop(std::stop_token stop);
 
   // The doorbell monitor's lifecycle is serialized by its OWN mutex, deliberately
-  // distinct from hw_queue_mutex_. An empty monitor exits itself when it observes
-  // the last host-accessible queue gone (so unregister_queue never has to join a
-  // thread that may be mid-iteration inside engine/event code — that join could
-  // deadlock, which is why queue destruction only removes queue state). A later
-  // register_queue reaps the already-exited jthread and starts a fresh one. Taking
-  // doorbell_thread_mutex_ (never nested under hw_queue_mutex_) keeps concurrent
-  // register/unregister from racing on doorbell_thread_ and doorbell_running_.
+  // distinct from hw_queue_mutex_. Queue removal releases hw_queue_mutex_ before
+  // stopping and joining the monitor, so an in-progress scan can finish. The
+  // lifecycle path then rechecks the queue set while startup is excluded; this
+  // keeps a concurrent registration from losing its monitor.
   std::mutex doorbell_thread_mutex_;
-  // True while a monitor is running or about to run. The monitor clears it under
-  // doorbell_thread_mutex_ just before returning, so ensure_doorbell_monitor() can
-  // tell a live monitor from a self-exited one that still needs joining.
+  // True while the lifecycle owns a running monitor.
   bool doorbell_running_ = false;
   std::jthread doorbell_thread_;
 };

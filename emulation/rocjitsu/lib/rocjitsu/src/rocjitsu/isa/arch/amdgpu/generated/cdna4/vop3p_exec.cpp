@@ -109,6 +109,12 @@ void VPkMinimum3F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))
+      raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))
+      raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src2, src2.size_bits()))
+      raw2 = util::f32_to_f16(std::bit_cast<float>(raw2));
     bool sel0_lo = (inst_.op_sel >> 0) & 1;
     bool sel1_lo = (inst_.op_sel >> 1) & 1;
     bool sel2_lo = (inst_.op_sel >> 2) & 1;
@@ -163,6 +169,12 @@ void VPkMaximum3F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))
+      raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))
+      raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src2, src2.size_bits()))
+      raw2 = util::f32_to_f16(std::bit_cast<float>(raw2));
     bool sel0_lo = (inst_.op_sel >> 0) & 1;
     bool sel1_lo = (inst_.op_sel >> 1) & 1;
     bool sel2_lo = (inst_.op_sel >> 2) & 1;
@@ -294,22 +306,11 @@ void VMfmaF3216x16x128F8f6f4Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
                                     [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
   uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
   uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  bool dispatched;
-  if (!(inst_.abid & 1u)) {
-    dispatched = amdgpu::dispatch_matrix_fmt_pair(
-        inst_.cbsz, inst_.blgp, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
-          amdgpu::exec_f32_mixed(cu, 16, 16, 128, 1, a_bits, b_bits, dst, s0b, s1b, s2, ea, eb,
-                                 const_acc);
-        });
-  } else {
-    uint32_t sa_base = amdgpu::src_base(vb, raw_words_[1] & 0x1FFu);
-    uint32_t sb_base = amdgpu::src_base(vb, (raw_words_[1] >> 9) & 0x1FFu);
-    dispatched = amdgpu::dispatch_matrix_fmt_pair(
-        inst_.cbsz, inst_.blgp, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
-          amdgpu::exec_f32_scaled_mixed(cu, 16, 16, 128, 1, a_bits, b_bits, dst, s0b, s1b, s2, ea,
-                                        eb, const_acc, sa_base, sb_base);
-        });
-  }
+  bool dispatched = amdgpu::dispatch_matrix_fmt_pair(
+      inst_.cbsz, inst_.blgp, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
+        amdgpu::exec_f32_mixed(cu, 16, 16, 128, 1, a_bits, b_bits, dst, s0b, s1b, s2, ea, eb,
+                               const_acc);
+      });
   if (!dispatched)
     throw util::UnimplementedInst(mnemonic());
 }
@@ -323,22 +324,11 @@ void VMfmaF3232x32x64F8f6f4Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
                                     [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
   uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
   uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
-  bool dispatched;
-  if (!(inst_.abid & 1u)) {
-    dispatched = amdgpu::dispatch_matrix_fmt_pair(
-        inst_.cbsz, inst_.blgp, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
-          amdgpu::exec_f32_mixed(cu, 32, 32, 64, 1, a_bits, b_bits, dst, s0b, s1b, s2, ea, eb,
-                                 const_acc);
-        });
-  } else {
-    uint32_t sa_base = amdgpu::src_base(vb, raw_words_[1] & 0x1FFu);
-    uint32_t sb_base = amdgpu::src_base(vb, (raw_words_[1] >> 9) & 0x1FFu);
-    dispatched = amdgpu::dispatch_matrix_fmt_pair(
-        inst_.cbsz, inst_.blgp, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
-          amdgpu::exec_f32_scaled_mixed(cu, 32, 32, 64, 1, a_bits, b_bits, dst, s0b, s1b, s2, ea,
-                                        eb, const_acc, sa_base, sb_base);
-        });
-  }
+  bool dispatched = amdgpu::dispatch_matrix_fmt_pair(
+      inst_.cbsz, inst_.blgp, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
+        amdgpu::exec_f32_mixed(cu, 32, 32, 64, 1, a_bits, b_bits, dst, s0b, s1b, s2, ea, eb,
+                               const_acc);
+      });
   if (!dispatched)
     throw util::UnimplementedInst(mnemonic());
 }
@@ -1059,6 +1049,56 @@ void VSmfmacF3232x32x32Fp8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
   amdgpu::exec_smfmac_f32_32x32x32_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_fp8,
                                        amdgpu::smfmac_read_fp8);
+}
+
+void VMfmaScaleF3216x16x128F8f6f4Vop3px2::execute_impl(amdgpu::Wavefront &wf) {
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
+  uint32_t const_acc;
+  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t scale_a = raw_words_[1] & 0x1FFu;
+  uint32_t scale_b = (raw_words_[1] >> 9) & 0x1FFu;
+  uint32_t scale_a_byte = ((raw_words_[0] >> 11) & 1u) | (((raw_words_[1] >> 27) & 1u) << 1);
+  uint32_t scale_b_byte = ((raw_words_[0] >> 12) & 1u) | (((raw_words_[1] >> 28) & 1u) << 1);
+  uint32_t c_modifier =
+      amdgpu::wmma_c_modifier((raw_words_[1] >> 29) & 7u, (raw_words_[0] >> 8) & 7u);
+  bool dispatched = amdgpu::dispatch_matrix_fmt_pair(
+      inst_.cbsz, inst_.blgp, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
+        amdgpu::exec_f32_scaled_mixed(cu, 16, 16, 128, 1, a_bits, b_bits, dst, s0b, s1b, s2, ea, eb,
+                                      const_acc, vb, scale_a, scale_b, scale_a_byte, scale_b_byte,
+                                      c_modifier);
+      });
+  if (!dispatched)
+    throw util::UnimplementedInst(mnemonic());
+}
+
+void VMfmaScaleF3232x32x64F8f6f4Vop3px2::execute_impl(amdgpu::Wavefront &wf) {
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
+  uint32_t const_acc;
+  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t scale_a = raw_words_[1] & 0x1FFu;
+  uint32_t scale_b = (raw_words_[1] >> 9) & 0x1FFu;
+  uint32_t scale_a_byte = ((raw_words_[0] >> 11) & 1u) | (((raw_words_[1] >> 27) & 1u) << 1);
+  uint32_t scale_b_byte = ((raw_words_[0] >> 12) & 1u) | (((raw_words_[1] >> 28) & 1u) << 1);
+  uint32_t c_modifier =
+      amdgpu::wmma_c_modifier((raw_words_[1] >> 29) & 7u, (raw_words_[0] >> 8) & 7u);
+  bool dispatched = amdgpu::dispatch_matrix_fmt_pair(
+      inst_.cbsz, inst_.blgp, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
+        amdgpu::exec_f32_scaled_mixed(cu, 32, 32, 64, 1, a_bits, b_bits, dst, s0b, s1b, s2, ea, eb,
+                                      const_acc, vb, scale_a, scale_b, scale_a_byte, scale_b_byte,
+                                      c_modifier);
+      });
+  if (!dispatched)
+    throw util::UnimplementedInst(mnemonic());
 }
 
 } // namespace cdna4

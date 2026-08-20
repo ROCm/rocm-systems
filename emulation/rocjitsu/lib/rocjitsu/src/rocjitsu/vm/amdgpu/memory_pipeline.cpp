@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -69,6 +70,8 @@ void write_lds_dst_load_direct(const VectorMemState &d, Lds &lds, uint32_t per_l
     }
     uint32_t lds_addr =
         d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * per_lane_bytes;
+    if (lds_addr == kInvalidLdsAddress)
+      continue;
     lds.write(lds_addr, &d.response_data[data_offset], per_lane_bytes);
   }
 }
@@ -100,6 +103,10 @@ MemoryAccessCompletion complete_lds_dst_load(VectorMemState &d, Wavefront &wf, C
         std::memcpy(&v, &d.response_data[ln * per_lane_bytes], 4);
       uint32_t lds_addr =
           d.lds_per_lane_addr ? d.per_lane_lds_addr[ln] : d.lds_base + ln * per_lane_bytes;
+      if (lds_addr == kInvalidLdsAddress) {
+        os << std::format(" L{}:@{:#x}->lds[dropped]", ln, d.per_lane_addr[ln]);
+        continue;
+      }
       os << std::format(" L{}:@{:#x}->lds[{:#x}]={:#x}", ln, d.per_lane_addr[ln], lds_addr, v);
     }
   });
@@ -137,7 +144,8 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
   uint32_t vgpr_count = is_atomic ? (d.elem_size / 4) : std::max(1u, total_bytes / 4);
 
   // Zero destination VGPRs for OOB lanes. Per AMD ISA spec, out-of-bounds
-  // buffer loads return 0. exec_mask is the original EXEC at issue time;
+  // buffer loads return 0. exec_mask is the effective EXEC at issue time;
+  // ordinary OOB accesses retain it while ignored resource types clear it.
   // lane_mask has OOB lanes removed. The difference gives exec-active OOB lanes.
   uint64_t exec = d.exec_mask;
   uint64_t oob_mask = exec & ~d.lane_mask; // exec-active but OOB
@@ -221,9 +229,10 @@ ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
   auto &d = *inst.data_as<ScalarMemState>();
   if (!d.is_load)
     return MemoryAccessCompletion::Complete;
-  auto &cu = wf.raw_cu();
   for (uint32_t i = 0; i < d.num_dwords; ++i) {
-    cu.write_sgpr(d.dst_reg_base + i, d.response_data[i]);
+    // Dispatch on the selector, not the resolved base: an SDATA of 108..123
+    // names the trap-temporary file, and the ROCr handler loads into TTMPs.
+    amdgpu::write_scalar_selector(wf, d.dst_selector + i, d.response_data[i]);
   }
   // Trace: log SMEM load values for debugging.
   util::Logger::vm([&](auto &os) {
@@ -486,13 +495,34 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
     return;
   }
 
+  // A FLAT wave can route some lanes to the private aperture and others to
+  // global memory. The swizzle stride is a property of the lanes that landed in
+  // scratch, not of the instruction, so issue the two groups separately rather
+  // than striding a global lane's second dword by lane_count*4. Uniform waves
+  // (including every dedicated SCRATCH op) take the single-request path.
+  const uint64_t scratch_lanes = d.scratch_swizzle ? d.scratch_lane_mask & d.lane_mask : 0;
+  const uint64_t plain_lanes = d.lane_mask & ~scratch_lanes;
+  const uint32_t stride = d.scratch_addr_stride;
+
   if (d.is_load) {
-    d.response_data.resize(d.wf_size * d.num_elems * d.elem_size);
-    l1_->load(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems, d.response_data.data(),
-              d.mtype, d.non_temporal, d.request_force_l1_bypass, d.wf_size, wf.process_id());
+    d.response_data.assign(d.wf_size * d.num_elems * d.elem_size, 0);
+    if (scratch_lanes)
+      l1_->load(d.per_lane_addr.data(), scratch_lanes, d.elem_size, d.num_elems,
+                d.response_data.data(), d.mtype, d.non_temporal, d.request_force_l1_bypass,
+                d.wf_size, wf.process_id(), stride, d.element_lane_masks.view());
+    if (plain_lanes)
+      l1_->load(d.per_lane_addr.data(), plain_lanes, d.elem_size, d.num_elems,
+                d.response_data.data(), d.mtype, d.non_temporal, d.request_force_l1_bypass,
+                d.wf_size, wf.process_id(), 0, d.element_lane_masks.view());
   } else {
-    l1_->store(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems, d.store_data.data(),
-               d.mtype, d.non_temporal, d.wf_size, wf.process_id());
+    if (scratch_lanes)
+      l1_->store(d.per_lane_addr.data(), scratch_lanes, d.elem_size, d.num_elems,
+                 d.store_data.data(), d.mtype, d.non_temporal, d.wf_size, wf.process_id(), stride,
+                 d.element_lane_masks.view());
+    if (plain_lanes)
+      l1_->store(d.per_lane_addr.data(), plain_lanes, d.elem_size, d.num_elems, d.store_data.data(),
+                 d.mtype, d.non_temporal, d.wf_size, wf.process_id(), 0,
+                 d.element_lane_masks.view());
   }
 }
 

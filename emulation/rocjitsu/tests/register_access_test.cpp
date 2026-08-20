@@ -29,6 +29,7 @@
 #include <bit>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <type_traits>
 #include <vector>
@@ -43,6 +44,11 @@ concept ExposesRawComputeUnit = requires(T &value) { value.raw_cu(); };
 
 template <typename T>
 concept ExposesRawVgprData = requires(T &value) { value.raw_vgpr_data(0); };
+
+template <typename T>
+concept ExposesReadRegionRegData = requires(const T &value) { value.reg_data(0); };
+
+static_assert(!ExposesReadRegionRegData<RegisterAccess::VgprReadRegion>);
 
 template <typename T>
 concept ExposesUnobservedVgprWrite = requires(T &value) { value.write_vgpr_storage(0, 0, 0); };
@@ -261,6 +267,39 @@ TEST(RegisterAccessTest, ReadRegionObservesAllRegistersAndReturnsLaneSpans) {
   EXPECT_EQ(region.lanes(1)[5], 0x4444u);
 }
 
+TEST(RegisterAccessTest, ReadRegionTraversesAndCopiesLogicalRegisterRange) {
+  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    Fixture fx(arch);
+    ASSERT_NE(fx.wf, nullptr);
+    SCOPED_TRACE(arch);
+
+    const uint32_t wf_size = fx.wf->wf_size();
+    constexpr uint32_t reg_count = 64;
+    const uint32_t physical_base = fx.vgpr_base() + 7;
+    fx.cu->write_vgpr(physical_base, 3, 0x11112222u);
+    fx.cu->write_vgpr(physical_base + reg_count / 2, 3, 0x33334444u);
+    fx.cu->write_vgpr(physical_base + reg_count - 1, 3, 0x55556666u);
+
+    RegisterAccess regs(*fx.cu);
+    auto region = regs.read_vgpr_region(physical_base, reg_count,
+                                        /*lane_mask=*/uint64_t{1} << 3);
+
+    std::vector<uint32_t> copied(static_cast<size_t>(reg_count) * wf_size);
+    region.copy_to(copied);
+    EXPECT_EQ(copied[3], 0x11112222u);
+    EXPECT_EQ(copied[(reg_count / 2) * wf_size + 3], 0x33334444u);
+    EXPECT_EQ(copied[(reg_count - 1) * wf_size + 3], 0x55556666u);
+
+    uint32_t relative_reg = 0;
+    const auto visitor = [&](std::span<const uint32_t> lanes) {
+      EXPECT_EQ(lanes[3], copied[static_cast<size_t>(relative_reg) * wf_size + 3]);
+      ++relative_reg;
+    };
+    region.for_each(visitor);
+    EXPECT_EQ(relative_reg, reg_count);
+  }
+}
+
 TEST(RegisterAccessTest, PartialByteReadRegionMasksReturnedValues) {
   Fixture fx;
   ASSERT_NE(fx.wf, nullptr);
@@ -275,7 +314,6 @@ TEST(RegisterAccessTest, PartialByteReadRegionMasksReturnedValues) {
   EXPECT_EQ(fx.plugin->reads[0].byte_mask, 0b0110);
   EXPECT_EQ(region.lane(/*relative_reg=*/0, /*lane=*/3), 0x00BBCC00u);
   EXPECT_THROW((void)region.lanes(), std::logic_error);
-  EXPECT_THROW((void)region.reg_data(), std::logic_error);
 }
 
 TEST(RegisterAccessTest, WriteRegionObservesWritesAndHonorsLaneMask) {

@@ -15,6 +15,7 @@
 #include "nccl_device.h"
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>
@@ -72,6 +73,18 @@ int nodeLocalRanks() {
   return n;
 }
 
+// Collective topology check: every rank receives the same verdict, so an
+// uneven placement cannot make one node skip while another enters NCCL setup.
+bool uniformNodeLocalRanks(int* ranksPerNode) {
+  int local = nodeLocalRanks();
+  int minimum = local;
+  int maximum = local;
+  MPI_Allreduce(MPI_IN_PLACE, &minimum, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+  MPI_Allreduce(MPI_IN_PLACE, &maximum, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+  if (ranksPerNode) *ranksPerNode = minimum;
+  return minimum == maximum;
+}
+
 // Single-node runs need intranet mode -- otherwise the topology pruner
 // removes the NET node and GIN has no path to bind.
 std::string intranetReason() {
@@ -121,6 +134,15 @@ ncclDevCommRequirements defaultGinReqs() {
 // Standard single-CTA GIN kernel launch (thread 0 issues, whole CTA waits/flushes).
 constexpr int kGinKernelBlocks  = 1;
 constexpr int kGinKernelThreads = 32;
+
+// Single-thread GIN kernel launch, for kernels where one thread both issues and
+// polls so there is no CTA-wide wait or flush to widen.
+constexpr int kGinSingleThreadBlocks  = 1;
+constexpr int kGinSingleThreadThreads = 1;
+
+// An LSA team only becomes non-trivial once a node hosts more than one rank; at
+// one rank per node it has size 1 and any LSA assertion is vacuous.
+constexpr int kMinLsaRanksPerNode = 2;
 
 }  // namespace
 
@@ -1038,16 +1060,27 @@ __global__ void barrier2RanksKernel(int iters, struct ncclDevComm devComm) {
   }
 }
 
-// First test that actually USES the railGinBarrier resource (prior tests
-// only provisioned it). Kernel completion after kIters rounds proves both
-// ranks moved through the barrier in lockstep -- if the epoch math broke,
-// iter 1 would deadlock waiting for an epoch the peer never reaches.
+// Direct rail-team barrier coverage. Exactly one rank per node makes the
+// two-rank rail team non-trivial and avoids conflating it with the world test.
 TEST_F(GinMPIDeviceTests, Barrier_TwoRanks) {
+  constexpr int kNodes = 2;
+  constexpr int kRanksPerNode = 1;
+  constexpr int kWorldRanks = kNodes * kRanksPerNode;
+
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
+  if (auto reason = crossNodeReason(); !reason.empty())
+    GTEST_SKIP() << reason;
 
-  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
-    GTEST_SKIP() << "Requires exactly 2 ranks";
+  if (!validateTestPrerequisites(/*min_processes=*/kWorldRanks,
+                                 /*max_processes=*/kWorldRanks,
+                                 /*require_power_of_two=*/false,
+                                 /*min_nodes=*/kNodes, /*max_nodes=*/kNodes))
+    GTEST_SKIP() << "Requires exactly " << kWorldRanks << " ranks on " << kNodes
+                 << " nodes";
+  int ranksPerNode = 0;
+  if (!uniformNodeLocalRanks(&ranksPerNode) || ranksPerNode != kRanksPerNode)
+    GTEST_SKIP() << "Requires exactly " << kRanksPerNode << " rank per node";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
   ncclComm_t  comm   = getActiveCommunicator();
@@ -1056,7 +1089,7 @@ TEST_F(GinMPIDeviceTests, Barrier_TwoRanks) {
   int rank = -1, nRanks = -1;
   ncclCommUserRank(comm, &rank);
   ncclCommCount(comm, &nRanks);
-  ASSERT_EQ(2, nRanks);
+  ASSERT_EQ(kWorldRanks, nRanks);
 
   // Large enough that a stuck-at-zero expected value would deadlock at
   // iter 1 (not silently pass on iter 0); small enough to stay fast. Each
@@ -1174,6 +1207,125 @@ TEST_F(GinMPIDeviceTests, Barrier_FourRanks) {
   MPI_Barrier(MPI_COMM_WORLD);
 }
 
+struct WorldBarrierObservation {
+  int teamNRanks;
+  int teamRank;
+  int teamStride;
+  uint32_t handleSignal0;
+  uint32_t activeSignal;
+  int selectionMatched;
+  int completedIters;
+  int signalMismatches;
+};
+
+// Observe the baked-in team and handle before synchronizing. A wrong world
+// constructor returns cleanly with selectionMatched=0 instead of hanging on an
+// unallocated or differently sized rail pool.
+__global__ void worldBarrierObservationKernel(
+    int iters, WorldBarrierObservation* observation,
+    struct ncclDevComm devComm) {
+  ncclGin gin{devComm, /*ginContext=*/0};
+  ncclGinBarrierSession<ncclCoopCta> bar{
+      ncclCoopCta(), gin, ncclTeamTagWorld{}, /*barrierIndex=*/0};
+  ncclTeam world = ncclTeamWorld(devComm);
+  bool selectionMatched =
+      bar.team.nRanks == world.nRanks &&
+      bar.team.rank == world.rank &&
+      bar.team.stride == world.stride &&
+      bar.handle.signal0 == devComm.worldGinBarrier.signal0 &&
+      bar.signal == devComm.worldGinBarrier.signal0;
+
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    observation->teamNRanks = bar.team.nRanks;
+    observation->teamRank = bar.team.rank;
+    observation->teamStride = bar.team.stride;
+    observation->handleSignal0 = bar.handle.signal0;
+    observation->activeSignal = bar.signal;
+    observation->selectionMatched = selectionMatched ? 1 : 0;
+  }
+  if (!selectionMatched) return;
+
+  for (int i = 0; i < iters; ++i) {
+    bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
+  }
+
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    int mismatches = 0;
+    for (int peer = 0; peer < world.nRanks; ++peer) {
+      uint64_t expected = peer == world.rank ? 0 : static_cast<uint64_t>(iters);
+      if (gin.readSignal(bar.signal + peer) != expected) ++mismatches;
+    }
+    observation->completedIters = iters;
+    observation->signalMismatches = mismatches;
+  }
+}
+
+// Two ranks per node make the world team (4 ranks, stride 1) observably
+// different from each non-trivial rail team (2 ranks, stride 2).
+TEST_F(GinMPIDeviceTests, Barrier_WorldTeamUsesWorldPool) {
+  constexpr int kNodes = 2;
+  constexpr int kRanksPerNode = 2;
+  constexpr int kWorldRanks = kNodes * kRanksPerNode;
+  constexpr int kRailRanks = kNodes;
+
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (auto reason = crossNodeReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (!validateTestPrerequisites(/*min_processes=*/kWorldRanks,
+                                 /*max_processes=*/kWorldRanks,
+                                 /*require_power_of_two=*/false,
+                                 /*min_nodes=*/kNodes, /*max_nodes=*/kNodes))
+    GTEST_SKIP() << "Requires exactly " << kWorldRanks << " ranks on " << kNodes
+                 << " nodes";
+  int ranksPerNode = 0;
+  if (!uniformNodeLocalRanks(&ranksPerNode) || ranksPerNode != kRanksPerNode)
+    GTEST_SKIP() << "Requires exactly " << kRanksPerNode << " ranks per node";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t comm = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+  ncclTeam_t world = ncclTeamWorld(comm);
+  ncclTeam_t rail = ncclTeamRail(comm);
+  ASSERT_EQ(kWorldRanks, world.nRanks);
+  ASSERT_EQ(kRailRanks, rail.nRanks);
+  ASSERT_NE(world.stride, rail.stride);
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.worldGinBarrierCount = 1;
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  auto devCommCleanup = makeScopeGuard([&]() {
+    (void)ncclDevCommDestroy(comm, &devComm);
+  });
+
+  WorldBarrierObservation* dObservation = nullptr;
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dObservation, sizeof(WorldBarrierObservation)));
+  auto observationCleanup = makeScopeGuard([&]() {
+    if (dObservation) (void)hipFree(dObservation);
+  });
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dObservation, 0, sizeof(WorldBarrierObservation)));
+
+  constexpr int kIters = 16;
+  MPI_Barrier(MPI_COMM_WORLD);
+  worldBarrierObservationKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+      kIters, dObservation, devComm);
+  ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+  WorldBarrierObservation observation{};
+  ASSERT_MPI_EQ(hipSuccess,
+                hipMemcpy(&observation, dObservation, sizeof(observation), hipMemcpyDeviceToHost));
+  ASSERT_MPI_EQ(world.nRanks, observation.teamNRanks);
+  ASSERT_MPI_EQ(world.rank, observation.teamRank);
+  ASSERT_MPI_EQ(world.stride, observation.teamStride);
+  ASSERT_MPI_EQ(devComm.worldGinBarrier.signal0, observation.handleSignal0);
+  ASSERT_MPI_EQ(devComm.worldGinBarrier.signal0, observation.activeSignal);
+  ASSERT_MPI_EQ(1, observation.selectionMatched);
+  ASSERT_MPI_EQ(kIters, observation.completedIters);
+  ASSERT_MPI_EQ(0, observation.signalMismatches);
+  MPI_Barrier(MPI_COMM_WORLD);
+}
+
 // Direct tests for ncclBarrierSession (barrier.h), separate from the alltoall
 // kernels that use it incidentally: BarrierSession_LsaOnly (LSA-only subset,
 // ncclTeamTagLsa, no GIN) and BarrierSession_Hybrid (world-team: inner LSA +
@@ -1222,9 +1374,10 @@ TEST_F(GinMPIDeviceTests, BarrierSession_LsaOnly) {
   if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/8))
     GTEST_SKIP() << "Requires 2-8 ranks";
 
-  // Needs >=2 co-located ranks; otherwise the LSA team is size 1 (vacuous).
-  if (nodeLocalRanks() < 2)
-    GTEST_SKIP() << "Requires >=2 ranks co-located on a node for a non-trivial LSA team";
+  int ranksPerNode = 0;
+  if (!uniformNodeLocalRanks(&ranksPerNode) || ranksPerNode < kMinLsaRanksPerNode)
+    GTEST_SKIP() << "Requires a uniform placement with >=" << kMinLsaRanksPerNode
+                 << " ranks per node";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
   ncclComm_t  comm   = getActiveCommunicator();
@@ -1303,9 +1456,23 @@ __global__ void barrierSessionHybridKernel(int iters, struct ncclDevComm devComm
 TEST_F(GinMPIDeviceTests, BarrierSession_Hybrid) {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
+  if (auto reason = crossNodeReason(); !reason.empty())
+    GTEST_SKIP() << reason;
 
-  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/8))
-    GTEST_SKIP() << "Requires 2-8 ranks";
+  // The hybrid session needs both a non-trivial LSA team and a cross-node rail,
+  // so at least two nodes each hosting a non-trivial LSA team. The upper bound
+  // is the harness limit shared with the other barrier tests.
+  constexpr int kMinNodes = 2;
+  constexpr int kMinRanks = kMinNodes * kMinLsaRanksPerNode;
+  constexpr int kMaxRanks = 8;
+
+  if (!validateTestPrerequisites(/*min_processes=*/kMinRanks,
+                                 /*max_processes=*/kMaxRanks))
+    GTEST_SKIP() << "Requires " << kMinRanks << "-" << kMaxRanks << " ranks";
+  int ranksPerNode = 0;
+  if (!uniformNodeLocalRanks(&ranksPerNode) || ranksPerNode < kMinLsaRanksPerNode)
+    GTEST_SKIP() << "Requires a uniform placement with at least "
+                 << kMinLsaRanksPerNode << " ranks per node";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
   ncclComm_t  comm   = getActiveCommunicator();
@@ -1318,17 +1485,20 @@ TEST_F(GinMPIDeviceTests, BarrierSession_Hybrid) {
 
   constexpr int kIters = 16;
 
-  // The world-team ncclBarrierSession sizes its hybrid LSA+rail-GIN barriers from
-  // reqs.barrierCount (not lsa/railGinBarrierCount); 0 hangs the rail arm.
-  // defaultGinReqs()'s ginConnectionType=FULL activates GIN so the outer
-  // barrier's waitSignal has a valid ctx (see Barrier_TwoRanks).
+  // Only barrierCount provisions the two pools consumed by the generic
+  // world-team session. Keeping every specialized count at zero ensures an
+  // accidental constructor or requirement-routing regression cannot be masked.
   ncclDevCommRequirements reqs = defaultGinReqs();
-  reqs.barrierCount        = 1;
+  reqs.barrierCount = 1;
   ncclDevComm devComm{};
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
   auto devCommCleanup = makeScopeGuard([&]() {
     (void)ncclDevCommDestroy(comm, &devComm);
   });
+
+  ASSERT_MPI_EQ(1, devComm.hybridLsaBarrier.nBarriers);
+  ASSERT_MPI_EQ(0, devComm.lsaBarrier.nBarriers);
+  ASSERT_MPI_EQ(ncclTeamRail(comm).nRanks, devComm.ginSignalCount);
 
   MPI_Barrier(MPI_COMM_WORLD);
 
@@ -1339,6 +1509,156 @@ TEST_F(GinMPIDeviceTests, BarrierSession_Hybrid) {
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
   MPI_Barrier(MPI_COMM_WORLD);
+}
+
+struct BarrierSelectionObservation {
+  uint64_t genericLsaBufHandle;
+  int genericLsaNBarriers;
+  uint32_t genericRailSignal0;
+  uint64_t dedicatedLsaBufHandle;
+  int dedicatedLsaNBarriers;
+  uint32_t directRailSignal0;
+  uint32_t directWorldSignal0;
+  int genericLsaNRanks;
+  int genericRailNRanks;
+  int dedicatedLsaNRanks;
+  int directRailNRanks;
+  int directWorldNRanks;
+};
+
+// Selection-only kernel: constructing every session is enough to observe which
+// pool it selected. Deliberately do not sync; valid specialized allocations
+// must not hide a generic constructor routed to the wrong pool.
+__global__ void barrierSelectionObservationKernel(
+    BarrierSelectionObservation* observation,
+    struct ncclDevComm devComm) {
+  ncclGin gin{devComm, /*ginContext=*/0};
+  ncclBarrierSession<ncclCoopCta> generic{
+      ncclCoopCta(), ncclTeamTagWorld{}, gin, /*index=*/0};
+  ncclLsaBarrierSession<ncclCoopCta> dedicatedLsa{
+      ncclCoopCta(), devComm, ncclTeamTagLsa{}, /*index=*/0};
+  ncclGinBarrierSession<ncclCoopCta> directRail{
+      ncclCoopCta(), gin, ncclTeamTagRail{}, /*barrierIndex=*/0};
+  ncclGinBarrierSession<ncclCoopCta> directWorld{
+      ncclCoopCta(), gin, ncclTeamTagWorld{}, /*barrierIndex=*/0};
+
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    auto& genericLsa = generic.lsaBarrier();
+    auto& genericRail = generic.ginBarrier();
+    observation->genericLsaBufHandle = genericLsa.handle.bufHandle;
+    observation->genericLsaNBarriers = genericLsa.handle.nBarriers;
+    observation->genericRailSignal0 = genericRail.handle.signal0;
+    observation->dedicatedLsaBufHandle = dedicatedLsa.handle.bufHandle;
+    observation->dedicatedLsaNBarriers = dedicatedLsa.handle.nBarriers;
+    observation->directRailSignal0 = directRail.handle.signal0;
+    observation->directWorldSignal0 = directWorld.handle.signal0;
+    observation->genericLsaNRanks = genericLsa.team.nRanks;
+    observation->genericRailNRanks = genericRail.team.nRanks;
+    observation->dedicatedLsaNRanks = dedicatedLsa.team.nRanks;
+    observation->directRailNRanks = directRail.team.nRanks;
+    observation->directWorldNRanks = directWorld.team.nRanks;
+  }
+}
+
+TEST_F(GinMPIDeviceTests, BarrierPools_AreIsolated) {
+  // Two ranks per node keeps the LSA, rail, and world teams distinct, so each
+  // barrier flavor has its own team to select.
+  constexpr int kNodes = 2;
+  constexpr int kRanksPerNode = 2;
+  constexpr int kWorldRanks = kNodes * kRanksPerNode;
+
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (auto reason = crossNodeReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (!validateTestPrerequisites(/*min_processes=*/kWorldRanks,
+                                 /*max_processes=*/kWorldRanks,
+                                 /*require_power_of_two=*/false,
+                                 /*min_nodes=*/kNodes, /*max_nodes=*/kNodes))
+    GTEST_SKIP() << "Requires exactly " << kWorldRanks << " ranks on " << kNodes
+                 << " nodes";
+  int ranksPerNode = 0;
+  if (!uniformNodeLocalRanks(&ranksPerNode) || ranksPerNode != kRanksPerNode)
+    GTEST_SKIP() << "Requires exactly " << kRanksPerNode << " ranks per node";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t comm = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+  ncclTeam_t lsa = ncclTeamLsa(comm);
+  ncclTeam_t rail = ncclTeamRail(comm);
+  ncclTeam_t world = ncclTeamWorld(comm);
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.ginSignalCount = 1;
+  reqs.barrierCount = 1;
+  reqs.lsaBarrierCount = 1;
+  reqs.railGinBarrierCount = 1;
+  reqs.worldGinBarrierCount = 1;
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  auto devCommCleanup = makeScopeGuard([&]() {
+    (void)ncclDevCommDestroy(comm, &devComm);
+  });
+
+  using Range = std::array<uint64_t, 2>;
+  std::array<Range, 4> ginRanges{{
+      {0, 1},
+      {devComm.hybridRailGinBarrier.signal0,
+       devComm.hybridRailGinBarrier.signal0 + static_cast<uint64_t>(rail.nRanks)},
+      {devComm.railGinBarrier.signal0,
+       devComm.railGinBarrier.signal0 + static_cast<uint64_t>(rail.nRanks)},
+      {devComm.worldGinBarrier.signal0,
+       devComm.worldGinBarrier.signal0 + static_cast<uint64_t>(world.nRanks)},
+  }};
+  bool ginRangesValid = true;
+  for (size_t i = 0; i < ginRanges.size(); ++i) {
+    ginRangesValid =
+        ginRangesValid && ginRanges[i][0] < ginRanges[i][1] &&
+        ginRanges[i][1] <= static_cast<uint64_t>(devComm.ginSignalCount);
+    for (size_t j = i + 1; j < ginRanges.size(); ++j) {
+      ginRangesValid =
+          ginRangesValid &&
+          (ginRanges[i][1] <= ginRanges[j][0] ||
+           ginRanges[j][1] <= ginRanges[i][0]);
+    }
+  }
+  ASSERT_MPI_TRUE(ginRangesValid);
+
+  uint64_t lsaBytes = static_cast<uint64_t>(3 + lsa.nRanks) * sizeof(uint32_t);
+  Range hybridLsaRange{
+      ncclGetResourceBufferOffset(devComm.hybridLsaBarrier.bufHandle),
+      ncclGetResourceBufferOffset(devComm.hybridLsaBarrier.bufHandle) + lsaBytes};
+  Range dedicatedLsaRange{
+      ncclGetResourceBufferOffset(devComm.lsaBarrier.bufHandle),
+      ncclGetResourceBufferOffset(devComm.lsaBarrier.bufHandle) + lsaBytes};
+  ASSERT_MPI_TRUE(hybridLsaRange[1] <= dedicatedLsaRange[0] ||
+                  dedicatedLsaRange[1] <= hybridLsaRange[0]);
+
+  BarrierSelectionObservation* dObservation = nullptr;
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dObservation, sizeof(BarrierSelectionObservation)));
+  auto observationCleanup = makeScopeGuard([&]() {
+    if (dObservation) (void)hipFree(dObservation);
+  });
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dObservation, 0, sizeof(BarrierSelectionObservation)));
+  barrierSelectionObservationKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+      dObservation, devComm);
+  ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+  BarrierSelectionObservation observation{};
+  ASSERT_MPI_EQ(hipSuccess,
+                hipMemcpy(&observation, dObservation, sizeof(observation), hipMemcpyDeviceToHost));
+  ASSERT_MPI_EQ(devComm.hybridLsaBarrier.bufHandle, observation.genericLsaBufHandle);
+  ASSERT_MPI_EQ(devComm.hybridLsaBarrier.nBarriers, observation.genericLsaNBarriers);
+  ASSERT_MPI_EQ(devComm.hybridRailGinBarrier.signal0, observation.genericRailSignal0);
+  ASSERT_MPI_EQ(devComm.lsaBarrier.bufHandle, observation.dedicatedLsaBufHandle);
+  ASSERT_MPI_EQ(devComm.lsaBarrier.nBarriers, observation.dedicatedLsaNBarriers);
+  ASSERT_MPI_EQ(devComm.railGinBarrier.signal0, observation.directRailSignal0);
+  ASSERT_MPI_EQ(devComm.worldGinBarrier.signal0, observation.directWorldSignal0);
+  ASSERT_MPI_EQ(lsa.nRanks, observation.genericLsaNRanks);
+  ASSERT_MPI_EQ(rail.nRanks, observation.genericRailNRanks);
+  ASSERT_MPI_EQ(lsa.nRanks, observation.dedicatedLsaNRanks);
+  ASSERT_MPI_EQ(rail.nRanks, observation.directRailNRanks);
+  ASSERT_MPI_EQ(world.nRanks, observation.directWorldNRanks);
 }
 
 // ---------------------------------------------------------------------------
@@ -2127,6 +2447,346 @@ TEST_F(GinMPIDeviceTests, AlltoallHybrid_Reference) {
       }
     }
   }
+}
+
+// A 2.29.7-versioned request for indexed GIN resources is rejected because
+// those device layouts are not compatible with the 2.30 GIN layout. This is
+// intentionally narrower than claiming every possible legacy pure-put binary
+// is detected by the compatibility filter.
+TEST_F(GinMPIDeviceTests, DevComm_LegacyGinSignalRequestRejected) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t comm = getActiveCommunicator();
+
+  // GIN device code compiled against 2.29.7 is ABI-incompatible with 2.30.
+  ncclDevCommRequirements legacyReqs = defaultGinReqs();
+  legacyReqs.version = NCCL_VERSION(2, 29, 7);
+  legacyReqs.ginSignalCount = 1;
+  ncclDevComm legacyDevComm{};
+  ncclResult_t result = ncclDevCommCreate(comm, &legacyReqs, &legacyDevComm);
+  if (result == ncclSuccess) {
+    (void)ncclDevCommDestroy(comm, &legacyDevComm);
+  }
+  ASSERT_MPI_EQ(ncclInvalidUsage, result);
+}
+
+// A compatible 2.30 request carries its requested ABI version into the returned
+// device communicator; it is not silently stamped with the runtime's version.
+TEST_F(GinMPIDeviceTests, DevComm_ReturnsRequestedVersion) {
+  if (auto reason = cuMemReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t comm = getActiveCommunicator();
+
+  ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+  reqs.version = NCCL_VERSION(2, 30, 0);
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  auto devCommCleanup = makeScopeGuard([&]() {
+    (void)ncclDevCommDestroy(comm, &devComm);
+  });
+  ASSERT_MPI_EQ(reqs.version, devComm.version);
+}
+
+// Backend-independent ownership check retained for both proxy and rocSHMEM-GDA
+// runs. The proxy-only test below adds functional queue/signal/counter coverage.
+TEST_F(GinMPIDeviceTests, DevComm_PerInstanceGinHandlesAreDistinct) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t comm = getActiveCommunicator();
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.ginContextCount = 1;
+  reqs.ginSignalCount = 1;
+
+  ncclDevComm first{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &first));
+  bool firstLive = true;
+  auto firstCleanup = makeScopeGuard([&]() {
+    if (firstLive) (void)ncclDevCommDestroy(comm, &first);
+  });
+
+  ncclDevComm second{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &second));
+  bool secondLive = true;
+  auto secondCleanup = makeScopeGuard([&]() {
+    if (secondLive) (void)ncclDevCommDestroy(comm, &second);
+  });
+
+  ASSERT_MPI_GT(first.ginConnectionCount, 0);
+  ASSERT_MPI_EQ(first.ginConnectionCount, second.ginConnectionCount);
+  bool locallyDistinct = true;
+  for (int connection = 0; connection < first.ginConnectionCount; ++connection) {
+    locallyDistinct =
+        locallyDistinct &&
+        first.ginHandles[connection] != second.ginHandles[connection];
+  }
+  int allDistinct = locallyDistinct ? 1 : 0;
+  MPI_Allreduce(MPI_IN_PLACE, &allDistinct, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+  if (allDistinct == 0) secondLive = false;
+  ASSERT_MPI_TRUE(allDistinct == 1);
+}
+
+__global__ void perDevCommIsolationProducerKernel(
+    ncclWindow_t srcWin, ncclWindow_t dstWin, size_t offset, size_t bytes,
+    uint64_t expectedEpoch, uint64_t timeoutCycles, int* completed,
+    struct ncclDevComm devComm) {
+  ncclGin gin{devComm, /*ginContext=*/0};
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    gin.put(ncclTeamWorld(devComm), /*peer=*/1,
+            dstWin, offset, srcWin, offset, bytes,
+            ncclGin_SignalInc{/*signal=*/0},
+            ncclGin_CounterInc{/*counter=*/0});
+    uint64_t start = clock64();
+    while (gin.readCounter(/*counter=*/0) < expectedEpoch &&
+           clock64() - start < timeoutCycles) {
+    }
+    *completed = gin.readCounter(/*counter=*/0) >= expectedEpoch ? 1 : 0;
+  }
+}
+
+__global__ void perDevCommIsolationConsumerKernel(
+    uint64_t expectedEpoch, uint64_t timeoutCycles, int* completed,
+    struct ncclDevComm devComm) {
+  ncclGin gin{devComm, /*ginContext=*/0};
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    uint64_t start = clock64();
+    while (gin.readSignal(/*signal=*/0) < expectedEpoch &&
+           clock64() - start < timeoutCycles) {
+    }
+    *completed = gin.readSignal(/*signal=*/0) >= expectedEpoch ? 1 : 0;
+  }
+}
+
+__global__ void readPerDevCommStateKernel(
+    uint64_t* state, struct ncclDevComm devComm) {
+  ncclGin gin{devComm, /*ginContext=*/0};
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    state[0] = gin.readSignal(/*signal=*/0);
+    state[1] = gin.readCounter(/*counter=*/0);
+  }
+}
+
+hipError_t runPerDevCommIsolationPhase(
+    int rank, ncclWindow_t srcWin, ncclWindow_t dstWin,
+    size_t offset, size_t bytes, uint64_t expectedEpoch,
+    ncclDevComm devComm, hipStream_t stream, int* dCompleted,
+    bool* completed) {
+  constexpr uint64_t kTimeoutCycles = 5000000000ULL;
+  MPI_Barrier(MPI_COMM_WORLD);
+  if (rank == 0) {
+    perDevCommIsolationProducerKernel<<<kGinSingleThreadBlocks,
+                                        kGinSingleThreadThreads, 0, stream>>>(
+        srcWin, dstWin, offset, bytes, expectedEpoch, kTimeoutCycles,
+        dCompleted, devComm);
+  } else {
+    perDevCommIsolationConsumerKernel<<<kGinSingleThreadBlocks,
+                                        kGinSingleThreadThreads, 0, stream>>>(
+        expectedEpoch, kTimeoutCycles, dCompleted, devComm);
+  }
+  hipError_t result = hipStreamSynchronize(stream);
+  int hCompleted = 0;
+  if (result == hipSuccess) {
+    result = hipMemcpy(&hCompleted, dCompleted, sizeof(int), hipMemcpyDeviceToHost);
+  }
+  if (completed) *completed = hCompleted == 1;
+  MPI_Barrier(MPI_COMM_WORLD);
+  return result;
+}
+
+hipError_t readPerDevCommState(
+    ncclDevComm devComm, hipStream_t stream, uint64_t state[2]) {
+  uint64_t* dState = nullptr;
+  hipError_t result = hipMalloc(&dState, 2 * sizeof(uint64_t));
+  if (result != hipSuccess) return result;
+  result = hipMemsetAsync(dState, 0, 2 * sizeof(uint64_t), stream);
+  if (result == hipSuccess) {
+    readPerDevCommStateKernel<<<kGinSingleThreadBlocks, kGinSingleThreadThreads, 0,
+                                stream>>>(dState, devComm);
+    result = hipStreamSynchronize(stream);
+  }
+  if (result == hipSuccess) {
+    result = hipMemcpy(state, dState, 2 * sizeof(uint64_t), hipMemcpyDeviceToHost);
+  }
+  (void)hipFree(dState);
+  return result;
+}
+
+// Exercise two device communicators backed by one host communicator, prove
+// their signal/counter epochs are independent, destroy the first out of LIFO
+// order, and then prove the second context and queue remain usable.
+TEST_F(GinMPIDeviceTests, DevComm_PerInstanceGinResourcesRemainUsable) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (requestedGinType() != 2)
+    GTEST_SKIP() << "Functional resource-isolation oracle requires GIN_IB_PROXY";
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t comm = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+  int rank = -1;
+  ncclCommUserRank(comm, &rank);
+
+  constexpr size_t kSlotBytes = 64;
+  constexpr int kSlots = 3;
+  constexpr size_t kBufferBytes = kSlots * kSlotBytes;
+  void* dSrc = nullptr;
+  void* dDst = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSrc, kBufferBytes));
+  auto memCleanup = makeScopeGuard([&]() {
+    if (dSrc) (void)ncclMemFree(dSrc);
+    if (dDst) (void)ncclMemFree(dDst);
+  });
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dDst, kBufferBytes));
+
+  ncclWindow_t srcWin = nullptr, dstWin = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dSrc, kBufferBytes, &srcWin,
+                                       NCCL_WIN_COLL_SYMMETRIC));
+  auto winCleanup = makeScopeGuard([&]() {
+    if (srcWin) (void)ncclCommWindowDeregister(comm, srcWin);
+    if (dstWin) (void)ncclCommWindowDeregister(comm, dstWin);
+  });
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dDst, kBufferBytes, &dstWin,
+                                       NCCL_WIN_COLL_SYMMETRIC));
+
+  std::vector<uint8_t> hostSrc(kBufferBytes, 0);
+  std::vector<uint8_t> hostDst(kBufferBytes, 0);
+  for (int slot = 0; slot < kSlots; ++slot) {
+    for (size_t i = 0; i < kSlotBytes; ++i) {
+      hostSrc[slot * kSlotBytes + i] =
+          static_cast<uint8_t>(0x20 + slot * 0x20 + (i & 0x1f));
+    }
+  }
+  ASSERT_MPI_EQ(hipSuccess,
+                hipMemcpy(dSrc, hostSrc.data(), kBufferBytes, hipMemcpyHostToDevice));
+  ASSERT_MPI_EQ(hipSuccess,
+                hipMemcpy(dDst, hostDst.data(), kBufferBytes, hipMemcpyHostToDevice));
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.ginContextCount = 1;
+  reqs.ginSignalCount = 1;
+  reqs.ginCounterCount = 1;
+
+  ncclDevComm first{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &first));
+  bool firstLive = true;
+  auto firstCleanup = makeScopeGuard([&]() {
+    if (firstLive) (void)ncclDevCommDestroy(comm, &first);
+  });
+
+  ncclDevComm second{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &second));
+  bool secondLive = true;
+  auto secondCleanup = makeScopeGuard([&]() {
+    if (secondLive) (void)ncclDevCommDestroy(comm, &second);
+  });
+
+  ASSERT_MPI_GT(first.ginConnectionCount, 0);
+  ASSERT_MPI_EQ(first.ginConnectionCount, second.ginConnectionCount);
+  bool handlesDistinct = true;
+  for (int connection = 0; connection < first.ginConnectionCount; ++connection) {
+    handlesDistinct =
+        handlesDistinct &&
+        first.ginHandles[connection] != second.ginHandles[connection];
+  }
+  int minHandlesDistinct = handlesDistinct ? 1 : 0;
+  int maxHandlesDistinct = minHandlesDistinct;
+  MPI_Allreduce(MPI_IN_PLACE, &minHandlesDistinct, 1, MPI_INT, MPI_MIN,
+                MPI_COMM_WORLD);
+  MPI_Allreduce(MPI_IN_PLACE, &maxHandlesDistinct, 1, MPI_INT, MPI_MAX,
+                MPI_COMM_WORLD);
+  // Avoid a second destroy through an intentionally aliased handle in the
+  // fail-before mutation; the process may exit with the leaked test context.
+  if (minHandlesDistinct == 0) secondLive = false;
+  ASSERT_MPI_TRUE(minHandlesDistinct == 1 && maxHandlesDistinct == 1);
+
+  auto stateMatches = [&](ncclDevComm devComm,
+                          uint64_t expectedSignal,
+                          uint64_t expectedCounter) {
+    uint64_t state[2] = {};
+    if (readPerDevCommState(devComm, stream, state) != hipSuccess) return false;
+    return state[0] == expectedSignal && state[1] == expectedCounter;
+  };
+
+  int* dPhaseCompleted = nullptr;
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dPhaseCompleted, sizeof(int)));
+  auto phaseStatusCleanup = makeScopeGuard([&]() {
+    if (dPhaseCompleted) (void)hipFree(dPhaseCompleted);
+  });
+
+  ASSERT_MPI_TRUE(stateMatches(first, 0, 0));
+  ASSERT_MPI_TRUE(stateMatches(second, 0, 0));
+
+  bool phaseCompleted = false;
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dPhaseCompleted, 0, sizeof(int)));
+  ASSERT_MPI_EQ(hipSuccess,
+                runPerDevCommIsolationPhase(rank, srcWin, dstWin,
+                                            /*offset=*/0, kSlotBytes,
+                                            /*expectedEpoch=*/1, first, stream,
+                                            dPhaseCompleted,
+                                            &phaseCompleted));
+  ASSERT_MPI_TRUE(phaseCompleted);
+  ASSERT_MPI_TRUE(stateMatches(first, rank == 1 ? 1 : 0, rank == 0 ? 1 : 0));
+  ASSERT_MPI_TRUE(stateMatches(second, 0, 0));
+
+  phaseCompleted = false;
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dPhaseCompleted, 0, sizeof(int)));
+  ASSERT_MPI_EQ(hipSuccess,
+                runPerDevCommIsolationPhase(rank, srcWin, dstWin,
+                                            /*offset=*/kSlotBytes, kSlotBytes,
+                                            /*expectedEpoch=*/1, second, stream,
+                                            dPhaseCompleted,
+                                            &phaseCompleted));
+  ASSERT_MPI_TRUE(phaseCompleted);
+  ASSERT_MPI_TRUE(stateMatches(first, rank == 1 ? 1 : 0, rank == 0 ? 1 : 0));
+  ASSERT_MPI_TRUE(stateMatches(second, rank == 1 ? 1 : 0, rank == 0 ? 1 : 0));
+
+  MPI_Barrier(MPI_COMM_WORLD);
+  ncclResult_t firstDestroyResult = ncclDevCommDestroy(comm, &first);
+  firstLive = false;
+  ASSERT_MPI_EQ(ncclSuccess, firstDestroyResult);
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  phaseCompleted = false;
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dPhaseCompleted, 0, sizeof(int)));
+  ASSERT_MPI_EQ(hipSuccess,
+                runPerDevCommIsolationPhase(rank, srcWin, dstWin,
+                                            /*offset=*/2 * kSlotBytes, kSlotBytes,
+                                            /*expectedEpoch=*/2, second, stream,
+                                            dPhaseCompleted,
+                                            &phaseCompleted));
+  ASSERT_MPI_TRUE(phaseCompleted);
+  ASSERT_MPI_TRUE(stateMatches(second, rank == 1 ? 2 : 0, rank == 0 ? 2 : 0));
+
+  bool payloadMatches = true;
+  if (rank == 1) {
+    std::vector<uint8_t> hostResult(kBufferBytes, 0);
+    payloadMatches =
+        hipMemcpy(hostResult.data(), dDst, kBufferBytes, hipMemcpyDeviceToHost) ==
+            hipSuccess &&
+        hostSrc == hostResult;
+  }
+  ASSERT_MPI_TRUE(payloadMatches);
+
+  MPI_Barrier(MPI_COMM_WORLD);
+  ncclResult_t secondDestroyResult = ncclDevCommDestroy(comm, &second);
+  secondLive = false;
+  ASSERT_MPI_EQ(ncclSuccess, secondDestroyResult);
+  MPI_Barrier(MPI_COMM_WORLD);
 }
 
 // Producer: one block per GIN context. Block b uses ginContext=b, puts into
@@ -3868,7 +4528,7 @@ TEST_F(GinMPIDeviceTests, RailConnection_Create) {
   reqs.ginSignalCount      = 1;
   ncclDevComm devComm{};
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
-  EXPECT_TRUE(devComm.ginIsRailed) << "devComm should report railed GIN";
+  EXPECT_TRUE(devComm.ginConnectionsRailed) << "devComm should report railed GIN";
   (void)ncclDevCommDestroy(comm, &devComm);
 }
 

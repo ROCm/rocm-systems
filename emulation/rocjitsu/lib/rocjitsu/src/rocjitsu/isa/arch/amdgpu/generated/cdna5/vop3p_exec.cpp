@@ -421,6 +421,12 @@ void VPkFmaF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))
+      raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))
+      raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src2, src2.size_bits()))
+      raw2 = util::f32_to_f16(std::bit_cast<float>(raw2));
     bool sel0_lo = (inst_.opsel >> 0) & 1;
     bool sel1_lo = (inst_.opsel >> 1) & 1;
     bool sel2_lo = (inst_.opsel >> 2) & 1;
@@ -467,6 +473,10 @@ void VPkAddF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))
+      raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))
+      raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));
     bool sel0_lo = (inst_.opsel >> 0) & 1;
     bool sel1_lo = (inst_.opsel >> 1) & 1;
     bool sel0_hi = (inst_.opsel_hi >> 0) & 1;
@@ -503,6 +513,10 @@ void VPkMulF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))
+      raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))
+      raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));
     bool sel0_lo = (inst_.opsel >> 0) & 1;
     bool sel1_lo = (inst_.opsel >> 1) & 1;
     bool sel0_hi = (inst_.opsel_hi >> 0) & 1;
@@ -540,6 +554,12 @@ void VPkFmaBf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))
+      raw0 = util::f32_to_bf16(std::bit_cast<float>(raw0));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))
+      raw1 = util::f32_to_bf16(std::bit_cast<float>(raw1));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src2, src2.size_bits()))
+      raw2 = util::f32_to_bf16(std::bit_cast<float>(raw2));
     bool sel0_lo = (inst_.opsel >> 0) & 1;
     bool sel1_lo = (inst_.opsel >> 1) & 1;
     bool sel2_lo = (inst_.opsel >> 2) & 1;
@@ -687,6 +707,10 @@ void VPkMinNumF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))
+      raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))
+      raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));
     bool sel0_lo = (inst_.opsel >> 0) & 1;
     bool sel1_lo = (inst_.opsel >> 1) & 1;
     bool sel0_hi = (inst_.opsel_hi >> 0) & 1;
@@ -723,6 +747,10 @@ void VPkMaxNumF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))
+      raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))
+      raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));
     bool sel0_lo = (inst_.opsel >> 0) & 1;
     bool sel1_lo = (inst_.opsel >> 1) & 1;
     bool sel0_hi = (inst_.opsel_hi >> 0) & 1;
@@ -759,6 +787,10 @@ void VPkMinimumF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))
+      raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))
+      raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));
     bool sel0_lo = (inst_.opsel >> 0) & 1;
     bool sel1_lo = (inst_.opsel >> 1) & 1;
     bool sel0_hi = (inst_.opsel_hi >> 0) & 1;
@@ -795,6 +827,10 @@ void VPkMaximumF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))
+      raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))
+      raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));
     bool sel0_lo = (inst_.opsel >> 0) & 1;
     bool sel1_lo = (inst_.opsel >> 1) & 1;
     bool sel0_hi = (inst_.opsel_hi >> 0) & 1;
@@ -984,6 +1020,10 @@ void VPkAddBf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))
+      raw0 = util::f32_to_bf16(std::bit_cast<float>(raw0));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))
+      raw1 = util::f32_to_bf16(std::bit_cast<float>(raw1));
     bool sel0_lo = (inst_.opsel >> 0) & 1;
     bool sel1_lo = (inst_.opsel >> 1) & 1;
     bool sel0_hi = (inst_.opsel_hi >> 0) & 1;
@@ -1085,6 +1125,10 @@ void VPkMulBf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))
+      raw0 = util::f32_to_bf16(std::bit_cast<float>(raw0));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))
+      raw1 = util::f32_to_bf16(std::bit_cast<float>(raw1));
     bool sel0_lo = (inst_.opsel >> 0) & 1;
     bool sel1_lo = (inst_.opsel >> 1) & 1;
     bool sel0_hi = (inst_.opsel_hi >> 0) & 1;
@@ -1120,6 +1164,10 @@ void VPkMinNumBf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))
+      raw0 = util::f32_to_bf16(std::bit_cast<float>(raw0));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))
+      raw1 = util::f32_to_bf16(std::bit_cast<float>(raw1));
     bool sel0_lo = (inst_.opsel >> 0) & 1;
     bool sel1_lo = (inst_.opsel >> 1) & 1;
     bool sel0_hi = (inst_.opsel_hi >> 0) & 1;
@@ -1155,6 +1203,10 @@ void VPkMaxNumBf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))
+      raw0 = util::f32_to_bf16(std::bit_cast<float>(raw0));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))
+      raw1 = util::f32_to_bf16(std::bit_cast<float>(raw1));
     bool sel0_lo = (inst_.opsel >> 0) & 1;
     bool sel1_lo = (inst_.opsel >> 1) & 1;
     bool sel0_hi = (inst_.opsel_hi >> 0) & 1;
@@ -1341,6 +1393,12 @@ void VPkMinimum3F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))
+      raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))
+      raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src2, src2.size_bits()))
+      raw2 = util::f32_to_f16(std::bit_cast<float>(raw2));
     bool sel0_lo = (inst_.opsel >> 0) & 1;
     bool sel1_lo = (inst_.opsel >> 1) & 1;
     bool sel2_lo = (inst_.opsel >> 2) & 1;
@@ -1395,6 +1453,12 @@ void VPkMaximum3F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))
+      raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))
+      raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src2, src2.size_bits()))
+      raw2 = util::f32_to_f16(std::bit_cast<float>(raw2));
     bool sel0_lo = (inst_.opsel >> 0) & 1;
     bool sel1_lo = (inst_.opsel >> 1) & 1;
     bool sel2_lo = (inst_.opsel >> 2) & 1;
@@ -1449,6 +1513,12 @@ void VPkMin3NumF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))
+      raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))
+      raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src2, src2.size_bits()))
+      raw2 = util::f32_to_f16(std::bit_cast<float>(raw2));
     bool sel0_lo = (inst_.opsel >> 0) & 1;
     bool sel1_lo = (inst_.opsel >> 1) & 1;
     bool sel2_lo = (inst_.opsel >> 2) & 1;
@@ -1496,6 +1566,12 @@ void VPkMax3NumF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))
+      raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))
+      raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));
+    if (amdgpu::pk16_src_needs_narrowing(inst_.src2, src2.size_bits()))
+      raw2 = util::f32_to_f16(std::bit_cast<float>(raw2));
     bool sel0_lo = (inst_.opsel >> 0) & 1;
     bool sel1_lo = (inst_.opsel >> 1) & 1;
     bool sel2_lo = (inst_.opsel >> 2) & 1;
@@ -2539,12 +2615,21 @@ void VWmmaScaleF32Vop3px2::execute_impl(amdgpu::Wavefront &wf) {
   const uint32_t matrix_a_scale_fmt = scale_inst_.neg & 0x3u;
   const uint32_t matrix_b_scale_fmt = scale_inst_.neg_hi & 0x3u;
   const bool scale16 = scale_inst_.op == 0x3a;
+  const bool scale0_inline_zero =
+      scale_src0.encoding_value() == OpSelSrcSimple::OPR_SRC_SIMPLE_POS_INT_MIN;
+  const bool scale1_inline_zero =
+      scale_src1.encoding_value() == OpSelSrcSimple::OPR_SRC_SIMPLE_POS_INT_MIN;
 
   auto scale_word = [&](const Operand &operand, uint32_t lane) -> uint64_t {
-    // For regular scaled WMMA, the inline integer-zero encoding
-    // selects a neutral E8M0 word rather than the numerical value 0.
-    if (!scale16 && operand.encoding_value() == OpSelSrcSimple::OPR_SRC_SIMPLE_POS_INT_MIN)
-      return 0x7f7f7f7fu;
+    // Inline zero supplies a neutral E8M0 scale for every K block.
+    if (operand.encoding_value() == OpSelSrcSimple::OPR_SRC_SIMPLE_POS_INT_MIN)
+      return 0x7f7f7f7f7f7f7f7full;
+    // Scalar scale sources use only bits 7:0, repeated for every K
+    // block. VGPR scale sources retain their packed per-block bytes.
+    if (operand.encoding_value() >= 0 && operand.encoding_value() <= 105) {
+      const uint64_t byte = amdgpu::RegisterAccess(wf).read_lane(operand, lane) & 0xffu;
+      return byte * 0x0101010101010101ull;
+    }
     return scale16 ? amdgpu::RegisterAccess(wf).read_lane64(operand, lane)
                    : amdgpu::RegisterAccess(wf).read_lane(operand, lane);
   };
@@ -2553,20 +2638,22 @@ void VWmmaScaleF32Vop3px2::execute_impl(amdgpu::Wavefront &wf) {
 
   bool dispatched = false;
   if (inst_.op == 0x88) {
-    amdgpu::exec_wmma_f32_scaled_mixed(cu, 32, 16, 128, 4, 4, dst, src0_base, src1_base, s2,
-                                       amdgpu::extract_fp4, amdgpu::extract_fp4, const_acc, scale0,
-                                       scale1, matrix_a_scale, matrix_b_scale, matrix_a_scale_fmt,
-                                       matrix_b_scale_fmt, scale16,
-                                       amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
+    amdgpu::exec_wmma_f32_scaled_mixed(
+        cu, 32, 16, 128, 4, 4, dst, src0_base, src1_base, s2, amdgpu::extract_fp4,
+        amdgpu::extract_fp4, const_acc, scale0, scale1, matrix_a_scale, matrix_b_scale,
+        scale0_inline_zero ? 0u : matrix_a_scale_fmt, scale1_inline_zero ? 0u : matrix_b_scale_fmt,
+        scale16, amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
     dispatched = true;
   } else {
     dispatched = amdgpu::dispatch_matrix_fmt_pair(
         matrix_a_fmt, matrix_b_fmt,
         [&](uint32_t a_bits, uint32_t b_bits, auto extract_a, auto extract_b) {
-          amdgpu::exec_wmma_f32_scaled_mixed(
-              cu, 16, 16, 128, a_bits, b_bits, dst, src0_base, src1_base, s2, extract_a, extract_b,
-              const_acc, scale0, scale1, matrix_a_scale, matrix_b_scale, matrix_a_scale_fmt,
-              matrix_b_scale_fmt, scale16, amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
+          amdgpu::exec_wmma_f32_scaled_mixed(cu, 16, 16, 128, a_bits, b_bits, dst, src0_base,
+                                             src1_base, s2, extract_a, extract_b, const_acc, scale0,
+                                             scale1, matrix_a_scale, matrix_b_scale,
+                                             scale0_inline_zero ? 0u : matrix_a_scale_fmt,
+                                             scale1_inline_zero ? 0u : matrix_b_scale_fmt, scale16,
+                                             amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
         });
   }
   if (!dispatched)
