@@ -282,6 +282,27 @@ separate kernel replay Doxygen group. A walkthrough for tool authors is
 {ref}`kernel-replay-sdk-api`. See
 {ref}`using-kernel-replay` for a configure / `replay_pass_count` / local-context how-to.
 
+## rocprofv3 integration
+
+`rocprofv3` exposes replay through one flag:
+
+```bash
+rocprofv3 --pmc <counters...> --kernel-replay-beta-enabled -- <app>
+```
+
+- `--kernel-replay-beta-enabled` requires `--pmc`, and the CLI fails with a diagnostic if it is used
+  without it.
+- The flag sets `ROCPROF_KERNEL_REPLAY`, which the tool library reads to decide whether to create the
+  kernel replay context.
+- There is no pass-count environment variable. The tool derives the pass count from the number of
+  counter groups collectable on the dispatch's agent and returns it from `pass_count_cb`.
+- The flag does not wire `replay_continue_cb` or the localized start/stop context callbacks.
+- Without the flag, multiple `--pmc` groups continue to use application replay, where the whole
+  application is re-run once per group.
+
+JSON counter records include a `replay_pass` field. CSV `counter_collection.csv` does **not** add a
+`Replay_Pass` column. See {ref}`using-kernel-replay-rocprofv3`.
+
 ## Source reference
 
 All paths are relative to `projects/rocprofiler-sdk/`.
@@ -299,4 +320,7 @@ All paths are relative to `projects/rocprofiler-sdk/`.
 | Operation name/id queries | `source/lib/rocprofiler-sdk/kernel_replay/kernel_replay.cpp` | `name_by_id()`, `id_by_name()` |
 | Localized context callbacks | `source/lib/rocprofiler-sdk/kernel_replay/local_context.cpp` | `replay_local_enable_context()`, `replay_local_disable_context()` |
 | Replay loop and dispatch-id reservation | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `WriteInterceptor` |
+| Tool-side subscription | `source/lib/rocprofiler-sdk-tool/tool.cpp` | `kernel_replay_callback()`, `kernel_replay_pass_count_callback()` |
+| Tool-side flag | `source/lib/rocprofiler-sdk-tool/config.hpp` | `kernel_replay` (`ROCPROF_KERNEL_REPLAY`) |
+| CLI flag | `source/bin/rocprofv3.py` | `--kernel-replay-beta-enabled` |
 | Tests | `source/lib/rocprofiler-sdk/kernel_replay/tests/` | `local_context.cpp` |
