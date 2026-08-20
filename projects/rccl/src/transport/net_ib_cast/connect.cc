@@ -21,6 +21,8 @@ NCCL_PARAM(IbCastSl, "IB_SL", -1);
 NCCL_PARAM(IbCastTc, "IB_TC", -1);
 NCCL_PARAM(IbCastFifoTc, "IB_FIFO_TC", -1);
 NCCL_PARAM(IbCastEceEnable, "IB_ECE_ENABLE", 1);
+NCCL_PARAM(IbCastSubnetAwareRouting, "IB_SUBNET_AWARE_ROUTING", 0);
+NCCL_PARAM(IbCastSubnetPrefixLen, "IB_SUBNET_PREFIX_LEN", 24);
 
 extern int64_t ncclParamIbCastOooRq();
 extern int64_t ncclParamIbCastResiliencyPortFailover();
@@ -523,19 +525,22 @@ ncclResult_t IbCastQpRtr(struct ncclIbQp* qp) {
     qpAttr.ah_attr.grh.hop_limit = 255;
     qpAttr.ah_attr.grh.traffic_class = rtrAttr->tc;
   } else {
-    // pick lid if subnet prefixs are same, FLID if they are not
-    if (IbCastExtractLocalSubnetPrefix(rtrAttr->localGid.global.subnet_prefix) ==
-        IbCastExtractLocalSubnetPrefix(rtrAttr->remoteGid.global.subnet_prefix)) {
-      qpAttr.ah_attr.is_global = 0;
-      qpAttr.ah_attr.dlid = rtrAttr->remoteLid;
-    } else {
-      uint16_t flid = IbCastExtractFlid(&rtrAttr->remoteGid);
-      if (flid == 0) {
-        WARN("Warning: remote FLID configured as zero even when endpoints are on different subnets, using dlid as "
-             "fallback");
-        qpAttr.ah_attr.dlid = rtrAttr->remoteLid;
-      } else {
-        qpAttr.ah_attr.dlid = IbCastExtractFlid(&rtrAttr->remoteGid);
+    // Path-local if same subnet and GRH not required; else global addressing. FLID only when subnets differ.
+    bool sameSubnet = (IbCastExtractLocalSubnetPrefix(rtrAttr->localGid.global.subnet_prefix) ==
+                       IbCastExtractLocalSubnetPrefix(rtrAttr->remoteGid.global.subnet_prefix));
+    bool needGlobal = !sameSubnet || (rtrAttr->localPortFlags & IBV_QPF_GRH_REQUIRED);
+    qpAttr.ah_attr.is_global = 0;
+    qpAttr.ah_attr.dlid = rtrAttr->remoteLid;
+    if (needGlobal) {
+      if (!sameSubnet) {
+        uint16_t flid = IbCastExtractFlid(&rtrAttr->remoteGid);
+        if (flid == 0) {
+          WARN("Warning: remote FLID configured as zero even when endpoints are on different subnets, using dlid as "
+               "fallback");
+          qpAttr.ah_attr.dlid = rtrAttr->remoteLid;
+        } else {
+          qpAttr.ah_attr.dlid = flid;
+        }
       }
       qpAttr.ah_attr.is_global = 1;
       qpAttr.ah_attr.grh.dgid.global.subnet_prefix = rtrAttr->remoteGid.global.subnet_prefix;
@@ -588,6 +593,129 @@ ncclResult_t IbCastQpError(struct ncclIbQp* qp) {
   return ncclSuccess;
 }
 
+// Check if two RoCE GIDs are on the same subnet.
+// For IPv4-mapped GIDs (::ffff:a.b.c.d), uses the given prefix length (1..32).
+// For native IPv6 GIDs, compares the 64-bit subnet prefix.
+static bool gidSameSubnet(union ibv_gid* local, union ibv_gid* remote, int prefixLen) {
+  sa_family_t localFam = getGidAddrFamily(local);
+  sa_family_t remoteFam = getGidAddrFamily(remote);
+  if (localFam != remoteFam) return false;
+  if (localFam == AF_INET) {
+    // IPv4-mapped: compare using configured prefix length.
+    // IPv4 address is in bytes 12-15 of the raw GID.
+    uint32_t localIp, remoteIp;
+    memcpy(&localIp, local->raw + 12, 4);
+    memcpy(&remoteIp, remote->raw + 12, 4);
+    uint32_t mask = htonl(~((1U << (32 - prefixLen)) - 1));
+    return (localIp & mask) == (remoteIp & mask);
+  } else {
+    // IPv6: compare subnet prefix (first 64 bits)
+    return local->global.subnet_prefix == remote->global.subnet_prefix;
+  }
+}
+
+// check if a local GID matches ANY of the remote GIDs.
+static bool subnetMatchesAny(union ibv_gid* localGid, union ibv_gid* remoteGids, int nRemoteGids, int prefixLen) {
+  for (int r = 0; r < nRemoteGids; r++) {
+    if (validGid(&remoteGids[r]) && gidSameSubnet(localGid, &remoteGids[r], prefixLen)) return true;
+  }
+  return false;
+}
+
+extern "C" int ncclIbCastTestGidSameSubnet(const uint8_t localGid[16], const uint8_t remoteGid[16], int prefixLen) {
+  union ibv_gid l, r;
+  memcpy(l.raw, localGid, 16);
+  memcpy(r.raw, remoteGid, 16);
+  return gidSameSubnet(&l, &r, prefixLen) ? 1 : 0;
+}
+
+extern "C" int ncclIbCastTestSubnetMatchesAny(const uint8_t localGid[16], const uint8_t* remoteGids, int nRemote,
+                                              int prefixLen) {
+  union ibv_gid l;
+  memcpy(l.raw, localGid, 16);
+  union ibv_gid r[NCCL_IB_MAX_DEVS_PER_NIC];
+  if (nRemote < 0 || nRemote > NCCL_IB_MAX_DEVS_PER_NIC) return 0;
+  for (int i = 0; i < nRemote; i++) memcpy(r[i].raw, remoteGids + (size_t)i * 16, 16);
+  return subnetMatchesAny(&l, r, nRemote, prefixLen) ? 1 : 0;
+}
+
+// Given remote GIDs (one per PF on the remote side), find a local merged IB
+// device that shares a subnet with any of them. Writes defaultDev to *foundDev
+// if no better match is found, preserving existing behavior for single-subnet
+// and IB deployments.
+// Checks the default device first to preserve NIC Fusion when all PFs in
+// the fused device can reach the peer (e.g., 2-node or switch setup).
+static ncclResult_t IbCastFindDevBySubnet(union ibv_gid* remoteGids, int nRemoteGids, int defaultDev, int* foundDev) {
+  *foundDev = defaultDev;
+
+  int prefixLen = ncclParamIbCastSubnetPrefixLen();
+  if (prefixLen < 1 || prefixLen > 32) {
+    WARN("NET/IB: NCCL_IB_SUBNET_PREFIX_LEN=%d is out of range [1,32]", prefixLen);
+    return ncclInvalidArgument;
+  }
+
+  // Quick check: if no remote GID is valid, nothing to do.
+  bool anyValid = false;
+  for (int r = 0; r < nRemoteGids; r++) {
+    if (validGid(&remoteGids[r])) {
+      anyValid = true;
+      break;
+    }
+  }
+  if (!anyValid) return ncclSuccess;
+
+  // First: check if the default device already works. If ALL its RoCE PFs
+  // match some remote GID's subnet, keep it — this preserves NIC Fusion
+  // bandwidth when both ports connect to the same destination.
+  if (defaultDev >= 0 && defaultDev < IbCastNMergedDevs) {
+    struct ncclIbMergedDev* mDev = IbCastMergedDevs + defaultDev;
+    int checked = 0, matched = 0;
+    for (int i = 0; i < mDev->vProps.ndevs; i++) {
+      int ibDevN = mDev->vProps.devs[i];
+      ncclIbDev* ibDev = IbCastDevs + ibDevN;
+      if (ibDev->portAttr.link_layer != IBV_LINK_LAYER_ETHERNET) continue;
+      int gidIndex = 0;
+      union ibv_gid localGid;
+      memset(&localGid, 0, sizeof(localGid));
+      if (IbCastGetGidIndex(ibDev->context, ibDev->portNum, &ibDev->portAttr, &gidIndex) != ncclSuccess) continue;
+      if (wrap_ibv_query_gid(ibDev->context, ibDev->portNum, gidIndex, &localGid) != ncclSuccess) continue;
+      checked++;
+      if (validGid(&localGid) && subnetMatchesAny(&localGid, remoteGids, nRemoteGids, prefixLen)) matched++;
+    }
+    if (checked > 0 && matched == checked) return ncclSuccess;
+  }
+
+  // Default device can't fully reach the peer (e.g., NIC Fusion fused PFs on
+  // different subnets, or the device is on the wrong subnet entirely).
+  // Search for a device whose RoCE PFs all match a remote GID's subnet.
+  // Same "all PFs must match" criterion as the defaultDev check: NCCL takes
+  // a merged-device index and spreads QPs across all its PFs, so a partial
+  // match would leave some QPs on PFs with no L2 path to the peer.
+  for (int devIdx = 0; devIdx < IbCastNMergedDevs; devIdx++) {
+    if (devIdx == defaultDev) continue;
+    struct ncclIbMergedDev* mDev = IbCastMergedDevs + devIdx;
+    int checked = 0, matched = 0;
+    for (int i = 0; i < mDev->vProps.ndevs; i++) {
+      int ibDevN = mDev->vProps.devs[i];
+      ncclIbDev* ibDev = IbCastDevs + ibDevN;
+      if (ibDev->portAttr.link_layer != IBV_LINK_LAYER_ETHERNET) continue;
+      int gidIndex = 0;
+      union ibv_gid localGid;
+      memset(&localGid, 0, sizeof(localGid));
+      if (IbCastGetGidIndex(ibDev->context, ibDev->portNum, &ibDev->portAttr, &gidIndex) != ncclSuccess) continue;
+      if (wrap_ibv_query_gid(ibDev->context, ibDev->portNum, gidIndex, &localGid) != ncclSuccess) continue;
+      checked++;
+      if (validGid(&localGid) && subnetMatchesAny(&localGid, remoteGids, nRemoteGids, prefixLen)) matched++;
+    }
+    if (checked > 0 && matched == checked) {
+      INFO(NCCL_NET, "NET/IB: Subnet-aware routing: overriding dev %d with dev %d", defaultDev, devIdx);
+      *foundDev = devIdx;
+      return ncclSuccess;
+    }
+  }
+  return ncclSuccess;
+}
+
 ncclResult_t IbCastListen(void* ctx, int dev, void* opaqueHandle, void** listenComm) {
   ncclResult_t ret = ncclSuccess;
   struct ncclIbListenComm* comm;
@@ -600,6 +728,33 @@ ncclResult_t IbCastListen(void* ctx, int dev, void* opaqueHandle, void** listenC
   NCCLCHECKGOTO(ncclSocketInit(&comm->sock, &IbCastIfAddr, handle->magic, ncclSocketTypeNetIb, NULL, 1), ret, fail);
   NCCLCHECKGOTO(ncclSocketListen(&comm->sock), ret, fail);
   NCCLCHECKGOTO(ncclSocketGetAddr(&comm->sock, &handle->connectAddr), ret, fail);
+
+  // Embed GIDs of the first 2 RoCE PFs (handle-size limited) in the handle so
+  // the connector can find a local NIC on the same subnet as one of our ports.
+  // ncclIbHandle is bounded to 128 B, so at most 2 GIDs fit; a vNIC with more
+  // than 2 RoCE PFs advertises only the first 2.
+  if (ncclParamIbCastSubnetAwareRouting() && dev < IbCastNMergedDevs) {
+    struct ncclIbMergedDev* mDev = IbCastMergedDevs + dev;
+    int gidSlot = 0, roceDevs = 0;
+    for (int i = 0; i < mDev->vProps.ndevs; i++) {
+      int ibDevN = mDev->vProps.devs[i];
+      ncclIbDev* ibDev = IbCastDevs + ibDevN;
+      if (ibDev->portAttr.link_layer != IBV_LINK_LAYER_ETHERNET) continue;
+      roceDevs++;
+      if (gidSlot >= 2) continue;
+      int gidIndex;
+      NCCLCHECKGOTO(IbCastGetGidIndex(ibDev->context, ibDev->portNum, &ibDev->portAttr, &gidIndex), ret, fail);
+      NCCLCHECKGOTO(wrap_ibv_query_gid(ibDev->context, ibDev->portNum, gidIndex, &handle->listenGids[gidSlot]), ret,
+                    fail);
+      gidSlot++;
+    }
+    if (roceDevs > 2) {
+      WARN("NET/IB: %s: subnet-aware routing device %d has %d RoCE PFs but only the first 2 are advertised "
+           "(handle-size limited)",
+           __func__, dev, roceDevs);
+    }
+  }
+
   *listenComm = comm;
 exit:
   return ret;
@@ -753,6 +908,7 @@ static ncclResult_t IbCastSenderQpsToRts(ncclIbSendComm* comm, struct ncclIbConn
     rtrAttr->remoteLid = remDevInfo->lid;
     rtrAttr->remoteGid = remDevInfo->gid;
     rtrAttr->localIbPort = ibDev->portNum;
+    rtrAttr->localPortFlags = ibDev->portAttr.flags;
     rtrAttr->localGid = commDev->base.gidInfo.localGid;
     rtrAttr->localGidIndex = commDev->base.gidInfo.localGidIndex;
     NCCLCHECK(IbCastQpRtr(localQp));
@@ -779,8 +935,8 @@ void IbCastSetTrafficClass(void* ctx, int trafficClass) {
   if (config) config->trafficClass = trafficClass;
 }
 
-ncclResult_t IbCastConnect(void* ctx, int dev, void* opaqueHandle, void** sendComm,
-                           ncclNetDeviceHandle_t** sendDevComm) {
+ncclResult_t IbCastConnectImpl(void* ctx, int dev, void* opaqueHandle, void** sendComm,
+                               ncclNetDeviceHandle_t** sendDevComm, int envTrafficClass) {
   ncclResult_t ret = ncclSuccess;
   struct ncclIbHandle* handle = (struct ncclIbHandle*)opaqueHandle;
   struct ncclIbCommStage* stage = &handle->stage;
@@ -791,6 +947,11 @@ ncclResult_t IbCastConnect(void* ctx, int dev, void* opaqueHandle, void** sendCo
   int channelId = 0;
   int isP2p = 0;
   *sendComm = NULL;
+
+  // Subnet-aware device selection: use the listener's GIDs (embedded in the
+  // handle) to find a local NIC on the same subnet as the remote peer.
+  // For single-subnet or IB deployments, all GIDs are zero → dev stays unchanged.
+  if (ncclParamIbCastSubnetAwareRouting()) NCCLCHECK(IbCastFindDevBySubnet(handle->listenGids, 2, dev, &dev));
 
   if (IbCastAinicRoce && sendDevComm) {
     channelId = ((ncclNet_ctxt_t*)sendDevComm)->chId;
@@ -994,7 +1155,7 @@ ib_recv_dev_list:
   meta.sl = (ncclParamIbCastSl() != -1)                    ? ncclParamIbCastSl() :
             (trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? trafficClass :
                                                              NCCL_IB_SL_DEFAULT;
-  meta.tc = (ncclParamIbCastTc() != -1)                    ? ncclParamIbCastTc() :
+  meta.tc = (envTrafficClass != -1)                        ? envTrafficClass :
             (trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? trafficClass :
                                                              NCCL_IB_TC_DEFAULT;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
@@ -1087,6 +1248,11 @@ exit:
 fail:
   free(comm);
   goto exit;
+}
+
+ncclResult_t IbCastConnect(void* ctx, int dev, void* opaqueHandle, void** sendComm,
+                           ncclNetDeviceHandle_t** sendDevComm) {
+  return IbCastConnectImpl(ctx, dev, opaqueHandle, sendComm, sendDevComm, ncclParamIbCastTc());
 }
 
 NCCL_PARAM(IbCastWarnRailLocal, "IB_WARN_RAIL_LOCAL", 0);
@@ -1254,6 +1420,7 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
     rtrAttr->remoteLid = remDevInfo->lid;
     rtrAttr->remoteGid = remDevInfo->gid;
     rtrAttr->localIbPort = ibDev->portNum;
+    rtrAttr->localPortFlags = ibDev->portAttr.flags;
     rtrAttr->localGid = rCommDev->base.gidInfo.localGid;
     rtrAttr->localGidIndex = rCommDev->base.gidInfo.localGidIndex;
     NCCLCHECK(IbCastQpRtr(localQp));
@@ -1325,6 +1492,7 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
       rtrAttr->remoteLid = ibDev->portAttr.lid;
       rtrAttr->remoteGid = rCommDev->base.gidInfo.localGid;
       rtrAttr->localIbPort = ibDev->portNum;
+      rtrAttr->localPortFlags = ibDev->portAttr.flags;
       rtrAttr->localGid = rCommDev->base.gidInfo.localGid;
       rtrAttr->localGidIndex = rCommDev->base.gidInfo.localGidIndex;
       NCCLCHECK(IbCastQpRtr(flushQp));
@@ -1475,6 +1643,25 @@ ib_recv:
     rComm->base.nqps = 1;
   }
   rComm->base.nDataQps = std::max(rComm->base.vProps.ndevs, remMeta.ndevs);
+
+  // Subnet-aware device selection: use the remote sender's GIDs to find a local
+  // NIC on the same subnet. Override lComm->dev and update vProps if a
+  // better device is found.
+  if (ncclParamIbCastSubnetAwareRouting() && remMeta.ndevs > 0) {
+    union ibv_gid remoteGids[NCCL_IB_MAX_DEVS_PER_NIC];
+    int nRemoteGids = 0;
+    for (int i = 0; i < remMeta.ndevs && i < NCCL_IB_MAX_DEVS_PER_NIC; i++) {
+      if (remMeta.devs[i].link_layer == IBV_LINK_LAYER_ETHERNET) {
+        remoteGids[nRemoteGids++] = remMeta.devs[i].gid;
+      }
+    }
+    int effectiveDev = lComm->dev;
+    NCCLCHECKGOTO(IbCastFindDevBySubnet(remoteGids, nRemoteGids, lComm->dev, &effectiveDev), ret, fail);
+    if (effectiveDev != lComm->dev) {
+      lComm->dev = effectiveDev;
+      rComm->base.vProps = IbCastMergedDevs[effectiveDev].vProps;
+    }
+  }
 
   // IB setup
   // Pre-declare variables because of goto
