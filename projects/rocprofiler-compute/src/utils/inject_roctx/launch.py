@@ -21,12 +21,12 @@ if _PACKAGE_PARENT not in sys.path:
 from utils.inject_roctx.core import install_global_wraps  # noqa: E402
 
 
-def _report_recordfn_callback_errors() -> None:
-    """Warn if the C++ RecordFunction tier swallowed callback exceptions."""
+def _report_torch_trace_callback_errors() -> None:
+    """Warn if torch_trace_collector swallowed callback exceptions."""
     torch_backend = sys.modules.get("utils.inject_roctx._backends.torch")
     if torch_backend is None:
         return
-    stats = torch_backend.dump_recordfn_stats()
+    stats = torch_backend.dump_torch_trace_stats()
     if not stats:
         return
     callback_errors = int(stats.get("callback_errors", 0) or 0)
@@ -69,4 +69,4 @@ sys.argv = [target_script] + script_args
 try:
     runpy.run_path(target_script, run_name="__main__")
 finally:
-    _report_recordfn_callback_errors()
+    _report_torch_trace_callback_errors()
