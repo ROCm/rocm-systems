@@ -12,6 +12,7 @@
 
 #include "RmaMPITestBase.hpp"
 #include "GinMultiSegmentHelpers.hpp"
+#include "../../HybridVmmHelpers.hpp"
 #include "MPIHelpers.hpp"
 
 #include <algorithm>
@@ -95,6 +96,9 @@ protected:
         for (auto& b : vmmBuffers_)
             FreeMultiSegmentVmm(*b);
         vmmBuffers_.clear();
+        for (auto& b : hybridBuffers_)
+            RCCLHybridVmmTests::FreeHybridVmm(*b);
+        hybridBuffers_.clear();
         logCtx_.reset();
         debugSubsysGuard_.reset();
         debugGuard_.reset();
@@ -111,17 +115,14 @@ protected:
     // GTEST_SKIP together (a unilateral skip would hang peers).
     bool SyncSkip(bool wantSkip)
     {
-        int flag = wantSkip ? 1 : 0;
-        MPI_Allreduce(MPI_IN_PLACE, &flag, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
-        return flag != 0;
+        return MPIHelpers::anyRankTrue(wantSkip);
     }
 
     // True only if EVERY rank observed the per-segment registration marker.
     bool AllTookMultiSegPath()
     {
-        int local = (readAllLogs().find(kMultiSegMarker) != std::string::npos) ? 1 : 0;
-        MPI_Allreduce(MPI_IN_PLACE, &local, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
-        return local != 0;
+        return MPIHelpers::allRanksTrue(
+            readAllLogs().find(kMultiSegMarker) != std::string::npos);
     }
 
     // Allocate a fixture-owned N-segment VMM window (freed in TearDown after MR
@@ -152,7 +153,40 @@ protected:
         return vmmBuffers_.back().get();
     }
 
+    RCCLHybridVmmTests::HybridVmmBuffer* AllocHybrid(
+        size_t gpuBytes, size_t localCpuBytes, std::string* reason)
+    {
+        int dev = 0;
+        if (hipGetDevice(&dev) != hipSuccess)
+            return nullptr;
+        auto buf = std::make_unique<RCCLHybridVmmTests::HybridVmmBuffer>();
+        if (!RCCLHybridVmmTests::AllocHybridVmm(
+                dev, gpuBytes, localCpuBytes, buf.get(), reason))
+            return nullptr;
+        hybridBuffers_.push_back(std::move(buf));
+        return hybridBuffers_.back().get();
+    }
+
+    bool AllocHybridForLocalRanks(
+        size_t gpuBytes, size_t localCpuBytes, int expectedLocalRanks,
+        RCCLHybridVmmTests::HybridVmmBuffer** out, std::string* reason)
+    {
+        *out = AllocHybrid(gpuBytes, localCpuBytes, reason);
+        if (SyncSkip(*out == nullptr)) {
+            if (reason && reason->empty())
+                *reason = "hybrid VMM allocation failed on another rank";
+            return false;
+        }
+        if (SyncSkip((*out)->localSize != expectedLocalRanks)) {
+            if (reason)
+                *reason = "unexpected number of shared-memory local ranks";
+            return false;
+        }
+        return true;
+    }
+
     std::vector<std::unique_ptr<MultiSegmentVmmBuffer>> vmmBuffers_;
+    std::vector<std::unique_ptr<RCCLHybridVmmTests::HybridVmmBuffer>> hybridBuffers_;
 };
 
 // Reproducer (AIRUNTIME-2351): a multi-segment window must register per-segment
@@ -454,6 +488,160 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_MultiNodeEngramMixedWindowIGetStress)
         }
         Barrier();
     }
+}
+
+// DeepEP HybridElasticSymmetricMemory:
+// [GPU][CPU local-rank 0][CPU local-rank 1]. Each process imports the same
+// local CPU handles before registration. Fetch from the matching CPU segment
+// on the other node into a non-zero local GPU offset.
+TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridImportedCpuSegmentIGet)
+{
+    if (!SetUpFixture(/*minProcesses=*/4, /*maxProcesses=*/4,
+                      /*minNodes=*/2, /*maxNodes=*/2))
+        GTEST_SKIP() << "requires exactly 4 ranks across 2 nodes";
+
+    constexpr size_t kMiB = 1024 * 1024;
+    constexpr size_t kGpuBytes = 8 * kMiB;
+    constexpr size_t kCpuBytes = 2 * kMiB;
+    constexpr size_t kPayload = 128 * 1024;
+    constexpr size_t kLocalOff = 64 * 1024;
+    constexpr uint8_t kSentinel = 0xB7;
+
+    std::string reason;
+    RCCLHybridVmmTests::HybridVmmBuffer* window = nullptr;
+    if (!AllocHybridForLocalRanks(
+            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/2, &window, &reason))
+        GTEST_SKIP() << "DeepEP hybrid allocation unavailable: " << reason;
+
+    const size_t remoteOff = kGpuBytes + static_cast<size_t>(window->localRank) * kCpuBytes + 4096;
+    const int peer = MPIHelpers::findRemotePeerForLocalRank(window->localRank);
+    ASSERT_GE(peer, 0);
+
+    FillBuf(static_cast<uint8_t*>(window->ptr) + remoteOff, kPayload,
+            static_cast<uint8_t>(0x30 + worldRank_));
+    FillSentinel(window->ptr, kGpuBytes, kSentinel);
+
+    void *mh = nullptr, *gh = nullptr;
+    ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
+    if (SyncSkip(!AllTookMultiSegPath()))
+        GTEST_SKIP() << "hybrid window did not take the multi-segment GIN path";
+
+    Barrier();
+    void* req = nullptr;
+    ASSERT_EQ(ncclSuccess,
+              rma_->iget(rmaCtx_, 0, remoteOff, mh, kPayload,
+                         kLocalOff, mh, peer, &req));
+    ASSERT_TRUE(PollUntilDone(req));
+    EXPECT_TRUE(VerifyBuf(static_cast<uint8_t*>(window->ptr) + kLocalOff,
+                          kPayload, static_cast<uint8_t>(0x30 + peer)));
+    EXPECT_TRUE(AllSentinel(window->ptr, kLocalOff, kSentinel));
+    EXPECT_TRUE(AllSentinel(static_cast<uint8_t*>(window->ptr) + kLocalOff + kPayload,
+                            kGpuBytes - kLocalOff - kPayload, kSentinel));
+    Barrier();
+}
+
+// Multi-node hybrid stress: alternate the remote node's imported CPU-owner
+// segment while varying source/destination offsets and transfer sizes. This
+// exercises segment-window selection, shared-handle lifetime, and independent
+// local/remote cursors with sentinel protection.
+TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridMultiNodeIGetStress)
+{
+    if (!SetUpFixture(/*minProcesses=*/4, /*maxProcesses=*/4,
+                      /*minNodes=*/2, /*maxNodes=*/2))
+        GTEST_SKIP() << "requires exactly 4 ranks across 2 nodes";
+
+    constexpr size_t kMiB = 1024 * 1024;
+    constexpr size_t kGpuBytes = 8 * kMiB;
+    constexpr size_t kCpuBytes = 2 * kMiB;
+    constexpr int kIterations = 32;
+    constexpr uint8_t kSentinel = 0xBC;
+    const std::vector<size_t> sizes = {
+        size_t{1}, size_t{63}, size_t{4095}, size_t{4096},
+        size_t{65535}, size_t{65536}, size_t{131072}, size_t{262144}
+    };
+
+    std::string reason;
+    RCCLHybridVmmTests::HybridVmmBuffer* window = nullptr;
+    if (!AllocHybridForLocalRanks(
+            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/2, &window, &reason))
+        GTEST_SKIP() << "DeepEP hybrid allocation unavailable: " << reason;
+
+    void *mh = nullptr, *gh = nullptr;
+    ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
+    if (SyncSkip(!AllTookMultiSegPath()))
+        GTEST_SKIP() << "hybrid window did not take the multi-segment GIN path";
+
+    for (int i = 0; i < kIterations; ++i)
+    {
+        const size_t len = sizes[static_cast<size_t>(i) % sizes.size()];
+        const size_t sourceInnerOff = 4096 +
+            (static_cast<size_t>(i) * 131071) % (kCpuBytes - len - 4096);
+        const size_t ownCpuOff = kGpuBytes +
+            static_cast<size_t>(window->localRank) * kCpuBytes + sourceInnerOff;
+        const size_t localOff = 65536 +
+            (static_cast<size_t>(i) * 65537) % (kGpuBytes - len - 65536);
+        const uint8_t seed = static_cast<uint8_t>(0x40 + worldRank_ + i);
+
+        FillBuf(static_cast<uint8_t*>(window->ptr) + ownCpuOff, len, seed);
+        FillSentinel(window->ptr, kGpuBytes, kSentinel);
+        Barrier();
+
+        const int sourceLocalRank = (i + window->localRank) % window->localSize;
+        const int peer = MPIHelpers::findRemotePeerForLocalRank(sourceLocalRank);
+        ASSERT_GE(peer, 0);
+        const size_t remoteOff = kGpuBytes +
+            static_cast<size_t>(sourceLocalRank) * kCpuBytes + sourceInnerOff;
+
+        void* req = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  rma_->iget(rmaCtx_, 0, remoteOff, mh, len,
+                             localOff, mh, peer, &req))
+            << "hybrid IGet post failed at iteration " << i;
+        ASSERT_TRUE(PollUntilDone(req))
+            << "hybrid IGet stalled at iteration " << i;
+        EXPECT_TRUE(VerifyBuf(static_cast<uint8_t*>(window->ptr) + localOff,
+                              len, static_cast<uint8_t>(0x40 + peer + i)))
+            << "hybrid payload mismatch at iteration " << i;
+        EXPECT_TRUE(AllSentinel(window->ptr, localOff, kSentinel));
+        EXPECT_TRUE(AllSentinel(static_cast<uint8_t*>(window->ptr) + localOff + len,
+                                kGpuBytes - localOff - len, kSentinel));
+        Barrier();
+    }
+}
+
+// Negative hybrid range guard: an IGet that overruns the final imported CPU
+// segment must be rejected before posting and leave the GPU destination intact.
+TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridOutOfRangeIGetRejected)
+{
+    if (!SetUpFixture(/*minProcesses=*/4, /*maxProcesses=*/4,
+                      /*minNodes=*/2, /*maxNodes=*/2))
+        GTEST_SKIP() << "requires exactly 4 ranks across 2 nodes";
+
+    constexpr size_t kMiB = 1024 * 1024;
+    constexpr size_t kGpuBytes = 8 * kMiB;
+    constexpr size_t kCpuBytes = 2 * kMiB;
+    constexpr uint8_t kSentinel = 0xC7;
+
+    std::string reason;
+    RCCLHybridVmmTests::HybridVmmBuffer* window = nullptr;
+    if (!AllocHybridForLocalRanks(
+            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/2, &window, &reason))
+        GTEST_SKIP() << "DeepEP hybrid allocation unavailable: " << reason;
+
+    void *mh = nullptr, *gh = nullptr;
+    ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
+    FillSentinel(window->ptr, kGpuBytes, kSentinel);
+    Barrier();
+
+    const int peer = MPIHelpers::findRemotePeerForLocalRank(window->localRank);
+    ASSERT_GE(peer, 0);
+    void* req = nullptr;
+    EXPECT_EQ(ncclInvalidArgument,
+              rma_->iget(rmaCtx_, 0, window->totalSize - 32, mh, 64,
+                         /*localOff=*/0, mh, peer, &req));
+    EXPECT_EQ(req, nullptr);
+    EXPECT_TRUE(AllSentinel(window->ptr, kGpuBytes, kSentinel));
+    Barrier();
 }
 
 // Receiver-side flush over a multi-segment buffer: after a plain iput, rank 1

@@ -4,7 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#pragma once
+#ifndef NET_IB_MULTI_SEGMENT_HELPERS_HPP
+#define NET_IB_MULTI_SEGMENT_HELPERS_HPP
 
 #ifdef MPI_TESTS_ENABLED
 
@@ -133,3 +134,5 @@ cleanup:
 } // namespace RCCLNetIbTests
 
 #endif // MPI_TESTS_ENABLED
+
+#endif // NET_IB_MULTI_SEGMENT_HELPERS_HPP
