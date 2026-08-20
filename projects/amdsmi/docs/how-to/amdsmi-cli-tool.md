@@ -1271,47 +1271,61 @@ GPU: 0
         MAX_BANDWIDTH: 5325 GB/s
     CACHE_INFO:
         CACHE_0:
+            CACHE_ACRONYM: L1D
             CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
             CACHE_SIZE: 32 KB
             CACHE_LEVEL: 1
             MAX_NUM_CU_SHARED: 1
             NUM_CACHE_INSTANCE: 228
+            TOTAL_CACHE_SIZE: 7296 KB
         CACHE_1:
+            CACHE_ACRONYM: L1I
             CACHE_PROPERTIES: INST_CACHE, SIMD_CACHE
             CACHE_SIZE: 64 KB
             CACHE_LEVEL: 1
             MAX_NUM_CU_SHARED: 2
             NUM_CACHE_INSTANCE: 108
+            TOTAL_CACHE_SIZE: 6912 KB
         CACHE_2:
+            CACHE_ACRONYM: L1I
             CACHE_PROPERTIES: INST_CACHE, SIMD_CACHE
             CACHE_SIZE: 64 KB
             CACHE_LEVEL: 1
             MAX_NUM_CU_SHARED: 1
             NUM_CACHE_INSTANCE: 12
+            TOTAL_CACHE_SIZE: 768 KB
         CACHE_3:
+            CACHE_ACRONYM: L1D
             CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
             CACHE_SIZE: 16 KB
             CACHE_LEVEL: 1
             MAX_NUM_CU_SHARED: 2
             NUM_CACHE_INSTANCE: 108
+            TOTAL_CACHE_SIZE: 1728 KB
         CACHE_4:
+            CACHE_ACRONYM: L1D
             CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
             CACHE_SIZE: 16 KB
             CACHE_LEVEL: 1
             MAX_NUM_CU_SHARED: 1
             NUM_CACHE_INSTANCE: 12
+            TOTAL_CACHE_SIZE: 192 KB
         CACHE_5:
+            CACHE_ACRONYM: L2
             CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
             CACHE_SIZE: 4096 KB
             CACHE_LEVEL: 2
             MAX_NUM_CU_SHARED: 228
             NUM_CACHE_INSTANCE: 1
+            TOTAL_CACHE_SIZE: 4096 KB
         CACHE_6:
+            CACHE_ACRONYM: L3
             CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
             CACHE_SIZE: 262144 KB
             CACHE_LEVEL: 3
             MAX_NUM_CU_SHARED: 228
             NUM_CACHE_INSTANCE: 1
+            TOTAL_CACHE_SIZE: 262144 KB
     MEM_CARVEOUT: N/A (UMA carveout is not supported on this ASIC/VBIOS)
     CLOCK:
         SYS:
