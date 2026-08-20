@@ -123,8 +123,7 @@ struct testColl {
       const void* sendbuff, void* recvbuff, int graphCapturing, int* algo, int* proto, int* nchannels);
   // Optional device-side (in-kernel wall_clock64) timing hook. Non-null only for
   // collectives that implement it (currently AllToAll). Driven by BenchTime via
-  // NCCL_GIN_ANVIL_DEVICE_TIMING (legacy NCCL_GIN_ANVIL_A2A_DEVICE_TIMING)
-  // (0=off, 1=augment, 2=device-time-only):
+  // --device_timing (0=off, 1=augment, 2=device-time-only):
   //   - outDeltaSec == nullptr (mode 1): prints an extra device-only
   //     latency/busbw line alongside the normal graph/hipEvent numbers (report,
   //     not replace).
@@ -353,6 +352,15 @@ extern const char *test_memorytypes[nccl_NUM_MTYPES];
 extern int deviceCtaCount; // number of CTAs for device implementation
 extern int deviceImpl;     // selected -D device implementation (0 = host); lets per-collective
                            // device-timing hooks pick the matching timed kernel.
+// In-kernel device timing (AllToAll -D 3/4): --device_timing 0=off, 1=augment, 2=device-only.
+extern int deviceTimingMode;
+extern int devtimeLoop;       // --devtime_loop (default 10)
+extern int devtimeSkip;       // --devtime_skip (default 10)
+extern int devtimeLoopMid;    // --devtime_loop_mid: loop at per-peer >= 8 MiB (0=disabled)
+extern int devtimeLoopLarge;  // --devtime_loop_large: loop at per-peer >= 64 MiB (0=disabled)
+extern int devtimeSkipMid;    // --devtime_skip_mid (-1: min(base skip, 2))
+extern int devtimeSkipLarge;  // --devtime_skip_large (-1: min(base skip, 1))
+extern int devtimeCheck;      // --devtime_check: validate timed-kernel output
 constexpr int test_opNumMax = (int)ncclNumOps + (NCCL_VERSION_CODE >= NCCL_VERSION(2,11,0) ? 1 : 0);
 extern int test_opnum;
 extern int test_typenum;
