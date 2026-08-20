@@ -19,7 +19,7 @@ import sys
 import types
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 from utils.inject_roctx._backends import torch_trace_fingerprint
 
@@ -89,18 +89,27 @@ def format_load_diagnostic_trail(
     return "\n".join(rendered)
 
 
-def compute_tag() -> Optional[str]:
-    """Return ``py{major}.{minor}_torch{version}_src{fingerprint}``, or ``None``."""
+def _tag_and_cxx11_abi() -> Optional[Tuple[str, str]]:
+    """Return ``(tag, cxx11_abi)``, or ``None`` if torch is not importable."""
     try:
         import torch
     except Exception:
         return None
 
-    py_major = sys.version_info.major
-    py_minor = sys.version_info.minor
     torch_version = torch.__version__.split("+", 1)[0]
     fingerprint = _source_fingerprint()
-    return f"py{py_major}.{py_minor}_torch{torch_version}_src{fingerprint}"
+    tag = (
+        f"py{sys.version_info.major}.{sys.version_info.minor}"
+        f"_torch{torch_version}_src{fingerprint}"
+    )
+    cxx11_abi = str(int(torch.compiled_with_cxx11_abi()))
+    return tag, cxx11_abi
+
+
+def compute_tag() -> Optional[str]:
+    """Return ``py{major}.{minor}_torch{version}_src{fingerprint}``, or ``None``."""
+    identity = _tag_and_cxx11_abi()
+    return None if identity is None else identity[0]
 
 
 def _import_module_from_path(name: str, path: Path) -> types.ModuleType:
@@ -245,6 +254,7 @@ def _runtime_build_path(
 def _try_runtime_build(
     tag: str,
     *,
+    cxx11_abi: str,
     force_rebuild: bool = False,
     diagnostics: Optional[_Diagnostics] = None,
 ) -> Optional[types.ModuleType]:
@@ -297,7 +307,8 @@ def _try_runtime_build(
         build_path=build_path,
         configure_options=(
             f"-DTORCH_TRACE_PYTHON={sys.executable}",
-            f"-DTORCH_TRACE_SOURCE_FINGERPRINT={_source_fingerprint()}",
+            f"-DTORCH_TRACE_SOURCE_FINGERPRINT={tag.rpartition('_src')[2]}",
+            f"-DTORCH_TRACE_CXX11_ABI={cxx11_abi}",
             "-DBUILD_TORCH_TRACE_COLLECTOR=ON",
             "-DCMAKE_BUILD_TYPE=Release",
         ),
@@ -336,12 +347,13 @@ def load(force_python_fallback: bool = False) -> LoadResult:
         )
         return LoadResult(None, None, diagnostics)
 
-    tag = compute_tag()
-    if tag is None:
+    identity = _tag_and_cxx11_abi()
+    if identity is None:
         _safe_log(
             "warning", "torch not importable; using Python-only injector", diagnostics
         )
         return LoadResult(None, None, diagnostics)
+    tag, cxx11_abi = identity
 
     if os.environ.get(_REBUILD_ENV_VAR) == "1":
         _safe_log(
@@ -350,17 +362,21 @@ def load(force_python_fallback: bool = False) -> LoadResult:
             f"building again for tag {tag}",
             diagnostics,
         )
-        mod = _try_runtime_build(tag, force_rebuild=True, diagnostics=diagnostics)
+        mod = _try_runtime_build(
+            tag,
+            cxx11_abi=cxx11_abi,
+            force_rebuild=True,
+            diagnostics=diagnostics,
+        )
         tier = TIER_RUNTIME_BUILD if mod is not None else None
         return LoadResult(mod, tier, diagnostics)
 
-    for tier_name, step in (
-        (TIER_PREBUILT, _try_prebuilt),
-        (TIER_RUNTIME_BUILD, _try_runtime_build),
-    ):
-        mod = step(tag, diagnostics=diagnostics)
-        if mod is not None:
-            return LoadResult(mod, tier_name, diagnostics)
+    mod = _try_prebuilt(tag, diagnostics=diagnostics)
+    if mod is not None:
+        return LoadResult(mod, TIER_PREBUILT, diagnostics)
+    mod = _try_runtime_build(tag, cxx11_abi=cxx11_abi, diagnostics=diagnostics)
+    if mod is not None:
+        return LoadResult(mod, TIER_RUNTIME_BUILD, diagnostics)
 
     _safe_log(
         "log",
