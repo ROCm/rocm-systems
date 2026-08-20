@@ -1,0 +1,374 @@
+#!/bin/bash
+# Orchestration for the RCCL AINIC Crusoe gfx950 runner, executed on the SPUR
+# submit node (the self-hosted GitHub runner). It:
+#   1. probes idle GPU nodes and pins a symmetric pair (scripts/crusoe_node_probe.sh
+#      + scripts/crusoe_pick_symmetric.py),
+#   2. submits scripts/crusoe_run_batch.sh with sbatch and waits until RUNNING,
+#   3. streams the allocation's output and watches its terminal state,
+#   4. self-heals around genuinely faulty hardware while treating preemption on
+#      this oversubscribed cluster as a benign retry (no blacklisting).
+#
+# Inputs come from the environment (set by the workflow step): SALLOC_* ,
+# GITHUB_WORKSPACE, TEST_RUNNER_DIR, RUNNER_TEMP, SCOPE, RUN_RCCL_BUILD_DIR,
+# GTEST_BIN_DIR, PERF_BIN_DIR, WORKDIR, MPI_PATH, ROCM_PATH, SPUR_CONTROLLER_ADDR.
+# Exits with the workload's exit code (0 = suites passed).
+set -o pipefail
+export PATH="/usr/local/bin:${PATH}"
+
+# SPUR CLI can wedge; SIGTERM is not enough, so -k is required.
+spur_cmd() { PATH="/usr/local/bin:/usr/bin:/bin:${PATH:-}" /usr/bin/timeout -k 5 30 "$@"; }
+
+RESV_ARG=""
+if [ -n "${SALLOC_RESERVATION}" ]; then
+  RESV_ARG="--reservation=${SALLOC_RESERVATION}"
+fi
+EXCLUDE_ARG=""
+if [ -n "${SALLOC_EXCLUDE}" ]; then
+  EXCLUDE_ARG="--exclude=${SALLOC_EXCLUDE}"
+fi
+ACCOUNT_ARG=""
+if [ -n "${SALLOC_ACCOUNT}" ]; then
+  ACCOUNT_ARG="--account=${SALLOC_ACCOUNT}"
+fi
+
+# sbatch --export=ALL (default) forwards these to the batch job. Note
+# RUN_RCCL_BUILD_DIR (not RCCL_BUILD_DIR): the bare name is only set inline on
+# the test run inside the batch so it never leaks into Phase 0's build.
+export RUN_RCCL_BUILD_DIR GTEST_BIN_DIR PERF_BIN_DIR SCOPE \
+       GITHUB_WORKSPACE TEST_RUNNER_DIR RUNNER_TEMP \
+       WORKDIR MPI_PATH ROCM_PATH SPUR_CONTROLLER_ADDR
+export PYTHONPATH="${GITHUB_WORKSPACE}/${TEST_RUNNER_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
+
+# The batch payload is a committed script (no temp heredoc): sbatch runs it
+# directly off NFS on the compute node(s).
+BATCH_SCRIPT="${GITHUB_WORKSPACE}/${TEST_RUNNER_DIR}/scripts/crusoe_run_batch.sh"
+SLURM_OUT="${RUNNER_TEMP}/crusoe_slurm.out"
+: > "${SLURM_OUT}"
+# Stale result from a previous attempt must not be mistaken for this one's.
+rm -f "${RUNNER_TEMP}/crusoe_result.txt"
+
+job_state_of() {
+  spur_cmd squeue -j "$1" -h -o '%T' 2>/dev/null | tr -d ' ' || true
+}
+job_reason_of() {
+  spur_cmd squeue -j "$1" -h -o '%R' 2>/dev/null || true
+}
+job_scontrol_state() {
+  spur_cmd spur show job "$1" 2>/dev/null | sed -n 's/.*JobState=\([^ ]*\).*/\1/p' | head -n1
+}
+
+# Wait until the job is RUNNING. PENDING is the expected busy-cluster path -- do
+# not scancel it. Heartbeats go to stderr so the caller can capture only the
+# terminal state on stdout.
+wait_until_running() {
+  local jobid="$1"
+  local state="" reason="" js="" last_log=0 now
+  while true; do
+    state=$(job_state_of "${jobid}")
+    reason=$(job_reason_of "${jobid}")
+    now=$(date +%s)
+    if [ "$((now - last_log))" -ge 60 ]; then
+      echo "$(date -u +%H:%M:%SZ) job ${jobid} state=${state:-?} reason=${reason:-?}" >&2
+      last_log="${now}"
+    fi
+    case "${reason}" in
+      *JobLaunchFailure*|*NODE_FAIL*)
+        echo "Launch failed (${reason}); cancelling ${jobid}" >&2
+        echo "NODE_FAIL"
+        return 1
+        ;;
+    esac
+    case "${state}" in
+      RUNNING)
+        echo "RUNNING"
+        return 0
+        ;;
+      PENDING|CONFIGURING)
+        sleep 15
+        continue
+        ;;
+      COMPLETED|FAILED|NODE_FAIL|CANCELLED|TIMEOUT)
+        echo "${state}"
+        return 1
+        ;;
+      "")
+        js=$(job_scontrol_state "${jobid}")
+        case "${js}" in
+          RUNNING)
+            echo "RUNNING"
+            return 0
+            ;;
+          PENDING|CONFIGURING)
+            sleep 15
+            continue
+            ;;
+          COMPLETED|FAILED|NODE_FAIL|CANCELLED|TIMEOUT)
+            echo "${js}"
+            return 1
+            ;;
+          "")
+            echo "gone"
+            return 1
+            ;;
+        esac
+        sleep 15
+        ;;
+      *)
+        sleep 15
+        ;;
+    esac
+  done
+}
+
+expand_idle() {
+  python3 -c 'import sys; from lib.test_executor import expand_slurm_hostlist; print("\n".join(expand_slurm_hostlist(sys.argv[1])))' "$1"
+}
+
+# Probe idle GPU nodes. Keep only hosts with 8 gfx950, ionic_0..7 in both sysfs
+# and ibv_devices, GID-index-1 on every ionic, and the same CPU/NUMA/NIC
+# fingerprint. stdout is host1,host2,... or empty (caller waits and retries).
+probe_symmetric_pair() {
+  local need="$1"
+  local spec hosts n j waited probe_ids probe_dir nready
+  spec=$(spur_cmd sinfo -p "${SALLOC_PARTITION}" -h -t idle -o '%N' 2>/dev/null | head -1 || true)
+  hosts=$(expand_idle "${spec}")
+  if [ "$(echo "${hosts}" | sed '/^$/d' | wc -l)" -lt "${need}" ]; then
+    echo "Not enough idle nodes to probe (need ${need})" >&2
+    return 1
+  fi
+  probe_dir="${RUNNER_TEMP}/probes"
+  mkdir -p "${probe_dir}"
+  rm -f "${probe_dir}"/*.out
+  probe_ids=""
+  local nprobe=0
+  for n in ${hosts}; do
+    [ "${nprobe}" -lt 16 ] || break
+    nprobe=$((nprobe + 1))
+    rm -f "${probe_dir}/${n}.out"
+    j=$(spur_cmd sbatch --parsable \
+      --job-name="ainic-probe-${n}" \
+      --output="${probe_dir}/${n}.out" \
+      --error="${probe_dir}/${n}.out" \
+      --partition="${SALLOC_PARTITION}" \
+      ${ACCOUNT_ARG} \
+      ${RESV_ARG} \
+      ${EXCLUDE_ARG} \
+      --nodes=1 \
+      --ntasks=1 \
+      --cpus-per-task=8 \
+      --gpus-per-node=8 \
+      --nodelist="${n}" \
+      --time=00:05:00 \
+      --wrap "bash ${GITHUB_WORKSPACE}/${TEST_RUNNER_DIR}/scripts/crusoe_node_probe.sh" 2>&1 \
+      | tee /dev/stderr | grep -oE '^[0-9]+$' | tail -1 || true)
+    if [ -n "${j}" ]; then
+      probe_ids="${probe_ids} ${j}"
+    else
+      echo "probe sbatch failed for ${n}" >&2
+    fi
+  done
+  echo "Launched probes:${probe_ids}" >&2
+  waited=0
+  while [ "${waited}" -lt 90 ]; do
+    sleep 10
+    waited=$((waited + 10))
+    nready=$( { grep -hE '^(OK|BAD) ' "${probe_dir}"/*.out 2>/dev/null || true; } | wc -l)
+    if [ "${nready}" -ge "${nprobe}" ]; then
+      break
+    fi
+  done
+  for j in ${probe_ids}; do
+    spur_cmd scancel "${j}" >/dev/null 2>&1 || true
+  done
+  echo "=== probe results ===" >&2
+  grep -hE '^(OK|BAD) ' "${probe_dir}"/*.out 2>/dev/null >&2 || true
+  python3 "${GITHUB_WORKSPACE}/${TEST_RUNNER_DIR}/scripts/crusoe_pick_symmetric.py" \
+    "${need}" "${probe_dir}"
+}
+
+# Nodes proven bad during THIS run: a probe/allocation that never reached
+# RUNNING, or a live allocation killed by the scheduler (CANCELLED/NODE_FAIL)
+# before its workload exited cleanly. They are folded into --exclude on every
+# subsequent probe and submit so the check self-heals around flaky hardware --
+# no hand-maintained list and no re-push needed when a node starts misbehaving
+# mid-run.
+BAD_NODES=""
+rebuild_exclude_arg() {
+  local combined="${SALLOC_EXCLUDE}"
+  if [ -n "${BAD_NODES}" ]; then
+    combined="${combined:+${combined},}${BAD_NODES}"
+  fi
+  if [ -n "${combined}" ]; then
+    EXCLUDE_ARG="--exclude=${combined}"
+  else
+    EXCLUDE_ARG=""
+  fi
+}
+blacklist_nodes() {
+  local nn
+  for nn in $(printf '%s' "$1" | tr ',' ' '); do
+    [ -n "${nn}" ] || continue
+    case ",${BAD_NODES}," in
+      *",${nn},"*) : ;;
+      *) BAD_NODES="${BAD_NODES:+${BAD_NODES},}${nn}" ;;
+    esac
+  done
+}
+# Of the given nodes, echo the comma-separated subset that is actually in a
+# fault state (down/drain/fail/...). A CANCELLED allocation on this shared
+# cluster is usually preemption by a higher-priority job -- the node is healthy
+# and must NOT be blacklisted, or the loop would burn through good hardware.
+# Only genuinely broken nodes get excluded.
+nodes_faulty() {
+  local nn stt out=""
+  for nn in $(printf '%s' "$1" | tr ',' ' '); do
+    [ -n "${nn}" ] || continue
+    stt=$(spur_cmd sinfo -n "${nn}" -h -o '%t' 2>/dev/null | head -1 | tr -d ' ')
+    case "${stt}" in
+      *down*|*drain*|*drng*|*fail*|*inval*|*unk*|*boot*|*na*)
+        out="${out:+${out},}${nn}" ;;
+    esac
+  done
+  printf '%s' "${out}"
+}
+
+echo "Submitting sbatch job (account=${SALLOC_ACCOUNT} partition=${SALLOC_PARTITION} nodes=${SALLOC_NODES} time=${SALLOC_TIME})..."
+MAX_LAUNCH_TRIES="${MAX_LAUNCH_TRIES:-8}"
+JOBID=""
+FINAL_RC=""
+launch_fails=0
+while [ "${launch_fails}" -lt "${MAX_LAUNCH_TRIES}" ]; do
+  rebuild_exclude_arg
+  echo "Looking for ${SALLOC_NODES} symmetric idle nodes (excluded: ${SALLOC_EXCLUDE:-none}${BAD_NODES:+; auto-bad: ${BAD_NODES}})..."
+  PIN=$(probe_symmetric_pair "${SALLOC_NODES}" || true)
+  if [ -z "${PIN}" ] || [ "$(echo "${PIN}" | tr ',' '\n' | sed '/^$/d' | wc -l)" -lt "${SALLOC_NODES}" ]; then
+    echo "No matching pair this round; waiting before another probe"
+    sleep 30
+    continue
+  fi
+  echo "Pinning probed symmetric nodes: ${PIN}"
+  : > "${SLURM_OUT}"
+  # Do not pass --ntasks=1: SPUR then allocates 1 node regardless of -N.
+  sbatch_out=$(spur_cmd sbatch --parsable \
+    --job-name=ainic-crusoe \
+    --output="${SLURM_OUT}" \
+    --error="${SLURM_OUT}" \
+    --partition="${SALLOC_PARTITION}" \
+    ${ACCOUNT_ARG} \
+    ${RESV_ARG} \
+    ${EXCLUDE_ARG} \
+    --nodelist="${PIN}" \
+    --nodes="${SALLOC_NODES}" \
+    --ntasks="${SALLOC_NODES}" \
+    --ntasks-per-node=1 \
+    --cpus-per-task=32 \
+    --gpus-per-node=8 \
+    --time="${SALLOC_TIME}" \
+    "${BATCH_SCRIPT}" 2>&1) || true
+  echo "${sbatch_out}"
+  JOBID=$(printf '%s\n' "${sbatch_out}" | grep -oE '^[0-9]+$' | tail -1)
+  if [ -z "${JOBID}" ]; then
+    echo "sbatch produced no job id; retrying"
+    launch_fails=$((launch_fails + 1))
+    sleep 15
+    continue
+  fi
+  echo "Submitted SPUR job ${JOBID} on ${PIN}; waiting until RUNNING"
+  state=$(wait_until_running "${JOBID}") || true
+  if [ "${state}" != "RUNNING" ]; then
+    # Never launched: could be a genuine node fault, or just contention/
+    # preemption before start. Blacklist only nodes that are actually in a fault
+    # state; otherwise retry on the same pool without discarding healthy
+    # hardware.
+    spur_cmd scancel "${JOBID}" >/dev/null 2>&1 || true
+    faulty=$(nodes_faulty "${PIN}")
+    if [ -n "${faulty}" ]; then
+      echo "Did not reach RUNNING (state=${state:-gone}); node fault on ${faulty} -- blacklisting and retrying"
+      blacklist_nodes "${faulty}"
+    else
+      echo "Did not reach RUNNING (state=${state:-gone}); nodes look healthy (contention/preemption) -- retrying without blacklisting"
+    fi
+    JOBID=""
+    launch_fails=$((launch_fails + 1))
+    sleep 10
+    continue
+  fi
+
+  # RUNNING: stream the allocation's output and watch its terminal state.
+  echo "Job ${JOBID} RUNNING on ${PIN}; streaming output"
+  tail -n +1 -F "${SLURM_OUT}" 2>/dev/null &
+  TAIL_PID=$!
+  job_state=""
+  while true; do
+    st=$(job_state_of "${JOBID}")
+    if [ -z "${st}" ]; then
+      job_state=$(job_scontrol_state "${JOBID}")
+      break
+    fi
+    case "${st}" in
+      COMPLETED|FAILED|CANCELLED|NODE_FAIL|TIMEOUT)
+        job_state="${st}"
+        break
+        ;;
+    esac
+    sleep 15
+  done
+  sleep 2
+  kill "${TAIL_PID}" 2>/dev/null || true
+  wait "${TAIL_PID}" 2>/dev/null || true
+
+  exitcode=$(spur_cmd spur show job "${JOBID}" | sed -n 's/.*[[:space:]]ExitCode=\([0-9-]*\):.*/\1/p' | head -n1)
+  echo "sbatch job ${JOBID} state=${job_state:-gone} ExitCode=${exitcode:-?}"
+  case "${job_state}" in
+    NODE_FAIL)
+      # The node itself failed under the running allocation -- exclude the whole
+      # pinned set and retry elsewhere.
+      echo "Allocation ended as NODE_FAIL; blacklisting ${PIN} and retrying"
+      blacklist_nodes "${PIN}"
+      JOBID=""
+      launch_fails=$((launch_fails + 1))
+      sleep 10
+      continue
+      ;;
+    CANCELLED|"")
+      # On this shared, oversubscribed cluster a live allocation that is
+      # cancelled without our doing is almost always PREEMPTION: a
+      # higher-priority job reclaimed the node seconds after ours started. The
+      # hardware is fine, so do NOT blacklist it (that would burn through good
+      # nodes) -- only exclude nodes actually in a fault state, and retry.
+      faulty=$(nodes_faulty "${PIN}")
+      if [ -n "${faulty}" ]; then
+        echo "Allocation ended as ${job_state:-gone}; node fault on ${faulty} -- blacklisting and retrying"
+        blacklist_nodes "${faulty}"
+      else
+        echo "Allocation ended as ${job_state:-gone} (likely preempted); nodes healthy -- retrying without blacklisting"
+      fi
+      JOBID=""
+      launch_fails=$((launch_fails + 1))
+      sleep 10
+      continue
+      ;;
+    COMPLETED)
+      FINAL_RC="${exitcode:-0}"
+      break
+      ;;
+    *)
+      # FAILED / TIMEOUT: the batch script ran to a natural exit, so this is a
+      # genuine build/test result. Report it; do not blacklist or retry (that
+      # would mask real regressions).
+      FINAL_RC="${exitcode:-1}"
+      if [ "${FINAL_RC}" = "0" ]; then FINAL_RC=1; fi
+      break
+      ;;
+  esac
+done
+
+if [ -z "${FINAL_RC}" ]; then
+  echo "ERROR: no ${SALLOC_NODES}-node GPU allocation survived to a workload exit after ${MAX_LAUNCH_TRIES} attempts."
+  echo "If allocations kept ending as CANCELLED on healthy nodes, they are being preempted -- this account/QOS is preemptible on a busy cluster. Fix by submitting under a non-preemptible QOS (e.g. --qos=amd-frameworks-ci-qos once z1_coco is associated with it), reserving nodes, or running when the cluster is idle."
+  echo "Auto-excluded faulty nodes this run: ${BAD_NODES:-none}"
+  exit 1
+fi
+
+echo "sbatch job ${JOBID} state=${job_state} ExitCode=${exitcode:-?} rc=${FINAL_RC}"
+exit "${FINAL_RC}"
