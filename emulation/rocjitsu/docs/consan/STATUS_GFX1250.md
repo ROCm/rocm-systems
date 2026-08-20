@@ -46,7 +46,7 @@ preserve an earlier green claim.
 
 | Workload | SuperCollider | Record/Replay | Sampled | Inline Shadow |
 |---|---|---|---|---|
-| **P0 Qwen3-0.6B prefill** | 🟧 Fresh current-workspace run transforms 1000/1000 accesses into a 365,536-byte object and reaches execution, but has no oracle or teardown verdict within 90 seconds; prior 1402/1402 evidence likewise had no verdict within 600 seconds | 🟧 Fresh current-workspace instrumentation is complete at 1000/1000 accesses plus 92/92 barriers, emits a 4,039,648-byte object, and reaches execution, but has no verdict within 60 seconds. A current standalone translation remains CPU-bound without diagnostics past five minutes; prior selected-object evidence diagnosed 17 unrecovered generated long-return targets | 🟧 Prior instrumentation is complete at 1402/1402 accesses plus 102/102 barriers and emits a 3,396,472-byte object; loader admission fails before execution, and standalone translation diagnoses the same 17 generated long-return targets; no oracle or accepted overhead | 🟧 Prior instrumentation is complete at 1402/1402 accesses plus 52/52 barriers and emits a 4,666,232-byte object; the installed runtime translator accepts it and execution begins but has no oracle within 60 seconds, while the newer standalone translator reports the same 17 generated long-return targets; no accepted overhead |
+| **P0 Qwen3-0.6B prefill** | 🟧 Fresh current-workspace run transforms 1000/1000 accesses into a 365,536-byte object and reaches execution, but has no oracle or teardown verdict within 90 seconds; prior 1402/1402 evidence likewise had no verdict within 600 seconds | 🟧 Fresh current-workspace instrumentation is complete at 1000/1000 accesses plus 92/92 barriers, emits a 4,039,648-byte object, and reaches execution, but has no verdict within 60 seconds. A current standalone translation remains CPU-bound without diagnostics past five minutes; prior selected-object evidence diagnosed 17 unrecovered generated long-return targets | 🟧 Current clean-revision instrumentation is complete at 1000/1000 accesses plus 90/90 barriers, emits a 3,945,440-byte object, and reaches execution, but has no oracle or teardown verdict within 30 seconds | 🟧 Current clean-revision instrumentation is complete at 1000/1000 accesses plus 46/46 barriers, emits a 4,748,256-byte object, and reaches execution, but has no oracle or teardown verdict within 30 seconds |
 | **P1 Sharktank TP1 prefill** | 🟩 Current clean-revision exact oracle in 12.13 seconds with complete 352/352 access coverage; current paired 1.17x retained | 🟩 Current clean-revision exact oracle in 13.50 seconds with complete 352/352 accesses plus 74/74 barriers, zero diagnostics, and a complete dynamic verdict under the target's bounded validation stride | 🟩 Current clean-revision exact oracle in 20.89 seconds with complete 352/352 accesses plus 64/64 applicable barriers, zero diagnostics or sampled conflicts, and a complete dynamic verdict; current paired 1.51x retained | 🟩 Current clean-revision exact oracle in 30.81 seconds with complete 352/352 accesses plus 37/37 barriers and a complete dynamic verdict; the target-native manifest retains a 60-second bound and current paired 2.11x |
 | **P1 Sharktank TP1 decode/combined** | 🟩 Exact decode/combined oracles; 704/704 accesses; current paired 1.09x | 🟩 Exact decode/combined oracles; 704/704 accesses, 74/74 barriers; current paired 1.16x | 🟩 Exact decode/combined oracles; 704/704 accesses, 128/128 applicable barriers; current paired 1.28x | 🟩 Current accepted bundle: exact decode/combined clean and paired oracles, complete 704/704 accesses plus 74/74 barriers, 2.92x maximum paired slowdown, reviewed exact-one detected/pass barrier move, containment, health, cleanup, and clean provenance |
 | **P2 Sharktank TP2 family** | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained |
@@ -544,6 +544,21 @@ bounded at that point, so this is neither a successful translation verdict nor
 a reproduction of the older 17-target failure. These results leave both cells
 orange and identify translation plus simulated execution latency as the current
 first boundary in this workspace.
+
+Clean-revision follow-ups at source revision `1ea9aa986f` and hook SHA-256
+`ae1c5b63c70dafdf433586bfb9ae61c67158b1b2f99e7e2124847e4a941e9008`
+refresh the two stale cells.  Sampled patches all 1000 accesses plus 90/90
+barriers and installs a 3,945,440-byte object.  Inline Shadow patches all 1000
+accesses plus 46/46 barriers and installs a 4,748,256-byte object.  Both
+replacements are accepted by the current runtime translator and issue repeated
+simulated dispatches, but neither produces an oracle or teardown verdict within
+the checked-in 30-second bound.  The retained artifacts are
+`/home/ossci/xx/consan-validation/rebase-20260820-gfx1250-qwen-sampled-current-1ea9aa9`
+and
+`/home/ossci/xx/consan-validation/rebase-20260820-gfx1250-qwen-inline-current-1ea9aa9`.
+This supersedes the old current-cell claim that Sampled fails loader admission;
+all four current Qwen profiles now reach execution, while bounded simulated
+execution remains the shared first acceptance gap.
 
 ### Current large Qwen translation boundary
 
