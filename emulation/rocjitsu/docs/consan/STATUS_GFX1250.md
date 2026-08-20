@@ -55,7 +55,37 @@ preserve an earlier green claim.
 | **P4 hip-moi WMMA attention** | 🟩 Current strict clean row: both exact oracles in 15.62 seconds with complete 18/18 access coverage; paired 1.78x retained | 🟩 Current strict clean row: both exact oracles in 16.87 seconds with 18/18 accesses, 8/8 barriers, and zero diagnostics; paired 1.17x retained | 🟩 Current strict clean row: both exact oracles in 15.86 seconds with 18/18 accesses and 8/8 applicable barriers; paired 1.15x retained | 🟩 Current strict clean row: both exact oracles in 21.52 seconds with 18/18 accesses and 4/4 barriers; paired 1.17x retained |
 | **P4 hip-moi Stream-K arrival** | 🟩 Fresh exact clean run with complete 4/4 access coverage; prior paired 7.38x retained | 🟩 Fresh exact clean run with 4/4 accesses, 8/8 barriers, 10/10 atomics, 16/16 fences, and zero diagnostics; prior paired 2.41x retained | 🟩 Fresh exact clean run with 4/4 accesses, 8/8 applicable barriers, and 10/10 atomics; prior paired 2.72x retained | 🟩 Fresh exact clean run with 4/4 accesses, 4/4 barriers, and 10/10 atomics; prior paired 2.62x retained |
 | **P4 hip-moi tree atomic-OR** | 🟩 Fresh exact clean run with complete 4/4 access coverage; prior paired 6.55x retained | 🟩 Fresh exact clean run with 4/4 accesses, 8/8 barriers, 10/10 atomics, 16/16 fences, and zero diagnostics; prior paired 2.04x retained | 🟩 Fresh exact clean run with 4/4 accesses, 8/8 applicable barriers, and 10/10 atomics; prior paired 2.57x retained | 🟩 Fresh exact clean run with 4/4 accesses, 4/4 barriers, and 10/10 atomics; prior paired 2.19x retained |
-| **P4 Jakub cooperative matmul** | 🟩 Three exact arithmetic oracles; clean 32/32 accesses; reviewed exact-one drop breaks the skewed oracle; paired 1.139x; detector gap tracked by `bd-2sjm.1` | 🟩 Three exact arithmetic oracles; clean 32/32 accesses + 8/8 barriers; reviewed drop emits a diagnostic and breaks the skewed oracle; paired 2.579x | 🟩 Three exact arithmetic oracles; clean 32/32 accesses + 8/8 applicable barrier members; stride-1/offset-0 fault qualification emits a diagnostic and breaks the skewed oracle; paired 1.174x | 🟩 Three exact arithmetic oracles; clean 32/32 accesses + 4/4 barriers; reviewed drop emits a diagnostic and breaks the skewed oracle; paired 1.145x |
+| **P4 Jakub cooperative matmul** | 🟩 Current four-oracle clean row; 70/70 accesses; reviewed exact-one drop breaks the skewed oracle; paired 1.139x; detector gap tracked by `bd-2sjm.1` | 🟩 Current four-oracle clean row; 70/70 accesses + 8/8 barriers and zero diagnostics; reviewed drop emits a diagnostic and breaks the skewed oracle; paired 2.579x | 🟩 Current four-oracle clean row; 70/70 accesses + 8/8 applicable barrier members; stride-1/offset-0 fault qualification emits a diagnostic and breaks the skewed oracle; paired 1.174x | 🟩 Current four-oracle clean row; 70/70 accesses + 4/4 barriers; reviewed drop emits a diagnostic and breaks the skewed oracle; paired 1.145x |
+
+### 2026-08-20 Aorta-derived PyTorch readiness
+
+The gfx1250 manifest now includes `pytorch-tdm-descriptor-add`,
+`pytorch-cluster-load-sync`, `pytorch-torch-mode`, `pytorch-torch-topk`,
+`pytorch-torch-sort`, `pytorch-scatter-reduce`, `pytorch-torch-histc`, and
+`pytorch-norm-softmax`.  These rows are not promoted into the historical
+40-cell matrix above until their shared runtime preflight passes.  The current
+workspace wheel, `torch 2.14.0.dev20260722+rocm7.1`, works on physical gfx950
+but is not a gfx1250-capable runtime: its bundled ROCr sees the synthetic
+gfx1250 agent under RocJitsu, while bundled HIP reports zero supported GPU
+agents and the wheel contains gfx950 but no gfx1250 runtime support.  A
+target-capable prebuilt wheel or source build is therefore an external
+prerequisite for all eight rows.  The strict doctor catches this before an E2E
+artifact is accepted; substituting gfx950 code objects or bypassing RocJitsu is
+not valid gfx1250 evidence.
+
+### 2026-08-20 current Jakub clean refresh
+
+Artifact
+`rebase-20260820-gfx1250-jakub-clean-all-646711b` runs the baseline and all
+four strict clean profiles through RocJitsu at source revision `646711ba1a` and
+hook SHA-256
+`2d5e0333992d414d479cc20419e59c390f503eb7a7eabe375be12a858d13d256`.
+All five rows pass all four current exact arithmetic oracles.  The rebuilt
+object has complete 70/70 access coverage in every engine, plus 8/8 barriers
+in Record/Replay and Sampled and 4/4 barriers in Inline Shadow.  Record/Replay
+emits zero diagnostics, and every instrumented row is analysis-, static-, and
+dynamic-complete.  The current clean evidence preserves the prior accepted
+paired-overhead and reviewed-fault qualifications.
 
 CLIP BF16 is intentionally omitted from the current acceptance matrix.  Its
 uninstrumented execution is not presently practical in the software GPU
@@ -226,6 +256,15 @@ fast D128 oracle for health because the default Qwen health smoke currently
 exceeds its 30-second simulator deadline.  The hook SHA-256 for inventory,
 paired, and fault evidence is
 `7b7b5fc01a9874b05d058492bd79231bbddba597196a258802cb7433ff3eb60f`.
+
+Current-tip artifact
+`rebase-20260820-gfx1250-d128-pressure-rr-646711b` rechecks the heavy clean
+Record/Replay path after sparse-table replay scheduling changed.  All four
+exact oracles pass in 72.63 seconds with complete 24/24 access and 8/8 barrier
+coverage, zero diagnostics, and complete static and dynamic verdicts.  Its
+baseline passes the same four oracles in 56.80 seconds.  This retains the
+accepted paired and reviewed-fault evidence above while proving that the
+current replay reader does not regress the 31,256-identity workload.
 
 ### Target-native Jakub matmul
 
