@@ -42,14 +42,16 @@ the same source. This is a requirement, not a recommendation.
    overruns the older side's buffer and corrupts the heap, which typically
    surfaces later as a crash somewhere unrelated.
 
-ROCprofiler-SDK negotiates the layout where the thunk allows it. Before reading
-any node record it calls the thunk's ``DxgAbiCheck`` handshake, and a thunk that
-reports a different ``sizeof(HsaNodeProperties)`` is refused rather than read,
-with ``wsl topology: ... rejected the HsaNodeProperties layout`` in the log. A
-thunk too old to export the handshake is read anyway, into storage deliberately
-longer than the record so that an overrun lands in padding, and a layout that
-was rearranged without changing ``sizeof()`` cannot be detected at all. Treat
-the handshake as a backstop, not as a substitute for a matched pair.
+The read is bounded by its destination rather than by the interface.
+``hsaKmtGetNodeProperties()`` copies the record whole and takes no size
+parameter, so each node is read into storage deliberately longer than the
+record this build expects, and a thunk that writes a longer one overruns that
+slack instead of the rest of the stack frame. An optional ``DxgAbiCheck``
+handshake, by which a thunk reports the ``sizeof(HsaNodeProperties)`` it was
+built with, is called when the thunk exports it; it is not required, and in
+practice it is not offered, so records are normally read on the assumption that
+the layouts match. A layout rearranged without a change of ``sizeof()`` cannot
+be detected either way. None of this substitutes for a matched pair.
 
 Required environment variables
 ------------------------------
@@ -354,8 +356,8 @@ the missing symbol named, before anything is opened.
 When agents are missing
 -----------------------
 
-A ``librocdxg`` that does not export what the read needs, or that fails the
-layout handshake, yields **no GPU agents at all** in ROCprofiler-SDK. This is
+A ``librocdxg`` that does not export what the read needs yields **no GPU
+agents at all** in ROCprofiler-SDK. This is
 visible rather than silent, but it is not harmless: the HSA runtime loads the
 same thunk and still reports its GPUs, so ROCprofiler-SDK and HSA disagree about
 which agents exist. Partially described topologies land in the same place — the
