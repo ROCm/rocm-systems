@@ -23,10 +23,13 @@
 #pragma once
 
 // Primitives shared by the replay mechanisms that re-execute recorded GPU work: the per-agent
-// serialization lock and the drain helpers a replay window needs before it snapshots device memory.
+// serialization lock, the drain helpers a replay window needs before it snapshots device memory,
+// and the queue submission path used to re-submit recorded packets.
 //
-// Any two replay mechanisms must agree on all of these -- they share one lock per agent, and each
-// must exclude the same concurrent GPU work from its snapshot->restore window.
+// Kernel replay (single dispatch, driven from inside WriteInterceptor) and range replay (a recorded
+// sequence, driven from rocprofiler_range_replay_end) must agree on all of these: they share one
+// lock per agent, and both must exclude the same concurrent GPU work from their snapshot->restore
+// windows.
 
 #include "lib/common/logging.hpp"
 
@@ -36,6 +39,7 @@
 #include <hsa/hsa.h>
 
 #include <chrono>
+#include <cstddef>
 #include <shared_mutex>
 #include <string_view>
 
@@ -44,6 +48,7 @@ namespace rocprofiler
 namespace hsa
 {
 class Queue;
+union rocprofiler_packet;
 
 // Per-agent replay serialization (reader/writer). A replay's snapshot->restore window must exclude
 // any concurrent GPU work on the agent that could mutate tracked device memory, but ordinary
@@ -108,5 +113,31 @@ replay_drain_or_fatal(const Queue& queue);
 // matching replay_drain_or_fatal.
 void
 replay_drain_agent_or_fatal(hsa_agent_t agent);
+
+// Write `count` packets into `queue`'s ring buffer and ring its doorbell -- the same submission the
+// application itself performs, so whichever interception mechanism is installed sees them. Used to
+// re-submit recorded packets from outside a WriteInterceptor call (range replay), where no
+// interceptor-provided writer is in scope. Blocks while the ring is full. Returns false if the
+// queue's packet buffer is unavailable.
+//
+// Callers submitting *recorded* packets must clear their completion signals first: re-firing a
+// signal the application has already consumed corrupts its synchronization.
+bool
+replay_ring_submit(const Queue& queue, const rocprofiler_packet* packets, size_t count);
+
+// Submit a barrier packet carrying `completion` and wait for it, fencing the CPU against all GPU
+// work previously submitted to `queue`. Returns false if the submission itself failed.
+bool
+replay_barrier_and_wait(const Queue& queue, hsa_signal_t completion);
+
+// While set on this thread, WriteInterceptor forwards packets untouched. Range replay's re-submit
+// path transforms the recorded packets once (via Queue::invoke_write_interceptor) and then writes
+// the result to the ring, which re-enters interception on this same thread; without this flag the
+// packets would be transformed twice (two pooled signals and two records per dispatch).
+void
+set_interceptor_passthrough(bool enabled);
+
+bool
+interceptor_passthrough();
 }  // namespace hsa
 }  // namespace rocprofiler

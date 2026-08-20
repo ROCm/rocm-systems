@@ -38,6 +38,8 @@
 #include "lib/rocprofiler-sdk/kernel_replay/replay_callbacks.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
 #include "lib/rocprofiler-sdk/ompt/ompt.hpp"
+#include "lib/rocprofiler-sdk/range_replay/range_replay.hpp"
+#include "lib/rocprofiler-sdk/range_replay/replay_callbacks.hpp"
 #include "lib/rocprofiler-sdk/rccl/rccl.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/rocdecode/rocdecode.hpp"
@@ -109,6 +111,7 @@ ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIP_GRAPH)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(ROCSHMEM_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIPFILE_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(KERNEL_REPLAY)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(RANGE_REPLAY)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -183,6 +186,11 @@ rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t         
         if(claimed_replay) rocprofiler::kernel_replay::release_replay_service_claim();
     }};
 
+    // Range replay is single-subscriber for the same reason: one plan per range.
+    if(kind == ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY &&
+       rocprofiler::range_replay::has_registered_range_replay_context())
+        return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
+
     RETURN_STATUS_ON_FAIL(rocprofiler::context::add_domain(ctx->callback_tracer->domains, kind));
 
     ctx->callback_tracer->callback_data.at(kind) = {callback, callback_args};
@@ -198,6 +206,14 @@ rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t         
         rocprofiler::kernel_replay::memory_tracker::set_tracking_enabled(true);
         // Configuration succeeded: keep the claim taken above.
         claimed_replay = false;
+    }
+
+    // Range replay snapshots and restores the same device memory kernel replay does, so it needs
+    // the same allocation inventory.
+    if(kind == ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY)
+    {
+        rocprofiler::kernel_replay::memory_tracker::set_tracking_enabled(true);
+        rocprofiler::range_replay::set_range_replay_service_configured(true);
     }
 
     return ROCPROFILER_STATUS_SUCCESS;
@@ -303,6 +319,11 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
         case ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY:
         {
             val = rocprofiler::kernel_replay::name_by_id(operation);
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY:
+        {
+            val = rocprofiler::range_replay::name_by_id(operation);
             break;
         }
         case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
@@ -474,6 +495,11 @@ rocprofiler_iterate_callback_tracing_kind_operations(
         case ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY:
         {
             ops = rocprofiler::kernel_replay::get_ids();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY:
+        {
+            ops = rocprofiler::range_replay::get_ids();
             break;
         }
         case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
@@ -703,6 +729,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
         case ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT:
         case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
         case ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY:
+        case ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY:
         case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
         case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
         case ROCPROFILER_CALLBACK_TRACING_RCCL_API:
