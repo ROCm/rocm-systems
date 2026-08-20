@@ -451,66 +451,48 @@ def verify_rccl_replacement(
     expected: dict,
     slurm_job_id: str = "",
 ) -> tuple[bool, str]:
-    """Verify that the container used the CI-built RCCL, not its bundled copy.
+    """Verify that every node used the CI-built RCCL, not its bundled copy.
 
-    Checks the madengine run logs for ``RCCL version :`` and compares it
-    against the expected fingerprint.  Also verifies the docker run command
-    includes the librccl bind-mount.
+    Checks *all* ``*node_*.out`` logs for ``RCCL version :`` and compares
+    against the expected fingerprint.  A library that reached only one node
+    still fails — this is the multi-node failure this job exists to catch.
 
     Returns (ok, message).  Generic across frameworks — any RCCL-based
     application prints the version string during init.
     """
-    if not expected.get("md5"):
-        return True, "No RCCL fingerprint to verify (overlay build used)"
+    if not expected.get("version"):
+        return True, "No RCCL version to verify"
 
-    # Find all log files from this run
     log_dir = work_dir / "slurm_output"
-    log_files = sorted(log_dir.glob("*node_0.out")) if log_dir.is_dir() else []
-    if not log_files:
-        return False, "No node_0 log found — cannot verify RCCL"
+    node_logs = sorted(log_dir.glob("*node_*.out")) if log_dir.is_dir() else []
+    if not node_logs:
+        return False, "No node logs found — cannot verify RCCL"
 
-    log_text = log_files[0].read_text(errors="replace")
+    verified_nodes: list[str] = []
+    for log_file in node_logs:
+        node_label = log_file.name
+        log_text = log_file.read_text(errors="replace")
 
-    # Check 1: bind-mount present in docker run command
-    if "librccl.so" not in log_text:
-        return False, (
-            "librccl.so bind-mount not found in docker run command. "
-            "Container is using its bundled RCCL, not the CI artifact."
-        )
+        rccl_versions = re.findall(r"RCCL version\s*:\s*(.+)", log_text)
+        if not rccl_versions:
+            return False, (
+                f"{node_label}: no 'RCCL version :' found — "
+                f"RCCL may not have initialized on this node"
+            )
 
-    # Check 2: RCCL version string matches
-    rccl_versions = re.findall(r"RCCL version\s*:\s*(.+)", log_text)
-    if not rccl_versions:
-        return False, "No 'RCCL version :' found in logs — RCCL may not have initialized"
-
-    runtime_version = rccl_versions[0].strip()
-    if expected.get("version") and runtime_version != expected["version"]:
-        return False, (
-            f"RCCL version mismatch: expected '{expected['version']}' "
-            f"(from artifact), got '{runtime_version}' (from container). "
-            f"The container may be using its bundled RCCL."
-        )
-
-    # Check 3: verify the live log exists with Librccl path
-    live_logs = sorted(log_dir.rglob("*.run.live.log"))
-    if not live_logs:
-        live_log_dirs = sorted((work_dir / "slurm_output").rglob("*.live.log"))
-        live_logs = live_log_dirs
-    rccl_path_found = False
-    for ll in live_logs:
-        try:
-            ll_text = ll.read_text(errors="replace")
-            paths = re.findall(r"Librccl path\s*:\s*(.+)", ll_text)
-            if paths:
-                rccl_path_found = True
-                break
-        except OSError:
-            continue
+        runtime_version = rccl_versions[0].strip()
+        if runtime_version != expected["version"]:
+            return False, (
+                f"{node_label}: RCCL version mismatch: "
+                f"expected '{expected['version']}' (from artifact), "
+                f"got '{runtime_version}' (from container)"
+            )
+        verified_nodes.append(node_label)
 
     return True, (
-        f"RCCL verified: version={runtime_version}, "
-        f"artifact_md5={expected['md5']}"
-        + (f", librccl_path={paths[0].strip()}" if rccl_path_found else "")
+        f"RCCL verified on {len(verified_nodes)} node(s): "
+        f"version={expected['version']}, "
+        f"artifact_md5={expected.get('md5', 'N/A')}"
     )
 
 
@@ -1271,8 +1253,9 @@ def main() -> None:
         manifest_path, output_csv, work_dir, args.timeout_minutes,
     )
 
-    # Step 5b: Verify RCCL replacement
-    if args.skip_overlay_build and rccl_fingerprint.get("md5"):
+    # Step 5b: Verify RCCL replacement (runs in both overlay and bind-mount modes)
+    rccl_verification_failed = False
+    if rccl_fingerprint.get("version"):
         rccl_ok, rccl_msg = verify_rccl_replacement(
             work_dir, rccl_fingerprint,
         )
@@ -1280,6 +1263,7 @@ def main() -> None:
             log.info("RCCL verification: %s", rccl_msg)
         else:
             log.error("RCCL verification FAILED: %s", rccl_msg)
+            rccl_verification_failed = True
             exit_code = max(exit_code, 1)
 
     # Step 6: Parse results — structured output first, live log fallback
@@ -1372,7 +1356,7 @@ def main() -> None:
     # Override exit_code if training actually completed successfully.
     # madengine can report failure (exit code 3) when its perf collector
     # can't parse the output format, even though training ran to completion.
-    if exit_code != 0 and precision_results:
+    if exit_code != 0 and not rccl_verification_failed and precision_results:
         all_pass = all(r["status"] == "pass" for r in precision_results)
         has_metric = all(r.get("metric_value") is not None for r in precision_results)
         if all_pass and has_metric:
