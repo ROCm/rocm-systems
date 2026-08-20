@@ -21,12 +21,26 @@ _COLLECTOR_SOURCE_NAMES = (
     "torch_trace_collector.cpp",
     "torch_trace_collector_module.cpp",
 )
+_COLLECTOR_HEADER_NAMES = (
+    "leaf_context.h",
+    "marker_stack.h",
+    "process_state.h",
+    "record_function_callback.h",
+    "record_function_installation.h",
+    "scope_guard.h",
+    "snapshot_store.h",
+    "stack_entry.h",
+    "stats.h",
+    "user_scope.h",
+    "wire_format.h",
+)
 
 
 def required_input_paths() -> tuple[Path, ...]:
-    """Collector sources, CMakeLists.txt, and shared utility headers."""
+    """Collector sources and headers, CMakeLists.txt, and shared utility headers."""
     return (
         *(_SO_SOURCE_DIR / name for name in _COLLECTOR_SOURCE_NAMES),
+        *(_SO_SOURCE_DIR / name for name in _COLLECTOR_HEADER_NAMES),
         _SO_BUILDFILE,
         *_SHARED_UTILS_HEADERS,
     )
