@@ -3782,7 +3782,7 @@ TEST(L1ScalarCacheVmidTest, WriteThroughStoreUsesStoreVmid) {
 }
 
 TEST(DoorbellMonitorLifecycle, RetiresAfterLastQueueAndRestartsOnNewQueue) {
-  // Regression for the leaked idle CP doorbell poller: the monitor must self-exit
+  // Regression for the idle CP doorbell poller: the monitor must stop and be joined
   // once the last host-accessible (KFD) queue is destroyed, and a later queue
   // registration must start a fresh monitor. Uses only the queue-registration
   // lifecycle (no dispatch), so the monitor thread runs on its own and its state
@@ -3808,8 +3808,10 @@ TEST(DoorbellMonitorLifecycle, RetiresAfterLastQueueAndRestartsOnNewQueue) {
   EXPECT_TRUE(wait_for_monitor(true)) << "registering a KFD queue must start the monitor";
 
   cp->unregister_queue(queue.queue_id, queue.process_id);
-  EXPECT_FALSE(wait_for_monitor(false))
-      << "monitor must self-exit after the last host-accessible queue is destroyed";
+  EXPECT_FALSE(cp->doorbell_monitor_running_for_test())
+      << "monitor must stop after the last host-accessible queue is destroyed";
+  EXPECT_FALSE(cp->doorbell_monitor_joinable_for_test())
+      << "the stopped monitor must be joined before queue teardown returns";
 
   // A new queue landing on a CP whose monitor retired must get polling back.
   amdgpu::HwQueue queue2{};
@@ -3820,7 +3822,47 @@ TEST(DoorbellMonitorLifecycle, RetiresAfterLastQueueAndRestartsOnNewQueue) {
   EXPECT_TRUE(wait_for_monitor(true)) << "a new KFD queue must restart a retired monitor";
 
   cp->unregister_queue(queue2.queue_id, queue2.process_id);
-  EXPECT_FALSE(wait_for_monitor(false)) << "monitor must retire again after the last queue";
+  EXPECT_FALSE(cp->doorbell_monitor_running_for_test())
+      << "monitor must retire again after the last queue";
+  EXPECT_FALSE(cp->doorbell_monitor_joinable_for_test())
+      << "the restarted monitor must also be joined during teardown";
+}
+
+TEST(DoorbellMonitorLifecycle, ConcurrentLastQueueRemovalAndRegistrationKeepsMonitorRunning) {
+  VmFixture f("cdna4", /*num_cus=*/1);
+  amdgpu::CommandProcessor *cp = f.cp();
+
+  for (uint32_t iteration = 0; iteration < 50; ++iteration) {
+    amdgpu::HwQueue old_queue{};
+    old_queue.process_id = 1;
+    old_queue.queue_id = iteration * 2 + 1;
+    old_queue.host_accessible = true;
+    cp->register_queue(old_queue);
+
+    amdgpu::HwQueue new_queue{};
+    new_queue.process_id = 1;
+    new_queue.queue_id = iteration * 2 + 2;
+    new_queue.host_accessible = true;
+
+    std::barrier start(3);
+    std::thread remove_last([&] {
+      start.arrive_and_wait();
+      cp->unregister_queue(old_queue.queue_id, old_queue.process_id);
+    });
+    std::thread register_next([&] {
+      start.arrive_and_wait();
+      cp->register_queue(new_queue);
+    });
+    start.arrive_and_wait();
+    remove_last.join();
+    register_next.join();
+
+    ASSERT_TRUE(cp->doorbell_monitor_running_for_test())
+        << "registration racing last-queue removal lost the monitor at iteration " << iteration;
+    cp->unregister_queue(new_queue.queue_id, new_queue.process_id);
+    ASSERT_FALSE(cp->doorbell_monitor_running_for_test());
+    ASSERT_FALSE(cp->doorbell_monitor_joinable_for_test());
+  }
 }
 
 } // namespace

@@ -59,6 +59,7 @@ RJ_DIAGNOSTIC_POP
 #endif
 #include <thread>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -112,6 +113,80 @@ namespace {
 void *safe_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
   return libc_passthrough().mmap(addr, length, prot, flags, fd, offset);
 }
+
+/// @brief Return whether two non-empty half-open address ranges overlap.
+/// @details Uses subtraction instead of computing either end address, avoiding
+/// integer overflow for a malformed range near UINTPTR_MAX.
+bool ranges_overlap(const void *lhs, size_t lhs_size, const void *rhs, size_t rhs_size) {
+  if (lhs_size == 0 || rhs_size == 0)
+    return false;
+  const auto lhs_base = reinterpret_cast<uintptr_t>(lhs);
+  const auto rhs_base = reinterpret_cast<uintptr_t>(rhs);
+  return lhs_base <= rhs_base ? rhs_base - lhs_base < lhs_size : lhs_base - rhs_base < rhs_size;
+}
+
+/// @brief Return whether one non-empty address range fully contains another.
+/// @details Like ranges_overlap(), avoids computing an end address so malformed
+/// ranges near UINTPTR_MAX cannot wrap around.
+bool range_contains(const void *outer, size_t outer_size, const void *inner, size_t inner_size) {
+  if (outer_size == 0 || inner_size == 0)
+    return false;
+  const auto outer_base = reinterpret_cast<uintptr_t>(outer);
+  const auto inner_base = reinterpret_cast<uintptr_t>(inner);
+  if (inner_base < outer_base)
+    return false;
+  const auto offset = inner_base - outer_base;
+  return offset <= outer_size && inner_size <= outer_size - offset;
+}
+
+/// @brief Move-only owner for an mmap until it is published into driver state.
+class UniqueMapping {
+public:
+  UniqueMapping() = default;
+  UniqueMapping(void *addr, size_t size) : addr_(addr), size_(size) {}
+  ~UniqueMapping() { reset(); }
+
+  UniqueMapping(const UniqueMapping &) = delete;
+  UniqueMapping &operator=(const UniqueMapping &) = delete;
+
+  UniqueMapping(UniqueMapping &&other) noexcept
+      : addr_(std::exchange(other.addr_, MAP_FAILED)), size_(std::exchange(other.size_, 0)) {}
+  UniqueMapping &operator=(UniqueMapping &&other) noexcept {
+    if (this != &other) {
+      reset();
+      addr_ = std::exchange(other.addr_, MAP_FAILED);
+      size_ = std::exchange(other.size_, 0);
+    }
+    return *this;
+  }
+
+  [[nodiscard]] explicit operator bool() const { return addr_ != MAP_FAILED; }
+  [[nodiscard]] void *get() const { return addr_; }
+  [[nodiscard]] void *release() {
+    size_ = 0;
+    return std::exchange(addr_, MAP_FAILED);
+  }
+  void reset(void *addr = MAP_FAILED, size_t size = 0) {
+    if (addr_ != MAP_FAILED)
+      libc_passthrough().munmap(addr_, size_);
+    addr_ = addr;
+    size_ = size;
+  }
+
+private:
+  void *addr_ = MAP_FAILED;
+  size_t size_ = 0;
+};
+
+struct PassthroughFdTraits {
+  using handle_type = int;
+
+  static handle_type invalid() noexcept { return -1; }
+  static bool is_valid(handle_type fd) noexcept { return fd >= 0; }
+  static void close(handle_type fd) noexcept { static_cast<void>(libc_passthrough().close(fd)); }
+};
+
+using UniqueDriverFd = util::BasicUniqueHandle<PassthroughFdTraits>;
 
 /// @brief fstat via the real libc, bypassing the interposer.
 /// @details Like safe_mmap: the interposer exports fstat with default visibility,
@@ -460,18 +535,78 @@ bool SimulatedKfd::is_doorbell_range(const void *addr, size_t length) const {
   // unprotected against a client mprotect). Snapshot each page/size under
   // alloc_mutex_ so a concurrent dispatch_mmap/dispatch_munmap (which mutate these
   // under the same lock) cannot tear the pointer/size read.
-  const auto query_base = reinterpret_cast<uintptr_t>(addr);
-  const auto query_end = query_base + length;
   std::lock_guard<std::mutex> lock(p->alloc_mutex_);
   for (const auto &gs : p->gpu_state_) {
-    if (!gs.doorbell_page || gs.doorbell_page_size == 0)
-      continue;
-    const auto base = reinterpret_cast<uintptr_t>(gs.doorbell_page);
-    const auto end = base + gs.doorbell_page_size;
-    if (query_base < end && query_end > base)
+    if (ranges_overlap(addr, length, gs.doorbell_monitor_page, gs.doorbell_page_size))
       return true;
+    for (const auto &view : gs.doorbell_views)
+      if (ranges_overlap(addr, length, view.page, gs.doorbell_page_size))
+        return true;
   }
   return false;
+}
+
+void *SimulatedKfd::mmap_replacing_client_doorbell_views(void *addr, size_t length, int prot,
+                                                         int flags, int fd, off_t offset) {
+  auto proc = find_process(local_process_id_);
+  if (!proc)
+    return safe_mmap(addr, length, prot, flags, fd, offset);
+
+  // Serialize the replacement with KFD teardown and doorbell mmap. Keep alloc_mutex_ held through
+  // the real mmap so mprotect/munmap cannot observe a retired view before MAP_FIXED has replaced
+  // it.
+  std::lock_guard<std::mutex> op_lock(proc->op_mutex_);
+  std::lock_guard<std::mutex> alloc_lock(proc->alloc_mutex_);
+
+  for (const auto &gs : proc->gpu_state_) {
+    if (ranges_overlap(addr, length, gs.doorbell_monitor_page, gs.doorbell_page_size)) {
+      errno = EINVAL;
+      return MAP_FAILED;
+    }
+    for (const auto &view : gs.doorbell_views) {
+      if (ranges_overlap(addr, length, view.page, gs.doorbell_page_size) &&
+          !range_contains(addr, length, view.page, gs.doorbell_page_size)) {
+        // Doorbell GPU mappings and ownership are tracked for the complete
+        // client view. Replacing only part would leave the remaining CPU range
+        // live but no longer tracked or GPU-mapped.
+        errno = EINVAL;
+        return MAP_FAILED;
+      }
+    }
+  }
+
+  struct RetiredView {
+    size_t gpu_ordinal;
+    size_t page_size;
+    KfdProcess::PerGpuState::DoorbellView view;
+  };
+  std::vector<RetiredView> retired;
+  for (size_t ord = 0; ord < proc->gpu_state_.size(); ++ord) {
+    auto &gs = proc->gpu_state_[ord];
+    for (auto view = gs.doorbell_views.begin(); view != gs.doorbell_views.end();) {
+      if (!ranges_overlap(addr, length, view->page, gs.doorbell_page_size)) {
+        ++view;
+        continue;
+      }
+      retired.push_back({.gpu_ordinal = ord, .page_size = gs.doorbell_page_size, .view = *view});
+      view = gs.doorbell_views.erase(view);
+    }
+  }
+
+  for (const auto &entry : retired)
+    unmap_from_gpu(*proc, entry.view.gpu_va, entry.page_size);
+
+  void *mapped = safe_mmap(addr, length, prot, flags, fd, offset);
+  if (mapped != MAP_FAILED)
+    return mapped;
+
+  int mmap_errno = errno;
+  for (const auto &entry : retired) {
+    map_to_gpu(*proc, entry.view.gpu_va, entry.view.page, entry.page_size, amdgpu::Mtype::UC);
+    proc->gpu_state_[entry.gpu_ordinal].doorbell_views.push_back(entry.view);
+  }
+  errno = mmap_errno;
+  return MAP_FAILED;
 }
 
 bool SimulatedKfd::ensure_fd_created() {
@@ -905,28 +1040,41 @@ int SimulatedKfd::close(uint32_t process_id) {
         });
   }
 
-  // Tear down doorbell pages. The mapped page pointer lives in gpu_state_ (not in
-  // allocations_), so the generic host_ptr teardown above does not cover it — hence
-  // this separate loop. The doorbell page is always driver-created (dispatch_mmap
-  // maps it via safe_mmap in BOTH modes: a memfd MAP_SHARED page in daemon mode, a
-  // fresh MAP_ANONYMOUS page in non-daemon mode), so the driver owns it and must
-  // reclaim it unconditionally on close. Snapshot and clear the fields under
-  // alloc_mutex_ (the lock the doorbell readers use —
-  // is_doorbell_range/dispatch_mmap/dispatch_munmap), then munmap outside the lock
-  // so the syscall does not run while alloc_mutex_ is held.
-  for (auto &gs : proc.gpu_state_) {
-    void *doorbell_page;
+  // Doorbell mappings live in gpu_state_, not allocations_. Snapshot and clear
+  // every client view plus the stable monitor alias under alloc_mutex_, then
+  // release the GPU and CPU mappings outside the lock.
+  for (size_t ord = 0; ord < proc.gpu_state_.size(); ++ord) {
+    auto &gs = proc.gpu_state_[ord];
+    int doorbell_memfd;
+    void *doorbell_monitor_page;
     size_t doorbell_page_size;
+    std::vector<KfdProcess::PerGpuState::DoorbellView> doorbell_views;
     {
       std::lock_guard<std::mutex> alk(proc.alloc_mutex_);
-      doorbell_page = gs.doorbell_page;
+      doorbell_memfd = gs.doorbell_memfd;
+      doorbell_monitor_page = gs.doorbell_monitor_page;
       doorbell_page_size = gs.doorbell_page_size;
-      gs.doorbell_page = nullptr;
-      gs.doorbell_gpu_va = 0;
+      doorbell_views = std::move(gs.doorbell_views);
+      gs.doorbell_memfd = -1;
+      gs.doorbell_monitor_page = nullptr;
       gs.doorbell_page_size = 0;
     }
-    if (doorbell_page && doorbell_page_size)
-      libc_passthrough().munmap(doorbell_page, doorbell_page_size);
+    update_cp_doorbell_base(static_cast<uint32_t>(ord), process_id, nullptr);
+    for (const auto &view : doorbell_views) {
+      if (view.gpu_va && doorbell_page_size)
+        unmap_from_gpu(proc, view.gpu_va, doorbell_page_size);
+      if (view.page != MAP_FAILED && doorbell_page_size)
+        libc_passthrough().munmap(view.page, doorbell_page_size);
+    }
+    if (doorbell_monitor_page && doorbell_page_size)
+      libc_passthrough().munmap(doorbell_monitor_page, doorbell_page_size);
+    if (doorbell_memfd >= 0) {
+      {
+        std::lock_guard<std::mutex> flk(owned_fds_mutex_);
+        owned_fds_.erase(doorbell_memfd);
+      }
+      libc_passthrough().close(doorbell_memfd);
+    }
   }
 
   leaked_queues = queue_ids.size();
@@ -1142,93 +1290,195 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
     uint64_t encoded_gpu =
         (static_cast<uint64_t>(offset) & ~KFD_MMAP_TYPE_MASK) >> KFD_MMAP_GPU_ID_SHIFT;
     uint32_t db_gpu_id = static_cast<uint32_t>(encoded_gpu);
+    if (!find_gpu(db_gpu_id)) {
+      errno = EINVAL;
+      return MAP_FAILED;
+    }
     uint32_t ord = gpu_ordinal(db_gpu_id);
 
+    // Serialize the canonical backing, both mappings, GPU page-table publication,
+    // and CP base update against process teardown and another doorbell mmap.
+    std::lock_guard<std::mutex> op_lock(proc.op_mutex_);
+    if (proc.event_state_.is_closing()) {
+      errno = ENODEV;
+      return MAP_FAILED;
+    }
+
     int doorbell_fd = -1;
+    int source_doorbell_fd = -1;
+    void *monitor_ptr = nullptr;
+    size_t published_size = 0;
     {
       std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
-      for (auto &[handle, alloc] : proc.allocations_) {
-        if ((alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL) && alloc.gpu_id == db_gpu_id) {
-          doorbell_fd = alloc.memfd;
-          break;
+      auto &gs = proc.gpu(ord);
+      doorbell_fd = gs.doorbell_memfd;
+      monitor_ptr = gs.doorbell_monitor_page;
+      published_size = gs.doorbell_page_size;
+      if (doorbell_fd < 0) {
+        for (auto &[handle, alloc] : proc.allocations_) {
+          if ((alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL) && alloc.gpu_id == db_gpu_id) {
+            source_doorbell_fd = alloc.memfd;
+            break;
+          }
         }
       }
     }
 
-    if (doorbell_fd >= 0) {
-      off_t cur_size = 0;
-      {
-        struct stat st {};
-        if (safe_fstat(doorbell_fd, &st) == 0)
-          cur_size = st.st_size;
-      }
-      if (static_cast<off_t>(length) > cur_size) {
-        if (ftruncate(doorbell_fd, static_cast<off_t>(length)) != 0) {
-          errno = ENOMEM;
+    UniqueDriverFd new_doorbell_fd;
+    if (doorbell_fd < 0) {
+      // Retain a private descriptor even when a KFD doorbell allocation supplied
+      // the source. The allocation can be freed independently; this duplicate keeps
+      // the canonical backing valid until the per-process doorbell state is torn down.
+      UniqueDriverFd created_source;
+      if (source_doorbell_fd < 0) {
+        // Local-mode ROCr can request a doorbell mmap without first allocating a
+        // KFD doorbell object. Give that path the same persistent shared backing.
+        created_source.reset(memfd_create("rocjitsu_doorbell", MFD_CLOEXEC | MFD_ALLOW_SEALING));
+        if (!created_source)
           return MAP_FAILED;
-        }
+        source_doorbell_fd = created_source.get();
       }
-      // Initialize doorbell backing to 0xFF via a temporary mapping. This
-      // avoids SIGBUS on the final MAP_SHARED mmap on Linux 6.17+ where
-      // shmem large folio allocation can fail during a bulk memset on a
-      // freshly-mapped region. Writing through a separate PROT_WRITE
-      // mapping forces page allocation before the final shared mapping.
-      auto *init_ptr = static_cast<uint8_t *>(
-          safe_mmap(nullptr, length, PROT_WRITE, MAP_SHARED, doorbell_fd, 0));
-      if (init_ptr != MAP_FAILED) {
-        std::memset(init_ptr, 0xFF, length);
-        libc_passthrough().munmap(init_ptr, length);
-      }
+      new_doorbell_fd.reset(safe_fcntl(source_doorbell_fd, F_DUPFD_CLOEXEC, 4096));
+      if (!new_doorbell_fd && created_source)
+        new_doorbell_fd = std::move(created_source);
+      if (!new_doorbell_fd)
+        return MAP_FAILED;
+      doorbell_fd = new_doorbell_fd.get();
+    }
+
+    // A process/GPU owns exactly one monitor view. Doorbell mappings have a fixed
+    // KFD page size; rejecting a conflicting remap avoids invalidating live queue
+    // offsets or changing the address polled by the CP.
+    if (monitor_ptr && published_size != length) {
+      new_doorbell_fd.reset();
+      errno = EINVAL;
+      return MAP_FAILED;
+    }
+    // MAP_FIXED replaces every existing mapping in its target range. Never let a
+    // client-selected address replace the CP's private alias; that would leave
+    // live queues polling an invalid address.
+    if ((flags & MAP_FIXED) && ranges_overlap(addr, length, monitor_ptr, published_size)) {
+      new_doorbell_fd.reset();
+      errno = EINVAL;
+      return MAP_FAILED;
+    }
+
+    off_t cur_size = 0;
+    {
+      struct stat st {};
+      if (safe_fstat(doorbell_fd, &st) == 0)
+        cur_size = st.st_size;
+    }
+    if (static_cast<off_t>(length) > cur_size &&
+        ftruncate(doorbell_fd, static_cast<off_t>(length)) != 0) {
+      int saved_errno = errno;
+      new_doorbell_fd.reset();
+      errno = saved_errno;
+      return MAP_FAILED;
     }
 
     int db_mflags = MAP_SHARED;
     if (flags & MAP_FIXED)
       db_mflags |= MAP_FIXED;
 
-    void *ptr = safe_mmap(addr, length, PROT_READ | PROT_WRITE,
-                          doorbell_fd >= 0 ? db_mflags : (db_mflags | MAP_ANONYMOUS),
-                          doorbell_fd >= 0 ? doorbell_fd : -1, 0);
-    if (ptr != MAP_FAILED) {
-      // Initialize doorbell backing to 0xFF so each uint64_t slot starts
-      // at ~0ULL, matching the HwQueue::last_doorbell sentinel. Without
-      // this, MAP_ANONYMOUS gives zero-filled pages and the CP's first
-      // scan falsely consumes the 0 vs ~0 transition, leaving
-      // last_doorbell==0. When ROCR later rings the doorbell with
-      // write_idx==0 (first packet), the CP sees no change and never
-      // processes the submission.
-      std::memset(ptr, 0xFF, length);
+    UniqueMapping new_monitor_mapping;
+    if (!monitor_ptr) {
+      // Initialize doorbell backing to 0xFF via the CP's permanent mapping so
+      // every slot matches the HwQueue::last_doorbell sentinel. This also avoids
+      // SIGBUS on the final MAP_SHARED mmap on Linux 6.17+ where
+      // shmem large folio allocation can fail during a bulk memset on a
+      // freshly-mapped region. Writing through a separate PROT_WRITE
+      // mapping forces page allocation before the client mapping is published. Keeping this
+      // alias gives the simulated CP a stable device-side view even while the
+      // runtime is creating or replacing its own mapping of the same memfd.
+      void *new_monitor = MAP_FAILED;
+      void *forced_monitor_addr =
+          next_doorbell_monitor_mmap_addr_.exchange(nullptr, std::memory_order_acq_rel);
+      if (fail_next_doorbell_monitor_mmap_.exchange(false, std::memory_order_acq_rel)) {
+        errno = ENOMEM;
+      } else {
+        int monitor_flags = MAP_SHARED;
+        if (forced_monitor_addr)
+          monitor_flags |= MAP_FIXED_NOREPLACE;
+        new_monitor = safe_mmap(forced_monitor_addr, length, PROT_READ | PROT_WRITE, monitor_flags,
+                                doorbell_fd, 0);
+      }
+      new_monitor_mapping.reset(new_monitor, length);
+      if (!new_monitor_mapping) {
+        int saved_errno = errno;
+        new_doorbell_fd.reset();
+        errno = saved_errno;
+        return MAP_FAILED;
+      }
 
-      // Hold op_mutex_ across the whole publish -> map_to_gpu -> set_doorbell_base
-      // sequence so a concurrent close() (which tears down doorbells under
-      // op_mutex_) cannot clear+munmap this page between publishing it and handing
-      // it to the CP, which would leave the CP with a dangling doorbell_base.
-      // op_mutex_ is the outer lock (op_mutex_ -> alloc_mutex_, matching close());
-      // set_doorbell_base takes hw_queue_mutex_, which is never held while taking
-      // op_mutex_, so there is no inversion. alloc_mutex_ is taken only for the
-      // field publish and released before set_doorbell_base (hw_queue_mutex_).
-      std::lock_guard<std::mutex> op_lock(proc.op_mutex_);
-      {
-        std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
-        // If close() has begun tearing this process down, do NOT publish a new
-        // doorbell page: it would never be reclaimed (leaked) and would hand the
-        // CP a base for a dying process. Fail the mmap instead. is_closing() is
-        // set by close() under op_mutex_, which we now hold, so this check is
-        // race-free against teardown.
-        if (proc.event_state_.is_closing()) {
-          libc_passthrough().munmap(ptr, length);
-          errno = ENODEV;
+      // Allocate the stable alias before the destructive client MAP_FIXED. If
+      // the kernel placed an alias in the requested client range, retain it as
+      // a reservation while establishing another. Once an alias lands fully
+      // outside the target, the reservations can be released and the final
+      // fixed mapping cannot replace the CP's private alias.
+      std::vector<UniqueMapping> monitor_reservations;
+      while ((flags & MAP_FIXED) &&
+             ranges_overlap(addr, length, new_monitor_mapping.get(), length)) {
+        monitor_reservations.push_back(std::move(new_monitor_mapping));
+        new_monitor_mapping.reset(
+            safe_mmap(nullptr, length, PROT_READ | PROT_WRITE, MAP_SHARED, doorbell_fd, 0), length);
+        if (!new_monitor_mapping) {
+          int saved_errno = errno;
+          new_monitor_mapping.reset();
+          monitor_reservations.clear();
+          new_doorbell_fd.reset();
+          errno = saved_errno;
           return MAP_FAILED;
         }
-        auto &gs = proc.gpu(ord);
-        gs.doorbell_page = ptr;
-        gs.doorbell_page_size = length;
-        gs.doorbell_gpu_va = reinterpret_cast<uint64_t>(ptr);
       }
-      // Use the local ptr (== the doorbell_gpu_va just written) rather than
-      // re-reading gs.doorbell_gpu_va without alloc_mutex_.
-      map_to_gpu(proc, reinterpret_cast<uint64_t>(ptr), ptr, length, amdgpu::Mtype::UC);
-      update_cp_doorbell_base(ord, proc.process_id(), ptr);
+      monitor_ptr = new_monitor_mapping.get();
+      std::memset(monitor_ptr, 0xFF, length);
     }
+
+    UniqueMapping client_mapping(
+        safe_mmap(addr, length, PROT_READ | PROT_WRITE, db_mflags, doorbell_fd, 0), length);
+    if (!client_mapping) {
+      int mmap_errno = errno;
+      new_monitor_mapping.reset();
+      new_doorbell_fd.reset();
+      errno = mmap_errno;
+      return MAP_FAILED;
+    }
+    void *ptr = client_mapping.get();
+    if (ranges_overlap(ptr, length, monitor_ptr, length)) {
+      client_mapping.reset();
+      new_monitor_mapping.reset();
+      new_doorbell_fd.reset();
+      errno = EINVAL;
+      return MAP_FAILED;
+    }
+
+    {
+      std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
+      auto &gs = proc.gpu(ord);
+      if (new_doorbell_fd) {
+        assert(gs.doorbell_memfd < 0);
+        gs.doorbell_memfd = new_doorbell_fd.release();
+        {
+          std::lock_guard<std::mutex> flk(owned_fds_mutex_);
+          owned_fds_.insert(gs.doorbell_memfd);
+        }
+      } else {
+        assert(gs.doorbell_memfd == doorbell_fd);
+      }
+      assert(!gs.doorbell_monitor_page || gs.doorbell_monitor_page == monitor_ptr);
+      if (std::ranges::none_of(gs.doorbell_views,
+                               [ptr](const auto &view) { return view.page == ptr; })) {
+        gs.doorbell_views.push_back({.page = ptr, .gpu_va = reinterpret_cast<uint64_t>(ptr)});
+      }
+      gs.doorbell_monitor_page = monitor_ptr;
+      gs.doorbell_page_size = length;
+    }
+
+    static_cast<void>(new_monitor_mapping.release());
+    static_cast<void>(client_mapping.release());
+    map_to_gpu(proc, reinterpret_cast<uint64_t>(ptr), ptr, length, amdgpu::Mtype::UC);
+    update_cp_doorbell_base(ord, proc.process_id(), monitor_ptr);
     return ptr;
   }
 
@@ -1383,32 +1633,51 @@ int SimulatedKfd::munmap(uint32_t process_id, void *addr, size_t length) {
 int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
   {
     uint32_t doorbell_ord = 0;
+    uint64_t doorbell_gpu_va = 0;
+    int doorbell_memfd = -1;
+    void *doorbell_monitor_page = nullptr;
     size_t doorbell_page_size = 0;
     bool is_doorbell = false;
+    bool last_doorbell_view = false;
     {
       std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
+      for (const auto &gs : proc.gpu_state_) {
+        if (ranges_overlap(addr, length, gs.doorbell_monitor_page, gs.doorbell_page_size)) {
+          errno = EPERM;
+          return -1;
+        }
+      }
       for (size_t ord = 0; ord < proc.gpu_state_.size(); ++ord) {
         auto &gs = proc.gpu(ord);
-        if (gs.doorbell_page == addr) {
-          if (!proc.event_state_.is_closing()) {
-            errno = EPERM;
-            return -1;
-          }
-          uint64_t gpu_va = gs.doorbell_gpu_va;
-          doorbell_page_size = gs.doorbell_page_size;
-          gs.doorbell_page = nullptr;
-          gs.doorbell_gpu_va = 0;
-          gs.doorbell_page_size = 0;
-          if (gpu_va && doorbell_page_size)
-            unmap_from_gpu(proc, gpu_va, doorbell_page_size);
-          doorbell_ord = static_cast<uint32_t>(ord);
-          is_doorbell = true;
-          break;
+        auto view = std::ranges::find_if(
+            gs.doorbell_views, [addr](const auto &candidate) { return candidate.page == addr; });
+        if (view == gs.doorbell_views.end())
+          continue;
+        if (!proc.event_state_.is_closing()) {
+          errno = EPERM;
+          return -1;
         }
+        doorbell_gpu_va = view->gpu_va;
+        doorbell_page_size = gs.doorbell_page_size;
+        gs.doorbell_views.erase(view);
+        last_doorbell_view = gs.doorbell_views.empty();
+        if (last_doorbell_view) {
+          doorbell_memfd = gs.doorbell_memfd;
+          doorbell_monitor_page = gs.doorbell_monitor_page;
+          gs.doorbell_memfd = -1;
+          gs.doorbell_monitor_page = nullptr;
+          gs.doorbell_page_size = 0;
+        }
+        doorbell_ord = static_cast<uint32_t>(ord);
+        is_doorbell = true;
+        break;
       }
     }
     if (is_doorbell) {
-      // Clear the CP's doorbell base for this process BEFORE munmapping the page.
+      if (doorbell_gpu_va && doorbell_page_size)
+        unmap_from_gpu(proc, doorbell_gpu_va, doorbell_page_size);
+
+      // Clear the CP's doorbell base for this process BEFORE munmapping its alias.
       // The doorbell poll thread reads and dereferences doorbell_base under the CP's
       // hw_queue_mutex_ (scan_doorbells); if we munmapped first, the poll thread
       // could deref the freed page in the window before the base is cleared and
@@ -1420,12 +1689,23 @@ int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
       // alloc_mutex_ under hw_queue_mutex_ (allocate_scratch_backing), so holding
       // alloc_mutex_ across update_cp_doorbell_base (hw_queue_mutex_) would be an
       // alloc_mutex_->hw_queue_mutex_ inversion that can deadlock.
-      update_cp_doorbell_base(doorbell_ord, proc.process_id(), nullptr);
+      if (last_doorbell_view)
+        update_cp_doorbell_base(doorbell_ord, proc.process_id(), nullptr);
+      if (doorbell_monitor_page && doorbell_page_size)
+        libc_passthrough().munmap(doorbell_monitor_page, doorbell_page_size);
       // Unmap the exact page we mapped: use the recorded doorbell page size, not
       // the caller-provided length. A length that differs from the tracked mapping
       // would otherwise partially unmap the CPU page and leave it inconsistent with
       // the GPU page-table unmap above.
-      libc_passthrough().munmap(addr, doorbell_page_size ? doorbell_page_size : length);
+      if (addr != MAP_FAILED && doorbell_page_size)
+        libc_passthrough().munmap(addr, doorbell_page_size);
+      if (doorbell_memfd >= 0) {
+        {
+          std::lock_guard<std::mutex> flk(owned_fds_mutex_);
+          owned_fds_.erase(doorbell_memfd);
+        }
+        libc_passthrough().close(doorbell_memfd);
+      }
       return 0;
     }
   }
@@ -1877,10 +2157,10 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
     // val==last_doorbell, no edge is detected, and the submission is never fetched
     // — a lost doorbell that hangs the waiter in hsa_signal_wait. Restoring the
     // sentinel keeps the "first real ring is always an edge" invariant.
-    if (recycled_offset && gs.doorbell_page &&
+    if (recycled_offset && gs.doorbell_monitor_page &&
         db_offset + sizeof(uint64_t) <= gs.doorbell_page_size) {
       std::atomic_ref<uint64_t>(
-          *reinterpret_cast<uint64_t *>(static_cast<char *>(gs.doorbell_page) + db_offset))
+          *reinterpret_cast<uint64_t *>(static_cast<char *>(gs.doorbell_monitor_page) + db_offset))
           .store(~uint64_t(0), std::memory_order_release);
     }
 
@@ -1896,7 +2176,8 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
     // page before creating queues, and queue creation for a process is single-
     // threaded (serialized by op_mutex_), so no concurrent dispatch_mmap re-maps
     // the doorbell in the unlock->register window.
-    hw.doorbell_base = gs.doorbell_page;
+    assert(gs.doorbell_views.empty() || gs.doorbell_monitor_page);
+    hw.doorbell_base = gs.doorbell_monitor_page;
     hw.last_doorbell = ~uint64_t(0);
     hw.host_accessible = true;
     hw.is_sdma = (args->queue_type == 1 /*KFD_IOC_QUEUE_TYPE_SDMA*/ ||
@@ -4411,7 +4692,17 @@ int SimulatedKfd::dispatch_get_mmap_memfd(KfdProcess &proc, off_t offset) const 
     uint64_t encoded_gpu =
         (static_cast<uint64_t>(offset) & ~KFD_MMAP_TYPE_MASK) >> KFD_MMAP_GPU_ID_SHIFT;
     uint32_t db_gpu_id = static_cast<uint32_t>(encoded_gpu);
+    if (!find_gpu(db_gpu_id))
+      return -1;
     std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
+    const auto &gs = proc.gpu(gpu_ordinal(db_gpu_id));
+    if (gs.doorbell_memfd >= 0) {
+      util::Logger::cp("MEMFD_LOOKUP: pid=", proc.process_id(),
+                       " DOORBELL canonical gpu_id=", db_gpu_id, " memfd=", gs.doorbell_memfd);
+      return gs.doorbell_memfd;
+    }
+    // Compatibility fallback for callers that query the backing before the
+    // mmap path has published the canonical descriptor.
     for (auto &[handle, alloc] : proc.allocations_) {
       if ((alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL) && alloc.gpu_id == db_gpu_id) {
         util::Logger::cp("MEMFD_LOOKUP: pid=", proc.process_id(), " DOORBELL match handle=", handle,
