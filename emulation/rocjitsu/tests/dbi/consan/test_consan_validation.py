@@ -1953,6 +1953,7 @@ class ConSanValidationTest(unittest.TestCase):
                 "SampledFastContextMatchesHostReference"
             ),
         )
+        self.assertEqual(workloads["d128-block"]["run_timeout_seconds"], 150)
         self.assertEqual(
             workloads["jakub-attention"]["relative_path"],
             (
@@ -1968,15 +1969,21 @@ class ConSanValidationTest(unittest.TestCase):
 
     def test_run_uses_target_resolved_workload_timeout(self) -> None:
         with temporary_root() as root:
-            for target, expected_timeout in (("gfx950", 30), ("gfx1250", 90)):
-                with self.subTest(target=target):
+            cases = (
+                ("gfx950", "d128-block", 30),
+                ("gfx1250", "d128-block", 150),
+                ("gfx950", "jakub-attention", 30),
+                ("gfx1250", "jakub-attention", 90),
+            )
+            for target, workload, expected_timeout in cases:
+                with self.subTest(target=target, workload=workload):
                     args = validation._parse_args(
                         [
                             "--target",
                             target,
                             "run",
                             "--workload",
-                            "jakub-attention",
+                            workload,
                             "--profile",
                             "supercollider",
                             "--phase",

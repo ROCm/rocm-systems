@@ -1226,6 +1226,7 @@ class _NativeGtestTarget:
     matrix_operation: str
     d128_block_oracle: str
     d128_block_fault_uses_oracle: bool = False
+    d128_block_run_timeout_seconds: int | None = None
 
 
 def _cdna_gtest_target(
@@ -1278,6 +1279,10 @@ NATIVE_GTEST_TARGETS = {
         matrix_operation="Wmma",
         d128_block_oracle="SampledFastContextMatchesHostReference",
         d128_block_fault_uses_oracle=True,
+        # Current Record/Replay retains thousands of dynamic identity records
+        # across both exact host-reference cases. The native gfx1250 simulator
+        # completes that stronger contract in roughly 102 seconds.
+        d128_block_run_timeout_seconds=150,
     ),
 }
 
@@ -1298,7 +1303,8 @@ def _attention_override(
     oracle: str,
     *,
     fault_uses_oracle: bool = False,
-) -> dict[str, str]:
+    run_timeout_seconds: int | None = None,
+) -> dict[str, object]:
     oracle_filter = f"{suite}.{oracle}"
     override = {
         "relative_path": relative_path,
@@ -1307,6 +1313,8 @@ def _attention_override(
     }
     if fault_uses_oracle:
         override["fault_filter"] = oracle_filter
+    if run_timeout_seconds is not None:
+        override["run_timeout_seconds"] = run_timeout_seconds
     return override
 
 
@@ -1424,6 +1432,7 @@ def _native_gtest_overrides(
             f"HipMoi{suite}D128AttentionBlock",
             target.d128_block_oracle,
             fault_uses_oracle=target.d128_block_fault_uses_oracle,
+            run_timeout_seconds=target.d128_block_run_timeout_seconds,
         ),
         "d128-pressure": _attention_override(
             _native_gtest_path(

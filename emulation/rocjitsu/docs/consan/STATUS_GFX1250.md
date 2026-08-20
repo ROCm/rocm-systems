@@ -50,7 +50,7 @@ preserve an earlier green claim.
 | **P1 Sharktank TP1 prefill** | 🟩 Exact prefill oracle; 352/352 accesses; current paired 1.17x | 🟩 Exact prefill oracle; 352/352 accesses, 37/37 barriers; current paired 1.25x | 🟩 Exact prefill oracle; 352/352 accesses, 64/64 applicable barriers; current paired 1.51x | 🟩 Exact prefill oracle; 352/352 accesses, 37/37 barriers; current paired 2.11x |
 | **P1 Sharktank TP1 decode/combined** | 🟩 Exact decode/combined oracles; 704/704 accesses; current paired 1.09x | 🟩 Exact decode/combined oracles; 704/704 accesses, 74/74 barriers; current paired 1.16x | 🟩 Exact decode/combined oracles; 704/704 accesses, 128/128 applicable barriers; current paired 1.28x | 🟧 Compute-active through 600 seconds; no verdict or accepted overhead |
 | **P2 Sharktank TP2 family** | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained | 🟧 Current uninstrumented all-mode baseline exceeds 600 seconds; prior frozen bundle retained |
-| **P4 hip-moi D128 block attention** | 🟩 Current paired 1.56x; 18/18 accesses | 🟩 At `fff5f3597b`: spot rerun exact in 10.89 seconds; 18/18 accesses and 4/4 barriers; paired 1.11x retained | 🟩 Current paired 1.13x; 18/18 accesses, 8/8 applicable barriers | 🟩 Current paired 1.09x; 18/18 accesses, 4/4 barriers |
+| **P4 hip-moi D128 block attention** | 🟩 Current strict clean row: both exact host-reference oracles in 20.08 seconds; 18/18 accesses; paired 1.56x retained | 🟩 Current strict clean row: both exact host-reference oracles in 103.08 seconds; 18/18 accesses, 8/8 barriers, and 5,844 visible evidence records; paired 1.11x retained | 🟩 Current strict clean row: both exact host-reference oracles in 20.78 seconds; 18/18 accesses, 8/8 applicable barriers; paired 1.13x retained | 🟩 Current strict clean row: both exact host-reference oracles in 33.06 seconds; 18/18 accesses, 4/4 barriers; paired 1.09x retained |
 | **P4 hip-moi D128 pressure attention** | 🟩 Current paired 1.84x; 40/40 accesses | 🟨 Fresh clean run passes three of four exact cases with 40/40 accesses and 4/4 barriers statically complete; the fourth exceeds the 30-second row deadline | 🟩 Current paired 1.12x; 40/40 accesses, 8/8 applicable barriers | 🟩 Current paired 1.29x; 40/40 accesses, 4/4 barriers |
 | **P4 hip-moi WMMA attention** | 🟩 Current paired 1.78x; 18/18 accesses | 🟩 At `fff5f3597b`: spot rerun exact in 7.81 seconds; 18/18 accesses and 4/4 barriers; paired 1.17x retained | 🟩 Current paired 1.15x; 18/18 accesses, 8/8 applicable barriers | 🟩 Current paired 1.17x; 18/18 accesses, 4/4 barriers |
 | **P4 hip-moi Stream-K arrival** | 🟩 Current paired 7.38x; 4/4 accesses | 🟩 Fresh clean run exact and complete at 4/4 accesses, 4/4 barriers, 10/10 atomics, and 16/16 fences; prior paired 2.41x retained | 🟩 Current paired 2.72x; 4/4 accesses, 8/8 applicable barriers, 10/10 atomics | 🟩 Current paired 2.62x; 4/4 accesses, 4/4 barriers, 10/10 atomics |
@@ -64,6 +64,23 @@ inference, and a single-executor baseline reaches inference but remains too
 slow for useful iteration.  Existing static gfx1250 qualification evidence is
 not sufficient for promotion; CLIP remains outside the matrix denominator
 until baseline execution becomes suitable for end-to-end validation.
+
+### 2026-08-20 D128 block timeout revalidation
+
+`rebase-20260820-gfx1250-d128-all-timeout-fixed` reruns the baseline and all
+four strict clean profiles through the native B0 simulator configuration. All
+five rows accept both host-reference oracles with hook SHA-256
+`5d0f27d1a1fd6968d9665afd98cfdb6b9b38f74b78b230b3625d7d45fa2f27fa`.
+The baseline takes 18.41 seconds; the four profile times and current coverage
+are recorded in the matrix above.
+
+Record/Replay now retains a materially stronger dynamic-identity contract than
+the historical 10.89-second spot run: the current row publishes 5,844 visible
+evidence records and all eight admitted barriers without saturating its report,
+where the older row retained 18 visible access records and four barriers. The
+gfx1250 D128 manifest therefore uses a target-specific 150-second process
+bound. A host regression test pins that bound, verifies that the runner uses
+it, and separately pins gfx950 to the ordinary 30-second bound.
 
 ### Target-native Jakub matmul
 
