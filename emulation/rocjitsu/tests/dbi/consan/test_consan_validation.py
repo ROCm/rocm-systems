@@ -2332,6 +2332,27 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertEqual(command[0], "iree-run-module")
         self.assertIn("--function=main", command)
 
+    def test_gfx1250_health_smoke_prefers_bounded_exact_device_oracle(self) -> None:
+        workload = validation.WORKLOAD_BY_ID["tp1-decode-combined"]
+        smoke = validation.WORKLOAD_BY_ID["d128-pressure"]
+        with temporary_root() as workspace:
+            executable = validation._input_files(workspace, "gfx1250", smoke)[
+                "executable"
+            ]
+            executable.parent.mkdir(parents=True, exist_ok=True)
+            executable.write_bytes(b"fixture")
+            command = validation._health_smoke_command(
+                workspace, "gfx1250", workload, workspace / "health.json"
+            )
+        self.assertEqual(command[0], str(executable))
+        self.assertEqual(
+            command[1],
+            (
+                "--gtest_filter=HipMoiGfx1250D128AttentionPressure."
+                "FullKvDoubleBufferedExactContextMatchesHostReference"
+            ),
+        )
+
     def test_profile_environment_scrubs_controls_and_relies_on_sync_defaults(
         self,
     ) -> None:

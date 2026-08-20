@@ -2285,6 +2285,19 @@ def _qwen_command(
 def _health_smoke_command(
     workspace: Path, target: str, workload: Workload, output: Path
 ) -> list[str]:
+    # Qwen is a useful universal smoke on hardware targets, but merely having
+    # its files does not make it a bounded software-emulator health probe.  The
+    # gfx1250 campaign already qualifies the single D128-pressure exact oracle
+    # as its independent, sub-30-second target-dispatch denominator.
+    if target == "gfx1250":
+        smoke_workload = WORKLOAD_BY_ID["d128-pressure"]
+        if all(
+            path.is_file()
+            for path in _input_files(workspace, target, smoke_workload).values()
+        ):
+            return _workload_command(
+                workspace, target, smoke_workload, "overhead", output
+            )
     qwen = WORKLOAD_BY_ID["qwen-prefill"]
     qwen_command = _qwen_command(workspace, target, False, output)
     if shutil.which(qwen_command[0]) and all(
