@@ -402,8 +402,9 @@ must tolerate the missing field: `_parse_function_backend` in
   otherwise; `ON` makes an absent torch a configure error;
   `OFF` skips the directory. Any other value stops the configure.
   `TORCH_TRACE_PYTHON` selects the interpreter, defaulting to the one CMake finds.
-  When `TORCH_TRACE_SOURCE_FINGERPRINT` is unset, CMake hashes the collector
-  `*.cpp`/`*.h` files, `CMakeLists.txt`, and the shared utility headers.
+  CMake hashes the collector `*.cpp`/`*.h` files, `CMakeLists.txt`, and the shared
+  utility headers when `TORCH_TRACE_SOURCE_FINGERPRINT` is unset. The runtime
+  loader passes it from the artifact tag.
 - CMake locates the interpreter with `find_package(Python3)` and the wheel with
   `find_package(Torch CONFIG)`. That lookup may enable the HIP language. Includes
   come from `TORCH_INCLUDE_DIRS`. `torch`, `torch_cpu`, `c10`, and `torch_python`
