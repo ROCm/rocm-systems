@@ -29,6 +29,8 @@ perf_record_command = _main.perf_record_command
 process_shader = _main.process_shader
 read_hazard_report = _main.read_hazard_report
 run_command = _main.run_command
+shader_required_archs = _main.shader_required_archs
+shader_supports_arch = _main.shader_supports_arch
 
 DEFAULT_ARCH = _main.DEFAULT_ARCH
 DEFAULT_EXCLUDED_WAITS = _main.DEFAULT_EXCLUDED_WAITS
@@ -58,6 +60,8 @@ __all__ = [
     "process_shader",
     "read_hazard_report",
     "run_command",
+    "shader_required_archs",
+    "shader_supports_arch",
     "write_benchmark_report",
     "write_csv_report",
     "write_json_report",

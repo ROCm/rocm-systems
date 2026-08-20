@@ -53,6 +53,11 @@ DEFAULT_TIMEOUT = 240  # 4 minutes
 
 WAIT_RE = re.compile(r"^\s+(s_wait\w+)\s+", re.MULTILINE)
 
+# Shaders using instructions that only assemble for some targets (arcadia
+# wavegroup semaphores, for one) declare them with a `// requires: gfx1260`
+# comment; they are skipped on every other architecture.
+REQUIRES_RE = re.compile(r"^\s*//\s*requires:\s*(.+)$", re.MULTILINE)
+
 # s_wait_xcnt tracks address translation (XNACK replay), not data completion.
 # Mutating it does not produce data hazards detectable by this plugin, so it
 # is excluded by default.  Use --include-xcnt to re-enable for future work.
@@ -515,6 +520,28 @@ def discover_shaders(shader_dir: Path) -> List[Path]:
     return shaders
 
 
+def shader_required_archs(shader: Path) -> List[str]:
+    """
+    Architectures a shader is restricted to, from a ``// requires: <arch>[, ...]`` line.
+
+    An empty list means the shader is portable across every target.
+    """
+    try:
+        text = shader.read_text(errors="replace")
+    except OSError:
+        return []
+    archs: List[str] = []
+    for match in REQUIRES_RE.finditer(text):
+        archs.extend(a.strip() for a in match.group(1).split(",") if a.strip())
+    return archs
+
+
+def shader_supports_arch(shader: Path, arch: str) -> bool:
+    """True when ``shader`` can be built for ``arch``."""
+    required = shader_required_archs(shader)
+    return not required or arch in required
+
+
 class RocjitsuRunner:
     """
     Runs kernels under rocJitsu with the ``data_hazard`` plugin enabled.
@@ -783,7 +810,20 @@ def main() -> int:
             print("No shader files found.", file=sys.stderr)
             return 1
 
+        skipped = [s for s in shaders if not shader_supports_arch(s, args.arch)]
+        shaders = [s for s in shaders if shader_supports_arch(s, args.arch)]
+        if not shaders:
+            print(f"No shader files target {args.arch}.", file=sys.stderr)
+            return 1
+
         print(f"Shaders: {[s.name for s in shaders]}")
+        if skipped:
+            print(
+                f"Skipped (not for {args.arch}): "
+                + ", ".join(
+                    f"{s.name} [{', '.join(shader_required_archs(s))}]" for s in skipped
+                )
+            )
         print(f"Architecture: {args.arch}")
 
         # --- find tools ---

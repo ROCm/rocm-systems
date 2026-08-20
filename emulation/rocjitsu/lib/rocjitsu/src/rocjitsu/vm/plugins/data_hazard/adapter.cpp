@@ -19,6 +19,8 @@ using hazard_core::InstructionEvent;
 using hazard_core::RegisterKind;
 using hazard_core::ResourceAccessEvent;
 using hazard_core::ResourceKind;
+using hazard_core::SemaphoreEvent;
+using hazard_core::SemaphoreKind;
 using hazard_core::WaitAction;
 using hazard_core::WaitCntType;
 
@@ -137,6 +139,12 @@ WaitAction make_wait_action(const WaitInfo &wait) {
     // accesses. The epoch is closed from onAmdgpuBarrierResolved, which runs
     // once every wave has arrived.
     break;
+  case WaitKind::SemaphoreWait:
+    // Unlike a barrier wait this can be classified before the wave stalls: the
+    // epoch it closes holds only the accesses of its own wavegroup, and the
+    // signal that releases the wait was issued before the wait was reached.
+    action.is_wavegroup_semaphore_wait = true;
+    break;
   case WaitKind::AddressTranslation:
     action.is_address_translation = true;
     break;
@@ -168,6 +176,8 @@ WaitKind make_wait_kind(std::string_view mnemonic) {
     return WaitKind::WaitTensorcnt;
   if (mnemonic == "s_barrier_wait")
     return WaitKind::BarrierWait;
+  if (mnemonic == "s_sema_wait")
+    return WaitKind::SemaphoreWait;
   if (mnemonic == "s_wait_xcnt")
     return WaitKind::AddressTranslation;
   return WaitKind::None;
@@ -222,6 +232,16 @@ void DataHazardAdapter::on_workgroup_begin(const ExecutionKey &workgroup) {
 
 void DataHazardAdapter::on_workgroup_end(const ExecutionKey &workgroup) {
   api_.on_workgroup_end(workgroup.dispatch_id, workgroup.cluster_id, workgroup.workgroup_id);
+}
+
+void DataHazardAdapter::on_wavegroup_begin(const ExecutionKey &wavegroup) {
+  api_.on_wavegroup_begin(wavegroup.dispatch_id, wavegroup.cluster_id, wavegroup.workgroup_id,
+                          wavegroup.wavegroup_id);
+}
+
+void DataHazardAdapter::on_wavegroup_end(const ExecutionKey &wavegroup) {
+  api_.on_wavegroup_end(wavegroup.dispatch_id, wavegroup.cluster_id, wavegroup.workgroup_id,
+                        wavegroup.wavegroup_id);
 }
 
 void DataHazardAdapter::on_wave_begin(const ExecutionKey &wave) { api_.on_wave_begin(wave); }
@@ -364,6 +384,14 @@ void DataHazardAdapter::on_local_memory_atomic_barrier(const ExecutionKey &wave,
   event.wave = wave;
   event.kind = async ? BarrierKind::LocalMemoryAtomicAsync : BarrierKind::LocalMemoryAtomic;
   api_.on_barrier(event);
+}
+
+void DataHazardAdapter::on_wavegroup_semaphore_signal(const ExecutionKey &wave) {
+  SemaphoreEvent event;
+  event.wave = wave;
+  event.wavegroup_id = wave.wavegroup_id;
+  event.kind = SemaphoreKind::Signal;
+  api_.on_semaphore(event);
 }
 
 void DataHazardAdapter::on_shutdown() { api_.on_shutdown(); }

@@ -1979,8 +1979,22 @@ TEST(DataHazardAdapterTest, MapsWaitMnemonicsToWaitKinds) {
   EXPECT_EQ(dh::make_wait_kind("s_waitcnt_vscnt"), dh::WaitKind::WaitVscnt);
   EXPECT_EQ(dh::make_wait_kind("s_wait_tensorcnt"), dh::WaitKind::WaitTensorcnt);
   EXPECT_EQ(dh::make_wait_kind("s_barrier_wait"), dh::WaitKind::BarrierWait);
+  EXPECT_EQ(dh::make_wait_kind("s_sema_wait"), dh::WaitKind::SemaphoreWait);
   EXPECT_EQ(dh::make_wait_kind("s_wait_xcnt"), dh::WaitKind::AddressTranslation);
   EXPECT_EQ(dh::make_wait_kind("v_add_u32"), dh::WaitKind::None);
+}
+
+TEST(DataHazardAdapterTest, SemaphoreWaitClosesWavegroupEpochRatherThanDrainingACounter) {
+  dh::WaitInfo wait;
+  wait.kind = dh::WaitKind::SemaphoreWait;
+
+  const WaitAction action = dh::make_wait_action(wait);
+  EXPECT_TRUE(action.is_wait_instruction);
+  EXPECT_TRUE(action.is_wavegroup_semaphore_wait);
+  // A semaphore orders waves, so it neither drains this wave's counters nor
+  // closes the workgroup-wide epoch a barrier closes.
+  EXPECT_TRUE(action.counters.empty());
+  EXPECT_FALSE(action.is_workgroup_barrier);
 }
 
 TEST(DataHazardAdapterTest, MapsWaitInfoToGenericWaitActions) {

@@ -38,6 +38,7 @@ set(RJ_HAZARD_CORE_SOURCES
 set(RJ_HAZARD_CORE_PUBLIC_HEADERS
     ${RJ_HAZARD_CORE_INCLUDE_DIR}/data_hazard_engine.h
     ${RJ_HAZARD_CORE_INCLUDE_DIR}/data_hazard_state.h
+    ${RJ_HAZARD_CORE_INCLUDE_DIR}/frontend_adapter.h
     ${RJ_HAZARD_CORE_INCLUDE_DIR}/hash_utils.h
     ${RJ_HAZARD_CORE_INCLUDE_DIR}/hazard_events.h
     ${RJ_HAZARD_CORE_INCLUDE_DIR}/simulator_api.h

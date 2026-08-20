@@ -37,11 +37,23 @@ public:
                                   EntityId workgroup_id) = 0;
   virtual void on_workgroup_end(EntityId dispatch_id, EntityId cluster_id,
                                 EntityId workgroup_id) = 0;
+  /// Wavegroup lifecycle. Both default to no-ops, and epochs are created
+  /// lazily, so a simulator without a wavegroup hierarchy need not call them.
+  /// on_wavegroup_end flushes the wavegroup's LDS epoch, which is what reports
+  /// a race when the kernel never issues the s_sema_wait that would close it.
+  virtual void on_wavegroup_begin(EntityId /*dispatch_id*/, EntityId /*cluster_id*/,
+                                  EntityId /*workgroup_id*/, EntityId /*wavegroup_id*/) {}
+  virtual void on_wavegroup_end(EntityId /*dispatch_id*/, EntityId /*cluster_id*/,
+                                EntityId /*workgroup_id*/, EntityId /*wavegroup_id*/) {}
   virtual void on_wave_begin(const ExecutionKey &wave) = 0;
   virtual void on_wave_end(const ExecutionKey &wave) = 0;
   virtual void on_instruction(const InstructionEvent &instruction) = 0;
   virtual void on_resource_access(const ResourceAccessEvent &access) = 0;
   virtual void on_barrier(const BarrierEvent &barrier) = 0;
+  /// s_sema_signal. Kept separate from on_barrier because a semaphore is a
+  /// wavegroup-scope directed signal rather than a workgroup barrier. Defaults
+  /// to a no-op so adapters without semaphore support need not override it.
+  virtual void on_semaphore(const SemaphoreEvent & /*semaphore*/) {}
   virtual void on_shutdown() = 0;
 };
 

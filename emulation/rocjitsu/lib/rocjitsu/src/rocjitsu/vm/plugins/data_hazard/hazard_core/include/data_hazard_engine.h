@@ -41,11 +41,16 @@ public:
   void on_workgroup_begin(EntityId dispatch_id, EntityId cluster_id,
                           EntityId workgroup_id) override;
   void on_workgroup_end(EntityId dispatch_id, EntityId cluster_id, EntityId workgroup_id) override;
+  /// Only the end of a wavegroup is overridden; epochs are created lazily, so
+  /// the inherited no-op begin suffices.
+  void on_wavegroup_end(EntityId dispatch_id, EntityId cluster_id, EntityId workgroup_id,
+                        EntityId wavegroup_id) override;
   void on_wave_begin(const ExecutionKey &wave) override;
   void on_wave_end(const ExecutionKey &wave) override;
   void on_instruction(const InstructionEvent &instruction) override;
   void on_resource_access(const ResourceAccessEvent &event) override;
   void on_barrier(const BarrierEvent &barrier) override;
+  void on_semaphore(const SemaphoreEvent &semaphore) override;
   void on_shutdown() override;
 
 private:
@@ -86,8 +91,18 @@ private:
   void check_global_access_for_races(const EngineInstructionContext &ctx,
                                      const ResourceAccessEvent &event);
   void flush_workgroup_epoch(const EngineWorkgroupKey &key);
+  void flush_wavegroup_epoch(const EngineWavegroupKey &key);
   void check_lds_epoch_for_races(const EngineWorkgroupKey &key,
                                  const std::vector<EngineLdsAccessRecord> &epoch);
+  /// Reports the LDS races inside one wavegroup, which the s_sema_signal /
+  /// s_sema_wait pair would have ordered. Runs when a semaphore wait closes the
+  /// epoch, or when the wavegroup or its workgroup ends with the epoch open.
+  void check_wavegroup_lds_epoch_for_races(const EngineWavegroupKey &key,
+                                           const std::vector<EngineLdsAccessRecord> &epoch);
+  /// Reports the intra-wave RAW of signalling a semaphore while LDS stores are
+  /// still pending, which lets the waiting wave read what was not yet written.
+  void report_pending_ds_before_signal(EngineWaveState &wave,
+                                       const EngineInstructionContext &ctx);
   void emit_warning(const EngineWarning &warning);
   const SimulatorInstructionFormatter *instruction_formatter() const;
 
