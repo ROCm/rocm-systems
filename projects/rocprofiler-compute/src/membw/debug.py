@@ -9,7 +9,7 @@ from membw.models import BottleneckNode, MemBwAnalysisResult
 from utils.logger import console_debug
 
 
-def print_evaluation_trace(
+def log_evaluation_trace(
     node_id: str,
     metric_key: Optional[str],
     metric_value: Optional[float],
@@ -40,7 +40,7 @@ def print_evaluation_trace(
         console_debug("membw", f"\treason: {reason}")
 
 
-def print_evaluation_summary(result: MemBwAnalysisResult) -> None:
+def log_evaluation_summary(result: MemBwAnalysisResult) -> None:
     """Print a compact summary of the evaluation result."""
     console_debug("membw", "=== Evaluation Summary ===")
     console_debug("membw", f"arch={result.arch} availability={result.availability}")

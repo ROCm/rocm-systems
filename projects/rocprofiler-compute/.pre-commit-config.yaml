@@ -70,6 +70,17 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+  # Local hook: membw tree spec metric drift validation
+  - repo: local
+    hooks:
+      - id: membw-tree-spec-check
+        name: Membw tree spec metric validation
+        entry: bash -lc 'cd projects/rocprofiler-compute && python3 tools/validate_membw_tree_spec.py'
+        language: system
+        files: (_membw_tree_spec\.yaml|_membw_guidance\.yaml|3000_mem_bw.*\.yaml|membw/models\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
+
   # Local hook: hash consistency check
   - repo: local
     hooks:
