@@ -27,6 +27,7 @@
 #include <memory>
 #include <vector>
 
+#include "ScopedHook.h"
 #include "fakes/rma_fakes.h"
 
 #include "nccl.h"
@@ -38,42 +39,6 @@
 #include RMA_PROXY_PROGRESS_CC_PATH
 
 namespace {
-
-// ===========================================================================
-// ScopedHook -- RAII wrapper around a controllable seam (any of the
-// std::function<...> hooks declared in fakes/rma_fakes.h). Installs the
-// behaviour + a call counter on construction, restores the previous behaviour
-// on destruction. Mirrors the helper in p2p-test.cc.
-// ===========================================================================
-template <typename FnSig>
-class ScopedHook;
-
-template <typename R, typename... Args>
-class ScopedHook<R(Args...)> {
-public:
-    template <typename Callable>
-    ScopedHook(std::function<R(Args...)>& slot, Callable fn)
-        : slot_(slot), saved_(std::move(slot)) {
-        slot_ = [this, fn = std::move(fn)](Args... args) -> R {
-            ++calls;
-            return fn(std::forward<Args>(args)...);
-        };
-    }
-    ~ScopedHook() { slot_ = std::move(saved_); }
-
-    ScopedHook(const ScopedHook&)            = delete;
-    ScopedHook& operator=(const ScopedHook&) = delete;
-    ScopedHook(ScopedHook&&)                 = delete;
-    ScopedHook& operator=(ScopedHook&&)      = delete;
-
-    int calls = 0;
-private:
-    std::function<R(Args...)>& slot_;
-    std::function<R(Args...)>  saved_;
-};
-
-template <typename R, typename... Args, typename Callable>
-ScopedHook(std::function<R(Args...)>&, Callable) -> ScopedHook<R(Args...)>;
 
 // ===========================================================================
 // FakeNet -- scriptable stand-in for the RMA network behind the ncclRma_t
