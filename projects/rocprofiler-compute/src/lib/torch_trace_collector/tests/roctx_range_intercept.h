@@ -9,7 +9,7 @@
 namespace roctx_range_intercept
 {
 
-void                     start();
-std::vector<std::string> stop();
+void                     start_recording();
+std::vector<std::string> stop_recording();
 
 }  // namespace roctx_range_intercept

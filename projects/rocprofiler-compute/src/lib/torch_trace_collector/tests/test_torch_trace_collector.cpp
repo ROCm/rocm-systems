@@ -65,7 +65,7 @@ void reset_state()
     stats().user_scope_pushes.store(0);
     stats().user_scope_pops.store(0);
     stats().user_scope_inherits.store(0);
-    (void)roctx_range_intercept::stop();
+    (void)roctx_range_intercept::stop_recording();
 }
 
 class RoctxRecordFnTest : public ::testing::Test
@@ -235,9 +235,9 @@ TEST(MarkerEncoding, RoundTripsThroughBuildCallTreesDecode)
 
 TEST(RoctxRangeIntercept, RecordsPushA)
 {
-    roctx_range_intercept::start();
+    roctx_range_intercept::start_recording();
     roctxRangePushA("probe");
-    const auto recorded = roctx_range_intercept::stop();
+    const auto recorded = roctx_range_intercept::stop_recording();
     roctxRangePop();
 
     ASSERT_EQ(recorded.size(), 1u);
@@ -543,10 +543,10 @@ TEST_F(RoctxRecordFnRealOpsTest, FwdBwdCounterSanity)
     EXPECT_LE(snapshots().pending(), 4u);
 }
 
-TEST_F(RoctxRecordFnRealOpsTest, CaptureLeafLabelsAndUserScope)
+TEST_F(RoctxRecordFnRealOpsTest, LeafLabelsAndUserScope)
 {
     install();
-    roctx_range_intercept::start();
+    roctx_range_intercept::start_recording();
 
     {
         auto warmup = at::randn({4, 4}, at::TensorOptions().device(at::kCUDA));
@@ -559,8 +559,8 @@ TEST_F(RoctxRecordFnRealOpsTest, CaptureLeafLabelsAndUserScope)
     y.backward();
     pop_user_scope();
 
-    const auto captured = roctx_range_intercept::stop();
-    ASSERT_FALSE(captured.empty());
+    const auto recorded = roctx_range_intercept::stop_recording();
+    ASSERT_FALSE(recorded.empty());
 
     bool        saw_aten_top      = false;
     bool        saw_aten_nested   = false;
@@ -572,7 +572,7 @@ TEST_F(RoctxRecordFnRealOpsTest, CaptureLeafLabelsAndUserScope)
 
     const std::string backend_suffix = "|torch";
 
-    for (const auto& m : captured)
+    for (const auto& m : recorded)
     {
         if (m.find("aten:0") != std::string::npos)
             saw_aten_top = true;
@@ -654,7 +654,7 @@ TEST_F(RoctxRecordFnRealOpsTest, DetachedForwardBounded)
 TEST_F(RoctxRecordFnRealOpsTest, ConcurrentThreadsScopedMarkers)
 {
     install();
-    roctx_range_intercept::start();
+    roctx_range_intercept::start_recording();
 
     constexpr int            n_workers = 4;
     std::vector<std::thread> threads;
@@ -679,8 +679,8 @@ TEST_F(RoctxRecordFnRealOpsTest, ConcurrentThreadsScopedMarkers)
         t.join();
     }
 
-    const auto captured = roctx_range_intercept::stop();
-    ASSERT_FALSE(captured.empty());
+    const auto recorded = roctx_range_intercept::stop_recording();
+    ASSERT_FALSE(recorded.empty());
 
     const std::array<std::string, 4> cpp_leaves = {"aten:0",
                                                    "aten.nested:0",
@@ -691,7 +691,7 @@ TEST_F(RoctxRecordFnRealOpsTest, ConcurrentThreadsScopedMarkers)
     {
         const std::string prefix = "test.concurrent.worker" + std::to_string(wid) + "/";
         bool              saw    = false;
-        for (const auto& m : captured)
+        for (const auto& m : recorded)
         {
             if (m.rfind(prefix, 0) != 0)
                 continue;
@@ -710,7 +710,7 @@ TEST_F(RoctxRecordFnRealOpsTest, ConcurrentThreadsScopedMarkers)
     }
 
     // Each worker's markers must carry only its own scope.
-    for (const auto& m : captured)
+    for (const auto& m : recorded)
     {
         std::size_t workers_named = 0;
         for (int wid = 0; wid < n_workers; ++wid)

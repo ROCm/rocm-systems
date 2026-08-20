@@ -433,8 +433,7 @@ must tolerate the missing field: `_parse_function_backend` in
 - **gtest** — snapshot store (save/consume, one-shot, LRU eviction, per-shard,
   concurrency, cross-thread key isolation), wire encoding round-trip, leaf
   labels, install/uninstall, scope balance, and real forward/backward runs on
-  GPU. The gtest records `roctxRangePushA` arguments via link wrap; the installed
-  module does not.
+  GPU. The gtest records each `roctxRangePushA` message.
 - **Counters** — `dump_stats()` surfaces push/pop balance, snapshot hit rate,
   and callback errors.
 

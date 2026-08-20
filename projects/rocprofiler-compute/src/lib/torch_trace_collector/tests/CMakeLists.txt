@@ -14,7 +14,6 @@ add_executable(
 target_link_libraries(${target} PRIVATE torch-trace-collector gtest_main)
 
 # torch's shared libraries cross-reference one another at load time.
-# --wrap records roctxRangePushA arguments in this executable only.
 target_link_options(
     ${target}
     PRIVATE LINKER:--allow-shlib-undefined LINKER:--wrap=roctxRangePushA
