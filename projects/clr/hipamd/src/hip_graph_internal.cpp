@@ -1359,7 +1359,7 @@ hipError_t GraphExec::BuildMultiBlockCommandBuffer() {
     // Comparison for COND_BRANCH: take true_target iff (*cond_device_ptr <cond_op> cond_value).
     // Defaults to "!= 0" (the WHILE/IF non-zero test). SWITCH lowers to a chain
     // of "== N" checks by setting cond_op=COND_EQ and cond_value=N.
-    uint32_t cond_op = 1;      // 1 == COND_NE (matches graph_scheduler_kernel.hip)
+    uint32_t cond_op = 1;      // 1 == COND_NE (matches blitcl.cpp)
     uint64_t cond_value = 0;
     // Native SWITCH terminator: jump to switch_case_targets[*cond_device_ptr], or
     // switch_default_target when the value is out of range. switch_table_off is the
@@ -1372,7 +1372,7 @@ hipError_t GraphExec::BuildMultiBlockCommandBuffer() {
     uint32_t term_flags = 0;
   };
 
-  // Walk-loop terminator flags. Must match graph_scheduler_kernel.hip.
+  // Walk-loop terminator flags. Must match blitcl.cpp.
   //
   // The interpreter's default way to know a condition is readable is to drain
   // the completion signal of the block that produced it, which costs a full
@@ -1621,7 +1621,7 @@ hipError_t GraphExec::BuildMultiBlockCommandBuffer() {
 
   // Detect simple WHILE pattern for the fused persistent kernel path.
   // Criteria: the top-level graph has exactly one segment, that segment is a WHILE
-  // conditional node, and the fused kernel HSACO is available.
+  // conditional node, and the fused kernel is available.
   bool try_fused_while = false;
   uint64_t fused_cond_ptr = 0;
   uint64_t fused_cond_default = 0;
@@ -1637,7 +1637,7 @@ hipError_t GraphExec::BuildMultiBlockCommandBuffer() {
     return e != nullptr && atoi(e) != 0;
   }();
 
-  if (fused_while_enabled && device->hasGraphWhileLoopHSACO()) {
+  if (fused_while_enabled && device->hasGraphWhileLoopKernel()) {
     auto top_topo_it = segments_per_level_.find(0);
     // The fused path replaces the whole command buffer with just the WHILE body,
     // so it is only valid when the WHILE is the ENTIRE graph: a single level-0
@@ -1821,7 +1821,7 @@ hipError_t GraphExec::BuildMultiBlockCommandBuffer() {
     const char* e = getenv("HIP_GRAPH_WALK_LOOP");
     return e != nullptr && atoi(e) != 0;
   }();
-  bool use_walk = walk_loop_enabled && device->hasGraphWalkLoopHSACO();
+  bool use_walk = walk_loop_enabled && device->hasGraphWalkLoopKernel();
   if (use_walk) {
     for (const auto& fb : flat_blocks) {
       // Every terminator the flattener emits (BRANCH / COND_BRANCH / RETURN /

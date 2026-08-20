@@ -117,22 +117,6 @@ target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/device/rocm/rocvirtual.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocurilocator.cpp)
 
-# Regenerate the embedded GPU graph-scheduler source header whenever the .hip
-# source changes, so the runtime-compiled scheduler (compiled via comgr in
-# Device::compileGraphSchedulerCodeObject, like the blit kernels) stays in sync.
-set(GRAPH_SCHED_SRC ${ROCCLR_SRC_DIR}/device/rocm/graph_scheduler_kernel.hip)
-set(GRAPH_SCHED_HDR ${ROCCLR_SRC_DIR}/device/rocm/graph_scheduler_source.h)
-set(GRAPH_SCHED_GEN ${ROCCLR_SRC_DIR}/device/rocm/gen_scheduler_source.sh)
-add_custom_command(
-  OUTPUT ${GRAPH_SCHED_HDR}
-  COMMAND bash ${GRAPH_SCHED_GEN} ${GRAPH_SCHED_SRC} ${GRAPH_SCHED_HDR}
-  DEPENDS ${GRAPH_SCHED_SRC} ${GRAPH_SCHED_GEN}
-  COMMENT "Embedding GPU graph scheduler source (graph_scheduler_source.h)"
-  VERBATIM)
-add_custom_target(gen_graph_scheduler_source DEPENDS ${GRAPH_SCHED_HDR})
-add_dependencies(rocclr gen_graph_scheduler_source)
-set_source_files_properties(${GRAPH_SCHED_HDR} PROPERTIES GENERATED TRUE)
-
 if(UNIX)
   target_sources(rocclr PRIVATE
     ${ROCCLR_SRC_DIR}/device/rocm/rocglinterop.cpp)

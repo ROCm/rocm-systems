@@ -2044,7 +2044,7 @@ class Device : public RuntimeObject {
   }
 
   //! Block-based graph kernel availability (overridden by roc::Device)
-  virtual bool hasGraphBlockIssueHSACO() const { return false; }
+  virtual bool hasGraphBlockIssueKernel() const { return false; }
   virtual uint64_t graphBranchKernelObject() const { return 0; }
   virtual uint32_t graphBranchPrivateSize() const { return 0; }
   virtual uint32_t graphBranchGroupSize() const { return 0; }
@@ -2063,11 +2063,11 @@ class Device : public RuntimeObject {
   virtual uint64_t graphWhileLoopKernelObject() const { return 0; }
   virtual uint32_t graphWhileLoopPrivateSize() const { return 0; }
   virtual uint32_t graphWhileLoopGroupSize() const { return 0; }
-  virtual bool hasGraphWhileLoopHSACO() const { return false; }
+  virtual bool hasGraphWhileLoopKernel() const { return false; }
   virtual uint64_t graphWalkLoopKernelObject() const { return 0; }
   virtual uint32_t graphWalkLoopPrivateSize() const { return 0; }
   virtual uint32_t graphWalkLoopGroupSize() const { return 0; }
-  virtual bool hasGraphWalkLoopHSACO() const { return false; }
+  virtual bool hasGraphWalkLoopKernel() const { return false; }
 
   /**
    * Validatates Virtual Address range between parent and sub-buffer.

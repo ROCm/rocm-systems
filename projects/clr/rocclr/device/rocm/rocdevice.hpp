@@ -569,24 +569,11 @@ class Device : public NullDevice {
   //! Create internal blit program
   bool createBlitProgram();
 
-  //! Load pre-compiled graph scheduler HSACO kernels
-  bool loadGraphSchedulerHSACO();
-
-  //! Resolve the OpenCL-C graph-scheduler kernels (compiled alongside the
-  //! other blit kernels, see createBlitProgram()) and, opt-in via
-  //! HIP_GRAPH_SCHED_CL/HIP_GRAPH_CONDWHILE_CL, swap them in over the HIP
-  //! ones resolved by loadGraphSchedulerHSACO(). Called once blitProgram()
-  //! is available (createBlitProgram() succeeds), since the graph-scheduler
-  //! HSACO load in Device::create() runs before the (lazily-created) blit
-  //! program exists.
+  //! Resolve the graph-scheduler kernels, which are compiled alongside the
+  //! other blit kernels (see createBlitProgram()). Called once blitProgram()
+  //! is available, which happens from VirtualGPU::create() via the blit
+  //! manager, so the kernels are resolved before any graph can be launched.
   void resolveGraphSchedulerCLKernels();
-
-  // Flat scheduler (backward compatible)
-  uint64_t graphSchedulerKernelObject() const { return graph_scheduler_kernel_object_; }
-  uint32_t graphSchedulerPrivateSize() const { return graph_scheduler_private_size_; }
-  uint32_t graphSchedulerGroupSize() const { return graph_scheduler_group_size_; }
-  uint32_t graphSchedulerKernargSize() const { return graph_scheduler_kernarg_size_; }
-  bool hasGraphSchedulerHSACO() const { return graph_scheduler_kernel_object_ != 0; }
 
   // Graph signal management
   uint64_t createGraphSignal(int64_t initial_value) override;
@@ -598,7 +585,7 @@ class Device : public NullDevice {
   uint64_t graphBlockIssueKernelObject() const { return graph_block_issue_kernel_object_; }
   uint32_t graphBlockIssuePrivateSize() const { return graph_block_issue_private_size_; }
   uint32_t graphBlockIssueGroupSize() const { return graph_block_issue_group_size_; }
-  bool hasGraphBlockIssueHSACO() const override { return graph_block_issue_kernel_object_ != 0; }
+  bool hasGraphBlockIssueKernel() const override { return graph_block_issue_kernel_object_ != 0; }
 
   uint64_t graphBranchKernelObject() const override { return graph_branch_kernel_object_; }
   uint32_t graphBranchPrivateSize() const override { return graph_branch_private_size_; }
@@ -623,12 +610,12 @@ class Device : public NullDevice {
   uint64_t graphWhileLoopKernelObject() const override { return graph_while_loop_kernel_object_; }
   uint32_t graphWhileLoopPrivateSize() const override { return graph_while_loop_private_size_; }
   uint32_t graphWhileLoopGroupSize() const override { return graph_while_loop_group_size_; }
-  bool hasGraphWhileLoopHSACO() const override { return graph_while_loop_kernel_object_ != 0; }
+  bool hasGraphWhileLoopKernel() const override { return graph_while_loop_kernel_object_ != 0; }
 
   uint64_t graphWalkLoopKernelObject() const override { return graph_walk_loop_kernel_object_; }
   uint32_t graphWalkLoopPrivateSize() const override { return graph_walk_loop_private_size_; }
   uint32_t graphWalkLoopGroupSize() const override { return graph_walk_loop_group_size_; }
-  bool hasGraphWalkLoopHSACO() const override { return graph_walk_loop_kernel_object_ != 0; }
+  bool hasGraphWalkLoopKernel() const override { return graph_walk_loop_kernel_object_ != 0; }
 
   // P2P agents avaialble for this device
   const std::vector<hsa_agent_t>& p2pAgents() const { return p2p_agents_; }
@@ -810,19 +797,11 @@ class Device : public NullDevice {
   hsa_signal_t prefetch_signal_;  //!< Prefetch signal, used to explicitly prefetch SVM on device
   std::atomic<int> cache_state_;  //!< State of cache, kUnknown/kFlushedToDevice/kFlushedToSystem
 
-  // Pre-compiled graph scheduler kernels (HSACO)
-  hsa_executable_t graph_scheduler_executable_ = {};
-  // Whether the OpenCL-C graph-scheduler kernels (compiled as part of
-  // blitProgram(), see createBlitProgram()) have already been resolved, so
+  // Whether the graph-scheduler kernels (compiled as part of blitProgram(),
+  // see createBlitProgram()) have already been resolved, so
   // resolveGraphSchedulerCLKernels() only does its work once per device even
   // though createBlitProgram() itself can run more than once historically.
   bool graph_scheduler_cl_resolved_ = false;
-
-  // Flat scheduler
-  uint64_t graph_scheduler_kernel_object_ = 0;
-  uint32_t graph_scheduler_kernarg_size_ = 0;
-  uint32_t graph_scheduler_private_size_ = 0;
-  uint32_t graph_scheduler_group_size_ = 0;
 
   // Block issue (initial entry from host)
   uint64_t graph_block_issue_kernel_object_ = 0;

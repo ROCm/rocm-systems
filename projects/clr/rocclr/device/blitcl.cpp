@@ -359,46 +359,38 @@ const char* HipExtraSourceCodeNoGWS = BLIT_KERNELS(
       *dbell = (long)(wr + pkt_count - 1);
     });
 
-// OpenCL C (CL2.0) port of the block-based graph-scheduler kernels
+// Block-based graph-scheduler kernels
 // (__amd_rocclr_graphCondBranchWhile, __amd_rocclr_graphBlockIssue,
 // __amd_rocclr_graphBranch, __amd_rocclr_graphCondBranch,
 // __amd_rocclr_graphSwitchBranch, __amd_rocclr_graphReturn,
-// __amd_rocclr_graphWhileLoop). Compiled as part of the same blit program as
-// the kernels above (via BlitProgram::create's extraKernel argument, see
-// Device::createBlitProgram in rocdevice.cpp), so it's resolved from
-// device()->blitProgram() rather than a separate amd::Program. Requires
-// -cl-std=CL2.0 (for atomic_work_item_fence / atomic_*_explicit with
-// explicit memory_scope_*); rocdevice.cpp's createBlitProgram() passes that
-// for the HIP extraKernel build.
+// __amd_rocclr_graphWhileLoop, __amd_rocclr_graphWalkLoop). This is the only
+// implementation of the block-based scheduler. Compiled as part of the same
+// blit program as the kernels above (via BlitProgram::create's extraKernel
+// argument, see Device::createBlitProgram in rocdevice.cpp) and resolved from
+// device()->blitProgram() by Device::resolveGraphSchedulerCLKernels() rather
+// than a separate amd::Program. Requires -cl-std=CL2.0 (for
+// atomic_work_item_fence / atomic_*_explicit with explicit memory_scope_*);
+// rocdevice.cpp's createBlitProgram() passes that for the HIP extraKernel build.
 //
-// __amd_rocclr_graphSchedulerHIP (the legacy flat/single-buffer scheduler
-// above, and its OpenCL analog __amd_rocclr_graphScheduler) is NOT the same
-// mechanism as this block-based scheduler: it has no callers left in the
-// runtime (superseded by the block-based scheduler below).
-//
-// Kernels are migrated off the HIP source (graph_scheduler_kernel.hip) here;
-// when HIP_GRAPH_SCHED_CL is set, the loader resolves every kernel present in
-// this string from the blit program instead of the HIP one, falling back
-// per-kernel to the HIP symbol on any failure.
+// The legacy flat/single-buffer scheduler above (__amd_rocclr_graphScheduler)
+// is NOT the same mechanism as this block-based scheduler: it is superseded by
+// the block-based scheduler below.
 //
 // This is hand-maintained (not generated). The struct layout and queue
-// offsets MUST stay in sync with graph_scheduler_kernel.hip and the
-// host-side kernarg packing.
+// offsets MUST stay in sync with the host-side definitions in
+// hip_graph_internal.hpp and its kernarg packing.
 //
-// Memory-model mapping (HIP builtin -> OpenCL C11), verified to lower to the
-// same gfx9xx cache-control bits (agent -> sc1, system -> sc0 sc1):
-//   fence(RELEASE,"agent")     -> atomic_work_item_fence(GLOBAL, release, device)
-//   fence(RELEASE,"workgroup") -> atomic_work_item_fence(LOCAL|GLOBAL, release, work_group)
-//   fence(RELEASE,"")          -> atomic_work_item_fence(GLOBAL, release, all_svm_devices)
-//   __atomic_load_n(RELAXED)   -> atomic_load_explicit(relaxed, device)
-//   __atomic_store_n(RELEASE)  -> atomic_store_explicit(release, device)
+// Memory scopes below are chosen for the gfx9xx cache-control bits they lower
+// to (agent -> sc1, system -> sc0 sc1):
+//   atomic_work_item_fence(GLOBAL, release, device)           -- agent scope
+//   atomic_work_item_fence(LOCAL|GLOBAL, release, work_group) -- workgroup
+//   atomic_work_item_fence(GLOBAL, release, all_svm_devices)  -- system scope
 //
 // Pointer fields inside ExecutionState/BlockDescriptor/SubBlock are kept as
-// plain uint64_t (matching the HIP struct exactly) and reinterpreted to a
-// concrete `global` pointer type at each use site. This sidesteps OpenCL's
-// address-space-qualified-pointer rules entirely (no pointer-typed struct
-// fields to worry about) and keeps the struct layout byte-for-byte identical
-// to the host-filled HIP version.
+// plain uint64_t and reinterpreted to a concrete `global` pointer type at each
+// use site. This sidesteps OpenCL's address-space-qualified-pointer rules
+// entirely (no pointer-typed struct fields to worry about) and keeps the
+// struct layout byte-for-byte identical to the host-filled version.
 const char* GraphSchedulerCLSourceCode = R"CLSRC(
 typedef uint  uint32_t;
 typedef ulong uint64_t;
@@ -424,7 +416,7 @@ typedef uchar uint8_t;
 #define TERM_RETURN      2u
 #define TERM_SWITCH      3u
 
-// BlockTerminator::flags -- see graph_scheduler_kernel.hip for the rationale.
+// BlockTerminator::flags.
 // WAIT: detect the producer by spinning on the condition itself (cheap, WHILE
 // latches only) rather than draining a completion signal. ARM: stamp
 // COND_SENTINEL when re-entering the loop body.
@@ -480,7 +472,7 @@ typedef struct {
 
 // One per block: the control-flow decision to make after issuing the block's
 // packets. Layout must stay byte-identical to BlockTerminator in
-// graph_scheduler_kernel.hip and hip_graph_internal.hpp (64 bytes).
+// hip_graph_internal.hpp (64 bytes).
 typedef struct {
     uint32_t kind;
     uint32_t branch_target;
@@ -624,9 +616,9 @@ static inline void issue_block(__global ExecutionState* state, uint32_t blk) {
     return;
   }
 
-  // Re-arm this diamond's fork/join barrier signals to 1 before issuing (see
-  // graph_scheduler_kernel.hip for the full rationale: WHILE loops re-issue
-  // the same diamond block every iteration and must not see stale signals).
+  // Re-arm this diamond's fork/join barrier signals to 1 before issuing:
+  // WHILE loops re-issue the same diamond block every iteration and must not
+  // see stale signals.
   if (state->fj_reset_count) {
     __global const uint64_t* rs = (__global const uint64_t*)state->fj_reset_ptr;
     for (uint32_t i = 0; i < state->fj_reset_count; ++i) {
@@ -926,10 +918,9 @@ __kernel void __amd_rocclr_graphWhileLoop(
   }
 
   // ---------------------------------------------------------------------
-  // Staged fused-WHILE (experimental, state->staged_while != 0). See
-  // graph_scheduler_kernel.hip for the full rationale: pre-stage N INVALID
-  // body packets and ring the doorbell once, then flip headers one at a time
-  // to release each iteration without a per-iteration doorbell/copy.
+  // Staged fused-WHILE (experimental, state->staged_while != 0): pre-stage N
+  // INVALID body packets and ring the doorbell once, then flip headers one at
+  // a time to release each iteration without a per-iteration doorbell/copy.
   // ---------------------------------------------------------------------
   if (state->staged_while != 0 && body_pkt_count == 1) {
     uint32_t N = state->staged_while;

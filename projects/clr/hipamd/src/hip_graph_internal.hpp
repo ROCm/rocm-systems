@@ -1251,7 +1251,7 @@ class GraphExecSegmented : public GraphExecBase {
   // (graphBranch / graphReturn) appended at the end of each block.
   // -----------------------------------------------------------------------
 
-  // Must match GPU-side BlockDescriptor in graph_scheduler_kernel.hip.
+  // Must match GPU-side BlockDescriptor in blitcl.cpp.
   // subblock_index/subblock_count are legacy fork/join fields, kept for blob
   // ABI compatibility and always written 0 (fork/join is no longer emitted).
   struct BlockDescriptor {
@@ -1261,7 +1261,7 @@ class GraphExecSegmented : public GraphExecBase {
     uint32_t subblock_count;  // legacy (always 0 => single-queue path)
   };
 
-  // Must match GPU-side ExecutionState in graph_scheduler_kernel.hip.
+  // Must match GPU-side ExecutionState in blitcl.cpp.
   // The lane-queue / sub-block / fj_reset fields are legacy fork/join state,
   // retained here for blob ABI compatibility and left zero-initialized.
   struct alignas(256) DeviceExecutionState {
@@ -1297,7 +1297,7 @@ class GraphExecSegmented : public GraphExecBase {
     uint64_t prof_doorbell;
     // Per-launch conditional reset table (array of {cond_ptr, default} pairs).
     // Lets graphs with multiple conditional handles reset ALL of them to their
-    // creation defaults on every relaunch. Must match graph_scheduler_kernel.hip.
+    // creation defaults on every relaunch. Must match blitcl.cpp.
     uint64_t cond_init_table_ptr;
     uint32_t cond_init_count;
     uint32_t _pad_cond_init;
@@ -1309,9 +1309,9 @@ class GraphExecSegmented : public GraphExecBase {
   };
   static_assert(sizeof(DeviceExecutionState) <= 256, "ExecutionState must fit 256 bytes");
 
-  // Must match GPU-side BlockTerminator in graph_scheduler_kernel.hip (and its
-  // OpenCL twin in blitcl.cpp). One per block; the walk-loop interpreter reads
-  // this instead of dispatching a terminator kernel.
+  // Must match GPU-side BlockTerminator in blitcl.cpp. One per block; the
+  // walk-loop interpreter reads this instead of dispatching a terminator
+  // kernel.
   struct BlockTerminator {
     uint32_t kind;              // matches FlatBlock::TermType
     uint32_t branch_target;
