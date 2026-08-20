@@ -11,6 +11,7 @@
 #include <hip/hip_runtime.h>
 #include "MPITestBase.hpp"
 #include "NetIbCastInspect.hpp"
+#include "NetIbFaultInject.hpp"
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
 #include "DeviceBufferHelpers.hpp"
@@ -19,6 +20,7 @@
 #include "net.h"
 #include "plugin/nccl_net.h"
 #include <atomic>
+#include <chrono>
 #include <vector>
 #include <memory>
 #include <cstring>
@@ -129,9 +131,15 @@ struct NetMHandleDeleter {
     }
 };
 
+// Deregistrations that failed inside a worker. A destructor cannot fail a test,
+// and swallowing the result would turn a refused deregistration into a phantom
+// MR leak later, so the count is recorded here and the harness checks it on the
+// main thread once the workers have joined. The serial teardown asserts on the
+// same return value.
+inline std::atomic<int> g_workerDeregFailures{0};
+
 // Worker threads must not invoke TEST_INFO or any helper that can call MPI.
-// This deleter is used only by the threaded test bodies; errors are surfaced
-// by the surrounding transfer operation and resource-leak checks.
+// This deleter is used only by the threaded test bodies.
 struct NetMHandleWorkerDeleter {
     ncclNet_t* net;
     void* comm;
@@ -140,7 +148,9 @@ struct NetMHandleWorkerDeleter {
 
     void operator()(void* mhandle) const {
         if (mhandle && net && comm) {
-            (void)net->deregMr(comm, mhandle);
+            if (net->deregMr(comm, mhandle) != ncclSuccess) {
+                g_workerDeregFailures.fetch_add(1, std::memory_order_relaxed);
+            }
         }
     }
 };
@@ -852,8 +862,12 @@ protected:
     static constexpr int kThreadTagStride = 1000;
     static constexpr int kMaxThreadTagOffset = 1; // listener-ready flag + handle
     static constexpr int kMpiGuaranteedTagUb = 32767;
+    // Upper bound on connections a single worker may own; each one consumes its
+    // own tag stride during the main-thread handle exchange.
+    static constexpr int kMaxConnsPerWorker = 2;
 
-    static_assert((MPIEnvironment::kMaxThreads - 1) * kThreadTagStride + kMaxThreadTagOffset
+    static_assert((MPIEnvironment::kMaxThreads * kMaxConnsPerWorker - 1) * kThreadTagStride
+                          + kMaxThreadTagOffset
                       <= kMpiGuaranteedTagUb,
                   "worst-case per-thread MPI tag must fit in the tag range every "
                   "MPI implementation is required to provide");
@@ -870,12 +884,22 @@ protected:
         run.results.resize(nThreads);
         run.threadIds.resize(nThreads);
 
+        // The HIP current device is thread-local, and MPIEnvironment binds it
+        // once on the main thread. Without propagating it, a worker touching GPU
+        // memory would land on device 0 regardless of this rank's assignment.
+        int hipDevice = -1;
+        if (hipGetDevice(&hipDevice) != hipSuccess) hipDevice = -1;
+
         ThreadStartGate startGate(nThreads);
         ThreadStartGate bodyGate(nThreads);
         std::atomic<int> inFlight{0};
         std::atomic<int> maxInFlight{0};
         auto worker = [&](int threadIdx) {
             run.threadIds[threadIdx] = std::this_thread::get_id();
+            // Reported only after both gates below: leaving early would strand
+            // the sibling workers waiting on them.
+            const hipError_t deviceError =
+                (hipDevice >= 0) ? hipSetDevice(hipDevice) : hipSuccess;
             if (!startGate.ArriveAndWait()) {
                 run.results[threadIdx].ok = false;
                 run.results[threadIdx].msg = "worker launch was cancelled";
@@ -891,6 +915,14 @@ protected:
                 inFlight.fetch_sub(1, std::memory_order_relaxed);
                 run.results[threadIdx].ok = false;
                 run.results[threadIdx].msg = "worker body start was cancelled";
+                return;
+            }
+            if (deviceError != hipSuccess) {
+                inFlight.fetch_sub(1, std::memory_order_relaxed);
+                run.results[threadIdx].ok = false;
+                run.results[threadIdx].msg = "hipSetDevice(" + std::to_string(hipDevice)
+                                             + ") failed in the worker: "
+                                             + hipGetErrorString(deviceError);
                 return;
             }
             try {
@@ -941,26 +973,584 @@ protected:
         }
     }
 
+    // Reduces worker outcomes across ranks and reports them on rank 0, which is
+    // the only rank with GTest listeners. The failing worker's message travels
+    // with the flag: without that, a failure on a non-zero rank shows up as
+    // "failed on a peer rank" and the actual reason is lost, since non-zero ranks
+    // have their output muted unless RCCL_MPI_LOG_ALL_RANKS is set.
     bool SynchronizeThreadResults(const std::vector<ThreadResult>& results, const char* phase) {
+        static constexpr int kResultTextBytes = 512;
+
         int localFailed = 0;
-        for (const auto& result : results)
-            if (!result.ok) localFailed = 1;
+        std::string localText;
+        for (size_t threadIdx = 0; threadIdx < results.size(); ++threadIdx) {
+            if (results[threadIdx].ok) continue;
+            localFailed = 1;
+            if (localText.size() < kResultTextBytes / 2)
+                localText += "thread " + std::to_string(threadIdx) + ": "
+                             + results[threadIdx].msg + "; ";
+        }
 
         int globalFailed = 0;
-        if (MPI_Allreduce(&localFailed, &globalFailed, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD) != MPI_SUCCESS) {
+        if (MPI_Allreduce(&localFailed, &globalFailed, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD)
+            != MPI_SUCCESS) {
             ADD_FAILURE() << phase << ": MPI_Allreduce failed";
             return false;
         }
         if (!globalFailed) return true;
 
-        for (size_t threadIdx = 0; threadIdx < results.size(); ++threadIdx) {
-            if (!results[threadIdx].ok)
-                ADD_FAILURE() << phase << ", thread " << threadIdx << ": " << results[threadIdx].msg;
+        std::vector<char> sendText(kResultTextBytes, '\0');
+        snprintf(sendText.data(), kResultTextBytes, "%s", localText.c_str());
+        std::vector<char> allText(kResultTextBytes * MPIEnvironment::world_size, '\0');
+        if (MPI_Allgather(sendText.data(), kResultTextBytes, MPI_CHAR, allText.data(),
+                          kResultTextBytes, MPI_CHAR, MPI_COMM_WORLD) != MPI_SUCCESS) {
+            ADD_FAILURE() << phase << ": MPI_Allgather of worker messages failed";
+            return false;
         }
-        if (!localFailed)
-            ADD_FAILURE() << phase << " failed on a peer rank";
+
+        for (int rank = 0; rank < MPIEnvironment::world_size; ++rank) {
+            const char* text = allText.data() + rank * kResultTextBytes;
+            if (text[0] == '\0') continue;
+            ADD_FAILURE() << phase << ", rank " << rank << ": " << text;
+        }
         return false;
     }
+
+    // ── Worker-safe data path ────────────────────────────────────────
+    //
+    // The ordinary transfer helpers (PostSendWithRetry, DoSendRecv, CastDoSendRecv)
+    // barrier and assert fatally, so a worker cannot use them: a fatal assertion
+    // only returns from the worker, and a worker-side collective strands the peer
+    // rank when a sibling fails. These return ThreadResult instead, and the main
+    // thread reports it after joining.
+    // ────────────────────────────────────────────────────────────────
+
+    ThreadResult WorkerRegister(void* comm, void* data, size_t size, int type, void** mhandle) {
+        ThreadResult result;
+        if (RegisterMemory(comm, data, size, type, mhandle) != ncclSuccess || *mhandle == nullptr) {
+            result.ok = false;
+            result.msg = "regMr failed";
+        }
+        return result;
+    }
+
+    ThreadResult WorkerPostSend(void* sendComm, void* data, size_t size, int tag,
+                                void* mhandle, void** request) {
+        ThreadResult result;
+        int attempts = 0;
+        do {
+            if (PostSend(sendComm, data, size, tag, mhandle, request) != ncclSuccess) {
+                result.ok = false;
+                result.msg = "isend failed";
+                return result;
+            }
+            if (*request != nullptr) break;
+            if (++attempts >= kMaxRetryAttempts) {
+                result.ok = false;
+                result.msg = "isend returned a NULL request after retries";
+                return result;
+            }
+            usleep(kPollIntervalUs);
+        } while (*request == nullptr);
+        return result;
+    }
+
+    ThreadResult WorkerPostRecv(void* recvComm, void* data, size_t size, int tag,
+                                void* mhandle, void** request) {
+        ThreadResult result;
+        void*  bufs[1]    = {data};
+        size_t sizes[1]   = {size};
+        int    tags[1]    = {tag};
+        void*  handles[1] = {mhandle};
+        if (PostRecv(recvComm, 1, bufs, sizes, tags, handles, request) != ncclSuccess
+            || *request == nullptr) {
+            result.ok = false;
+            result.msg = "irecv failed or returned a NULL request";
+        }
+        return result;
+    }
+
+    ThreadResult WorkerWait(void* request, int* sizes, int timeoutMs = kDefaultTimeoutMs) {
+        ThreadResult result;
+        if (WaitForCompletion(request, sizes, timeoutMs) != ncclSuccess) {
+            result.ok = false;
+            result.msg = "request did not complete within the timeout";
+        }
+        return result;
+    }
+
+    // One transfer on the worker's own connection, without touching buffer
+    // contents. For GPU buffers, or when the caller verifies the payload itself.
+    ThreadResult WorkerSendRecvRaw(int rank, ConnectionPair& pair, void* buffer, size_t size,
+                                   int tag, void* mhandle, int timeoutMs = kDefaultTimeoutMs,
+                                   int* receivedSize = nullptr) {
+        void* request = nullptr;
+        ThreadResult result = (rank == 0)
+            ? WorkerPostRecv(pair.recvComm, buffer, size, tag, mhandle, &request)
+            : WorkerPostSend(pair.sendComm, buffer, size, tag, mhandle, &request);
+        if (!result.ok) return result;
+
+        int sizes[1] = {0};
+        result = WorkerWait(request, sizes, timeoutMs);
+        if (!result.ok) return result;
+        if (receivedSize) *receivedSize = sizes[0];
+        return result;
+    }
+
+    // One transfer plus host-side payload check: the sender fills a seeded
+    // pattern, the receiver clears its buffer first and verifies afterwards. A
+    // distinct seed per worker turns any cross-connection delivery into a data
+    // failure rather than a silent pass.
+    ThreadResult WorkerSendRecvPattern(int rank, ConnectionPair& pair, void* buffer, size_t size,
+                                       int tag, void* mhandle, int seed,
+                                       int timeoutMs = kDefaultTimeoutMs) {
+        if (rank == 0) {
+            memset(buffer, 0, size);
+        } else {
+            fillHostBufferWithPattern<uint8_t>(buffer, size, makeBytePattern(seed));
+        }
+
+        int received = 0;
+        ThreadResult result = WorkerSendRecvRaw(rank, pair, buffer, size, tag, mhandle,
+                                               timeoutMs, &received);
+        if (!result.ok) return result;
+
+        if (rank == 0) {
+            if (received != (int)size) {
+                result.ok = false;
+                result.msg = "received size mismatch";
+                return result;
+            }
+            if (size > 0
+                && !verifyHostBufferData<uint8_t>(buffer, size, makeBytePattern(seed))) {
+                result.ok = false;
+                result.msg = "data validation failed";
+            }
+        }
+        return result;
+    }
+
+    // Composite: allocate a host buffer, register it, run one seeded transfer,
+    // and release both. Covers the common single-transfer worker body.
+    ThreadResult WorkerHostTransfer(int rank, ConnectionPair& pair, size_t size, int tag,
+                                    int seed, int timeoutMs = kDefaultTimeoutMs) {
+        ThreadResult result;
+        void* buffer = malloc(size ? size : 1);
+        if (!buffer) {
+            result.ok = false;
+            result.msg = "malloc failed";
+            return result;
+        }
+        auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+        void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+        void* mhandle = nullptr;
+        result = WorkerRegister(comm, buffer, size ? size : 1, NCCL_PTR_HOST, &mhandle);
+        if (!result.ok) return result;
+        NetMHandleWorkerGuard mhandleGuard(mhandle, NetMHandleWorkerDeleter(net_, comm));
+
+        return WorkerSendRecvPattern(rank, pair, buffer, size, tag, mhandle, seed, timeoutMs);
+    }
+
+    // ── Worker-safe IB-CAST scheduler inspection ─────────────────────
+    // Token and cursor state is per send communicator, so a worker can arm and
+    // read its own connection without disturbing the others.
+
+    ThreadResult WorkerCastSetTokens(void* sendComm, const std::vector<int>& tokens) {
+        ThreadResult result;
+        if (ncclIbCastSetTokens(sendComm, tokens.data(), (int)tokens.size()) != ncclSuccess) {
+            result.ok = false;
+            result.msg = "ncclIbCastSetTokens failed";
+        }
+        return result;
+    }
+
+    ThreadResult WorkerCastGetSchedState(void* sendComm, struct ncclIbCastSchedState* out) {
+        ThreadResult result;
+        memset(out, 0, sizeof(*out));
+        if (ncclIbCastGetSchedState(sendComm, out) != ncclSuccess) {
+            result.ok = false;
+            result.msg = "ncclIbCastGetSchedState failed";
+        }
+        return result;
+    }
+
+    // Warm the scheduler up (it initializes on the first send) and arm equal
+    // weights. nqps comes from the environment so both ranks agree without a
+    // collective; the sender confirms the connection really uses that many QPs.
+    ThreadResult WorkerCastPrepareTokens(int rank, ConnectionPair& pair, void* buffer,
+                                         void* mhandle, int nqps, int tag, int seed) {
+        ThreadResult result = WorkerSendRecvPattern(rank, pair, buffer, 64, tag, mhandle, seed);
+        if (!result.ok || rank != 1) return result;
+
+        // Token arithmetic in these tests is derived from the environment so the
+        // expected values are predictable, which only holds if the connection
+        // really uses that many QPs. Asking the scheduler here is what makes a
+        // mismatch a clear failure instead of a wrong expectation. Where the count
+        // drives an action rather than an expectation -- arming faults on every QP
+        // -- the live value is used directly instead.
+        int liveNqps = 0;
+        result = WorkerCastLiveNqps(pair.sendComm, &liveNqps);
+        if (!result.ok) return result;
+        if (liveNqps != nqps) {
+            result.ok = false;
+            result.msg = "scheduler reports nqps=" + std::to_string(liveNqps)
+                         + " but the environment implies " + std::to_string(nqps);
+            return result;
+        }
+        return WorkerCastSetTokens(pair.sendComm, EqualTokens(nqps));
+    }
+
+    // Worker-safe CAST transfer with a token-consumption expectation. Only the
+    // sender owns scheduler state, so it checks the delta while the receiver
+    // verifies the payload. Pass a negative delta to skip the token check.
+    ThreadResult WorkerCastTransferExpectTokens(int rank, ConnectionPair& pair, void* buffer,
+                                                size_t size, int tag, void* mhandle, int seed,
+                                                int expectedTokenDelta,
+                                                int timeoutMs = kLargeTransferTimeoutMs) {
+        struct ncclIbCastSchedState before = {};
+        ThreadResult result;
+        if (rank == 1) {
+            result = WorkerCastGetSchedState(pair.sendComm, &before);
+            if (!result.ok) return result;
+        }
+
+        result = WorkerSendRecvPattern(rank, pair, buffer, size, tag, mhandle, seed, timeoutMs);
+        if (!result.ok) return result;
+
+        if (rank == 1 && expectedTokenDelta >= 0) {
+            struct ncclIbCastSchedState after = {};
+            result = WorkerCastGetSchedState(pair.sendComm, &after);
+            if (!result.ok) return result;
+            const int delta = before.activeTotTokens - after.activeTotTokens;
+            if (delta != expectedTokenDelta) {
+                result.ok = false;
+                result.msg = "expected a WRR token delta of "
+                             + std::to_string(expectedTokenDelta) + " at size "
+                             + std::to_string(size) + ", observed " + std::to_string(delta);
+            }
+        }
+        return result;
+    }
+
+    // Number of QPs per connection the environment asks for. The CAST configs
+    // always set it, and CAST_ENV_CHECK_OR_SKIP has already enforced that.
+    static int CastEnvNqps() {
+        const char* value = getenv("NCCL_IB_QPS_PER_CONNECTION");
+        return (value && value[0]) ? std::atoi(value) : 1;
+    }
+
+#if defined(ENABLE_FAULT_INJECTION)
+    // ── Worker-safe IB-CAST fault injection ──────────────────────────
+    // The pre-call intercept hooks store their state in the communicator
+    // (faultQpDelayUs / faultQpError in ncclIbNetCommBase), so a worker can
+    // break its own connection without touching anybody else's. The
+    // libibverbs-level ops registry is process-global and deliberately not
+    // used here.
+
+    ThreadResult WorkerCastFaultArmError(void* sendComm, int nqps) {
+        ThreadResult result;
+        for (int qp = 0; qp < nqps; qp++) {
+            if (ncclIbCastFaultSetQpError(sendComm, qp, /*inject=*/true) != ncclSuccess) {
+                result.ok = false;
+                result.msg = "ncclIbCastFaultSetQpError failed on QP " + std::to_string(qp);
+                return result;
+            }
+        }
+        return result;
+    }
+
+    ThreadResult WorkerCastFaultSetDelay(void* sendComm, int qpIdx, uint32_t delayUs) {
+        ThreadResult result;
+        if (ncclIbCastFaultSetQpDelay(sendComm, qpIdx, delayUs) != ncclSuccess) {
+            result.ok = false;
+            result.msg = "ncclIbCastFaultSetQpDelay failed";
+        }
+        return result;
+    }
+
+    ThreadResult WorkerCastFaultClear(void* sendComm) {
+        ThreadResult result;
+        if (ncclIbCastFaultClear(sendComm) != ncclSuccess) {
+            result.ok = false;
+            result.msg = "ncclIbCastFaultClear failed";
+        }
+        return result;
+    }
+
+    int WorkerCastFatalCount(void* sendComm) {
+        int count = 0;
+        if (ncclIbCastFaultGetFatalCount(sendComm, &count) != ncclSuccess) return -1;
+        return count;
+    }
+
+    ThreadResult WorkerCastDriveQpToError(void* sendComm, int qpIdx) {
+        ThreadResult result;
+        if (ncclIbCastFaultDriveQpToError(sendComm, qpIdx) != ncclSuccess) {
+            result.ok = false;
+            result.msg = "ncclIbCastFaultDriveQpToError failed";
+        }
+        return result;
+    }
+
+    // Post one send and poll it, treating both a failed isend and a fatal error
+    // count as an outcome rather than a test failure. Used by fault tests that
+    // accept either signal.
+    struct WorkerFaultSendOutcome {
+        ncclResult_t sendRet = ncclSuccess;
+        bool         completed = false;
+        int          fatalCount = 0;
+    };
+
+    WorkerFaultSendOutcome WorkerCastFaultSend(void* sendComm, void* buffer, size_t size, int tag,
+                                               void* mhandle, int pollIterations) {
+        WorkerFaultSendOutcome outcome;
+        void* request = nullptr;
+        for (int attempt = 0; attempt < kMaxRetryAttempts; attempt++) {
+            outcome.sendRet = PostSend(sendComm, buffer, size, tag, mhandle, &request);
+            if (outcome.sendRet != ncclSuccess || request != nullptr) break;
+            usleep(kPollIntervalUs);
+        }
+        outcome.fatalCount = WorkerCastFatalCount(sendComm);
+
+        if (outcome.sendRet == ncclSuccess && request != nullptr) {
+            for (int poll = 0; poll < pollIterations; poll++) {
+                int done = 0;
+                int sizes[1] = {0};
+                const ncclResult_t testRet = TestRequest(request, &done, sizes);
+                if (testRet != ncclSuccess) {
+                    outcome.sendRet = testRet;
+                    break;
+                }
+                outcome.fatalCount = WorkerCastFatalCount(sendComm);
+                if (done) {
+                    outcome.completed = true;
+                    break;
+                }
+                if (outcome.fatalCount > 0) break;
+                usleep(kPollIntervalUs);
+            }
+        }
+        return outcome;
+    }
+
+    // Shared worker body for the failover tests: drive the sender's QP 0 into
+    // the error state, then require the payload to still arrive over the
+    // surviving device of a fused NIC, with no fatal error and a device state
+    // that is no longer Ok. Resiliency state is per communicator, so N workers
+    // can fail their own links at once; what they share is the single global
+    // recovery thread, which is exactly what concurrency here exercises.
+    ThreadResult WorkerCastFailoverTransfer(int rank, ConnectionPair& pair, void* buffer,
+                                            size_t size, int tag, void* mhandle, int seed,
+                                            int messages = 1) {
+        ThreadResult result;
+        if (rank == 1) {
+            result = WorkerCastDriveQpToError(pair.sendComm, 0);
+            if (!result.ok) return result;
+        }
+
+        for (int i = 0; i < messages; i++) {
+            result = WorkerSendRecvPattern(rank, pair, buffer, size, tag + i, mhandle, seed + i,
+                                           kLargeTransferTimeoutMs);
+            if (!result.ok) {
+                result.msg = "after driving QP 0 to error: " + result.msg;
+                return result;
+            }
+        }
+
+        if (rank != 1) return result;
+
+        const int fatalCount = WorkerCastFatalCount(pair.sendComm);
+        if (fatalCount != 0) {
+            result.ok = false;
+            result.msg = "failover should have handled the QP error, but the fatal count is "
+                         + std::to_string(fatalCount);
+            return result;
+        }
+
+        struct ncclIbCastResiliencyState state = {};
+        if (ncclIbCastGetResiliencyState(pair.sendComm, &state) != ncclSuccess) {
+            result.ok = false;
+            result.msg = "ncclIbCastGetResiliencyState failed";
+            return result;
+        }
+        // 0 is ncclIbResiliencyDevStateOk; anything else means the failure was
+        // registered (Error, RecoveryInProgress or Recovered).
+        if (state.devState[0] == 0) {
+            result.ok = false;
+            result.msg = "device 0 still reports Ok after its QP was driven to error";
+        }
+        return result;
+    }
+
+    // Failover with requests already in flight: post every message first, then
+    // break QP 0 under them, then require all of them to complete. Because isend
+    // only gets a request once the receiver has published a FIFO slot, "all sends
+    // posted" already implies "all receives posted", which is the ordering the
+    // serial test buys with a barrier the worker cannot use.
+    //
+    // buffer must hold messages * size bytes; each message uses its own slice so
+    // completions cannot be confused with each other.
+    ThreadResult WorkerCastFailoverInFlight(int rank, ConnectionPair& pair, void* buffer,
+                                            size_t size, int tag, void* mhandle, int seed,
+                                            int messages) {
+        ThreadResult result;
+        std::vector<void*> requests(messages, nullptr);
+
+        for (int i = 0; i < messages; i++) {
+            char* slice = static_cast<char*>(buffer) + static_cast<size_t>(i) * size;
+            if (rank == 0) {
+                memset(slice, 0, size);
+                result = WorkerPostRecv(pair.recvComm, slice, size, tag + i, mhandle,
+                                        &requests[i]);
+            } else {
+                fillHostBufferWithPattern<uint8_t>(slice, size, makeBytePattern(seed + i));
+                result = WorkerPostSend(pair.sendComm, slice, size, tag + i, mhandle,
+                                        &requests[i]);
+            }
+            if (!result.ok) return result;
+        }
+
+        if (rank == 1) {
+            result = WorkerCastDriveQpToError(pair.sendComm, 0);
+            if (!result.ok) return result;
+        }
+
+        for (int i = 0; i < messages; i++) {
+            int sizes[1] = {0};
+            result = WorkerWait(requests[i], sizes, kLargeTransferTimeoutMs);
+            if (!result.ok) {
+                result.msg = "request " + std::to_string(i)
+                             + " never completed after QP 0 was driven to error";
+                return result;
+            }
+            if (rank != 0) continue;
+
+            char* slice = static_cast<char*>(buffer) + static_cast<size_t>(i) * size;
+            if (sizes[0] != (int)size
+                || !verifyHostBufferData<uint8_t>(slice, size, makeBytePattern(seed + i))) {
+                result.ok = false;
+                result.msg = "message " + std::to_string(i)
+                             + " arrived corrupted or short after failover";
+                return result;
+            }
+        }
+
+        if (rank != 1) return result;
+
+        const int fatalCount = WorkerCastFatalCount(pair.sendComm);
+        if (fatalCount != 0) {
+            result.ok = false;
+            result.msg = "failover should have absorbed the QP error, but the fatal count is "
+                         + std::to_string(fatalCount);
+        }
+        return result;
+    }
+
+    // Poll a receive the peer may never satisfy, and report whether it finished.
+    bool WorkerDrainRecv(void* request, int pollIterations) {
+        if (!request) return true;
+        for (int poll = 0; poll < pollIterations; poll++) {
+            int done = 0;
+            int sizes[1] = {0};
+            if (TestRequest(request, &done, sizes) != ncclSuccess) return false;
+            if (done) return true;
+            usleep(kPollIntervalUs);
+        }
+        return false;
+    }
+
+    // Releases a receive that the peer's injected send will never satisfy.
+    //
+    // Two things make this necessary rather than tidy. The work request keeps
+    // referencing the receive buffer's memory region until the queue pair is
+    // destroyed, which happens after the worker has already had to deregister it,
+    // and deregistration cannot wait for the close because it needs the
+    // communicator that the close frees. Nor can the transfer simply be finished:
+    // the failed send consumed the FIFO slot this receive was matched to, so no
+    // later send can complete it.
+    //
+    // Driving this side's queue pairs to error is what breaks the tie. The NIC
+    // completes the outstanding work request with a flush status, so nothing
+    // references the region by the time the worker unwinds. The connection is
+    // spent either way -- it exists in these tests to be broken.
+    ThreadResult WorkerCastFlushAbandonedRecv(void* recvComm, void* request) {
+        ThreadResult result;
+        if (!request) return result;
+
+        // The API rejects an index past the connection's QP count, which is how
+        // the loop learns where to stop.
+        static constexpr int kQpProbeLimit = 64;
+        for (int qp = 0; qp < kQpProbeLimit; qp++) {
+            if (ncclIbCastFaultDriveRecvQpToError(recvComm, qp) != ncclSuccess) break;
+        }
+
+        // A flush completion surfaces as an error, and that is the expected
+        // outcome here: all that matters is that the request stops being
+        // outstanding before the memory region goes away.
+        static constexpr int kFlushPolls = 500;  // 500 * 10ms = 5s
+        for (int poll = 0; poll < kFlushPolls; poll++) {
+            int done = 0;
+            int sizes[1] = {0};
+            if (TestRequest(request, &done, sizes) != ncclSuccess) return result;
+            if (done) return result;
+            usleep(kPollIntervalUs);
+        }
+        result.ok = false;
+        result.msg = "the abandoned receive was still outstanding after its queue pairs were "
+                     "driven to error";
+        return result;
+    }
+
+    // Both sides lose QP 0 and the payload then has to ride the surviving device.
+    //
+    // The serial recovery test breaks the queue pairs with a transfer already in
+    // flight, so that failover rescues an outstanding request. A worker cannot
+    // reproduce that: the serial body coordinates the two sides with an MPI
+    // handshake around the break, and without one, both orders were measured to be
+    // unusable. Breaking both sides with the receive posted flushes that work
+    // request while the data still arrives over the surviving device, and the two
+    // sides run one message apart for the rest of the test (seen once in four full
+    // matrix runs, as the sender exhausting its FIFO-slot retries on message n+1
+    // while the receiver waited for message n). Breaking only the sender in flight
+    // and the receiver afterwards failed every one of nineteen consecutive runs.
+    // So the break happens while the connection is idle, and the difference from
+    // the serial body is stated in the test plan rather than papered over.
+    ThreadResult WorkerTransferAcrossQpFailure(int rank, ConnectionPair& pair, void* buffer,
+                                               size_t size, int tag, void* mhandle, int seed,
+                                               int timeoutMs) {
+        ThreadResult result;
+        if (rank == 0) {
+            if (ncclIbCastFaultDriveRecvQpToError(pair.recvComm, 0) != ncclSuccess) {
+                result.ok = false;
+                result.msg = "ncclIbCastFaultDriveRecvQpToError failed";
+                return result;
+            }
+        } else {
+            result = WorkerCastDriveQpToError(pair.sendComm, 0);
+            if (!result.ok) return result;
+        }
+        return WorkerSendRecvPattern(rank, pair, buffer, size, tag, mhandle, seed, timeoutMs);
+    }
+
+    // QPs the connection actually uses. NCCL_IB_QPS_PER_CONNECTION states only a
+    // request: on a merged device the plugin creates that many per member, so
+    // arming faults from the environment would leave the remaining QPs healthy
+    // and "the send must fail" would depend on which QP the scheduler picked.
+    // Valid once the scheduler is warm, which the first successful send does.
+    ThreadResult WorkerCastLiveNqps(void* sendComm, int* nqps) {
+        struct ncclIbCastSchedState state;
+        ThreadResult result = WorkerCastGetSchedState(sendComm, &state);
+        if (!result.ok) return result;
+        if (state.nqps <= 0) {
+            result.ok = false;
+            result.msg = "scheduler reports nqps=" + std::to_string(state.nqps);
+            return result;
+        }
+        *nqps = state.nqps;
+        return result;
+    }
+#endif /* ENABLE_FAULT_INJECTION */
 
     ncclResult_t InitNetIbCtx(void** ctxOut) {
         ncclNetCommConfig_t commConfig = {};
@@ -1054,21 +1644,131 @@ protected:
         for (auto& connection : connections) TeardownConnectionForThread(connection, rank);
     }
 
+    // Which device each worker connects over. Spreading puts workers on
+    // different NICs, so concurrency reaches several devices' protection
+    // domains and MR caches instead of hammering one.
+    struct ThreadDevPolicy {
+        int  dev    = 0;
+        bool spread = false;
+
+        static ThreadDevPolicy Fixed(int dev) { return ThreadDevPolicy{dev, false}; }
+        static ThreadDevPolicy Spread() { return ThreadDevPolicy{0, true}; }
+    };
+
+    // Payload seed for worker threadIdx at sequence position seq. Workers must
+    // differ here, otherwise a payload delivered on the wrong connection still
+    // verifies and the cross-worker check is vacuous.
+    //
+    // makeBytePattern() observes the seed only modulo 256, so the stride has to
+    // be odd: an even stride collides for workers whose indices differ by
+    // 256/gcd(stride, 256) -- with a stride of 100000 that is every 8th worker.
+    // The base keeps the seed off zero, whose pattern begins with the 0x00 that
+    // the receive buffer is cleared to.
+    static constexpr int kWorkerSeedBase   = 55;
+    static constexpr int kWorkerSeedStride = 100001;
+    static int WorkerSeed(int threadIdx, int seq) {
+        return kWorkerSeedBase + threadIdx * kWorkerSeedStride + seq;
+    }
+
+    // Plugin-visible indices of physical (non-merged) devices. devices() also
+    // reports virtual NICs created by earlier tests, and a deduped 1-device vNIC
+    // reuses an existing physical index, so dedupe on vProps.devs[0].
+    // Only devices that can actually deliver traffic are returned: a RoCE NIC
+    // with link-local GIDs only sets up QPs without complaint and then drops
+    // packets silently, which would surface as an unexplained connect or accept
+    // timeout on whichever worker happened to be handed that device.
+    std::vector<int> PhysicalDeviceIndices() {
+        std::vector<int> indices;
+        int n = 0;
+        if (GetDeviceCount(&n) != ncclSuccess) return indices;
+        std::set<int> seen;
+        for (int i = 0; i < n; i++) {
+            ncclNetProperties_t props;
+            memset(&props, 0, sizeof(props));
+            if (GetDeviceProperties(i, &props) != ncclSuccess) continue;
+            if (props.vProps.ndevs > 1) continue;
+            if (props.name && !CanRouteCrossNode(props.name)) continue;
+            if (seen.insert(props.vProps.devs[0]).second) indices.push_back(i);
+        }
+        return indices;
+    }
+
+    // Device indices both ranks agree on. PhysicalDeviceIndices() reads local
+    // sysfs only, so where the two nodes have different NICs alive, slot k would
+    // sit on different hardware per rank: connect and accept still succeed and
+    // the traffic is then dropped, which surfaces as an unexplained completion
+    // timeout -- the very failure the routability filter exists to prevent.
+    // Intersecting the two lists keeps every slot symmetric.
+    bool AgreedPhysicalDeviceIndices(std::vector<int>* out, std::string* reason) {
+        out->clear();
+        unsigned long long localMask = 0;
+        for (int dev : PhysicalDeviceIndices()) {
+            if (dev < 0 || dev >= 64) continue;
+            localMask |= (1ull << dev);
+        }
+        unsigned long long agreed = 0;
+        if (MPI_Allreduce(&localMask, &agreed, 1, MPI_UNSIGNED_LONG_LONG, MPI_BAND,
+                          MPI_COMM_WORLD) != MPI_SUCCESS) {
+            *reason = "MPI_Allreduce of the routable device mask failed";
+            return false;
+        }
+        for (int dev = 0; dev < 64; ++dev)
+            if (agreed & (1ull << dev)) out->push_back(dev);
+        if (out->empty()) {
+            *reason = "no device index is routable on both ranks, so workers cannot be spread";
+            return false;
+        }
+        return true;
+    }
+
+    int ResolveWorkerDev(const ThreadDevPolicy& policy, const std::vector<int>& physical,
+                         int slotIdx) {
+        if (!policy.spread) return policy.dev;
+        return physical[slotIdx % physical.size()];
+    }
+
+    // Bounded rendezvous for workers that must all reach a point before any of
+    // them moves on, which the start gates cannot express: they only synchronize
+    // entry into the body. Bounded so a worker that failed earlier cannot hang
+    // its siblings; the caller reports the timeout as its own failure.
+    static bool WorkerRendezvous(std::atomic<int>& arrived, int expected, int pollIterations) {
+        arrived.fetch_add(1, std::memory_order_release);
+        for (int poll = 0; poll < pollIterations; poll++) {
+            if (arrived.load(std::memory_order_acquire) >= expected) return true;
+            usleep(kPollIntervalUs);
+        }
+        return false;
+    }
+
     // Mirrors the normal rccl-tests -t execution model: contexts and
     // communicators are established by the main thread, then workers drive
     // independent comms concurrently. MPI is used only between phases.
-    void RunMultiThreadedIndependent(int dev, int nThreads,
-                                     std::function<ThreadResult(int, ConnectionPair&)> body) {
+    //
+    // connsPerWorker > 1 gives every worker several independent connections,
+    // which a body needs when it has to prove that state from one connection
+    // does not leak into a fresh one.
+    void RunMultiThreadedIndependentGroups(
+        ThreadDevPolicy policy, int nThreads, int connsPerWorker,
+        std::function<ThreadResult(int, std::vector<ConnectionPair*>&)> body) {
         const int rank     = MPIEnvironment::world_rank;
         const int peerRank = (rank + 1) % 2;
-        std::vector<ThreadConnection> connections(nThreads);
-        std::vector<ThreadResult> initResults(nThreads);
+        const int nSlots   = nThreads * connsPerWorker;
+        std::vector<int> physical;
+        if (policy.spread) {
+            std::string reason;
+            // Both ranks reach the same verdict, so the skip cannot strand a peer.
+            if (!AgreedPhysicalDeviceIndices(&physical, &reason)) GTEST_SKIP() << reason;
+        }
+        std::vector<ThreadConnection> connections(nSlots);
+        std::vector<ThreadResult> initResults(nSlots);
 
-        for (int threadIdx = 0; threadIdx < nThreads; ++threadIdx) {
-            if (InitNetIbCtx(&connections[threadIdx].ctx) != ncclSuccess
-                || connections[threadIdx].ctx == nullptr) {
-                initResults[threadIdx].ok = false;
-                initResults[threadIdx].msg = "InitNetIb failed or returned a null context";
+        g_workerDeregFailures.store(0, std::memory_order_relaxed);
+
+        for (int slot = 0; slot < nSlots; ++slot) {
+            if (InitNetIbCtx(&connections[slot].ctx) != ncclSuccess
+                || connections[slot].ctx == nullptr) {
+                initResults[slot].ok = false;
+                initResults[slot].msg = "InitNetIb failed or returned a null context";
             }
         }
         if (!SynchronizeThreadResults(initResults, "NetIB context initialization")) {
@@ -1078,11 +1778,11 @@ protected:
             return;
         }
 
-        std::vector<ThreadResult> setupResults(nThreads);
-        for (int threadIdx = 0; threadIdx < nThreads; ++threadIdx) {
-            setupResults[threadIdx] = SetupConnectionForThread(
-                connections[threadIdx].ctx, dev, connections[threadIdx].pair, rank, peerRank,
-                threadIdx * kThreadTagStride);
+        std::vector<ThreadResult> setupResults(nSlots);
+        for (int slot = 0; slot < nSlots; ++slot) {
+            setupResults[slot] = SetupConnectionForThread(
+                connections[slot].ctx, ResolveWorkerDev(policy, physical, slot),
+                connections[slot].pair, rank, peerRank, slot * kThreadTagStride);
         }
         if (!SynchronizeThreadResults(setupResults, "NetIB connection setup")) {
             MPI_Barrier(MPI_COMM_WORLD);
@@ -1091,14 +1791,115 @@ protected:
             return;
         }
 
-        ThreadWorkerRun run = RunThreadWorkers(
-            nThreads, [&](int threadIdx) { return body(threadIdx, connections[threadIdx].pair); });
+        ThreadWorkerRun run = RunThreadWorkers(nThreads, [&](int threadIdx) {
+            std::vector<ConnectionPair*> pairs;
+            pairs.reserve(connsPerWorker);
+            for (int c = 0; c < connsPerWorker; ++c)
+                pairs.push_back(&connections[threadIdx * connsPerWorker + c].pair);
+            return body(threadIdx, pairs);
+        });
         VerifyThreadFanOut(run, nThreads);
         SynchronizeThreadResults(run.results, "NetIB threaded data path");
 
         MPI_Barrier(MPI_COMM_WORLD);
         TeardownThreadConnections(connections, rank);
+
+        // Reduced, so both ranks fail together and the message names the rank that
+        // saw it. A local-only check would fail on rank 1 alone, whose output the
+        // runner mutes, leaving a result mismatch with no visible reason.
+        const int localDeregFailures = g_workerDeregFailures.load(std::memory_order_relaxed);
+        int totalDeregFailures = 0;
+        MPI_Allreduce(&localDeregFailures, &totalDeregFailures, 1, MPI_INT, MPI_SUM,
+                      MPI_COMM_WORLD);
+        EXPECT_EQ(totalDeregFailures, 0)
+            << "a worker's deregMr was refused (" << localDeregFailures << " on this rank, "
+            << totalDeregFailures
+            << " across both), which would otherwise surface as an MR leak";
         MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+    void RunMultiThreadedIndependent(ThreadDevPolicy policy, int nThreads,
+                                     std::function<ThreadResult(int, ConnectionPair&)> body) {
+        RunMultiThreadedIndependentGroups(
+            policy, nThreads, 1,
+            [&](int threadIdx, std::vector<ConnectionPair*>& pairs) {
+                return body(threadIdx, *pairs[0]);
+            });
+    }
+
+    void RunMultiThreadedIndependent(int dev, int nThreads,
+                                     std::function<ThreadResult(int, ConnectionPair&)> body) {
+        RunMultiThreadedIndependent(ThreadDevPolicy::Fixed(dev), nThreads, body);
+    }
+
+    // How a threaded size sweep registers memory. Some serial bodies register the
+    // whole buffer once, others register exactly the current size on every step;
+    // on a fused device that second shape is the point of the test, since each
+    // registration fans out across both members' protection domains and caches.
+    // The threaded branch has to match whichever its serial body does, or it
+    // quietly covers less.
+    enum class SweepRegistration { Once, PerSize };
+
+    // Threaded size sweep: every worker walks the list on its own connection with
+    // a per-worker payload seed, so a transfer delivered on the wrong connection
+    // fails verification. Wraps the run in an RDMA resource leak check.
+    void RunThreadedSizeSweep(ThreadDevPolicy policy, int nThreads,
+                              const std::vector<size_t>& sizes, int repeats,
+                              const char* label,
+                              SweepRegistration registration = SweepRegistration::Once) {
+        const int rank = MPIEnvironment::world_rank;
+        size_t maxSize = 1;
+        for (size_t size : sizes) maxSize = std::max(maxSize, size);
+
+        const RdmaResourceCounts before = CaptureRdmaResources();
+        RunMultiThreadedIndependent(
+            policy, nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                ThreadResult result;
+                void* buffer = malloc(maxSize);
+                if (!buffer) {
+                    result.ok = false;
+                    result.msg = "malloc failed";
+                    return result;
+                }
+                auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+                void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+                const bool perSize = (registration == SweepRegistration::PerSize);
+
+                void* wholeMhandle = nullptr;
+                if (!perSize) {
+                    result = WorkerRegister(comm, buffer, maxSize, NCCL_PTR_HOST, &wholeMhandle);
+                    if (!result.ok) return result;
+                }
+                NetMHandleWorkerGuard wholeGuard(wholeMhandle,
+                                                 NetMHandleWorkerDeleter(net_, comm));
+
+                int tag = 0;
+                for (size_t size : sizes) {
+                    void* sizeMhandle = nullptr;
+                    if (perSize) {
+                        result = WorkerRegister(comm, buffer, size, NCCL_PTR_HOST, &sizeMhandle);
+                        if (!result.ok) return result;
+                    }
+                    // Released at the end of this size, so the next one registers
+                    // again, as the serial body does.
+                    NetMHandleWorkerGuard sizeGuard(sizeMhandle,
+                                                    NetMHandleWorkerDeleter(net_, comm));
+                    void* mhandle = perSize ? sizeMhandle : wholeMhandle;
+
+                    for (int repeat = 0; repeat < repeats; repeat++) {
+                        const int timeout = (size > 1024 * 1024) ? kLargeTransferTimeoutMs
+                                                                 : kDefaultTimeoutMs;
+                        result = WorkerSendRecvPattern(rank, pair, buffer, size, tag, mhandle,
+                                                       WorkerSeed(threadIdx, tag), timeout);
+                        if (!result.ok) return result;
+                        tag++;
+                    }
+                }
+                return result;
+            });
+        MPI_Barrier(MPI_COMM_WORLD);
+        AssertNoRdmaLeaks(before, CaptureRdmaResources(), label);
     }
 
     // ===============================================================
