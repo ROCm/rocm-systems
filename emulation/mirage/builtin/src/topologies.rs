@@ -1,7 +1,7 @@
 //! Strongly-typed builtin [`TopologyDef`]s (system layouts).
 //!
 //! Each topology references a builtin agent by name; see
-//! [`crate::agents`] for the agents themselves.
+//! [`mod@crate::agents`] for the agents themselves.
 
 use mirage_core::common::MaybeRef;
 use mirage_core::topology::TopologyDef;
@@ -32,6 +32,8 @@ fn layout(num_nodes: u32, gpus_per_node: u32, agent: &str) -> TopologyDef {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
     use super::*;
 
     #[test]
