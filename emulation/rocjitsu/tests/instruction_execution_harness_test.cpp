@@ -37,6 +37,8 @@
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
+#include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "test_encodings_util.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -212,6 +214,18 @@ public:
     else
       delete inst;
   }
+};
+
+class Gfx1250VgprReadRecorder final : public ExecutionPlugin {
+public:
+  Gfx1250VgprReadRecorder() : ExecutionPlugin("gfx1250_vgpr_read_recorder") {}
+
+  void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *, uint32_t physical_reg, uint64_t,
+                             uint8_t) override {
+    read_registers.push_back(physical_reg);
+  }
+
+  std::vector<uint32_t> read_registers;
 };
 
 /// @brief Check if a mnemonic should be skipped in the execution harness.
@@ -555,6 +569,154 @@ TEST(Gfx1250MemoryExecutionHarness, ExecutesRepresentativeValidAddressStores) {
   EXPECT_EQ(gpu_mem.read32(kBufferAddr + 16), 0x22000000u);
   EXPECT_EQ(gpu_mem.read32(kBufferAddr + 32), 0u);
   EXPECT_EQ(gpu_mem.read32(kBufferAddr + 48), 0x22000001u);
+
+  if (!wf->is_halted())
+    wf->halt();
+}
+
+TEST(Gfx1250MemoryExecutionHarness, SwizzledBufferIdxenOffenUsesScaledStride) {
+  amdgpu::GpuMemory gpu_mem("gfx1250_swizzled_buffer_harness_mem");
+  amdgpu::L2Cache l2("gfx1250_swizzled_buffer_harness_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  Gfx1250MemoryTestCu cu("gfx1250", cfg, &gpu_mem, &l2);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+
+  auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x3u);
+
+  constexpr uint64_t kBufferAddr = 0x4000;
+  constexpr uint32_t kRawStride = 16;
+  constexpr uint32_t kStrideScaleEncoding = 1;
+  constexpr uint32_t kStrideMultiplier = 4;
+  constexpr uint32_t kIndexStride = 32;
+  constexpr uint32_t kScaledStride = kRawStride * kStrideMultiplier;
+  constexpr uint32_t kSwizzleEnable = 1u << 28;
+  constexpr uint32_t kSecondIndex = kIndexStride;
+  constexpr uint32_t kSecondVoffset = 16;
+  constexpr uint32_t kLinearSecondOffset = kSecondIndex * kScaledStride + kSecondVoffset;
+  constexpr uint32_t kUnscaledSwizzledSecondOffset = (kRawStride + kSecondVoffset) * kIndexStride;
+  constexpr uint32_t kSwizzledSecondOffset = (kScaledStride + kSecondVoffset) * kIndexStride;
+  constexpr std::array<uint32_t, 2> kPayload = {0x3300'0000u, 0x3300'0001u};
+  const uint32_t sb = wf->sgpr_alloc().base;
+  const uint32_t vb = wf->vgpr_alloc().base;
+
+  cu.write_sgpr(sb + 4, static_cast<uint32_t>(kBufferAddr));
+  cu.write_sgpr(sb + 5, static_cast<uint32_t>(kBufferAddr >> 32));
+  cu.write_sgpr(sb + 6, 0);
+  cu.write_sgpr(sb + 7, (kRawStride << 12) | (kStrideScaleEncoding << 26) | kSwizzleEnable);
+  gpu_mem.write32(kBufferAddr, 0);
+  gpu_mem.write32(kBufferAddr + kLinearSecondOffset, 0);
+  gpu_mem.write32(kBufferAddr + kUnscaledSwizzledSecondOffset, 0);
+  gpu_mem.write32(kBufferAddr + kSwizzledSecondOffset, 0);
+  for (uint32_t lane = 0; lane < kPayload.size(); ++lane) {
+    cu.write_vgpr(vb, lane, kPayload[lane]);
+    cu.write_vgpr(vb + 1, lane, 0);
+    cu.write_vgpr(vb + 5, lane, lane * kSecondIndex);
+    cu.write_vgpr(vb + 6, lane, lane * kSecondVoffset);
+  }
+
+  // buffer_store_b32 v0, v[5:6], s[4:7], NULL idxen offen
+  const uint32_t buffer_store_words[] = {0xC406807Cu, 0xC0800800u, 0x00000005u};
+  std::unique_ptr<Instruction> buffer_store(decode_valid(*decoder, buffer_store_words));
+  ASSERT_NE(buffer_store, nullptr);
+  ASSERT_EQ(std::string_view(buffer_store->mnemonic()), "buffer_store_b32");
+  cu.execute_and_route(buffer_store.release(), *wf);
+  cu.flush_all();
+
+  EXPECT_EQ(gpu_mem.read32(kBufferAddr), kPayload[0]);
+  EXPECT_EQ(gpu_mem.read32(kBufferAddr + kLinearSecondOffset), 0u);
+  EXPECT_EQ(gpu_mem.read32(kBufferAddr + kUnscaledSwizzledSecondOffset), 0u);
+  EXPECT_EQ(gpu_mem.read32(kBufferAddr + kSwizzledSecondOffset), kPayload[1]);
+
+  // buffer_load_b32 v1, v[5:6], s[4:7], NULL idxen offen
+  const uint32_t buffer_load_words[] = {0xC405007Cu, 0xC0800801u, 0x00000005u};
+  std::unique_ptr<Instruction> buffer_load(decode_valid(*decoder, buffer_load_words));
+  ASSERT_NE(buffer_load, nullptr);
+  ASSERT_EQ(std::string_view(buffer_load->mnemonic()), "buffer_load_b32");
+  cu.execute_and_route(buffer_load.release(), *wf);
+  cu.flush_all();
+
+  EXPECT_EQ(cu.read_vgpr(vb + 1, 0), kPayload[0]);
+  EXPECT_EQ(cu.read_vgpr(vb + 1, 1), kPayload[1]);
+
+  if (!wf->is_halted())
+    wf->halt();
+}
+
+TEST(Gfx1250MemoryExecutionHarness, NonBufferResourceTypeSuppressesLoadAndStore) {
+  amdgpu::GpuMemory gpu_mem("gfx1250_non_buffer_type_harness_mem");
+  amdgpu::L2Cache l2("gfx1250_non_buffer_type_harness_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  Gfx1250MemoryTestCu cu("gfx1250", cfg, &gpu_mem, &l2);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+
+  auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  constexpr uint64_t kBufferAddr = 0x5000;
+  constexpr uint64_t kNumRecords = 64;
+  constexpr uint32_t kNonBufferType = 2;
+  constexpr uint32_t kInitialMemory = 0x1122'3344u;
+  constexpr uint32_t kStorePayload = 0x5566'7788u;
+  constexpr uint32_t kLoadSentinel = 0xA5A5'5A5Au;
+  const uint32_t sb = wf->sgpr_alloc().base;
+  const uint32_t vb = wf->vgpr_alloc().base;
+
+  cu.write_sgpr(sb + 4, static_cast<uint32_t>(kBufferAddr));
+  cu.write_sgpr(sb + 5, static_cast<uint32_t>(kBufferAddr >> 32) |
+                            static_cast<uint32_t>((kNumRecords & 0x7Fu) << 25));
+  cu.write_sgpr(sb + 6, static_cast<uint32_t>(kNumRecords >> 7));
+  cu.write_sgpr(sb + 7,
+                static_cast<uint32_t>((kNumRecords >> 39) & 0x3Fu) | (kNonBufferType << 30));
+  cu.write_vgpr(vb, 0, kStorePayload);
+  cu.write_vgpr(vb + 1, 0, kLoadSentinel);
+  cu.write_vgpr(vb + 5, 0, 0);
+  cu.write_vgpr(vb + 6, 0, 0);
+  gpu_mem.write32(kBufferAddr, kInitialMemory);
+
+  auto plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto recorder = std::make_unique<Gfx1250VgprReadRecorder>();
+  auto *recorder_ptr = recorder.get();
+  plugin_group->add(std::move(recorder));
+  cu.set_plugin_group(plugin_group);
+
+  // buffer_store_b32 v0, v[5:6], s[4:7], NULL idxen offen
+  const uint32_t buffer_store_words[] = {0xC406807Cu, 0xC0800800u, 0x00000005u};
+  std::unique_ptr<Instruction> buffer_store(decode_valid(*decoder, buffer_store_words));
+  ASSERT_NE(buffer_store, nullptr);
+  cu.execute_and_route(buffer_store.release(), *wf);
+  cu.flush_all();
+  EXPECT_EQ(gpu_mem.read32(kBufferAddr), kInitialMemory);
+  EXPECT_TRUE(recorder_ptr->read_registers.empty());
+
+  // buffer_load_b32 v1, v[5:6], s[4:7], NULL idxen offen
+  const uint32_t buffer_load_words[] = {0xC405007Cu, 0xC0800801u, 0x00000005u};
+  std::unique_ptr<Instruction> buffer_load(decode_valid(*decoder, buffer_load_words));
+  ASSERT_NE(buffer_load, nullptr);
+  cu.execute_and_route(buffer_load.release(), *wf);
+  cu.flush_all();
+  EXPECT_TRUE(recorder_ptr->read_registers.empty());
+  EXPECT_EQ(cu.read_vgpr(vb + 1, 0), kLoadSentinel);
+  EXPECT_TRUE(wf->wait_counters().empty());
 
   if (!wf->is_halted())
     wf->halt();

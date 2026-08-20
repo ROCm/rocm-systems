@@ -287,6 +287,8 @@ void RaceDetectorPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst,
 
   if (inst.data()->tag() == amdgpu::GLOBAL_MEM) {
     auto &d = *inst.data_as<amdgpu::VectorMemState>();
+    if (d.exec_mask == 0)
+      return;
     if (d.lds_dst) {
       uint32_t perLaneBytes = d.num_elems * d.elem_size;
       if (d.cluster_multicast && d.cluster_mcast_mask != 0) {
@@ -313,10 +315,10 @@ void RaceDetectorPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst,
       for (uint32_t i = 0; i < d.num_elems; ++i)
         registers[i] = logicalBase + i;
       uint8_t byte_mask = d.d16_lo ? 0x3 : d.d16_hi ? 0xC : 0xF;
-      rs->registerEvent(wf.pc, MemoryEventType::GLOBAL_TO_VGPR, std::move(registers), wf.exec(),
+      rs->registerEvent(wf.pc, MemoryEventType::GLOBAL_TO_VGPR, std::move(registers), d.exec_mask,
                         byte_mask);
     } else if (!d.is_load) {
-      rs->registerEvent(wf.pc, MemoryEventType::VGPR_TO_GLOBAL, {}, wf.exec());
+      rs->registerEvent(wf.pc, MemoryEventType::VGPR_TO_GLOBAL, {}, d.exec_mask);
     }
   }
 

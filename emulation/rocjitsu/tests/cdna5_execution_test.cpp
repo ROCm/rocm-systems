@@ -4,6 +4,8 @@
 #include "cdna5_sim_test_common.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vbuffer.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
+#include "rocjitsu/vm/plugins/execution_plugin_group.h"
 
 namespace {
 
@@ -17,6 +19,17 @@ public:
 
 private:
   bool original_;
+};
+
+class VgprReadRecorder final : public ExecutionPlugin {
+public:
+  VgprReadRecorder() : ExecutionPlugin("vgpr_read_recorder") {}
+
+  void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *, uint32_t, uint64_t, uint8_t) override {
+    ++read_count;
+  }
+
+  uint32_t read_count = 0;
 };
 
 TEST(Gfx1250ExecutionTest, TargetProvidesImmutableExecutionBackend) {
@@ -215,15 +228,16 @@ TEST(Gfx1250ExecutionTest, VbufferB64B96MixedLanesHonorStructuredPartialOob) {
   constexpr uint32_t kStoreVgpr = 16;
   constexpr uint64_t kNumRecords = 32;
   constexpr uint32_t kRawStride = 4;
-  constexpr uint32_t kStrideScale = 1;
-  constexpr uint32_t kStride = kRawStride * 4;
+  constexpr uint32_t kStrideScaleEncoding = 1;
+  constexpr uint32_t kStrideMultiplier = 4;
+  constexpr uint32_t kStride = kRawStride * kStrideMultiplier;
   const std::array<uint32_t, 4> resource = {
       static_cast<uint32_t>(kAddr),
       static_cast<uint32_t>((kAddr >> 32) & 0x01FF'FFFFu) |
           static_cast<uint32_t>((kNumRecords & 0x7Fu) << 25),
       static_cast<uint32_t>(kNumRecords >> 7),
       static_cast<uint32_t>((kNumRecords >> 39) & 0x3Fu) | (kRawStride << 12) |
-          (kStrideScale << 26) | (1u << 29),
+          (kStrideScaleEncoding << 26) | (1u << 29),
   };
   for (uint32_t i = 0; i < resource.size(); ++i)
     cu->write_sgpr(wf->sgpr_alloc().base + kResourceSgpr + i, resource[i]);
@@ -340,6 +354,58 @@ TEST(Gfx1250ExecutionTest, NonReturningVbufferB64AtomicHonorsWholePayloadBounds)
   partial_oob->execute_impl(*wf);
   pipeline.issue(partial_oob, *wf);
   EXPECT_EQ(sim.memory->read64(kAddr), kInitial);
+}
+
+TEST(Gfx1250ExecutionTest, ReturningVbufferAtomicIgnoresNonBufferResourceType) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  constexpr uint64_t kAddr = 0xC180;
+  constexpr uint32_t kResourceSgpr = 4;
+  constexpr uint32_t kDataVgpr = 8;
+  constexpr uint32_t kNonBufferType = 2;
+  constexpr uint32_t kInitialMemory = 0x0102'0304u;
+  constexpr uint32_t kDataSentinel = 0xA1A2'A3A4u;
+  constexpr uint64_t kNumRecords = sizeof(uint32_t);
+  const std::array<uint32_t, 4> resource = {
+      static_cast<uint32_t>(kAddr),
+      static_cast<uint32_t>((kAddr >> 32) & 0x01FF'FFFFu) |
+          static_cast<uint32_t>((kNumRecords & 0x7Fu) << 25),
+      static_cast<uint32_t>(kNumRecords >> 7),
+      static_cast<uint32_t>((kNumRecords >> 39) & 0x3Fu) | (kNonBufferType << 30),
+  };
+  for (uint32_t i = 0; i < resource.size(); ++i)
+    cu->write_sgpr(wf->sgpr_alloc().base + kResourceSgpr + i, resource[i]);
+  sim.memory->write32(kAddr, kInitialMemory);
+  cu->write_vgpr(wf->vgpr_alloc().base + kDataVgpr, 0, kDataSentinel);
+
+  auto plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto recorder = std::make_unique<VgprReadRecorder>();
+  auto *recorder_ptr = recorder.get();
+  ASSERT_TRUE(plugin_group->add(std::move(recorder)));
+  cu->set_plugin_group(plugin_group);
+  plugin_group->onInit();
+
+  cdna5::VbufferMachineInst machine{};
+  machine.vdata = kDataVgpr;
+  machine.rsrc = kResourceSgpr;
+  machine.soffset = cdna5::OPR_SREG_NULL;
+  machine.scope = 3;
+  machine.th = amdgpu::GFX12_TH_ATOMIC_RETURN;
+
+  amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), cu->l2());
+  auto *atomic =
+      new cdna5::BufferAtomicSwapB32Vbuffer(reinterpret_cast<const cdna5::MachineInst *>(&machine));
+  atomic->execute_impl(*wf);
+  pipeline.issue(atomic, *wf);
+
+  EXPECT_EQ(recorder_ptr->read_count, 0u);
+  EXPECT_EQ(sim.memory->read32(kAddr), kInitialMemory);
+  EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + kDataVgpr, 0), kDataSentinel);
+  EXPECT_TRUE(wf->wait_counters().empty());
 }
 
 TEST(Gfx1250ExecutionTest, DivScaleWritesExplicitSdstMask) {

@@ -14,6 +14,7 @@
 #include "util/except.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <optional>
@@ -22,6 +23,7 @@ namespace rocjitsu::cdna5 {
 namespace {
 
 constexpr uint64_t kBufferOffsetMask = (uint64_t{1} << 45) - 1;
+constexpr std::array<uint32_t, 4> kStrideMultipliers = {1, 4, 8, 32};
 
 uint32_t scaled_vaddr_factor(const amdgpu::VectorMemState &d) {
   // LLVM folds gfx1250 scale_offset when the scale matches the full memory
@@ -78,6 +80,23 @@ void init_vector_mem_state(amdgpu::Wavefront &wf, amdgpu::VectorMemState &d) {
 
 int64_t logical_buffer_offset(uint32_t index, uint32_t stride, uint32_t voffset, int32_t ioffset) {
   return static_cast<int64_t>(index) * stride + voffset + ioffset;
+}
+
+uint64_t swizzled_buffer_offset(uint32_t index, uint32_t stride, uint32_t voffset, int32_t ioffset,
+                                uint32_t soffset) {
+  // CDNA5 section 9.4.2 fixes the combined offset width at 45 bits, groups
+  // indexes in sets of 32, and uses 16-byte swizzle elements.
+  constexpr uint64_t kIndexStride = 32;
+  constexpr uint64_t kElementSize = 16;
+
+  int64_t combined_offset = static_cast<int64_t>(voffset) + ioffset + soffset;
+  uint64_t total_offset = static_cast<uint64_t>(combined_offset) & kBufferOffsetMask;
+  uint64_t index_msb = index / kIndexStride;
+  uint64_t index_lsb = index % kIndexStride;
+  uint64_t offset_msb = total_offset / kElementSize;
+  uint64_t offset_lsb = total_offset % kElementSize;
+  return (index_msb * stride + offset_msb * kElementSize) * kIndexStride +
+         index_lsb * kElementSize + offset_lsb;
 }
 
 bool byte_range_exceeds(int64_t offset, uint32_t size, uint64_t bound) {
@@ -152,14 +171,13 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
 } // namespace
 
 BufferResource decode_buffer_resource(uint32_t srd0, uint32_t srd1, uint32_t srd2, uint32_t srd3) {
-  static constexpr uint32_t stride_multipliers[] = {1, 4, 8, 32};
   BufferResource resource{};
   resource.base_address = (static_cast<uint64_t>(srd1 & 0x01FF'FFFFu) << 32) | srd0;
   resource.num_records =
       ((static_cast<uint64_t>(srd3 & 0x3Fu) << 32) | srd2) << 7 | ((srd1 >> 25) & 0x7Fu);
   resource.raw_stride = (srd3 >> 12) & 0x3FFFu;
-  resource.stride_scale = static_cast<uint8_t>((srd3 >> 26) & 0x3u);
-  resource.stride = resource.raw_stride * stride_multipliers[resource.stride_scale];
+  resource.stride_scale_encoding = static_cast<uint8_t>((srd3 >> 26) & 0x3u);
+  resource.stride = resource.raw_stride * kStrideMultipliers[resource.stride_scale_encoding];
   resource.swizzle_enabled = ((srd3 >> 28) & 0x1u) != 0;
   resource.oob_select = ((srd3 >> 29) & 0x1u) != 0;
   resource.type = static_cast<uint8_t>((srd3 >> 30) & 0x3u);
@@ -251,6 +269,15 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   uint32_t srd2 = amdgpu::read_scalar_selector(wf, sb_sel + 2);
   uint32_t srd3 = amdgpu::read_scalar_selector(wf, sb_sel + 3);
   BufferResource resource = decode_buffer_resource(srd0, srd1, srd2, srd3);
+  if (resource.type != 0) {
+    // CDNA5 ignores VBUFFER operations whose resource TYPE does not identify
+    // a buffer. Model the access with effective EXEC=0 so loads and returning
+    // atomics preserve their destinations rather than taking the OOB zero path.
+    d.exec_mask = 0;
+    d.lane_mask = 0;
+    d.element_lane_masks.clear();
+    return;
+  }
   uint32_t soffset_val = has_smem_offset(inst.soffset) ? read_sreg_m0_operand(wf, inst.soffset) : 0;
   int32_t ioff = signed_ioffset(inst.ioffset);
   uint32_t vbase = 0;
@@ -287,16 +314,17 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
     } else if (inst.offen) {
       voffset = vaddr_region->lane(0, lane);
     }
-    int64_t logical_offset = logical_buffer_offset(index, resource.stride, voffset, ioff);
-    uint64_t buffer_offset = static_cast<uint64_t>(logical_offset) & kBufferOffsetMask;
-    d.per_lane_addr[lane] = resource.base_address + soffset_val + buffer_offset;
-
     if (resource.swizzle_enabled) {
-      // Swizzled address generation is not modeled yet. Preserve the existing
-      // linear address behavior, but do not apply unswizzled bounds rules.
+      uint64_t buffer_offset =
+          swizzled_buffer_offset(index, resource.stride, voffset, ioff, soffset_val);
+      d.per_lane_addr[lane] = resource.base_address + buffer_offset;
       d.lane_mask |= uint64_t{1} << lane;
       continue;
     }
+
+    int64_t logical_offset = logical_buffer_offset(index, resource.stride, voffset, ioff);
+    uint64_t buffer_offset = static_cast<uint64_t>(logical_offset) & kBufferOffsetMask;
+    d.per_lane_addr[lane] = resource.base_address + soffset_val + buffer_offset;
 
     int64_t record_offset = static_cast<int64_t>(soffset_val) + voffset + ioff;
     int64_t total_offset = static_cast<int64_t>(soffset_val) + logical_offset;
