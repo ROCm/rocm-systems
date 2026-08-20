@@ -1421,12 +1421,12 @@ configure_settings(bool _init)
                             expanded_filename, TIMEMORY_PROJECT_NAME));
         }
 
-        // Timemory parses config files during static init before main(), outside our
-        // control (see timemory_library_constructor()->init_config()). Bad .json files
-        // fail to parse but Timemory error message is uninformative. Meanwhile, the
-        // suppress_config flag is always true in the launcher. So, to produce a proper
-        // diagnostic message for bad .json files, the above .json root check MUST stay
-        // above this 'continue' gate to run regardless of suppress_config flag.
+        // Timemory parses config files during static init before main() (see
+        // timemory_library_constructor()->init_config()). Bad .json files fail to parse
+        // but Timemory error message is uninformative. Meanwhile, the suppress_config
+        // flag is always true in the launcher. So, to produce a proper diagnostic message
+        // for bad .json files, the above .json root check MUST stay above this 'continue'
+        // gate to run regardless of suppress_config flag.
         if(_config->get_suppress_config()) continue;
 
         LOG_DEBUG("Reading config file {}", filename);
