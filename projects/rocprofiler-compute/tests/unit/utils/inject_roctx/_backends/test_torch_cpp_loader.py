@@ -15,6 +15,7 @@ import common  # noqa: F401
 import pytest
 
 from utils.inject_roctx._backends import torch_cpp_loader as inject_roctx_loader
+from utils.inject_roctx._backends import torch_trace_fingerprint
 
 _FAKE_TAG = "py3.12_torch2.9_src000000000000"
 
@@ -54,9 +55,9 @@ def test_source_fingerprint_changes_when_inputs_change(tmp_path, monkeypatch):
     cpp.write_text("// fingerprint test source\n")
     cmake.write_text("# fingerprint test buildfile\n")
     monkeypatch.setattr(
-        inject_roctx_loader,
-        "_FINGERPRINT_INPUTS",
-        (cpp, cmake),
+        torch_trace_fingerprint,
+        "fingerprint_input_paths",
+        lambda: (cpp, cmake),
     )
 
     baseline = inject_roctx_loader._source_fingerprint()
@@ -75,9 +76,9 @@ def test_source_fingerprint_changes_when_inputs_change(tmp_path, monkeypatch):
 
 def test_source_fingerprint_excludes_tool_version_file():
     """The tool ``VERSION`` file is not a fingerprint input."""
-    for path in inject_roctx_loader._FINGERPRINT_INPUTS:
+    for path in torch_trace_fingerprint.fingerprint_input_paths():
         assert path.name != "VERSION", (
-            f"VERSION should not be in _FINGERPRINT_INPUTS; saw {path}"
+            f"VERSION should not be in fingerprint_input_paths; saw {path}"
         )
 
 
@@ -87,9 +88,9 @@ def test_source_fingerprint_is_missing_sentinel_when_no_inputs_readable(
 ):
     """When no inputs are readable, the fingerprint is the ``"missing"`` sentinel."""
     monkeypatch.setattr(
-        inject_roctx_loader,
-        "_FINGERPRINT_INPUTS",
-        (tmp_path / "does_not_exist.cpp",),
+        torch_trace_fingerprint,
+        "fingerprint_input_paths",
+        lambda: (tmp_path / "does_not_exist.cpp",),
     )
     assert inject_roctx_loader._source_fingerprint() == "missing"
 
@@ -98,7 +99,9 @@ def test_source_fingerprint_is_length_delimited(tmp_path, monkeypatch):
     """Reshuffling bytes across input boundaries changes the fingerprint."""
     a = tmp_path / "a.cpp"
     b = tmp_path / "b.txt"
-    monkeypatch.setattr(inject_roctx_loader, "_FINGERPRINT_INPUTS", (a, b))
+    monkeypatch.setattr(
+        torch_trace_fingerprint, "fingerprint_input_paths", lambda: (a, b)
+    )
 
     a.write_bytes(b"AB")
     b.write_bytes(b"C")
@@ -147,7 +150,7 @@ def torch_trace_collector_module_sources():
     """
     return sorted(
         p
-        for p in inject_roctx_loader._FINGERPRINT_INPUTS
+        for p in torch_trace_fingerprint.fingerprint_input_paths()
         if p.suffix in (".cpp", ".h") and p.parent == inject_roctx_loader._SO_SOURCE_DIR
     )
 
@@ -187,7 +190,7 @@ def test_fingerprint_inputs_cover_every_build_input():
         "the build file changed shape and this parser needs updating"
     )
 
-    input_names = {p.name for p in inject_roctx_loader._FINGERPRINT_INPUTS}
+    input_names = {p.name for p in torch_trace_fingerprint.fingerprint_input_paths()}
     missing = declared - input_names
     assert not missing, f"build inputs absent from the fingerprint: {sorted(missing)}"
 
@@ -196,6 +199,7 @@ def test_fingerprint_inputs_cover_every_build_input():
     for required in (
         "CMakeLists.txt",
         "probe_torch.py",
+        "print_fingerprint.py",
         "synchronized.hpp",
         "gsl_assert.h",
     ):
@@ -373,7 +377,9 @@ def _set_so_inputs_present(monkeypatch, tmp_path):
     monkeypatch.setattr(inject_roctx_loader, "_SO_SOURCE_DIR", src_dir)
     monkeypatch.setattr(inject_roctx_loader, "_SO_BUILDFILE", cml)
     monkeypatch.setattr(
-        inject_roctx_loader, "_FINGERPRINT_INPUTS", (cpp, module_cpp, cml)
+        torch_trace_fingerprint,
+        "fingerprint_input_paths",
+        lambda: (cpp, module_cpp, cml),
     )
     return src_dir
 
@@ -459,9 +465,9 @@ def test_runtime_build_path_falls_back_to_the_user_cache(monkeypatch, tmp_path):
 def test_runtime_build_skips_when_sources_missing(monkeypatch, tmp_path):
     """Missing build inputs skip the runtime build before cmake is consulted."""
     monkeypatch.setattr(
-        inject_roctx_loader,
-        "_FINGERPRINT_INPUTS",
-        (tmp_path / "nonexistent.cpp", tmp_path / "nonexistent.txt"),
+        torch_trace_fingerprint,
+        "fingerprint_input_paths",
+        lambda: (tmp_path / "nonexistent.cpp", tmp_path / "nonexistent.txt"),
     )
     monkeypatch.setattr(
         inject_roctx_loader,
