@@ -80,6 +80,18 @@ def compare_one(
 ) -> dict[str, Any]:
     baseline = load(baseline_path)
     candidate = load(candidate_path)
+    baseline_cases = baseline["cases"]
+    candidate_cases = candidate["cases"]
+    case_results = [
+        compare_case(baseline_case, candidate_case)
+        for baseline_case, candidate_case in zip(baseline_cases, candidate_cases)
+    ]
+    max_abs_values = [
+        result["max_abs"]
+        for result in case_results
+        if result.get("max_abs") is not None
+    ]
+    case_count_match = len(baseline_cases) == len(candidate_cases)
     result = {
         "baseline": str(baseline_path),
         "candidate": str(candidate_path),
@@ -89,6 +101,34 @@ def compare_one(
         "candidate_device": candidate.get("device"),
         "baseline_arch": baseline.get("cuda_arch", "cpu"),
         "candidate_arch": candidate.get("cuda_arch", "cpu"),
+        "case_count_match": case_count_match,
+        "baseline_case_count": len(baseline_cases),
+        "candidate_case_count": len(candidate_cases),
+        "prompt_match": case_count_match and all(case["prompt_match"] for case in case_results),
+        "sequence_ids_match": case_count_match
+        and all(case["sequence_ids_match"] for case in case_results),
+        "new_token_ids_match": case_count_match
+        and all(case["new_token_ids_match"] for case in case_results),
+        "allclose": case_count_match and all(case["allclose"] for case in case_results),
+        "max_abs": max(max_abs_values) if max_abs_values else None,
+        "mismatch_count": sum(
+            case["mismatch_count"]
+            for case in case_results
+            if case.get("mismatch_count", 0) > 0
+        ),
+        "nonfinite_count": sum(case.get("nonfinite_count", 0) for case in case_results),
+        "cases": case_results,
+    }
+    return result
+
+
+def compare_case(baseline: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
+    result = {
+        "case_index": baseline.get("case_index"),
+        "candidate_case_index": candidate.get("case_index"),
+        "prompt": baseline.get("prompt"),
+        "candidate_prompt": candidate.get("prompt"),
+        "prompt_match": baseline.get("prompt") == candidate.get("prompt"),
         "sequence_ids_match": baseline.get("sequence_ids") == candidate.get("sequence_ids"),
         "new_token_ids_match": baseline.get("new_token_ids") == candidate.get("new_token_ids"),
         "baseline_new_token_ids": baseline.get("new_token_ids"),
@@ -117,7 +157,8 @@ def main() -> int:
 
     for result in results:
         if (
-            not result["sequence_ids_match"]
+            not result["prompt_match"]
+            or not result["sequence_ids_match"]
             or not result["new_token_ids_match"]
             or not result["allclose"]
         ):

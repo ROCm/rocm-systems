@@ -13,7 +13,13 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_MANIFEST = SCRIPT_DIR / "models.json"
 ROCJITSU_ROOT = SCRIPT_DIR.parents[1]
 
-PROMPT = "The quick brown fox"
+PROMPTS = [
+    "The quick brown fox",
+    "A good GPU simulator should",
+    "In one sentence, explain matrix multiplication:",
+    "ROCm kernel launch status:",
+    "The answer is 42 because",
+]
 MAX_NEW_TOKENS = 1
 RTOL = 1e-3
 ATOL = 1e-3

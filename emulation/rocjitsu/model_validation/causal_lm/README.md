@@ -1,12 +1,19 @@
 # Causal-LM Smoke Test
 
-This directory is a small proof that rocjitsu can run Hugging Face causal-LM
-models on simulated `gfx1250` and match CPU/real-GPU output for a fixed
-one-token prompt.
+This directory is a small harness for checking whether rocjitsu can run Hugging
+Face causal-LM models on simulated `gfx1250` and match CPU/real-GPU output for
+fixed one-token generation prompts.
 
-The fixed workload is:
+The fixed workload is five prompts:
 
-- prompt: `The quick brown fox`
+- `The quick brown fox`
+- `A good GPU simulator should`
+- `In one sentence, explain matrix multiplication:`
+- `ROCm kernel launch status:`
+- `The answer is 42 because`
+
+Each prompt uses:
+
 - generation: greedy, `max_new_tokens=1`
 - dtype: float32
 - attention: eager
@@ -40,13 +47,6 @@ cmake --build "$ROCJITSU_BUILD" \
   -j "$(nproc)"
 ```
 
-For gated models, log in with the Hugging Face CLI first:
-
-```bash
-hf auth login
-hf auth whoami
-```
-
 ## Run
 
 List the model keys in `models.json`, then run one:
@@ -66,6 +66,7 @@ The initial model keys are:
 
 Each run downloads the model if needed, then runs CPU, real GPU, simulated
 `gfx1250`, and comparison. Results are written under `results/<model-key>/`.
+Current checked results are summarized in `RESULTS.md`.
 
 ## Outputs
 
@@ -80,5 +81,5 @@ Each run downloads the model if needed, then runs CPU, real GPU, simulated
 - `HSA_ENABLE_SDMA=1` is set for real GPU and simulator runs.
 - `HSA_HOTSWAP_DISABLE=1` is set for simulator runs so the selected rocjitsu
   launcher controls execution.
-- Simulator runtime directories default to short paths under `/tmp` to avoid
-  daemon socket path-length issues.
+- Simulator runtime directories default to short paths under `$TMPDIR` or the
+  system temporary directory to avoid daemon socket path-length issues.

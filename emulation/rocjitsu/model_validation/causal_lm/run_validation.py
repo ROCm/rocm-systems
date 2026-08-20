@@ -19,7 +19,7 @@ from common import (
     DEFAULT_MANIFEST,
     IGNORE_PATTERNS,
     MAX_NEW_TOKENS,
-    PROMPT,
+    PROMPTS,
     ROCJITSU_ROOT,
     RTOL,
     load_models,
@@ -189,7 +189,7 @@ def download_model(model: dict[str, str], model_cache_dir: Path, results_dir: Pa
             + "\n"
         )
         stderr_path.write_text("")
-    except Exception as exc:  # noqa: BLE001 - keep the proof runner diagnostic.
+    except Exception as exc:  # noqa: BLE001 - keep the validation runner diagnostic.
         returncode = 2
         stdout_path.write_text("")
         stderr_path.write_text(
@@ -239,7 +239,8 @@ def write_summary(
         "target_outputs": {key: str(value) for key, value in outputs.items()},
         "validation": {
             "targets": list(TARGETS),
-            "prompt": PROMPT,
+            "prompts": PROMPTS,
+            "prompt_count": len(PROMPTS),
             "max_new_tokens": MAX_NEW_TOKENS,
             "dtype": "float32",
             "attention": "eager",
@@ -371,7 +372,8 @@ def main() -> int:
         compare_one(outputs["cpu"], outputs["sim_gfx1250"]),
     ]
     failed = any(
-        not result["sequence_ids_match"]
+        not result["prompt_match"]
+        or not result["sequence_ids_match"]
         or not result["new_token_ids_match"]
         or not result["allclose"]
         for result in compare_results

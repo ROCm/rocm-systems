@@ -38,11 +38,6 @@ LD_LIBRARY_PATH="$ROCM_LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
   tinyllama_1b
 ```
 
-Expected passing behavior after the rocjitsu `v_cls_i32` fix:
-
-```text
-CPU new token:      [432]
-real GPU new token: [432]
-sim new token:      [432]
-sim logits:         allclose with CPU
-```
+The intended passing behavior is that all fixed prompts produce matching CPU,
+real-GPU, and simulated `gfx1250` token IDs and logits. See
+`../causal_lm/RESULTS.md` for the checked results.
