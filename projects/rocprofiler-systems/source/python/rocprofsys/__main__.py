@@ -23,6 +23,21 @@ import traceback
 PY3 = sys.version_info[0] == 3
 _ROCPROFSYS_PYTHON_SCRIPT_FILE = None
 
+# Maps a parse_args() destination onto the profiler config attribute it sets.
+# '--label' is handled separately since it fans out into three attributes.
+_CONFIG_OPTION_MAP = {
+    "verbosity": "verbosity",
+    "full_filepath": "full_filepath",
+    "function_include": "include_functions",
+    "function_exclude": "exclude_functions",
+    "function_restrict": "restrict_functions",
+    "module_include": "include_modules",
+    "module_exclude": "exclude_modules",
+    "module_restrict": "restrict_modules",
+    "trace_c": "trace_c",
+    "annotate_trace": "annotate_trace",
+}
+
 # Python 3.x compatibility utils: execfile
 try:
     execfile
@@ -57,12 +72,15 @@ def find_script(script_name):
 
 
 def parse_args(args=None):
-    """Parse the arguments"""
+    """Parse the arguments.
+
+    Options that mirror a profiler config setting default to None, meaning
+    "not specified on the command line". Callers are responsible for merging
+    those against the profiler config's own defaults.
+    """
 
     if args is None:
         args = sys.argv[1:]
-
-    from .libpyrocprofsys.profiler import config as _profiler_config
 
     def str2bool(v):
         if isinstance(v, bool):
@@ -74,17 +92,10 @@ def parse_args(args=None):
         else:
             raise argparse.ArgumentTypeError("Boolean value expected.")
 
-    _default_label = []
-    if _profiler_config.include_args:
-        _default_label.append("args")
-    if _profiler_config.include_filename:
-        _default_label.append("file")
-    if _profiler_config.include_line:
-        _default_label.append("line")
-
     parser = argparse.ArgumentParser(
         "rocprofsys",
         add_help=True,
+        allow_abbrev=False,
         epilog="usage: {} -m rocprofsys <ROCPROFSYS_ARGS> -- <SCRIPT> <SCRIPT_ARGS>".format(
             os.path.basename(sys.executable)
         ),
@@ -93,7 +104,7 @@ def parse_args(args=None):
         "-v",
         "--verbosity",
         type=int,
-        default=_profiler_config.verbosity,
+        default=None,
         help="Logging verbosity",
     )
     parser.add_argument(
@@ -127,7 +138,7 @@ def parse_args(args=None):
         nargs="?",
         metavar="BOOL",
         const=True,
-        default=_profiler_config.full_filepath,
+        default=None,
         help="Encode the full function filename (instead of basename)",
     )
     parser.add_argument(
@@ -135,7 +146,7 @@ def parse_args(args=None):
         type=str,
         choices=("args", "file", "line"),
         nargs="*",
-        default=_default_label,
+        default=None,
         help="Encode the function arguments, filename, and/or line number into the profiling function label",
     )
     parser.add_argument(
@@ -144,7 +155,7 @@ def parse_args(args=None):
         type=str,
         nargs="+",
         metavar="FUNC",
-        default=_profiler_config.include_functions,
+        default=None,
         help="Include any entries with these function names",
     )
     parser.add_argument(
@@ -153,7 +164,7 @@ def parse_args(args=None):
         type=str,
         nargs="+",
         metavar="FUNC",
-        default=_profiler_config.exclude_functions,
+        default=None,
         help="Filter out any entries with these function names",
     )
     parser.add_argument(
@@ -162,7 +173,7 @@ def parse_args(args=None):
         type=str,
         nargs="+",
         metavar="FUNC",
-        default=_profiler_config.restrict_functions,
+        default=None,
         help="Select only entries with these function names",
     )
     parser.add_argument(
@@ -171,7 +182,7 @@ def parse_args(args=None):
         type=str,
         nargs="+",
         metavar="FILE",
-        default=_profiler_config.include_modules,
+        default=None,
         help="Include any entries from these files",
     )
     parser.add_argument(
@@ -180,7 +191,7 @@ def parse_args(args=None):
         type=str,
         nargs="+",
         metavar="FILE",
-        default=_profiler_config.exclude_modules,
+        default=None,
         help="Filter out any entries from these files",
     )
     parser.add_argument(
@@ -189,7 +200,7 @@ def parse_args(args=None):
         type=str,
         nargs="+",
         metavar="FILE",
-        default=_profiler_config.restrict_modules,
+        default=None,
         help="Select only entries from these files",
     )
     parser.add_argument(
@@ -198,7 +209,7 @@ def parse_args(args=None):
         nargs="?",
         metavar="BOOL",
         const=True,
-        default=_profiler_config.trace_c,
+        default=None,
         help="Enable profiling C functions",
     )
     parser.add_argument(
@@ -208,7 +219,7 @@ def parse_args(args=None):
         nargs="?",
         metavar="BOOL",
         const=True,
-        default=_profiler_config.annotate_trace,
+        default=None,
         help="Enable perfetto debug annotations",
     )
 
@@ -251,21 +262,21 @@ def run(prof, cmd):
     prof.runctx(code, globs, None)
 
 
-def apply_config_option(args):
-    """Set the config-file environment variable before loading profiler bindings."""
-    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
-    parser.add_argument("-c", "--config")
-    opts, _ = parser.parse_known_args(args)
-    if opts.config is None:
+def apply_config_option(config_path):
+    """Merge a --config file path into ROCPROFSYS_CONFIG_FILE before loading profiler bindings."""
+    if config_path is None:
         return
 
-    # If the environment already has a config file, keep it and add ours after
-    # it (colon-separated), so both get read. Otherwise, just use ours.
-    existing_config_file = os.environ.get("ROCPROFSYS_CONFIG_FILE")
+    # If the environment already has a config file, keep it and append ours so
+    # both get read. The native config reader accepts ':' and ';' as
+    # separators; strip any trailing one to avoid an empty entry.
+    existing_config_file = os.environ.get("ROCPROFSYS_CONFIG_FILE", "").rstrip(":;")
     if existing_config_file:
-        os.environ["ROCPROFSYS_CONFIG_FILE"] = existing_config_file + ":" + opts.config
+        os.environ["ROCPROFSYS_CONFIG_FILE"] = (
+            existing_config_file + os.pathsep + config_path
+        )
     else:
-        os.environ["ROCPROFSYS_CONFIG_FILE"] = opts.config
+        os.environ["ROCPROFSYS_CONFIG_FILE"] = config_path
 
 
 def main(main_args=sys.argv):
@@ -276,7 +287,6 @@ def main(main_args=sys.argv):
     if "--" in main_args:
         _idx = main_args.index("--")
         _argv = main_args[(_idx + 1) :]
-        apply_config_option(main_args[1:_idx])
         opts = parse_args(main_args[1:_idx])
         argv = _argv
     else:
@@ -291,6 +301,9 @@ def main(main_args=sys.argv):
                     "the script and its arguments to ensure correct parsing. \nE.g. "
                     "python -m rocprofsys -- ./script.py".format(" ".join(argv))
                 )
+
+    # Must happen before any profiler bindings are imported below.
+    apply_config_option(opts.config)
 
     if not argv:
         raise RuntimeError(
@@ -322,19 +335,16 @@ def main(main_args=sys.argv):
 
     from .libpyrocprofsys.profiler import config as _profiler_config
 
-    _profiler_config.trace_c = opts.trace_c
-    _profiler_config.include_args = "args" in opts.label
-    _profiler_config.include_line = "line" in opts.label
-    _profiler_config.include_filename = "file" in opts.label
-    _profiler_config.full_filepath = opts.full_filepath
-    _profiler_config.include_functions = opts.function_include
-    _profiler_config.include_modules = opts.module_include
-    _profiler_config.exclude_functions = opts.function_exclude
-    _profiler_config.exclude_modules = opts.module_exclude
-    _profiler_config.restrict_functions = opts.function_restrict
-    _profiler_config.restrict_modules = opts.module_restrict
-    _profiler_config.annotate_trace = opts.annotate_trace
-    _profiler_config.verbosity = opts.verbosity
+    # Unset options are None, and leave the config's own default in place.
+    for opt_name, config_name in _CONFIG_OPTION_MAP.items():
+        value = getattr(opts, opt_name)
+        if value is not None:
+            setattr(_profiler_config, config_name, value)
+
+    if opts.label is not None:
+        _profiler_config.include_args = "args" in opts.label
+        _profiler_config.include_line = "line" in opts.label
+        _profiler_config.include_filename = "file" in opts.label
 
     print("[rocprofsys]> profiling: {}".format(argv))
 
