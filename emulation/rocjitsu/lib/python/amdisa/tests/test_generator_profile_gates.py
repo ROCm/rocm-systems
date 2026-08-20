@@ -3990,6 +3990,8 @@ def test_gfx1250_helper_blocks_emit_scaled_wmma_table_decoder(
     assert 'isGfx1250WmmaScaleSource' in helpers
     assert 'isGfx1250WmmaScaleFormatPairLegal' in helpers
     assert 'isGfx1250WmmaScalePairValid' in helpers
+    assert 'matrix->opsel_hi_2' in helpers
+    assert 'matrix->pad_14' not in helpers
     assert 'isWmmaScaleF32Vop3px2' not in helpers
 
     execution_impl = impls.execution[0]
