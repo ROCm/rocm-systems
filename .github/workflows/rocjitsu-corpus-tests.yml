@@ -214,35 +214,47 @@ jobs:
           ROCMINFO=RocminfoTest
           RCCL_DAEMON=RcclDaemonTest
           EXCLUDED_TESTS="${ROCMINFO}|${RCCL_DAEMON}"
-          SANITIZER_EXCLUDED_TESTS=(
-            "HsaTest\.InitSucceeded"
-            "HsaTest\.GpuAgentFound"
+          COMMON_SANITIZER_EXCLUDED_TESTS=(
             # The hardware-backed tools-hook test cannot initialize ROCR when
             # the launcher and hook use a sanitizer-instrumented process image.
             "HsaHooksTest\.TranslateGfx950Mfma16x16ThroughToolsLib"
             "Cdna4ToCdna3SimulatedDispatchTest\..*"
             "Cdna4ToCdna3DbtGuestTest\..*"
-            "HipMemcpyTest\.RoundTripFloat"
-            "HipMemcpyTest\.RoundTripInt"
-            "HipMemcpyTest\.DeviceToDevice"
-            "HipVectorAddTest\.CorrectResult"
-            "DaemonTest\.HipVectorAdd"
-            "DaemonTest\.HipMemcpyRoundTripFloat"
-            "DaemonTest\.HipMemcpyRoundTripInt"
-            "DaemonTest\.HipMemcpyDeviceToDevice"
-            "DaemonTest\.TwoIndependentClients"
             "DaemonTest\.LoggingPlugin"
             "BfeRegressionTest\.ThreadIdxY"
             "LoggingTest\.dispatch_logged"
             "CvtNarrow\.AllTests"
             "RaceTest\..*"
           )
+          CLANG_ASAN_UBSAN_EXCLUDED_TESTS=(
+            "${COMMON_SANITIZER_EXCLUDED_TESTS[@]}"
+            # Direct HIP clients hang in the Clang sanitizer lane. The daemon
+            # variants complete their functional checks, but the unsymbolized
+            # ROCr library reports process-exit allocations that cannot be
+            # suppressed without hiding all leaks originating in ROCr.
+            "HipMemcpyTest\.RoundTripFloat"
+            "HipMemcpyTest\.RoundTripInt"
+            "HipMemcpyTest\.DeviceToDevice"
+            "HipVectorAddTest\.CorrectResult"
+            "DaemonTest\.HipMemcpyRoundTripFloat"
+            "DaemonTest\.HipMemcpyRoundTripInt"
+            "DaemonTest\.HipMemcpyDeviceToDevice"
+            "DaemonTest\.TwoIndependentClients"
+          )
           TSAN_EXCLUDED_TESTS=(
-            "${SANITIZER_EXCLUDED_TESTS[@]}"
+            "${COMMON_SANITIZER_EXCLUDED_TESTS[@]}"
             # Hardware dispatch reports a TSan race while ROCr tears down its
             # async-event bookkeeping, outside rocjitsu-owned code.
             "HsaTranslateTest\.TranslateAndDispatchVectorAdd"
             "HsaTranslateTest\.TranslateAndDispatchMfma16x16"
+            # Direct HIP test discovery initializes the instrumented ROCr client,
+            # which reports a ConcurrentAsyncEvents race; vector add also exposes
+            # unsynchronized simulator/client buffer access. The daemon variants
+            # use the separately synchronized RPC path and remain enabled.
+            "HipMemcpyTest\.RoundTripFloat"
+            "HipMemcpyTest\.RoundTripInt"
+            "HipMemcpyTest\.DeviceToDevice"
+            "HipVectorAddTest\.CorrectResult"
             # This test has a five-second wall-clock assertion that becomes
             # load-sensitive at the TSan job's CI-level parallelism.
             "DaemonApi\.FullListenerQueueDoesNotBlockOrRemoveSocket"
@@ -251,13 +263,21 @@ jobs:
           TEST_REGEX="${{ matrix.test_regex }}"
           CMAKE_CONFIG_FLAGS=()
           if [[ "${{ matrix.enable_asan }}" == "1" && "${{ matrix.enable_ubsan }}" == "1" ]]; then
-            EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${SANITIZER_EXCLUDED_TESTS[*]}")"
+            if [[ -z "${{ matrix.cxx_compiler }}" || "${{ matrix.cxx_compiler }}" == *clang* ]]; then
+              EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${CLANG_ASAN_UBSAN_EXCLUDED_TESTS[*]}")"
+            else
+              EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${COMMON_SANITIZER_EXCLUDED_TESTS[*]}")"
+            fi
             CMAKE_CONFIG_FLAGS+=(
               -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O2 -g"
               -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O2 -g"
             )
           fi
           if [[ "${{ matrix.enable_tsan }}" == "1" ]]; then
+            # The CP reads a stable MAP_SHARED alias rather than the client's
+            # virtual address. TSan keys shadow state by address and therefore
+            # cannot validate the store/load synchronization across those two
+            # aliases; these tests cover lifecycle and teardown races only.
             EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${TSAN_EXCLUDED_TESTS[*]}")"
           fi
           if [[ -n "${{ matrix.c_compiler }}" ]]; then

@@ -138,6 +138,14 @@ public:
   void setup_topology(const config::KfdDeviceConfig &dev, uint32_t num_xcc);
   void setup_topology(const std::vector<config::KfdDeviceConfig> &devs, uint32_t num_xcc);
   bool is_doorbell_range(const void *addr, size_t length) const override;
+
+  /// @brief Perform an ordinary MAP_FIXED mmap while retiring replaced client doorbell views.
+  /// @details The interposer routes non-KFD fixed mappings here so a successful replacement no
+  /// longer remains protected or teardown-owned as a doorbell. The canonical backing and private
+  /// command-processor alias are retained. A failed mmap restores the retired GPU mappings/views.
+  void *mmap_replacing_client_doorbell_views(void *addr, size_t length, int prot, int flags, int fd,
+                                             off_t offset) override;
+
   uint32_t gpu_id() const { return gpus_.empty() ? 0 : gpus_[0].gpu_id; }
   uint32_t num_gpus() const { return static_cast<uint32_t>(gpus_.size()); }
   const Sysfs &topology() const { return topology_; }
@@ -167,6 +175,20 @@ public:
   /// @details Introspection for tests/diagnostics. Each live KFD fd (the primary
   /// plus every dup) holds one reference; the process is destroyed at zero.
   [[nodiscard]] uint32_t local_open_ref_count() const;
+
+  /// @brief Make the next private doorbell-monitor mmap fail with ENOMEM.
+  /// @details One-shot test seam for verifying failure atomicity before a
+  /// destructive client MAP_FIXED mapping.
+  void fail_next_doorbell_monitor_mmap_for_testing() {
+    fail_next_doorbell_monitor_mmap_.store(true, std::memory_order_release);
+  }
+
+  /// @brief Place the next private doorbell-monitor mmap at @p addr.
+  /// @details Uses MAP_FIXED_NOREPLACE so this test seam never destroys an
+  /// unexpected mapping while deterministically exercising alias relocation.
+  void force_next_doorbell_monitor_mmap_at_for_testing(void *addr) {
+    next_doorbell_monitor_mmap_addr_.store(addr, std::memory_order_release);
+  }
 
   [[nodiscard]] bool owns_fd(int fd) const override;
   std::string redirect_sysfs_path(const char *path) const override;
@@ -425,6 +447,8 @@ private:
   std::vector<GpuDevice> gpus_;
   bool daemon_mode_ = false;
   std::atomic<int> fd_{-1};
+  std::atomic<bool> fail_next_doorbell_monitor_mmap_{false};
+  std::atomic<void *> next_doorbell_monitor_mmap_addr_{nullptr};
 
   /// @brief Process table mapping process_id to KfdProcess.
   /// @details Protected by process_mutex_ for concurrent daemon access.
