@@ -103,7 +103,7 @@ def gfx1250_generated_root(amdgpu_generated_root: Path) -> Path:
 
 def _generated_dir_name(arch_name: str) -> str:
     profile = Cdna5Profile()
-    if arch_name == profile.generated_arch_name:
+    if arch_name in ('gfx1250', profile.generated_arch_name):
         assert profile.generated_dir_name is not None
         return profile.generated_dir_name
     return arch_name
@@ -121,6 +121,7 @@ def _profile_for_arch(arch_name: str):
         'rdna3_5': Rdna3_5Profile,
         'rdna4': Rdna4Profile,
         'cdna5': Cdna5Profile,
+        'gfx1250': Cdna5Profile,
     }
     return profile_types[arch_name]()
 
@@ -293,7 +294,9 @@ def _generated_bool_method_body(cpp: str, class_name: str, method: str) -> str:
 
 
 def _generated_decode_body(cpp: str, class_name: str) -> str:
-    start = cpp.index(f'DecodeResult decode{class_name}(')
+    # Generated files declare every decoder before defining it.  Select the
+    # definition, including when several numbered model shards are combined.
+    start = cpp.rindex(f'DecodeResult decode{class_name}(')
     end = cpp.index('\n}\n} // namespace detail', start)
     return cpp[start : end + 2]
 
@@ -1372,6 +1375,23 @@ def test_readlane_family_decodes_lane_selector_as_scalar_value():
     body = codegen._gen_execute_body(inst, sem, 'ENC_VOP3')
 
     assert 'uint32_t lane = amdgpu::RegisterAccess(wf).read_scalar(src1);' in body
+    assert 'lane &= wf.kernel_wave_size() - 1;' not in body
+    assert 'read_scalar_selected_lane(src0, lane)' in body
+    assert 'src1.encoding_value_' not in body
+
+    operands = [
+        Operand('vdst', 32, 'OPR_VGPR', False, True, False, False, 0),
+        Operand('src0', 32, 'OPR_SSRC', True, False, False, False, 1),
+        Operand('src1', 32, 'OPR_SSRC_LANESEL', True, False, False, False, 2),
+    ]
+    inst = Instruction('V_WRITELANE_B32', 'ENC_VOP3', 0, operands)
+    sem = InstructionSemantics('V_WRITELANE_B32', 'vector_writelane')
+
+    body = codegen._gen_execute_body(inst, sem, 'ENC_VOP3')
+
+    assert 'uint32_t lane = amdgpu::RegisterAccess(wf).read_scalar(src1);' in body
+    assert 'lane &= wf.kernel_wave_size() - 1;' not in body
+    assert 'write_scalar_selected_lane(vdst, lane, val)' in body
     assert 'src1.encoding_value_' not in body
 
 
@@ -1401,7 +1421,7 @@ def test_div_scale_writes_explicit_sdst_mask():
     )
 
     assert 'amdgpu::write_wave_mask_scalar(sdst, wf, vcc);' in body
-    assert 'wf.set_vcc(vcc)' not in body
+    assert 'wf.set_vcc' not in body
 
     callback_body = gen_vector_div_scale(
         ['vdst', 'sdst'],
@@ -1418,7 +1438,7 @@ def test_vector_cmp_writes_explicit_sdst_mask():
     body = gen_vector_cmp(['sdst'], ['src0', 'src1'], 't', 'u32', is_vop3=True)
 
     assert 'amdgpu::write_wave_mask_scalar(sdst, wf, vcc);' in body
-    assert 'wf.set_vcc(vcc)' not in body
+    assert 'wf.set_vcc' not in body
 
 
 def test_vector_cmp_omits_redundant_mask_clears():
@@ -1432,14 +1452,14 @@ def test_vop3_cmp_writes_explicit_mask_width_for_wave_size():
     body = gen_vector_cmp(['vdst'], ['src0', 'src1'], 'eq', 'f32', is_vop3=True)
 
     assert 'amdgpu::write_wave_mask_scalar(vdst, wf, vcc);' in body
-    assert 'wf.set_vcc(vcc)' not in body
+    assert 'wf.set_vcc' not in body
 
 
 def test_vop3_add_co_writes_explicit_sdst_mask_width_for_wave_size():
     body = gen_vector_add_co(['vdst', 'sdst'], ['src0', 'src1'], 'add', 'u32')
 
     assert 'amdgpu::write_wave_mask_scalar(sdst, wf, vcc);' in body
-    assert 'wf.set_vcc(vcc)' not in body
+    assert 'wf.set_vcc' not in body
 
 
 def test_vop3_mad_u64_u32_writes_explicit_sdst_carry():
@@ -1450,7 +1470,7 @@ def test_vop3_mad_u64_u32_writes_explicit_sdst_carry():
     assert 'if (result < product)' in body
     assert 'carry |= 1ULL << lane;' in body
     assert 'amdgpu::write_wave_mask_scalar(sdst, wf, carry);' in body
-    assert 'wf.set_vcc(carry)' not in body
+    assert 'wf.set_vcc' not in body
 
     callback_body = gen_vector_mad_64_32(
         ['vdst', 'sdst'],
@@ -1468,7 +1488,7 @@ def test_vector_cmp_class_writes_explicit_sdst_mask():
     )
 
     assert 'amdgpu::write_wave_mask_scalar(sdst, wf, vcc);' in body
-    assert 'wf.set_vcc(vcc)' not in body
+    assert 'wf.set_vcc' not in body
 
     callback_body = gen_vector_cmp_class(
         ['sdst'],
@@ -1560,13 +1580,12 @@ def test_vop3_compare_simd_probe_can_commit_raw_result():
         'v_subrev_co_ci_u32_vop2',
     ),
 )
-def test_vop2_carry_simd_probe_can_commit_raw_result(template_name: str):
+def test_vop2_carry_simd_probe_requires_result_writer(template_name: str):
     default_probe = simd_probe_line(template_name)
     commit_probe = simd_probe_line(template_name, result_writer='commit_result')
 
-    assert default_probe is not None
+    assert default_probe is None
     assert commit_probe is not None
-    assert 'ROCJITSU_TRY_SIMD_VOP2_CARRY(' in default_probe
     assert 'ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(commit_result,' in commit_probe
 
 
@@ -2740,7 +2759,7 @@ def test_generated_literal32_widening_shapes_cover_gfx1250_and_cdna_vopc(
     _run_multi(args)
 
     gfx_operand_exec = (gfx1250_generated_root / 'operand_exec.cpp').read_text()
-    gfx_vop3_alu = (gfx1250_generated_root / 'vop3_alu.cpp').read_text()
+    gfx_vop3_alu = _generated_split_model_source(gfx1250_generated_root, 'vop3_alu')
     gfx_vop3_data = (gfx1250_generated_root / 'vop3_data.cpp').read_text()
     gfx_vop3_ternary = (gfx1250_generated_root / 'vop3_ternary.cpp').read_text()
     gfx_vop3p = (gfx1250_generated_root / 'vop3p.cpp').read_text()
@@ -3487,7 +3506,9 @@ def test_generated_dpp_legality_checks_are_coalesced(
     for arch, filename, class_name in cases:
         source = (amdgpu_generated_root / arch / filename).read_text()
         constructor = _generated_constructor_body(source, class_name)
-        assert constructor.count('does not support DPP') == 1, class_name
+        decode_body = _generated_decode_body(source, class_name)
+        assert decode_body.count('does not support DPP') == 1, class_name
+        assert 'does not support DPP' not in constructor, class_name
 
 
 def test_generated_optional_includes_have_direct_uses(amdgpu_generated_root: Path):
@@ -3796,12 +3817,9 @@ def test_generated_dpp_commit_separates_modern_source_and_destination_masks(
 
         body = _generated_method_body(vopc, 'VCmpEqU32Vopc', 'VCmpLeU32Vopc')
         assert 'ScopedVgprWriteMask' not in body
-        if arch.startswith('cdna'):
-            assert 'dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask' in body
-        else:
-            assert 'dpp_row_bank_mask_ = dpp_plan_.row_bank_mask' in body
-            assert 'dpp_source_write_mask_ = dpp_plan_.source_write_mask' in body
-            assert 'amdgpu::dpp::dpp_compare_result(' in body
+        assert 'dpp_row_bank_mask_ = dpp_plan_.row_bank_mask' in body
+        assert 'dpp_source_write_mask_ = dpp_plan_.source_write_mask' in body
+        assert 'amdgpu::dpp::dpp_compare_result(' in body
 
 
 def test_rdna1_2_generated_vopc_dpp_is_explicitly_unsupported(
@@ -3840,7 +3858,7 @@ def test_generated_cmpx_dpp_cleanup_applies_arch_compare_rules(
 
         body = _generated_method_body(vopc, 'VCmpxEqU32Vopc', 'VCmpxLeU32Vopc')
         assert 'uint64_t dpp_old_exec_ = wf.exec();' in body, arch
-        if arch.startswith('cdna'):
+        if arch.startswith('cdna') and arch != 'cdna5':
             assert 'uint64_t new_exec = wf.exec();' in body, arch
             assert 'dpp_old_exec_ & ~dpp_write_mask_' in body, arch
             assert 'wf.set_exec(merged_exec);' in body, arch
@@ -3951,6 +3969,7 @@ def test_generated_modern_dpp_source_policy_covers_non_vop1_families(
     assert sdst_body.count('amdgpu::dpp::make_dpp_plan(') == 1
     assert 'dpp_secondary_source_write_mask_' not in sdst_body
     assert 'commit_result' in sdst_body
+    assert 'amdgpu::dpp::dpp_source_suppressed_result(' in sdst_body
     assert 'dpp_secondary_preserve_mask' not in sdst_body
     assert 'execute_v_add_co_ci_u32_vop3(*this, wf, commit_result)' in sdst_body
     assert 'apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf)' in sdst_body
@@ -3967,6 +3986,23 @@ def test_shared_vop3_secondary_result_writer_keeps_simd_enabled(
     assert 'ROCJITSU_TRY_SIMD_VOP3_CIN_RESULT(commit_result,' in body
     assert 'commit_result(vcc);' in body
     assert 'write_wave_mask_scalar' not in body
+
+
+def test_generated_rdna12_sdwa_explicit_compare_uses_wave_width_destination(
+    amdgpu_generated_root: Path,
+):
+    for arch in ('rdna1', 'rdna2'):
+        source = _execution_source_path(
+            amdgpu_generated_root / arch / 'vopc.cpp', _profile_for_arch(arch)
+        ).read_text()
+        body = _generated_function_body(
+            source, 'RJ_NOINLINE void VCmpEqU32Vopc::execute_modifier_impl'
+        )
+        assert (
+            'amdgpu::write_explicit_lane_mask(sb + sdwa_sdst_, wf, cmp_result);' in body
+        )
+        assert 'sb + sdwa_sdst_ + 1' not in body
+        assert 'wf.set_vcc(dpp_old_vcc_);' in body
 
 
 @pytest.mark.parametrize(
@@ -3986,7 +4022,7 @@ def test_shared_vop2_carry_result_writer_keeps_simd_enabled(
     assert 'CommitResult commit_result' in body
     assert 'ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(commit_result,' in body
     assert 'commit_result(vcc);' in body
-    assert 'wf.set_vcc(vcc);' not in body
+    assert 'wf.set_vcc' not in body
 
 
 @pytest.mark.parametrize(
@@ -4059,7 +4095,7 @@ def test_generated_vop2_carry_dpp_preserves_only_source_suppressed_vcc(
         assert 'uint64_t dpp_old_vcc_ = wf.vcc();' in body
         assert 'dpp_source_write_mask_ = dpp_plan_.source_write_mask;' in body
         merge_start = body.index('amdgpu::dpp::dpp_source_suppressed_result(')
-        merge_end = body.index('wf.set_vcc(final_result);', merge_start)
+        merge_end = body.index('wf.set_vcc_mask(final_result);', merge_start)
         merge = body[merge_start:merge_end]
         assert 'dpp_old_vcc_, dpp_old_exec_, dpp_source_write_mask_' in merge
         assert 'row_bank' not in merge
@@ -4081,15 +4117,18 @@ def test_generated_rdna4_rejects_opcode_illegal_dpp(
     for filename, class_name, reason in cases:
         source = (rdna4 / filename).read_text()
         constructor = _generated_constructor_body(source, class_name)
-        assert reason in constructor, class_name
-        assert 'util::InvalidInst' in constructor, class_name
+        decode_body = _generated_decode_body(source, class_name)
+        assert reason in decode_body, class_name
+        assert 'emit_error.emit()' in decode_body, class_name
+        assert 'util::InvalidInst' not in constructor, class_name
 
     fma_mix = (rdna4 / 'vop3p.cpp').read_text()
     legal_constructor = _generated_constructor_body(fma_mix, 'VFmaMixF32Vop3p')
+    legal_decode = _generated_decode_body(fma_mix, 'VFmaMixF32Vop3p')
     assert 'Vop3pVopDpp16MachineInst' in legal_constructor
     assert 'does not support DPP' not in legal_constructor
-    assert 'dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)' in legal_constructor
-    assert 'reserved DPP control' in legal_constructor
+    assert 'dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)' in legal_decode
+    assert 'reserved DPP control' in legal_decode
 
 
 @pytest.mark.parametrize(
@@ -4108,16 +4147,16 @@ def test_generated_modern_rdna_validates_dpp_opsel_alignment(
         if arch == 'gfx1250'
         else (arch_root / vop3_filename).read_text()
     )
-    vop3_constructor = _generated_constructor_body(vop3, 'VAddF16Vop3')
-    assert 'DPP requires matching OPSEL halves' in vop3_constructor
-    assert 'op->opsel != 0 && op->opsel != 0xB' in vop3_constructor
+    vop3_decode = _generated_decode_body(vop3, 'VAddF16Vop3')
+    assert 'DPP requires matching OPSEL halves' in vop3_decode
+    assert 'op->opsel != 0 && op->opsel != 0xB' in vop3_decode
 
     vop3p = (arch_root / 'vop3p.cpp').read_text()
-    vop3p_constructor = _generated_constructor_body(vop3p, 'VFmaMixF32Vop3p')
-    assert 'DPP requires low/low and high/high OPSEL' in vop3p_constructor
-    assert 'op->opsel != 0 || opsel_hi != 0x7' in vop3p_constructor
-    assert f'op->{opsel_hi_2_field}' in vop3p_constructor
-    assert 'reinterpret_cast<const uint32_t *>(inst)[0] >> 14' not in vop3p_constructor
+    vop3p_decode = _generated_decode_body(vop3p, 'VFmaMixF32Vop3p')
+    assert 'DPP requires low/low and high/high OPSEL' in vop3p_decode
+    assert 'op->opsel != 0 || opsel_hi != 0x7' in vop3p_decode
+    assert f'op->{opsel_hi_2_field}' in vop3p_decode
+    assert 'reinterpret_cast<const uint32_t *>(inst)[0] >> 14' not in vop3p_decode
 
 
 @pytest.mark.parametrize(
@@ -4132,10 +4171,10 @@ def test_generated_modern_rdna_validates_dpp_opsel_alignment(
         ('rdna3', Rdna3Profile),
         ('rdna3_5', Rdna3_5Profile),
         ('rdna4', Rdna4Profile),
-        ('gfx1250', Gfx1250Profile),
+        ('gfx1250', Cdna5Profile),
     ],
 )
-def test_all_generated_valu_constructors_match_dpp_profile_rules(
+def test_all_generated_valu_models_match_dpp_profile_rules(
     amdgpu_generated_root: Path, arch: str, profile_type
 ):
     isa_xml = _mrisa_dir() / f'amdgpu_isa_{arch}.xml'
@@ -4181,6 +4220,7 @@ def test_all_generated_valu_constructors_match_dpp_profile_rules(
             )
             constructor = constructors.get(inst.fmt_name)
             assert constructor is not None, inst.fmt_name
+            decode_body = _generated_decode_body(model_source, inst.fmt_name)
 
             if inst.is_implied_literal_enc:
                 # Implied-literal/source-extension decoding is owned by the
@@ -4188,7 +4228,8 @@ def test_all_generated_valu_constructors_match_dpp_profile_rules(
                 continue
 
             if rule is DppOpcodeRule.FORBID:
-                assert 'does not support DPP' in constructor, inst.fmt_name
+                assert 'does not support DPP' in decode_body, inst.fmt_name
+                assert 'does not support DPP' not in constructor, inst.fmt_name
                 checked += 1
                 continue
 
@@ -4212,9 +4253,9 @@ def test_all_generated_valu_constructors_match_dpp_profile_rules(
                 continue
 
             if rule is DppOpcodeRule.ROW_SELECT_ONLY:
-                assert 'only DPP row-select controls' in constructor, inst.fmt_name
-                assert 'ROW_SELECT_BASE' in constructor, inst.fmt_name
-                assert 'ROW_SELECT_MAX' in constructor, inst.fmt_name
+                assert 'only DPP row-select controls' in decode_body, inst.fmt_name
+                assert 'ROW_SELECT_BASE' in decode_body, inst.fmt_name
+                assert 'ROW_SELECT_MAX' in decode_body, inst.fmt_name
                 if dpp8_struct is not None:
                     assert (
                         f'reinterpret_cast<const {dpp8_struct}' not in constructor
@@ -4224,7 +4265,7 @@ def test_all_generated_valu_constructors_match_dpp_profile_rules(
                     assert (
                         f'reinterpret_cast<const {dpp16_struct}' in constructor
                     ), inst.fmt_name
-                    assert 'dpp_ctrl_is_valid' in constructor, inst.fmt_name
+                    assert 'dpp_ctrl_is_valid' in decode_body, inst.fmt_name
                 if supports_dpp8:
                     assert (
                         f'reinterpret_cast<const {dpp8_struct}' in constructor
@@ -4237,24 +4278,24 @@ def test_all_generated_valu_constructors_match_dpp_profile_rules(
 def test_generated_gfx1250_limits_64bit_dpp_to_row_select(
     amdgpu_generated_root: Path,
 ):
-    constructor_source = _generated_split_model_source(
+    model_source = _generated_split_model_source(
         amdgpu_generated_root / _generated_dir_name('gfx1250'), 'vop3_alu'
     )
-    constructor = _generated_constructor_body(constructor_source, 'VAddF64Vop3')
-    assert 'only DPP row-select controls' in constructor
-    assert 'amdgpu::dpp::ROW_SELECT_BASE' in constructor
-    assert 'amdgpu::dpp::ROW_SELECT_MAX' in constructor
+    decode_body = _generated_decode_body(model_source, 'VAddF64Vop3')
+    assert 'only DPP row-select controls' in decode_body
+    assert 'amdgpu::dpp::ROW_SELECT_BASE' in decode_body
+    assert 'amdgpu::dpp::ROW_SELECT_MAX' in decode_body
 
 
 @pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
 def test_generated_cdna_64bit_input_dpp_is_row_only(
     amdgpu_generated_root: Path, arch: str
 ):
-    constructor_source = (amdgpu_generated_root / arch / 'vop1.cpp').read_text()
-    constructor = _generated_constructor_body(constructor_source, 'VMovB64Vop1')
-    assert 'only DPP row-select controls' in constructor
-    assert 'amdgpu::dpp::ROW_SELECT_BASE' in constructor
-    assert 'amdgpu::dpp::ROW_SELECT_MAX' in constructor
+    model_source = (amdgpu_generated_root / arch / 'vop1.cpp').read_text()
+    decode_body = _generated_decode_body(model_source, 'VMovB64Vop1')
+    assert 'only DPP row-select controls' in decode_body
+    assert 'amdgpu::dpp::ROW_SELECT_BASE' in decode_body
+    assert 'amdgpu::dpp::ROW_SELECT_MAX' in decode_body
 
 
 def test_shared_execute_preflight_detects_cdna3_fp8_cvt_divergence():

@@ -7459,10 +7459,9 @@ RJ_NOINLINE void VAddCoCiU32Vop3SdstEnc::execute_modifier_impl(amdgpu::Wavefront
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
-    if (inst_.src0 == amdgpu::SRC_DPP) {
-      uint64_t preserve_mask = dpp_old_exec_ & ~dpp_source_write_mask_;
-      final_result = (raw_result & ~preserve_mask) | (dpp_old_secondary_dst_ & preserve_mask);
-    }
+    if (inst_.src0 == amdgpu::SRC_DPP)
+      final_result = amdgpu::dpp::dpp_source_suppressed_result(
+          raw_result, dpp_old_secondary_dst_, dpp_old_exec_, dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(sdst, wf, final_result);
   };
   amdgpu::execute_v_add_co_ci_u32_vop3(*this, wf, commit_result);
@@ -7505,10 +7504,9 @@ RJ_NOINLINE void VSubCoCiU32Vop3SdstEnc::execute_modifier_impl(amdgpu::Wavefront
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
-    if (inst_.src0 == amdgpu::SRC_DPP) {
-      uint64_t preserve_mask = dpp_old_exec_ & ~dpp_source_write_mask_;
-      final_result = (raw_result & ~preserve_mask) | (dpp_old_secondary_dst_ & preserve_mask);
-    }
+    if (inst_.src0 == amdgpu::SRC_DPP)
+      final_result = amdgpu::dpp::dpp_source_suppressed_result(
+          raw_result, dpp_old_secondary_dst_, dpp_old_exec_, dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(sdst, wf, final_result);
   };
   amdgpu::execute_v_sub_co_ci_u32_vop3(*this, wf, commit_result);
@@ -7551,10 +7549,9 @@ RJ_NOINLINE void VSubrevCoCiU32Vop3SdstEnc::execute_modifier_impl(amdgpu::Wavefr
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
-    if (inst_.src0 == amdgpu::SRC_DPP) {
-      uint64_t preserve_mask = dpp_old_exec_ & ~dpp_source_write_mask_;
-      final_result = (raw_result & ~preserve_mask) | (dpp_old_secondary_dst_ & preserve_mask);
-    }
+    if (inst_.src0 == amdgpu::SRC_DPP)
+      final_result = amdgpu::dpp::dpp_source_suppressed_result(
+          raw_result, dpp_old_secondary_dst_, dpp_old_exec_, dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(sdst, wf, final_result);
   };
   amdgpu::execute_v_subrev_co_ci_u32_vop3(*this, wf, commit_result);
@@ -7603,10 +7600,9 @@ RJ_NOINLINE void VDivScaleF64Vop3SdstEnc::execute_modifier_impl(amdgpu::Wavefron
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
-    if (inst_.src0 == amdgpu::SRC_DPP) {
-      uint64_t preserve_mask = dpp_old_exec_ & ~dpp_source_write_mask_;
-      final_result = (raw_result & ~preserve_mask) | (dpp_old_secondary_dst_ & preserve_mask);
-    }
+    if (inst_.src0 == amdgpu::SRC_DPP)
+      final_result = amdgpu::dpp::dpp_source_suppressed_result(
+          raw_result, dpp_old_secondary_dst_, dpp_old_exec_, dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(sdst, wf, final_result);
   };
   amdgpu::execute_v_div_scale_f64_vop3(*this, wf, commit_result);
@@ -7647,10 +7643,9 @@ RJ_NOINLINE void VMadCoU64U32Vop3SdstEnc::execute_modifier_impl(amdgpu::Wavefron
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
-    if (inst_.src0 == amdgpu::SRC_DPP) {
-      uint64_t preserve_mask = dpp_old_exec_ & ~dpp_source_write_mask_;
-      final_result = (raw_result & ~preserve_mask) | (dpp_old_secondary_dst_ & preserve_mask);
-    }
+    if (inst_.src0 == amdgpu::SRC_DPP)
+      final_result = amdgpu::dpp::dpp_source_suppressed_result(
+          raw_result, dpp_old_secondary_dst_, dpp_old_exec_, dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(sdst, wf, final_result);
   };
   amdgpu::execute_v_mad_co_u64_u32_vop3(*this, wf, commit_result);
@@ -7691,10 +7686,9 @@ RJ_NOINLINE void VMadCoI64I32Vop3SdstEnc::execute_modifier_impl(amdgpu::Wavefron
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
-    if (inst_.src0 == amdgpu::SRC_DPP) {
-      uint64_t preserve_mask = dpp_old_exec_ & ~dpp_source_write_mask_;
-      final_result = (raw_result & ~preserve_mask) | (dpp_old_secondary_dst_ & preserve_mask);
-    }
+    if (inst_.src0 == amdgpu::SRC_DPP)
+      final_result = amdgpu::dpp::dpp_source_suppressed_result(
+          raw_result, dpp_old_secondary_dst_, dpp_old_exec_, dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(sdst, wf, final_result);
   };
   amdgpu::execute_v_mad_co_i64_i32_vop3(*this, wf, commit_result);
@@ -7737,10 +7731,9 @@ RJ_NOINLINE void VAddCoU32Vop3SdstEnc::execute_modifier_impl(amdgpu::Wavefront &
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
-    if (inst_.src0 == amdgpu::SRC_DPP) {
-      uint64_t preserve_mask = dpp_old_exec_ & ~dpp_source_write_mask_;
-      final_result = (raw_result & ~preserve_mask) | (dpp_old_secondary_dst_ & preserve_mask);
-    }
+    if (inst_.src0 == amdgpu::SRC_DPP)
+      final_result = amdgpu::dpp::dpp_source_suppressed_result(
+          raw_result, dpp_old_secondary_dst_, dpp_old_exec_, dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(sdst, wf, final_result);
   };
   amdgpu::execute_v_add_co_u32_vop3(*this, wf, commit_result);
@@ -7783,10 +7776,9 @@ RJ_NOINLINE void VSubCoU32Vop3SdstEnc::execute_modifier_impl(amdgpu::Wavefront &
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
-    if (inst_.src0 == amdgpu::SRC_DPP) {
-      uint64_t preserve_mask = dpp_old_exec_ & ~dpp_source_write_mask_;
-      final_result = (raw_result & ~preserve_mask) | (dpp_old_secondary_dst_ & preserve_mask);
-    }
+    if (inst_.src0 == amdgpu::SRC_DPP)
+      final_result = amdgpu::dpp::dpp_source_suppressed_result(
+          raw_result, dpp_old_secondary_dst_, dpp_old_exec_, dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(sdst, wf, final_result);
   };
   amdgpu::execute_v_sub_co_u32_vop3(*this, wf, commit_result);
@@ -7829,10 +7821,9 @@ RJ_NOINLINE void VSubrevCoU32Vop3SdstEnc::execute_modifier_impl(amdgpu::Wavefron
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
-    if (inst_.src0 == amdgpu::SRC_DPP) {
-      uint64_t preserve_mask = dpp_old_exec_ & ~dpp_source_write_mask_;
-      final_result = (raw_result & ~preserve_mask) | (dpp_old_secondary_dst_ & preserve_mask);
-    }
+    if (inst_.src0 == amdgpu::SRC_DPP)
+      final_result = amdgpu::dpp::dpp_source_suppressed_result(
+          raw_result, dpp_old_secondary_dst_, dpp_old_exec_, dpp_source_write_mask_);
     amdgpu::write_wave_mask_scalar(sdst, wf, final_result);
   };
   amdgpu::execute_v_subrev_co_u32_vop3(*this, wf, commit_result);

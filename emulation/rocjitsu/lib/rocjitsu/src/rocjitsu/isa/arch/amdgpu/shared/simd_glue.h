@@ -166,6 +166,13 @@ inline void write_explicit_lane_mask(const Operand &dst, Wavefront &wf, uint64_t
     amdgpu::RegisterAccess(wf).write_scalar64(dst, mask);
 }
 
+inline void write_explicit_lane_mask(uint32_t physical_dst, Wavefront &wf, uint64_t mask) {
+  amdgpu::RegisterAccess regs(wf);
+  regs.write_sgpr(physical_dst, static_cast<uint32_t>(mask));
+  if (wf.wf_size() > 32)
+    regs.write_sgpr(physical_dst + 1, static_cast<uint32_t>(mask >> 32));
+}
+
 inline util::native<uint32_t> simd_sign_extend_u32(util::native<uint32_t> v, unsigned bits) {
   assert(bits >= 1 && bits <= 32 && "simd_sign_extend_u32 requires a 1..32 bit width");
   const uint32_t sign = uint32_t{1} << (bits - 1);
@@ -859,13 +866,6 @@ template <typename Inst, typename CarryOp, typename WriteResult>
 template <typename Inst, typename CarryOp, typename WriteResult>
 [[nodiscard]] bool try_execute_binary_vop2_carry_simd(Inst &, Wavefront &, CarryOp, WriteResult) {
   return false;
-}
-
-template <typename Inst, typename CarryOp>
-[[nodiscard]] inline bool try_execute_binary_vop2_carry_simd(Inst &inst, Wavefront &wf,
-                                                             CarryOp carry_op) {
-  return try_execute_binary_vop2_carry_simd(inst, wf, carry_op,
-                                            [&](uint64_t result) { wf.set_vcc_mask(result); });
 }
 
 /// VOP2 ternary (fused multiply-add) SIMD fast path for literal-addend and
@@ -4394,15 +4394,8 @@ template <bool Vop3, typename Inst>
   if (::rocjitsu::amdgpu::try_execute_unary_vop1_simd<Tin, Tout>(inst, wf, __VA_ARGS__))           \
   return
 
-/// Carry-VOP2 counterpart. Lane type is fixed to uint32_t, so unlike the binary
-/// macro this takes only the functor. Variadic so the functor's commas pass
-/// through as one token sequence.
-#define ROCJITSU_TRY_SIMD_VOP2_CARRY(...)                                                          \
-  if (::rocjitsu::amdgpu::try_execute_binary_vop2_carry_simd(inst, wf, __VA_ARGS__))               \
-  return
-
-/// Result-writer variant used when the wrapper must merge DPP-suppressed VCC
-/// lanes before the architectural commit.
+/// Carry-VOP2 counterpart. The wrapper-owned writer merges DPP-suppressed
+/// lanes and applies the target wave-width policy before the VCC commit.
 #define ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(WRITE_RESULT, ...)                                     \
   if (::rocjitsu::amdgpu::try_execute_binary_vop2_carry_simd(inst, wf, __VA_ARGS__, WRITE_RESULT)) \
   return

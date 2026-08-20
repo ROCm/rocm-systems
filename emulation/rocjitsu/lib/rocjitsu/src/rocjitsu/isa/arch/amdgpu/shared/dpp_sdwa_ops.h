@@ -92,17 +92,18 @@ private:
     }
   }
 
-  const amdgpu::VgprStorage *simd_vgpr_storage_impl(const amdgpu::Wavefront &) const override {
-    return &lo_;
+  amdgpu::ConstVgprStorage simd_vgpr_storage_impl(const amdgpu::Wavefront &) const override {
+    return {reinterpret_cast<const uint32_t *>(&lo_), MAX_LANES};
   }
 
   amdgpu::ConstVgprStoragePair64
   simd_vgpr_storage64_impl(const amdgpu::Wavefront &) const override {
-    return {&lo_, &hi_};
+    return {{reinterpret_cast<const uint32_t *>(&lo_), MAX_LANES},
+            {reinterpret_cast<const uint32_t *>(&hi_), MAX_LANES}};
   }
 
-  amdgpu::VgprStorage lo_{};
-  amdgpu::VgprStorage hi_{};
+  simdojo::VectorReg<MAX_LANES, uint32_t> lo_{};
+  simdojo::VectorReg<MAX_LANES, uint32_t> hi_{};
   int lane_count_ = 0;
 };
 

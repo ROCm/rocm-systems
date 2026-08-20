@@ -947,13 +947,14 @@ void VDivFixupF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 
 void VReadlaneB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t lane = amdgpu::RegisterAccess(wf).read_scalar(src1);
-  amdgpu::RegisterAccess(wf).write_scalar(vdst, amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+  amdgpu::RegisterAccess(wf).write_scalar(
+      vdst, amdgpu::RegisterAccess(wf).read_scalar_selected_lane(src0, lane));
 }
 
 void VWritelaneB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t val = amdgpu::RegisterAccess(wf).read_scalar(src0);
   uint32_t lane = amdgpu::RegisterAccess(wf).read_scalar(src1);
-  amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, val);
+  amdgpu::RegisterAccess(wf).write_scalar_selected_lane(vdst, lane, val);
 }
 
 void VLdexpF32Vop3::execute_impl(amdgpu::Wavefront &wf) {

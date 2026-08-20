@@ -2350,6 +2350,8 @@ class CodeGenerator:
         )
         execution_method = textwrap.dedent('''\
             void Vopd::execute_impl(amdgpu::Wavefront &wf) {
+              if (wf.wf_size() != 32)
+                throw util::UnimplementedInst("VOPD requires Wave32");
             @EXECUTE_IMPL_BODY@
             }
             ''').replace('@EXECUTE_IMPL_BODY@', execute_impl_body)
@@ -5982,7 +5984,7 @@ class CodeGenerator:
                 f'  uint32_t lane = amdgpu::RegisterAccess(wf).read_scalar({src_ops[1]});'
             )
             L.append(
-                f'  amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, amdgpu::RegisterAccess(wf).read_lane({src_ops[0]}, lane));'
+                f'  amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, amdgpu::RegisterAccess(wf).read_scalar_selected_lane({src_ops[0]}, lane));'
             )
             return '\n'.join(L)
 
@@ -5994,7 +5996,7 @@ class CodeGenerator:
                 f'  uint32_t lane = amdgpu::RegisterAccess(wf).read_scalar({src_ops[1]});'
             )
             L.append(
-                f'  amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, val);'
+                f'  amdgpu::RegisterAccess(wf).write_scalar_selected_lane({dst_ops[0]}, lane, val);'
             )
             return '\n'.join(L)
 
@@ -9431,10 +9433,14 @@ class CodeGenerator:
                                 if len(_rejected_dpp_markers) == 1
                                 else 'DPP'
                             )
-                            ctor_body_parts.append(
-                                f'if ({" || ".join(marker for marker, _ in _rejected_dpp_markers)}) '
-                                f'throw util::InvalidInst("{inst.name} does not support '
-                                f'{_unsupported_dpp_label}", "");'
+                            _qualified_rejected_dpp_markers = [
+                                marker.replace('OpEncoding', factory_op_encoding)
+                                for marker, _ in _rejected_dpp_markers
+                            ]
+                            factory_validation_parts.append(
+                                f'if ({" || ".join(_qualified_rejected_dpp_markers)}) '
+                                f'[[unlikely]] return emit_error.emit() << "{inst.name} does not support '
+                                f'{_unsupported_dpp_label}";'
                             )
                         if (
                             self.isa_spec.profile.dpp_requires_opsel_lane_alignment
@@ -9447,17 +9453,20 @@ class CodeGenerator:
                                 'amdgpu::dpp::is_src_dpp8('
                                 'reinterpret_cast<const OpEncoding*>(inst)->src0))'
                             )
+                            _factory_dpp_marker_expr = _dpp_marker_expr.replace(
+                                'OpEncoding', factory_op_encoding
+                            )
                             if _dpp_enc_name.upper() == 'ENC_VOP3P':
                                 _opsel_hi_2_field = self._op_sel_hi_2_field(
                                     _dpp_enc_name
                                 )
-                                ctor_body_parts.append(
-                                    f'if ({_dpp_marker_expr}) {{'
-                                    ' auto *op = reinterpret_cast<const OpEncoding*>(inst);'
+                                factory_validation_parts.append(
+                                    f'if ({_factory_dpp_marker_expr}) {{'
+                                    f' auto *op = reinterpret_cast<const {factory_op_encoding}*>(inst);'
                                     ' uint32_t opsel_hi = op->opsel_hi |'
                                     f'     ((op->{_opsel_hi_2_field} & 1u) << 2);'
                                     ' if (op->opsel != 0 || opsel_hi != 0x7)'
-                                    f'   throw util::InvalidInst("{inst.mnemonic}: DPP requires low/low and high/high OPSEL", "");'
+                                    f'   [[unlikely]] return emit_error.emit() << "{inst.mnemonic}: DPP requires low/low and high/high OPSEL";'
                                     '}'
                                 )
                             else:
@@ -9478,11 +9487,11 @@ class CodeGenerator:
                                 if not _vop3_has_16bit_dst:
                                     _vop3_high_pattern = _vop3_input_mask
                                 _vop3_opsel_check = f'op->opsel != 0 && op->opsel != 0x{_vop3_high_pattern:X}'
-                                ctor_body_parts.append(
-                                    f'if ({_dpp_marker_expr}) {{'
-                                    ' auto *op = reinterpret_cast<const OpEncoding*>(inst);'
+                                factory_validation_parts.append(
+                                    f'if ({_factory_dpp_marker_expr}) {{'
+                                    f' auto *op = reinterpret_cast<const {factory_op_encoding}*>(inst);'
                                     f' if ({_vop3_opsel_check})'
-                                    f'   throw util::InvalidInst("{inst.mnemonic}: DPP requires matching OPSEL halves", "");'
+                                    f'   [[unlikely]] return emit_error.emit() << "{inst.mnemonic}: DPP requires matching OPSEL halves";'
                                     '}'
                                 )
                         for opnd in inst.operands:
@@ -9509,14 +9518,20 @@ class CodeGenerator:
                                     and _dpp_opcode_rule
                                     is DppOpcodeRule.ROW_SELECT_ONLY
                                 ):
-                                    ctor_body_parts.append(
-                                        f'if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding*>(inst)->src0)) '
-                                        f'throw util::InvalidInst("{inst.mnemonic}: only DPP row-select controls 0x150-0x15f are supported", "");'
-                                        f'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) {{'
+                                    _factory_src0 = f'reinterpret_cast<const {factory_op_encoding}*>(inst)->src0'
+                                    factory_validation_parts.append(
+                                        f'if (amdgpu::dpp::is_src_dpp8({_factory_src0})) '
+                                        f'[[unlikely]] return emit_error.emit() << "{inst.mnemonic}: only DPP row-select controls 0x150-0x15f are supported";'
+                                        f'if ({_factory_src0} == amdgpu::SRC_DPP) {{'
                                         f' auto *dp = reinterpret_cast<const {_dpp_struct}*>(inst);'
                                         f' if (dp->dpp_ctrl < amdgpu::dpp::ROW_SELECT_BASE ||'
                                         f'     dp->dpp_ctrl > amdgpu::dpp::ROW_SELECT_MAX)'
-                                        f'   throw util::InvalidInst("{inst.mnemonic}: only DPP row-select controls 0x150-0x15f are supported", "");'
+                                        f'   [[unlikely]] return emit_error.emit() << "{inst.mnemonic}: only DPP row-select controls 0x150-0x15f are supported";'
+                                        f'}}'
+                                    )
+                                    ctor_body_parts.append(
+                                        f'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) {{'
+                                        f' auto *dp = reinterpret_cast<const {_dpp_struct}*>(inst);'
                                         f' src0 = Operand({opnd.size}, OperandType::OPR_VGPR, dp->vsrc0);'
                                         f' dpp_ctrl_ = dp->dpp_ctrl;'
                                         f' dpp_row_mask_ = dp->row_mask;'
@@ -9543,22 +9558,27 @@ class CodeGenerator:
                                         )
                                     )
                                 if unsupported_dpp_markers:
-                                    unsupported_dpp_label = (
-                                        unsupported_dpp_markers[0][1]
-                                        if len(unsupported_dpp_markers) == 1
-                                        else 'DPP'
-                                    )
-                                    qualified_dpp_markers = [
-                                        marker.replace(
-                                            'OpEncoding', factory_op_encoding
+                                    # The encoding-wide check above also covers
+                                    # instructions with a logical src0. Keep this
+                                    # operand-local fallback only for marker
+                                    # combinations it did not already reject.
+                                    if not _rejected_dpp_markers:
+                                        unsupported_dpp_label = (
+                                            unsupported_dpp_markers[0][1]
+                                            if len(unsupported_dpp_markers) == 1
+                                            else 'DPP'
                                         )
-                                        for marker, _ in unsupported_dpp_markers
-                                    ]
-                                    factory_validation_parts.append(
-                                        f'if ({" || ".join(qualified_dpp_markers)}) '
-                                        f'[[unlikely]] return emit_error.emit() << "{inst.name} does not support '
-                                        f'{unsupported_dpp_label}";'
-                                    )
+                                        qualified_dpp_markers = [
+                                            marker.replace(
+                                                'OpEncoding', factory_op_encoding
+                                            )
+                                            for marker, _ in unsupported_dpp_markers
+                                        ]
+                                        factory_validation_parts.append(
+                                            f'if ({" || ".join(qualified_dpp_markers)}) '
+                                            f'[[unlikely]] return emit_error.emit() << "{inst.name} does not support '
+                                            f'{unsupported_dpp_label}";'
+                                        )
                                 elif (
                                     _dpp_struct
                                     and _supports_dpp_encoding
@@ -9574,12 +9594,18 @@ class CodeGenerator:
                                     _allows_row_xmask = str(
                                         self.isa_spec.profile.dpp_supports_row_xmask
                                     ).lower()
-                                    ctor_body_parts.append(
-                                        f'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) {{'
+                                    _factory_src0 = f'reinterpret_cast<const {factory_op_encoding}*>(inst)->src0'
+                                    factory_validation_parts.append(
+                                        f'if ({_factory_src0} == amdgpu::SRC_DPP) {{'
                                         f' auto *dp = reinterpret_cast<const {_dpp_struct}*>(inst);'
                                         f' if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, '
                                         f'{_allows_wave_controls}, {_allows_row_bcast}, {_allows_row_xmask}))'
-                                        f'   throw util::InvalidInst("{inst.mnemonic}: reserved DPP control", "");'
+                                        f'   [[unlikely]] return emit_error.emit() << "{inst.mnemonic}: reserved DPP control";'
+                                        f'}}'
+                                    )
+                                    ctor_body_parts.append(
+                                        f'if (reinterpret_cast<const OpEncoding*>(inst)->src0 == amdgpu::SRC_DPP) {{'
+                                        f' auto *dp = reinterpret_cast<const {_dpp_struct}*>(inst);'
                                         f' src0 = Operand({opnd.size}, OperandType::OPR_VGPR, dp->vsrc0);'
                                         f' dpp_ctrl_ = dp->dpp_ctrl;'
                                         f' dpp_row_mask_ = dp->row_mask;'
@@ -10266,13 +10292,10 @@ class CodeGenerator:
                             _secondary_final_result = ''
                             if _modern_dpp_sources:
                                 _secondary_final_result = (
-                                    '    if (inst_.src0 == amdgpu::SRC_DPP) {\n'
-                                    '      uint64_t preserve_mask =\n'
-                                    '          dpp_old_exec_ & ~dpp_source_write_mask_;\n'
-                                    '      final_result =\n'
-                                    '          (raw_result & ~preserve_mask) |\n'
-                                    '          (dpp_old_secondary_dst_ & preserve_mask);\n'
-                                    '    }\n'
+                                    '    if (inst_.src0 == amdgpu::SRC_DPP)\n'
+                                    '      final_result = amdgpu::dpp::dpp_source_suppressed_result(\n'
+                                    '          raw_result, dpp_old_secondary_dst_, dpp_old_exec_,\n'
+                                    '          dpp_source_write_mask_);\n'
                                 )
                             _result_commit_setup = (
                                 '  auto commit_result = [&](uint64_t raw_result) {\n'
@@ -10295,7 +10318,7 @@ class CodeGenerator:
                                 '  auto commit_result = [&](uint64_t raw_result) {\n'
                                 '    uint64_t final_result = raw_result;\n'
                                 f'{_implicit_vcc_final_result}'
-                                '    wf.set_vcc(final_result);\n'
+                                '    wf.set_vcc_mask(final_result);\n'
                                 '  };\n'
                             )
                             _result_shared_arg = ', commit_result'
@@ -10321,7 +10344,7 @@ class CodeGenerator:
                         elif _uses_implicit_vcc_result_writer:
                             _ordinary_result_commit_setup = (
                                 '  auto commit_result = [&](uint64_t raw_result) {\n'
-                                '    wf.set_vcc(raw_result);\n'
+                                '    wf.set_vcc_mask(raw_result);\n'
                                 '  };\n'
                             )
                         # SDWA postamble: apply dst_sel merge and float clamp after ALU.
@@ -10345,7 +10368,9 @@ class CodeGenerator:
                                 if _is_cmpx:
                                     _write_result = '    wf.set_exec(dpp_cmp_result);\n'
                                 elif _is_vopc:
-                                    _write_result = '    wf.set_vcc(dpp_cmp_result);\n'
+                                    _write_result = (
+                                        '    wf.set_vcc_mask(dpp_cmp_result);\n'
+                                    )
                                 else:
                                     _write_result = (
                                         f'    amdgpu::write_wave_mask_scalar({_compare_dst_name}, wf, '
@@ -10370,10 +10395,7 @@ class CodeGenerator:
                                         '  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {\n'
                                         '    uint64_t cmp_result = wf.vcc();\n'
                                         '    uint32_t sb = wf.sgpr_alloc().base;\n'
-                                        '    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, '
-                                        'static_cast<uint32_t>(cmp_result));\n'
-                                        '    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1,\n'
-                                        '        static_cast<uint32_t>(cmp_result >> 32));\n'
+                                        '    amdgpu::write_explicit_lane_mask(sb + sdwa_sdst_, wf, cmp_result);\n'
                                         '    wf.set_vcc(dpp_old_vcc_);\n'
                                         '  }\n'
                                     )
@@ -10400,8 +10422,7 @@ class CodeGenerator:
                                         '  if (inst_.src0 == amdgpu::SRC_SDWA && sdwa_sd_) {\n'
                                         '    uint64_t cmp_result = wf.vcc();\n'
                                         '    uint32_t sb = wf.sgpr_alloc().base;\n'
-                                        '    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_, static_cast<uint32_t>(cmp_result));\n'
-                                        '    amdgpu::RegisterAccess(wf).write_sgpr(sb + sdwa_sdst_ + 1, static_cast<uint32_t>(cmp_result >> 32));\n'
+                                        '    amdgpu::write_explicit_lane_mask(sb + sdwa_sdst_, wf, cmp_result);\n'
                                         '    wf.set_vcc(dpp_old_vcc_);\n'
                                         '  }\n'
                                     )
@@ -12613,8 +12634,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             execution_decls += (
                 '  std::optional<uint32_t> simd_vgpr_base_impl(const amdgpu::Wavefront &wf) const override;\n'
                 '  std::optional<uint32_t> simd_vgpr_base_mut_impl(amdgpu::Wavefront &wf) const override;\n'
-                '  const amdgpu::VgprStorage *simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const override;\n'
-                '  amdgpu::VgprStorage *simd_vgpr_storage_mut_impl(amdgpu::Wavefront &wf) const override;\n'
+                '  amdgpu::ConstVgprStorage simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const override;\n'
+                '  amdgpu::VgprStorage simd_vgpr_storage_mut_impl(amdgpu::Wavefront &wf) const override;\n'
                 '  amdgpu::ConstVgprStoragePair64 simd_vgpr_storage64_impl(const amdgpu::Wavefront &wf) const override;\n'
                 '  amdgpu::VgprStoragePair64 simd_vgpr_storage64_mut_impl(amdgpu::Wavefront &wf) const override;\n'
                 '  void simd_notify_read_impl(const amdgpu::Wavefront &wf, uint64_t lane_mask, uint8_t byte_mask) const override;\n'
@@ -12639,8 +12660,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '    void (Operand::*write_scalar64)(amdgpu::Wavefront &, uint64_t) const = nullptr;\n'
                 '    std::optional<uint32_t> (Operand::*simd_vgpr_base)(const amdgpu::Wavefront &) const = nullptr;\n'
                 '    std::optional<uint32_t> (Operand::*simd_vgpr_base_mut)(amdgpu::Wavefront &) const = nullptr;\n'
-                '    const amdgpu::VgprStorage *(Operand::*simd_vgpr_storage)(const amdgpu::Wavefront &) const = nullptr;\n'
-                '    amdgpu::VgprStorage *(Operand::*simd_vgpr_storage_mut)(amdgpu::Wavefront &) const = nullptr;\n'
+                '    amdgpu::ConstVgprStorage (Operand::*simd_vgpr_storage)(const amdgpu::Wavefront &) const = nullptr;\n'
+                '    amdgpu::VgprStorage (Operand::*simd_vgpr_storage_mut)(amdgpu::Wavefront &) const = nullptr;\n'
                 '    amdgpu::ConstVgprStoragePair64 (Operand::*simd_vgpr_storage64)(const amdgpu::Wavefront &) const = nullptr;\n'
                 '    amdgpu::VgprStoragePair64 (Operand::*simd_vgpr_storage64_mut)(amdgpu::Wavefront &) const = nullptr;\n'
                 '    void (Operand::*simd_notify_read)(const amdgpu::Wavefront &, uint64_t, uint8_t) const = nullptr;\n'
@@ -12664,8 +12685,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  void write_scalar64_exec(amdgpu::Wavefront &, uint64_t) const;\n'
                 '  std::optional<uint32_t> simd_vgpr_base_exec(const amdgpu::Wavefront &) const;\n'
                 '  std::optional<uint32_t> simd_vgpr_base_mut_exec(amdgpu::Wavefront &) const;\n'
-                '  const amdgpu::VgprStorage *simd_vgpr_storage_exec(const amdgpu::Wavefront &) const;\n'
-                '  amdgpu::VgprStorage *simd_vgpr_storage_mut_exec(amdgpu::Wavefront &) const;\n'
+                '  amdgpu::ConstVgprStorage simd_vgpr_storage_exec(const amdgpu::Wavefront &) const;\n'
+                '  amdgpu::VgprStorage simd_vgpr_storage_mut_exec(amdgpu::Wavefront &) const;\n'
                 '  amdgpu::ConstVgprStoragePair64 simd_vgpr_storage64_exec(const amdgpu::Wavefront &) const;\n'
                 '  amdgpu::VgprStoragePair64 simd_vgpr_storage64_mut_exec(amdgpu::Wavefront &) const;\n'
                 '  void simd_notify_read_exec(const amdgpu::Wavefront &, uint64_t, uint8_t) const;\n'
@@ -12957,18 +12978,18 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                       return callback ? (this->*callback)(wf) : std::nullopt;
                     }
 
-                    const amdgpu::VgprStorage *
+                    amdgpu::ConstVgprStorage
                     Operand::simd_vgpr_storage_impl(const amdgpu::Wavefront &wf) const {
                       decltype(ExecutionBackend::simd_vgpr_storage) callback =
                           execution_backend_ ? execution_backend_->simd_vgpr_storage : nullptr;
-                      return callback ? (this->*callback)(wf) : nullptr;
+                      return callback ? (this->*callback)(wf) : amdgpu::ConstVgprStorage{};
                     }
 
-                    amdgpu::VgprStorage *
+                    amdgpu::VgprStorage
                     Operand::simd_vgpr_storage_mut_impl(amdgpu::Wavefront &wf) const {
                       decltype(ExecutionBackend::simd_vgpr_storage_mut) callback =
                           execution_backend_ ? execution_backend_->simd_vgpr_storage_mut : nullptr;
-                      return callback ? (this->*callback)(wf) : nullptr;
+                      return callback ? (this->*callback)(wf) : amdgpu::VgprStorage{};
                     }
 
                     amdgpu::ConstVgprStoragePair64
@@ -12976,7 +12997,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                       decltype(ExecutionBackend::simd_vgpr_storage64) callback =
                           execution_backend_ ? execution_backend_->simd_vgpr_storage64 : nullptr;
                       return callback ? (this->*callback)(wf)
-                                      : amdgpu::ConstVgprStoragePair64{nullptr, nullptr};
+                                      : amdgpu::ConstVgprStoragePair64{};
                     }
 
                     amdgpu::VgprStoragePair64
@@ -12984,7 +13005,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                       decltype(ExecutionBackend::simd_vgpr_storage64_mut) callback =
                           execution_backend_ ? execution_backend_->simd_vgpr_storage64_mut : nullptr;
                       return callback ? (this->*callback)(wf)
-                                      : amdgpu::VgprStoragePair64{nullptr, nullptr};
+                                      : amdgpu::VgprStoragePair64{};
                     }
 
                     void Operand::simd_notify_read_impl(const amdgpu::Wavefront &wf,
@@ -13648,17 +13669,19 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                   return std::nullopt;
                 }
 
-                const amdgpu::VgprStorage *
+                amdgpu::ConstVgprStorage
                 Operand::simd_vgpr_storage_exec(const amdgpu::Wavefront &wf) const {
                   if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
                     uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, vgpr_msb_role());
-                    return &raw_compute_unit(wf.cu()).template raw_vgpr_reg<64>(
-                        wf.vgpr_alloc().base + voff);
+                    const auto &cu = raw_compute_unit(wf.cu());
+                    return {reinterpret_cast<const uint32_t *>(
+                                cu.raw_vgpr_data(wf.vgpr_alloc().base + voff)),
+                            cu.vgpr_storage_lane_count()};
                   }
-                  return nullptr;
+                  return {};
                 }
 
-                amdgpu::VgprStorage *
+                amdgpu::VgprStorage
                 Operand::simd_vgpr_storage_mut_exec(amdgpu::Wavefront &wf) const {
                   if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
                     amdgpu::VgprMsbRole role =
@@ -13666,10 +13689,12 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                             ? amdgpu::VgprMsbRole::Dst
                             : vgpr_msb_role();
                     uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, role);
-                    return &raw_compute_unit(wf.cu()).template raw_vgpr_reg<64>(
-                        wf.vgpr_alloc().base + voff);
+                    auto &cu = raw_compute_unit(wf.cu());
+                    return {reinterpret_cast<uint32_t *>(
+                                cu.raw_vgpr_data(wf.vgpr_alloc().base + voff)),
+                            cu.vgpr_storage_lane_count()};
                   }
-                  return nullptr;
+                  return {};
                 }
 
                 amdgpu::ConstVgprStoragePair64
@@ -13677,10 +13702,13 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                   if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
                     uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, vgpr_msb_role());
                     uint32_t reg = wf.vgpr_alloc().base + voff;
-                    return {&raw_compute_unit(wf.cu()).template raw_vgpr_reg<64>(reg),
-                            &raw_compute_unit(wf.cu()).template raw_vgpr_reg<64>(reg + 1)};
+                    const auto &cu = raw_compute_unit(wf.cu());
+                    return {{reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(reg)),
+                             cu.vgpr_storage_lane_count()},
+                            {reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(reg + 1)),
+                             cu.vgpr_storage_lane_count()}};
                   }
-                  return {nullptr, nullptr};
+                  return {};
                 }
 
                 amdgpu::VgprStoragePair64
@@ -13692,10 +13720,13 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                             : vgpr_msb_role();
                     uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, role);
                     uint32_t reg = wf.vgpr_alloc().base + voff;
-                    return {&raw_compute_unit(wf.cu()).template raw_vgpr_reg<64>(reg),
-                            &raw_compute_unit(wf.cu()).template raw_vgpr_reg<64>(reg + 1)};
+                    auto &cu = raw_compute_unit(wf.cu());
+                    return {{reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(reg)),
+                             cu.vgpr_storage_lane_count()},
+                            {reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(reg + 1)),
+                             cu.vgpr_storage_lane_count()}};
                   }
-                  return {nullptr, nullptr};
+                  return {};
                 }
 
                 void Operand::simd_notify_read_exec(const amdgpu::Wavefront &wf,

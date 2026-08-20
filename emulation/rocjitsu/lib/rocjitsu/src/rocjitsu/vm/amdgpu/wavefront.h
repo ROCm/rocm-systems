@@ -75,8 +75,11 @@ public:
   ~Wavefront() override = default;
 
   /// @brief Return the number of lanes per wavefront.
-  /// @returns Lanes per wavefront (ISA-fixed).
+  /// @returns Lanes in this dispatched architectural wavefront.
   uint32_t wf_size() const { return wf_size_; }
+
+  /// @brief Return the descriptor-selected architectural wave width.
+  uint32_t kernel_wave_size() const { return wf_size_; }
 
   /// @brief Return the ISA maximum SGPRs per wavefront.
   /// @returns Maximum scalar registers.
@@ -297,12 +300,11 @@ public:
   /// @details DPP semantic helpers still evaluate every active lane so scalar
   /// side results see the complete operation. This mask suppresses both the
   /// architectural VGPR commit and its plugin observation for row/bank-masked
-  /// or invalid-source lanes. Unlike EXEC, the mask covers all 64 physical
-  /// lanes: Wave32 V_WRITELANE instructions may use lanes 32-63 as storage.
-  uint64_t vgpr_write_mask() const { return vgpr_write_mask_; }
+  /// or invalid-source lanes.
+  uint64_t vgpr_write_mask() const { return vgpr_write_mask_ & lane_mask(); }
 
   /// @brief Set the execution-local VGPR write-effect mask.
-  void set_vgpr_write_mask(uint64_t val) { vgpr_write_mask_ = val; }
+  void set_vgpr_write_mask(uint64_t val) { vgpr_write_mask_ = val & lane_mask(); }
 
   /// @brief Return the raw architectural VCC register pair.
   /// @returns Raw VCC register value, including non-lane bits in wave32 mode.
@@ -319,11 +321,12 @@ public:
   /// and carry producers must use set_vcc_mask() to preserve wave32 VCC_HI.
   void set_vcc(uint64_t val) { vcc_ = val; }
 
-  /// @brief Set the active-lane portion of the VCC register pair.
-  /// @param val New lane-mask value.
-  ///
-  /// Wave32 leaves VCC_HI available as scalar scratch. Vector instructions
-  /// that produce a predicate or carry mask must preserve those non-lane bits.
+  /// @brief Commit a wave-sized implicit VCC result.
+  /// @details Vector mask-producing instructions write only the lanes present
+  /// in the current wave. In Wave32, VCC_HI remains separately addressable
+  /// scalar state and must not be clobbered by a low-half compare or carry
+  /// result.
+  /// @param val New per-lane VCC result.
   void set_vcc_mask(uint64_t val) { vcc_ = (vcc_ & ~lane_mask()) | (val & lane_mask()); }
 
   /// @brief Return the M0 special register.
@@ -794,8 +797,9 @@ public:
     num_vgprs_ = 0;
     sgpr_alloc_ = {};
     vgpr_alloc_ = {};
+    wf_size_ = default_wf_size_;
     exec_ = lane_mask();
-    vgpr_write_mask_ = ~0ULL;
+    vgpr_write_mask_ = lane_mask();
     vcc_ = 0;
     m0_ = 0;
     set_mode_raw(0);
@@ -842,9 +846,10 @@ protected:
   /// @param max_sgprs Maximum SGPRs per wavefront (ISA-fixed).
   /// @param max_vgprs Maximum VGPRs per wavefront (ISA-fixed).
   /// @param mode_has_gpr_idx_en Whether MODE bit 27 enables GPR indexing.
-  Wavefront(ComputeUnitCore &cu, uint32_t wf_id, uint32_t wf_size, uint32_t max_sgprs,
-            uint32_t max_vgprs, bool mode_has_gpr_idx_en)
-      : cu_(cu), cu_view_(cu), wf_id_(wf_id), wf_size_(wf_size), max_sgprs_(max_sgprs),
+  Wavefront(ComputeUnitCore &cu, uint32_t wf_id, uint32_t default_wf_size, uint32_t max_wf_size,
+            uint32_t max_sgprs, uint32_t max_vgprs, bool mode_has_gpr_idx_en)
+      : cu_(cu), cu_view_(cu), wf_id_(wf_id), wf_size_(default_wf_size),
+        default_wf_size_(default_wf_size), max_wf_size_(max_wf_size), max_sgprs_(max_sgprs),
         max_vgprs_(max_vgprs), mode_has_gpr_idx_en_(mode_has_gpr_idx_en) {}
 
   ComputeUnitCore &cu_; ///< Parent CU (permanent, set at construction).
@@ -864,11 +869,13 @@ protected:
   uint32_t cluster_rank_ = 0;   ///< Workgroup rank inside the dispatch cluster.
   uint32_t cluster_size_ = 1;   ///< Number of workgroups in the dispatch cluster.
 
-  uint32_t wf_size_ = 0;   ///< Lanes per wavefront (ISA-fixed).
-  uint32_t num_sgprs_ = 0; ///< Allocated scalar registers (set at dispatch).
-  uint32_t num_vgprs_ = 0; ///< Allocated vector registers (set at dispatch).
-  uint32_t max_sgprs_ = 0; ///< ISA maximum SGPRs per wavefront.
-  uint32_t max_vgprs_ = 0; ///< ISA maximum VGPRs per wavefront.
+  uint32_t wf_size_ = 0;         ///< Lanes in the current dispatched wavefront.
+  uint32_t default_wf_size_ = 0; ///< ISA default wavefront width.
+  uint32_t max_wf_size_ = 0;     ///< Maximum wavefront width supported by the ISA.
+  uint32_t num_sgprs_ = 0;       ///< Allocated scalar registers (set at dispatch).
+  uint32_t num_vgprs_ = 0;       ///< Allocated vector registers (set at dispatch).
+  uint32_t max_sgprs_ = 0;       ///< ISA maximum SGPRs per wavefront.
+  uint32_t max_vgprs_ = 0;       ///< ISA maximum VGPRs per wavefront.
 
   RegAllocation sgpr_alloc_; ///< Slice in CU's SGPR file.
   RegAllocation vgpr_alloc_; ///< Slice in CU's VGPR file.
@@ -984,8 +991,8 @@ public:
   /// @param cu Parent compute unit.
   /// @param wf_id Slot index within the CU.
   IsaWavefront(ComputeUnitCore &cu, uint32_t wf_id)
-      : Wavefront(cu, wf_id, Isa::WF_SIZE, Isa::MAX_SGPRS_PER_WF, Isa::MAX_VGPRS_PER_WF,
-                  Isa::MODE_HAS_GPR_IDX_EN) {}
+      : Wavefront(cu, wf_id, Isa::WF_SIZE, Isa::WF_SIZE_MAX, Isa::MAX_SGPRS_PER_WF,
+                  Isa::MAX_VGPRS_PER_WF, Isa::MODE_HAS_GPR_IDX_EN) {}
 
   /// @brief Return the raw status register value.
   /// @returns Raw status register value.

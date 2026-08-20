@@ -133,7 +133,7 @@ def test_amdgpu_profiles_split_execution_sources(profile):
         (Rdna3Profile(), True),
         (Rdna3_5Profile(), True),
         (Rdna4Profile(), True),
-        (Gfx1250Profile(), True),
+        (Cdna5Profile(), True),
     ],
 )
 def test_dpp_inactive_source_policy(profile, expected):
@@ -150,7 +150,7 @@ def test_dpp_inactive_source_policy(profile, expected):
         (Rdna3Profile(), True),
         (Rdna3_5Profile(), True),
         (Rdna4Profile(), True),
-        (Gfx1250Profile(), True),
+        (Cdna5Profile(), True),
     ],
 )
 def test_dpp_suppressed_compare_policy(profile, expected):
@@ -250,7 +250,7 @@ def test_legacy_dpp_prohibition_tables_do_not_match_nearby_legal_opcodes(
         (Rdna1Profile(), True, True, False),
         (Rdna3Profile(), False, False, True),
         (Rdna4Profile(), False, False, True),
-        (Gfx1250Profile(), False, False, True),
+        (Cdna5Profile(), False, False, True),
     ],
 )
 def test_dpp_control_range_capabilities(profile, wave, row_bcast, row_xmask):
@@ -282,27 +282,27 @@ def test_dpp_control_range_capabilities(profile, wave, row_bcast, row_xmask):
         (Rdna4Profile(), 'ENC_VOPC', 'V_CMP_EQ_F64', DppOpcodeRule.FORBID),
         (Rdna4Profile(), 'ENC_VOPC', 'V_CMP_EQ_U32', DppOpcodeRule.ALLOW),
         (
-            Gfx1250Profile(),
+            Cdna5Profile(),
             'ENC_VOP3',
             'V_ADD_F64',
             DppOpcodeRule.ROW_SELECT_ONLY,
         ),
         (
-            Gfx1250Profile(),
+            Cdna5Profile(),
             'ENC_VOP3',
             'V_MUL_LO_U32',
             DppOpcodeRule.ROW_SELECT_ONLY,
         ),
-        (Gfx1250Profile(), 'ENC_VOP3', 'V_TRIG_PREOP_F64', DppOpcodeRule.FORBID),
+        (Cdna5Profile(), 'ENC_VOP3', 'V_TRIG_PREOP_F64', DppOpcodeRule.FORBID),
         (
-            Gfx1250Profile(),
+            Cdna5Profile(),
             'ENC_VOP3',
             'V_LDEXP_F64',
             DppOpcodeRule.ROW_SELECT_ONLY,
         ),
-        (Gfx1250Profile(), 'ENC_VOP3', 'V_CVT_SCALE_F32_F16', DppOpcodeRule.FORBID),
-        (Gfx1250Profile(), 'ENC_VOP3P', 'V_FMA_MIX_F32', DppOpcodeRule.ALLOW),
-        (Gfx1250Profile(), 'ENC_VOP3P', 'V_DOT4_F32_FP8', DppOpcodeRule.FORBID),
+        (Cdna5Profile(), 'ENC_VOP3', 'V_CVT_SCALE_F32_F16', DppOpcodeRule.FORBID),
+        (Cdna5Profile(), 'ENC_VOP3P', 'V_FMA_MIX_F32', DppOpcodeRule.ALLOW),
+        (Cdna5Profile(), 'ENC_VOP3P', 'V_DOT4_F32_FP8', DppOpcodeRule.FORBID),
     ],
 )
 def test_dpp_opcode_rules(profile, encoding, opcode, expected):

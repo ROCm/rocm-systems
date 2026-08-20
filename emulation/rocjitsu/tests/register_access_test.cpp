@@ -108,7 +108,7 @@ struct Fixture {
   RecordingPlugin *plugin = nullptr;
   Wavefront *wf = nullptr;
 
-  explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4)
+  explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4, uint32_t wave_size = 0)
       : execution_backend_scope(arch == ROCJITSU_CODE_ARCH_RDNA4 ? &rdna4::execution_backend()
                                                                  : &cdna4::execution_backend()) {
     ComputeUnitCore::Config cfg{};
@@ -125,7 +125,7 @@ struct Fixture {
     plugin_group->add(std::move(recorder));
     cu->set_plugin_group(plugin_group);
 
-    wf = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, kSgprsPerWave, kVgprsPerWave);
+    wf = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, kSgprsPerWave, kVgprsPerWave, wave_size);
   }
 
   uint32_t sgpr_base() const { return wf->sgpr_alloc().base; }
@@ -580,6 +580,34 @@ TEST(RegisterAccessTest, ScopedVgprWriteMaskIntersectsAndRestoresNestedScopes) {
   EXPECT_EQ(fx.wf->vgpr_write_mask(), ~uint64_t{0});
   outer.restore();
   EXPECT_EQ(fx.wf->vgpr_write_mask(), ~uint64_t{0});
+}
+
+TEST(RegisterAccessTest, Wave32VgprWriteMaskRejectsNonExecutionLanes) {
+  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(fx.wf, nullptr);
+  ASSERT_EQ(fx.wf->wf_size(), 32u);
+
+  constexpr uint64_t lane_mask = 0xFFFFFFFFULL;
+  EXPECT_EQ(fx.wf->vgpr_write_mask(), lane_mask);
+  fx.wf->set_vgpr_write_mask(~uint64_t{0});
+  EXPECT_EQ(fx.wf->vgpr_write_mask(), lane_mask);
+
+  amdgpu::dpp::ScopedVgprWriteMask scope;
+  scope.bind(*fx.wf, uint64_t{1} << 43);
+  EXPECT_EQ(fx.wf->vgpr_write_mask(), 0u);
+  scope.restore();
+  EXPECT_EQ(fx.wf->vgpr_write_mask(), lane_mask);
+}
+
+TEST(RegisterAccessTest, Wave64DispatchExpandsVgprWriteMaskToArchitecturalWidth) {
+  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4, /*wave_size=*/64);
+  ASSERT_NE(fx.wf, nullptr);
+  ASSERT_EQ(fx.wf->wf_size(), 64u);
+  EXPECT_EQ(fx.wf->vgpr_write_mask(), ~uint64_t{0});
+
+  rdna4::Operand destination(32, rdna4::OperandType::OPR_VGPR, 0);
+  RegisterAccess(*fx.wf).write_lane(destination, 47, 0xCAFE0047u);
+  EXPECT_EQ(fx.cu->read_vgpr(fx.vgpr_base(), 47), 0xCAFE0047u);
 }
 
 TEST(RegisterAccessTest, WriteViewsCannotOutliveTheirAcquiredWriteMask) {
