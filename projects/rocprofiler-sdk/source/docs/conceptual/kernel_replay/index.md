@@ -14,8 +14,8 @@ application run, restoring device memory between executions so every pass sees i
 | Counter group rotation | amortized across dispatches | none; different dispatches sample different groups | `O(1 ×` app runtime`)` |
 
 Kernel replay is **experimental**. The public header lives under
-`rocprofiler-sdk/experimental/`, the `rocprofv3` flag is `--kernel-replay-beta-enabled`, and both are
-expected to change before a stable release. Several waits inside the replay window abort the process
+`rocprofiler-sdk/experimental/`. Both the API and any later command-line flag are expected to
+change before a stable release. Several waits inside the replay window abort the process
 on expiry rather than proceeding on questionable state — a deliberate choice for a beta feature,
 described in [Concurrency and isolation](kernel_replay_concurrency_and_isolation.md).
 
@@ -47,19 +47,19 @@ experimental/kernel_replay.h            public payload struct (callback tracing 
 
 Because replay is a callback tracing service rather than a counter-collection mode, it is not tied to
 hardware counters. A tool decides what each pass is for and, through localized context control, which
-of its services are active on which pass. `rocprofv3` uses that to collect every `--pmc` group in one
-run; a custom tool can use the same domain for timing, PC sampling, or thread trace.
+of its services are active on which pass. A custom tool can collect every counter group in one run,
+or use the same domain for timing, PC sampling, or thread trace. Command-line `rocprofv3` wiring is
+the stacked tool integration PR.
 
 ## Documentation in this section
 
-**Tool users** (`rocprofv3`): start with {ref}`using-kernel-replay`.
+**Tool authors:** start with {ref}`using-kernel-replay`.
 
 **SDK / tool developers:**
 
 - **[Callback API and tool configuration](kernel_replay_callback_api.md)** — the public API surface:
   the `ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY` domain, its two operations, the payload struct,
-  pass-count semantics, localized context control, and how a tool (including `rocprofv3`) configures
-  replay.
+  pass-count semantics, localized context control, and how a tool configures replay.
 - **[Concurrency and isolation](kernel_replay_concurrency_and_isolation.md)** — how the
   snapshot-to-restore window is isolated: the per-agent reader/writer lock, the agent-wide drain,
   agent-scoped snapshots, the async completion handler drain, the bounded-wait and abort convention,
