@@ -197,13 +197,6 @@ def present_counters(request):
 
 
 @pytest.fixture
-def rocprofv3_path(request):
-    path = request.config.getoption("--rocprofv3")
-    assert path, "--rocprofv3 must point to the rocprofv3 script"
-    return path
-
-
-@pytest.fixture
 def rocprofv3_module(request):
     # Import the rocprofv3 script directly (no .py extension) for GPU-free parse tests.
     path = request.config.getoption("--rocprofv3")

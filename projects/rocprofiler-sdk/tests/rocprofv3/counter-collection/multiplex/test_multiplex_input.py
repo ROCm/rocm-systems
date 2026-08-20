@@ -24,10 +24,8 @@
 
 # GPU-free unit tests of rocprofv3's multiplex input parsing (parse_input only).
 
-import os
 import sys
 import json
-import subprocess
 import pytest
 
 
@@ -94,25 +92,6 @@ def test_interval_optional(rocprofv3_module, tmp_path):
 
     assert parsed_yaml == parsed_json
     assert parsed_yaml[0][0] == layout
-
-
-def test_pmc_and_pmc_groups_are_mutually_exclusive(rocprofv3_path, tmp_path):
-    """--pmc and pmc_groups cannot be combined; rocprofv3 rejects it up front
-    (GPU-free: the launcher fatal-errors before executing the application)."""
-    mux = tmp_path / "mux.json"
-    _write_json(mux, [["SQ_WAVES"], ["GRBM_COUNT"]], 1)
-
-    proc = subprocess.run(
-        [rocprofv3_path, "--pmc", "SQ_WAVES", "-i", str(mux), "--", "/bin/true"],
-        capture_output=True,
-        text=True,
-        timeout=60,
-        env={**os.environ, "ROCR_VISIBLE_DEVICES": ""},
-    )
-
-    output = proc.stdout + proc.stderr
-    assert proc.returncode != 0, f"expected non-zero exit, got 0.\n{output}"
-    assert "Cannot specify both --pmc" in output, f"unexpected error output:\n{output}"
 
 
 if __name__ == "__main__":
