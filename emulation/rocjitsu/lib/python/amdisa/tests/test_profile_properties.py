@@ -432,6 +432,9 @@ class TestCdnaProfile:
     def test_waitcnt_lgkmcnt_mask(self):
         assert self.p.waitcnt_lgkmcnt_mask == '0x0F'
 
+    def test_d16_loads_zero_unselected_half(self):
+        assert self.p.d16_loads_zero_unselected_half is True
+
     def test_field_renames_flat(self):
         renames = self.p.field_renames('ENC_FLAT')
         assert renames.get('sve') == 'lds'
@@ -489,6 +492,9 @@ class TestCdna1Profile:
     def test_wave_size_inherited(self):
         assert self.p.wave_size == 64
 
+    def test_d16_loads_preserve_unselected_half(self):
+        assert self.p.d16_loads_zero_unselected_half is False
+
 
 class TestCdna2Profile:
     """Cdna2Profile: AccVGPR base 512, GFX9_GLC coherency, sgpr_pair scratch."""
@@ -507,6 +513,9 @@ class TestCdna2Profile:
 
     def test_flat_scratch_mechanism(self):
         assert self.p.flat_scratch_mechanism == 'sgpr_pair'
+
+    def test_d16_loads_zero_unselected_half(self):
+        assert self.p.d16_loads_zero_unselected_half is True
 
 
 class TestRdna1Profile:
@@ -668,6 +677,9 @@ class TestCdna5Profile:
 
     def test_vgpr_msb_indexing(self):
         assert self.p.uses_vgpr_msb_indexing is True
+
+    def test_d16_loads_zero_unselected_half(self):
+        assert self.p.d16_loads_zero_unselected_half is True
 
     def test_source_split_limits_leave_precommit_margin(self):
         limits = self.p.source_split_max_bytes

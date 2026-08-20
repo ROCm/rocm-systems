@@ -2370,7 +2370,7 @@ TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotObserveInstructionWrite
 }
 
 TEST(ExecutionPluginTest, D16MemoryCompletionPreservesHalfWithoutObservation) {
-  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"cdna5", /*wavefront_size=*/32);
+  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32);
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -2410,6 +2410,52 @@ TEST(ExecutionPluginTest, D16MemoryCompletionPreservesHalfWithoutObservation) {
     const uint32_t expected = high_half ? 0x1122CCDDu : 0xAABB1122u;
     EXPECT_EQ(cu->read_vgpr_storage(physical_dst, 0), expected);
   }
+}
+
+TEST(RaceDetectorPluginTest, D16LoadTracksFullDwordWhenSramEccEnabled) {
+  auto opposite_half_read_reports_race = [](std::string_view arch, uint32_t wavefront_size) {
+    PluginFixture f(/*num_wf_slots=*/1, arch, wavefront_size);
+    PluginSinkConfig sink_config;
+    StringSink &sink = sink_config.emplace<StringSink>();
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+    if (!f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>())) {
+      ADD_FAILURE() << "failed to attach race detector";
+      return false;
+    }
+    f.soc->set_plugin_group(f.plugin_group_);
+    f.plugin_group_->onInit();
+
+    auto *cu = f.cu();
+    auto *wf = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+    EXPECT_NE(wf, nullptr);
+    if (wf == nullptr)
+      return false;
+    wf->set_exec(1u);
+    std::array<amdgpu::Wavefront *, 1> waves{wf};
+    f.plugin_group_->onAmdgpuWorkgroupDispatched(
+        /*dispatch_id=*/1, /*wg_id=*/0, /*physical_vgpr_count=*/256, /*sgpr_count=*/104, waves);
+
+    constexpr uint32_t kDst = 4;
+    auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+    state->elem_size = 1;
+    state->num_elems = 1;
+    state->is_load = true;
+    state->wf_size = wf->wf_size();
+    state->exec_mask = 1;
+    state->lane_mask = 1;
+    state->dst_reg_base = wf->vgpr_alloc().base + kDst;
+    state->d16_lo = true;
+    TestMemoryInstruction load(std::move(state));
+    f.plugin_group_->onAmdgpuRouteMemoryInstruction(load, *wf);
+
+    f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base + kDst, /*lane_mask=*/1,
+                                           ExecutionPlugin::kHighHalfByteMask);
+    return sink.str().find("RACE ") != std::string::npos;
+  };
+
+  EXPECT_TRUE(opposite_half_read_reports_race("cdna4", /*wavefront_size=*/64));
+  EXPECT_TRUE(opposite_half_read_reports_race("cdna5", /*wavefront_size=*/32));
+  EXPECT_FALSE(opposite_half_read_reports_race("rdna4", /*wavefront_size=*/32));
 }
 
 TEST(ExecutionPluginTest, F64SimdSourceReadObservationReportsBothHalves) {

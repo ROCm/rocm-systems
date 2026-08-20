@@ -4702,39 +4702,43 @@ def test_only_gfx1250_generates_implicit_use_operands_overrides(
 
 
 @pytest.mark.parametrize(
-    'src_file,class_name',
+    'src_file,class_name,dst_name',
     [
-        ('vflat.cpp', 'FlatLoadD16U8Vflat'),
-        ('vglobal.cpp', 'GlobalLoadD16U8Vglobal'),
-        ('vscratch.cpp', 'ScratchLoadD16U8Vscratch'),
+        ('vbuffer.cpp', 'BufferLoadD16U8Vbuffer', 'vdata'),
+        ('vds.cpp', 'DsLoadU8D16Vds', 'vdst'),
+        ('vflat.cpp', 'FlatLoadD16U8Vflat', 'vdst'),
+        ('vglobal.cpp', 'GlobalLoadD16U8Vglobal', 'vdst'),
+        ('vscratch.cpp', 'ScratchLoadD16U8Vscratch', 'vdst'),
     ],
 )
-def test_gfx1250_d16_load_preserves_destination_without_printing_it(
-    gfx1250_generated_root: Path, src_file, class_name
+def test_gfx1250_d16_load_does_not_preserve_destination(
+    gfx1250_generated_root: Path, src_file, class_name, dst_name
 ):
-    """A D16 partial-def load reads vdst via the implicit hooks, not src_operands_.
+    """A gfx1250 D16 load zero-fills rather than preserve-reading its destination.
 
-    GLOBAL/SCRATCH share semantic_class 'flat_load' with FLAT but emit to
-    separate files, so cover all three. Listing vdst as a source would print it
-    twice in disassembly; pin that a future generator change doing so fails here.
+    Cover every generated memory family because each independently emits its
+    instruction class and hidden-use overrides.
     """
     cpp = (gfx1250_generated_root / src_file).read_text()
     ctor = _generated_constructor_body(cpp, class_name)
 
-    # vdst is a destination, never a source (kept out of the printed operands).
-    assert 'dst_operands_[0] = &vdst;' in ctor
-    assert not re.search(r'src_operands_\[[^\]]*\]\s*=\s*&vdst;', ctor)
+    assert f'dst_operands_[0] = &{dst_name};' in ctor
+    assert not re.search(rf'src_operands_\[[^\]]*\]\s*=\s*&{dst_name};', ctor)
 
-    # The preserved-destination read is modeled via both implicit hooks.
     uses_override = f'void {class_name}::implicit_uses(RegisterSet &uses) const'
     operands_override = f'void {class_name}::implicit_use_operands('
-    assert uses_override in cpp
-    assert operands_override in cpp
-    uses_start = cpp.index(uses_override)
-    uses_body = cpp[uses_start : cpp.index('\n}', uses_start)]
-    assert 'if (auto r = vdst.to_register_ref())' in uses_body
-    assert 'uses.expand(*r);' in uses_body
-    operands_start = cpp.index(operands_override)
-    operands_body = cpp[operands_start : cpp.index('\n}', operands_start)]
-    assert 'if (vdst.to_register_ref())' in operands_body
-    assert 'operands.push_back(&vdst);' in operands_body
+    assert uses_override not in cpp
+    assert operands_override not in cpp
+
+
+def test_cdna4_d16_load_does_not_preserve_destination(
+    amdgpu_generated_root: Path,
+):
+    """CDNA4 D16 loads are full VGPR writes because gfx950 enables SRAM ECC."""
+    cpp = (amdgpu_generated_root / 'cdna4' / 'mubuf.cpp').read_text()
+    class_name = 'BufferLoadUbyteD16Mubuf'
+    ctor = _generated_constructor_body(cpp, class_name)
+
+    assert 'dst_operands_[0] = &vdata;' in ctor
+    assert not re.search(r'src_operands_\[[^\]]*\]\s*=\s*&vdata;', ctor)
+    assert f'void {class_name}::implicit_uses(RegisterSet &uses) const' not in cpp
