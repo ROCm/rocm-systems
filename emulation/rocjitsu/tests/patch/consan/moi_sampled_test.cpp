@@ -2852,6 +2852,52 @@ TEST(ConSanMoi, Cdna4Wave64AccvgprBoundarySampledUsesPrivatePersistentState) {
   EXPECT_TRUE(result.final_validation_passed);
 }
 
+TEST(ConSanMoi, Cdna4PrivateWorkgroupStateFallsBackFromSampledFastGate) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint32_t kAccessCount = 9u;
+  std::vector<uint32_t> text_words(640u, build_s_nop(0, kArch));
+  for (uint32_t index = 0; index < kAccessCount; ++index) {
+    const auto guest = build_cdna4_ds_store_b32(
+        /*vaddr=*/10, /*vdata=*/11, /*byte_offset=*/index * sizeof(uint32_t), kArch);
+    ASSERT_TRUE(guest);
+    std::copy(guest->begin(), guest->end(), text_words.begin() + index * guest->size());
+  }
+  text_words.back() = build_s_endpgm(kArch);
+  std::vector<uint8_t> bytes = make_cdna4_lds_code_object(
+      text_words, "sampled_private_workgroup_fast_gate", /*vgpr_granulated=*/3u);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    // v12 is the first accumulator.  Sampled state and the entry-captured
+    // workgroup tuple therefore use private storage rather than crossing the
+    // compiler-defined ordinary-VGPR boundary.
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 2u);
+  });
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
+  options.moi_runtime_sample_stride = 2u;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = direct_sampled_report_bytes(2u * kAccessCount);
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = 2u * kAccessCount;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.moi_private_epoch_automatic);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
+                               &ConSanPatchInfo::kind),
+            kAccessCount);
+  const auto access = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
+  ASSERT_NE(access, result.patches.end());
+  EXPECT_TRUE(access->persistent_record_replay_workgroup_private_offsets.complete());
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("runtime workgroup fast gate unavailable") != std::string::npos;
+  }));
+  EXPECT_TRUE(result.final_validation_passed);
+}
+
 TEST(ConSanMoi, Cdna4FullPressureSampledStoreRecoversSpilledAddressAfterGuest) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   const auto guest =

@@ -12,6 +12,12 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     result.warnings.emplace_back("ConSan MOI sampled probe does not support this architecture");
     return;
   }
+  const auto add_unique_warning = [&result](std::string_view warning) {
+    if (std::ranges::none_of(result.warnings, [warning](const std::string &existing) {
+          return existing == warning;
+        }))
+      result.warnings.emplace_back(warning);
+  };
 
   const ConSanMoiReportBufferLayout layout = resolve_sampled_report_layout(options);
   const uint32_t total_budget = std::min(options.max_patches, layout.sampled_watchpoint_capacity);
@@ -1211,23 +1217,33 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
             const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
                 bytes, planned_patch.workgroup_descriptor_file_offset, candidate_options, arch,
                 workgroup_errors);
-            if (!workgroup_sources) {
-              result.errors.insert(result.errors.end(), workgroup_errors.begin(),
-                                   workgroup_errors.end());
-              return;
+            if (workgroup_sources) {
+              auto fast_gate = build_moi_runtime_workgroup_gate_island_words(
+                  bytes, candidate, candidate_options, *workgroup_sources,
+                  planned_patch.runtime_sample_index, *planned_patch.entry_island_offset,
+                  cave_text_offset, planned_patch.placement.return_target,
+                  planned_patch.entry_island_word_count, arch);
+              if (fast_gate)
+                island_words = std::move(*fast_gate);
             }
-            auto fast_gate = build_moi_runtime_workgroup_gate_island_words(
-                bytes, candidate, candidate_options, *workgroup_sources,
-                planned_patch.runtime_sample_index, *planned_patch.entry_island_offset,
-                cave_text_offset, planned_patch.placement.return_target,
-                planned_patch.entry_island_word_count, arch);
-            if (fast_gate)
-              island_words = std::move(*fast_gate);
-          } else if (append_moi_scc_preserving_indirect_jump(
-                         island_words, *planned_patch.entry_island_offset, cave_text_offset,
-                         moi_indirect_jump_sgprs(candidate_options)->pc_sgpr,
-                         special_state.scc_save_sgpr,
-                         /*capture_scc=*/true, arch)) {
+            // This gate is only an early workgroup/dispatch rejection.  The
+            // probe body still performs the authoritative LDS-cell selection
+            // and chooses its evidence bank.  Entry-captured workgroup state
+            // may live in private memory, which cannot be read safely before
+            // a spill-backed body saves guest VGPRs.  Retain correct sampling
+            // through the ordinary indirect entry instead of treating the
+            // optional fast path as a transform requirement.
+            if (island_words.empty()) {
+              add_unique_warning(
+                  "ConSan MOI sampled runtime workgroup fast gate unavailable; using "
+                  "address-only sampling");
+            }
+          }
+          if (island_words.empty() &&
+              append_moi_scc_preserving_indirect_jump(
+                  island_words, *planned_patch.entry_island_offset, cave_text_offset,
+                  moi_indirect_jump_sgprs(candidate_options)->pc_sgpr, special_state.scc_save_sgpr,
+                  /*capture_scc=*/true, arch)) {
             island_words.resize(planned_patch.entry_island_word_count, build_s_nop(0, arch));
           }
           if (island_words.size() != planned_patch.entry_island_word_count) {
@@ -1246,20 +1262,18 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
               bytes, planned_patch.workgroup_descriptor_file_offset, candidate_options, arch,
               workgroup_errors);
-          if (!workgroup_sources) {
-            result.errors.insert(result.errors.end(), workgroup_errors.begin(),
-                                 workgroup_errors.end());
-            return;
+          if (workgroup_sources) {
+            auto gate = build_moi_runtime_workgroup_gate_call_words(
+                bytes, candidate, candidate_options, *workgroup_sources, cave_text_offset,
+                planned_patch.placement.return_target, access_island_word_count, arch);
+            if (gate)
+              dense_gate_words = std::move(*gate);
           }
-          auto gate = build_moi_runtime_workgroup_gate_call_words(
-              bytes, candidate, candidate_options, *workgroup_sources, cave_text_offset,
-              planned_patch.placement.return_target, access_island_word_count, arch);
-          if (!gate) {
-            result.errors.emplace_back(
-                "ConSan MOI sampled probe could not encode its dense runtime gate");
-            return;
+          if (dense_gate_words.empty()) {
+            add_unique_warning(
+                "ConSan MOI sampled dense runtime workgroup fast gate unavailable; using "
+                "address-only sampling");
           }
-          dense_gate_words = std::move(*gate);
         }
         uint32_t body_guest_instruction_offset = 0;
         MoiAppendedBodyOptions body_options(arch);
