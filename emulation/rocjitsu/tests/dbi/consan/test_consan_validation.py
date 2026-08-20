@@ -1987,6 +1987,8 @@ class ConSanValidationTest(unittest.TestCase):
                 ("gfx1250", "jakub-attention", 90),
                 ("gfx950", "tp1-prefill", 300),
                 ("gfx1250", "tp1-prefill", 60),
+                ("gfx950", "tp1-decode-combined", 300),
+                ("gfx1250", "tp1-decode-combined", 180),
             )
             for target, workload, expected_timeout in cases:
                 with self.subTest(target=target, workload=workload):
@@ -2486,17 +2488,21 @@ class ConSanValidationTest(unittest.TestCase):
         self.assertNotIn("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", tp1_environment)
 
     def test_tp1_record_replay_uses_target_bounded_validation_stride(self) -> None:
-        tp1 = validation.WORKLOAD_BY_ID["tp1-prefill"]
-        for target, expected_stride in (
-            ("gfx942", None),
-            ("gfx950", "256"),
-            ("gfx1201", None),
-            ("gfx1250", "256"),
+        for workload_id, target, expected_stride in (
+            ("tp1-prefill", "gfx942", None),
+            ("tp1-prefill", "gfx950", "256"),
+            ("tp1-prefill", "gfx1201", None),
+            ("tp1-prefill", "gfx1250", "256"),
+            ("tp1-decode-combined", "gfx942", None),
+            ("tp1-decode-combined", "gfx950", "256"),
+            ("tp1-decode-combined", "gfx1201", None),
+            ("tp1-decode-combined", "gfx1250", None),
         ):
-            with self.subTest(target=target):
+            with self.subTest(workload=workload_id, target=target):
+                workload = validation.WORKLOAD_BY_ID[workload_id]
                 environment = validation._clean_environment(
                     "record-replay",
-                    tp1,
+                    workload,
                     Path("/hook.so"),
                     target,
                     Path("/workspace"),
