@@ -168,6 +168,33 @@ is:
 This is preferable to e.g. `LD_PRELOAD` or `--wrap` because the seam
 is explicit, greppable, and visible in code review.
 
+### Factor each default into a named `Default*` function
+
+A hook's default behaviour is needed in two places — the hook's
+initialiser and the fakes file's `Reset*()` function. Do **not** write
+the lambda body out twice; the two copies drift. Instead put each
+default in a named free function prefixed `Default` and reference it
+from both. `fakes/hip_fakes.cc` and `fakes/rma_fakes.cc` follow this
+pattern:
+
+```cpp
+// One definition of the behaviour...
+static ncclResult_t DefaultRmaDestroyDesc(struct ncclComm*,
+                                          struct ncclRmaProxyDesc** desc) {
+    *desc = nullptr;
+    return ncclSuccess;
+}
+
+// ...used for the hook's initial value...
+std::function<ncclResult_t(struct ncclComm*, struct ncclRmaProxyDesc**)>
+    g_rmaDestroyDesc = DefaultRmaDestroyDesc;
+
+// ...and reused by the reset, no duplicated body.
+void ResetRmaFakes() {
+    g_rmaDestroyDesc = DefaultRmaDestroyDesc;
+}
+```
+
 
 ## Dealing with each kind of dependency
 
