@@ -61,7 +61,7 @@ REGRESSION_THRESHOLD_INFERENCE = 0.05  # 5%
 MADENGINE_REPO = "https://github.com/ROCm/madengine.git"
 MADENGINE_REF = "ec4de0b58c49f05d89dd33e38cc3e81e0fb3d992"
 MAD_REPO = "https://github.com/ROCm/MAD.git"
-MAD_REF = "688828bd9d4ad5be4196bc6161cabb6d7048ee65"
+MAD_REF = "63867e6a6e42355fd7b040fbcbd5bf043c9982fc"
 MAD_BRANCH = "mad-rccl"
 
 WORKLOAD_CONFIGS = {
