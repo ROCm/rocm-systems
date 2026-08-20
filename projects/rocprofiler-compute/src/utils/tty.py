@@ -842,6 +842,38 @@ def format_table_output(
     return content
 
 
+def _render_membw_guidance(membw_result: Any) -> str:  # noqa: ANN401
+    """Render membw guidance text to append below the memory chart."""
+    lines: list[str] = []
+
+    active_count = sum(1 for block in membw_result.guidance_blocks if block)
+
+    if active_count == 0:
+        if membw_result.availability == "unavailable":
+            lines.append(
+                "Memory Bandwidth Analysis: Unavailable "
+                f"({membw_result.availability_reason or 'no data'})."
+            )
+        elif membw_result.availability == "partial":
+            lines.append(
+                "Memory Bandwidth Analysis: Partial data "
+                f"({membw_result.availability_reason})."
+            )
+        else:
+            lines.append(
+                "Memory Bandwidth Analysis: No bottlenecks detected (GL1 / GL2 / EA)."
+            )
+    else:
+        lines.append("-" * 80)
+        lines.append("Memory Bandwidth Guided Analysis")
+        lines.append("-" * 80)
+        for block in membw_result.guidance_blocks:
+            lines.append(block)
+            lines.append("")
+
+    return "\n".join(lines) + "\n"
+
+
 def show_all(
     args: argparse.Namespace,
     runs: dict[str, Any],
@@ -1026,14 +1058,18 @@ def show_all(
                     + "\n"
                 )
             elif is_gfx9(gpu_arch):
+                membw_result = getattr(first_run, "membw_result", None)
                 panel_content += (
                     mem_chart_gfx9.plot_mem_chart(
                         mem_chart_data,
                         chart_title=heading,
                         gpu_arch=gpu_arch,
+                        membw=membw_result,
                     )
                     + "\n"
                 )
+                if membw_result is not None:
+                    panel_content += _render_membw_guidance(membw_result)
 
         # Roofline printing is handled separately above in is_roofline_shown.
         # With --view table, roofline tables (401/402) render as normal tables.

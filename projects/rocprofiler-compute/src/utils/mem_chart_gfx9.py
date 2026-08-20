@@ -11,8 +11,10 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from membw.models import BottleneckNode
 from utils.mem_chart_common import (
     COLORS,
+    CachePanelRow,
     build_arch_notes,
     build_bw_edge_column,
     build_cache_panel,
@@ -317,12 +319,60 @@ def _build_request_edges(
     return Text.from_markup("\n".join(lines))
 
 
-def _build_l1_stack(metrics: dict[str, Any]) -> Group:
+def _collect_stall_rows(
+    membw: Optional[Any],  # noqa: ANN401
+    level: str,
+) -> list[CachePanelRow]:
+    """Extract active bottleneck rows for a memory level."""
+    if membw is None:
+        return []
+    rows: list[CachePanelRow] = []
+    for node in membw.nodes:
+        _collect_active_leaves(node, level, rows)
+    return rows
+
+
+def _collect_active_leaves(
+    node: BottleneckNode,
+    level: str,
+    rows: list[CachePanelRow],
+) -> None:
+    """Recursively collect active leaf nodes at a given level."""
+    if node.state != "active":
+        return
+    if node.level == level and not any(c.state == "active" for c in node.children):
+        value = node.supporting[0].value if node.supporting else None
+        rows.append((f"[!] {node.label}", value, "%", COLORS["stall"], False))
+    for child in node.children:
+        _collect_active_leaves(child, level, rows)
+
+
+def _build_ea_stall_content(
+    membw: Optional[Any],  # noqa: ANN401
+) -> str:
+    """Build EA stall indicator content for the Data Fabric panel."""
+    stall_rows = _collect_stall_rows(membw, "EA")
+    if not stall_rows:
+        return ""
+    return "\n".join(
+        metric_line(label, value, unit, color)
+        for label, value, unit, color, *_ in stall_rows
+    )
+
+
+def _build_l1_stack(
+    metrics: dict[str, Any],
+    membw: Optional[Any] = None,  # noqa: ANN401
+) -> Group:
     """Build vertically stacked L1 cache panels: VL1D, LDS, sL1D, L1I."""
+    vl1_rows: list[CachePanelRow] = [
+        ("Hit", metrics["vl1_hit"], "%", COLORS["hit"]),
+    ]
+    vl1_rows.extend(_collect_stall_rows(membw, "GL1"))
 
     vl1_panel = build_cache_panel(
         "VL1D",
-        [("Hit", metrics["vl1_hit"], "%", COLORS["hit"])],
+        vl1_rows,
         width=_IP_BLOCK_W,
         height=_VL1D_H,
     )
@@ -529,6 +579,7 @@ def create_mem_chart_diagram(
     show_debug: bool = False,
     chart_title: str = "",
     gpu_arch: Optional[str] = None,
+    membw: Optional[Any] = None,  # noqa: ANN401
 ) -> None:
     """Create the CDNA memory diagram matching the reference PNG layout."""
     metrics = _extract_metrics(metric_dict)
@@ -540,11 +591,15 @@ def create_mem_chart_diagram(
     # Build main diagram grid first (needed to measure width for scope bar)
     kernel = build_kernel_panel(_TOTAL_H, padding_lines=13)
     req_edges = _build_request_edges(metrics, kernel_arrows)
-    l1_stack = _build_l1_stack(metrics)
+    l1_stack = _build_l1_stack(metrics, membw=membw)
     l1_l2_edges = _build_l1_l2_edges(metrics, std_arrows)
+    l2_rows: list[CachePanelRow] = [
+        ("Hit", metrics["l2_hit"], "%", COLORS["hit"]),
+    ]
+    l2_rows.extend(_collect_stall_rows(membw, "GL2"))
     l2 = build_cache_panel(
         "L2",
-        [("Hit", metrics["l2_hit"], "%", COLORS["hit"])],
+        l2_rows,
         width=_IP_BLOCK_W,
         height=_TOTAL_H,
     )
@@ -566,7 +621,8 @@ def create_mem_chart_diagram(
         std_arrows,
     )
     if is_gfx950:
-        fabric = build_ip_block("Data Fabric", _IP_BLOCK_W, _TOTAL_H)
+        ea_content = _build_ea_stall_content(membw)
+        fabric = build_ip_block("Data Fabric", _IP_BLOCK_W, _TOTAL_H, ea_content)
         hbm_content = _build_hbm_content(metrics)
         hbm = build_ip_block("HBM", _IP_BLOCK_W, _TOTAL_H, hbm_content)
     else:
@@ -631,8 +687,9 @@ def create_mem_chart_diagram(
             )
         )
 
+    has_stalls = membw is not None and any(n.state == "active" for n in membw.nodes)
     sections.append("")
-    sections.append(build_legend())
+    sections.append(build_legend(include_stall=has_stalls))
 
     if show_debug:
         notes: list[tuple[str, str]] = [
@@ -675,6 +732,7 @@ def plot_mem_chart(
     *,
     chart_title: str,
     gpu_arch: Optional[str] = None,
+    membw: Optional[Any] = None,  # noqa: ANN401
 ) -> str:
     """Render the CDNA memory chart and return as a string."""
     return render_chart_to_string(
@@ -684,6 +742,7 @@ def plot_mem_chart(
         console_width=_CONSOLE_WIDTH,
         chart_title=chart_title,
         gpu_arch=gpu_arch,
+        membw=membw,
     )
 
 
