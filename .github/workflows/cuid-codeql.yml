@@ -48,7 +48,7 @@ jobs:
       - name: Download and extract CodeQL bundle
         shell: bash
         run: |
-          curl -sS -o codeql-bundle-linux64.tar.gz \
+          wget -q -O codeql-bundle-linux64.tar.gz \
             "https://mkmartifactory.amd.com:8443/artifactory/system-provisioning/CodeQL/bundles/latest/codeql-bundle-linux64.tar.gz"
           tar -xzf codeql-bundle-linux64.tar.gz
           chmod +x ./codeql/codeql
@@ -88,12 +88,26 @@ jobs:
       - name: Build and Install OpenSSL 3.0 (if needed)
         run: |
           set -e
+          # The openssl CLI's version doesn't guarantee the -dev headers CMake's
+          # find_package(OpenSSL) needs are installed, so install the dev package first
+          # (a no-op if already satisfied) before checking the version.
+          if command -v apt-get &> /dev/null; then
+              apt-get update
+              apt-get install -y libssl-dev
+          elif command -v dnf &> /dev/null; then
+              dnf install -y openssl-devel
+          elif command -v zypper &> /dev/null; then
+              zypper install -y libopenssl-devel
+          fi
+
           OPENSSL_VER=$(openssl version | awk '{print $2}')
           echo "Current OpenSSL version: $OPENSSL_VER"
-          if [[ "$OPENSSL_VER" != 3.* ]]; then
-             echo "Installing OpenSSL 3.0..."
+          if [[ "$OPENSSL_VER" == 3.* ]]; then
+             echo "OpenSSL 3.0+ dev package installed."
+             echo "OPENSSL_ROOT_DIR=/usr" >> $GITHUB_ENV
+          else
+             echo "Package manager did not provide OpenSSL 3.0+; building from source..."
              if command -v apt-get &> /dev/null; then
-                 apt-get update
                  apt-get install -y wget build-essential zlib1g-dev perl
              elif command -v dnf &> /dev/null; then
                  dnf install -y wget make gcc perl zlib-devel perl-core
@@ -109,18 +123,17 @@ jobs:
              make install
              ldconfig
              echo "OPENSSL_ROOT_DIR=/usr/local" >> $GITHUB_ENV
-          else
-             echo "OpenSSL 3.0+ already installed."
           fi
 
       # CodeQL's bundled autobuilder still auto-detects Makefile/CMake, same as the old Autobuild action
       - name: Create CodeQL database
         shell: bash
         run: |
+          # Discard any stale CMakeCache from a previous run/environment to force a clean configure
+          rm -rf "$PROJECT_DIR/build"
           ./codeql/codeql database create codeqldb --language=${{ matrix.language }} --source-root=$PROJECT_DIR \
-          --command=bash \
-          --command=-c \
-          --command="mkdir -p build && cd build && cmake $PROJECT_DIR -DOPENSSL_ROOT_DIR=$OPENSSL_ROOT_DIR && make -j$(nproc)"
+          --command="cmake -S $PROJECT_DIR -B $PROJECT_DIR/build -DOPENSSL_ROOT_DIR=$OPENSSL_ROOT_DIR" \
+          --command="cmake --build $PROJECT_DIR/build -j$(nproc)"
 
       - name: Perform CodeQL Analysis
         shell: bash
