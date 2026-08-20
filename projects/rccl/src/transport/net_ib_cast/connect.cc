@@ -729,20 +729,29 @@ ncclResult_t IbCastListen(void* ctx, int dev, void* opaqueHandle, void** listenC
   NCCLCHECKGOTO(ncclSocketListen(&comm->sock), ret, fail);
   NCCLCHECKGOTO(ncclSocketGetAddr(&comm->sock, &handle->connectAddr), ret, fail);
 
-  // Embed GIDs of all PFs in the handle so the connector can find a local NIC
-  // on the same subnet as any of our ports.
+  // Embed GIDs of the first 2 RoCE PFs (handle-size limited) in the handle so
+  // the connector can find a local NIC on the same subnet as one of our ports.
+  // ncclIbHandle is bounded to 128 B, so at most 2 GIDs fit; a vNIC with more
+  // than 2 RoCE PFs advertises only the first 2.
   if (ncclParamIbCastSubnetAwareRouting() && dev < IbCastNMergedDevs) {
     struct ncclIbMergedDev* mDev = IbCastMergedDevs + dev;
-    int gidSlot = 0;
-    for (int i = 0; i < mDev->vProps.ndevs && gidSlot < 2; i++) {
+    int gidSlot = 0, roceDevs = 0;
+    for (int i = 0; i < mDev->vProps.ndevs; i++) {
       int ibDevN = mDev->vProps.devs[i];
       ncclIbDev* ibDev = IbCastDevs + ibDevN;
       if (ibDev->portAttr.link_layer != IBV_LINK_LAYER_ETHERNET) continue;
+      roceDevs++;
+      if (gidSlot >= 2) continue;
       int gidIndex;
       NCCLCHECKGOTO(IbCastGetGidIndex(ibDev->context, ibDev->portNum, &ibDev->portAttr, &gidIndex), ret, fail);
       NCCLCHECKGOTO(wrap_ibv_query_gid(ibDev->context, ibDev->portNum, gidIndex, &handle->listenGids[gidSlot]), ret,
                     fail);
       gidSlot++;
+    }
+    if (roceDevs > 2) {
+      WARN("NET/IB: %s: subnet-aware routing device %d has %d RoCE PFs but only the first 2 are advertised "
+           "(handle-size limited)",
+           __func__, dev, roceDevs);
     }
   }
 
