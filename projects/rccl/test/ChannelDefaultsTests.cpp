@@ -44,9 +44,15 @@ struct ResolvedChannels
 };
 
 // Drive the production function with a mock comm and return what it resolved.
-// nNodes > 1 also sets topo->nRanks, which the per-arch multi-node caps match on.
+//
+// topo->nRanks is what the arch-gated branches match on. Multi-node cases set it to the
+// total rank count, which the gfx950 caps key off. Single-node cases leave it at 0 by
+// default, which deliberately suppresses the per-peer doubling
+// (`nodes[GPU].count == topo->nRanks`) so p2pnChannelsPerPeer passes through as
+// kInputChannelsPerPeer and the saturate expectations stay easy to derive. Pass
+// allRanksLocal to exercise the doubling instead.
 ResolvedChannels ResolveP2pChannels(const char* arch, int nRanks, int collChannels = kDefaultCollChannels,
-                                    int nNodes = 1)
+                                    int nNodes = 1, bool allRanksLocal = false)
 {
     // Heap, not stack: ncclTopoSystem is ~13 MiB and the default stack is 8 MB.
     ncclComm_t comm      = nullptr;
@@ -57,6 +63,8 @@ ResolvedChannels ResolveP2pChannels(const char* arch, int nRanks, int collChanne
     CreateMockComm(comm, *topo, *gpu, arch, nRanks);
     AttachMockSharedRes(comm, *sharedRes);
     if (nNodes > 1) SetMockNodes(comm, nNodes, nRanks);
+    // Match nodes[GPU].count, which CreateMockComm sets to 1, so the doubling branch fires.
+    else if (allRanksLocal) SetMockNodes(comm, 1, comm->topo->nodes[GPU].count);
     comm->nChannels           = collChannels;
     comm->p2pnChannelsPerPeer = kInputChannelsPerPeer;
 
@@ -131,6 +139,25 @@ TEST(ChannelDefaults, Gfx1250_SaturateOnByDefault)
 TEST(ChannelDefaults, Gfx950_SaturateOffByDefault)
 {
     const ResolvedChannels r = ResolveP2pChannels("gfx950", /*nRanks=*/4);
+    EXPECT_EQ(r.p2pnChannelsPerPeer, kInputChannelsPerPeer);
+    ExpectPoolInvariant(r);
+}
+
+// Single-node per-peer doubling, gated on nodes[GPU].count == topo->nRanks and on the arch.
+// gfx950 because saturate is off there by default and would otherwise overwrite the result.
+TEST(ChannelDefaults, Gfx950_SingleNodeDoublesPerPeer)
+{
+    const ResolvedChannels r =
+      ResolveP2pChannels("gfx950", /*nRanks=*/8, kDefaultCollChannels, /*nNodes=*/1, /*allRanksLocal=*/true);
+    EXPECT_EQ(r.p2pnChannelsPerPeer, kInputChannelsPerPeer * 2) << "pow2Up(8) * 2";
+    ExpectPoolInvariant(r);
+}
+
+// The doubling is arch-gated, so an otherwise identical gfx90a job does not get it.
+TEST(ChannelDefaults, Gfx90a_SingleNodeDoesNotDoublePerPeer)
+{
+    const ResolvedChannels r =
+      ResolveP2pChannels("gfx90a", /*nRanks=*/8, kDefaultCollChannels, /*nNodes=*/1, /*allRanksLocal=*/true);
     EXPECT_EQ(r.p2pnChannelsPerPeer, kInputChannelsPerPeer);
     ExpectPoolInvariant(r);
 }
