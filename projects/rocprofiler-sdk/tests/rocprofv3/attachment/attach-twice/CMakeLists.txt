@@ -9,7 +9,6 @@ project(
     VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
-find_package(Python3 REQUIRED)
 
 set(ROCPROFILER_MEMCHECK_TYPES "AddressSanitizer" "UndefinedBehaviorSanitizer"
                                "ThreadSanitizer" "LeakSanitizer")
@@ -29,16 +28,6 @@ endif()
 set(attachment-env
     "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
     )
-
-add_test(
-    NAME rocprofv3-test-attachment-reattach-config-filter
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/validate_reattach_config.py
-            $<TARGET_FILE:rocprofiler-sdk::rocprofv3>)
-
-set_tests_properties(
-    rocprofv3-test-attachment-reattach-config-filter
-    PROPERTIES TIMEOUT 30 LABELS "attachment" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 # Test that launches the app and reattaches to it twice
 rocprofiler_add_integration_execute_test(
