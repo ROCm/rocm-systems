@@ -231,7 +231,7 @@ struct ncclSideStreamScope {
   ncclSideStreamScope& operator=(const ncclSideStreamScope&) = delete;
 };
 
-#if CUDART_VERSION >= 12020 || ROCM_VERSION >= 71200
+#if CUDART_VERSION >= 12020 || NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
 
 static inline ncclResult_t ncclCuMemHostAlloc(void** ptr, CUmemGenericAllocationHandle* handlep, size_t size) {
   ncclResult_t result = ncclSuccess;
@@ -754,9 +754,9 @@ static inline ncclResult_t ncclCuMemGetAddressRange(CUdeviceptr userBuff, size_t
       CUCHECK(cuMemRetainAllocationHandle(&handle, (void*)mappedPtrEnd));
       CUCHECK(cuMemGetAllocationPropertiesFromHandle(&prop, handle));
 #if defined(__HIP_PLATFORM_AMD__)
-#if ROCM_VERSION >= 71200
+#if NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
       // CLR rejects HostNuma; RCCL allocates host segments as CU_MEM_LOCATION_TYPE_HOST
-      // (host VMM alloc is only available on ROCm >= 7.12, matching ncclCuMemHostAlloc).
+      // in native ROCm 7.12 and the 7.0.2.x backport.
       if (prop.location.type == CU_MEM_LOCATION_TYPE_HOST) {
         *hasSysmemSegment = true;
       }

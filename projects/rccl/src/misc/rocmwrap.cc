@@ -190,9 +190,6 @@ int ncclCuMemEnable() {
 static int ncclCumemHostEnable = -1;
 int ncclCuMemHostEnable() {
   if (ncclCumemHostEnable != -1) return ncclCumemHostEnable;
-  // NOTE: the cuMem *host* allocation path is NOT part of the ROCm 7.0.2.x
-  // backport (it relies on hipDeviceAttributeHostNumaId, which is absent there),
-  // so it has its own native-only gate rather than NCCL_CUMEM_VERSION_SUPPORTED().
 #if !NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
   ncclCumemHostEnable = 0;
   return ncclCumemHostEnable;
@@ -222,7 +219,7 @@ int ncclCuMemHostEnable() {
       CUCHECK(cuDeviceGetAttribute(&cpuNumaNodeId, hipDeviceAttributeHostNumaId, currentDev));
       if (cpuNumaNodeId < 0) cpuNumaNodeId = 0;
       // CLR rejects HostNuma; probe with Host to match alloc.h's ncclCuMemHostAlloc.
-      prop.location.type = hipMemLocationTypeHost;
+      prop.location.type = CU_MEM_LOCATION_TYPE_HOST;
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
       prop.requestedHandleTypes = ncclCuMemHandleType;
       // HIP/CLR requires host id to be 0. cpuNumaNodeId can exceed GPU count and fail.
