@@ -155,6 +155,76 @@
         }
       ]
     },
+    "a_netib_multithread": {
+      "extends": "a_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "description": "A17: four worker threads per rank, each on its own NET/IB context and connection. Mirrors how a framework process with several communicators drives the plugin from several proxy threads.",
+      "tests": [
+        {
+          "name": "A17_NetIB_MultiThread_SimpleSendRecv",
+          "description": "Concurrent workers each transfer on an independent connection.",
+          "test_filter": "NetIbMPITest.SimpleSendRecv"
+        },
+        {
+          "name": "A17_NetIB_MultiThread_SequentialTransfers",
+          "description": "Concurrent workers each run repeated transfers on an independent connection.",
+          "test_filter": "NetIbMPITest.MultipleSequentialTransfers"
+        },
+        {
+          "name": "A17_NetIB_MultiThread_MemoryRegistrationStorm",
+          "description": "Concurrent register/deregister storms contend on the shared per-device MR cache.",
+          "test_filter": "NetIbMPITest.MemoryRegistrationStorm"
+        },
+        {
+          "name": "A17_NetIB_MultiThread_MrCacheRefCount",
+          "description": "All workers register the same address, contending on one cache entry's refcount.",
+          "test_filter": "NetIbMPITest.MrCacheRefCount"
+        },
+        {
+          "name": "A17_NetIB_MultiThread_ProgressDoesNotSerialize",
+          "description": "Gate: concurrent workers must progress at the same time. Catches a lock held across a progress call, which functional tests pass straight through.",
+          "test_filter": "NetIbMPITest.ThreadedProgressDoesNotSerialize"
+        }
+      ]
+    },
+    "a_cast_multithread": {
+      "extends": "a_cast_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "env_variables": {
+        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "10000000"
+      },
+      "description": "A18: four worker threads per rank on independent IB-CAST connections, so several WRR schedulers advance at once.",
+      "tests": [
+        {
+          "name": "A18_Cast_MultiThread_StressMultiRound",
+          "description": "Concurrent CAST connections, each auditing its own WRR token ledger.",
+          "test_filter": "NetIbMPITest.CastStressMultiRoundTwoConns"
+        }
+      ]
+    },
+    "a_fault_inject_multithread": {
+      "extends": "a_cast_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "env_variables": {
+        "RCCL_IB_FAULT_INJECTION": "0"
+      },
+      "description": "A19: fault isolation between workers. One worker breaks its own connection while the others must keep transferring cleanly. Fault injection stays off: the tests use the per-comm hooks, and the libibverbs shims add process-global mutex traffic to every poll_cq while their per-device registry lets one worker's clear disarm the others.",
+      "tests": [
+        {
+          "name": "A19_Cast_FaultIsolationAcrossWorkers",
+          "description": "Injected fault state stays inside its communicator; bystander connections stay clean.",
+          "test_filter": "NetIbMPITest.FaultIsolationAcrossWorkers"
+        },
+        {
+          "name": "A19_Cast_FaultShimsAbsentUnlessRequested",
+          "description": "The libibverbs ops shims must not be installed while RCCL_IB_FAULT_INJECTION is off: their poll_cq serializes the whole process on one mutex.",
+          "test_filter": "NetIbMPITest.FaultInjectionShimsAbsentUnlessRequested"
+        }
+      ]
+    },
 
     "a_gin": {
       "extends": "a_base",
@@ -448,6 +518,9 @@
     { "name": "A14. GIN enable gate (ROCM-27070)",    "config": "a_gin_enable_gate", "enabled": true },
     { "name": "A15. GIN AINIC backend (ROCM-27070)",  "config": "a_gin_ainic_backend", "enabled": true },
     { "name": "A16. Component - Bootstrap socket poll", "config": "a_socket_poll_bootstrap", "enabled": true },
+    { "name": "A17. Component - NetIb multithread",   "config": "a_netib_multithread", "enabled": true },
+    { "name": "A18. Component - CAST multithread",    "config": "a_cast_multithread", "enabled": true },
+    { "name": "A19. Component - Fault isolation across workers", "config": "a_fault_inject_multithread", "enabled": true },
 
     { "name": "B1. IB baseline",                     "config": "b1_ib",             "enabled": true },
     { "name": "B2. CAST alltoall full (1K-16G)",     "config": "b_alltoall_cast_full", "enabled": true },

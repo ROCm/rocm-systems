@@ -446,6 +446,91 @@
         "NCCL_DMABUF_ENABLE": "1"
       }
     },
+    "net_ib_multithread_independent": {
+      "extends": "net_ib_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "tests": [
+        {
+          "name": "NetIB_MultiThread_IndependentSimpleSendRecv",
+          "description": "Concurrent workers each transfer on an independent NET/IB context and connection",
+          "test_filter": "NetIbMPITest.SimpleSendRecv"
+        },
+        {
+          "name": "NetIB_MultiThread_IndependentSequentialTransfers",
+          "description": "Concurrent workers each run repeated transfers on an independent connection",
+          "test_filter": "NetIbMPITest.MultipleSequentialTransfers"
+        },
+        {
+          "name": "NetIB_MultiThread_MultipleSizes",
+          "description": "Concurrent workers sweep the size ladder into the shared per-device MR cache",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizes"
+        },
+        {
+          "name": "NetIB_MultiThread_MemoryRegistrationStorm",
+          "description": "Concurrent register/deregister storms race the per-device MR cache",
+          "test_filter": "NetIbMPITest.MemoryRegistrationStorm"
+        },
+        {
+          "name": "NetIB_MultiThread_MrCacheRefCount",
+          "description": "All workers register the same address, contending on one cache entry's refcount",
+          "test_filter": "NetIbMPITest.MrCacheRefCount"
+        },
+        {
+          "name": "NetIB_MultiThread_LongRunningEndurance",
+          "description": "Sustained concurrent traffic with the RDMA leak check around the whole run",
+          "test_filter": "NetIbMPITest.LongRunningEndurance"
+        }
+      ]
+    },
+    "cast_multithread": {
+      "extends": "cast_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "10000000"
+      },
+      "tests": [
+        {
+          "name": "Cast_MultiThread_StressMultiRound",
+          "description": "Concurrent IB-CAST connections, each auditing its own WRR token ledger",
+          "test_filter": "NetIbMPITest.CastStressMultiRoundTwoConns"
+        },
+        {
+          "name": "Cast_MultiThread_SendRecvMultipleSizes",
+          "description": "Concurrent schedulers sweep both sides of the WRR/split boundary",
+          "test_filter": "NetIbMPITest.CastSendRecvMultipleSizes"
+        }
+      ]
+    },
+    "fault_inject_multithread": {
+      "extends": "cast_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "env_variables": {
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "100",
+        "RCCL_IB_QP_SCHED_RESET_INTERVAL": "1000",
+        "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "2000",
+        "NCCL_IB_RETURN_ASYNC_EVENTS": "1",
+        "RCCL_IB_FAULT_INJECTION": "0"
+      },
+      "tests": [
+        {
+          "name": "FaultInj_MultiThread_IsolationAcrossWorkers",
+          "description": "One worker breaks its own connection while the others keep transferring cleanly",
+          "test_filter": "NetIbMPITest.FaultIsolationAcrossWorkers"
+        },
+        {
+          "name": "FaultInj_MultiThread_QpErrorClearRecovers",
+          "description": "Each worker breaks one connection, clears the fault and must move data on a second one",
+          "test_filter": "NetIbMPITest.FaultInjCastQpErrorClearRecovers"
+        }
+      ]
+    },
     "net_ib_initialization": {
       "extends": "net_ib_base",
       "timeout": 60,
@@ -1334,7 +1419,7 @@
         {
           "name": "UBR_AlltoAll_OutOfPlace_MultiNode",
           "description": "AlltoAll out-of-place with UBR on multi-node",
-          "test_filter": "UBR_AlltoAll.OutOfPlace_MultiNode"
+          "test_filter": "UBR_AllToAll.OutOfPlace_MultiNode"
         },
         {
           "name": "UBR_SendRecv_RingPattern_MultiNode",
@@ -1344,19 +1429,19 @@
         {
           "name": "UBR_AlltoAllStress_InterleavedMultiSize",
           "description": "Stress test with interleaved AlltoAll/AlltoAllv across small/medium/large sizes",
-          "test_filter": "UBR_AlltoAllStress.InterleavedMultiSize_MultiNode",
+          "test_filter": "UBR_AllToAllStress.InterleavedMultiSize_MultiNode",
           "timeout": 300
         },
         {
           "name": "UBR_AlltoAllStress_SplitComm",
           "description": "Stress test with interleaved AlltoAll/AlltoAllv using split communicators",
-          "test_filter": "UBR_AlltoAllStress.InterleavedWithSplitComm_MultiNode",
+          "test_filter": "UBR_AllToAllStress.InterleavedWithSplitComm_MultiNode",
           "timeout": 300
         },
         {
           "name": "UBR_AlltoAllStress_ConcurrentMultiComm",
           "description": "Concurrent AlltoAll on multiple communicators with separate streams",
-          "test_filter": "UBR_AlltoAllStress.ConcurrentMultiComm_MultiNode",
+          "test_filter": "UBR_AllToAllStress.ConcurrentMultiComm_MultiNode",
           "timeout": 300
         },
         {
@@ -1367,12 +1452,12 @@
         {
           "name": "UBR_ConcurrentRegHang_AlltoAll_Contiguous",
           "description": "ncclAlltoAll with contiguous registered buffers (should pass)",
-          "test_filter": "UBR_ConcurrentRegHang.AlltoAll_ContiguousBuffer_SHOULD_WORK"
+          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_SHOULD_WORK"
         },
         {
           "name": "UBR_ConcurrentRegHang_AlltoAll_Stress",
           "description": "Stress test: 50 iterations of ncclAlltoAll with contiguous buffers",
-          "test_filter": "UBR_ConcurrentRegHang.AlltoAll_ContiguousBuffer_Stress_SHOULD_WORK",
+          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_Stress_SHOULD_WORK",
           "timeout": 300
         },
         {
@@ -1455,12 +1540,12 @@
         {
           "name": "UBR_AlltoAll_Contiguous_Success",
           "description": "ncclAlltoAll with contiguous registered buffers",
-          "test_filter": "UBR_ConcurrentRegHang.AlltoAll_ContiguousBuffer_SHOULD_WORK"
+          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_SHOULD_WORK"
         },
         {
           "name": "UBR_AlltoAll_Stress_Success",
           "description": "Stress test: 50 iterations of ncclAlltoAll with contiguous buffers",
-          "test_filter": "UBR_ConcurrentRegHang.AlltoAll_ContiguousBuffer_Stress_SHOULD_WORK",
+          "test_filter": "UBR_ConcurrentRegHang.AllToAll_ContiguousBuffer_Stress_SHOULD_WORK",
           "timeout": 300
         },
         {
@@ -1855,7 +1940,7 @@
         {
           "name": "GraphCapture_AlltoAll_MultiNode",
           "description": "AlltoAll graph capture with IPC registration on multi-node",
-          "test_filter": "GraphCapture_AlltoAll.MultiNode"
+          "test_filter": "GraphCapture_AllToAll.MultiNode"
         },
         {
           "name": "GraphCapture_AllReduce_MultiNode",
@@ -1988,7 +2073,7 @@
       "tests": [
         { "name": "NetIB_Stress_FanIn",                 "description": "Fan-in 3->1, 100 iterations",            "test_filter": "NetIbMPITest.FanInStress" },
         { "name": "NetIB_Stress_FanOut",                "description": "Fan-out 1->3, 100 iterations",           "test_filter": "NetIbMPITest.FanOutStress" },
-        { "name": "NetIB_Stress_AlltoAll",              "description": "Full mesh, 50 iterations",               "test_filter": "NetIbMPITest.AlltoAllStress" },
+        { "name": "NetIB_Stress_AlltoAll",              "description": "Full mesh, 50 iterations",               "test_filter": "NetIbMPITest.AllToAllStress" },
         { "name": "NetIB_Stress_BidirectionalMultiRank","description": "All pairs bidirectional, 50 iterations",  "test_filter": "NetIbMPITest.BidirectionalMultiRank" },
         { "name": "NetIB_Stress_LongRunningMultiRank",  "description": "Fan-in 3->1, 1000 iterations",           "test_filter": "NetIbMPITest.LongRunningMultiRank" }
       ]
@@ -3877,6 +3962,24 @@
       "name": "NET Transport - Ethernet (Multi-Node)",
       "description": "Network transport tests over Ethernet",
       "config": "net_transport_eth_multinode",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Multithread Independent Connections (4)",
+      "description": "4 worker threads/rank, each on an independent NET/IB context and connection",
+      "config": "net_ib_multithread_independent",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST Multithread (4)",
+      "description": "4 worker threads/rank driving independent IB-CAST connections and WRR schedulers",
+      "config": "cast_multithread",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Fault Injection Multithread (4)",
+      "description": "Per-communicator fault injection across concurrent workers, including cross-worker isolation",
+      "config": "fault_inject_multithread",
       "enabled": true
     },
     {

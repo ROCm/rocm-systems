@@ -1041,6 +1041,21 @@ class TestExecutor:
                 "duration": 0,
                 "error": msg,
             }
+
+        # num_gpus of 0 declares a test that needs no GPU, which only makes sense
+        # on one node: multi-node placement builds "host:{num_gpus}" and
+        # "--map-by ppr:{num_gpus}:node" from it, and zero there would launch
+        # nothing. Fail this test rather than emit that.
+        if num_nodes > 1 and num_gpus < 1:
+            msg = (f"Invalid num_gpus for test '{test_name}': {num_gpus} GPUs/node cannot place "
+                   f"ranks across {num_nodes} nodes")
+            print(f"ERROR: {msg}")
+            return {
+                "name": test_name,
+                "result": TestResult.RESULT_FAILED.value,
+                "duration": 0,
+                "error": msg,
+            }
         timeout = test_config.get("timeout", 0)
         env_vars = test_config.get("env_variables", {})
 
