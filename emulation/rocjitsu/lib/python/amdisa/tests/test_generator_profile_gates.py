@@ -16,6 +16,7 @@ from amdisa.__main__ import (
 )
 from amdisa.codegen import CodeGenerator
 from amdisa.codegen.config import CodegenConfig
+from amdisa.codegen.execute import ExecuteContext
 from amdisa.codegen.execute.vector_special import (
     gen_cvt_fp8,
     gen_vector_mad_64_32,
@@ -60,6 +61,37 @@ def _repo_root() -> Path:
 def _mrisa_dir() -> Path:
     default = _repo_root() / 'shared' / 'machine-readable-isa' / 'isa'
     return Path(os.environ.get('MRISA_PATH', default))
+
+
+def _gen_mfma(
+    inst: Instruction,
+    arch_name: str,
+    profile=None,
+) -> str:
+    profiles = {
+        'cdna1': Cdna1Profile,
+        'cdna2': Cdna2Profile,
+        'cdna3': CdnaProfile,
+        'cdna4': CdnaProfile,
+        'rdna3': Rdna3Profile,
+        'rdna3_5': Rdna3_5Profile,
+        'rdna4': Rdna4Profile,
+        'cdna5': Cdna5Profile,
+    }
+    profile = profile or profiles[arch_name]()
+    return gen_mfma(
+        ExecuteContext(
+            inst=inst,
+            sem=InstructionSemantics(inst.name, 'mfma'),
+            dst_ops=['vdst'],
+            src_ops=['src0', 'src1', 'src2'],
+            profile=profile,
+            enc_name=inst.enc_name,
+            is_vop3=True,
+            has_abs=False,
+            arch_name=arch_name,
+        )
+    )
 
 
 @pytest.fixture
@@ -1083,9 +1115,54 @@ def test_true16_vop3_cmpx_hoists_opsel():
         assert 'if (opsel & (1u << 1)) s1_raw >>= 16;' in body
 
 
+def test_matrix_resolved_dense_operands_support_vgpr_and_inline_accumulators():
+    inst = Instruction('V_WMMA_F32_16X16X32_F16', 'ENC_VOP3P', 0, [])
+    profile = SimpleNamespace(uses_vgpr_msb_indexing=True)
+
+    body = _gen_mfma(inst, 'rdna4', profile)
+
+    for operand in ('vdst', 'src0', 'src1'):
+        assert (
+            f'Isa::resolved_vgpr_offset(wf, {operand}.opr_type_, '
+            f'{operand}.encoding_value_, {operand}.vgpr_msb_role())'
+        ) in body
+    assert (
+        'auto src2_off = Isa::resolved_vgpr_offset(wf, src2.opr_type_, '
+        'src2.encoding_value_, src2.vgpr_msb_role());'
+    ) in body
+    assert 'const_acc = amdgpu::ACC_FROM_VGPR;' in body
+    assert 's2 = vb + *src2_off;' in body
+    assert 'const_acc = amdgpu::RegisterAccess(wf).read_scalar(src2);' in body
+
+
+def test_matrix_resolved_sparse_index_rejects_missing_vgpr_offset():
+    inst = Instruction('V_SWMMAC_F32_16X16X32_F16', 'ENC_VOP3P', 0, [])
+    profile = SimpleNamespace(uses_vgpr_msb_indexing=True)
+
+    body = _gen_mfma(inst, 'rdna4', profile)
+
+    assert (
+        'auto index_off = Isa::resolved_vgpr_offset(wf, src2.opr_type_, '
+        'src2.encoding_value_, src2.vgpr_msb_role());'
+    ) in body
+    assert 'if (!index_off)\n    throw util::UnimplementedInst(mnemonic());' in body
+    assert 'uint32_t index_base = vb + *index_off;' in body
+
+
+def test_matrix_direct_offsets_do_not_use_resolved_operand_setup():
+    inst = Instruction('V_WMMA_F32_16X16X16_F16', 'ENC_VOP3P', 0, [])
+    profile = SimpleNamespace(uses_vgpr_msb_indexing=False)
+
+    body = _gen_mfma(inst, 'rdna4', profile)
+
+    assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
+    assert 'Isa::resolved_vgpr_offset' not in body
+    assert 'amdgpu::resolve_acc(vb, dst,' in body
+
+
 def test_gfx1250_wmma_f32_passes_c_modifier_to_accumulator_helper():
     inst = Instruction('V_WMMA_F32_16X16X32_F16', 'ENC_VOP3P', 0, [])
-    body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'cdna5')
+    body = _gen_mfma(inst, 'cdna5')
 
     assert 'amdgpu::exec_wmma_f32_16x16x32_f16(' in body
     assert 'amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi)' in body
@@ -1148,7 +1225,7 @@ def test_rdna_wmma_uses_arch_specific_wave32_operand_layout():
     inst = Instruction('V_WMMA_F32_16X16X16_F16', 'ENC_VOP3P', 0, operands)
 
     for arch in ('rdna3', 'rdna3_5'):
-        body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], arch)
+        body = _gen_mfma(inst, arch)
 
         assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
         assert (
@@ -1156,7 +1233,7 @@ def test_rdna_wmma_uses_arch_specific_wave32_operand_layout():
         )
         assert 'amdgpu::exec_f32(cu, 16, 16, 16' not in body
 
-    body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'rdna4')
+    body = _gen_mfma(inst, 'rdna4')
     assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
     assert 'amdgpu::exec_wmma_f32(cu, 16, 16, 16, 16, dst,' in body
     assert 'amdgpu::exec_f32(cu, 16, 16, 16' not in body
@@ -1172,7 +1249,7 @@ def test_rdna_wmma_i32_iu8_uses_arch_specific_wave32_operand_layout():
     inst = Instruction('V_WMMA_I32_16X16X16_IU8', 'ENC_VOP3P', 0, operands)
 
     for arch in ('rdna3', 'rdna3_5'):
-        body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], arch)
+        body = _gen_mfma(inst, arch)
 
         assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
         assert (
@@ -1186,7 +1263,7 @@ def test_rdna_wmma_i32_iu8_uses_arch_specific_wave32_operand_layout():
         )
         assert 'amdgpu::exec_i32_mixed(cu, 16, 16, 16' not in body
 
-    body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'rdna4')
+    body = _gen_mfma(inst, 'rdna4')
     assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
     assert (
         'auto extract_a = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc)'
@@ -1216,7 +1293,7 @@ def test_rdna_wmma_f16_bf16_use_arch_specific_wave32_dispatch():
         lower = dtype.lower()
 
         for arch in ('rdna3', 'rdna3_5'):
-            body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], arch)
+            body = _gen_mfma(inst, arch)
 
             assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
             assert (
@@ -1226,7 +1303,7 @@ def test_rdna_wmma_f16_bf16_use_arch_specific_wave32_dispatch():
             assert '(inst_.op_sel >> 2) & 0x1u' in body
             assert f'amdgpu::exec_wmma_{lower}(cu, 16, 16, 16' not in body
 
-        body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'rdna4')
+        body = _gen_mfma(inst, 'rdna4')
         assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
         assert f'amdgpu::exec_wmma_{lower}(cu, 16, 16, 16, 16, dst,' in body
         assert 'wf.wf_size());' in body
@@ -1235,7 +1312,7 @@ def test_rdna_wmma_f16_bf16_use_arch_specific_wave32_dispatch():
 
 def test_gfx1250_wmma_i32_iu4_emits_executor():
     inst = Instruction('V_WMMA_I32_16X16X16_IU4', 'ENC_VOP3P', 0, [])
-    body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'cdna5')
+    body = _gen_mfma(inst, 'cdna5')
 
     assert '(inst_.neg & 0x1u) ? amdgpu::extract_i4(cu, base, loc)' in body
     assert 'amdgpu::exec_wmma_i32(cu, 16, 16, 16, 4, dst, src0_base,' in body
@@ -1243,14 +1320,14 @@ def test_gfx1250_wmma_i32_iu4_emits_executor():
 
 def test_cdna3_fp8_mfma_uses_fnuz_helper_variant():
     inst = Instruction('V_MFMA_F32_16X16X32_FP8_FP8', 'ENC_VOP3P_MFMA', 0, [])
-    body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'cdna3')
+    body = _gen_mfma(inst, 'cdna3')
 
     assert 'amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, true, true, true>(' in body
 
 
 def test_cdna3_fp8_smfmac_uses_fnuz_readers():
     inst = Instruction('V_SMFMAC_F32_16X16X64_FP8_BF8', 'ENC_VOP3P_MFMA', 0, [])
-    body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'cdna3')
+    body = _gen_mfma(inst, 'cdna3')
 
     assert 'amdgpu::smfmac_read_fp8_fnuz' in body
     assert 'amdgpu::smfmac_read_bf8_fnuz' in body
@@ -1258,7 +1335,7 @@ def test_cdna3_fp8_smfmac_uses_fnuz_readers():
 
 def test_cdna4_fp8_mfma_keeps_ocp_helper_variant():
     inst = Instruction('V_MFMA_F32_16X16X32_FP8_FP8', 'ENC_VOP3P_MFMA', 0, [])
-    body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'cdna4')
+    body = _gen_mfma(inst, 'cdna4')
 
     assert 'amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, true, true>(' in body
     assert 'amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, true, true, true>(' not in body
@@ -1369,11 +1446,11 @@ def test_cdna_f64_mfma_uses_blgp_as_neg_immediate():
     inst = Instruction('V_MFMA_F64_16X16X4_F64', 'ENC_VOP3P_MFMA', 0, operands)
 
     for arch in ('cdna3', 'cdna4'):
-        body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], arch)
+        body = _gen_mfma(inst, arch)
         assert 's2, const_acc, inst_.blgp);' in body
 
     for arch in ('rdna3', 'rdna4', 'cdna5'):
-        body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], arch)
+        body = _gen_mfma(inst, arch)
         assert 's2, const_acc, 0u);' in body
 
 
@@ -3260,7 +3337,7 @@ def test_rdna4_swmmac_uses_src2_as_sparse_index_vgpr():
         ],
     )
 
-    body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'rdna4')
+    body = _gen_mfma(inst, 'rdna4')
 
     assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
     assert 'uint32_t const_acc = amdgpu::ACC_FROM_VGPR;' in body
@@ -3296,7 +3373,7 @@ def test_rdna4_f16_bf16_swmmac_dispatch_wiring_is_generated():
             operands,
         )
 
-        body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'rdna4')
+        body = _gen_mfma(inst, 'rdna4')
 
         assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
         assert 'uint32_t const_acc = amdgpu::ACC_FROM_VGPR;' in body
@@ -3326,7 +3403,7 @@ def test_rdna4_swmmac_uses_32_index_entries_for_wide_8bit_k():
         ],
     )
 
-    body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'rdna4')
+    body = _gen_mfma(inst, 'rdna4')
 
     assert 'index_base, 32, index_key, amdgpu::extract_fp8, amdgpu::extract_fp8' in body
 

@@ -121,6 +121,24 @@ def test_amdgpu_profiles_split_execution_sources(profile):
     assert profile.split_execution_sources
 
 
+@pytest.mark.parametrize(
+    ('profile', 'expected'),
+    [
+        (Cdna1Profile(), False),
+        (Cdna2Profile(), False),
+        (CdnaProfile(), False),
+        (Rdna1Profile(), False),
+        (Rdna2Profile(), False),
+        (Rdna3Profile(), False),
+        (Rdna3_5Profile(), False),
+        (Rdna4Profile(), False),
+        (Cdna5Profile(), True),
+    ],
+)
+def test_uses_vgpr_msb_indexing(profile, expected):
+    assert profile.uses_vgpr_msb_indexing is expected
+
+
 def test_non_split_generation_leaves_exec_named_sources_untouched(tmp_path):
     class NonSplitRdna4Profile(Rdna4Profile):
         @property
