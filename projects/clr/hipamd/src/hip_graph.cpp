@@ -1615,12 +1615,14 @@ hipError_t hipGraphAddConditionalNode(hipGraphNode_t* pGraphNode,
   }
 
   // Validate conditional type requirements
-  if (type == hipGraphCondTypeIf && numConditionalGraphs != 2) {
-    HIP_RETURN(hipErrorInvalidValue);  // IF needs exactly 2 (true + false)
+  if (type == hipGraphCondTypeIf && numConditionalGraphs != 1 && numConditionalGraphs != 2) {
+    HIP_RETURN(hipErrorInvalidValue);  // IF needs 1 (if-only) or 2 (if-else)
   }
   if (type == hipGraphCondTypeWhile && numConditionalGraphs != 1) {
     HIP_RETURN(hipErrorInvalidValue);  // WHILE needs exactly 1 (loop body)
   }
+  // SWITCH: numConditionalGraphs == number of cases (>= 1, already validated
+  // above). Case N runs when the condition value == N; out-of-range runs none.
 
   std::vector<hip::Graph*> child_graphs;
   child_graphs.reserve(numConditionalGraphs);

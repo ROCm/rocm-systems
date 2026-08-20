@@ -2029,10 +2029,12 @@ bool VirtualGPU::runGraphBlockIssue(void* exec_state_ptr, uint32_t total_graph_p
 
   hsa_kernel_dispatch_packet_t pkt = {};
   pkt.setup = 1 << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS;
-  pkt.workgroup_size_x = 1;
+  // 64-thread workgroup: graphBlockIssue copies a plain block's packets into the
+  // queue ring cooperatively (one thread per 16B chunk) to hide VRAM latency.
+  pkt.workgroup_size_x = 64;
   pkt.workgroup_size_y = 1;
   pkt.workgroup_size_z = 1;
-  pkt.grid_size_x = 1;
+  pkt.grid_size_x = 64;
   pkt.grid_size_y = 1;
   pkt.grid_size_z = 1;
   pkt.kernel_object = roc_device_.graphBlockIssueKernelObject();
@@ -2094,7 +2096,48 @@ bool VirtualGPU::runGraphWhileLoop(void* exec_state_ptr, uint64_t cond_ptr,
 }
 
 // ================================================================================================
-bool VirtualGPU::upgradeToDeviceMemQueue() {
+bool VirtualGPU::runGraphWalkLoop(void* exec_state_ptr) {
+  if (gpu_queue_ == nullptr || exec_state_ptr == nullptr) {
+    return false;
+  }
+  if (!roc_device_.hasGraphWalkLoopHSACO()) {
+    return false;
+  }
+
+  // Kernarg: single pointer to ExecutionState. Everything else the interpreter
+  // needs (terminator table, entry block, work queue) is read from that struct.
+  struct alignas(16) {
+    uint64_t state_ptr;
+  } *args = reinterpret_cast<decltype(args)>(allocKernArg(sizeof(*args), 256));
+  if (args == nullptr) return false;
+
+  args->state_ptr = reinterpret_cast<uint64_t>(exec_state_ptr);
+
+  hsa_kernel_dispatch_packet_t pkt = {};
+  pkt.setup = 1 << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS;
+  // 64-thread workgroup (one CU, same residency as the single-thread
+  // graphWhileLoop which already reserves a full wavefront): thread 0 drives the
+  // walk, all threads cooperate on the packet copy.
+  pkt.workgroup_size_x = 64;
+  pkt.workgroup_size_y = 1;
+  pkt.workgroup_size_z = 1;
+  pkt.grid_size_x = 64;
+  pkt.grid_size_y = 1;
+  pkt.grid_size_z = 1;
+  pkt.kernel_object = roc_device_.graphWalkLoopKernelObject();
+  pkt.kernarg_address = args;
+  pkt.private_segment_size = roc_device_.graphWalkLoopPrivateSize();
+  pkt.group_segment_size = roc_device_.graphWalkLoopGroupSize();
+
+  ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+      "[runGraphWalkLoop] exec_state=%p, kernel_obj=0x%lx, kernarg=%p, queue=%p",
+      exec_state_ptr, pkt.kernel_object, args, gpu_queue_);
+
+  return dispatchGenericAqlPacket(&pkt, dispatchPacketHeader_, 1, false, false);
+}
+
+// ================================================================================================
+bool VirtualGPU::upgradeToDeviceMemQueue(bool device_mem_qdesc) {
   if (device_mem_queue_) return true;  // Already upgraded
 
   hsa_queue_t* old_queue = gpu_queue_;
@@ -2104,7 +2147,7 @@ bool VirtualGPU::upgradeToDeviceMemQueue() {
   hsa_queue_t* new_queue = roc_device_.acquireQueue(
       queue_size, cooperative_, cuMask_, priority_, false, dedicated_queue_,
       /*preferred=*/nullptr, /*excluded_ids=*/nullptr, /*metadata_ring_buffer=*/nullptr,
-      /*device_mem=*/true);
+      /*device_mem=*/true, device_mem_qdesc);
   if (new_queue == nullptr) {
     device_mem_queue_ = false;
     return false;

@@ -615,9 +615,10 @@ class VirtualGPU : public device::VirtualDevice {
   bool runGraphBlockIssue(void* exec_state_ptr, uint32_t total_graph_packets = 0) override;
   bool runGraphWhileLoop(void* exec_state_ptr, uint64_t cond_ptr,
                          uint32_t body_block_idx) override;
+  bool runGraphWalkLoop(void* exec_state_ptr) override;
   bool addBarrierPacket(uint64_t signal_handle) override;
   void* getGpuQueue() override { return gpu_queue_; }
-  bool upgradeToDeviceMemQueue() override;
+  bool upgradeToDeviceMemQueue(bool device_mem_qdesc = false) override;
 
   // Return pointer to PrintfDbg
   PrintfDbg* printfDbg() const { return printfdbg_; }

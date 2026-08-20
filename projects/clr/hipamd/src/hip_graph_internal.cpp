@@ -1310,10 +1310,10 @@ bool GraphExec::IsAllCapturedGraph() const {
   return IsCommandBufferEligible();
 }
 
-// ================================================================================================
 bool GraphExec::IsCommandBufferEligible() const {
   if (segments_.empty()) return false;
-  for (const auto& seg : segments_) {
+  for (size_t i = 0; i < segments_.size(); ++i) {
+    const auto& seg = segments_[i];
     if (seg.nodes.empty()) return false;
 
     // Sub-graph segments (child graph or conditional): check recursively
@@ -1329,8 +1329,11 @@ bool GraphExec::IsCommandBufferEligible() const {
       if (!node->GraphCaptureEnabled()) return false;
     }
 
-    // Single branch: at most one successor
-    if (seg.segment_ids_edges.size() > 1) return false;
+    // Any number of successors is fine: multi-branch (arbitrary static DAG)
+    // graphs are linearized into a single topological block chain by
+    // BuildMultiBlockCommandBuffer. Per-block barrier semantics on the shared
+    // queue enforce every cross-block dependency, so no structured fork/join
+    // shape is required.
   }
   return true;
 }
@@ -1347,13 +1350,43 @@ hipError_t GraphExec::BuildMultiBlockCommandBuffer() {
     int segment_id;
     std::vector<uint8_t*> user_packets;
 
-    enum TermType { BRANCH, COND_BRANCH, RETURN };
+    enum TermType { BRANCH, COND_BRANCH, RETURN, SWITCH };
     TermType term_type = RETURN;
     uint32_t branch_target = 0;
     uint32_t true_target = 0;
     uint32_t false_target = 0;
     uint64_t cond_device_ptr = 0;
+    // Comparison for COND_BRANCH: take true_target iff (*cond_device_ptr <cond_op> cond_value).
+    // Defaults to "!= 0" (the WHILE/IF non-zero test). SWITCH lowers to a chain
+    // of "== N" checks by setting cond_op=COND_EQ and cond_value=N.
+    uint32_t cond_op = 1;      // 1 == COND_NE (matches graph_scheduler_kernel.hip)
+    uint64_t cond_value = 0;
+    // Native SWITCH terminator: jump to switch_case_targets[*cond_device_ptr], or
+    // switch_default_target when the value is out of range. switch_table_off is the
+    // byte offset of this block's case-target array within the baked switch region.
+    std::vector<uint32_t> switch_case_targets;
+    uint32_t switch_default_target = 0;
+    uint32_t switch_table_off = 0;
+    // Walk-loop sentinel hints, only ever set on WHILE header/latch blocks.
+    // See kTermFlagSentinelWait/Arm and the walk-loop bake below.
+    uint32_t term_flags = 0;
   };
+
+  // Walk-loop terminator flags. Must match graph_scheduler_kernel.hip.
+  //
+  // The interpreter's default way to know a condition is readable is to drain
+  // the completion signal of the block that produced it, which costs a full
+  // end-of-pipe round trip through the CP. For a WHILE latch there is a cheaper
+  // detector, the one the fused kernel uses: stamp COND_SENTINEL into the
+  // condition on the way into the body, then spin until the body's own store
+  // replaces it. That observes the value directly instead of waiting for the
+  // dispatch to be reported complete.
+  //
+  // ARM is set on both the header and the latch (whoever enters the body stamps
+  // the sentinel); WAIT only on the latch, because the header's condition comes
+  // from before the loop and must still be waited on the normal way.
+  constexpr uint32_t kTermFlagSentinelWait = 1u << 0;
+  constexpr uint32_t kTermFlagSentinelArm  = 1u << 1;
 
   // When set, body leaf blocks emit COND_BRANCH instead of BRANCH back to
   // the while-header. This fuses the condition check into the body's last
@@ -1386,8 +1419,22 @@ hipError_t GraphExec::BuildMultiBlockCommandBuffer() {
     }
     if (topo.empty()) return exit_block;
 
-    // Phase 1: allocate one block per segment (user packets collected now;
-    // terminators wired in phase 2 once all indices are known).
+    // Gather a segment's captured dispatch packets.
+    auto collect_seg_packets = [&](int seg_id, std::vector<uint8_t*>& out) {
+      auto batch_it = exec->segmentBatches_.find(seg_id);
+      if (batch_it == exec->segmentBatches_.end()) return;
+      for (auto& pb : batch_it->second.packet_batches) {
+        out.insert(out.end(), pb.dispatchPackets.begin(), pb.dispatchPackets.end());
+      }
+    };
+    // Phase 1: allocate one block per segment, in topological order. Multi-branch
+    // fan-out is linearized -- independent branches simply become consecutive
+    // blocks. Blocks for this exec are contiguous: [entry_block, entry_block +
+    // topo.size()); seg_to_block[topo[i]] == entry_block + i. Cross-block
+    // dependencies are preserved because (a) topo order places every producer
+    // before its consumer and (b) the captured dispatch packets carry the
+    // barrier bit, so a consumer block waits for all prior packets on the shared
+    // queue to retire.
     std::unordered_map<int, uint32_t> seg_to_block;
     uint32_t entry_block = static_cast<uint32_t>(flat_blocks.size());
 
@@ -1398,29 +1445,26 @@ hipError_t GraphExec::BuildMultiBlockCommandBuffer() {
 
       FlatBlock fb;
       fb.segment_id = seg_id;
-
       if (!seg.last_node || !seg.last_node->HasSubGraphs()) {
-        auto batch_it = exec->segmentBatches_.find(seg_id);
-        if (batch_it != exec->segmentBatches_.end()) {
-          for (auto& pb : batch_it->second.packet_batches) {
-            fb.user_packets.insert(fb.user_packets.end(),
-                                   pb.dispatchPackets.begin(),
-                                   pb.dispatchPackets.end());
-          }
-        }
+        collect_seg_packets(seg_id, fb.user_packets);
       }
       flat_blocks.push_back(std::move(fb));
     }
 
-    // Phase 2: wire CFG terminators.
+    // Phase 2: wire CFG terminators. Execution is a straight topological walk:
+    // block i falls through to block i+1, and only the final block of this exec
+    // branches to exit_block (or RETURNs). This linearizes arbitrary multi-branch
+    // fan-out; the graph edges themselves are honored implicitly by topo order.
     // IMPORTANT: do not hold references to flat_blocks elements across
     // recursive flattenGraph calls (vector may reallocate).
-    for (int seg_id : topo) {
+    for (size_t ti = 0; ti < topo.size(); ++ti) {
+      int seg_id = topo[ti];
       uint32_t block_idx = seg_to_block[seg_id];
       auto& seg = exec->segments_[seg_id];
-      bool is_leaf = seg.segment_ids_edges.empty();
-      uint32_t successor = is_leaf ? exit_block
-                                   : seg_to_block[seg.segment_ids_edges[0]];
+      // Topological successor: the next block emitted for this exec, or the
+      // caller-supplied exit_block once we reach the last topo segment.
+      bool is_leaf = (ti + 1 == topo.size());
+      uint32_t successor = is_leaf ? exit_block : (block_idx + 1);
 
       if (seg.last_node && seg.last_node->HasSubGraphs()) {
         if (seg.last_node->GetType() == hipGraphNodeTypeConditional) {
@@ -1434,27 +1478,42 @@ hipError_t GraphExec::BuildMultiBlockCommandBuffer() {
           constexpr uint32_t kInlineReturn = 0xFFFFFFFFu;
 
           if (cond_type == hipGraphCondTypeWhile && !sub_execs.empty()) {
-            // WHILE: body leaf blocks get COND_BRANCH that self-loops on
-            // true and returns inline on false. Only 2 blocks:
-            //   Block N:   [graphCondBranch → true:N+1, false:INLINE_RETURN]
-            //   Block N+1: [body pkts] [graphCondBranch → true:N+1, false:INLINE_RETURN]
+            // WHILE: use an explicit loop LATCH block that re-checks the
+            // condition. Every body control path -- including the convergence of
+            // a nested conditional (e.g. an IF at the tail of the body) -- flows
+            // to the latch, so the loop is correct for ARBITRARY body shapes, not
+            // just a single linear block. Structure:
+            //   header(block_idx): COND_BRANCH cond → true:body_entry, false:exit
+            //   ...body blocks...  (all leaves BRANCH to latch)
+            //   latch:             COND_BRANCH cond → true:body_entry, false:exit
             uint32_t while_false = (successor != kNoExit) ? successor : kInlineReturn;
-            WhileBackEdge wbe;
-            wbe.cond_device_ptr = cond_ptr;
-            wbe.false_target = while_false;
-            uint32_t body_entry = flattenGraph(sub_execs[0], kNoExit, &wbe);
-            // Patch body leaf COND_BRANCH true_targets to body_entry (self-loop)
-            for (uint32_t bi = body_entry; bi < flat_blocks.size(); ++bi) {
-              if (flat_blocks[bi].term_type == FlatBlock::COND_BRANCH &&
-                  flat_blocks[bi].cond_device_ptr == cond_ptr &&
-                  flat_blocks[bi].true_target == 0) {
-                flat_blocks[bi].true_target = body_entry;
-              }
+            // Reserve the latch block before flattening the body so the body's
+            // exit paths can target it. Hold only its index (the vector may
+            // reallocate inside the recursive flattenGraph call).
+            uint32_t latch_idx = static_cast<uint32_t>(flat_blocks.size());
+            {
+              FlatBlock latch_fb;
+              latch_fb.segment_id = -1;
+              latch_fb.term_type = FlatBlock::COND_BRANCH;
+              latch_fb.cond_device_ptr = cond_ptr;
+              latch_fb.true_target = 0;  // patched to body_entry below
+              latch_fb.false_target = while_false;
+              // Hot edge of the loop: eligible for the sentinel detector.
+              latch_fb.term_flags = kTermFlagSentinelWait | kTermFlagSentinelArm;
+              flat_blocks.push_back(std::move(latch_fb));
             }
+            // Flatten the body so every exit path converges on the latch.
+            uint32_t body_entry = flattenGraph(sub_execs[0], latch_idx, nullptr);
+            flat_blocks[latch_idx].true_target = body_entry;
+            // Header: check the condition once on entry (zero-iteration support).
             flat_blocks[block_idx].term_type = FlatBlock::COND_BRANCH;
             flat_blocks[block_idx].cond_device_ptr = cond_ptr;
             flat_blocks[block_idx].true_target = body_entry;
             flat_blocks[block_idx].false_target = while_false;
+            // Arm (but do not wait on) the sentinel: the first latch visit has
+            // to find the condition already stamped, or it would read the
+            // pre-loop value and skip waiting for iteration 1.
+            flat_blocks[block_idx].term_flags = kTermFlagSentinelArm;
           } else if (cond_type == hipGraphCondTypeIf && !sub_execs.empty()) {
             // IF needs a valid exit block for both branches to converge.
             uint32_t cond_exit = successor;
@@ -1474,6 +1533,62 @@ hipError_t GraphExec::BuildMultiBlockCommandBuffer() {
             flat_blocks[block_idx].cond_device_ptr = cond_ptr;
             flat_blocks[block_idx].true_target = true_entry;
             flat_blocks[block_idx].false_target = false_entry;
+          } else if (cond_type == hipGraphCondTypeSwitch && !sub_execs.empty()) {
+            // SWITCH: execute the Nth body if the condition value == N; an
+            // out-of-range value runs no body. All case bodies converge on
+            // switch_exit.
+            uint32_t switch_exit = successor;
+            if (switch_exit == kNoExit) {
+              FlatBlock exit_fb;
+              exit_fb.segment_id = -1;
+              exit_fb.term_type = FlatBlock::RETURN;
+              switch_exit = static_cast<uint32_t>(flat_blocks.size());
+              flat_blocks.push_back(std::move(exit_fb));
+            }
+            uint32_t num_cases = static_cast<uint32_t>(sub_execs.size());
+            // Flatten each case body first, recording its entry block.
+            std::vector<uint32_t> case_entries(num_cases);
+            for (uint32_t c = 0; c < num_cases; ++c) {
+              case_entries[c] = flattenGraph(sub_execs[c], switch_exit, nullptr);
+            }
+
+            if (device->graphSwitchBranchKernelObject() != 0) {
+              // Native O(1) terminator: the header block jumps directly to
+              // case_targets[value] via the graphSwitchBranch scheduler kernel.
+              auto& hdr = flat_blocks[block_idx];
+              hdr.term_type = FlatBlock::SWITCH;
+              hdr.cond_device_ptr = cond_ptr;
+              hdr.switch_case_targets = case_entries;
+              hdr.switch_default_target = switch_exit;
+            } else {
+              // Fallback: lower to an O(N) chain of equality-check COND_BRANCH
+              // blocks (COND_EQ + value) when the native kernel is unavailable:
+              //   header(block_idx): COND_EQ 0 → true:case0_entry, false:check_1
+              //   check_{N-1}:       COND_EQ N-1 → true:case{N-1}, false:exit
+              std::vector<uint32_t> check_idx(num_cases);
+              check_idx[0] = block_idx;
+              for (uint32_t c = 1; c < num_cases; ++c) {
+                FlatBlock chk;
+                chk.segment_id = -1;
+                chk.term_type = FlatBlock::COND_BRANCH;
+                chk.cond_device_ptr = cond_ptr;
+                chk.cond_op = 0;             // COND_EQ
+                chk.cond_value = c;
+                check_idx[c] = static_cast<uint32_t>(flat_blocks.size());
+                flat_blocks.push_back(std::move(chk));
+              }
+              for (uint32_t c = 0; c < num_cases; ++c) {
+                uint32_t next_false =
+                    (c + 1 < num_cases) ? check_idx[c + 1] : switch_exit;
+                auto& blk = flat_blocks[check_idx[c]];
+                blk.term_type = FlatBlock::COND_BRANCH;
+                blk.cond_device_ptr = cond_ptr;
+                blk.cond_op = 0;             // COND_EQ
+                blk.cond_value = c;
+                blk.true_target = case_entries[c];
+                blk.false_target = next_false;
+              }
+            }
           }
         } else {
           // Child graph: inline its blocks, branch to child entry
@@ -1509,11 +1624,28 @@ hipError_t GraphExec::BuildMultiBlockCommandBuffer() {
   // conditional node, and the fused kernel HSACO is available.
   bool try_fused_while = false;
   uint64_t fused_cond_ptr = 0;
+  uint64_t fused_cond_default = 0;
   GraphExec* fused_body_exec = nullptr;
 
-  if (device->hasGraphWhileLoopHSACO()) {
+  // Opt-in: HIP_GRAPH_FUSED_WHILE=1 enables the persistent graphWhileLoop kernel
+  // (1 body dispatch/iter, no per-iter terminator round-trip). Default off keeps
+  // the standard 2-dispatch condBranchWhile path. The persistent kernel issues a
+  // SINGLE linear body block to a work queue, so it only applies when the body
+  // flattens to one block with no internal fork/join or nested control flow.
+  static const bool fused_while_enabled = []() {
+    const char* e = getenv("HIP_GRAPH_FUSED_WHILE");
+    return e != nullptr && atoi(e) != 0;
+  }();
+
+  if (fused_while_enabled && device->hasGraphWhileLoopHSACO()) {
     auto top_topo_it = segments_per_level_.find(0);
-    if (top_topo_it != segments_per_level_.end() && top_topo_it->second.size() == 1) {
+    // The fused path replaces the whole command buffer with just the WHILE body,
+    // so it is only valid when the WHILE is the ENTIRE graph: a single level-0
+    // segment AND no downstream levels. Without the max_dependency_level_ guard a
+    // graph like "WHILE_A -> WHILE_B" (B at level 1) would fuse A and silently
+    // drop B and everything after it.
+    if (top_topo_it != segments_per_level_.end() && top_topo_it->second.size() == 1 &&
+        max_dependency_level_ == 0) {
       int sole_seg = top_topo_it->second[0];
       auto& seg = segments_[sole_seg];
       if (seg.last_node && seg.last_node->GetType() == hipGraphNodeTypeConditional) {
@@ -1521,9 +1653,21 @@ hipError_t GraphExec::BuildMultiBlockCommandBuffer() {
         if (cond_node->GetCondType() == hipGraphCondTypeWhile) {
           const auto& sub_execs = cond_node->GetSubGraphExecs();
           if (!sub_execs.empty()) {
-            try_fused_while = false;
-            fused_cond_ptr = cond_node->GetHandle().device_ptr;
-            fused_body_exec = sub_execs[0];
+            GraphExec* body = sub_execs[0];
+            // Only fuse when the body is a SINGLE plain segment: it then flattens
+            // to exactly one contiguous linear block the persistent kernel can
+            // issue in one shot. Multi-segment bodies (chains, forks, nested
+            // control flow) fall through to the standard multi-block path.
+            bool body_eligible =
+                body->segments_.size() == 1 &&
+                !(body->segments_[0].last_node &&
+                  body->segments_[0].last_node->HasSubGraphs());
+            if (body_eligible) {
+              try_fused_while = true;
+              fused_cond_ptr = cond_node->GetHandle().device_ptr;
+              fused_cond_default = cond_node->GetHandle().default_value;
+              fused_body_exec = body;
+            }
           }
         }
       }
@@ -1538,6 +1682,13 @@ hipError_t GraphExec::BuildMultiBlockCommandBuffer() {
     // kernel handles return, not a graphReturn terminator.
     uint32_t body_entry = flattenGraph(fused_body_exec, kNoExit, nullptr);
     uint32_t block_count_fused = static_cast<uint32_t>(flat_blocks.size());
+
+    // Eligibility (checked before enabling try_fused_while) guarantees the body
+    // is a single plain segment, so it must flatten to exactly one linear block
+    // that the persistent kernel can issue contiguously.
+    if (block_count_fused != 1 || flat_blocks[0].user_packets.empty()) {
+      return hipErrorInvalidValue;
+    }
 
     // For the fused path, body blocks have NO CFG terminator.
     cmd_buffer_.blocks.resize(block_count_fused);
@@ -1637,7 +1788,11 @@ hipError_t GraphExec::BuildMultiBlockCommandBuffer() {
     exec_state->work_doorbell_ptr = 0;  // Filled at launch time
     exec_state->cached_queue_base = 0;
     exec_state->cached_queue_size = 0;
-    exec_state->_reserved0 = 0;
+    exec_state->staged_while = 0;  // Set at launch from HIP_GRAPH_STAGED_WHILE
+    // The persistent graphWhileLoop kernel re-arms the condition variable to its
+    // default at the start of every launch (loop starts armed each launch).
+    exec_state->cond_init_ptr   = fused_cond_ptr;
+    exec_state->cond_init_value = fused_cond_default;
 
     cmd_buffer_.kernel_packet_count = total_user_packets;
     cmd_buffer_.valid = true;
@@ -1656,19 +1811,222 @@ hipError_t GraphExec::BuildMultiBlockCommandBuffer() {
   uint32_t block_count = static_cast<uint32_t>(flat_blocks.size());
   if (block_count == 0) return hipErrorInvalidValue;
 
+  // Opt-in: HIP_GRAPH_WALK_LOOP=1 keeps this same flattened CFG but has the
+  // persistent graphWalkLoop kernel interpret it on the GPU, instead of chaining
+  // a terminator-kernel dispatch after every block. Unlike the fused-WHILE path
+  // above it places no requirement on the top-level shape: arbitrary nested
+  // WHILE/IF/SWITCH works, and so does a loop-free IF/SWITCH graph, because the
+  // walk is driven by the terminator table rather than a hardcoded loop.
+  static const bool walk_loop_enabled = []() {
+    const char* e = getenv("HIP_GRAPH_WALK_LOOP");
+    return e != nullptr && atoi(e) != 0;
+  }();
+  bool use_walk = walk_loop_enabled && device->hasGraphWalkLoopHSACO();
+  if (use_walk) {
+    for (const auto& fb : flat_blocks) {
+      // Every terminator the flattener emits (BRANCH / COND_BRANCH / RETURN /
+      // SWITCH) is representable, but a native SWITCH is only usable with its
+      // case-target array, and fork/join sub-blocks would need lane queues the
+      // interpreter does not drive. Fall back to the self-enqueueing path.
+      if (fb.term_type == FlatBlock::SWITCH && fb.switch_case_targets.empty()) {
+        use_walk = false;
+        break;
+      }
+    }
+  }
+
+  // A condition can only be read once the kernel that writes it has retired, so
+  // the last non-empty block before each condition evaluation gets a trailing
+  // barrier packet that decrements a shared signal, and the interpreter drains
+  // that signal before evaluating any condition. Walking terminators from a
+  // block: if its own terminator is conditional it must be armed; if it
+  // branches through empty blocks into a conditional, likewise; once the walk
+  // reaches another non-empty block, that block carries the signal instead.
+  //
+  // Arming only these blocks is what makes ONE shared signal sufficient: an
+  // armed block is always drained by the next condition evaluation before
+  // anything else can re-arm, so at most one is ever outstanding. Draining the
+  // newest block also covers older ones, since the work queue is in-order and
+  // the barrier packet waits on all preceding packets.
+  // Opt-in: HIP_GRAPH_WALK_SENTINEL=1 lets WHILE latches use the sentinel
+  // detector described at kTermFlagSentinelWait. It carries the same assumption
+  // the fused path makes -- that the loop body writes its condition on every
+  // iteration -- so a body that only writes it on some iterations would spin
+  // forever. Off by default; the signal-based wait is unconditionally correct.
+  static const bool walk_sentinel_enabled = []() {
+    const char* e = getenv("HIP_GRAPH_WALK_SENTINEL");
+    return e != nullptr && atoi(e) != 0;
+  }();
+  if (!use_walk || !walk_sentinel_enabled) {
+    for (auto& fb : flat_blocks) fb.term_flags = 0;
+  }
+
+  std::vector<uint8_t> needs_signal(block_count, 0);
+  bool any_signal = false;
+  if (use_walk) {
+    auto is_cond_term = [](const FlatBlock& b) {
+      return b.term_type == FlatBlock::COND_BRANCH || b.term_type == FlatBlock::SWITCH;
+    };
+    for (uint32_t bi = 0; bi < block_count; ++bi) {
+      if (flat_blocks[bi].user_packets.empty()) continue;
+      uint32_t cur = bi;
+      for (uint32_t hops = 0; hops <= block_count; ++hops) {
+        const auto& fb = flat_blocks[cur];
+        if (is_cond_term(fb)) {
+          // A sentinel-waiting conditional detects its producer by watching the
+          // condition itself, so this block needs no signal. Leaving it armed
+          // would be actively wrong: nothing would ever drain it, and the next
+          // re-arm could race with the in-flight decrement of the shared signal.
+          if ((fb.term_flags & kTermFlagSentinelWait) == 0) {
+            needs_signal[bi] = 1;
+            any_signal = true;
+          }
+          break;
+        }
+        if (fb.term_type != FlatBlock::BRANCH) break;  // RETURN: nothing reads a condition
+        uint32_t nxt = fb.branch_target;
+        if (nxt >= block_count) break;                 // kInlineReturn / out of range
+        if (!flat_blocks[nxt].user_packets.empty()) break;  // that block arms instead
+        cur = nxt;
+      }
+    }
+  }
+
+  // One shared block-completion signal for the whole command buffer, re-armed
+  // by the interpreter before each issue of an armed block.
+  //
+  // Opt-in: HIP_GRAPH_WALK_DEVSIGNAL=1 carves the amd_signal_t out of the
+  // command buffer instead. ROCr allocates every signal's ABI block from the
+  // system allocator (SharedSignalPool_t::alloc -> fine-grained host memory),
+  // so the word the interpreter polls each iteration sits across the fabric;
+  // the command buffer is device-local on large-BAR parts. Only the scheduler
+  // touches this signal, so it needs no event and no runtime Signal object.
+  static const bool walk_devsignal_enabled = []() {
+    const char* e = getenv("HIP_GRAPH_WALK_DEVSIGNAL");
+    return e != nullptr && atoi(e) != 0;
+  }();
+  const bool walk_devsignal = use_walk && any_signal && walk_devsignal_enabled;
+  if (use_walk && any_signal) {
+    // Its own device-local block, deliberately not a slice of the command
+    // buffer: measurement puts the whole benefit in where this one polled word
+    // lives and none of it in the packets or queue rings, so it has to stay in
+    // VRAM even when the command buffer is in system memory. Host-initialized,
+    // hence the large-BAR requirement.
+    if (walk_devsignal && device->info().largeBar_) {
+      auto* sig = reinterpret_cast<uint8_t*>(device->deviceLocalAlloc(64));
+      if (sig != nullptr) {
+        // amd_signal_t: kind at +0, value at +8, event_mailbox_ptr at +16.
+        *reinterpret_cast<int64_t*>(sig + 0)   = 1;  // AMD_SIGNAL_KIND_USER
+        *reinterpret_cast<int64_t*>(sig + 8)   = 1;  // value: armed
+        *reinterpret_cast<uint64_t*>(sig + 16) = 0;  // no event, no interrupt
+        cmd_buffer_.walk_signal_devptr = sig;
+        cmd_buffer_.walk_signal_handle = reinterpret_cast<uint64_t>(sig);
+        cmd_buffer_.walk_signal_in_devmem = true;
+      }
+    }
+    if (cmd_buffer_.walk_signal_handle == 0) {
+      cmd_buffer_.walk_signal_handle = device->createGraphSignal(1);
+    }
+    if (cmd_buffer_.walk_signal_handle == 0) {
+      use_walk = false;  // no signal, no safe condition read
+    }
+  }
+
+  // Collect every conditional handle in the graph (top-level + nested) so the
+  // scheduler can reset them all to their creation defaults at launch start.
+  // Without this, only one handle was reset and a second top-level conditional
+  // (e.g. two sequential WHILE loops) would misbehave on the second launch.
+  // Stored as flat {device_ptr, default_value} u64 pairs; deduplicated by ptr.
+  std::vector<uint64_t> cond_reset_pairs;
+  {
+    auto already_seen = [&](uint64_t ptr) {
+      for (size_t i = 0; i < cond_reset_pairs.size(); i += 2) {
+        if (cond_reset_pairs[i] == ptr) return true;
+      }
+      return false;
+    };
+    std::function<void(GraphExecSegmented*)> collectConds =
+        [&](GraphExecSegmented* exec) {
+      for (auto& seg : exec->segments_) {
+        if (seg.last_node &&
+            seg.last_node->GetType() == hipGraphNodeTypeConditional) {
+          auto* cond_node = static_cast<GraphConditionalNode*>(seg.last_node);
+          auto handle = cond_node->GetHandle();
+          if (handle.device_ptr != 0 && !already_seen(handle.device_ptr)) {
+            cond_reset_pairs.push_back(handle.device_ptr);
+            cond_reset_pairs.push_back(handle.default_value);
+          }
+          for (auto* body : cond_node->GetSubGraphExecs()) {
+            collectConds(static_cast<GraphExecSegmented*>(body));
+          }
+        }
+      }
+    };
+    collectConds(this);
+  }
+  uint32_t cond_reset_count = static_cast<uint32_t>(cond_reset_pairs.size() / 2);
+
   // --- Count packets per block ---
   cmd_buffer_.blocks.resize(block_count);
   size_t total_user_packets = 0;
 
-  for (uint32_t bi = 0; bi < block_count; ++bi) {
-    uint32_t user_pkts = static_cast<uint32_t>(flat_blocks[bi].user_packets.size());
-    cmd_buffer_.blocks[bi].segment_id = flat_blocks[bi].segment_id;
-    cmd_buffer_.blocks[bi].user_packet_count = user_pkts;
-    cmd_buffer_.blocks[bi].total_packet_count = user_pkts + 1;  // +1 for CFG terminator
-    total_user_packets += user_pkts;
+  size_t total_packets = 0;
+
+  // For an armed block, prefer hanging the completion signal off its last user
+  // packet rather than appending a barrier packet: same "block finished" signal
+  // with no extra packet for the CP to fetch and process, which is otherwise a
+  // full round trip on the per-iteration critical path.
+  //
+  // Two conditions. The captured packet must not already carry a completion
+  // signal of its own (profiling/timing), and the last packet's completion must
+  // actually imply the whole block's -- true when the block is a single packet,
+  // or when the last packet has the AQL barrier bit (bit 8) so it cannot have
+  // started before its predecessors retired. Otherwise fall back to a trailing
+  // barrier-AND packet, whose barrier bit gives that guarantee unconditionally.
+  std::vector<uint8_t> inline_signal(block_count, 0);
+  if (use_walk) {
+    for (uint32_t bi = 0; bi < block_count; ++bi) {
+      if (!needs_signal[bi]) continue;
+      const auto& pkts = flat_blocks[bi].user_packets;
+      if (pkts.empty()) continue;
+      const uint8_t* last = pkts.back();
+      uint64_t existing_signal = *reinterpret_cast<const uint64_t*>(last + 56);
+      uint16_t header = *reinterpret_cast<const uint16_t*>(last);
+      bool ordered = (pkts.size() == 1) || ((header & (1u << 8)) != 0);
+      if (existing_signal == 0 && ordered) {
+        inline_signal[bi] = 1;
+      }
+    }
   }
 
-  size_t total_packets = total_user_packets + block_count;
+  for (uint32_t bi = 0; bi < block_count; ++bi) {
+    auto& fb = flat_blocks[bi];
+    cmd_buffer_.blocks[bi].segment_id = fb.segment_id;
+    uint32_t user_pkts = static_cast<uint32_t>(fb.user_packets.size());
+    cmd_buffer_.blocks[bi].user_packet_count = user_pkts;
+    // Standard path: +1 CFG terminator dispatch per block. Walk-loop path: no
+    // terminator (the interpreter reads the table), plus a trailing barrier
+    // packet only where the signal could not be folded into a user packet.
+    uint32_t extra = 0;
+    if (use_walk) {
+      extra = (needs_signal[bi] && !inline_signal[bi]) ? 1u : 0u;
+    } else {
+      extra = 1u;
+    }
+    cmd_buffer_.blocks[bi].total_packet_count = user_pkts + extra;
+    total_user_packets += user_pkts;
+    total_packets += cmd_buffer_.blocks[bi].total_packet_count;
+  }
+
+  // Size the native-SWITCH case-target region and assign each SWITCH block a
+  // byte offset within it (array of uint32_t block indices per switch).
+  size_t switch_table_size = 0;
+  for (auto& fb : flat_blocks) {
+    if (fb.term_type == FlatBlock::SWITCH) {
+      fb.switch_table_off = static_cast<uint32_t>(switch_table_size);
+      switch_table_size += fb.switch_case_targets.size() * sizeof(uint32_t);
+    }
+  }
 
   // --- Calculate memory layout ---
   constexpr size_t kPkt = CommandBuffer::kPacketSize;
@@ -1695,12 +2053,37 @@ hipError_t GraphExec::BuildMultiBlockCommandBuffer() {
   cmd_buffer_.packets_offset = offset;
   size_t packets_size = total_packets * kPkt;
   offset += packets_size;
+  offset = (offset + 63) & ~63u;
+
+  cmd_buffer_.cond_table_offset = offset;
+  size_t cond_table_size = cond_reset_pairs.size() * sizeof(uint64_t);
+  offset += cond_table_size;
+  offset = (offset + 63) & ~63u;
+
+  cmd_buffer_.switch_table_offset = offset;
+  offset += switch_table_size;
+  offset = (offset + 63) & ~63u;
+
+  // BlockTerminator[] for the walk-loop interpreter (one 64-byte entry/block).
+  cmd_buffer_.term_table_offset = offset;
+  if (use_walk) {
+    offset += block_count * sizeof(BlockTerminator);
+  }
+  offset = (offset + 63) & ~63u;
 
   cmd_buffer_.total_byte_size = offset;
   cmd_buffer_.block_count = block_count;
 
   // --- Allocate device memory ---
-  if (device->info().largeBar_) {
+  // HIP_GRAPH_CMDBUF_SYSMEM forces the fine-grained system-memory path a
+  // non-large-BAR part would take anyway, to A/B where the scheduler's packet
+  // source should live. This also relocates the carved walk signal, so keep it
+  // separate from HIP_GRAPH_WALK_DEVSIGNAL when reading results.
+  static const bool cmdbuf_sysmem = []() {
+    const char* e = getenv("HIP_GRAPH_CMDBUF_SYSMEM");
+    return e != nullptr && atoi(e) != 0;
+  }();
+  if (device->info().largeBar_ && !cmdbuf_sysmem) {
     cmd_buffer_.device_ptr = reinterpret_cast<uint8_t*>(
         device->deviceLocalAlloc(cmd_buffer_.total_byte_size));
     cmd_buffer_.device_local = true;
@@ -1720,6 +2103,20 @@ hipError_t GraphExec::BuildMultiBlockCommandBuffer() {
   auto* exec_state  = reinterpret_cast<DeviceExecutionState*>(base + cmd_buffer_.exec_state_offset);
   uint8_t* kernarg_pool = base + cmd_buffer_.kernarg_pool_offset;
   uint8_t* packets_area = base + cmd_buffer_.packets_offset;
+  uint8_t* switch_table_area = base + cmd_buffer_.switch_table_offset;
+  auto* term_table = use_walk
+      ? reinterpret_cast<BlockTerminator*>(base + cmd_buffer_.term_table_offset)
+      : nullptr;
+
+
+  // Bake each native-SWITCH block's case-target array into the switch region.
+  for (auto& fb : flat_blocks) {
+    if (fb.term_type == FlatBlock::SWITCH && !fb.switch_case_targets.empty()) {
+      memcpy(switch_table_area + fb.switch_table_off,
+             fb.switch_case_targets.data(),
+             fb.switch_case_targets.size() * sizeof(uint32_t));
+    }
+  }
 
   // --- Fill block table, copy packets, and build CFG terminators ---
   uint32_t pkt_byte_cursor = 0;
@@ -1728,16 +2125,57 @@ hipError_t GraphExec::BuildMultiBlockCommandBuffer() {
   for (uint32_t bi = 0; bi < block_count; ++bi) {
     auto& binfo = cmd_buffer_.blocks[bi];
     auto& fb = flat_blocks[bi];
-    binfo.packet_byte_offset = pkt_byte_cursor;
     binfo.kernarg_offset = bi * kKAEntry;
 
+    // Copy this block's user packets, then position `dst` at the CFG terminator
+    // slot that follows them on the shared control queue.
+    binfo.packet_byte_offset = pkt_byte_cursor;
     block_table[bi].packet_offset = pkt_byte_cursor;
     block_table[bi].packet_count  = binfo.total_packet_count;
 
-    uint8_t* dst = packets_area + pkt_byte_cursor;
-    for (auto* pkt : fb.user_packets) {
-      memcpy(dst, pkt, kPkt);
-      dst += kPkt;
+    uint8_t* d = packets_area + pkt_byte_cursor;
+    for (auto* pkt : fb.user_packets) { memcpy(d, pkt, kPkt); d += kPkt; }
+    uint8_t* dst = d;
+    pkt_byte_cursor += binfo.total_packet_count * kPkt;
+
+    if (use_walk) {
+      // Walk-loop path: no terminator dispatch packet. The interpreter reads
+      // this block's control flow straight out of the terminator table.
+      auto& term = term_table[bi];
+      term.kind           = static_cast<uint32_t>(fb.term_type);
+      term.branch_target  = fb.branch_target;
+      term.true_target    = fb.true_target;
+      term.false_target   = fb.false_target;
+      term.cond_op        = fb.cond_op;
+      term.num_cases      = static_cast<uint32_t>(fb.switch_case_targets.size());
+      term.default_target = fb.switch_default_target;
+      term.flags          = fb.term_flags;
+      term.cond_ptr       = fb.cond_device_ptr;
+      term.cond_value     = fb.cond_value;
+      term.signal_addr    = needs_signal[bi]
+                              ? cmd_buffer_.walk_signal_handle + 8  // &amd_signal_t->value
+                              : 0;
+      term.case_targets_ptr =
+          (fb.term_type == FlatBlock::SWITCH)
+              ? reinterpret_cast<uint64_t>(switch_table_area + fb.switch_table_off)
+              : 0;
+
+      if (inline_signal[bi]) {
+        // Fold the signal into the copy of the block's last user packet, so its
+        // own completion is what the interpreter waits on. The captured source
+        // packet is left untouched (other paths still use it).
+        uint8_t* last_pkt = dst - kPkt;
+        *reinterpret_cast<uint64_t*>(last_pkt + 56) = cmd_buffer_.walk_signal_handle;
+      } else if (needs_signal[bi]) {
+        // Barrier-AND with the barrier bit: the CP processes it only after every
+        // preceding packet on this queue has completed, then decrements the
+        // shared signal 1 -> 0, which is what the interpreter polls for.
+        memset(dst, 0, kPkt);
+        *reinterpret_cast<uint64_t*>(dst + 56) = cmd_buffer_.walk_signal_handle;
+        constexpr uint16_t kBarrierHeader = 3 | (1 << 8) | (1 << 9) | (1 << 11);
+        *reinterpret_cast<uint16_t*>(dst + 0) = kBarrierHeader;
+      }
+      continue;
     }
 
     // CFG terminator AQL packet
@@ -1783,30 +2221,53 @@ hipError_t GraphExec::BuildMultiBlockCommandBuffer() {
           *reinterpret_cast<uint32_t*>(ka + 20) = 0;
           *reinterpret_cast<uint64_t*>(ka + 24) = 0;  // value = 0 (NE 0 means true)
           // ka+32 (body_src) and ka+40 (body_pkt_count) deferred
+          // condBranchWhile copies the body packets into the ring cooperatively
+          // across a wavefront to hide VRAM copy latency (the dominant per-iter
+          // cost). Widen this terminator's launch to 64 threads; only thread 0
+          // reserves the slot range, publishes write_index and rings the doorbell.
+          *reinterpret_cast<uint16_t*>(dst + 4)  = 64;  // workgroup_size_x
+          *reinterpret_cast<uint32_t*>(dst + 12) = 64;  // grid_size_x
         } else {
           *reinterpret_cast<uint64_t*>(dst + 32) = device->graphCondBranchKernelObject();
           *reinterpret_cast<uint32_t*>(dst + 24) = device->graphCondBranchPrivateSize();
           *reinterpret_cast<uint32_t*>(dst + 28) = device->graphCondBranchGroupSize();
           *reinterpret_cast<uint64_t*>(ka + 0)  = reinterpret_cast<uint64_t>(exec_state);
           *reinterpret_cast<uint64_t*>(ka + 8)  = fb.cond_device_ptr;
-          *reinterpret_cast<uint32_t*>(ka + 16) = kCondNE;
+          *reinterpret_cast<uint32_t*>(ka + 16) = fb.cond_op;      // COND_NE (IF/WHILE) or COND_EQ (SWITCH)
           *reinterpret_cast<uint32_t*>(ka + 20) = 0;
-          *reinterpret_cast<uint64_t*>(ka + 24) = 0;
+          *reinterpret_cast<uint64_t*>(ka + 24) = fb.cond_value;   // 0 (IF/WHILE) or case index (SWITCH)
           *reinterpret_cast<uint32_t*>(ka + 32) = fb.true_target;
           *reinterpret_cast<uint32_t*>(ka + 36) = fb.false_target;
         }
+        break;
+      }
+
+      case FlatBlock::SWITCH: {
+        // Native SWITCH terminator: graphSwitchBranch(state, ref_ptr,
+        // case_targets, num_cases, default_target). case_targets points into the
+        // baked switch region; value >= num_cases takes default_target.
+        const uint32_t* case_dev =
+            reinterpret_cast<const uint32_t*>(switch_table_area + fb.switch_table_off);
+        *reinterpret_cast<uint64_t*>(dst + 32) = device->graphSwitchBranchKernelObject();
+        *reinterpret_cast<uint32_t*>(dst + 24) = device->graphSwitchBranchPrivateSize();
+        *reinterpret_cast<uint32_t*>(dst + 28) = device->graphSwitchBranchGroupSize();
+        *reinterpret_cast<uint64_t*>(ka + 0)  = reinterpret_cast<uint64_t>(exec_state);
+        *reinterpret_cast<uint64_t*>(ka + 8)  = fb.cond_device_ptr;
+        *reinterpret_cast<uint64_t*>(ka + 16) = reinterpret_cast<uint64_t>(case_dev);
+        *reinterpret_cast<uint32_t*>(ka + 24) =
+            static_cast<uint32_t>(fb.switch_case_targets.size());
+        *reinterpret_cast<uint32_t*>(ka + 28) = fb.switch_default_target;
         break;
       }
     }
 
     constexpr uint16_t kCfgHeader = 2 | (1 << 8) | (1 << 9) | (1 << 11);
     *reinterpret_cast<uint16_t*>(dst + 0) = kCfgHeader;
-
-    pkt_byte_cursor += binfo.total_packet_count * kPkt;
   }
 
   // --- Patch WHILE self-loop condBranch kernarg with resolved body_src / body_pkt_count. ---
-  for (uint32_t bi = 0; bi < block_count; ++bi) {
+  // Walk-loop path has no condBranchWhile terminators to patch.
+  for (uint32_t bi = 0; bi < block_count && !use_walk; ++bi) {
     auto& fb = flat_blocks[bi];
     if (fb.term_type != FlatBlock::COND_BRANCH) continue;
     bool is_while_self_loop = (fb.true_target == bi) &&
@@ -1835,7 +2296,6 @@ hipError_t GraphExec::BuildMultiBlockCommandBuffer() {
   exec_state->work_doorbell_ptr = 0;
   exec_state->cached_queue_base = 0;  // Filled at launch time
   exec_state->cached_queue_size = 0;  // Filled at launch time
-  exec_state->_reserved0 = 0;
 
   // Find conditional node to populate GPU-side init for cond variable.
   exec_state->cond_init_ptr = 0;
@@ -1852,14 +2312,36 @@ hipError_t GraphExec::BuildMultiBlockCommandBuffer() {
     }
   }
 
+  // Bake the full conditional reset table into the command buffer so every
+  // handle is re-initialized to its default on each launch (see collection above).
+  exec_state->cond_init_table_ptr = 0;
+  exec_state->cond_init_count = 0;
+  if (cond_reset_count > 0) {
+    uint8_t* cond_table_area = base + cmd_buffer_.cond_table_offset;
+    memcpy(cond_table_area, cond_reset_pairs.data(),
+           cond_reset_pairs.size() * sizeof(uint64_t));
+    exec_state->cond_init_table_ptr = reinterpret_cast<uint64_t>(cond_table_area);
+    exec_state->cond_init_count = cond_reset_count;
+  }
+
+  // Walk-loop interpreter: hand it the terminator table and the entry block.
+  exec_state->term_table_ptr = use_walk ? reinterpret_cast<uint64_t>(term_table) : 0;
+  exec_state->entry_block = root_entry;
+  exec_state->_pad_walk = 0;
+
   cmd_buffer_.has_fused_while = false;
+  cmd_buffer_.has_walk_loop = use_walk;
+  cmd_buffer_.entry_block = root_entry;
   cmd_buffer_.kernel_packet_count = total_user_packets;
   cmd_buffer_.valid = true;
 
   ClPrint(amd::LOG_INFO, amd::LOG_CODE,
       "[GraphExec] Built multi-block command buffer: %u blocks, %zu user packets, "
-      "%zu total packets, %zu bytes (root_entry=%u)",
-      block_count, total_user_packets, total_packets, cmd_buffer_.total_byte_size, root_entry);
+      "%zu total packets, %zu bytes (root_entry=%u, walk_loop=%d, device_local=%d, "
+      "signal=0x%lx devmem_signal=%d)",
+      block_count, total_user_packets, total_packets, cmd_buffer_.total_byte_size,
+      root_entry, static_cast<int>(use_walk), static_cast<int>(cmd_buffer_.device_local),
+      cmd_buffer_.walk_signal_handle, static_cast<int>(cmd_buffer_.walk_signal_in_devmem));
 
   return hipSuccess;
 }
@@ -2284,36 +2766,50 @@ hipError_t GraphExecSegmented::Init() {
   // segments so the recursive CaptureAQLPackets/CaptureAndFormPacketsForGraph can capture
   // their packets. Relocated here from the classic Init path: conditional-graph support
   // lives on the segmented path only.
+  //
+  // This MUST recurse into each body exec: a conditional nested inside another
+  // conditional's body (e.g. IF inside a WHILE body) needs its own
+  // body_graph_execs_ built too. Otherwise the nested conditional node's
+  // HasSubGraphs() returns false, it is misclassified as a non-capturable
+  // regular node in IsCommandBufferEligible(), and the entire graph silently
+  // falls back off the command-buffer path.
   // NOTE: review body-graph lifetime/scheduling ordering after a build.
-  for (auto& segment : segments_) {
-    if (segment.last_node && segment.last_node->GetType() == hipGraphNodeTypeConditional) {
-      auto* cond_node = static_cast<hip::GraphConditionalNode*>(segment.last_node);
-      const auto& body_graphs = cond_node->GetChildGraphs();
-      std::vector<GraphExecSegmented*> body_execs;
-      body_execs.reserve(body_graphs.size());
-      for (auto* body_graph : body_graphs) {
-        auto* body_exec = new GraphExecSegmented(0);
-        body_graph->clone(body_exec, true);
-        if (body_exec->GetKernelArgManager() == nullptr) {
-          auto* kernArgMgr = GetKernelArgManager();
-          if (kernArgMgr != nullptr) {
-            kernArgMgr->retain();
-            body_exec->SetKernelArgManager(kernArgMgr);
+  std::function<void(GraphExecSegmented*)> buildCondBodyExecs =
+      [&](GraphExecSegmented* exec) {
+    for (auto& segment : exec->segments_) {
+      if (segment.last_node &&
+          segment.last_node->GetType() == hipGraphNodeTypeConditional) {
+        auto* cond_node = static_cast<hip::GraphConditionalNode*>(segment.last_node);
+        const auto& body_graphs = cond_node->GetChildGraphs();
+        std::vector<GraphExecSegmented*> body_execs;
+        body_execs.reserve(body_graphs.size());
+        for (auto* body_graph : body_graphs) {
+          auto* body_exec = new GraphExecSegmented(0);
+          body_graph->clone(body_exec, true);
+          if (body_exec->GetKernelArgManager() == nullptr) {
+            auto* kernArgMgr = exec->GetKernelArgManager();
+            if (kernArgMgr != nullptr) {
+              kernArgMgr->retain();
+              body_exec->SetKernelArgManager(kernArgMgr);
+            }
           }
+          if (body_exec->captureDeviceId_ == -1) {
+            body_exec->captureDeviceId_ = exec->captureDeviceId_;
+          }
+          hipError_t sched_status = body_exec->ScheduleNodesIntoBatches();
+          if (sched_status != hipSuccess) {
+            ClPrint(amd::LOG_WARNING, amd::LOG_CODE,
+                "[GraphExecSegmented::Init] Failed to schedule conditional body graph");
+          }
+          // Recurse so conditionals nested inside this body are wrapped too.
+          buildCondBodyExecs(body_exec);
+          body_execs.push_back(body_exec);
         }
-        if (body_exec->captureDeviceId_ == -1) {
-          body_exec->captureDeviceId_ = captureDeviceId_;
-        }
-        hipError_t sched_status = body_exec->ScheduleNodesIntoBatches();
-        if (sched_status != hipSuccess) {
-          ClPrint(amd::LOG_WARNING, amd::LOG_CODE,
-              "[GraphExecSegmented::Init] Failed to schedule conditional body graph");
-        }
-        body_execs.push_back(body_exec);
+        cond_node->SetBodyGraphExecs(std::move(body_execs));
       }
-      cond_node->SetBodyGraphExecs(std::move(body_execs));
     }
-  }
+  };
+  buildCondBodyExecs(this);
 
   // For graph nodes capture AQL packets to dispatch them directly during graph launch.
   // BuildSyncPlan (inside CaptureAndFormPacketsForGraph) runs the barrier-ROI collapse
@@ -3815,8 +4311,17 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
     graph_launch_stream->vdev()->HiddenHeapInit();
   }
 
+  // Debug toggle: HIP_DISABLE_GRAPH_CMDBUF=1 bypasses the GPU-resident command
+  // buffer at launch (it is still built at instantiate) so the plain segmented
+  // executor runs instead. Used to A/B the command-buffer fast path against the
+  // segmented path.
+  static const bool cmdbuf_disabled = []() {
+    const char* e = getenv("HIP_DISABLE_GRAPH_CMDBUF");
+    return e != nullptr && atoi(e) != 0;
+  }();
+
   amd::Command* last_cmd = nullptr;
-  if (cmd_buffer_.valid && !cross_device_launch &&
+  if (cmd_buffer_.valid && !cmdbuf_disabled && !cross_device_launch &&
       instantiateDeviceId_ == launch_stream->DeviceId()) {
     // Command buffer fast path: single-branch, all-captured graph.
     // A scheduler kernel copies the pre-built kernel packets to the HW queue.
@@ -3833,16 +4338,37 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
       return hipErrorOutOfMemory;
     }
 
-    // Sync internal stream with launch stream
-    amd::Command::EventWaitList startWaitList;
-    amd::Command* lastLaunchCmd = launch_stream->getLastQueuedCommand(true);
-    if (lastLaunchCmd != nullptr) {
-      startWaitList.push_back(lastLaunchCmd);
-    }
-    auto* startCommand = new amd::Marker(*internal_stream, kMarkerDisableFlush, startWaitList);
-    startCommand->enqueue();
-    if (lastLaunchCmd != nullptr) {
-      lastLaunchCmd->release();
+    // Kick the initial scheduler kernel (graphBlockIssue / graphWhileLoop) from
+    // the user's launch stream instead of the internal stream. The internal
+    // queue's descriptor lives in device memory, so dispatching there makes the
+    // host write a VRAM-resident queue descriptor across PCIe on every launch;
+    // launching the scheduler from the launch stream (a system-memory queue)
+    // avoids that host->VRAM write. The scheduler still emits ALL block packets
+    // -- at every nesting level -- to the internal device-memory work queue via
+    // exec_state->queue_ptr, so only the one-time kick moves. Launch-stream
+    // in-order semantics also make the internal<->launch start marker redundant.
+    // Gated by HIP_GRAPH_DISPATCH_ON_LAUNCH (default on) for A/B.
+    static const bool dispatch_on_launch = []() {
+      const char* e = getenv("HIP_GRAPH_DISPATCH_ON_LAUNCH");
+      return e == nullptr || atoi(e) != 0;  // default on
+    }();
+
+    // Sync internal stream with launch stream. Only needed when the scheduler is
+    // kicked from the internal stream; when dispatching on the launch stream the
+    // in-order launch queue already orders the kick after prior launch-stream
+    // work, so no cross-queue start marker is required.
+    amd::Command* startCommand = nullptr;
+    if (!dispatch_on_launch) {
+      amd::Command::EventWaitList startWaitList;
+      amd::Command* lastLaunchCmd = launch_stream->getLastQueuedCommand(true);
+      if (lastLaunchCmd != nullptr) {
+        startWaitList.push_back(lastLaunchCmd);
+      }
+      startCommand = new amd::Marker(*internal_stream, kMarkerDisableFlush, startWaitList);
+      startCommand->enqueue();
+      if (lastLaunchCmd != nullptr) {
+        lastLaunchCmd->release();
+      }
     }
 
     auto* device = g_devices[instantiateDeviceId_]->devices()[0];
@@ -3860,10 +4386,87 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
       return hipErrorOutOfMemory;
     }
 
+    // Whether this arch's command processor makes forward progress re-reading a
+    // write/read_dispatch_id that lives in VRAM and is fed by a GPU-resident
+    // scheduler kernel (the DEVICE_MEM_QUEUE_DESCRIPTOR "self-fed queue" case).
+    // gfx950 == (9,5,0); anything strictly newer is self-fed-capable. On gfx942/
+    // gfx950 the CP fails to re-observe the GPU-written index, so a VRAM descriptor
+    // hangs the standard WHILE / block-issue paths -- keep the descriptor in system
+    // memory there. Overridable with HIP_GRAPH_FUSED_SINGLEQ for bring-up.
+    const bool self_fed_queue_arch = [&]() {
+      const char* e = getenv("HIP_GRAPH_FUSED_SINGLEQ");
+      if (e != nullptr) return atoi(e) != 0;
+      const auto& isa = device->isa();
+      if (isa.versionMajor() > 9) return true;  // gfx10+/gfx12+ MI450-class
+      if (isa.versionMajor() == 9 && isa.versionMinor() == 5)
+        return isa.versionStepping() > 0;       // strictly newer than gfx950
+      return false;
+    }();
+
     // Upgrade graph queue to device memory for lower latency (only for WHILE loops
     // where the condBranch kernel issues packets to this queue every iteration).
-    if (cmd_buffer_.has_while_cond_branch || cmd_buffer_.has_fused_while) {
-      internal_stream->vdev()->upgradeToDeviceMemQueue();
+    // Gated by HIP_WHILE_CTRLQ_DEVMEM (default on) to A/B the control-queue effect.
+    static const bool ctrlq_devmem = []() {
+      const char* e = getenv("HIP_WHILE_CTRLQ_DEVMEM");
+      return e == nullptr || atoi(e) != 0;  // default on
+    }();
+    if (ctrlq_devmem &&
+        (cmd_buffer_.has_while_cond_branch || cmd_buffer_.has_fused_while ||
+         cmd_buffer_.has_walk_loop)) {
+      // Placing the queue descriptor (write/read_dispatch_id) in device memory
+      // keeps the scheduler kernel's per-iteration index accesses local to VRAM.
+      // Fused WHILE: the persistent graphWhileLoop kernel manages the loop itself
+      // (caches the write index in a register, polls read_id) and never depends on
+      // the CP re-reading a GPU-written VRAM descriptor, so the device-memory
+      // descriptor is SAFE ON ALL ARCHES -- and beneficial (its read_id polls
+      // become local). Standard condBranchWhile path: the CP must re-observe the
+      // VRAM descriptor each iteration, so restrict it to self-fed-capable arches.
+      // graphWalkLoop has the same property as the fused kernel: it drives the
+      // work queue's indices itself and never relies on the CP re-reading a
+      // GPU-written control-queue descriptor.
+      const bool device_mem_qdesc =
+          (cmd_buffer_.has_fused_while || cmd_buffer_.has_walk_loop)
+              ? true
+              : (cmd_buffer_.has_while_cond_branch && self_fed_queue_arch);
+      internal_stream->vdev()->upgradeToDeviceMemQueue(device_mem_qdesc);
+    } else {
+      // General command-buffer path (plain kernel graphs, no control flow): the
+      // graphBlockIssue scheduler copies ALL baked kernel packets to this
+      // internal queue on every launch. If the queue lives in system memory,
+      // those packet writes (and the write_index update) cross PCIe from the
+      // GPU. Placing the ring buffer in device memory always helps; the VRAM
+      // descriptor has the same CP-forward-progress requirement as the standard
+      // WHILE path, so only request it on self-fed-capable arches.
+      // Gated by HIP_GRAPH_INTERNALQ_DEVMEM (default on) for A/B.
+      static const bool general_devmem = []() {
+        const char* e = getenv("HIP_GRAPH_INTERNALQ_DEVMEM");
+        return e == nullptr || atoi(e) != 0;  // default on
+      }();
+      if (general_devmem) {
+        internal_stream->vdev()->upgradeToDeviceMemQueue(
+            /*device_mem_qdesc=*/self_fed_queue_arch);
+      }
+    }
+
+    // Dump per-iteration scheduler cycle profiling from the previous launch
+    // (only populated when the blob is built with GRAPH_SCHED_PROFILE). The
+    // exec_state lives in host-visible device memory and persists across
+    // launches, so it holds the last iteration's phase deltas. Enable with
+    // HIP_GRAPH_SCHED_PROFILE=1.
+    static const bool sched_profile = []() {
+      const char* e = getenv("HIP_GRAPH_SCHED_PROFILE");
+      return e != nullptr && atoi(e) != 0;
+    }();
+    if (sched_profile) {
+      uint64_t c = exec_state->prof_cond, r = exec_state->prof_reserve,
+               m = exec_state->prof_memcpy, d = exec_state->prof_doorbell;
+      if ((c | r | m | d) != 0) {
+        fprintf(stderr,
+            "[sched-profile] condBranchWhile last-iter: cond=%lu reserve=%lu "
+            "memcpy=%lu doorbell=%lu kernel_total=%lu (cycles ~= ns)\n",
+            (unsigned long)c, (unsigned long)r, (unsigned long)m,
+            (unsigned long)d, (unsigned long)(c + r + m + d));
+      }
     }
 
     // Initialize per-launch execution state
@@ -3885,14 +4488,68 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
     // GPU-side init: graphBlockIssue writes cond_init_value to cond_init_ptr
     // before dispatching the first block. No host-side reset needed.
 
+    // MI450-class hardware: the command processor makes forward progress on a
+    // queue that a still-resident kernel is feeding, so the persistent
+    // graphWhileLoop kernel can dispatch its body onto the SAME queue it runs on
+    // (single-queue fused WHILE, no separate work queue). On gfx950/MI3xx the CP
+    // parks/sleeps on a self-fed queue (the body never launches -> deadlock), so
+    // those keep the two-queue design. self_fed_queue_arch (computed above for the
+    // queue-descriptor decision) captures exactly this capability.
     bool sched_ok = false;
 
-    if (cmd_buffer_.has_fused_while) {
-      // Fused WHILE path: need a second queue for body packets.
-      // The persistent kernel runs on internal_stream's queue (Queue A / control),
-      // and issues body packets to a second queue (Queue B / work).
+    if (cmd_buffer_.has_fused_while || cmd_buffer_.has_walk_loop) {
+      // Persistent-kernel paths (fused WHILE, or the graphWalkLoop CFG
+      // interpreter): the kernel runs on a "control" queue and issues user
+      // packets to a separate "work" queue. It never writes to its own control
+      // queue, so the control queue is off the per-iteration critical path --
+      // and the split is required on arches where the CP does not make forward
+      // progress on a queue a resident kernel is feeding (self_fed_queue_arch).
+      //
+      // HIP_GRAPH_WHILE_ON_LAUNCH=1 dispatches the persistent kernel directly on
+      // the user's launch stream instead of a dedicated internal control queue,
+      // and reuses the (now-free) internal_stream as the work queue. This saves
+      // one HW queue and the internal<->launch start/completion sync. It does not
+      // change per-iteration latency (the work queue is the hot path).
+      static const bool while_on_launch = []() {
+        const char* e = getenv("HIP_GRAPH_WHILE_ON_LAUNCH");
+        return e != nullptr && atoi(e) != 0;  // default off
+      }();
+
+      // MI450-class single-queue fused WHILE: the persistent kernel and the body
+      // it dispatches share ONE queue (no separate work queue). Requires CP
+      // forward progress on a self-fed queue (see self_fed_queue_arch); inert on
+      // gfx950. Implies dispatching the persistent kernel on the launch stream.
+      const bool fused_single_q = self_fed_queue_arch;
+
+      // The queue that hosts the persistent kernel dispatch.
+      auto* control_vdev = (while_on_launch || fused_single_q)
+                               ? launch_stream->vdev()
+                               : internal_stream->vdev();
+
+      // Isolation experiment: with the control on the launch stream, optionally
+      // upgrade that (host-memory) launch queue to device memory, to test whether
+      // the control queue's *placement* affects per-iteration cost even though
+      // the persistent kernel is launched only once. HIP_WHILE_ON_LAUNCH_DEVMEM=1.
+      if (while_on_launch) {
+        static const bool on_launch_devmem = []() {
+          const char* e = getenv("HIP_WHILE_ON_LAUNCH_DEVMEM");
+          return e != nullptr && atoi(e) != 0;  // default off
+        }();
+        if (on_launch_devmem) {
+          control_vdev->upgradeToDeviceMemQueue();
+        }
+      }
+
       hip::Stream* work_stream = nullptr;
-      if (parallel_streams_[instantiateDeviceId_].size() > 1) {
+      if (fused_single_q) {
+        // Single queue: body packets go to the SAME queue the persistent kernel
+        // runs on (the launch stream). No second HW queue at all.
+        work_stream = launch_stream;
+      } else if (while_on_launch) {
+        // Reuse the internal stream as the body/work queue (control moved to the
+        // launch stream), so no second internal queue is needed.
+        work_stream = internal_stream;
+      } else if (parallel_streams_[instantiateDeviceId_].size() > 1) {
         work_stream = parallel_streams_[instantiateDeviceId_][1];
       }
 
@@ -3913,26 +4570,91 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
         }
       }
 
+      // Experimental staged fused-WHILE: pre-stage a batch of INVALID-header
+      // body packets and ring the doorbell once per batch instead of per
+      // iteration (see graphWhileLoop). HIP_GRAPH_STAGED_WHILE=<depth>; 0/unset
+      // disables. "1" maps to a sensible default depth.
+      static const uint32_t staged_depth = []() -> uint32_t {
+        const char* e = getenv("HIP_GRAPH_STAGED_WHILE");
+        if (e == nullptr) return 0;
+        int v = atoi(e);
+        if (v <= 0) return 0;
+        return (v == 1) ? 16u : static_cast<uint32_t>(v);
+      }();
+      exec_state->staged_while = staged_depth;
+
       if (work_stream != nullptr) {
+        // The persistent kernel writes body packets + rings the doorbell on this
+        // work queue every iteration, so it -- not the control queue -- is the
+        // per-iteration hot queue in the fused path. Upgrading it to device memory
+        // keeps those ring writes in VRAM. The upgrade swaps the underlying HW
+        // queue, so read the queue handle only after upgrading.
+        //
+        // IMPORTANT (gfx950/gfx942): the producer (persistent graphWhileLoop) runs
+        // on the CONTROL queue and writes body packets into the WORK queue's ring.
+        // If that ring lives in VRAM, the work queue's CP must observe another
+        // client's VRAM writes -- and on gfx950/gfx942 the CP's read path to that
+        // region is only coherent when a peer/large-BAR mapping exists (i.e. when
+        // multiple GPUs are visible). With a single visible GPU
+        // (HIP_VISIBLE_DEVICES/ROCR_VISIBLE_DEVICES) the body never launches and
+        // the loop deadlocks. A system-scope publish fence in the kernel does NOT
+        // fix this (verified) -- it is a CP mapping/coherence property, not a
+        // shader cache-visibility one. So only place the work ring in VRAM on
+        // self-fed-capable arches (MI450+); keep it in system memory on
+        // gfx950/gfx942 where it is correct regardless of visibility (per-iteration
+        // cost is dominated by the body-launch round-trip, so the ring location is
+        // within noise anyway). HIP_FUSED_WORKQ_DEVMEM forces it for bring-up on a
+        // multi-GPU-visible box.
+        const bool workq_devmem = [&]() {
+          const char* e = getenv("HIP_FUSED_WORKQ_DEVMEM");
+          if (e != nullptr) return atoi(e) != 0;   // explicit override
+          return self_fed_queue_arch;               // default: only MI450+
+        }();
+        // Also place the work queue's DESCRIPTOR (write/read_dispatch_id) in VRAM,
+        // not just its ring buffer. The producer (persistent graphWhileLoop kernel)
+        // runs on the control queue, so from the work queue's CP this is a normal
+        // cross-queue producer/consumer rather than a self-fed queue -- but the
+        // write_dispatch_id is still GPU-written and CP-re-read, which is the
+        // pattern that hangs gfx950 on the standard path. Gate behind
+        // HIP_FUSED_WORKQ_DEVMEM_DESC (default off) to A/B and check for hangs.
+        static const bool workq_devmem_qdesc = []() {
+          const char* e = getenv("HIP_FUSED_WORKQ_DEVMEM_DESC");
+          return e != nullptr && atoi(e) != 0;  // default off
+        }();
+        if (workq_devmem) {
+          work_stream->vdev()->upgradeToDeviceMemQueue(workq_devmem_qdesc);
+        }
         auto* work_gpu_queue = reinterpret_cast<hsa_queue_t*>(
             work_stream->vdev()->getGpuQueue());
         exec_state->work_queue_ptr = reinterpret_cast<uint64_t>(work_gpu_queue);
         exec_state->work_doorbell_ptr = *reinterpret_cast<uint64_t*>(
             work_gpu_queue->doorbell_signal.handle + 8);
 
-        ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-            "[GraphExec::Run] FUSED WHILE: control_queue=%p, work_queue=%p, "
-            "cond_ptr=0x%lx, body_block=%u",
-            gpu_queue, work_gpu_queue,
-            cmd_buffer_.while_cond_ptr, cmd_buffer_.while_body_block_idx);
+        if (cmd_buffer_.has_walk_loop) {
+          ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+              "[GraphExec::Run] WALK LOOP: control_queue=%p, work_queue=%p, "
+              "blocks=%u, entry_block=%u",
+              gpu_queue, work_gpu_queue, cmd_buffer_.block_count,
+              cmd_buffer_.entry_block);
 
-        sched_ok = internal_stream->vdev()->runGraphWhileLoop(
-            cmd_buffer_.device_ptr + cmd_buffer_.exec_state_offset,
-            cmd_buffer_.while_cond_ptr,
-            cmd_buffer_.while_body_block_idx);
+          sched_ok = control_vdev->runGraphWalkLoop(
+              cmd_buffer_.device_ptr + cmd_buffer_.exec_state_offset);
+        } else {
+          ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+              "[GraphExec::Run] FUSED WHILE: control_queue=%p, work_queue=%p, "
+              "cond_ptr=0x%lx, body_block=%u",
+              gpu_queue, work_gpu_queue,
+              cmd_buffer_.while_cond_ptr, cmd_buffer_.while_body_block_idx);
+
+          sched_ok = control_vdev->runGraphWhileLoop(
+              cmd_buffer_.device_ptr + cmd_buffer_.exec_state_offset,
+              cmd_buffer_.while_cond_ptr,
+              cmd_buffer_.while_body_block_idx);
+        }
       } else {
         ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
-            "[GraphExec::Run] FUSED WHILE: failed to get second queue, falling back");
+            "[GraphExec::Run] persistent kernel: failed to get second queue, "
+            "falling back");
       }
     } else {
       // Standard multi-block path
@@ -3943,7 +4665,13 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
       exec_state->work_queue_ptr = 0;
       exec_state->work_doorbell_ptr = 0;
 
-      sched_ok = internal_stream->vdev()->runGraphBlockIssue(
+      // Kick graphBlockIssue from the launch stream (see dispatch_on_launch) so
+      // the host never writes the device-memory internal queue descriptor. The
+      // scheduler still emits every block -- all nesting levels -- to the internal
+      // work queue via exec_state->queue_ptr (set above).
+      auto* issue_vdev = dispatch_on_launch ? launch_stream->vdev()
+                                            : internal_stream->vdev();
+      sched_ok = issue_vdev->runGraphBlockIssue(
           cmd_buffer_.device_ptr + cmd_buffer_.exec_state_offset);
     }
 
@@ -3962,7 +4690,9 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
       status = hipErrorUnknown;
     }
 
-    startCommand->release();
+    if (startCommand != nullptr) {
+      startCommand->release();
+    }
   } else if (!cross_device_launch) {
     if (max_streams_dev_.size() == 1) {
       // Single-device: pass collision-handled streams_ to EnqueueSegmentedGraph

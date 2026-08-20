@@ -1403,12 +1403,16 @@ class VirtualDevice : public amd::ReferenceCountedObject {
     return false;
   }
 
+  //! Dispatches the graphWalkLoop CFG-interpreting persistent kernel on the
+  //! control queue. All parameters live in the ExecutionState struct.
+  virtual bool runGraphWalkLoop(void* exec_state_ptr) { return false; }
+
   //! Enqueues a barrier-and packet waiting on the given signal (handle is hsa_signal_t.handle)
   virtual bool addBarrierPacket(uint64_t signal_handle) { return false; }
 
   //! Returns the raw HSA queue pointer for direct access
   virtual void* getGpuQueue() { return nullptr; }
-  virtual bool upgradeToDeviceMemQueue() { return false; }
+  virtual bool upgradeToDeviceMemQueue(bool device_mem_qdesc = false) { return false; }
 
 
   //! Returns the number of outstanding HSA async handlers
@@ -2053,10 +2057,17 @@ class Device : public RuntimeObject {
   virtual uint64_t graphCondBranchWhileKernelObject() const { return 0; }
   virtual uint32_t graphCondBranchWhilePrivateSize() const { return 0; }
   virtual uint32_t graphCondBranchWhileGroupSize() const { return 0; }
+  virtual uint64_t graphSwitchBranchKernelObject() const { return 0; }
+  virtual uint32_t graphSwitchBranchPrivateSize() const { return 0; }
+  virtual uint32_t graphSwitchBranchGroupSize() const { return 0; }
   virtual uint64_t graphWhileLoopKernelObject() const { return 0; }
   virtual uint32_t graphWhileLoopPrivateSize() const { return 0; }
   virtual uint32_t graphWhileLoopGroupSize() const { return 0; }
   virtual bool hasGraphWhileLoopHSACO() const { return false; }
+  virtual uint64_t graphWalkLoopKernelObject() const { return 0; }
+  virtual uint32_t graphWalkLoopPrivateSize() const { return 0; }
+  virtual uint32_t graphWalkLoopGroupSize() const { return 0; }
+  virtual bool hasGraphWalkLoopHSACO() const { return false; }
 
   /**
    * Validatates Virtual Address range between parent and sub-buffer.

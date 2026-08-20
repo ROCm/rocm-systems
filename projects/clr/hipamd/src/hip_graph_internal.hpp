@@ -1140,6 +1140,19 @@ class GraphExecSegmented : public GraphExecBase {
         } else {
           device->svmFree(cmd_buffer_.device_ptr);
         }
+        if (cmd_buffer_.cond_init_table_devptr != nullptr) {
+          device->svmFree(cmd_buffer_.cond_init_table_devptr);
+          cmd_buffer_.cond_init_table_devptr = nullptr;
+        }
+        if (cmd_buffer_.walk_signal_in_devmem) {
+          if (cmd_buffer_.walk_signal_devptr != nullptr) {
+            device->deviceLocalFree(cmd_buffer_.walk_signal_devptr);
+            cmd_buffer_.walk_signal_devptr = nullptr;
+          }
+        } else if (cmd_buffer_.walk_signal_handle != 0) {
+          device->destroyGraphSignal(cmd_buffer_.walk_signal_handle);
+        }
+        cmd_buffer_.walk_signal_handle = 0;
       }
       cmd_buffer_.device_ptr = nullptr;
       cmd_buffer_.valid = false;
@@ -1238,14 +1251,20 @@ class GraphExecSegmented : public GraphExecBase {
   // (graphBranch / graphReturn) appended at the end of each block.
   // -----------------------------------------------------------------------
 
-  // Must match GPU-side BlockDescriptor in graph_scheduler_kernel.hip
+  // Must match GPU-side BlockDescriptor in graph_scheduler_kernel.hip.
+  // subblock_index/subblock_count are legacy fork/join fields, kept for blob
+  // ABI compatibility and always written 0 (fork/join is no longer emitted).
   struct BlockDescriptor {
-    uint32_t packet_offset;   // Byte offset from packets area
+    uint32_t packet_offset;   // Byte offset from packets area (control-queue range)
     uint32_t packet_count;    // AQL packets in this block (user + CFG)
+    uint32_t subblock_index;  // legacy (always 0)
+    uint32_t subblock_count;  // legacy (always 0 => single-queue path)
   };
 
-  // Must match GPU-side ExecutionState in graph_scheduler_kernel.hip (80 bytes)
-  struct alignas(128) DeviceExecutionState {
+  // Must match GPU-side ExecutionState in graph_scheduler_kernel.hip.
+  // The lane-queue / sub-block / fj_reset fields are legacy fork/join state,
+  // retained here for blob ABI compatibility and left zero-initialized.
+  struct alignas(256) DeviceExecutionState {
     uint64_t cmd_buffer_base;        // Pointer to packets area
     uint64_t block_table_ptr;        // Pointer to BlockDescriptor[]
     uint32_t block_count;
@@ -1261,9 +1280,53 @@ class GraphExecSegmented : public GraphExecBase {
     // Pre-resolved queue metadata for graphCondBranchWhile (avoids per-iter lookups)
     uint64_t cached_queue_base;      // Queue ring buffer base address
     uint32_t cached_queue_size;      // Queue ring buffer size (slots)
-    uint32_t _reserved0;
+    uint32_t num_lane_queues;        // # entries in lane-queue pool
+    // Static fork/join lane-queue pool (index 0 == control queue).
+    uint64_t subblock_table_ptr;     // Pointer to SubBlock[]
+    uint64_t lane_queue_ptrs;        // Pointer to uint64_t[] amd_queue_t*
+    uint64_t lane_doorbell_ptrs;     // Pointer to uint64_t[] doorbells
+    uint64_t fj_reset_ptr;           // Pointer to uint64_t[] signal value addrs to re-arm
+    uint32_t fj_reset_count;         // # signals to re-arm before each diamond block
+    uint32_t staged_while;           // Staged fused-WHILE depth (0 = disabled); see graphWhileLoop
+    // Per-iteration cycle profiling, written by scheduler kernels only when the
+    // blob is built with GRAPH_SCHED_PROFILE. Layout must match the device
+    // ExecutionState; values are 0 in normal (non-profiling) builds.
+    uint64_t prof_cond;
+    uint64_t prof_reserve;
+    uint64_t prof_memcpy;
+    uint64_t prof_doorbell;
+    // Per-launch conditional reset table (array of {cond_ptr, default} pairs).
+    // Lets graphs with multiple conditional handles reset ALL of them to their
+    // creation defaults on every relaunch. Must match graph_scheduler_kernel.hip.
+    uint64_t cond_init_table_ptr;
+    uint32_t cond_init_count;
+    uint32_t _pad_cond_init;
+    // CFG-walking interpreter (graphWalkLoop): device-resident BlockTerminator[]
+    // and the entry block. Zero for every other scheduler path.
+    uint64_t term_table_ptr;
+    uint32_t entry_block;
+    uint32_t _pad_walk;
   };
-  static_assert(sizeof(DeviceExecutionState) <= 128, "ExecutionState must fit 128 bytes");
+  static_assert(sizeof(DeviceExecutionState) <= 256, "ExecutionState must fit 256 bytes");
+
+  // Must match GPU-side BlockTerminator in graph_scheduler_kernel.hip (and its
+  // OpenCL twin in blitcl.cpp). One per block; the walk-loop interpreter reads
+  // this instead of dispatching a terminator kernel.
+  struct BlockTerminator {
+    uint32_t kind;              // matches FlatBlock::TermType
+    uint32_t branch_target;
+    uint32_t true_target;
+    uint32_t false_target;
+    uint32_t cond_op;
+    uint32_t num_cases;
+    uint32_t default_target;
+    uint32_t flags;
+    uint64_t cond_ptr;
+    uint64_t cond_value;
+    uint64_t signal_addr;       // completion signal value addr to drain, or 0
+    uint64_t case_targets_ptr;  // uint32_t[num_cases] for a native SWITCH
+  };
+  static_assert(sizeof(BlockTerminator) == 64, "BlockTerminator must be 64 bytes");
 
   struct BlockInfo {
     int segment_id;
@@ -1283,9 +1346,25 @@ class GraphExecSegmented : public GraphExecBase {
     size_t exec_state_offset = 0;
     size_t kernarg_pool_offset = 0;
     size_t packets_offset = 0;
+    size_t cond_table_offset = 0;    // {cond_ptr, default} pairs for launch reset
+    size_t switch_table_offset = 0;  // native SWITCH case-target arrays (uint32_t[])
+    size_t term_table_offset = 0;    // BlockTerminator[] for the walk-loop path
 
     uint32_t block_count = 0;
     std::vector<BlockInfo> blocks;
+
+    // CFG-walking interpreter: when set, use graphWalkLoop instead of
+    // graphBlockIssue. Handles arbitrary nested WHILE/IF/SWITCH in one
+    // persistent kernel, with no per-terminator dispatch round trip.
+    bool has_walk_loop = false;
+    uint32_t entry_block = 0;         // block the walk starts from
+    uint64_t walk_signal_handle = 0;  // shared block-completion signal (hsa_signal_t)
+    // HIP_GRAPH_WALK_DEVSIGNAL: the block-completion signal is a hand-built
+    // amd_signal_t in its own device-local block rather than one from
+    // hsa_signal_create, whose ABI block always lives in fine-grained system
+    // memory. Not a runtime-owned signal, so it is freed, not destroyed.
+    void* walk_signal_devptr = nullptr;
+    bool walk_signal_in_devmem = false;
 
     // Fused WHILE loop: when set, use graphWhileLoop instead of graphBlockIssue
     bool has_fused_while = false;
@@ -1296,6 +1375,12 @@ class GraphExecSegmented : public GraphExecBase {
     // GPU-side cond variable init (graphBlockIssue writes this before first block)
     uint64_t cond_init_ptr = 0;        // 0 = no init needed
     uint64_t cond_init_value = 0;
+
+    // Device-resident table of {cond_ptr, default_value} pairs for ALL conditional
+    // handles in the graph. Baked once at instantiation; the scheduler resets every
+    // entry at launch start so multi-conditional graphs relaunch deterministically.
+    uint8_t* cond_init_table_devptr = nullptr;
+    uint32_t cond_init_count = 0;
 
     static constexpr size_t kPacketSize = 64;
     static constexpr size_t kKernargAlign = 256;
@@ -1436,6 +1521,12 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
   ChildGraphNode(const ChildGraphNode& rhs) : GraphNode(rhs), GraphExecSegmented() {
     rhs.Graph::clone(this);
     graphCaptureStatus_ = rhs.graphCaptureStatus_;
+    // A ChildGraphNode is simultaneously the node and its own sub-graph exec.
+    // The non-copy ctor wires this up; the copy ctor (used when the executable
+    // graph clones its nodes at instantiate) must do the same, otherwise
+    // GetSubGraphExecs() returns empty and the recursive dependency/packet/
+    // command-buffer passes silently skip the child body.
+    sub_graph_execs_ = {static_cast<GraphExec*>(this)};
   }
 
  public:

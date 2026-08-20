@@ -17,12 +17,12 @@
 #include "hsa_ven_amd_loader.h"
 #include "hsa_ven_amd_aqlprofile.h"
 #else
-#include "/home/amd/anusha_latest_clr/rocm-systems/projects/rocr-runtime/build/install/include/hsa/hsa.h"
-#include "/home/amd/anusha_latest_clr/rocm-systems/projects/rocr-runtime/build/install/include/hsa/hsa_ext_image.h"
-#include "/home/amd/anusha_latest_clr/rocm-systems/projects/rocr-runtime/build/install/include/hsa/hsa_ext_amd.h"
-#include "/home/amd/anusha_latest_clr/rocm-systems/projects/rocr-runtime/build/install/include/hsa/amd_hsa_signal.h"
-#include "/home/amd/anusha_latest_clr/rocm-systems/projects/rocr-runtime/build/install/include/hsa/hsa_ven_amd_loader.h"
-#include "/home/amd/anusha_latest_clr/rocm-systems/projects/rocr-runtime/build/install/include/hsa/hsa_ven_amd_aqlprofile.h"
+#include "/home/agodavar/rocm-systems/projects/rocr-runtime/build/install/include/hsa/hsa.h"
+#include "/home/agodavar/rocm-systems/projects/rocr-runtime/build/install/include/hsa/hsa_ext_image.h"
+#include "/home/agodavar/rocm-systems/projects/rocr-runtime/build/install/include/hsa/hsa_ext_amd.h"
+#include "/home/agodavar/rocm-systems/projects/rocr-runtime/build/install/include/hsa/amd_hsa_signal.h"
+#include "/home/agodavar/rocm-systems/projects/rocr-runtime/build/install/include/hsa/hsa_ven_amd_loader.h"
+#include "/home/agodavar/rocm-systems/projects/rocr-runtime/build/install/include/hsa/hsa_ven_amd_aqlprofile.h"
 #endif  
 
 typedef hsa_status_t HSA_API hsa_amd_queue_create_fn(

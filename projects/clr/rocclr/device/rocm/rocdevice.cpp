@@ -54,8 +54,10 @@
 #include <iostream>
 #include <iomanip>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #define OPENCL_VERSION_STR XSTR(OPENCL_MAJOR) "." XSTR(OPENCL_MINOR)
@@ -76,6 +78,7 @@ static_assert(static_cast<uint32_t>(amd::Device::VmmAccess::kReadWrite) ==
 namespace amd::device {
 extern const char* HipExtraSourceCode;
 extern const char* HipExtraSourceCodeNoGWS;
+extern const char* GraphSchedulerCLSourceCode;
 }  // namespace amd::device
 
 namespace amd::roc {
@@ -784,23 +787,37 @@ bool Device::createBlitProgram() {
   bool result = true;
   std::string extraKernel;
 
+  std::string extraOptions;
   if (amd::IS_HIP) {
     if (settings().gwsInitSupported_) {
       extraKernel = device::HipExtraSourceCode;
     } else {
       extraKernel = device::HipExtraSourceCodeNoGWS;
     }
+    // Graph-scheduler kernels (__amd_rocclr_graphBlockIssue, graphBranch,
+    // graphCondBranch, graphCondBranchWhile, graphSwitchBranch, graphReturn,
+    // graphWhileLoop) live alongside the other blit kernels in blitcl.cpp and
+    // are compiled into this same program (see resolveGraphSchedulerCLKernels(),
+    // which resolves them from blitProgram() instead of a separate
+    // amd::Program). They use OpenCL C11 atomics with explicit memory scopes
+    // (atomic_work_item_fence/atomic_*_explicit), which require CL2.0.
+    extraKernel += device::GraphSchedulerCLSourceCode;
+    extraOptions = "-cl-std=CL2.0";
   } else {
     extraKernel = SchedulerSourceCode;
   }
 
   blitProgram_ = new BlitProgram(context_);
   // Create blit programs
-  if (blitProgram_ == nullptr || !blitProgram_->create(this, extraKernel, "")) {
+  if (blitProgram_ == nullptr || !blitProgram_->create(this, extraKernel, extraOptions)) {
     delete blitProgram_;
     blitProgram_ = nullptr;
     LogError("Couldn't create blit kernels!");
     return false;
+  }
+
+  if (amd::IS_HIP) {
+    resolveGraphSchedulerCLKernels();
   }
 
   return result;
@@ -808,6 +825,199 @@ bool Device::createBlitProgram() {
 
 // ================================================================================================
 #include "device/rocm/graph_scheduler_blob.h"
+#include "device/rocm/graph_scheduler_source.h"
+
+// Compile the embedded GPU graph-scheduler HIP source (GraphSchedulerSourceCode)
+// to a loadable code object for `isa_name` at runtime, via comgr -- the same
+// in-process compiler the blit kernels use (see Device::BlitProgram::create).
+// This replaces the prebuilt per-arch blob: the scheduler now works on any ISA
+// comgr can target, not just the baked ones, and there is no manual regen step.
+//
+// Pipeline mirrors devprogram.cpp's OpenCL/HIP path:
+//   SOURCE --COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC--> BC
+//   BC     --CODEGEN_BC_TO_RELOCATABLE-------------->  relocatable
+//   reloc  --LINK_RELOCATABLE_TO_EXECUTABLE--------->  executable (code object)
+// The resulting bytes feed the same hsa_code_object_reader path as the blob.
+//
+// Compiled bytes are cached per ISA so multiple devices of the same arch (and
+// re-inits) do not recompile.
+static bool compileGraphSchedulerCodeObject(const char* isa_name,
+                                            std::vector<char>& out,
+                                            amd_comgr_language_t language = AMD_COMGR_LANGUAGE_HIP,
+                                            const char* source = GraphSchedulerSourceCode,
+                                            size_t source_len = sizeof(GraphSchedulerSourceCode) - 1,
+                                            const char* source_name = "graph_scheduler_kernel.hip") {
+  // Escape hatch to force the prebuilt-blob fallback (A/B and emergency use).
+  if (getenv("HIP_GRAPH_NO_RTC") != nullptr) return false;
+  // Cache per ISA *and* language so the HIP and OpenCL builds don't collide.
+  const std::string cache_key =
+      std::string(isa_name) + (language == AMD_COMGR_LANGUAGE_HIP ? "#hip" : "#cl");
+  static std::mutex cache_mtx;
+  static std::unordered_map<std::string, std::vector<char>> cache;
+  {
+    std::lock_guard<std::mutex> lk(cache_mtx);
+    auto it = cache.find(cache_key);
+    if (it != cache.end()) {
+      if (it->second.empty()) return false;  // negative cache: prior failure
+      out = it->second;
+      return true;
+    }
+  }
+
+  if (!amd::Comgr::IsReady()) {
+    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+        "[GraphScheduler] comgr not available; cannot runtime-compile scheduler");
+    std::lock_guard<std::mutex> lk(cache_mtx);
+    cache[cache_key];  // negative-cache
+    return false;
+  }
+
+  auto comgr_ok = [](amd_comgr_status_t s) { return s == AMD_COMGR_STATUS_SUCCESS; };
+  // Dump any comgr diagnostic log attached to a result data set (best-effort).
+  auto dump_log = [&](amd_comgr_data_set_t set, const char* phase) {
+    size_t n = 0;
+    if (amd::Comgr::action_data_count(set, AMD_COMGR_DATA_KIND_LOG, &n) != AMD_COMGR_STATUS_SUCCESS ||
+        n == 0)
+      return;
+    amd_comgr_data_t ld = {};
+    if (amd::Comgr::action_data_get_data(set, AMD_COMGR_DATA_KIND_LOG, 0, &ld) !=
+        AMD_COMGR_STATUS_SUCCESS)
+      return;
+    size_t sz = 0;
+    if (amd::Comgr::get_data(ld, &sz, nullptr) == AMD_COMGR_STATUS_SUCCESS && sz > 0) {
+      std::vector<char> buf(sz + 1, 0);
+      if (amd::Comgr::get_data(ld, &sz, buf.data()) == AMD_COMGR_STATUS_SUCCESS) {
+        ClPrint(amd::LOG_INFO, amd::LOG_CODE, "[GraphScheduler] comgr %s log: %s", phase,
+                buf.data());
+      }
+    }
+    amd::Comgr::release_data(ld);
+  };
+  bool ok = false;
+  std::vector<char> exec_bytes;
+
+  amd_comgr_data_t src_data = {};
+  amd_comgr_data_set_t in_set = {}, bc_set = {}, reloc_set = {}, exe_set = {};
+  amd_comgr_action_info_t compile_ai = {}, link_ai = {};
+  bool have_src = false, have_in = false, have_bc = false, have_reloc = false,
+       have_exe = false, have_compile_ai = false, have_link_ai = false;
+
+  do {
+    if (!comgr_ok(amd::Comgr::create_data_set(&in_set))) break;
+    have_in = true;
+    if (!comgr_ok(amd::Comgr::create_data(AMD_COMGR_DATA_KIND_SOURCE, &src_data))) break;
+    have_src = true;
+    if (!comgr_ok(amd::Comgr::set_data(src_data, source_len, source)))
+      break;
+    if (!comgr_ok(amd::Comgr::set_data_name(src_data, source_name))) break;
+    if (!comgr_ok(amd::Comgr::data_set_add(in_set, src_data))) break;
+
+    // Compile action. HIP: auto-includes the clang HIP runtime wrapper so
+    // __global__/__device__/__shared__ resolve without shipping HIP headers.
+    // OpenCL 2.0: native device-only kernels; comgr sets -cl-std and includes
+    // the OpenCL default header, so no macro shims are needed.
+    if (!comgr_ok(amd::Comgr::create_action_info(&compile_ai))) break;
+    have_compile_ai = true;
+    if (!comgr_ok(amd::Comgr::action_info_set_isa_name(compile_ai, isa_name))) break;
+    if (!comgr_ok(amd::Comgr::action_info_set_language(compile_ai, language))) break;
+    amd::Comgr::action_info_set_logging(compile_ai, true);
+    const char* copts[] = {"-O3"};
+    if (!comgr_ok(amd::Comgr::action_info_set_option_list(compile_ai, copts, 1))) break;
+
+    if (!comgr_ok(amd::Comgr::create_data_set(&bc_set))) break;
+    have_bc = true;
+    if (!comgr_ok(amd::Comgr::do_action(
+            AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC, compile_ai, in_set, bc_set))) {
+      dump_log(bc_set, "compile-source-to-bc");
+      break;
+    }
+
+    // Codegen + link actions: no source language, isa only.
+    if (!comgr_ok(amd::Comgr::create_action_info(&link_ai))) break;
+    have_link_ai = true;
+    if (!comgr_ok(amd::Comgr::action_info_set_isa_name(link_ai, isa_name))) break;
+    amd::Comgr::action_info_set_logging(link_ai, true);
+    // -O3 must reach the LLVM backend too: the CODEGEN_BC_TO_RELOCATABLE step
+    // (instruction selection / regalloc / scheduling) is where the terminator
+    // kernels' code quality is decided. Omitting it regressed the standard path
+    // ~17% while leaving the latency-bound fused kernel unaffected.
+    const char* lopts[] = {"-O3"};
+    if (!comgr_ok(amd::Comgr::action_info_set_option_list(link_ai, lopts, 1))) break;
+
+    if (!comgr_ok(amd::Comgr::create_data_set(&reloc_set))) break;
+    have_reloc = true;
+    if (!comgr_ok(amd::Comgr::do_action(
+            AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE, link_ai, bc_set, reloc_set))) {
+      dump_log(reloc_set, "codegen-bc-to-relocatable");
+      break;
+    }
+
+    if (!comgr_ok(amd::Comgr::create_data_set(&exe_set))) break;
+    have_exe = true;
+    if (!comgr_ok(amd::Comgr::do_action(
+            AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE, link_ai, reloc_set, exe_set))) {
+      dump_log(exe_set, "link-relocatable-to-executable");
+      break;
+    }
+
+    size_t count = 0;
+    if (!comgr_ok(amd::Comgr::action_data_count(exe_set, AMD_COMGR_DATA_KIND_EXECUTABLE, &count)) ||
+        count == 0)
+      break;
+    amd_comgr_data_t exe_data = {};
+    if (!comgr_ok(amd::Comgr::action_data_get_data(exe_set, AMD_COMGR_DATA_KIND_EXECUTABLE, 0,
+                                                   &exe_data)))
+      break;
+    size_t exe_size = 0;
+    if (!comgr_ok(amd::Comgr::get_data(exe_data, &exe_size, nullptr)) || exe_size == 0) {
+      amd::Comgr::release_data(exe_data);
+      break;
+    }
+    exec_bytes.resize(exe_size);
+    if (!comgr_ok(amd::Comgr::get_data(exe_data, &exe_size, exec_bytes.data()))) {
+      amd::Comgr::release_data(exe_data);
+      break;
+    }
+    amd::Comgr::release_data(exe_data);
+    ok = true;
+  } while (false);
+
+  if (have_exe) amd::Comgr::destroy_data_set(exe_set);
+  if (have_reloc) amd::Comgr::destroy_data_set(reloc_set);
+  if (have_bc) amd::Comgr::destroy_data_set(bc_set);
+  if (have_link_ai) amd::Comgr::destroy_action_info(link_ai);
+  if (have_compile_ai) amd::Comgr::destroy_action_info(compile_ai);
+  if (have_src) amd::Comgr::release_data(src_data);
+  if (have_in) amd::Comgr::destroy_data_set(in_set);
+
+  std::lock_guard<std::mutex> lk(cache_mtx);
+  if (ok) {
+    cache[cache_key] = exec_bytes;
+    out = std::move(exec_bytes);
+  } else {
+    cache[cache_key];  // negative-cache to avoid recompiling a failing ISA
+    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+        "[GraphScheduler] runtime compile failed for ISA %s", isa_name);
+  }
+  return ok;
+}
+
+// Looks up a kernel already parsed into a device::Program (post-load) and
+// extracts the fields needed to bake it into a raw AQL dispatch packet.
+static bool resolveDeviceProgramKernel(device::Program* dev_prog, const char* kernel_name,
+                                       uint64_t* kernel_object, uint32_t* private_size,
+                                       uint32_t* group_size) {
+  const auto& kernels = dev_prog->kernels();
+  auto it = kernels.find(kernel_name);
+  if (it == kernels.end()) {
+    return false;
+  }
+  const device::Kernel* kernel = it->second;
+  *kernel_object = kernel->KernelCodeHandle();
+  *private_size = kernel->WorkitemPrivateSegmentByteSize();
+  *group_size = kernel->WorkgroupGroupSegmentByteSize();
+  return true;
+}
 
 static bool resolveKernelSymbol(hsa_executable_t exec, hsa_agent_t agent,
                                 const char* name,
@@ -828,10 +1038,40 @@ static bool resolveKernelSymbol(hsa_executable_t exec, hsa_agent_t agent,
 }
 
 bool Device::loadGraphSchedulerHSACO() {
+  // Primary path: compile the embedded scheduler source for this device's exact
+  // ISA at runtime (like the blit kernels). Works on any comgr-supported arch.
+  const void* co_ptr = nullptr;
+  size_t co_len = 0;
+  std::vector<char> compiled;
+  if (compileGraphSchedulerCodeObject(isa().isaName().c_str(), compiled)) {
+    co_ptr = compiled.data();
+    co_len = compiled.size();
+    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+        "[GraphScheduler] Runtime-compiled scheduler for %s (%zu bytes)",
+        isa().isaName().c_str(), co_len);
+  } else {
+    // Fallback: prebuilt per-arch blob (gen_scheduler_blob.sh), for environments
+    // where comgr is unavailable. Only the baked arches are covered here.
+    const std::string_view dev_name(info().name_);
+    if (dev_name.find("gfx950") != std::string_view::npos) {
+      co_ptr = graph_scheduler_gfx950_unbundled_hsaco;
+      co_len = graph_scheduler_gfx950_unbundled_hsaco_len;
+    } else if (dev_name.find("gfx942") != std::string_view::npos) {
+      co_ptr = graph_scheduler_gfx942_unbundled_hsaco;
+      co_len = graph_scheduler_gfx942_unbundled_hsaco_len;
+    } else {
+      ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+          "[GraphScheduler] No scheduler code object for device %s; command buffer disabled",
+          info().name_);
+      return false;
+    }
+    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+        "[GraphScheduler] Using prebuilt scheduler blob for %s (comgr compile unavailable)",
+        info().name_);
+  }
+
   hsa_code_object_reader_t reader = {};
-  hsa_status_t st = Hsa::code_object_reader_create_from_memory(
-      graph_scheduler_gfx942_unbundled_hsaco,
-      graph_scheduler_gfx942_unbundled_hsaco_len, &reader);
+  hsa_status_t st = Hsa::code_object_reader_create_from_memory(co_ptr, co_len, &reader);
   if (st != HSA_STATUS_SUCCESS) return false;
 
   st = Hsa::executable_create_alt(HSA_PROFILE_FULL,
@@ -911,6 +1151,22 @@ bool Device::loadGraphSchedulerHSACO() {
       &graph_cond_branch_while_private_size_,
       &graph_cond_branch_while_group_size_);
 
+  // Native O(1) SWITCH terminator (optional; host falls back to a graphCondBranch
+  // equality chain when this symbol is absent from the blob).
+  resolveKernelSymbol(graph_scheduler_executable_, bkendDevice_,
+      "__amd_rocclr_graphSwitchBranch.kd",
+      &graph_switch_branch_kernel_object_,
+      &graph_switch_branch_private_size_,
+      &graph_switch_branch_group_size_);
+
+  // CFG-walking interpreter (optional; the host keeps the self-enqueueing path
+  // when this symbol is absent, so an older blob stays usable).
+  resolveKernelSymbol(graph_scheduler_executable_, bkendDevice_,
+      "__amd_rocclr_graphWalkLoop.kd",
+      &graph_walk_loop_kernel_object_,
+      &graph_walk_loop_private_size_,
+      &graph_walk_loop_group_size_);
+
   if (block_ok && branch_ok && ret_ok) {
     ClPrint(amd::LOG_INFO, amd::LOG_CODE,
         "[GraphScheduler] Block-based kernels loaded: blockIssue=0x%lx branch=0x%lx "
@@ -925,7 +1181,87 @@ bool Device::loadGraphSchedulerHSACO() {
         block_ok, branch_ok, cond_ok, ret_ok, while_ok);
   }
 
+  // The OpenCL-C ports of these kernels are compiled alongside the other
+  // blit kernels (see createBlitProgram() / blitcl.cpp's
+  // GraphSchedulerCLSourceCode), and blitProgram() doesn't exist yet at this
+  // point (it's created lazily on first blit use). resolveGraphSchedulerCLKernels()
+  // runs later, from createBlitProgram(), to opt-in swap these HIP symbols
+  // for their OpenCL equivalents.
   return true;
+}
+
+// ================================================================================================
+// Opt-in (HIP_GRAPH_SCHED_CL=1, or the legacy alias HIP_GRAPH_CONDWHILE_CL=1
+// which predates the other kernels' ports, back when graphCondBranchWhile
+// was the only one in the OpenCL source): source every graph-scheduler
+// kernel present in blitcl.cpp's GraphSchedulerCLSourceCode from the
+// OpenCL-C port instead of the HIP one. These are compiled through the same
+// amd::Program(..., Program::OpenCL_C) + build()/load() pipeline as the rest
+// of the blit kernels -- literally the same program, resolved here via
+// blitProgram()'s already-parsed device::Program -- rather than a bespoke
+// comgr action pipeline or a separate amd::Program of our own. Each kernel
+// is resolved and swapped in independently; on any per-kernel resolution
+// failure we silently keep that kernel's HIP symbol already resolved by
+// loadGraphSchedulerHSACO(). Called once, from createBlitProgram(), right
+// after blitProgram_ is built.
+void Device::resolveGraphSchedulerCLKernels() {
+  if (graph_scheduler_cl_resolved_) {
+    return;
+  }
+  graph_scheduler_cl_resolved_ = true;
+
+  if (getenv("HIP_GRAPH_SCHED_CL") == nullptr && getenv("HIP_GRAPH_CONDWHILE_CL") == nullptr) {
+    return;
+  }
+  if (blitProgram_ == nullptr || blitProgram_->program_ == nullptr) {
+    return;
+  }
+  device::Program* dev_prog = blitProgram_->program_->getDeviceProgram(*this);
+  if (dev_prog == nullptr) {
+    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+        "[GraphScheduler] blit device program unavailable; keeping HIP");
+    return;
+  }
+
+  struct ClKernelSlot {
+    const char* name;
+    uint64_t* kernel_object;
+    uint32_t* private_size;
+    uint32_t* group_size;
+  };
+  const ClKernelSlot slots[] = {
+    {"__amd_rocclr_graphCondBranchWhile", &graph_cond_branch_while_kernel_object_,
+     &graph_cond_branch_while_private_size_, &graph_cond_branch_while_group_size_},
+    {"__amd_rocclr_graphBlockIssue", &graph_block_issue_kernel_object_,
+     &graph_block_issue_private_size_, &graph_block_issue_group_size_},
+    {"__amd_rocclr_graphBranch", &graph_branch_kernel_object_, &graph_branch_private_size_,
+     &graph_branch_group_size_},
+    {"__amd_rocclr_graphCondBranch", &graph_cond_branch_kernel_object_,
+     &graph_cond_branch_private_size_, &graph_cond_branch_group_size_},
+    {"__amd_rocclr_graphSwitchBranch", &graph_switch_branch_kernel_object_,
+     &graph_switch_branch_private_size_, &graph_switch_branch_group_size_},
+    {"__amd_rocclr_graphReturn", &graph_return_kernel_object_, &graph_return_private_size_,
+     &graph_return_group_size_},
+    {"__amd_rocclr_graphWhileLoop", &graph_while_loop_kernel_object_,
+     &graph_while_loop_private_size_, &graph_while_loop_group_size_},
+    {"__amd_rocclr_graphWalkLoop", &graph_walk_loop_kernel_object_,
+     &graph_walk_loop_private_size_, &graph_walk_loop_group_size_},
+  };
+  for (const auto& slot : slots) {
+    uint64_t cl_obj = 0;
+    uint32_t cl_priv = 0, cl_grp = 0;
+    if (resolveDeviceProgramKernel(dev_prog, slot.name, &cl_obj, &cl_priv, &cl_grp)) {
+      *slot.kernel_object = cl_obj;
+      *slot.private_size = cl_priv;
+      *slot.group_size = cl_grp;
+      ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+          "[GraphScheduler] %s sourced from OpenCL port (blit program): "
+          "kernel_obj=0x%lx (priv=%u grp=%u)", slot.name, cl_obj, cl_priv, cl_grp);
+    } else if (*slot.kernel_object != 0) {
+      ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+          "[GraphScheduler] OpenCL %s symbol not found in blit program; keeping HIP", slot.name);
+    }
+  }
 }
 
 // ================================================================================================
@@ -3508,7 +3844,8 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
                                   amd::CommandQueue::Priority priority, bool managed,
                                   bool dedicated_queue, hsa_queue_t* preferred,
                                   const std::unordered_set<uint64_t>* excluded_ids,
-                                  void** metadata_ring_buffer, bool device_mem) {
+                                  void** metadata_ring_buffer, bool device_mem,
+                                  bool device_mem_qdesc) {
   // App-thread context: flush queues deferred from the async thread once they
   // reach the batch threshold, bounding live deferred queues.
   if (DeferredQueueCount() >= kDeferredQueueDrainThreshold) {
@@ -3652,6 +3989,31 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
   if (device_mem_ring_buf) {
     desc.flags = static_cast<hsa_amd_queue_create_flag_t>(
         desc.flags | HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF);
+
+    // Optionally place the queue descriptor (amd_queue_t, which holds
+    // write_dispatch_id/read_dispatch_id) in device memory as well. By default
+    // the descriptor stays in fine-grained system memory, so every read of the
+    // write/read index by a GPU-resident scheduler kernel crosses the fabric.
+    // Moving it to VRAM (via finegrain_allocator in ROCr) makes those reads
+    // local. This is only requested for graph-internal WHILE queues (via the
+    // device_mem_qdesc argument from upgradeToDeviceMemQueue), not for general
+    // device-mem queues. HIP_QUEUE_DEVMEM_DESC overrides for A/B measurement:
+    // "1" forces on, "0" forces off.
+    // Whether to place write/read_dispatch_id (the amd_queue_t descriptor) in VRAM.
+    // Callers decide: the standard condBranchWhile / graphBlockIssue paths need the
+    // command processor to make forward progress re-reading a GPU-written VRAM
+    // descriptor (only reliable on self-fed-capable arches), so those callers pass
+    // device_mem_qdesc only where safe. The fused persistent-kernel path manages
+    // the loop on-device and is safe on all arches. HIP_QUEUE_DEVMEM_DESC overrides
+    // for A/B measurement: "1" forces on, "0" forces off.
+    bool want_qdesc = device_mem_qdesc;
+    if (const char* env = getenv("HIP_QUEUE_DEVMEM_DESC")) {
+      want_qdesc = (env[0] == '1');
+    }
+    if (want_qdesc) {
+      desc.flags = static_cast<hsa_amd_queue_create_flag_t>(
+          desc.flags | HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR);
+    }
   }
   if (!final_mask.empty()) {
     desc.engine.compute.cu_mask_count = static_cast<uint32_t>(final_mask.size() * 32);

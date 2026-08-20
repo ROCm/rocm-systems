@@ -572,6 +572,15 @@ class Device : public NullDevice {
   //! Load pre-compiled graph scheduler HSACO kernels
   bool loadGraphSchedulerHSACO();
 
+  //! Resolve the OpenCL-C graph-scheduler kernels (compiled alongside the
+  //! other blit kernels, see createBlitProgram()) and, opt-in via
+  //! HIP_GRAPH_SCHED_CL/HIP_GRAPH_CONDWHILE_CL, swap them in over the HIP
+  //! ones resolved by loadGraphSchedulerHSACO(). Called once blitProgram()
+  //! is available (createBlitProgram() succeeds), since the graph-scheduler
+  //! HSACO load in Device::create() runs before the (lazily-created) blit
+  //! program exists.
+  void resolveGraphSchedulerCLKernels();
+
   // Flat scheduler (backward compatible)
   uint64_t graphSchedulerKernelObject() const { return graph_scheduler_kernel_object_; }
   uint32_t graphSchedulerPrivateSize() const { return graph_scheduler_private_size_; }
@@ -603,6 +612,10 @@ class Device : public NullDevice {
   uint32_t graphCondBranchWhilePrivateSize() const override { return graph_cond_branch_while_private_size_; }
   uint32_t graphCondBranchWhileGroupSize() const override { return graph_cond_branch_while_group_size_; }
 
+  uint64_t graphSwitchBranchKernelObject() const override { return graph_switch_branch_kernel_object_; }
+  uint32_t graphSwitchBranchPrivateSize() const override { return graph_switch_branch_private_size_; }
+  uint32_t graphSwitchBranchGroupSize() const override { return graph_switch_branch_group_size_; }
+
   uint64_t graphReturnKernelObject() const override { return graph_return_kernel_object_; }
   uint32_t graphReturnPrivateSize() const override { return graph_return_private_size_; }
   uint32_t graphReturnGroupSize() const override { return graph_return_group_size_; }
@@ -611,6 +624,11 @@ class Device : public NullDevice {
   uint32_t graphWhileLoopPrivateSize() const override { return graph_while_loop_private_size_; }
   uint32_t graphWhileLoopGroupSize() const override { return graph_while_loop_group_size_; }
   bool hasGraphWhileLoopHSACO() const override { return graph_while_loop_kernel_object_ != 0; }
+
+  uint64_t graphWalkLoopKernelObject() const override { return graph_walk_loop_kernel_object_; }
+  uint32_t graphWalkLoopPrivateSize() const override { return graph_walk_loop_private_size_; }
+  uint32_t graphWalkLoopGroupSize() const override { return graph_walk_loop_group_size_; }
+  bool hasGraphWalkLoopHSACO() const override { return graph_walk_loop_kernel_object_ != 0; }
 
   // P2P agents avaialble for this device
   const std::vector<hsa_agent_t>& p2pAgents() const { return p2p_agents_; }
@@ -654,7 +672,8 @@ class Device : public NullDevice {
       bool managed = false, bool dedicated_queue = false,
       hsa_queue_t* preferred = nullptr,
       const std::unordered_set<uint64_t>* excluded_ids = nullptr,
-      void** metadata_ring_buffer = nullptr, bool device_mem = false);
+      void** metadata_ring_buffer = nullptr, bool device_mem = false,
+      bool device_mem_qdesc = false);
 
   //! Release HSA queue
   void releaseQueue(hsa_queue_t*, const std::vector<uint32_t>& cuMask = {}, bool coop_queue = false,
@@ -793,6 +812,11 @@ class Device : public NullDevice {
 
   // Pre-compiled graph scheduler kernels (HSACO)
   hsa_executable_t graph_scheduler_executable_ = {};
+  // Whether the OpenCL-C graph-scheduler kernels (compiled as part of
+  // blitProgram(), see createBlitProgram()) have already been resolved, so
+  // resolveGraphSchedulerCLKernels() only does its work once per device even
+  // though createBlitProgram() itself can run more than once historically.
+  bool graph_scheduler_cl_resolved_ = false;
 
   // Flat scheduler
   uint64_t graph_scheduler_kernel_object_ = 0;
@@ -820,6 +844,11 @@ class Device : public NullDevice {
   uint32_t graph_cond_branch_while_private_size_ = 0;
   uint32_t graph_cond_branch_while_group_size_ = 0;
 
+  // Switch branch (native multi-way case jump)
+  uint64_t graph_switch_branch_kernel_object_ = 0;
+  uint32_t graph_switch_branch_private_size_ = 0;
+  uint32_t graph_switch_branch_group_size_ = 0;
+
   // Return
   uint64_t graph_return_kernel_object_ = 0;
   uint32_t graph_return_private_size_ = 0;
@@ -829,6 +858,11 @@ class Device : public NullDevice {
   uint64_t graph_while_loop_kernel_object_ = 0;
   uint32_t graph_while_loop_private_size_ = 0;
   uint32_t graph_while_loop_group_size_ = 0;
+
+  // CFG-walking interpreter (persistent kernel, arbitrary nested control flow)
+  uint64_t graph_walk_loop_kernel_object_ = 0;
+  uint32_t graph_walk_loop_private_size_ = 0;
+  uint32_t graph_walk_loop_group_size_ = 0;
 
   size_t gpuvm_segment_max_alloc_;
   size_t alloc_granularity_;
