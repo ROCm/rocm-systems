@@ -45,6 +45,8 @@ enum class WaitKind {
   WaitVscnt,
   WaitTensorcnt,
   BarrierWait,
+  /// s_sema_wait, the wavegroup-scope counterpart of BarrierWait.
+  SemaphoreWait,
   AddressTranslation,
 };
 
@@ -108,6 +110,9 @@ public:
   void on_dispatch_end(hazard_core::EntityId dispatch_id);
   void on_workgroup_begin(const hazard_core::ExecutionKey &workgroup);
   void on_workgroup_end(const hazard_core::ExecutionKey &workgroup);
+  /// Wavegroup lifecycle, taking the wavegroup from ExecutionKey::wavegroup_id.
+  void on_wavegroup_begin(const hazard_core::ExecutionKey &wavegroup);
+  void on_wavegroup_end(const hazard_core::ExecutionKey &wavegroup);
   void on_wave_begin(const hazard_core::ExecutionKey &wave);
   void on_wave_end(const hazard_core::ExecutionKey &wave);
   void on_instruction(const InstructionView &instruction);
@@ -115,6 +120,10 @@ public:
   void on_memory_route(const MemoryRouteView &route);
   void on_workgroup_barrier(const hazard_core::ExecutionKey &wave);
   void on_local_memory_atomic_barrier(const hazard_core::ExecutionKey &wave, bool async);
+  /// s_sema_signal on @p wave. Reported separately from the wait, which the
+  /// instruction's WaitInfo carries, because only the signal needs the wave's
+  /// LDS stores to have drained.
+  void on_wavegroup_semaphore_signal(const hazard_core::ExecutionKey &wave);
   void on_shutdown();
 
 private:

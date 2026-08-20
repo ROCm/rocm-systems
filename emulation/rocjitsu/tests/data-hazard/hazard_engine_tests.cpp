@@ -2414,3 +2414,214 @@ TEST(GenericDataHazardEngineTest, ShutdownFlushesOutstandingWorkgroupEpochs) {
   EXPECT_EQ(warnings[0].finding.kind, HazardKind::LocalMemoryRace);
   EXPECT_EQ(warnings[0].finding.instruction.execution.dispatch_id, 1u);
 }
+
+// =============================================================================
+// Wavegroup semaphores
+//
+// Waves of one wavegroup order their LDS accesses with s_sema_signal /
+// s_sema_wait instead of a workgroup barrier, so those pairs are judged against
+// the semaphores rather than against the barrier.
+// =============================================================================
+
+namespace {
+
+/// Issues an LDS access on @p wave, whose ExecutionKey carries the wavegroup.
+void record_wavegroup_lds_access(DataHazardEngine &engine, EntityId instruction_id,
+                                 const ExecutionKey &wave, bool is_write, uint64_t address = 0x100,
+                                 WaitCntType local_write_wait = WaitCntType::NONE) {
+  InstructionEvent instruction;
+  instruction.instruction = make_instruction(instruction_id, 0x200 + instruction_id * 4);
+  instruction.instruction.execution = wave;
+  instruction.hazards.local_write_wait = local_write_wait;
+  engine.on_instruction(instruction);
+
+  ResourceAccessEvent access;
+  access.instruction = instruction.instruction;
+  access.resource_kind = ResourceKind::LocalMemory;
+  access.address = address;
+  access.size_bytes = 4;
+  access.is_read = !is_write;
+  access.is_write = is_write;
+  engine.on_resource_access(access);
+}
+
+/// Issues s_sema_wait on @p wave, closing that wave's wavegroup LDS epoch.
+void record_semaphore_wait(DataHazardEngine &engine, EntityId instruction_id,
+                           const ExecutionKey &wave) {
+  InstructionEvent instruction;
+  instruction.instruction = make_instruction(instruction_id, 0x200 + instruction_id * 4);
+  instruction.instruction.execution = wave;
+  instruction.wait_action.is_wait_instruction = true;
+  instruction.wait_action.is_wavegroup_semaphore_wait = true;
+  engine.on_instruction(instruction);
+}
+
+} // namespace
+
+TEST(GenericDataHazardEngineTest, ReportsUnsynchronizedWavegroupLdsAccessesAtWavegroupEnd) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  engine.on_workgroup_begin(1, 0, 0);
+  const ExecutionKey producer{1, 0, 0, 7, 0};
+  const ExecutionKey consumer{1, 0, 0, 7, 1};
+  engine.on_wavegroup_begin(1, 0, 0, 7);
+  engine.on_wave_begin(producer);
+  engine.on_wave_begin(consumer);
+
+  record_wavegroup_lds_access(engine, 1, producer, /*is_write=*/true);
+  record_wavegroup_lds_access(engine, 2, consumer, /*is_write=*/false);
+
+  ASSERT_TRUE(engine.warning_snapshot().empty());
+
+  engine.on_wavegroup_end(1, 0, 0, 7);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.kind, HazardKind::LocalMemoryRace);
+  EXPECT_EQ(warnings[0].finding.instruction.execution.wavegroup_id, 7u);
+  EXPECT_NE(warnings[0].message.find("without wavegroup semaphore"), std::string::npos);
+  EXPECT_NE(warnings[0].suggestion.find("s_sema_signal / s_sema_wait"), std::string::npos);
+}
+
+TEST(GenericDataHazardEngineTest, SemaphoreWaitSeparatesConflictingWavegroupLdsAccesses) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  engine.on_workgroup_begin(1, 0, 0);
+  const ExecutionKey producer{1, 0, 0, 7, 0};
+  const ExecutionKey consumer{1, 0, 0, 7, 1};
+  engine.on_wave_begin(producer);
+  engine.on_wave_begin(consumer);
+
+  record_wavegroup_lds_access(engine, 1, producer, /*is_write=*/true);
+  record_semaphore_wait(engine, 2, consumer);
+  record_wavegroup_lds_access(engine, 3, consumer, /*is_write=*/false);
+
+  engine.on_wavegroup_end(1, 0, 0, 7);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}
+
+TEST(GenericDataHazardEngineTest, WorkgroupBarrierLeavesIntraWavegroupPairToSemaphoreScope) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  engine.on_workgroup_begin(1, 0, 0);
+  const ExecutionKey producer{1, 0, 0, 7, 0};
+  const ExecutionKey consumer{1, 0, 0, 7, 1};
+  engine.on_wave_begin(producer);
+  engine.on_wave_begin(consumer);
+
+  record_wavegroup_lds_access(engine, 1, producer, /*is_write=*/true);
+  record_wavegroup_lds_access(engine, 2, consumer, /*is_write=*/false);
+
+  BarrierEvent barrier;
+  barrier.wave = producer;
+  barrier.kind = BarrierKind::Workgroup;
+  engine.on_barrier(barrier);
+
+  // Reported once, by the scope that names the synchronization the waves were
+  // actually meant to use.
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_NE(warnings[0].message.find("without wavegroup semaphore"), std::string::npos);
+  EXPECT_EQ(warnings[0].finding.instruction.execution.wavegroup_id, 7u);
+}
+
+TEST(GenericDataHazardEngineTest, CrossWavegroupLdsPairStaysWorkgroupScoped) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  engine.on_workgroup_begin(1, 0, 0);
+  const ExecutionKey first_wavegroup_wave{1, 0, 0, 7, 0};
+  const ExecutionKey second_wavegroup_wave{1, 0, 0, 8, 1};
+  engine.on_wave_begin(first_wavegroup_wave);
+  engine.on_wave_begin(second_wavegroup_wave);
+
+  record_wavegroup_lds_access(engine, 1, first_wavegroup_wave, /*is_write=*/true);
+  record_wavegroup_lds_access(engine, 2, second_wavegroup_wave, /*is_write=*/false);
+
+  engine.on_workgroup_end(1, 0, 0);
+
+  // A semaphore orders only one wavegroup, so waves in different wavegroups
+  // still need the workgroup barrier.
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_NE(warnings[0].message.find("without workgroup barrier"), std::string::npos);
+  EXPECT_EQ(warnings[0].finding.instruction.execution.wavegroup_id, 0u);
+}
+
+TEST(GenericDataHazardEngineTest, WorkgroupEndFlushesWavegroupEpochLeftOpen) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  engine.on_workgroup_begin(1, 0, 0);
+  const ExecutionKey producer{1, 0, 0, 7, 0};
+  const ExecutionKey consumer{1, 0, 0, 7, 1};
+  engine.on_wave_begin(producer);
+  engine.on_wave_begin(consumer);
+
+  record_wavegroup_lds_access(engine, 1, producer, /*is_write=*/true);
+  record_wavegroup_lds_access(engine, 2, consumer, /*is_write=*/false);
+
+  // No on_wavegroup_end: a frontend need not report it, so the workgroup ending
+  // has to drain what is left.
+  engine.on_workgroup_end(1, 0, 0);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_NE(warnings[0].message.find("without wavegroup semaphore"), std::string::npos);
+}
+
+TEST(GenericDataHazardEngineTest, SemaphoreSignalWithPendingLdsStoreReportsMissingDscnt) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  engine.on_workgroup_begin(1, 0, 0);
+  const ExecutionKey producer{1, 0, 0, 7, 0};
+  engine.on_wave_begin(producer);
+
+  record_wavegroup_lds_access(engine, 1, producer, /*is_write=*/true, 0x100, WaitCntType::LDS);
+  ASSERT_EQ(engine.wave_snapshot(producer)->core.lds_fifo.size(), 1u);
+
+  SemaphoreEvent signal;
+  signal.wave = producer;
+  signal.wavegroup_id = 7;
+  signal.kind = SemaphoreKind::Signal;
+  engine.on_semaphore(signal);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_NE(warnings[0].message.find("s_sema_signal issued with 1 pending LDS store"),
+            std::string::npos);
+  EXPECT_NE(warnings[0].suggestion.find("s_wait_dscnt 0 before s_sema_signal"), std::string::npos);
+  EXPECT_EQ(warnings[0].finding.instruction.execution.wavegroup_id, 7u);
+}
+
+TEST(GenericDataHazardEngineTest, SemaphoreSignalAfterDrainingLdsStoresIsClean) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  engine.on_workgroup_begin(1, 0, 0);
+  const ExecutionKey producer{1, 0, 0, 7, 0};
+  engine.on_wave_begin(producer);
+
+  record_wavegroup_lds_access(engine, 1, producer, /*is_write=*/true, 0x100, WaitCntType::LDS);
+
+  InstructionEvent drain;
+  drain.instruction = make_instruction(2, 0x300);
+  drain.instruction.execution = producer;
+  drain.wait_action.is_wait_instruction = true;
+  drain.wait_action.counters.push_back(WaitCounterClear{WaitCntType::LDS, 0});
+  engine.on_instruction(drain);
+  ASSERT_TRUE(engine.wave_snapshot(producer)->core.lds_fifo.empty());
+
+  SemaphoreEvent signal;
+  signal.wave = producer;
+  signal.wavegroup_id = 7;
+  signal.kind = SemaphoreKind::Signal;
+  engine.on_semaphore(signal);
+
+  EXPECT_TRUE(engine.warning_snapshot().empty());
+}

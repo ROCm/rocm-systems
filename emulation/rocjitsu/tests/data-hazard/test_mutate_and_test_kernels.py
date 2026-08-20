@@ -33,7 +33,8 @@ visibility. CI uploads those two files as job artifacts.
   far it got, not how well hazards are detected.
 
 ROCm tool discovery uses ``ROCM_PATH`` / ``ROCM_HOME`` when set; architecture uses
-``TARGET_ARCH`` when set.
+``TARGET_ARCH`` when set. A kernel that declares ``// requires: <arch>`` is skipped on
+every other architecture — the wavegroup semaphore kernels only assemble for gfx1260.
 """
 
 from __future__ import annotations
@@ -62,6 +63,8 @@ from mutate_and_test import (  # noqa: E402
     discover_shaders,
     find_tool,
     process_shader,
+    shader_required_archs,
+    shader_supports_arch,
     write_csv_report,
     write_json_report,
 )
@@ -200,6 +203,12 @@ def test_kernel_mutation_pipeline_runs(
     mutation_session_reports: list,
 ) -> None:
     from mutate_and_test import DEFAULT_EXCLUDED_WAITS
+
+    if not shader_supports_arch(shader_path, target_arch):
+        pytest.skip(
+            f"{shader_path.name} is written for "
+            f"{', '.join(shader_required_archs(shader_path))}, not {target_arch}"
+        )
 
     report = process_shader(
         kernel_builder_for_shader,

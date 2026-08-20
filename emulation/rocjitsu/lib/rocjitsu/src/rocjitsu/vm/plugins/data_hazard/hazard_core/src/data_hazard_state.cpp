@@ -57,6 +57,7 @@ void EngineState::reset() {
   wave_index.clear();
   wave_to_workgroup.clear();
   reported_lds_races.clear();
+  reported_wavegroup_lds_races.clear();
   global_shadow.clear();
   warnings.clear();
   wave_cache_generation.fetch_add(1, std::memory_order_release);
